@@ -1,0 +1,79 @@
+package config
+
+import (
+	"os"
+
+	"github.com/BurntSushi/toml"
+)
+
+type AgentConfig struct {
+	Agent  AgentSection  `toml:"agent"`
+	Server ServerConnect `toml:"server"`
+	Log    LogConfig     `toml:"log"`
+}
+
+type AgentSection struct {
+	AgentName  string `toml:"agent_name"`
+	AgentToken string `toml:"agent_token"`
+}
+
+type ServerConnect struct {
+	Address   string `toml:"address"`
+	Port      int    `toml:"port"`
+	Protocol  string `toml:"protocol"` // tcp, wss
+	TLSEnable bool   `toml:"tls_enable"`
+}
+
+func LoadAgentConfig(path string) (*AgentConfig, error) {
+	var cfg AgentConfig
+
+	// 支持环境变量覆盖
+	if name := os.Getenv("AGENT_NAME"); name != "" {
+		cfg.Agent.AgentName = name
+	}
+	if token := os.Getenv("AGENT_TOKEN"); token != "" {
+		cfg.Agent.AgentToken = token
+	}
+	if addr := os.Getenv("SERVER_ADDR"); addr != "" {
+		cfg.Server.Address = addr
+	}
+
+	// 读取配置文件
+	data, err := os.ReadFile(path)
+	if err != nil {
+		// 如果配置文件不存在但环境变量已设置，则继续
+		if os.IsNotExist(err) && cfg.Agent.AgentName != "" {
+			return &cfg, nil
+		}
+		return nil, err
+	}
+
+	// 解析TOML
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+
+	// 环境变量优先级更高
+	if name := os.Getenv("AGENT_NAME"); name != "" {
+		cfg.Agent.AgentName = name
+	}
+	if token := os.Getenv("AGENT_TOKEN"); token != "" {
+		cfg.Agent.AgentToken = token
+	}
+	if addr := os.Getenv("SERVER_ADDR"); addr != "" {
+		cfg.Server.Address = addr
+	}
+
+	// 设置默认值
+	if cfg.Server.Port == 0 {
+		cfg.Server.Port = 7000
+	}
+	if cfg.Server.Protocol == "" {
+		cfg.Server.Protocol = "tcp"
+	}
+	if cfg.Log.Level == "" {
+		cfg.Log.Level = "info"
+	}
+
+	return &cfg, nil
+}

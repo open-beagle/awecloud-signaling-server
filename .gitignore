@@ -1,0 +1,36 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/cmd/server/server
+/cmd/agent/agent
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Data
+/bin/
+/data/
+/logs/
+/certs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config (keep examples)
+config/server.toml
+config/agent.toml
+!config/*.example.toml
