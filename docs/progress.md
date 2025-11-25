@@ -4,9 +4,10 @@
 
 ## 当前状态
 
-- **当前阶段**: 第一阶段 - Server端核心功能
-- **当前周次**: Week 1 ✅ 已完成
+- **当前阶段**: 架构重新设计完成 ✅
+- **当前周次**: Week 1 ✅ 已完成，Week 2 需重新规划
 - **总体进度**: 12.5% (1/8周)
+- **重要**: 架构已重新设计，参见 `docs/design-v2.md`
 
 ---
 
@@ -138,6 +139,28 @@
 - ✅ 完成Week 1所有任务
 - ✅ 提前完成Week 2的API开发任务
 - ✅ 创建项目文档规范
+- ✅ 完善设计文档：明确Server两个端口和路由设计
+  - 端口8080: Web管理界面（HTTP）- 路由 `/`
+  - 端口7000: FRP信令服务（WebSocket）- 路由 `/ws`
+- ✅ 创建Kubernetes部署配置
+- ✅ 删除docker-compose，改用K8s部署
+- ✅ 更新FRP WebSocket路径：`/frp` → `/ws`
+- ✅ 修改Client创建接口：支持指定client_id（用户名/邮箱）
+  - 为未来用户登录功能预留扩展性
+  - 添加重新生成secret接口
+- ⚠️ **发现架构设计问题**：
+  - Agent组件设计有误
+  - 需要将Agent拆分为Agent-Web和Agent-FRP两个组件
+  - Agent-Web通过gRPC与Server-Web通信
+  - Agent-FRP通过WebSocket与Server-FRP通信
+  - 需要重新设计整个架构
+- ✅ **完成架构重新设计**：
+  - 创建 `docs/design-v2.md`
+  - Server分为Server-Web和Server-FRP两个服务
+  - Agent分为Agent-Web和Agent-FRP两个模块
+  - Client/Desktop也分为Web和FRP两个模块
+  - 新增gRPC管理通道
+  - 定义gRPC接口（Protocol Buffers）
 - 📝 创建本进度跟踪文档
 
 ---

@@ -14,6 +14,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/api"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/frp"
 )
 
 type Server struct {
@@ -54,7 +55,7 @@ func (s *Server) Run() error {
 		Handler: router,
 	}
 
-	// 启动服务器
+	// 启动Web服务器
 	go func() {
 		log.Printf("Web管理界面启动在: http://%s", addr)
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -62,7 +63,17 @@ func (s *Server) Run() error {
 		}
 	}()
 
-	// TODO: 启动FRP Server
+	// 启动FRP Server
+	frpServer, err := frp.NewFRPServer(s.config)
+	if err != nil {
+		return fmt.Errorf("创建FRP Server失败: %w", err)
+	}
+
+	go func() {
+		if err := frpServer.Run(); err != nil {
+			log.Printf("FRP Server运行错误: %v", err)
+		}
+	}()
 
 	// 等待中断信号
 	quit := make(chan os.Signal, 1)
@@ -75,6 +86,12 @@ func (s *Server) Run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// 停止FRP Server
+	if err := frpServer.Stop(); err != nil {
+		log.Printf("停止FRP Server失败: %v", err)
+	}
+
+	// 停止HTTP服务器
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		return fmt.Errorf("服务器关闭失败: %w", err)
 	}
@@ -117,6 +134,7 @@ func (s *Server) setupRouter() *gin.Engine {
 			authGroup.PUT("/clients/:id/disable", clientAPI.Disable)
 			authGroup.PUT("/clients/:id/enable", clientAPI.Enable)
 			authGroup.DELETE("/clients/:id", clientAPI.Delete)
+			authGroup.POST("/clients/:id/regenerate-secret", clientAPI.RegenerateSecret)
 
 			// STCP实例管理
 			stcpAPI := api.NewSTCPAPI()

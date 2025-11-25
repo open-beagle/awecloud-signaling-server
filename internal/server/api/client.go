@@ -43,17 +43,31 @@ func (a *ClientAPI) List(c *gin.Context) {
 	})
 }
 
+type CreateClientRequest struct {
+	ClientID string `json:"client_id" binding:"required"` // 用户名或邮箱
+}
+
 func (a *ClientAPI) Create(c *gin.Context) {
-	// 生成client_id和client_secret
-	clientID, err := generateToken(16)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, ClientResponse{
+	var req CreateClientRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ClientResponse{
 			Success: false,
-			Message: "生成Client ID失败",
+			Message: "请求参数错误：需要提供client_id",
 		})
 		return
 	}
 
+	// 检查client_id是否已存在
+	var existingClient model.Client
+	if err := db.DB.Where("client_id = ?", req.ClientID).First(&existingClient).Error; err == nil {
+		c.JSON(http.StatusConflict, ClientResponse{
+			Success: false,
+			Message: "Client ID已存在",
+		})
+		return
+	}
+
+	// 生成client_secret
 	clientSecret, err := generateToken(32)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ClientResponse{
@@ -65,7 +79,7 @@ func (a *ClientAPI) Create(c *gin.Context) {
 
 	// 创建Client
 	client := &model.Client{
-		ClientID:     "client-" + clientID,
+		ClientID:     req.ClientID, // 使用指定的client_id
 		ClientSecret: clientSecret,
 		Status:       "active",
 		IsOnline:     false,
@@ -83,6 +97,53 @@ func (a *ClientAPI) Create(c *gin.Context) {
 		Success: true,
 		Message: "创建成功",
 		Client:  client,
+	})
+}
+
+// RegenerateSecret 重新生成Client Secret
+func (a *ClientAPI) RegenerateSecret(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ClientResponse{
+			Success: false,
+			Message: "无效的ID",
+		})
+		return
+	}
+
+	// 生成新secret
+	clientSecret, err := generateToken(32)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ClientResponse{
+			Success: false,
+			Message: "生成Client Secret失败",
+		})
+		return
+	}
+
+	// 更新Client
+	var client model.Client
+	if err := db.DB.First(&client, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, ClientResponse{
+			Success: false,
+			Message: "Client不存在",
+		})
+		return
+	}
+
+	client.ClientSecret = clientSecret
+	if err := db.DB.Save(&client).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, ClientResponse{
+			Success: false,
+			Message: "更新失败",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, ClientResponse{
+		Success: true,
+		Message: "Secret重新生成成功",
+		Client:  &client,
 	})
 }
 

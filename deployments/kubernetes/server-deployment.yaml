@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: awecloud-signaling-server
+  namespace: awecloud
+  labels:
+    app: awecloud-signaling-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: awecloud-signaling-server
+  template:
+    metadata:
+      labels:
+        app: awecloud-signaling-server
+    spec:
+      containers:
+      - name: server
+        image: awecloud-signaling-server:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: frp
+          containerPort: 7000
+          protocol: TCP
+        - name: web
+          containerPort: 8080
+          protocol: TCP
+        env:
+        - name: SERVER_BIND_ADDR
+          value: "0.0.0.0"
+        - name: SERVER_BIND_PORT
+          value: "7000"
+        - name: TRANSPORT_PROTOCOL
+          value: "websocket"
+        - name: WEB_LISTEN_PORT
+          value: "8080"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: awecloud-secrets
+              key: jwt-secret
+        volumeMounts:
+        - name: data
+          mountPath: /app/data
+        - name: logs
+          mountPath: /app/logs
+        - name: config
+          mountPath: /app/config
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: awecloud-data-pvc
+      - name: logs
+        emptyDir: {}
+      - name: config
+        configMap:
+          name: awecloud-server-config

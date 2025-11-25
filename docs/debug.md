@@ -134,4 +134,40 @@ BUILD_VERSION=v1.0.0 ./scripts/build.sh
 
 ---
 
+### [2025-11-25] 架构重大调整
+
+**问题描述**:
+原架构设计有误，Agent的角色和通信方式理解错误
+
+**讨论方案**:
+- 原方案: Agent作为单一FRP Client，直接连接Server-FRP
+- 新方案: Agent分为两个组件
+  - Agent-Web: 通过gRPC与Server-Web通信，接收管理指令
+  - Agent-FRP: 通过WebSocket与Server-FRP通信，建立FRP隧道
+- 选择: 采用新方案，重新设计整个架构
+
+**正确的架构**:
+1. Server分为两个独立组件:
+   - Server-Web (端口8080): 管理界面和API
+   - Server-FRP (端口7000): FRP信令服务
+
+2. Agent分为两个组件:
+   - Agent-Web: 通过gRPC与Server-Web通信
+   - Agent-FRP: 通过WebSocket与Server-FRP通信
+
+3. Client (Visitor):
+   - 通过WebSocket与Server-FRP通信
+   - 通过STCP隧道访问Agent-FRP
+   - Agent-FRP才是真正访问SSH/MySQL/Redis的组件
+
+**影响范围**:
+- 整个项目架构
+- Agent实现方式
+- 通信协议设计
+- 可能需要调整数据库设计
+
+**状态**: 待重新设计
+
+---
+
 <!-- 后续调试记录追加在此 -->

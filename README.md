@@ -2,6 +2,19 @@
 
 基于FRP的内网穿透信令服务系统。
 
+**Server端口**:
+- 8080: Web管理界面（HTTP）- 管理员访问，管理Agent、Client和STCP实例
+- 7000: FRP信令服务（WebSocket）- Agent和Client的FRP控制连接
+
+**部署架构**:
+- Server使用WebSocket协议（非加密）
+- TLS加密由Traefik网关统一处理
+- 客户端通过WSS连接到Traefik，Traefik转发到Server
+
+**访问地址**:
+- Web管理: `https://your-domain.com/`
+- FRP信令: `wss://your-domain.com/ws`
+
 ## 项目结构
 
 ```
@@ -79,7 +92,9 @@ curl -X POST http://localhost:8080/api/agents \
 **创建Client**
 ```bash
 curl -X POST http://localhost:8080/api/clients \
-  -H "Authorization: Bearer YOUR_TOKEN"
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"client_id":"user@example.com"}'
 ```
 
 ### STCP实例管理
