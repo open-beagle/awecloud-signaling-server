@@ -7,6 +7,7 @@ import (
 
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 	"github.com/fatedier/frp/server"
+
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 )
 

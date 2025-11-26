@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package awecloud.signaling;
+
+option go_package = "github.com/open-beagle/awecloud-signaling-server/pkg/proto";
+
+// ClientService Client管理服务
+service ClientService {
+  // Client认证
+  rpc Authenticate(AuthRequest) returns (AuthResponse);
+  
+  // 获取可访问服务列表
+  rpc GetServices(GetServicesRequest) returns (GetServicesResponse);
+  
+  // 连接服务（获取连接信息）
+  rpc ConnectService(ConnectRequest) returns (ConnectResponse);
+}
+
+// Client认证请求
+message AuthRequest {
+  string client_id = 1;
+  string client_secret = 2;
+}
+
+// Client认证响应
+message AuthResponse {
+  bool success = 1;
+  string message = 2;
+  string session_token = 3;
+  int64 expires_at = 4;
+}
+
+// 获取服务列表请求
+message GetServicesRequest {
+  string session_token = 1;
+}
+
+// 获取服务列表响应
+message GetServicesResponse {
+  bool success = 1;
+  repeated ServiceInfo services = 2;
+}
+
+message ServiceInfo {
+  int64 instance_id = 1;
+  string instance_name = 2;
+  string agent_name = 3;
+  string description = 4;
+  int32 local_port = 5;
+}
+
+// 连接服务请求
+message ConnectRequest {
+  string session_token = 1;
+  int64 instance_id = 2;
+}
+
+// 连接服务响应
+message ConnectResponse {
+  bool success = 1;
+  string message = 2;
+  string instance_name = 3;
+  string secret_key = 4;
+  int32 suggested_local_port = 5;  // 建议的本地端口
+}

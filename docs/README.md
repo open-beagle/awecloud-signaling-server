@@ -33,10 +33,21 @@
 **技术设计** - 系统架构和技术方案
 
 - 项目概述和架构
-- 数据库设计
-- API设计
-- WSS协议实现
-- 部署方案
+- 核心架构设计
+- 引用详细设计文档：
+  - `design_server.md` - Server进程内部设计（重要）
+  - `design_database.md` - 数据库详细设计
+  - `design_api.md` - API详细设计
+  - `design_deployment.md` - 部署方案
+
+### 🧪 测试规范 (`test.md`)
+**测试文档** - API测试规范和流程
+
+- 测试原则和流程
+- 测试目录结构
+- 测试脚本规范
+- 测试用例说明
+- **测试脚本位于 `tests/` 目录**
 
 ## 快速参考
 
@@ -104,6 +115,36 @@ GOARCHS=$(go env GOARCH) ./scripts/build.sh
 - ❌ 禁止随意创建文档
 - 💬 新文档必须经过讨论和批准
 - 📋 保持文档结构简洁清晰
+
+## 测试规范
+
+### 测试流程
+```bash
+# 1. 清理数据库
+rm -f data/awecloud.db
+
+# 2. 启动Server（手动）
+./bin/server -c config/server.toml
+
+# 3. 运行测试（新终端）
+./tests/run_all.sh
+
+# 或运行单个测试
+./tests/api/test_admin.sh
+```
+
+### 测试目录
+```
+tests/
+├── api/                    # API测试脚本
+│   ├── test_admin.sh      # 管理员认证测试
+│   ├── test_agent.sh      # Agent管理测试
+│   ├── test_client.sh     # Client管理测试
+│   ├── test_stcp.sh       # STCP实例管理测试
+│   └── test_client_auth.sh # Client认证测试
+├── common.sh              # 公共函数
+└── run_all.sh             # 运行所有测试
+```
 
 ## 文档版本
 

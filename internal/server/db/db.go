@@ -6,12 +6,13 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
-	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
 var DB *gorm.DB
@@ -50,7 +51,8 @@ func autoMigrate() error {
 		&model.Agent{},
 		&model.Client{},
 		&model.STCPInstance{},
-		&model.ClientPermission{},
+		&model.STCPAccess{},
+		&model.ClientSession{},
 	)
 }
 

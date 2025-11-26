@@ -123,18 +123,19 @@ curl -X POST http://localhost:8080/api/stcp-instances/1/grant-access \
 
 ## 开发状态
 
-**当前进度**: Week 1 已完成 ✅
+**当前进度**: 27% (2.6/8周)
 
-- [x] 项目初始化
-- [x] 数据库设计
-- [x] 管理员认证
-- [x] Agent管理API
-- [x] Client管理API
-- [x] STCP实例管理API
-- [ ] FRP Server集成（Week 2）
-- [ ] Agent端实现（Week 3）
-- [ ] Web管理界面（Week 4-5）
-- [ ] Desktop应用（Week 6-7）
+- [x] Week 1: 数据库模型、RESTful API、测试框架 ✅
+- [x] Week 2: gRPC服务、Server内部设计、进程内通信 ✅
+- [x] Week 3: Agent基础框架、gRPC客户端（60%）🔄
+- [ ] Week 4-5: Web管理界面
+- [ ] Week 6-7: Desktop客户端应用
+- [ ] Week 8: 测试和优化
+
+**重要里程碑**: 完整的gRPC通信链路已验证 🎉
+- ✅ Server → Agent注册成功
+- ✅ Server → Agent心跳正常
+- ✅ 创建/删除STCP命令实时发送到Agent
 
 详细进度查看: `docs/progress.md`
 

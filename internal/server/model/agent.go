@@ -9,6 +9,7 @@ type Agent struct {
 	Status        string     `gorm:"size:20;default:offline" json:"status"` // online, offline
 	LastHeartbeat *time.Time `json:"last_heartbeat"`
 	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 func (Agent) TableName() string {

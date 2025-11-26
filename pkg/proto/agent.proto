@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package awecloud.signaling;
+
+option go_package = "github.com/open-beagle/awecloud-signaling-server/pkg/proto";
+
+// AgentService Agent管理服务
+service AgentService {
+  // Agent注册
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  
+  // Agent心跳
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  
+  // 接收Server指令（双向流）
+  rpc ReceiveCommands(stream CommandResponse) returns (stream Command);
+  
+  // 状态上报
+  rpc ReportStatus(StatusReport) returns (StatusResponse);
+}
+
+// Agent注册请求
+message RegisterRequest {
+  string agent_name = 1;
+  string agent_token = 2;
+}
+
+// Agent注册响应
+message RegisterResponse {
+  bool success = 1;
+  string message = 2;
+  int64 agent_id = 3;
+}
+
+// Agent心跳请求
+message HeartbeatRequest {
+  int64 agent_id = 1;
+  string agent_token = 2;
+}
+
+// Agent心跳响应
+message HeartbeatResponse {
+  bool success = 1;
+  int64 timestamp = 2;
+}
+
+// Server指令
+message Command {
+  enum Type {
+    CREATE_STCP = 0;
+    DELETE_STCP = 1;
+  }
+  
+  string command_id = 1;
+  Type type = 2;
+  string instance_name = 3;
+  string secret_key = 4;
+  string local_ip = 5;
+  int32 local_port = 6;
+}
+
+// 指令响应
+message CommandResponse {
+  string command_id = 1;
+  bool success = 2;
+  string message = 3;
+}
+
+// 状态上报
+message StatusReport {
+  int64 agent_id = 1;
+  repeated STCPStatus stcp_statuses = 2;
+}
+
+message STCPStatus {
+  string instance_name = 1;
+  string status = 2;  // "running", "stopped", "error"
+  int32 active_connections = 3;
+}
+
+// 状态响应
+message StatusResponse {
+  bool success = 1;
+}

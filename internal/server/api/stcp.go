@@ -1,26 +1,38 @@
 package api
 
 import (
+	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
+	grpcserver "github.com/open-beagle/awecloud-signaling-server/internal/server/grpc"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
-type STCPAPI struct{}
+type STCPAPI struct {
+	agentService *grpcserver.AgentServiceServer
+}
 
 func NewSTCPAPI() *STCPAPI {
 	return &STCPAPI{}
 }
 
+// SetAgentService 设置AgentService（用于发送命令）
+func (a *STCPAPI) SetAgentService(service *grpcserver.AgentServiceServer) {
+	a.agentService = service
+}
+
 type CreateSTCPRequest struct {
-	AgentID      int64  `json:"agent_id" binding:"required"`
 	InstanceName string `json:"instance_name" binding:"required"`
-	ServiceType  string `json:"service_type" binding:"required"`
+	AgentID      int64  `json:"agent_id" binding:"required"`
 	LocalIP      string `json:"local_ip" binding:"required"`
 	LocalPort    int    `json:"local_port" binding:"required"`
+	Description  string `json:"description"`
 }
 
 type GrantAccessRequest struct {
@@ -80,19 +92,14 @@ func (a *STCPAPI) Create(c *gin.Context) {
 		return
 	}
 
-	// 生成server_name
-	serverName := agent.AgentName + "." + req.InstanceName
-
 	// 创建STCP实例
 	instance := &model.STCPInstance{
-		AgentID:      req.AgentID,
 		InstanceName: req.InstanceName,
-		ServiceType:  req.ServiceType,
+		AgentID:      req.AgentID,
+		SecretKey:    secretKey,
 		LocalIP:      req.LocalIP,
 		LocalPort:    req.LocalPort,
-		SecretKey:    secretKey,
-		ServerName:   serverName,
-		Status:       "inactive",
+		Description:  req.Description,
 	}
 
 	if err := db.DB.Create(instance).Error; err != nil {
@@ -103,7 +110,26 @@ func (a *STCPAPI) Create(c *gin.Context) {
 		return
 	}
 
-	// TODO: 通知Agent创建STCP代理
+	// 通知Agent创建STCP代理
+	if a.agentService != nil && a.agentService.IsAgentOnline(req.AgentID) {
+		cmd := &pb.Command{
+			CommandId:    fmt.Sprintf("create-%d-%d", instance.ID, instance.CreatedAt.Unix()),
+			Type:         pb.Command_CREATE_STCP,
+			InstanceName: instance.InstanceName,
+			SecretKey:    instance.SecretKey,
+			LocalIp:      instance.LocalIP,
+			LocalPort:    int32(instance.LocalPort),
+		}
+
+		if err := a.agentService.SendCommand(req.AgentID, cmd); err != nil {
+			log.Printf("发送创建STCP命令失败: %v", err)
+			// 不影响API响应，Agent重连后会同步
+		} else {
+			log.Printf("已发送创建STCP命令: instance=%s, agent_id=%d", instance.InstanceName, req.AgentID)
+		}
+	} else {
+		log.Printf("Agent离线，STCP实例已保存，等待Agent上线后同步: agent_id=%d", req.AgentID)
+	}
 
 	c.JSON(http.StatusOK, STCPResponse{
 		Success:  true,
@@ -122,8 +148,33 @@ func (a *STCPAPI) Delete(c *gin.Context) {
 		return
 	}
 
-	// TODO: 通知Agent删除STCP代理
+	// 查询实例信息
+	var instance model.STCPInstance
+	if err := db.DB.First(&instance, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, STCPResponse{
+			Success: false,
+			Message: "实例不存在",
+		})
+		return
+	}
 
+	// 通知Agent删除STCP代理
+	if a.agentService != nil && a.agentService.IsAgentOnline(instance.AgentID) {
+		cmd := &pb.Command{
+			CommandId:    fmt.Sprintf("delete-%d-%d", instance.ID, instance.UpdatedAt.Unix()),
+			Type:         pb.Command_DELETE_STCP,
+			InstanceName: instance.InstanceName,
+		}
+
+		if err := a.agentService.SendCommand(instance.AgentID, cmd); err != nil {
+			log.Printf("发送删除STCP命令失败: %v", err)
+			// 继续删除数据库记录
+		} else {
+			log.Printf("已发送删除STCP命令: instance=%s, agent_id=%d", instance.InstanceName, instance.AgentID)
+		}
+	}
+
+	// 删除数据库记录
 	if err := db.DB.Delete(&model.STCPInstance{}, id).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, STCPResponse{
 			Success: false,
@@ -157,13 +208,13 @@ func (a *STCPAPI) GrantAccess(c *gin.Context) {
 		return
 	}
 
-	// 创建权限
-	permission := &model.ClientPermission{
-		ClientID:       req.ClientID,
+	// 创建访问权限
+	access := &model.STCPAccess{
 		STCPInstanceID: id,
+		ClientID:       req.ClientID,
 	}
 
-	if err := db.DB.Create(permission).Error; err != nil {
+	if err := db.DB.Create(access).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, STCPResponse{
 			Success: false,
 			Message: "授权失败: " + err.Error(),
@@ -196,9 +247,9 @@ func (a *STCPAPI) RevokeAccess(c *gin.Context) {
 		return
 	}
 
-	// 删除权限
-	if err := db.DB.Where("client_id = ? AND stcp_instance_id = ?", req.ClientID, id).
-		Delete(&model.ClientPermission{}).Error; err != nil {
+	// 删除访问权限
+	if err := db.DB.Where("stcp_instance_id = ? AND client_id = ?", id, req.ClientID).
+		Delete(&model.STCPAccess{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, STCPResponse{
 			Success: false,
 			Message: "撤销失败",

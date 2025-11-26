@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
@@ -81,8 +82,7 @@ func (a *ClientAPI) Create(c *gin.Context) {
 	client := &model.Client{
 		ClientID:     req.ClientID, // 使用指定的client_id
 		ClientSecret: clientSecret,
-		Status:       "active",
-		IsOnline:     false,
+		Enabled:      true,
 	}
 
 	if err := db.DB.Create(client).Error; err != nil {
@@ -157,7 +157,7 @@ func (a *ClientAPI) Disable(c *gin.Context) {
 		return
 	}
 
-	if err := db.DB.Model(&model.Client{}).Where("id = ?", id).Update("status", "disabled").Error; err != nil {
+	if err := db.DB.Model(&model.Client{}).Where("id = ?", id).Update("enabled", false).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, ClientResponse{
 			Success: false,
 			Message: "禁用失败",
@@ -181,7 +181,7 @@ func (a *ClientAPI) Enable(c *gin.Context) {
 		return
 	}
 
-	if err := db.DB.Model(&model.Client{}).Where("id = ?", id).Update("status", "active").Error; err != nil {
+	if err := db.DB.Model(&model.Client{}).Where("id = ?", id).Update("enabled", true).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, ClientResponse{
 			Success: false,
 			Message: "启用失败",

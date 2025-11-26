@@ -1,12 +1,14 @@
 package api
 
 import (
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
@@ -33,11 +35,9 @@ type ClientAuthResponse struct {
 }
 
 type ServiceInfo struct {
-	ID         int64  `json:"id"`
-	Name       string `json:"name"`
-	Type       string `json:"type"`
-	ServerName string `json:"server_name"`
-	SecretKey  string `json:"secret_key"`
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	SecretKey string `json:"secret_key"`
 }
 
 type ServicesResponse struct {
@@ -76,7 +76,7 @@ func (a *ClientAuthAPI) Auth(c *gin.Context) {
 	}
 
 	// 检查状态
-	if client.Status != "active" {
+	if !client.Enabled {
 		c.JSON(http.StatusForbidden, ClientAuthResponse{
 			Success: false,
 			Message: "Client已被禁用",
@@ -100,11 +100,16 @@ func (a *ClientAuthAPI) Auth(c *gin.Context) {
 		return
 	}
 
-	// 更新最后在线时间
-	now := time.Now()
-	client.IsOnline = true
-	client.LastSeen = &now
-	db.DB.Save(&client)
+	// 创建会话记录
+	session := &model.ClientSession{
+		ClientID:     client.ID,
+		SessionToken: tokenString,
+		ExpiresAt:    time.Now().Add(time.Hour * time.Duration(a.config.Security.JWTExpireHours)),
+	}
+	if err := db.DB.Create(session).Error; err != nil {
+		log.Printf("创建会话记录失败: %v", err)
+		// 不影响登录流程，继续
+	}
 
 	c.JSON(http.StatusOK, ClientAuthResponse{
 		Success:   true,
@@ -158,8 +163,8 @@ func (a *ClientAuthAPI) GetServices(c *gin.Context) {
 	clientID := int64(claims["client_id"].(float64))
 
 	// 查询Client有权限访问的服务
-	var permissions []model.ClientPermission
-	if err := db.DB.Preload("STCPInstance").Where("client_id = ?", clientID).Find(&permissions).Error; err != nil {
+	var accessList []model.STCPAccess
+	if err := db.DB.Preload("STCPInstance").Where("client_id = ?", clientID).Find(&accessList).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, ServicesResponse{
 			Success: false,
 			Message: "查询失败",
@@ -168,15 +173,13 @@ func (a *ClientAuthAPI) GetServices(c *gin.Context) {
 	}
 
 	// 构建服务列表
-	services := make([]ServiceInfo, 0, len(permissions))
-	for _, perm := range permissions {
-		if perm.STCPInstance != nil {
+	services := make([]ServiceInfo, 0, len(accessList))
+	for _, access := range accessList {
+		if access.STCPInstance != nil {
 			services = append(services, ServiceInfo{
-				ID:         perm.STCPInstance.ID,
-				Name:       perm.STCPInstance.InstanceName,
-				Type:       perm.STCPInstance.ServiceType,
-				ServerName: perm.STCPInstance.ServerName,
-				SecretKey:  perm.STCPInstance.SecretKey,
+				ID:        access.STCPInstance.ID,
+				Name:      access.STCPInstance.InstanceName,
+				SecretKey: access.STCPInstance.SecretKey,
 			})
 		}
 	}

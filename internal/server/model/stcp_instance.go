@@ -4,15 +4,14 @@ import "time"
 
 type STCPInstance struct {
 	ID           int64     `gorm:"primaryKey" json:"id"`
+	InstanceName string    `gorm:"uniqueIndex;size:100;not null" json:"instance_name"`
 	AgentID      int64     `gorm:"not null;index" json:"agent_id"`
-	InstanceName string    `gorm:"size:100;not null" json:"instance_name"`
-	ServiceType  string    `gorm:"size:20;not null" json:"service_type"` // tcp, udp
+	SecretKey    string    `gorm:"size:255;not null" json:"secret_key"`
 	LocalIP      string    `gorm:"size:50;not null" json:"local_ip"`
 	LocalPort    int       `gorm:"not null" json:"local_port"`
-	SecretKey    string    `gorm:"size:255;not null" json:"secret_key"`
-	ServerName   string    `gorm:"uniqueIndex;size:200;not null" json:"server_name"`
-	Status       string    `gorm:"size:20;default:inactive" json:"status"` // active, inactive
+	Description  string    `gorm:"type:text" json:"description"`
 	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 
 	// 关联
 	Agent *Agent `gorm:"foreignKey:AgentID" json:"agent,omitempty"`

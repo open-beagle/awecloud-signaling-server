@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,15 +12,29 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc"
+
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/api"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/frp"
+	grpcserver "github.com/open-beagle/awecloud-signaling-server/internal/server/grpc"
+	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
 type Server struct {
 	config     *config.ServerConfig
 	httpServer *http.Server
+	grpcServer *grpc.Server
+
+	// gRPC服务
+	agentService  *grpcserver.AgentServiceServer
+	clientService *grpcserver.ClientServiceServer
+}
+
+// GetAgentService 获取AgentService（供API使用）
+func (s *Server) GetAgentService() *grpcserver.AgentServiceServer {
+	return s.agentService
 }
 
 func NewServer(cfg *config.ServerConfig) (*Server, error) {
@@ -44,6 +59,29 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 func (s *Server) Run() error {
 	// 设置Gin模式
 	gin.SetMode(gin.ReleaseMode)
+
+	// 创建gRPC服务
+	s.agentService = grpcserver.NewAgentServiceServer()
+	s.clientService = grpcserver.NewClientServiceServer(s.config)
+
+	s.grpcServer = grpc.NewServer()
+	pb.RegisterAgentServiceServer(s.grpcServer, s.agentService)
+	pb.RegisterClientServiceServer(s.grpcServer, s.clientService)
+
+	// 启动gRPC服务器（在HTTP服务器的同一端口，使用cmux或h2c）
+	// 这里简化处理，使用单独的端口
+	grpcAddr := fmt.Sprintf("%s:%d", s.config.Web.ListenAddr, s.config.Web.ListenPort+1)
+	grpcListener, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		return fmt.Errorf("gRPC监听失败: %w", err)
+	}
+
+	go func() {
+		log.Printf("gRPC服务启动在: %s", grpcAddr)
+		if err := s.grpcServer.Serve(grpcListener); err != nil {
+			log.Fatalf("gRPC服务器启动失败: %v", err)
+		}
+	}()
 
 	// 创建路由
 	router := s.setupRouter()
@@ -85,6 +123,9 @@ func (s *Server) Run() error {
 	// 优雅关闭
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// 停止gRPC服务器
+	s.grpcServer.GracefulStop()
 
 	// 停止FRP Server
 	if err := frpServer.Stop(); err != nil {
@@ -138,6 +179,7 @@ func (s *Server) setupRouter() *gin.Engine {
 
 			// STCP实例管理
 			stcpAPI := api.NewSTCPAPI()
+			stcpAPI.SetAgentService(s.agentService) // 注入AgentService
 			authGroup.GET("/stcp-instances", stcpAPI.List)
 			authGroup.POST("/stcp-instances", stcpAPI.Create)
 			authGroup.DELETE("/stcp-instances/:id", stcpAPI.Delete)

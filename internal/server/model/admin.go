@@ -7,6 +7,7 @@ type Admin struct {
 	Username     string    `gorm:"uniqueIndex;size:50;not null" json:"username"`
 	PasswordHash string    `gorm:"size:255;not null" json:"-"`
 	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func (Admin) TableName() string {
