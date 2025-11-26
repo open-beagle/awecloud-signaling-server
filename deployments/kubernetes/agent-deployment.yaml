@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: awecloud-signaling-agent
+  namespace: awecloud
+  labels:
+    app: awecloud-signaling-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: awecloud-signaling-agent
+  template:
+    metadata:
+      labels:
+        app: awecloud-signaling-agent
+    spec:
+      containers:
+      - name: agent
+        image: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.0
+        imagePullPolicy: Always
+        env:
+        - name: AGENT_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: awecloud-agent-config
+              key: agent-name
+        - name: AGENT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: awecloud-agent-secret
+              key: agent-token
+        - name: SERVER_ADDRESS
+          valueFrom:
+            configMapKeyRef:
+              name: awecloud-agent-config
+              key: server-address
+        - name: SERVER_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: awecloud-agent-config
+              key: server-port
+        volumeMounts:
+        - name: logs
+          mountPath: /app/logs
+        - name: config
+          mountPath: /app/config
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: logs
+        emptyDir: {}
+      - name: config
+        configMap:
+          name: awecloud-agent-config

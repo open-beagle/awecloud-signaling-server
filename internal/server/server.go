@@ -61,7 +61,7 @@ func (s *Server) Run() error {
 	gin.SetMode(gin.ReleaseMode)
 
 	// 创建gRPC服务
-	s.agentService = grpcserver.NewAgentServiceServer()
+	s.agentService = grpcserver.NewAgentServiceServer(s.config.Server.FRPAuthToken)
 	s.clientService = grpcserver.NewClientServiceServer(s.config)
 
 	s.grpcServer = grpc.NewServer()
@@ -149,6 +149,10 @@ func (s *Server) setupRouter() *gin.Engine {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
+	// 静态文件服务（前端）
+	router.Static("/assets", "./web/dist/assets")
+	router.StaticFile("/favicon.ico", "./web/dist/favicon.ico")
+
 	// API路由组
 	apiGroup := router.Group("/api")
 	{
@@ -192,6 +196,17 @@ func (s *Server) setupRouter() *gin.Engine {
 		apiGroup.POST("/client/auth", clientAuthAPI.Auth)
 		apiGroup.GET("/client/services", clientAuthAPI.GetServices)
 	}
+
+	// SPA路由支持（必须在所有路由之后）
+	router.NoRoute(func(c *gin.Context) {
+		// 如果是API请求，返回404
+		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api" {
+			c.JSON(404, gin.H{"error": "Not Found"})
+			return
+		}
+		// 否则返回index.html（SPA）
+		c.File("./web/dist/index.html")
+	})
 
 	return router
 }

@@ -19,8 +19,9 @@ type AgentSection struct {
 
 type ServerConnect struct {
 	Address   string `toml:"address"`
-	Port      int    `toml:"port"`
-	Protocol  string `toml:"protocol"` // tcp, wss
+	Port      int    `toml:"port"`      // FRP服务端口
+	GRPCPort  int    `toml:"grpc_port"` // gRPC API端口
+	Protocol  string `toml:"protocol"`  // tcp, wss
 	TLSEnable bool   `toml:"tls_enable"`
 }
 
@@ -67,6 +68,9 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	// 设置默认值
 	if cfg.Server.Port == 0 {
 		cfg.Server.Port = 7000
+	}
+	if cfg.Server.GRPCPort == 0 {
+		cfg.Server.GRPCPort = 8081
 	}
 	if cfg.Server.Protocol == "" {
 		cfg.Server.Protocol = "tcp"

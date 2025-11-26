@@ -30,6 +30,7 @@ message RegisterResponse {
   bool success = 1;
   string message = 2;
   int64 agent_id = 3;
+  string frp_token = 4;  // FRP 认证 Token
 }
 
 // Agent心跳请求

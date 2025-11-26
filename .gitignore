@@ -34,3 +34,18 @@ Thumbs.db
 config/server.toml
 config/agent.toml
 !config/*.example.toml
+
+# Frontend
+/web/node_modules/
+/web/dist/
+/web/.vite/
+/web/.env.local
+/web/.env.*.local
+/web/npm-debug.log*
+/web/yarn-debug.log*
+/web/yarn-error.log*
+/web/pnpm-debug.log*
+
+# Temporary files (for testing and development)
+/.tmp/
+.tmp/

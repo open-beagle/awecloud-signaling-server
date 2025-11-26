@@ -1,0 +1,181 @@
+# 构建和部署说明
+
+## 目录结构
+
+```
+.beagle/
+├── server.dockerfile        # Server Dockerfile
+├── agent.dockerfile         # Agent Dockerfile
+├── local-docker-build.sh    # 本地 Docker 构建脚本
+└── README.md                # 本文档
+
+scripts/
+└── build.sh                 # 统一构建脚本（交叉编译）
+```
+
+## 本地构建
+
+### 1. 构建二进制文件
+
+```bash
+# 设置版本（可选）
+export BUILD_VERSION=v0.1.0
+
+# 只构建当前架构
+GOARCHS=$(go env GOARCH) bash ./scripts/build.sh
+
+# 或构建多架构
+GOARCHS=amd64,arm64 bash ./scripts/build.sh
+
+# 输出在 bin/ 目录
+# bin/server-linux-amd64
+# bin/server-linux-arm64
+# bin/agent-linux-amd64
+# bin/agent-linux-arm64
+# bin/server -> server-linux-amd64 (符号链接)
+# bin/agent -> agent-linux-amd64 (符号链接)
+```
+
+### 查看版本信息
+
+```bash
+# Server 版本
+./bin/server -v
+
+# Agent 版本
+./bin/agent -v
+
+# 输出示例：
+# AWECloud Signaling Server
+# Version:    v0.1.0
+# Git Commit: abc1234
+# Build Date: 2025-11-26_10:30:00
+```
+
+### 2. 构建 Docker 镜像
+
+```bash
+# 设置版本和镜像仓库（可选）
+export BUILD_VERSION=v0.1.0
+export REGISTRY=registry.cn-qingdao.aliyuncs.com/wod
+
+# 构建
+bash .beagle/local-docker-build.sh
+
+# 查看镜像
+docker images | grep awecloud-signaling
+```
+
+### 3. 推送镜像
+
+```bash
+# 登录阿里云容器镜像服务
+docker login registry.cn-qingdao.aliyuncs.com
+
+# 推送 Server 镜像
+docker push registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.0
+
+# 推送 Agent 镜像
+docker push registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.0
+```
+
+## GitHub Actions 自动构建
+
+### 触发方式
+
+1. **自动触发**：推送到 `dev` 或 `main` 分支
+2. **手动触发**：在 GitHub Actions 页面手动运行
+
+### 构建流程
+
+1. 使用 `golang:1.24-alpine` 镜像交叉编译（amd64 + arm64）
+2. 构建 Docker 镜像（amd64 + arm64）
+3. 创建 multi-arch manifest
+4. 推送到阿里云容器镜像服务
+
+### 镜像标签
+
+- Server: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.0`
+- Agent: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.0`
+
+## 架构支持
+
+- **amd64**: x86_64 架构
+- **arm64**: ARM64 架构（如 Apple Silicon）
+
+## 镜像说明
+
+### Server 镜像
+
+- 基础镜像：Alpine Linux
+- 包含：ca-certificates, sqlite
+- 暴露端口：7000, 8080, 8081
+- 工作目录：/app
+- 配置文件：/app/config/server.toml
+
+### Agent 镜像
+
+- 基础镜像：Alpine Linux
+- 包含：ca-certificates
+- 工作目录：/app
+- 配置文件：/app/config/agent.toml
+
+## 版本管理
+
+版本号格式：`vX.Y.Z`
+
+- X: 主版本号（重大变更）
+- Y: 次版本号（功能增加）
+- Z: 修订号（bug 修复）
+
+当前版本：`v0.1.0`
+
+## 注意事项
+
+1. **CGO**：Server 需要 CGO（SQLite），Agent 不需要
+2. **构建时间**：交叉编译需要几分钟
+3. **镜像大小**：
+   - Server: ~50MB
+   - Agent: ~30MB
+4. **权限**：确保脚本有执行权限（`chmod +x`）
+
+## 故障排查
+
+### 构建失败
+
+```bash
+# 检查 Go 版本
+go version
+
+# 检查依赖
+go mod tidy
+
+# 清理缓存
+go clean -cache
+```
+
+### Docker 构建失败
+
+```bash
+# 检查 Docker 版本
+docker version
+
+# 清理构建缓存
+docker builder prune
+
+# 查看构建日志
+docker build --progress=plain ...
+```
+
+### 推送失败
+
+```bash
+# 检查登录状态
+docker login registry.cn-qingdao.aliyuncs.com
+
+# 检查镜像标签
+docker images | grep awecloud-signaling
+
+# 手动推送
+docker push <image:tag>
+```

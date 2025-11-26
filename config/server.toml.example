@@ -1,0 +1,25 @@
+# AWECloud Signaling Server 配置文件
+
+[web]
+listen_addr = "0.0.0.0"
+listen_port = 8080
+default_admin_username = "admin"
+default_admin_password = "admin123"
+
+[security]
+jwt_secret = "your-secret-key-change-in-production"
+
+[database]
+path = "data/server.db"
+
+[log]
+level = "info"
+file = ""
+
+[server]
+bind_addr = "0.0.0.0"
+bind_port = 7000
+transport_protocol = "websocket"
+tls_cert_file = ""
+tls_key_file = ""
+frp_auth_token = "change-this-to-a-secure-random-token"

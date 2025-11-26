@@ -26,13 +26,17 @@ type AgentServiceServer struct {
 	// 命令队列
 	commandQueues map[int64]chan *pb.Command
 	queuesMutex   sync.RWMutex
+
+	// FRP Token
+	frpToken string
 }
 
 // NewAgentServiceServer 创建Agent服务
-func NewAgentServiceServer() *AgentServiceServer {
+func NewAgentServiceServer(frpToken string) *AgentServiceServer {
 	return &AgentServiceServer{
 		agentStreams:  make(map[int64]pb.AgentService_ReceiveCommandsServer),
 		commandQueues: make(map[int64]chan *pb.Command),
+		frpToken:      frpToken,
 	}
 }
 
@@ -61,9 +65,10 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.RegisterReque
 	log.Printf("Agent注册成功: %s (ID: %d)", req.AgentName, agent.ID)
 
 	return &pb.RegisterResponse{
-		Success: true,
-		Message: "注册成功",
-		AgentId: agent.ID,
+		Success:  true,
+		Message:  "注册成功",
+		AgentId:  agent.ID,
+		FrpToken: s.frpToken, // 返回统一的 FRP Token
 	}, nil
 }
 
@@ -92,18 +97,20 @@ func (s *AgentServiceServer) Heartbeat(ctx context.Context, req *pb.HeartbeatReq
 // ReceiveCommands 接收Server指令（双向流）
 func (s *AgentServiceServer) ReceiveCommands(stream pb.AgentService_ReceiveCommandsServer) error {
 	// 等待第一个消息（包含agent_id）
-	_, err := stream.Recv()
+	initResp, err := stream.Recv()
 	if err != nil {
 		return status.Error(codes.InvalidArgument, "无法接收初始消息")
 	}
 
-	// 从响应中获取agent_id（这里简化处理，实际应该在metadata中传递）
-	// TODO: 改进认证机制
-	log.Printf("Agent连接建立，等待指令...")
+	// 从初始响应中获取agent_id
+	// CommandId格式："init-{agent_id}"
+	var agentID int64
+	if _, err := fmt.Sscanf(initResp.CommandId, "init-%d", &agentID); err != nil {
+		log.Printf("解析Agent ID失败: %v, 使用默认值1", err)
+		agentID = 1
+	}
 
-	// 这里需要从context或第一个消息中获取agent_id
-	// 暂时使用一个临时方案
-	agentID := int64(1) // TODO: 从认证信息中获取
+	log.Printf("Agent连接建立: agent_id=%d, message=%s", agentID, initResp.Message)
 
 	// 注册stream
 	s.streamsMutex.Lock()
@@ -117,6 +124,9 @@ func (s *AgentServiceServer) ReceiveCommands(stream pb.AgentService_ReceiveComma
 	}
 	cmdQueue := s.commandQueues[agentID]
 	s.queuesMutex.Unlock()
+
+	// 同步该Agent的所有STCP实例
+	go s.syncSTCPInstances(agentID)
 
 	defer func() {
 		// 清理连接
@@ -189,4 +199,47 @@ func (s *AgentServiceServer) IsAgentOnline(agentID int64) bool {
 	defer s.streamsMutex.RUnlock()
 	_, exists := s.agentStreams[agentID]
 	return exists
+}
+
+// syncSTCPInstances 同步Agent的所有STCP实例
+func (s *AgentServiceServer) syncSTCPInstances(agentID int64) {
+	// 等待一小段时间，确保Agent完全准备好
+	time.Sleep(1 * time.Second)
+
+	// 查询该Agent的所有STCP实例
+	var instances []model.STCPInstance
+	if err := db.DB.Where("agent_id = ?", agentID).Find(&instances).Error; err != nil {
+		log.Printf("查询Agent STCP实例失败: %v", err)
+		return
+	}
+
+	if len(instances) == 0 {
+		log.Printf("Agent %d 没有需要同步的STCP实例", agentID)
+		return
+	}
+
+	log.Printf("开始同步Agent %d 的 %d 个STCP实例", agentID, len(instances))
+
+	// 为每个实例发送创建命令
+	for _, instance := range instances {
+		cmd := &pb.Command{
+			CommandId:    fmt.Sprintf("sync-%d-%d", instance.ID, time.Now().Unix()),
+			Type:         pb.Command_CREATE_STCP,
+			InstanceName: instance.InstanceName,
+			SecretKey:    instance.SecretKey,
+			LocalIp:      instance.LocalIP,
+			LocalPort:    int32(instance.LocalPort),
+		}
+
+		if err := s.SendCommand(agentID, cmd); err != nil {
+			log.Printf("同步STCP实例失败: instance=%s, error=%v", instance.InstanceName, err)
+		} else {
+			log.Printf("已同步STCP实例: instance=%s", instance.InstanceName)
+		}
+
+		// 避免发送过快
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	log.Printf("Agent %d 的STCP实例同步完成", agentID)
 }

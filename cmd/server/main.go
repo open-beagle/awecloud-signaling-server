@@ -10,9 +10,25 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server"
 )
 
+var (
+	version   = "dev"
+	gitCommit = "unknown"
+	buildDate = "unknown"
+)
+
 func main() {
 	configPath := flag.String("c", "config/server.toml", "配置文件路径")
+	showVersion := flag.Bool("v", false, "显示版本信息")
 	flag.Parse()
+
+	// 显示版本信息
+	if *showVersion {
+		fmt.Printf("AWECloud Signaling Server\n")
+		fmt.Printf("Version:    %s\n", version)
+		fmt.Printf("Git Commit: %s\n", gitCommit)
+		fmt.Printf("Build Date: %s\n", buildDate)
+		os.Exit(0)
+	}
 
 	// 加载配置
 	cfg, err := config.LoadServerConfig(*configPath)
@@ -26,6 +42,7 @@ func main() {
 	}
 
 	log.Printf("AWECloud Signaling Server 启动中...")
+	log.Printf("版本: %s (commit: %s, built: %s)", version, gitCommit, buildDate)
 	log.Printf("配置文件: %s", *configPath)
 
 	// 创建并启动服务器

@@ -26,7 +26,8 @@ type Agent struct {
 	grpcClient pb.AgentServiceClient
 
 	// Agent信息
-	agentID int64
+	agentID  int64
+	frpToken string
 
 	// 命令处理
 	commandChan chan *pb.Command
@@ -129,8 +130,8 @@ func (a *Agent) Run() error {
 
 // connectToServer 连接到Server
 func (a *Agent) connectToServer() error {
-	// gRPC连接地址（端口8081）
-	grpcAddr := fmt.Sprintf("%s:%d", a.config.Server.Address, 8081)
+	// gRPC连接地址
+	grpcAddr := fmt.Sprintf("%s:%d", a.config.Server.Address, a.config.Server.GRPCPort)
 
 	log.Printf("连接到Server gRPC: %s", grpcAddr)
 
@@ -168,7 +169,15 @@ func (a *Agent) register() error {
 	}
 
 	a.agentID = resp.AgentId
-	log.Printf("注册成功，Agent ID: %d", a.agentID)
+	a.frpToken = resp.FrpToken
+
+	if a.frpToken != "" {
+		log.Printf("注册成功，Agent ID: %d, FRP Token: %s...", a.agentID, a.frpToken[:16])
+		// 将 FRP Token 传递给 FRP Manager
+		a.frpManager.SetFRPToken(a.frpToken)
+	} else {
+		log.Printf("注册成功，Agent ID: %d (无 FRP Token)", a.agentID)
+	}
 
 	return nil
 }
@@ -224,11 +233,11 @@ func (a *Agent) receiveCommands() {
 		return
 	}
 
-	// 发送初始消息（确认连接）
+	// 发送初始消息（确认连接，包含agent_id）
 	if err := stream.Send(&pb.CommandResponse{
-		CommandId: "init",
+		CommandId: fmt.Sprintf("init-%d", a.agentID),
 		Success:   true,
-		Message:   "Agent已连接",
+		Message:   fmt.Sprintf("Agent已连接: %d", a.agentID),
 	}); err != nil {
 		log.Printf("发送初始消息失败: %v", err)
 		return

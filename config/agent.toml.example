@@ -1,0 +1,11 @@
+# AWECloud Signaling Agent 配置文件
+
+[agent]
+agent_name = "agent-dev-001"
+agent_token = "your-agent-token-from-server"
+
+[server]
+address = "localhost"
+port = 7000        # FRP服务端口
+grpc_port = 8081   # gRPC API端口
+tls_enable = false

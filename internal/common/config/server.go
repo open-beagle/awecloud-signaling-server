@@ -20,6 +20,7 @@ type ServerSection struct {
 	TransportProtocol string `toml:"transport_protocol"` // tcp, websocket, wss
 	TLSCertFile       string `toml:"tls_cert_file"`
 	TLSKeyFile        string `toml:"tls_key_file"`
+	FRPAuthToken      string `toml:"frp_auth_token"` // FRP 认证 Token
 }
 
 type DatabaseSection struct {

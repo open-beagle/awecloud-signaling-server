@@ -28,7 +28,7 @@ echo "---"
 
 # 构建 ldflags，注入版本信息
 LDFLAGS="-w -s"
-LDFLAGS="${LDFLAGS} -X 'main.appVersion=${BUILD_VERSION}'"
+LDFLAGS="${LDFLAGS} -X 'main.version=${BUILD_VERSION}'"
 LDFLAGS="${LDFLAGS} -X 'main.gitCommit=${GIT_COMMIT}'"
 LDFLAGS="${LDFLAGS} -X 'main.buildDate=${BUILD_DATE}'"
 

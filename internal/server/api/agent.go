@@ -23,10 +23,9 @@ type CreateAgentRequest struct {
 }
 
 type AgentResponse struct {
-	Success bool          `json:"success"`
-	Message string        `json:"message,omitempty"`
-	Agent   *model.Agent  `json:"agent,omitempty"`
-	Agents  []model.Agent `json:"agents,omitempty"`
+	Success bool        `json:"success"`
+	Message string      `json:"message,omitempty"`
+	Data    interface{} `json:"data,omitempty"`
 }
 
 func (a *AgentAPI) List(c *gin.Context) {
@@ -46,7 +45,7 @@ func (a *AgentAPI) List(c *gin.Context) {
 
 	c.JSON(http.StatusOK, AgentResponse{
 		Success: true,
-		Agents:  agents,
+		Data:    agents,
 	})
 }
 
@@ -88,7 +87,7 @@ func (a *AgentAPI) Create(c *gin.Context) {
 	c.JSON(http.StatusOK, AgentResponse{
 		Success: true,
 		Message: "创建成功",
-		Agent:   agent,
+		Data:    agent,
 	})
 }
 
@@ -159,7 +158,7 @@ func (a *AgentAPI) RegenerateToken(c *gin.Context) {
 	c.JSON(http.StatusOK, AgentResponse{
 		Success: true,
 		Message: "Token重新生成成功",
-		Agent:   &agent,
+		Data:    map[string]string{"agent_token": agent.AgentToken},
 	})
 }
 

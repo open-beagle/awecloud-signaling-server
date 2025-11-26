@@ -17,14 +17,17 @@ spec:
     spec:
       containers:
       - name: server
-        image: awecloud-signaling-server:latest
-        imagePullPolicy: IfNotPresent
+        image: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.0
+        imagePullPolicy: Always
         ports:
         - name: frp
           containerPort: 7000
           protocol: TCP
         - name: web
           containerPort: 8080
+          protocol: TCP
+        - name: grpc
+          containerPort: 8081
           protocol: TCP
         env:
         - name: SERVER_BIND_ADDR

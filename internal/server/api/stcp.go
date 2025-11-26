@@ -40,10 +40,9 @@ type GrantAccessRequest struct {
 }
 
 type STCPResponse struct {
-	Success   bool                 `json:"success"`
-	Message   string               `json:"message,omitempty"`
-	Instance  *model.STCPInstance  `json:"instance,omitempty"`
-	Instances []model.STCPInstance `json:"instances,omitempty"`
+	Success bool        `json:"success"`
+	Message string      `json:"message,omitempty"`
+	Data    interface{} `json:"data,omitempty"`
 }
 
 func (a *STCPAPI) List(c *gin.Context) {
@@ -57,8 +56,8 @@ func (a *STCPAPI) List(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, STCPResponse{
-		Success:   true,
-		Instances: instances,
+		Success: true,
+		Data:    instances,
 	})
 }
 
@@ -132,9 +131,9 @@ func (a *STCPAPI) Create(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, STCPResponse{
-		Success:  true,
-		Message:  "创建成功",
-		Instance: instance,
+		Success: true,
+		Message: "创建成功",
+		Data:    instance,
 	})
 }
 
