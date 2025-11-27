@@ -40,7 +40,7 @@
       </el-table>
     </el-card>
 
-    <CreateDialog v-model="createDialogVisible" @success="loadAgents" />
+    <CreateDialog v-model="createDialogVisible" @success="handleCreateSuccess" />
     <TokenDialog v-model="tokenDialogVisible" :agent="currentAgent" />
   </div>
 </template>
@@ -81,6 +81,13 @@ const loadAgents = async () => {
 
 const handleCreate = () => {
   createDialogVisible.value = true
+}
+
+const handleCreateSuccess = (agent: Agent) => {
+  loadAgents()
+  // 显示新创建的Agent的Token
+  currentAgent.value = agent
+  tokenDialogVisible.value = true
 }
 
 const handleViewToken = (agent: Agent) => {

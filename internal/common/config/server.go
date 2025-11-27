@@ -20,7 +20,9 @@ type ServerSection struct {
 	TransportProtocol string `toml:"transport_protocol"` // tcp, websocket, wss
 	TLSCertFile       string `toml:"tls_cert_file"`
 	TLSKeyFile        string `toml:"tls_key_file"`
-	FRPAuthToken      string `toml:"frp_auth_token"` // FRP 认证 Token
+	FRPAuthToken      string `toml:"frp_auth_token"`  // FRP 认证 Token
+	FRPServerAddr     string `toml:"frp_server_addr"` // FRP 服务器地址
+	FRPServerPort     int    `toml:"frp_server_port"` // FRP 服务器端口
 }
 
 type DatabaseSection struct {
@@ -68,6 +70,12 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 	if cfg.Server.TransportProtocol == "" {
 		cfg.Server.TransportProtocol = "tcp"
+	}
+	if cfg.Server.FRPServerAddr == "" {
+		cfg.Server.FRPServerAddr = "127.0.0.1"
+	}
+	if cfg.Server.FRPServerPort == 0 {
+		cfg.Server.FRPServerPort = 7000
 	}
 	if cfg.Web.ListenAddr == "" {
 		cfg.Web.ListenAddr = "0.0.0.0"

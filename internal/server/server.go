@@ -231,19 +231,18 @@ func (s *Server) setupRouter() *gin.Engine {
 				deviceAuthGroup.DELETE("/devices/:device_token", deviceTokenAPI.DeleteDevice)
 			}
 
-			// 端口偏好API（需要JWT认证）
+			// 端口偏好API（需要Client JWT认证）
 			portPrefAPI := api.NewPortPreferenceAPI()
+			auditLogAPI := api.NewAuditLogAPI()
+
 			v1ClientGroup := v1Group.Group("/client")
-			v1ClientGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret))
+			v1ClientGroup.Use(api.ClientAuthMiddleware(s.config.Security.JWTSecret))
 			{
 				v1ClientGroup.GET("/preferences/port", portPrefAPI.GetPortPreferences)
 				v1ClientGroup.POST("/preferences/port", portPrefAPI.SavePortPreference)
+				// 客户端记录审计日志（需要Client JWT认证）
+				v1ClientGroup.POST("/audit/connection", auditLogAPI.RecordConnection)
 			}
-
-			// 审计日志API
-			auditLogAPI := api.NewAuditLogAPI()
-			// 客户端记录审计日志（需要JWT认证）
-			v1ClientGroup.POST("/audit/connection", auditLogAPI.RecordConnection)
 
 			// 管理员查询审计日志（需要管理员认证）
 			v1AdminGroup := v1Group.Group("/admin")

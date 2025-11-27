@@ -43,12 +43,13 @@ GOARCHS=amd64,arm64 bash ./scripts/build.sh
 ```bash
 # 在 golang:1.24-alpine 容器中构建
 docker pull registry.cn-qingdao.aliyuncs.com/wod/golang:1.24-alpine && \
-docker run --rm -v $(pwd):/go/src/github.com/open-beagle/awecloud-signaling-server \
-  -w /go/src/github.com/open-beagle/awecloud-signaling-server \
-  -e BUILD_VERSION=v0.1.0 \
-  -e GOARCHS=amd64,arm64 \
-  registry.cn-qingdao.aliyuncs.com/wod/golang:1.24-alpine \
-  bash ./.beagle/build.sh
+docker run --rm --user 1000:1000 \
+   -v $(pwd):/go/src/github.com/open-beagle/awecloud-signaling-server \
+   -w /go/src/github.com/open-beagle/awecloud-signaling-server \
+   -e BUILD_VERSION=v0.1.0 \
+   -e GOARCHS=amd64,arm64 \
+   registry.cn-qingdao.aliyuncs.com/wod/golang:1.24-alpine \
+   bash ./.beagle/build.sh
 ```
 
 ### 查看版本信息

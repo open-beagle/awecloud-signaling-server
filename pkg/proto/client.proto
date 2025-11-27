@@ -28,6 +28,9 @@ message AuthResponse {
   string message = 2;
   string session_token = 3;
   int64 expires_at = 4;
+  string frp_token = 5;  // FRP认证token
+  string frp_server = 6; // FRP服务器地址
+  int32 frp_port = 7;    // FRP服务器端口
 }
 
 // 获取服务列表请求

@@ -23,3 +23,5 @@ transport_protocol = "websocket"
 tls_cert_file = ""
 tls_key_file = ""
 frp_auth_token = "change-this-to-a-secure-random-token"
+frp_server_addr = "127.0.0.1"  # FRP服务器地址（Desktop连接用）
+frp_server_port = 7000          # FRP服务器端口（Desktop连接用）

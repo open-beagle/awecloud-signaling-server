@@ -30,6 +30,7 @@ type RecordConnectionRequest struct {
 	DeviceInfo        auth.DeviceInfo `json:"device_info"`
 	Success           bool            `json:"success"`
 	ErrorMessage      string          `json:"error_message"`
+	ServerAddress     string          `json:"server_address"` // Desktop连接的Server地址
 }
 
 // QueryAuditLogsResponse 查询审计日志响应
@@ -50,6 +51,7 @@ type AuditLogInfo struct {
 	ClientName        string          `json:"client_name"`
 	STCPInstanceID    int64           `json:"stcp_instance_id"`
 	STCPInstanceName  string          `json:"stcp_instance_name"`
+	ServerAddress     string          `json:"server_address"`
 	Action            string          `json:"action"`
 	LocalPort         int             `json:"local_port"`
 	DeviceInfo        auth.DeviceInfo `json:"device_info"`
@@ -93,13 +95,14 @@ func (a *AuditLogAPI) RecordConnection(c *gin.Context) {
 
 	// 创建审计日志记录
 	auditLog := &model.ConnectionAuditLog{
-		ClientID:          int64(clientID.(float64)),
-		STCPInstanceID:    req.STCPInstanceID,
+		ClientPKID:        int64(clientID.(float64)),
+		STCPInstancePKID:  req.STCPInstanceID,
 		Action:            req.Action,
 		LocalPort:         req.LocalPort,
 		DeviceFingerprint: req.DeviceFingerprint,
 		DeviceInfo:        deviceInfoJSON,
 		IPAddress:         ipAddress,
+		ServerAddress:     req.ServerAddress,
 		Success:           req.Success,
 		ErrorMessage:      req.ErrorMessage,
 	}
@@ -185,7 +188,7 @@ func (a *AuditLogAPI) QueryAuditLogs(c *gin.Context) {
 	// 分页查询
 	var logs []model.ConnectionAuditLog
 	offset := (page - 1) * pageSize
-	if err := query.Preload("Client").Preload("STCPInstance").
+	if err := query.Preload("Client").Preload("STCPInstance.Agent").
 		Order("created_at DESC").
 		Limit(pageSize).
 		Offset(offset).
@@ -200,33 +203,51 @@ func (a *AuditLogAPI) QueryAuditLogs(c *gin.Context) {
 
 	// 构建响应
 	logInfos := make([]AuditLogInfo, 0, len(logs))
-	for _, log := range logs {
-		deviceInfo, _ := auth.DeviceInfoFromJSON(log.DeviceInfo)
+	for _, auditLog := range logs {
+		deviceInfo, _ := auth.DeviceInfoFromJSON(auditLog.DeviceInfo)
 
 		clientName := ""
-		if log.Client.ClientID != "" {
-			clientName = log.Client.ClientID
+		log.Printf("Debug: audit_log_id=%d, client_pk_id=%d, Client.ID=%d, Client.ClientID=%s",
+			auditLog.ID, auditLog.ClientPKID, auditLog.Client.ID, auditLog.Client.ClientID)
+
+		if auditLog.Client.ClientID != "" {
+			clientName = auditLog.Client.ClientID
+		} else {
+			log.Printf("Warning: Client not loaded for audit log %d, client_pk_id=%d", auditLog.ID, auditLog.ClientPKID)
 		}
 
+		// 构建完整的实例名称：{agent_name}.{instance_name}
 		instanceName := ""
-		if log.STCPInstance.InstanceName != "" {
-			instanceName = log.STCPInstance.InstanceName
+		if auditLog.STCPInstance.InstanceName != "" {
+			agentName := ""
+			if auditLog.STCPInstance.Agent != nil && auditLog.STCPInstance.Agent.AgentName != "" {
+				agentName = auditLog.STCPInstance.Agent.AgentName
+			}
+
+			if agentName != "" {
+				instanceName = fmt.Sprintf("%s.%s", agentName, auditLog.STCPInstance.InstanceName)
+			} else {
+				instanceName = auditLog.STCPInstance.InstanceName
+			}
+		} else {
+			log.Printf("Warning: STCPInstance not loaded for audit log %d, instance_pk_id=%d", auditLog.ID, auditLog.STCPInstancePKID)
 		}
 
 		logInfos = append(logInfos, AuditLogInfo{
-			ID:                log.ID,
-			ClientID:          log.ClientID,
+			ID:                auditLog.ID,
+			ClientID:          auditLog.ClientPKID,
 			ClientName:        clientName,
-			STCPInstanceID:    log.STCPInstanceID,
+			STCPInstanceID:    auditLog.STCPInstancePKID,
 			STCPInstanceName:  instanceName,
-			Action:            log.Action,
-			LocalPort:         log.LocalPort,
+			ServerAddress:     auditLog.ServerAddress,
+			Action:            auditLog.Action,
+			LocalPort:         auditLog.LocalPort,
 			DeviceInfo:        deviceInfo,
-			DeviceFingerprint: log.DeviceFingerprint,
-			IPAddress:         log.IPAddress,
-			Success:           log.Success,
-			ErrorMessage:      log.ErrorMessage,
-			CreatedAt:         log.CreatedAt.Format(time.RFC3339),
+			DeviceFingerprint: auditLog.DeviceFingerprint,
+			IPAddress:         auditLog.IPAddress,
+			Success:           auditLog.Success,
+			ErrorMessage:      auditLog.ErrorMessage,
+			CreatedAt:         auditLog.CreatedAt.Format(time.RFC3339),
 		})
 	}
 
@@ -289,7 +310,7 @@ func (a *AuditLogAPI) ExportAuditLogs(c *gin.Context) {
 
 	// 查询所有记录（不分页）
 	var logs []model.ConnectionAuditLog
-	if err := query.Preload("Client").Preload("STCPInstance").
+	if err := query.Preload("Client").Preload("STCPInstance.Agent").
 		Order("created_at DESC").
 		Find(&logs).Error; err != nil {
 		log.Printf("查询审计日志失败: %v", err)
@@ -325,16 +346,26 @@ func (a *AuditLogAPI) ExportAuditLogs(c *gin.Context) {
 				clientName = log.Client.ClientID
 			}
 
+			// 构建完整的实例名称：{agent_name}.{instance_name}
 			instanceName := ""
 			if log.STCPInstance.InstanceName != "" {
-				instanceName = log.STCPInstance.InstanceName
+				agentName := ""
+				if log.STCPInstance.Agent != nil && log.STCPInstance.Agent.AgentName != "" {
+					agentName = log.STCPInstance.Agent.AgentName
+				}
+
+				if agentName != "" {
+					instanceName = fmt.Sprintf("%s.%s", agentName, log.STCPInstance.InstanceName)
+				} else {
+					instanceName = log.STCPInstance.InstanceName
+				}
 			}
 
 			writer.Write([]string{
 				strconv.FormatInt(log.ID, 10),
-				strconv.FormatInt(log.ClientID, 10),
+				strconv.FormatInt(log.ClientPKID, 10),
 				clientName,
-				strconv.FormatInt(log.STCPInstanceID, 10),
+				strconv.FormatInt(log.STCPInstancePKID, 10),
 				instanceName,
 				log.Action,
 				strconv.Itoa(log.LocalPort),

@@ -50,8 +50,8 @@ PLATFORMS=linux/amd64,darwin/amd64,windows/amd64 bash scripts/build_desktop.sh
 ```
 
 **前置要求**：
-- Server/Agent: Go 1.21+
-- Desktop: Go 1.21+, Node.js 16+, Wails CLI
+- Server/Agent: Go 1.24+
+- Desktop: Go 1.24+, Node.js 20+, Wails CLI
 
 ### 2. 启动 Server
 
@@ -76,9 +76,6 @@ PLATFORMS=linux/amd64,darwin/amd64,windows/amd64 bash scripts/build_desktop.sh
 ### 3. 启动 Agent
 
 ```bash
-# 使用演示脚本快速创建Agent
-./scripts/demo.sh
-
 # 或使用启动脚本
 ./scripts/run_agent.sh
 

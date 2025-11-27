@@ -79,8 +79,13 @@
         <el-table-column
           prop="stcp_instance_name"
           :label="$t('audit.instanceName')"
-          width="150"
-        />
+          width="200"
+        >
+          <template #default="{ row }">
+            <div>{{ row.stcp_instance_name }}</div>
+            <div class="text-secondary">{{ row.server_address }}</div>
+          </template>
+        </el-table-column>
         <el-table-column
           prop="action"
           :label="$t('audit.action')"
@@ -119,7 +124,7 @@
           width="200"
         >
           <template #default="{ row }">
-            <div>{{ row.device_info.os }} {{ row.device_info.os_version }}</div>
+            <div>{{ formatOSName(row.device_info) }}</div>
             <div class="text-secondary">{{ row.device_info.hostname }}</div>
           </template>
         </el-table-column>
@@ -247,6 +252,35 @@ const handleExport = async () => {
     console.error('Export audit logs error:', error)
     ElMessage.error(t('audit.exportFailed'))
   }
+}
+
+// 格式化操作系统显示名称
+const formatOSName = (deviceInfo: any) => {
+  if (!deviceInfo) return ''
+  
+  const os = deviceInfo.os?.toLowerCase() || ''
+  const osVersion = deviceInfo.os_version || ''
+  
+  // 如果有os_version，直接使用
+  if (osVersion && osVersion !== os) {
+    return osVersion
+  }
+  
+  // 否则根据os类型返回友好名称
+  if (os === 'windows') {
+    return 'Windows'
+  }
+  
+  if (os === 'darwin') {
+    return 'macOS'
+  }
+  
+  if (os === 'linux') {
+    return 'Linux'
+  }
+  
+  // 其他系统，首字母大写
+  return os ? os.charAt(0).toUpperCase() + os.slice(1) : 'Unknown'
 }
 
 onMounted(() => {

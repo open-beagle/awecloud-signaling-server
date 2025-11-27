@@ -48,7 +48,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
-  (e: 'success'): void
+  (e: 'success', agent: any): void
 }>()
 
 const { t } = useI18n()
@@ -90,9 +90,9 @@ const handleSubmit = async () => {
       loading.value = true
       try {
         const res = await createAgent(form)
-        if (res.success) {
+        if (res.success && res.data) {
           ElMessage.success(t('common.createSuccess'))
-          emit('success')
+          emit('success', res.data)
           handleClose()
         }
       } catch (error) {
