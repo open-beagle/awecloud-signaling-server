@@ -17,10 +17,11 @@ func NewClientAPI() *ClientAPI {
 }
 
 type ClientResponse struct {
-	Success bool           `json:"success"`
-	Message string         `json:"message,omitempty"`
-	Client  *model.Client  `json:"client,omitempty"`
-	Clients []model.Client `json:"clients,omitempty"`
+	Success      bool           `json:"success"`
+	Message      string         `json:"message,omitempty"`
+	Client       *model.Client  `json:"client,omitempty"`
+	Clients      []model.Client `json:"clients,omitempty"`
+	ClientSecret string         `json:"client_secret,omitempty"` // 用于返回新生成的secret
 }
 
 func (a *ClientAPI) List(c *gin.Context) {
@@ -93,10 +94,12 @@ func (a *ClientAPI) Create(c *gin.Context) {
 		return
 	}
 
+	// 返回时包含secret（只在创建时返回一次）
 	c.JSON(http.StatusOK, ClientResponse{
-		Success: true,
-		Message: "创建成功",
-		Client:  client,
+		Success:      true,
+		Message:      "创建成功",
+		Client:       client,
+		ClientSecret: clientSecret, // 明文返回secret
 	})
 }
 
@@ -140,10 +143,12 @@ func (a *ClientAPI) RegenerateSecret(c *gin.Context) {
 		return
 	}
 
+	// 返回时包含新的secret
 	c.JSON(http.StatusOK, ClientResponse{
-		Success: true,
-		Message: "Secret重新生成成功",
-		Client:  &client,
+		Success:      true,
+		Message:      "Secret重新生成成功",
+		Client:       &client,
+		ClientSecret: clientSecret, // 明文返回新secret
 	})
 }
 

@@ -33,6 +33,7 @@ export default {
   },
   menu: {
     agents: 'Agent管理',
+    clients: 'Client管理',
     stcpInstances: 'STCP实例'
   },
   agent: {

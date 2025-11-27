@@ -7,5 +7,5 @@ agent_token = "your-agent-token-from-server"
 [server]
 address = "localhost"
 port = 7000        # FRP服务端口
-grpc_port = 8081   # gRPC API端口
+grpc_port = 8080   # gRPC端口（HTTP/2统一端口，同时支持HTTP和gRPC）
 tls_enable = false

@@ -17,6 +17,10 @@
         <el-icon><Monitor /></el-icon>
         <template #title>{{ t('menu.agents') }}</template>
       </el-menu-item>
+      <el-menu-item index="/clients">
+        <el-icon><User /></el-icon>
+        <template #title>{{ t('menu.clients') }}</template>
+      </el-menu-item>
       <el-menu-item index="/stcp-instances">
         <el-icon><Connection /></el-icon>
         <template #title>{{ t('menu.stcpInstances') }}</template>

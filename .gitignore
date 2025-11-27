@@ -52,3 +52,7 @@ config/agent.toml
 # Temporary files (for testing and development)
 /.tmp/
 .tmp/
+
+# Desktop client (independent git repository)
+/desktop/
+!desktop/README.md

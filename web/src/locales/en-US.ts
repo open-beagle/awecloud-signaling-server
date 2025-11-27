@@ -33,6 +33,7 @@ export default {
   },
   menu: {
     agents: 'Agents',
+    clients: 'Clients',
     stcpInstances: 'STCP Instances'
   },
   agent: {

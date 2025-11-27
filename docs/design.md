@@ -34,7 +34,9 @@ awecloud-signaling/
                     │ ┌──────────┐    ┌──────────┐   │
                     │ │Server-Web│    │Server-FRP│   │
                     │ │  :8080   │◄──►│  :7000   │   │
-                    │ │HTTP+gRPC │    │WebSocket │   │
+                    │ │HTTP/2    │    │WebSocket │   │
+                    │ │RESTful   │    │          │   │
+                    │ │+ gRPC    │    │          │   │
                     │ └────▲─────┘    └────▲─────┘   │
                     └──────┼───────────────┼─────────┘
                            │               │
@@ -96,18 +98,19 @@ awecloud-signaling/
 ### 1.3 架构说明
 
 **Traefik网关路由**：
-- `https://your-domain.com/` → Server:8080 (HTTPS/HTTP + gRPC)
-- `wss://your-domain.com/ws` → Server:7000 (WSS/WebSocket)
+- `https://your-domain.com/` → Server:8080 (HTTP/2: RESTful API + gRPC)
+- `wss://your-domain.com/ws` → Server:7000 (WebSocket: FRP信令)
 
 **Server进程**（单一进程，两个服务线程）：
 
 Server是一个单一的Go进程，内部运行两个服务线程：
 
 1. **Server-Web线程** (监听端口8080)：
-   - 接收来自Traefik的HTTPS/HTTP流量（路径 `/`）
-   - 提供Web管理界面（HTTP）
-   - 提供RESTful API（HTTP）
-   - 提供gRPC服务（gRPC over HTTP/2）
+   - 接收来自Traefik的HTTPS流量（路径 `/`）
+   - **统一使用HTTP/2协议，同时支持HTTP和gRPC**
+   - 提供Web管理界面（HTTP/1.1或HTTP/2）
+   - 提供RESTful API（HTTP/1.1或HTTP/2）
+   - 提供gRPC服务（HTTP/2，通过Content-Type区分）
    - 接收Agent的gRPC连接（管理和控制Agent）
    - 接收Desktop的gRPC连接（认证和服务列表）
    - 管理Agent、Client、STCP实例
@@ -157,9 +160,13 @@ Desktop是一个单一的Go进程（Wails应用），内部运行两个工作线
    - 接收Desktop-Web线程的控制指令（进程内通信）
 
 **通信协议总结**：
-- **管理通道（gRPC over HTTP/2）**：
+- **管理通道（HTTP/2统一端口）**：
   - Agent → Server-Web线程（经过Traefik，端口8080，路径 `/`）
+    - RESTful API: HTTP/1.1或HTTP/2
+    - gRPC: HTTP/2（Content-Type: application/grpc）
   - Desktop → Server-Web线程（经过Traefik，端口8080，路径 `/`）
+    - gRPC: HTTP/2（Content-Type: application/grpc）
+  - **实现方式**：同一端口同时处理HTTP和gRPC，服务器根据Content-Type自动路由
 - **信令通道（WebSocket）**：
   - Agent → Server-FRP线程（经过Traefik，端口7000，路径 `/ws`）
   - Desktop → Server-FRP线程（经过Traefik，端口7000，路径 `/ws`）
@@ -183,6 +190,14 @@ Server是一个单一的Go进程，启动时会创建两个服务线程（gorout
 ### 2.1 Server-Web线程
 
 **监听端口**: 8080
+
+**协议**: HTTP/2（同时支持HTTP/1.1和gRPC）
+
+**实现方式**: 
+- 使用HTTP/2服务器同时处理HTTP和gRPC请求
+- 根据Content-Type区分请求类型：
+  - `application/grpc` → gRPC处理器
+  - 其他 → HTTP处理器（Gin路由）
 
 **功能**:
 1. Web管理界面（HTTP）
@@ -342,6 +357,16 @@ Server进程内部运行两个服务线程，详细设计请参考 [Server内部
 - 进程内通信接口设计
 - 状态管理和错误处理
 
+## 5.1 Desktop客户端设计
+
+Desktop客户端是跨平台桌面应用，供用户访问内网服务。详细设计请参考 [Desktop设计文档](./design_desktop.md)。
+
+**核心内容**：
+- 技术栈和架构设计
+- 用户界面设计
+- 连接管理和状态同步
+- 本地端口映射
+
 ## 6. 数据库设计
 
 使用 **SQLite** 作为数据库。详细的表结构设计请参考 [数据库设计文档](./design_database.md)。
@@ -363,7 +388,27 @@ Server进程内部运行两个服务线程，详细设计请参考 [Server内部
 - gRPC API：Agent管理和Client服务查询
 - WebSocket：FRP信令通道
 
-## 8. 部署方案
+## 8. FRP隧道设计
+
+FRP隧道是系统的核心功能，实现内网穿透和安全连接。详细设计请参考 [FRP设计文档](./design_frp.md)。
+
+**核心内容**：
+- WebSocket传输协议配置
+- STCP代理类型和工作原理
+- Server/Agent/Desktop端实现
+- 连接流程和数据流向
+
+## 9. Web管理界面设计
+
+Web管理界面供管理员管理系统资源。详细设计请参考 [Web界面设计文档](./design_server_web.md)。
+
+**核心内容**：
+- 前端技术栈（Vue 3 + Element Plus）
+- 功能模块（Agent管理、STCP实例管理）
+- 界面布局和交互设计
+- 国际化支持
+
+## 10. 部署方案
 
 详细的部署方案请参考 [部署设计文档](./design_deployment.md)。
 
@@ -372,9 +417,9 @@ Server进程内部运行两个服务线程，详细设计请参考 [Server内部
 - Kubernetes集群部署
 - Traefik网关配置
 
-## 9. 关键变更总结
+## 11. 关键变更总结
 
-### 8.1 与原设计的差异
+### 11.1 与原设计的差异
 
 **原设计问题**:
 - Agent作为单一FRP Client，直接连接Server
@@ -387,7 +432,7 @@ Server进程内部运行两个服务线程，详细设计请参考 [Server内部
 - Agent-Web线程接收指令，通过进程内通信控制Agent-FRP线程
 - Desktop也采用相同的双线程设计
 
-### 8.2 技术栈更新
+### 11.2 技术栈更新
 
 **新增**:
 - gRPC：用于Server-Web和Agent-Web之间的管理通信

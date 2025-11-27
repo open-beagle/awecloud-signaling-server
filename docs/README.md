@@ -40,9 +40,21 @@
 - 核心架构设计
 - 引用详细设计文档：
   - `design_server.md` - Server 进程内部设计（重要）
+  - `design_http2.md` - HTTP/2 统一端口设计（重要）
+  - `design_server_web.md` - Web 管理界面设计
+  - `design_desktop.md` - Desktop 客户端设计
   - `design_database.md` - 数据库详细设计
   - `design_api.md` - API 详细设计
   - `design_deployment.md` - 部署方案
+  - `design_frp.md` - FRP 隧道设计和实现
+
+### 📝 变更记录 (`changes.md`)
+
+**设计变更** - 重要设计决策的记录
+
+- 2025-11-27: HTTP/2 统一端口设计
+  - 将HTTP和gRPC合并到端口8080
+  - 详细的变更原因和实施计划
 
 ### 🧪 测试规范 (`test.md`)
 
@@ -62,6 +74,22 @@
 - 目录结构
 - API 文档
 - 开发状态
+
+### 🖥️ Desktop 客户端
+
+**独立仓库** - Desktop 客户端应用
+
+- 仓库地址: https://github.com/open-beagle/awecloud-signaling-desktop
+- 本地路径: `../desktop/`
+- Desktop 相关代码在独立仓库中开发
+- 与 Server 通过 gRPC 和 FRP 通信
+
+**Desktop 文档**:
+- `../desktop/docs/README.md` - Desktop 文档索引
+- `../desktop/docs/development.md` - 开发指南
+- `../desktop/docs/user-guide.md` - 用户手册
+- `../desktop/docs/logo.md` - Logo 使用说明
+- `../desktop/PROGRESS.md` - Desktop 开发进度
 
 ## 文档规范
 

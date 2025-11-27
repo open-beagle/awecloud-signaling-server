@@ -22,6 +22,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true }
       },
       {
+        path: 'clients',
+        name: 'Clients',
+        component: () => import('@/views/Client/List.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
         path: 'stcp-instances',
         name: 'STCPInstances',
         component: () => import('@/views/STCP/List.vue'),

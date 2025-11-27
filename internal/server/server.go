@@ -4,14 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
@@ -68,36 +70,39 @@ func (s *Server) Run() error {
 	pb.RegisterAgentServiceServer(s.grpcServer, s.agentService)
 	pb.RegisterClientServiceServer(s.grpcServer, s.clientService)
 
-	// 启动gRPC服务器（在HTTP服务器的同一端口，使用cmux或h2c）
-	// 这里简化处理，使用单独的端口
-	grpcAddr := fmt.Sprintf("%s:%d", s.config.Web.ListenAddr, s.config.Web.ListenPort+1)
-	grpcListener, err := net.Listen("tcp", grpcAddr)
-	if err != nil {
-		return fmt.Errorf("gRPC监听失败: %w", err)
-	}
+	// 创建Gin路由（HTTP处理）
+	ginRouter := s.setupRouter()
 
-	go func() {
-		log.Printf("gRPC服务启动在: %s", grpcAddr)
-		if err := s.grpcServer.Serve(grpcListener); err != nil {
-			log.Fatalf("gRPC服务器启动失败: %v", err)
+	// 创建统一处理器（HTTP/2: 同时支持HTTP和gRPC）
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 根据Content-Type区分请求类型
+		if r.ProtoMajor == 2 && strings.HasPrefix(
+			r.Header.Get("Content-Type"), "application/grpc") {
+			// gRPC请求
+			s.grpcServer.ServeHTTP(w, r)
+		} else {
+			// HTTP请求
+			ginRouter.ServeHTTP(w, r)
 		}
-	}()
+	})
 
-	// 创建路由
-	router := s.setupRouter()
-
-	// 创建HTTP服务器
+	// 创建HTTP/2服务器
+	// 使用h2c（HTTP/2 Cleartext）支持非TLS的HTTP/2
+	h2s := &http2.Server{}
 	addr := fmt.Sprintf("%s:%d", s.config.Web.ListenAddr, s.config.Web.ListenPort)
 	s.httpServer = &http.Server{
 		Addr:    addr,
-		Handler: router,
+		Handler: h2c.NewHandler(handler, h2s),
 	}
 
-	// 启动Web服务器
+	// 启动统一服务器（HTTP + gRPC）
 	go func() {
-		log.Printf("Web管理界面启动在: http://%s", addr)
+		log.Printf("Server启动在: http://%s", addr)
+		log.Printf("  - Web管理界面: http://%s/", addr)
+		log.Printf("  - RESTful API: http://%s/api/...", addr)
+		log.Printf("  - gRPC服务: %s (HTTP/2)", addr)
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("HTTP服务器启动失败: %v", err)
+			log.Fatalf("服务器启动失败: %v", err)
 		}
 	}()
 
