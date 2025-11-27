@@ -2,18 +2,35 @@
 
 ## 1. 项目概述
 
-### 1.1 项目组成
+**AWECloud Signaling** 是一个基于内网穿透技术的安全访问系统，允许用户通过Desktop客户端安全地访问部署在内网的服务（如SSH、MySQL、Redis等）。
+
+系统由三个核心组件组成：
+- **Server**：部署在公有云，作为信令服务器和流量中继
+- **Agent**：部署在内网环境，提供对内网服务的访问
+- **Desktop**：运行在用户电脑，作为访问内网服务的客户端
+
+### 1.1 系统组成
 
 ```
-awecloud-signaling/
-├── awecloud-signaling-server/     # 信令服务器
-│   ├── cmd/
-│   │   ├── server/                # Server端程序（包含Web和FRP两个服务）
-│   │   └── agent/                 # Agent端程序（包含Web和FRP两个模块）
+AWECloud Signaling/
+├── Server/                        # 服务端（部署在公有云）
+│   ├── cmd/server/                # Server进程入口
+│   ├── internal/server/           # Server实现
+│   │   ├── api/                   # Server-Web线程（HTTP/gRPC）
+│   │   └── frp/                   # Server-FRP线程（WebSocket）
 │   └── web/                       # 管理网页
 │
-└── awecloud-signaling-desktop/    # 客户端应用（包含Web和FRP两个模块）
-    └── 跨平台桌面应用
+├── Agent/                         # Agent端（部署在内网）
+│   ├── cmd/agent/                 # Agent进程入口
+│   └── internal/agent/            # Agent实现
+│       ├── web/                   # Agent-Web线程（gRPC客户端）
+│       └── frp/                   # Agent-FRP线程（WebSocket客户端）
+│
+└── Desktop/                       # Desktop端（用户桌面应用）
+    ├── frontend/                  # 前端界面（Wails）
+    └── backend/                   # 后端实现
+        ├── web/                   # Desktop-Web线程（gRPC客户端）
+        └── frp/                   # Desktop-FRP线程（WebSocket客户端）
 ```
 
 ### 1.2 系统架构
@@ -95,7 +112,7 @@ awecloud-signaling/
    - Desktop-FRP → Server-FRP（WebSocket，主动连接）
    - Desktop-FRP ↔ Agent-FRP（STCP隧道，通过Server-FRP协调）
 
-### 1.3 架构说明
+### 1.3 组件详细说明
 
 **Traefik网关路由**：
 - `https://your-domain.com/` → Server:8080 (HTTP/2: RESTful API + gRPC)
@@ -178,12 +195,16 @@ Desktop是一个单一的Go进程（Wails应用），内部运行两个工作线
   - Desktop-Web线程 ↔ Desktop-FRP线程（同一进程内）
 
 **重要说明**：
-- Server、Agent、Desktop都是**单一进程**
-- 每个进程内部有**两个工作线程**（或goroutine）
+- **AWECloud Signaling** 是整个系统的名称
+- **Server**、**Agent**、**Desktop** 都是 AWECloud Signaling 的组成部分
+- 每个组件都是**单一进程**
+- 每个进程内部有**两个工作线程**（goroutine）
 - "Server-Web"、"Server-FRP"等术语指的是**进程内的服务线程**，不是独立进程
 - 进程内通信使用Go的channel、接口调用或共享内存，无需网络通信
 
-## 2. Server进程设计
+## 2. Server组件设计
+
+**Server** 是 AWECloud Signaling 的服务端组件，部署在公有云上。
 
 Server是一个单一的Go进程，启动时会创建两个服务线程（goroutine）。
 
@@ -211,6 +232,13 @@ Server是一个单一的Go进程，启动时会创建两个服务线程（gorout
 - RESTful API：管理员认证、Agent管理、Client管理、STCP实例管理
 - gRPC API：Agent注册/心跳/指令流、Client认证/服务查询
 
+**访问控制**:
+
+详细的访问控制设计请参考 [访问控制设计文档](./design_server_access_control.md)。
+
+- 当前：调试模式，所有服务为 public
+- 未来：支持 public、private、group 三种权限模型
+
 **进程内通信**:
 - 通过Go channel或接口调用与Server-FRP线程通信
 - 发送控制指令（创建/删除STCP代理）
@@ -230,7 +258,9 @@ Server是一个单一的Go进程，启动时会创建两个服务线程（gorout
 - 上报Agent和Desktop的连接状态
 - 通知STCP隧道建立结果
 
-## 3. Agent进程设计
+## 3. Agent组件设计
+
+**Agent** 是 AWECloud Signaling 的内网代理组件，部署在内网环境中。
 
 Agent是一个单一的Go进程，启动时会创建两个工作线程（goroutine）。
 
@@ -287,7 +317,9 @@ Agent是一个单一的Go进程，启动时会创建两个工作线程（gorouti
 8. 转发流量到本地服务
 ```
 
-## 4. Desktop进程设计
+## 4. Desktop组件设计
+
+**Desktop** 是 AWECloud Signaling 的桌面客户端组件，运行在用户电脑上。
 
 Desktop是一个单一的Go进程（Wails应用），启动时会创建两个工作线程（goroutine）。
 
@@ -347,9 +379,9 @@ Desktop是一个单一的Go进程（Wails应用），启动时会创建两个工
 9. 转发���户流量到Agent
 ```
 
-## 5. Server进程内部设计
+## 5. Server组件内部设计
 
-Server进程内部运行两个服务线程，详细设计请参考 [Server内部设计文档](./design_server.md)。
+Server组件内部运行两个服务线程，详细设计请参考 [Server内部设计文档](./design_server.md)。
 
 **核心内容**：
 - 线程架构和通信机制
@@ -357,9 +389,9 @@ Server进程内部运行两个服务线程，详细设计请参考 [Server内部
 - 进程内通信接口设计
 - 状态管理和错误处理
 
-## 5.1 Desktop客户端设计
+## 5.1 Desktop组件详细设计
 
-Desktop客户端是跨平台桌面应用，供用户访问内网服务。详细设计请参考 [Desktop设计文档](./design_desktop.md)。
+Desktop组件是跨平台桌面应用，供用户访问内网服务。详细设计请参考 [Desktop设计文档](./design_desktop.md)。
 
 **核心内容**：
 - 技术栈和架构设计
@@ -417,22 +449,129 @@ Web管理界面供管理员管理系统资源。详细设计请参考 [Web界面
 - Kubernetes集群部署
 - Traefik网关配置
 
-## 11. 关键变更总结
+## 11. 安全令牌与审计日志设计
 
-### 11.1 与原设计的差异
+系统引入了Device Token机制和审计日志系统，提升安全性和可审计性。详细设计请参考 [安全令牌与审计日志设计文档](./design_security_token_audit.md)。
 
-**原设计问题**:
-- Agent作为单一FRP Client，直接连接Server
-- 缺少管理通道，无法动态控制Agent
+**核心内容**：
 
-**新设计改进**:
+### 11.1 Device Token系统
+
+**问题**：Desktop客户端明文存储`client_secret`存在安全风险
+
+**解决方案**：
+- 使用设备令牌（Device Token）替代明文secret存储
+- Token绑定设备硬件指纹（CPU、系统版本等）
+- Token有7天有效期，支持远程撤销
+- 用户可以管理所有已登录设备
+
+**Desktop登录双模式**：
+1. **模式1（离线显示）**：Server离线但有有效Token时
+   - 显示服务器地址（明文）
+   - 显示用户名（明文）
+   - 点击"登录"按钮尝试使用本地token重连
+   
+2. **模式2（完整登录）**：正常登录流程
+   - 输入服务器地址、用户名、密码
+   - 勾选"记住登录"
+   - Token失效后自动填充服务器地址和用户名
+
+**配置文件管理**：
+- 勾选"记住登录"：保存`server_address`、`client_id`、`device_token`
+- Token失效：清除token相关字段，保留基本信息
+- 用户只需重新输入密码
+
+### 11.2 审计日志系统
+
+**问题**：端口偏好保存在客户端，服务端无法追踪用户行为
+
+**解决方案**：
+- 端口偏好迁移到服务端（云端同步）
+- 记录所有连接/断开操作
+- 记录设备信息、IP地址、操作结果
+- 支持管理员查询和导出审计日志
+
+**新增API**：
+- `GET /api/v1/client/auth/login/devices` - 列出已登录设备
+- `POST /api/v1/client/auth/login/devices/:device_token/offline` - 让设备下线
+- `DELETE /api/v1/client/auth/login/devices/:device_token` - 删除设备记录
+- `GET /api/v1/client/preferences/port` - 获取端口偏好
+- `POST /api/v1/client/preferences/port` - 保存端口偏好
+- `POST /api/v1/client/audit/connection` - 记录连接审计日志
+- `GET /api/v1/admin/audit/connection` - 查询审计日志（管理员）
+
+### 11.3 安全性提升
+
+- ✅ 消除明文存储secret的风险
+- ✅ Token绑定设备，无法跨设备使用
+- ✅ 支持远程撤销设备访问权限
+- ✅ 完整的用户行为审计
+- ✅ 异常行为检测基础
+
+## 12. Desktop版本管理
+
+系统支持Desktop客户端版本管理，确保客户端版本符合安全要求。详细设计请参考 [Desktop版本管理设计文档](./design_version_control.md)。
+
+**核心功能**：
+
+### 12.1 Server端版本控制
+
+- 管理员可在Web界面设置最低支持的Desktop版本
+- 可配置Desktop下载地址
+- 可启用/禁用版本检查功能
+
+### 12.2 Desktop端版本检查
+
+- 登录前自动检查版本是否符合要求
+- 版本过低时显示强制升级界面
+- 提供下载链接，引导用户升级
+
+### 12.3 版本号规范
+
+使用语义化版本号（Semantic Versioning）：
+- 格式：`MAJOR.MINOR.PATCH`（如：1.0.0）
+- 编译时注入版本号
+- 支持版本比较和验证
+
+### 12.4 新增API
+
+- `POST /api/v1/client/version/check` - Desktop检查版本
+- `GET /api/v1/admin/settings/version` - 获取版本设置（管理员）
+- `PUT /api/v1/admin/settings/version/min` - 更新最低版本（管理员）
+- `PUT /api/v1/admin/settings/version/download-url` - 更新下载地址（管理员）
+- `PUT /api/v1/admin/settings/version/check-enabled` - 启用/禁用版本检查（管理员）
+
+### 12.5 数据库变更
+
+新增`system_settings`表，存储系统级配置：
+- `desktop_min_version`：最低支持版本
+- `desktop_latest_version`：最新版本
+- `desktop_download_url`：下载地址
+- `version_check_enabled`：是否启用版本检查
+
+## 13. 关键变更总结
+
+### 13.1 架构设计要点
+
+**系统命名**:
+- 整体系统名称：**AWECloud Signaling**
+- 三个核心组件：**Server**（服务端）、**Agent**（内网代理）、**Desktop**（桌面客户端）
+- 所有组件都是 AWECloud Signaling 系统的组成部分
+
+**架构特点**:
 - 每个组件（Server、Agent、Desktop）都是**单一进程**
 - 每个进程内部运行**两个工作线程**（goroutine）
-- 增加gRPC管理通道（Agent → Server-Web线程）
-- Agent-Web线程接收指令，通过进程内通信控制Agent-FRP线程
-- Desktop也采用相同的双线程设计
+- 使用gRPC管理通道（Agent/Desktop → Server-Web线程）
+- 使用WebSocket信令通道（Agent/Desktop → Server-FRP线程）
+- 通过STCP隧道实现Agent和Desktop之间的安全数据传输
 
-### 11.2 技术栈更新
+**部署模型**:
+- Server部署在公有云（有公网IP和域名）
+- Agent部署在内网环境（无公网IP，主动连接Server）
+- Desktop运行在用户电脑（无公网IP，主动连接Server）
+- 所有连接都是从内网主动发起，无需开放内网端口
+
+### 13.2 技术栈更新
 
 **新增**:
 - gRPC：用于Server-Web和Agent-Web之间的管理通信
@@ -445,6 +584,6 @@ Web管理界面供管理员管理系统资源。详细设计请参考 [Web界面
 
 ---
 
-**文档版本**: 2.0  
-**最后更新**: 2025-11-25  
+**文档版本**: 2.2  
+**最后更新**: 2025-11-27  
 **状态**: 当前设计

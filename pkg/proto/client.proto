@@ -47,6 +47,8 @@ message ServiceInfo {
   string agent_name = 3;
   string description = 4;
   int32 local_port = 5;
+  string access_type = 6;  // 'public', 'private', 'group'
+  string status = 7;       // 'online', 'offline'
 }
 
 // 连接服务请求

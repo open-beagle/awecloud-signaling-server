@@ -26,9 +26,6 @@ spec:
         - name: web
           containerPort: 8080
           protocol: TCP
-        - name: grpc
-          containerPort: 8081
-          protocol: TCP
         env:
         - name: SERVER_BIND_ADDR
           value: "0.0.0.0"
@@ -45,11 +42,11 @@ spec:
               key: jwt-secret
         volumeMounts:
         - name: data
-          mountPath: /app/data
+          mountPath: /home/code/data
         - name: logs
-          mountPath: /app/logs
+          mountPath: /home/code/logs
         - name: config
-          mountPath: /app/config
+          mountPath: /home/code/config
         resources:
           requests:
             memory: "256Mi"
@@ -72,7 +69,7 @@ spec:
       volumes:
       - name: data
         persistentVolumeClaim:
-          claimName: awecloud-data-pvc
+          claimName: awecloud-signaling-server-data
       - name: logs
         emptyDir: {}
       - name: config

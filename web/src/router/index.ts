@@ -32,6 +32,18 @@ const routes: RouteRecordRaw[] = [
         name: 'STCPInstances',
         component: () => import('@/views/STCP/List.vue'),
         meta: { requiresAuth: true }
+      },
+      {
+        path: 'groups',
+        name: 'Groups',
+        component: () => import('@/views/Group/List.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'audit-logs',
+        name: 'AuditLogs',
+        component: () => import('@/views/Audit/AuditLogs.vue'),
+        meta: { requiresAuth: true }
       }
     ]
   }

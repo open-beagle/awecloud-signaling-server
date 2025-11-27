@@ -53,3 +53,12 @@ export function formatFullTime(dateString: string): string {
   
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
 }
+
+/**
+ * 格式化时间（默认使用完整时间格式）
+ * @param dateString ISO时间字符串
+ * @returns 格式化的时间字符串
+ */
+export function formatTime(dateString: string): string {
+  return formatFullTime(dateString)
+}

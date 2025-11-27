@@ -27,7 +27,7 @@ tests/
 
 ```bash
 # 清理旧数据
-rm -f data/awecloud.db
+rm -f data/server.db
 
 # 启动Server（手动）
 ./bin/server -c config/server.toml

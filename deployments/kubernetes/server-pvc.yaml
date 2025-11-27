@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: awecloud-data-pvc
+  name: awecloud-signaling-server-data
   namespace: awecloud
 spec:
   accessModes:

@@ -17,7 +17,9 @@ export default {
     createSuccess: 'Created successfully',
     copy: 'Copy',
     copySuccess: 'Copied',
-    logout: 'Logout'
+    logout: 'Logout',
+    search: 'Search',
+    reset: 'Reset'
   },
   login: {
     title: 'Login',
@@ -34,7 +36,34 @@ export default {
   menu: {
     agents: 'Agents',
     clients: 'Clients',
-    stcpInstances: 'STCP Instances'
+    stcpInstances: 'STCP Instances',
+    auditLogs: 'Audit Logs'
+  },
+  audit: {
+    title: 'Connection Audit Logs',
+    clientId: 'Client ID',
+    clientIdPlaceholder: 'Enter Client ID',
+    clientName: 'Client Name',
+    instanceId: 'Instance ID',
+    instanceIdPlaceholder: 'Enter Instance ID',
+    instanceName: 'Instance Name',
+    action: 'Action',
+    actionPlaceholder: 'Select Action',
+    dateRange: 'Date Range',
+    startDate: 'Start Date',
+    endDate: 'End Date',
+    localPort: 'Local Port',
+    ipAddress: 'IP Address',
+    status: 'Status',
+    success: 'Success',
+    failed: 'Failed',
+    deviceInfo: 'Device Info',
+    createdAt: 'Time',
+    errorMessage: 'Error Message',
+    export: 'Export',
+    exportSuccess: 'Export successful',
+    exportFailed: 'Export failed',
+    queryFailed: 'Query failed'
   },
   agent: {
     list: 'Agent List',

@@ -18,7 +18,8 @@ import (
 // ClientServiceServer Client服务实现
 type ClientServiceServer struct {
 	pb.UnimplementedClientServiceServer
-	config *config.ServerConfig
+	config       *config.ServerConfig
+	agentService *AgentServiceServer
 }
 
 // NewClientServiceServer 创建Client服务
@@ -26,6 +27,11 @@ func NewClientServiceServer(cfg *config.ServerConfig) *ClientServiceServer {
 	return &ClientServiceServer{
 		config: cfg,
 	}
+}
+
+// SetAgentService 设置AgentService（用于检查Agent状态）
+func (s *ClientServiceServer) SetAgentService(agentService *AgentServiceServer) {
+	s.agentService = agentService
 }
 
 // Authenticate Client认证
@@ -115,31 +121,70 @@ func (s *ClientServiceServer) GetServices(ctx context.Context, req *pb.GetServic
 
 	clientID := int64(claims["client_id"].(float64))
 
-	// 查询Client有权限访问的服务
-	var accessList []model.STCPAccess
-	if err := db.DB.Preload("STCPInstance").Preload("STCPInstance.Agent").
-		Where("client_id = ?", clientID).Find(&accessList).Error; err != nil {
-		log.Printf("查询服务列表失败: %v", err)
+	// 权限过滤逻辑：查询用户可访问的服务
+	var allInstances []model.STCPInstance
+
+	// 1. 查询所有 public 服务
+	var publicInstances []model.STCPInstance
+	if err := db.DB.Preload("Agent").Where("access_type = ?", "public").Find(&publicInstances).Error; err != nil {
+		log.Printf("查询 public 服务失败: %v", err)
 		return nil, status.Error(codes.Internal, "查询失败")
 	}
+	allInstances = append(allInstances, publicInstances...)
+
+	// 2. 查询用户有权限的 private 服务
+	var privateAccess []model.STCPAccess
+	if err := db.DB.Preload("STCPInstance").Preload("STCPInstance.Agent").
+		Where("client_id = ?", clientID).
+		Find(&privateAccess).Error; err != nil {
+		log.Printf("查询 private 服务失败: %v", err)
+		return nil, status.Error(codes.Internal, "查询失败")
+	}
+	for _, access := range privateAccess {
+		if access.STCPInstance != nil && access.STCPInstance.AccessType == "private" {
+			allInstances = append(allInstances, *access.STCPInstance)
+		}
+	}
+
+	// 3. 查询用户所在组的 group 服务
+	var groupInstances []model.STCPInstance
+	if err := db.DB.Preload("Agent").
+		Joins("JOIN group_members ON group_members.group_id = stcp_instances.group_id").
+		Where("group_members.client_id = ? AND stcp_instances.access_type = ?", clientID, "group").
+		Find(&groupInstances).Error; err != nil {
+		log.Printf("查询 group 服务失败: %v", err)
+		return nil, status.Error(codes.Internal, "查询失败")
+	}
+	allInstances = append(allInstances, groupInstances...)
 
 	// 构建服务列表
-	services := make([]*pb.ServiceInfo, 0, len(accessList))
-	for _, access := range accessList {
-		if access.STCPInstance != nil {
-			agentName := ""
-			if access.STCPInstance.Agent != nil {
-				agentName = access.STCPInstance.Agent.AgentName
-			}
-
-			services = append(services, &pb.ServiceInfo{
-				InstanceId:   access.STCPInstance.ID,
-				InstanceName: access.STCPInstance.InstanceName,
-				AgentName:    agentName,
-				Description:  access.STCPInstance.Description,
-				LocalPort:    int32(access.STCPInstance.LocalPort),
-			})
+	services := make([]*pb.ServiceInfo, 0, len(allInstances))
+	for _, instance := range allInstances {
+		agentName := ""
+		if instance.Agent != nil {
+			agentName = instance.Agent.AgentName
 		}
+
+		accessType := instance.AccessType
+		if accessType == "" {
+			accessType = "public"
+		}
+
+		// 检查状态
+		serviceStatus := "offline"
+		if s.agentService != nil && s.agentService.IsAgentOnline(instance.AgentID) {
+			serviceStatus = "online"
+		}
+
+		services = append(services, &pb.ServiceInfo{
+			InstanceId:   instance.ID,
+			InstanceName: instance.InstanceName,
+			AgentName:    agentName,
+			Description:  instance.Description,
+			LocalPort:    int32(instance.LocalPort),
+			AccessType:   accessType,
+			Status:       serviceStatus,
+		})
 	}
 
 	log.Printf("返回服务列表: client_id=%d, count=%d", clientID, len(services))
@@ -168,16 +213,6 @@ func (s *ClientServiceServer) ConnectService(ctx context.Context, req *pb.Connec
 
 	clientID := int64(claims["client_id"].(float64))
 
-	// 检查权限
-	var access model.STCPAccess
-	if err := db.DB.Where("client_id = ? AND stcp_instance_id = ?", clientID, req.InstanceId).First(&access).Error; err != nil {
-		log.Printf("Client无权限访问该服务: client_id=%d, instance_id=%d", clientID, req.InstanceId)
-		return &pb.ConnectResponse{
-			Success: false,
-			Message: "无权限访问该服务",
-		}, nil
-	}
-
 	// 查询STCP实例
 	var instance model.STCPInstance
 	if err := db.DB.First(&instance, req.InstanceId).Error; err != nil {
@@ -185,6 +220,36 @@ func (s *ClientServiceServer) ConnectService(ctx context.Context, req *pb.Connec
 		return &pb.ConnectResponse{
 			Success: false,
 			Message: "服务不存在",
+		}, nil
+	}
+
+	// 检查权限
+	hasAccess := false
+	switch instance.AccessType {
+	case "public", "":
+		// Public 服务，所有用户可访问
+		hasAccess = true
+	case "private":
+		// Private 服务，检查 stcp_access 表
+		var access model.STCPAccess
+		if err := db.DB.Where("client_id = ? AND stcp_instance_id = ?", clientID, req.InstanceId).First(&access).Error; err == nil {
+			hasAccess = true
+		}
+	case "group":
+		// Group 服务，检查用户是否在组中
+		if instance.GroupID != nil {
+			var member model.GroupMember
+			if err := db.DB.Where("client_id = ? AND group_id = ?", clientID, *instance.GroupID).First(&member).Error; err == nil {
+				hasAccess = true
+			}
+		}
+	}
+
+	if !hasAccess {
+		log.Printf("Client无权限访问该服务: client_id=%d, instance_id=%d, access_type=%s", clientID, req.InstanceId, instance.AccessType)
+		return &pb.ConnectResponse{
+			Success: false,
+			Message: "无权限访问该服务",
 		}, nil
 	}
 

@@ -20,31 +20,20 @@ spec:
         image: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.0
         imagePullPolicy: Always
         env:
+        # Agent 标识（必需）
         - name: AGENT_NAME
-          valueFrom:
-            configMapKeyRef:
-              name: awecloud-agent-config
-              key: agent-name
+          value: "agent-k8s-001"  # 可以根据需要修改
+        # Agent 认证 Token（必需，从 Secret 获取）
         - name: AGENT_TOKEN
           valueFrom:
             secretKeyRef:
               name: awecloud-agent-secret
               key: agent-token
-        - name: SERVER_ADDRESS
-          valueFrom:
-            configMapKeyRef:
-              name: awecloud-agent-config
-              key: server-address
-        - name: SERVER_PORT
-          valueFrom:
-            configMapKeyRef:
-              name: awecloud-agent-config
-              key: server-port
         volumeMounts:
         - name: logs
-          mountPath: /app/logs
+          mountPath: /home/code/logs
         - name: config
-          mountPath: /app/config
+          mountPath: /home/code/config
         resources:
           requests:
             memory: "128Mi"

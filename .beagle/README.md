@@ -6,16 +6,18 @@
 .beagle/
 ├── server.dockerfile        # Server Dockerfile
 ├── agent.dockerfile         # Agent Dockerfile
-├── local-docker-build.sh    # 本地 Docker 构建脚本
+├── build.sh                 # CI/CD 构建脚本（使用 xx-go 跨架构编译）
 └── README.md                # 本文档
 
 scripts/
-└── build.sh                 # 统一构建脚本（交叉编译）
+└── build.sh                 # 本地开发构建脚本
 ```
 
 ## 本地构建
 
 ### 1. 构建二进制文件
+
+**本地开发构建**（使用 `scripts/build.sh`）：
 
 ```bash
 # 设置版本（可选）
@@ -24,7 +26,7 @@ export BUILD_VERSION=v0.1.0
 # 只构建当前架构
 GOARCHS=$(go env GOARCH) bash ./scripts/build.sh
 
-# 或构建多架构
+# 或构建多架构（需要安装交叉编译工具链）
 GOARCHS=amd64,arm64 bash ./scripts/build.sh
 
 # 输出在 bin/ 目录
@@ -34,6 +36,19 @@ GOARCHS=amd64,arm64 bash ./scripts/build.sh
 # bin/agent-linux-arm64
 # bin/server -> server-linux-amd64 (符号链接)
 # bin/agent -> agent-linux-amd64 (符号链接)
+```
+
+**CI/CD 构建**（使用 `.beagle/build.sh` 和 xx-go）：
+
+```bash
+# 在 golang:1.24-alpine 容器中构建
+docker pull registry.cn-qingdao.aliyuncs.com/wod/golang:1.24-alpine && \
+docker run --rm -v $(pwd):/go/src/github.com/open-beagle/awecloud-signaling-server \
+  -w /go/src/github.com/open-beagle/awecloud-signaling-server \
+  -e BUILD_VERSION=v0.1.0 \
+  -e GOARCHS=amd64,arm64 \
+  registry.cn-qingdao.aliyuncs.com/wod/golang:1.24-alpine \
+  bash ./.beagle/build.sh
 ```
 
 ### 查看版本信息
@@ -88,7 +103,9 @@ docker push registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.0
 
 ### 构建流程
 
-1. 使用 `golang:1.24-alpine` 镜像交叉编译（amd64 + arm64）
+1. 使用 `golang:1.24-alpine` 镜像和 `xx-go` 工具交叉编译（amd64 + arm64）
+   - Server: CGO_ENABLED=1（支持 SQLite）
+   - Agent: CGO_ENABLED=0（纯 Go）
 2. 构建 Docker 镜像（amd64 + arm64）
 3. 创建 multi-arch manifest
 4. 推送到阿里云容器镜像服务
@@ -132,12 +149,17 @@ docker push registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.0
 
 ## 注意事项
 
-1. **CGO**：Server 需要 CGO（SQLite），Agent 不需要
-2. **构建时间**：交叉编译需要几分钟
-3. **镜像大小**：
+1. **CGO**：
+   - Server 需要 CGO_ENABLED=1（使用 mattn/go-sqlite3）
+   - Agent 不需要 CGO（纯 Go）
+2. **跨架构编译**：
+   - 本地开发：使用 `scripts/build.sh`（标准 Go 交叉编译）
+   - CI/CD：使用 `.beagle/build.sh`（xx-go 工具，支持 CGO 跨架构）
+3. **构建时间**：交叉编译需要几分钟
+4. **镜像大小**：
    - Server: ~50MB
    - Agent: ~30MB
-4. **权限**：确保脚本有执行权限（`chmod +x`）
+5. **权限**：确保脚本有执行权限（`chmod +x`）
 
 ## 故障排查
 

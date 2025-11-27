@@ -114,13 +114,18 @@ CREATE TABLE stcp_instances (
     local_ip TEXT NOT NULL,
     local_port INTEGER NOT NULL,
     description TEXT,
+    access_type TEXT DEFAULT 'public',  -- 访问权限: 'public', 'private', 'group'
+    group_id INTEGER NULL,              -- 当 access_type = 'group' 时使用
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+    FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+    FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE SET NULL
 );
 
 CREATE INDEX idx_stcp_instances_name ON stcp_instances(instance_name);
 CREATE INDEX idx_stcp_instances_agent_id ON stcp_instances(agent_id);
+CREATE INDEX idx_stcp_instances_access_type ON stcp_instances(access_type);
+CREATE INDEX idx_stcp_instances_group_id ON stcp_instances(group_id);
 ```
 
 **字段说明**：
@@ -128,6 +133,8 @@ CREATE INDEX idx_stcp_instances_agent_id ON stcp_instances(agent_id);
 - `instance_name`: 实例名称（唯一），如 "dev-mysql"
 - `agent_id`: 所属Agent ID（外键）
 - `secret_key`: STCP密钥，用于建立加密隧道
+- `access_type`: 访问权限类型（public/private/group），默认 public
+- `group_id`: 组ID（当 access_type = 'group' 时使用）
 - `local_ip`: 本地服务IP，如 "127.0.0.1"
 - `local_port`: 本地服务端口，如 3306
 - `description`: 描述信息，如 "开发环境MySQL数据库"
@@ -211,25 +218,228 @@ CREATE INDEX idx_client_sessions_expires_at ON client_sessions(expires_at);
 - `idx_client_sessions_client_id`: Client ID索引
 - `idx_client_sessions_expires_at`: 过期时间索引，用于清理过期会话
 
+### 2.7 设备令牌表 (device_tokens)
+
+存储Desktop客户端的设备令牌，用于安全的自动登录。
+
+```sql
+CREATE TABLE device_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    device_token TEXT NOT NULL UNIQUE,
+    device_fingerprint TEXT NOT NULL,
+    device_info TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    last_used_at DATETIME,
+    revoked BOOLEAN DEFAULT 0,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_device_tokens_token ON device_tokens(device_token);
+CREATE INDEX idx_device_tokens_client_id ON device_tokens(client_id);
+CREATE INDEX idx_device_tokens_expires_at ON device_tokens(expires_at);
+CREATE INDEX idx_device_tokens_fingerprint ON device_tokens(device_fingerprint);
+```
+
+**字段说明**：
+- `id`: 主键，自增
+- `client_id`: Client ID（外键）
+- `device_token`: 设备令牌（唯一），UUID格式
+- `device_fingerprint`: 设备指纹，SHA256哈希值
+- `device_info`: 设备信息JSON，包含OS、CPU、主机名等
+- `created_at`: 创建时间
+- `expires_at`: 过期时间（默认7天）
+- `last_used_at`: 最后使用时间
+- `revoked`: 是否已撤销，0=未撤销，1=已撤销
+
+**外键约束**：
+- `client_id` → `clients(id)`，级联删除
+
+**索引**：
+- `idx_device_tokens_token`: 设备令牌索引，加速认证查询
+- `idx_device_tokens_client_id`: Client ID索引，用于查询用户的所有设备
+- `idx_device_tokens_expires_at`: 过期时间索引，用于清理过期令牌
+- `idx_device_tokens_fingerprint`: 设备指纹索引，用于验证设备
+
+**设备信息JSON示例**：
+```json
+{
+  "os": "windows",
+  "os_version": "Windows 10",
+  "arch": "amd64",
+  "cpu_model": "Intel Core i7-9700K",
+  "machine_id": "S-1-5-21-...",
+  "hostname": "DESKTOP-ABC123"
+}
+```
+
+### 2.8 端口偏好表 (port_preferences)
+
+存储用户对STCP实例的端口偏好设置。
+
+```sql
+CREATE TABLE port_preferences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    stcp_instance_id INTEGER NOT NULL,
+    preferred_port INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (stcp_instance_id) REFERENCES stcp_instances(id) ON DELETE CASCADE,
+    UNIQUE(client_id, stcp_instance_id)
+);
+
+CREATE INDEX idx_port_preferences_client_id ON port_preferences(client_id);
+CREATE INDEX idx_port_preferences_instance_id ON port_preferences(stcp_instance_id);
+```
+
+**字段说明**：
+- `id`: 主键，自增
+- `client_id`: Client ID（外键）
+- `stcp_instance_id`: STCP实例ID（外键）
+- `preferred_port`: 偏好端口号
+- `created_at`: 创建时间
+- `updated_at`: 更新时间
+
+**外键约束**：
+- `client_id` → `clients(id)`，级联删除
+- `stcp_instance_id` → `stcp_instances(id)`，级联删除
+
+**唯一约束**：
+- `(client_id, stcp_instance_id)`: 每个用户对每个实例只能有一个端口偏好
+
+**索引**：
+- `idx_port_preferences_client_id`: Client ID索引
+- `idx_port_preferences_instance_id`: STCP实例ID索引
+
+### 2.9 连接审计日志表 (connection_audit_logs)
+
+记录用户的连接和断开操作，用于安全审计。
+
+```sql
+CREATE TABLE connection_audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    stcp_instance_id INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    local_port INTEGER,
+    device_fingerprint TEXT,
+    device_info TEXT,
+    ip_address TEXT,
+    success BOOLEAN DEFAULT 1,
+    error_message TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (stcp_instance_id) REFERENCES stcp_instances(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_audit_logs_client_id ON connection_audit_logs(client_id);
+CREATE INDEX idx_audit_logs_instance_id ON connection_audit_logs(stcp_instance_id);
+CREATE INDEX idx_audit_logs_created_at ON connection_audit_logs(created_at);
+CREATE INDEX idx_audit_logs_action ON connection_audit_logs(action);
+CREATE INDEX idx_audit_logs_success ON connection_audit_logs(success);
+```
+
+**字段说明**：
+- `id`: 主键，自增
+- `client_id`: Client ID（外键）
+- `stcp_instance_id`: STCP实例ID（外键）
+- `action`: 操作类型，枚举值：'connect', 'disconnect'
+- `local_port`: 本地端口号
+- `device_fingerprint`: 设备指纹
+- `device_info`: 设备信息JSON
+- `ip_address`: 客户端IP地址
+- `success`: 操作是否成功，0=失败，1=成功
+- `error_message`: 错误信息（失败时）
+- `created_at`: 创建时间
+
+**外键约束**：
+- `client_id` → `clients(id)`，级联删除
+- `stcp_instance_id` → `stcp_instances(id)`，级联删除
+
+**索引**：
+- `idx_audit_logs_client_id`: Client ID索引，用于查询某用户的所有日志
+- `idx_audit_logs_instance_id`: STCP实例ID索引，用于查询某服务的所有日志
+- `idx_audit_logs_created_at`: 创建时间索引，用于时间范围查询
+- `idx_audit_logs_action`: 操作类型索引
+- `idx_audit_logs_success`: 成功状态索引，用于查询失败的操作
+
+**设备信息JSON示例**：
+```json
+{
+  "os": "windows",
+  "hostname": "DESKTOP-ABC123"
+}
+```
+
+### 2.10 系统设置表 (system_settings)
+
+存储系统级别的配置项，如Desktop最低版本要求等。
+
+```sql
+CREATE TABLE IF NOT EXISTS system_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    setting_key TEXT NOT NULL UNIQUE,
+    setting_value TEXT NOT NULL,
+    description TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_by TEXT
+);
+
+CREATE INDEX idx_system_settings_key ON system_settings(setting_key);
+
+-- 插入默认设置
+INSERT INTO system_settings (setting_key, setting_value, description, updated_by) 
+VALUES 
+    ('desktop_min_version', '1.0.0', 'Desktop客户端最低支持版本', 'system'),
+    ('desktop_latest_version', '1.0.0', 'Desktop客户端最新版本', 'system'),
+    ('desktop_download_url', 'https://github.com/your-org/awecloud-desktop/releases', 'Desktop客户端下载地址', 'system'),
+    ('version_check_enabled', 'true', '是否启用版本检查', 'system');
+```
+
+**字段说明**：
+- `id`: 主键，自增
+- `setting_key`: 设置项的键（唯一）
+- `setting_value`: 设置项的值（文本格式）
+- `description`: 设置项描述
+- `updated_at`: 最后更新时间
+- `updated_by`: 更新者（管理员用户名或'system'）
+
+**索引**：
+- `idx_system_settings_key`: 设置键索引，加速查询
+
+**预定义设置项**：
+
+| setting_key | 默认值 | 说明 |
+|-------------|--------|------|
+| `desktop_min_version` | `1.0.0` | Desktop最低支持版本 |
+| `desktop_latest_version` | `1.0.0` | Desktop最新版本（可选） |
+| `desktop_download_url` | `https://...` | Desktop下载地址 |
+| `version_check_enabled` | `true` | 是否启用版本检查 |
+
 ## 3. 数据关系图
 
 ```
 admins (管理员)
   ↓ (管理)
   
-agents (Agent) ←──────┐
-  ↓ (1:N)              │
-  │                    │
-stcp_instances (实例)  │
-  ↓ (N:M)              │
-  │                    │
-stcp_access (访问控制) │
-  ↓ (N:M)              │
-  │                    │
-clients (Client) ──────┘
+agents (Agent) ←──────────────┐
+  ↓ (1:N)                      │
+  │                            │
+stcp_instances (实例)          │
+  ↓ (N:M)                      │
+  │                            │
+stcp_access (访问控制)         │
+  ↓ (N:M)                      │
+  │                            │
+clients (Client) ──────────────┘
   ↓ (1:N)
-  │
-client_sessions (会话)
+  ├─ client_sessions (会话)
+  ├─ device_tokens (设备令牌)
+  ├─ port_preferences (端口偏好)
+  └─ connection_audit_logs (审计日志)
 ```
 
 ## 4. 初始化数据
@@ -258,7 +468,18 @@ WHERE expires_at < datetime('now');
 
 建议：每小时执行一次清理任务。
 
-### 5.2 更新Agent状态
+### 5.2 清理过期设备令牌
+
+定期清理过期的设备令牌：
+
+```sql
+DELETE FROM device_tokens 
+WHERE expires_at < datetime('now') AND revoked = 0;
+```
+
+建议：每天执行一次清理任务。
+
+### 5.3 更新Agent状态
 
 定期检查Agent心跳，更新离线状态：
 
@@ -269,6 +490,22 @@ WHERE last_heartbeat < datetime('now', '-60 seconds');
 ```
 
 建议：每30秒执行一次检查。
+
+### 5.4 归档审计日志
+
+定期归档旧的审计日志（可选）：
+
+```sql
+-- 将90天前的日志移动到归档表
+INSERT INTO connection_audit_logs_archive 
+SELECT * FROM connection_audit_logs 
+WHERE created_at < datetime('now', '-90 days');
+
+DELETE FROM connection_audit_logs 
+WHERE created_at < datetime('now', '-90 days');
+```
+
+建议：根据合规要求和存储容量决定归档策略。
 
 ## 6. 数据备份
 

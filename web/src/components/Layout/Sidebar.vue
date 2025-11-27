@@ -25,6 +25,14 @@
         <el-icon><Connection /></el-icon>
         <template #title>{{ t('menu.stcpInstances') }}</template>
       </el-menu-item>
+      <el-menu-item index="/groups">
+        <el-icon><UserFilled /></el-icon>
+        <template #title>用户组</template>
+      </el-menu-item>
+      <el-menu-item index="/audit-logs">
+        <el-icon><Document /></el-icon>
+        <template #title>{{ t('menu.auditLogs') }}</template>
+      </el-menu-item>
     </el-menu>
   </div>
 </template>

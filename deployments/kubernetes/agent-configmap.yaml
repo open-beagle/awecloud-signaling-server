@@ -4,15 +4,16 @@ metadata:
   name: awecloud-agent-config
   namespace: awecloud
 data:
-  agent-name: "agent-k8s-001"
-  server-address: "awecloud-signaling-server.awecloud.svc.cluster.local"
-  server-port: "7000"
   agent.toml: |
-    [agent]
-    agent_name = "agent-k8s-001"
-    agent_token = ""  # 从Secret获取
-
+    # AWECloud Signaling Agent 配置文件
+    # agent_name 和 agent_token 通过环境变量配置
+    
     [server]
     address = "awecloud-signaling-server.awecloud.svc.cluster.local"
-    port = 7000
+    port = 7000        # FRP服务端口（WebSocket）
+    grpc_port = 8080   # gRPC端口（HTTP/2统一端口）
     tls_enable = false
+    
+    [log]
+    level = "info"
+    file = ""

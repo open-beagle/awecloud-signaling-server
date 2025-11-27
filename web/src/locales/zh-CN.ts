@@ -17,7 +17,9 @@ export default {
     createSuccess: '创建成功',
     copy: '复制',
     copySuccess: '复制成功',
-    logout: '退出登录'
+    logout: '退出登录',
+    search: '查询',
+    reset: '重置'
   },
   login: {
     title: '登录',
@@ -34,7 +36,34 @@ export default {
   menu: {
     agents: 'Agent管理',
     clients: 'Client管理',
-    stcpInstances: 'STCP实例'
+    stcpInstances: 'STCP实例',
+    auditLogs: '审计日志'
+  },
+  audit: {
+    title: '连接审计日志',
+    clientId: 'Client ID',
+    clientIdPlaceholder: '请输入Client ID',
+    clientName: 'Client名称',
+    instanceId: '实例ID',
+    instanceIdPlaceholder: '请输入实例ID',
+    instanceName: '实例名称',
+    action: '操作',
+    actionPlaceholder: '选择操作类型',
+    dateRange: '日期范围',
+    startDate: '开始日期',
+    endDate: '结束日期',
+    localPort: '本地端口',
+    ipAddress: 'IP地址',
+    status: '状态',
+    success: '成功',
+    failed: '失败',
+    deviceInfo: '设备信息',
+    createdAt: '时间',
+    errorMessage: '错误信息',
+    export: '导出',
+    exportSuccess: '导出成功',
+    exportFailed: '导出失败',
+    queryFailed: '查询失败'
   },
   agent: {
     list: 'Agent列表',

@@ -65,6 +65,7 @@ func (s *Server) Run() error {
 	// 创建gRPC服务
 	s.agentService = grpcserver.NewAgentServiceServer(s.config.Server.FRPAuthToken)
 	s.clientService = grpcserver.NewClientServiceServer(s.config)
+	s.clientService.SetAgentService(s.agentService) // 设置AgentService用于检查状态
 
 	s.grpcServer = grpc.NewServer()
 	pb.RegisterAgentServiceServer(s.grpcServer, s.agentService)
@@ -195,12 +196,63 @@ func (s *Server) setupRouter() *gin.Engine {
 			authGroup.GET("/stcp-instances/:id/accesses", stcpAPI.ListAccesses)
 			authGroup.POST("/stcp-instances/:id/grant", stcpAPI.GrantAccess)
 			authGroup.POST("/stcp-instances/:id/revoke", stcpAPI.RevokeAccess)
+			authGroup.PUT("/stcp-instances/:id/access-type", stcpAPI.SetAccessType)
+
+			// 组管理
+			groupAPI := api.NewGroupAPI()
+			authGroup.GET("/groups", groupAPI.GetGroups)
+			authGroup.POST("/groups", groupAPI.CreateGroup)
+			authGroup.PUT("/groups/:id", groupAPI.UpdateGroup)
+			authGroup.DELETE("/groups/:id", groupAPI.DeleteGroup)
+			authGroup.GET("/groups/:id/members", groupAPI.GetGroupMembers)
+			authGroup.POST("/groups/:id/members", groupAPI.AddGroupMember)
+			authGroup.DELETE("/groups/:id/members/:client_id", groupAPI.RemoveGroupMember)
 		}
 
 		// Client端API（不需要管理员认证）
 		clientAuthAPI := api.NewClientAuthAPI(s.config)
 		apiGroup.POST("/client/auth", clientAuthAPI.Auth)
 		apiGroup.GET("/client/services", clientAuthAPI.GetServices)
+
+		// Device Token API（v1）
+		v1Group := apiGroup.Group("/v1")
+		{
+			// Device Token认证API（不需要JWT认证）
+			deviceTokenAPI := api.NewDeviceTokenAPI(s.config)
+			v1Group.POST("/client/auth/login", deviceTokenAPI.LoginWithSecret)
+			v1Group.POST("/client/auth/login/token", deviceTokenAPI.LoginWithToken)
+
+			// Device Token管理API（需要JWT认证）
+			deviceAuthGroup := v1Group.Group("/client/auth/login")
+			deviceAuthGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret))
+			{
+				deviceAuthGroup.GET("/devices", deviceTokenAPI.ListDevices)
+				deviceAuthGroup.POST("/devices/:device_token/offline", deviceTokenAPI.OfflineDevice)
+				deviceAuthGroup.DELETE("/devices/:device_token", deviceTokenAPI.DeleteDevice)
+			}
+
+			// 端口偏好API（需要JWT认证）
+			portPrefAPI := api.NewPortPreferenceAPI()
+			v1ClientGroup := v1Group.Group("/client")
+			v1ClientGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret))
+			{
+				v1ClientGroup.GET("/preferences/port", portPrefAPI.GetPortPreferences)
+				v1ClientGroup.POST("/preferences/port", portPrefAPI.SavePortPreference)
+			}
+
+			// 审计日志API
+			auditLogAPI := api.NewAuditLogAPI()
+			// 客户端记录审计日志（需要JWT认证）
+			v1ClientGroup.POST("/audit/connection", auditLogAPI.RecordConnection)
+
+			// 管理员查询审计日志（需要管理员认证）
+			v1AdminGroup := v1Group.Group("/admin")
+			v1AdminGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret))
+			{
+				v1AdminGroup.GET("/audit/connection", auditLogAPI.QueryAuditLogs)
+				v1AdminGroup.GET("/audit/connection/export", auditLogAPI.ExportAuditLogs)
+			}
+		}
 	}
 
 	// SPA路由支持（必须在所有路由之后）

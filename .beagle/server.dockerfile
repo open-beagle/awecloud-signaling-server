@@ -10,16 +10,28 @@ LABEL author=${AUTHOR} version=${VERSION}
 ARG TARGETOS
 ARG TARGETARCH
 
-COPY bin/server-${TARGETOS}-${TARGETARCH} /usr/local/bin/server
-
+# Create user and directories
 RUN set -ex && \
-    apk add --no-cache ca-certificates sqlite && \
-    mkdir -p /app/data /app/logs /app/certs /app/config
+    apk add --no-cache ca-certificates sqlite-libs && \
+    addgroup -g 1000 code && \
+    adduser -D -u 1000 -G code code && \
+    mkdir -p /home/code/data /home/code/logs /home/code/certs /home/code/config && \
+    chown -R code:code /home/code
 
-WORKDIR /app
+# Copy binary
+COPY --chown=code:code bin/server-${TARGETOS}-${TARGETARCH} /usr/local/bin/server
 
-COPY config/server.toml /app/config/
+# Copy example config as default config
+COPY --chown=code:code config/server.toml.example /home/code/config/server.toml
 
-EXPOSE 7000 8080 8081
+# Switch to non-root user
+USER code
 
-CMD ["server", "-c", "/app/config/server.toml"]
+WORKDIR /home/code
+
+# Declare volumes for persistent data
+VOLUME ["/home/code/data", "/home/code/logs"]
+
+EXPOSE 7000 8080
+
+CMD ["server", "-c", "/home/code/config/server.toml"]

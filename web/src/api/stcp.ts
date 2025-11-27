@@ -34,3 +34,10 @@ export const revokeSTCPAccess = (instanceId: number, clientId: number) => {
     client_id: clientId
   })
 }
+
+export const setAccessType = (instanceId: number, accessType: string, groupId?: number) => {
+  return request.put<any, ApiResponse>(`/stcp-instances/${instanceId}/access-type`, {
+    access_type: accessType,
+    group_id: groupId
+  })
+}

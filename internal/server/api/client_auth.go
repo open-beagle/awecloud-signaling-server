@@ -162,26 +162,59 @@ func (a *ClientAuthAPI) GetServices(c *gin.Context) {
 
 	clientID := int64(claims["client_id"].(float64))
 
-	// 查询Client有权限访问的服务
-	var accessList []model.STCPAccess
-	if err := db.DB.Preload("STCPInstance").Where("client_id = ?", clientID).Find(&accessList).Error; err != nil {
+	// 权限过滤逻辑：查询用户可访问的服务
+	var allInstances []model.STCPInstance
+
+	// 1. 查询所有 public 服务
+	var publicInstances []model.STCPInstance
+	if err := db.DB.Where("access_type = ?", "public").Find(&publicInstances).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, ServicesResponse{
 			Success: false,
-			Message: "查询失败",
+			Message: "查询 public 服务失败",
 		})
 		return
 	}
+	allInstances = append(allInstances, publicInstances...)
+
+	// 2. 查询用户有权限的 private 服务
+	var privateAccess []model.STCPAccess
+	if err := db.DB.Preload("STCPInstance").
+		Where("client_id = ?", clientID).
+		Find(&privateAccess).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, ServicesResponse{
+			Success: false,
+			Message: "查询 private 服务失败",
+		})
+		return
+	}
+	for _, access := range privateAccess {
+		if access.STCPInstance != nil && access.STCPInstance.AccessType == "private" {
+			allInstances = append(allInstances, *access.STCPInstance)
+		}
+	}
+
+	// 3. 查询用户所在组的 group 服务
+	var groupInstances []model.STCPInstance
+	if err := db.DB.
+		Joins("JOIN group_members ON group_members.group_id = stcp_instances.group_id").
+		Where("group_members.client_id = ? AND stcp_instances.access_type = ?", clientID, "group").
+		Find(&groupInstances).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, ServicesResponse{
+			Success: false,
+			Message: "查询 group 服务失败",
+		})
+		return
+	}
+	allInstances = append(allInstances, groupInstances...)
 
 	// 构建服务列表
-	services := make([]ServiceInfo, 0, len(accessList))
-	for _, access := range accessList {
-		if access.STCPInstance != nil {
-			services = append(services, ServiceInfo{
-				ID:        access.STCPInstance.ID,
-				Name:      access.STCPInstance.InstanceName,
-				SecretKey: access.STCPInstance.SecretKey,
-			})
-		}
+	services := make([]ServiceInfo, 0, len(allInstances))
+	for _, instance := range allInstances {
+		services = append(services, ServiceInfo{
+			ID:        instance.ID,
+			Name:      instance.InstanceName,
+			SecretKey: instance.SecretKey,
+		})
 	}
 
 	c.JSON(http.StatusOK, ServicesResponse{

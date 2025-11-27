@@ -41,6 +41,9 @@
 - 引用详细设计文档：
   - `design_server.md` - Server 进程内部设计（重要）
   - `design_http2.md` - HTTP/2 统一端口设计（重要）
+  - `design_security_token_audit.md` - 安全令牌与审计日志设计（重要）
+  - `design_version_control.md` - Desktop版本管理设计（重要）
+  - `design_server_access_control.md` - 访问控制系统设计（未来功能）
   - `design_server_web.md` - Web 管理界面设计
   - `design_desktop.md` - Desktop 客户端设计
   - `design_database.md` - 数据库详细设计
@@ -161,7 +164,7 @@ GOARCHS=$(go env GOARCH) ./scripts/build.sh
 
 ```bash
 # 1. 清理数据库
-rm -f data/awecloud.db
+rm -f data/server.db
 
 # 2. 启动Server（手动）
 ./bin/server -c config/server.toml
@@ -190,5 +193,19 @@ tests/
 ## 文档版本
 
 - **创建日期**: 2025-11-25
-- **最后更新**: 2025-11-25
+- **最后更新**: 2025-11-27
 - **维护者**: 项目团队
+
+## 最近更新
+
+### 2025-11-27
+- 新增 `design_security_token_audit.md` - 安全令牌与审计日志设计
+  - Device Token系统：替代明文secret存储
+  - Desktop登录双模式设计
+  - 审计日志系统：记录用户连接行为
+  - 设备管理功能：查看、下线、删除设备
+- 新增 `design_version_control.md` - Desktop版本管理设计
+  - Server端设置最低支持版本
+  - Desktop端版本检查和强制升级
+  - Web管理界面版本管理功能
+  - 版本发布流程规范

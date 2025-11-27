@@ -39,10 +39,20 @@ type GrantAccessRequest struct {
 	ClientID int64 `json:"client_id" binding:"required"`
 }
 
+type SetAccessTypeRequest struct {
+	AccessType string `json:"access_type" binding:"required"` // 'public', 'private', 'group'
+	GroupID    *int64 `json:"group_id"`                       // 当 access_type = 'group' 时必需
+}
+
 type STCPResponse struct {
 	Success bool        `json:"success"`
 	Message string      `json:"message,omitempty"`
 	Data    interface{} `json:"data,omitempty"`
+}
+
+type STCPInstanceWithStatus struct {
+	model.STCPInstance
+	Status string `json:"status"` // 'online', 'offline'
 }
 
 func (a *STCPAPI) List(c *gin.Context) {
@@ -55,9 +65,24 @@ func (a *STCPAPI) List(c *gin.Context) {
 		return
 	}
 
+	// 添加状态信息
+	instancesWithStatus := make([]STCPInstanceWithStatus, 0, len(instances))
+	for _, instance := range instances {
+		status := "offline"
+		// 检查 Agent 是否在线
+		if a.agentService != nil && a.agentService.IsAgentOnline(instance.AgentID) {
+			status = "online"
+		}
+
+		instancesWithStatus = append(instancesWithStatus, STCPInstanceWithStatus{
+			STCPInstance: instance,
+			Status:       status,
+		})
+	}
+
 	c.JSON(http.StatusOK, STCPResponse{
 		Success: true,
-		Data:    instances,
+		Data:    instancesWithStatus,
 	})
 }
 
@@ -285,5 +310,83 @@ func (a *STCPAPI) ListAccesses(c *gin.Context) {
 	c.JSON(http.StatusOK, STCPResponse{
 		Success: true,
 		Data:    accesses,
+	})
+}
+
+// SetAccessType 设置访问权限类型
+func (a *STCPAPI) SetAccessType(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, STCPResponse{
+			Success: false,
+			Message: "无效的ID",
+		})
+		return
+	}
+
+	var req SetAccessTypeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, STCPResponse{
+			Success: false,
+			Message: "请求参数错误",
+		})
+		return
+	}
+
+	// 验证 access_type
+	if req.AccessType != "public" && req.AccessType != "private" && req.AccessType != "group" {
+		c.JSON(http.StatusBadRequest, STCPResponse{
+			Success: false,
+			Message: "无效的访问权限类型",
+		})
+		return
+	}
+
+	// 如果是 group 类型，必须提供 group_id
+	if req.AccessType == "group" && req.GroupID == nil {
+		c.JSON(http.StatusBadRequest, STCPResponse{
+			Success: false,
+			Message: "group 类型必须提供 group_id",
+		})
+		return
+	}
+
+	// 查询实例
+	var instance model.STCPInstance
+	if err := db.DB.First(&instance, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, STCPResponse{
+			Success: false,
+			Message: "实例不存在",
+		})
+		return
+	}
+
+	// 如果提供了 group_id，验证组是否存在
+	if req.GroupID != nil {
+		var group model.Group
+		if err := db.DB.First(&group, *req.GroupID).Error; err != nil {
+			c.JSON(http.StatusNotFound, STCPResponse{
+				Success: false,
+				Message: "组不存在",
+			})
+			return
+		}
+	}
+
+	// 更新访问权限
+	instance.AccessType = req.AccessType
+	instance.GroupID = req.GroupID
+
+	if err := db.DB.Save(&instance).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, STCPResponse{
+			Success: false,
+			Message: "更新失败",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, STCPResponse{
+		Success: true,
+		Message: "访问权限已更新",
 	})
 }

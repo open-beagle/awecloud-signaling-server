@@ -12,13 +12,11 @@ spec:
     port: 7000
     targetPort: 7000
     protocol: TCP
+    appProtocol: websocket
   - name: web
     port: 8080
     targetPort: 8080
     protocol: TCP
-  - name: grpc
-    port: 8081
-    targetPort: 8081
-    protocol: TCP
+    appProtocol: http2
   selector:
     app: awecloud-signaling-server

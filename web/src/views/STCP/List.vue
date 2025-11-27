@@ -24,13 +24,33 @@
           </template>
         </el-table-column>
         <el-table-column prop="description" :label="t('agent.description')" min-width="200" />
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.status === 'online'" type="success" size="small">在线</el-tag>
+            <el-tag v-else type="info" size="small">离线</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="访问权限" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.access_type === 'public'" type="success">Public</el-tag>
+            <el-tag v-else-if="row.access_type === 'private'" type="warning">Private</el-tag>
+            <el-tag v-else-if="row.access_type === 'group'" type="info">Group</el-tag>
+            <el-tag v-else>Public</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column :label="t('agent.createdAt')" width="100">
           <template #default="{ row }">
             <TimeAgo :time="row.created_at" />
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" width="180" fixed="right">
+        <el-table-column :label="t('common.actions')" width="280" fixed="right">
           <template #default="{ row }">
+            <el-button
+              size="small"
+              @click="handleSetAccess(row)"
+            >
+              权限设置
+            </el-button>
             <el-button
               size="small"
               type="primary"
@@ -50,6 +70,11 @@
     </el-card>
 
     <CreateDialog v-model="createDialogVisible" @success="loadInstances" />
+    <AccessDialog
+      v-model="accessDialogVisible"
+      :instance="selectedInstance"
+      @success="loadInstances"
+    />
     <GrantDialog
       v-model="grantDialogVisible"
       :instance="selectedInstance"
@@ -67,6 +92,7 @@ import { getSTCPInstances, deleteSTCPInstance } from '@/api/stcp'
 import type { STCPInstance } from '@/types/models'
 import TimeAgo from '@/components/Common/TimeAgo.vue'
 import CreateDialog from './components/CreateDialog.vue'
+import AccessDialog from './components/AccessDialog.vue'
 import GrantDialog from './components/GrantDialog.vue'
 
 const { t } = useI18n()
@@ -75,6 +101,7 @@ const loading = ref(false)
 const instances = ref<STCPInstance[]>([])
 const createDialogVisible = ref(false)
 const grantDialogVisible = ref(false)
+const accessDialogVisible = ref(false)
 const selectedInstance = ref<STCPInstance | null>(null)
 
 const loadInstances = async () => {
@@ -93,6 +120,11 @@ const loadInstances = async () => {
 
 const handleCreate = () => {
   createDialogVisible.value = true
+}
+
+const handleSetAccess = (instance: STCPInstance) => {
+  selectedInstance.value = instance
+  accessDialogVisible.value = true
 }
 
 const handleGrant = (instance: STCPInstance) => {

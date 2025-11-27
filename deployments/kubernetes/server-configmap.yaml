@@ -12,7 +12,7 @@ data:
 
     [database]
     type = "sqlite"
-    path = "./data/awecloud.db"
+    path = "./data/server.db"
 
     [web]
     listen_addr = "0.0.0.0"

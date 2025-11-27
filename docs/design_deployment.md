@@ -109,7 +109,7 @@ data:
   SERVER_DOMAIN: "your-domain.com"
   SERVER_WEB_PORT: "8080"
   SERVER_FRP_PORT: "7000"
-  DB_PATH: "/data/awecloud.db"
+  DB_PATH: "/data/server.db"
 ```
 
 ### 3.3 Secret
@@ -427,7 +427,7 @@ scrape_configs:
 **Docker部署**:
 ```bash
 # 备份数据库
-docker exec awecloud-server sqlite3 /data/awecloud.db ".backup /data/backup.db"
+docker exec awecloud-server sqlite3 /data/server.db ".backup /data/backup.db"
 docker cp awecloud-server:/data/backup.db ./backup_$(date +%Y%m%d).db
 ```
 
@@ -435,7 +435,7 @@ docker cp awecloud-server:/data/backup.db ./backup_$(date +%Y%m%d).db
 ```bash
 # 备份PVC数据
 kubectl exec -n awecloud deployment/server-deployment -- \
-  sqlite3 /data/awecloud.db ".backup /data/backup.db"
+  sqlite3 /data/server.db ".backup /data/backup.db"
 
 kubectl cp awecloud/server-deployment-xxx:/data/backup.db \
   ./backup_$(date +%Y%m%d).db
@@ -449,7 +449,7 @@ kubectl cp awecloud/server-deployment-xxx:/data/backup.db \
 docker-compose stop server
 
 # 恢复数据库
-docker cp ./backup.db awecloud-server:/data/awecloud.db
+docker cp ./backup.db awecloud-server:/data/server.db
 
 # 启动服务
 docker-compose start server
@@ -461,7 +461,7 @@ docker-compose start server
 kubectl scale deployment/server-deployment -n awecloud --replicas=0
 
 # 恢复数据库
-kubectl cp ./backup.db awecloud/server-deployment-xxx:/data/awecloud.db
+kubectl cp ./backup.db awecloud/server-deployment-xxx:/data/server.db
 
 # 扩容到1
 kubectl scale deployment/server-deployment -n awecloud --replicas=1

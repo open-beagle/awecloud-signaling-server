@@ -65,16 +65,21 @@ kubectl get ingress -n awecloud
 ### 6. 部署 Agent
 
 ```bash
-# 更新 agent-secret.yaml 中的 agent-token
-# 将 "your-agent-token-here" 替换为实际的 token
+# 1. 更新 agent-secret.yaml 中的 agent-token
+#    将 "your-agent-token-here" 替换为从 Server Web 界面获取的实际 token
+vim agent-secret.yaml
 
-# 创建 Secret
+# 2. （可选）更新 agent-deployment.yaml 中的 AGENT_NAME
+#    默认为 "agent-k8s-001"，可以根据需要修改
+vim agent-deployment.yaml
+
+# 3. 创建 Secret
 kubectl apply -f agent-secret.yaml
 
-# 创建 ConfigMap
+# 4. 创建 ConfigMap（包含 Server 连接配置）
 kubectl apply -f agent-configmap.yaml
 
-# 创建 Deployment
+# 5. 创建 Deployment
 kubectl apply -f agent-deployment.yaml
 ```
 
@@ -88,8 +93,9 @@ kubectl get pods -n awecloud
 kubectl logs -f -n awecloud deployment/awecloud-signaling-agent
 
 # 应该看到类似输出：
-# 连接到Server gRPC: awecloud-signaling-server.awecloud.svc.cluster.local:8081
-# 注册成功，Agent ID: 1
+# Agent-Web: 连接到 Server gRPC: awecloud-signaling-server.awecloud.svc.cluster.local:8080
+# Agent-Web: 注册成功，Agent ID: 1
+# Agent-FRP: 连接到 Server FRP: awecloud-signaling-server.awecloud.svc.cluster.local:7000
 ```
 
 ## 镜像版本
@@ -117,13 +123,25 @@ kubectl set image deployment/awecloud-signaling-agent \
 
 ### Server
 
-- **7000**: FRP 信令服务（WebSocket）
-- **8080**: Web 管理界面和 RESTful API
-- **8081**: gRPC 服务（Agent 连接）
+- **7000**: Server-FRP 线程（WebSocket 信令服务）
+  - Agent-FRP 连接
+  - Desktop-FRP 连接
+  - 协调 STCP 隧道建立
+  
+- **8080**: Server-Web 线程（HTTP/2 统一端口）
+  - Web 管理界面（HTTP）
+  - RESTful API（HTTP）
+  - gRPC 服务（HTTP/2）
+  - Agent-Web 连接（gRPC）
+  - Desktop-Web 连接（gRPC）
+
+**说明**：Server 使用 HTTP/2 协议，在同一端口（8080）上同时支持 HTTP 和 gRPC，服务器根据 Content-Type 自动路由。
 
 ### Agent
 
 - 无需暴露端口，主动连接到 Server
+  - Agent-Web 线程 → Server-Web（gRPC，端口 8080）
+  - Agent-FRP 线程 → Server-FRP（WebSocket，端口 7000）
 
 ## 配置说明
 
@@ -139,15 +157,24 @@ kubectl set image deployment/awecloud-signaling-agent \
 
 ### Agent 配置
 
-通过 ConfigMap `awecloud-agent-config` 配置：
+**通过环境变量配置**（推荐）：
 
-- `agent-name`: Agent 名称
-- `server-address`: Server 地址
-- `server-port`: Server 端口
+在 `agent-deployment.yaml` 中配置：
+- `AGENT_NAME`: Agent 名称（直接在 Deployment 中设置）
+- `AGENT_TOKEN`: Agent 认证 token（从 Secret 获取）
 
-通过 Secret `awecloud-agent-secret` 配置：
+**通过 ConfigMap 配置**：
 
-- `agent-token`: Agent 认证 token
+`awecloud-agent-config` 包含基础配置：
+- Server 连接地址和端口
+- 日志配置
+
+**通过 Secret 配置**：
+
+`awecloud-agent-secret` 包含敏感信息：
+- `agent-token`: Agent 认证 token（从 Server Web 界面创建 Agent 时获取）
+
+**配置优先级**：环境变量 > 配置文件
 
 ## 故障排查
 

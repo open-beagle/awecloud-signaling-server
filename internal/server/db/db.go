@@ -50,9 +50,14 @@ func autoMigrate() error {
 		&model.Admin{},
 		&model.Agent{},
 		&model.Client{},
+		&model.Group{},
+		&model.GroupMember{},
 		&model.STCPInstance{},
 		&model.STCPAccess{},
 		&model.ClientSession{},
+		&model.DeviceToken{},
+		&model.PortPreference{},
+		&model.ConnectionAuditLog{},
 	)
 }
 

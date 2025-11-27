@@ -10,14 +10,26 @@ LABEL author=${AUTHOR} version=${VERSION}
 ARG TARGETOS
 ARG TARGETARCH
 
-COPY bin/agent-${TARGETOS}-${TARGETARCH} /usr/local/bin/agent
-
+# Create user and directories
 RUN set -ex && \
     apk add --no-cache ca-certificates && \
-    mkdir -p /app/logs /app/config
+    addgroup -g 1000 code && \
+    adduser -D -u 1000 -G code code && \
+    mkdir -p /home/code/logs /home/code/config && \
+    chown -R code:code /home/code
 
-WORKDIR /app
+# Copy binary
+COPY --chown=code:code bin/agent-${TARGETOS}-${TARGETARCH} /usr/local/bin/agent
 
-COPY config/agent.toml /app/config/
+# Copy example config as default config
+COPY --chown=code:code config/agent.toml.example /home/code/config/agent.toml
 
-CMD ["agent", "-c", "/app/config/agent.toml"]
+# Switch to non-root user
+USER code
+
+WORKDIR /home/code
+
+# Declare volume for logs
+VOLUME ["/home/code/logs"]
+
+CMD ["agent", "-c", "/home/code/config/agent.toml"]
