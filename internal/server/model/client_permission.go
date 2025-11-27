@@ -5,9 +5,9 @@ import "time"
 // STCPAccess STCP访问控制表（重命名自ClientPermission）
 type STCPAccess struct {
 	ID             int64     `gorm:"primaryKey" json:"id"`
-	STCPInstanceID int64     `gorm:"not null;index" json:"stcp_instance_id"`
-	ClientID       int64     `gorm:"not null;index" json:"client_id"`
-	GrantedAt      time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"granted_at"`
+	STCPInstanceID int64     `gorm:"not null;index:idx_stcp_client" json:"stcp_instance_id"`
+	ClientID       int64     `gorm:"not null;index:idx_stcp_client" json:"client_id"`
+	CreatedAt      time.Time `json:"created_at"`
 
 	// 关联
 	STCPInstance *STCPInstance `gorm:"foreignKey:STCPInstanceID" json:"stcp_instance,omitempty"`
@@ -15,5 +15,5 @@ type STCPAccess struct {
 }
 
 func (STCPAccess) TableName() string {
-	return "stcp_access"
+	return "stcp_accesses"
 }

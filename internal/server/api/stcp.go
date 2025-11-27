@@ -261,3 +261,29 @@ func (a *STCPAPI) RevokeAccess(c *gin.Context) {
 		Message: "撤销成功",
 	})
 }
+
+func (a *STCPAPI) ListAccesses(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, STCPResponse{
+			Success: false,
+			Message: "无效的ID",
+		})
+		return
+	}
+
+	// 查询访问权限列表
+	var accesses []model.STCPAccess
+	if err := db.DB.Preload("Client").Where("stcp_instance_id = ?", id).Find(&accesses).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, STCPResponse{
+			Success: false,
+			Message: "查询失败",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, STCPResponse{
+		Success: true,
+		Data:    accesses,
+	})
+}

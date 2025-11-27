@@ -18,3 +18,19 @@ export const createSTCPInstance = (data: {
 export const deleteSTCPInstance = (id: number) => {
   return request.delete<any, ApiResponse>(`/stcp-instances/${id}`)
 }
+
+export const getSTCPAccesses = (instanceId: number) => {
+  return request.get<any, ApiResponse<any[]>>(`/stcp-instances/${instanceId}/accesses`)
+}
+
+export const grantSTCPAccess = (instanceId: number, clientId: number) => {
+  return request.post<any, ApiResponse>(`/stcp-instances/${instanceId}/grant`, {
+    client_id: clientId
+  })
+}
+
+export const revokeSTCPAccess = (instanceId: number, clientId: number) => {
+  return request.post<any, ApiResponse>(`/stcp-instances/${instanceId}/revoke`, {
+    client_id: clientId
+  })
+}

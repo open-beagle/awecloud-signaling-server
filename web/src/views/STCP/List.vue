@@ -29,8 +29,15 @@
             <TimeAgo :time="row.created_at" />
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" width="100" fixed="right">
+        <el-table-column :label="t('common.actions')" width="180" fixed="right">
           <template #default="{ row }">
+            <el-button
+              size="small"
+              type="primary"
+              @click="handleGrant(row)"
+            >
+              {{ t('stcp.grantAccess') }}
+            </el-button>
             <el-button
               size="small"
               type="danger"
@@ -43,6 +50,11 @@
     </el-card>
 
     <CreateDialog v-model="createDialogVisible" @success="loadInstances" />
+    <GrantDialog
+      v-model="grantDialogVisible"
+      :instance="selectedInstance"
+      @success="loadInstances"
+    />
   </div>
 </template>
 
@@ -55,12 +67,15 @@ import { getSTCPInstances, deleteSTCPInstance } from '@/api/stcp'
 import type { STCPInstance } from '@/types/models'
 import TimeAgo from '@/components/Common/TimeAgo.vue'
 import CreateDialog from './components/CreateDialog.vue'
+import GrantDialog from './components/GrantDialog.vue'
 
 const { t } = useI18n()
 
 const loading = ref(false)
 const instances = ref<STCPInstance[]>([])
 const createDialogVisible = ref(false)
+const grantDialogVisible = ref(false)
+const selectedInstance = ref<STCPInstance | null>(null)
 
 const loadInstances = async () => {
   loading.value = true
@@ -78,6 +93,11 @@ const loadInstances = async () => {
 
 const handleCreate = () => {
   createDialogVisible.value = true
+}
+
+const handleGrant = (instance: STCPInstance) => {
+  selectedInstance.value = instance
+  grantDialogVisible.value = true
 }
 
 const handleDelete = async (instance: STCPInstance) => {

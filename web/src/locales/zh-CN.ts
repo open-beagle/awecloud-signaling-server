@@ -71,6 +71,31 @@ export default {
     localIpRequired: '请输入本地IP',
     localPortRequired: '请输入本地端口',
     selectAgent: '选择Agent',
-    noOnlineAgent: '没有在线的Agent'
+    noOnlineAgent: '没有在线的Agent',
+    grantAccess: '授权管理',
+    grantToClient: '已授权的Client',
+    addClient: '添加Client',
+    selectClient: '选择Client',
+    grantSuccess: '授权成功',
+    revokeConfirm: '确认撤销此授权吗？',
+    revokeSuccess: '撤销成功'
+  },
+  client: {
+    list: 'Client列表',
+    create: '创建Client',
+    clientId: 'Client ID',
+    clientSecret: 'Client Secret',
+    enabled: '状态',
+    createdAt: '创建时间',
+    viewSecret: '查看Secret',
+    regenerateSecret: '重新生成Secret',
+    disable: '禁用',
+    enable: '启用',
+    deleteConfirm: '确认删除此Client吗？',
+    secretTitle: 'Client Secret',
+    secretTip: '请妥善保存Secret，关闭后无法再次查看',
+    regenerateConfirm: '确认重新生成Secret吗？旧Secret将失效',
+    disableConfirm: '确认禁用此Client吗？',
+    enableConfirm: '确认启用此Client吗？'
   }
 }

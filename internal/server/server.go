@@ -192,8 +192,9 @@ func (s *Server) setupRouter() *gin.Engine {
 			authGroup.GET("/stcp-instances", stcpAPI.List)
 			authGroup.POST("/stcp-instances", stcpAPI.Create)
 			authGroup.DELETE("/stcp-instances/:id", stcpAPI.Delete)
-			authGroup.POST("/stcp-instances/:id/grant-access", stcpAPI.GrantAccess)
-			authGroup.DELETE("/stcp-instances/:id/revoke-access", stcpAPI.RevokeAccess)
+			authGroup.GET("/stcp-instances/:id/accesses", stcpAPI.ListAccesses)
+			authGroup.POST("/stcp-instances/:id/grant", stcpAPI.GrantAccess)
+			authGroup.POST("/stcp-instances/:id/revoke", stcpAPI.RevokeAccess)
 		}
 
 		// Client端API（不需要管理员认证）
