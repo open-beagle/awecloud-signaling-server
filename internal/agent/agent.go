@@ -169,14 +169,25 @@ func (a *Agent) register() error {
 	}
 
 	a.agentID = resp.AgentId
-	a.frpToken = resp.FrpToken
+	a.frpToken = resp.Token
 
 	if a.frpToken != "" {
-		log.Printf("注册成功，Agent ID: %d, FRP Token: %s...", a.agentID, a.frpToken[:16])
-		// 将 FRP Token 传递给 FRP Manager
-		a.frpManager.SetFRPToken(a.frpToken)
+		log.Printf("注册成功，Agent ID: %d, Token: %s...", a.agentID, a.frpToken[:16])
+		// 将 Token 传递给 FRP Manager
+		a.frpManager.SetToken(a.frpToken)
 	} else {
-		log.Printf("注册成功，Agent ID: %d (无 FRP Token)", a.agentID)
+		log.Printf("注册成功，Agent ID: %d (无 Token)", a.agentID)
+	}
+
+	// 更新 FRP 连接信息
+	if resp.Server != "" {
+		// 使用 Server 返回的完整 URL
+		log.Printf("使用 Server 提供的隧道地址: %s", resp.Server)
+		a.frpManager.SetServerURL(resp.Server)
+	} else if resp.Port > 0 {
+		// 使用 Server 地址 + 端口
+		log.Printf("使用隧道端口: %d", resp.Port)
+		a.frpManager.SetServerPort(int(resp.Port))
 	}
 
 	return nil

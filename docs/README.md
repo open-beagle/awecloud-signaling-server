@@ -43,6 +43,7 @@
   - `design_http2.md` - HTTP/2 统一端口设计（重要）
   - `design_security_token_audit.md` - 安全令牌与审计日志设计（重要）
   - `design_version_control.md` - Desktop版本管理设计（重要）
+  - `design_public_url.md` - 公网地址配置设计（待实现）
   - `design_server_access_control.md` - 访问控制系统设计（未来功能）
   - `design_server_web.md` - Web 管理界面设计
   - `design_desktop.md` - Desktop 客户端设计

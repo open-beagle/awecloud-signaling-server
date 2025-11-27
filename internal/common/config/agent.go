@@ -28,23 +28,24 @@ type ServerConnect struct {
 func LoadAgentConfig(path string) (*AgentConfig, error) {
 	var cfg AgentConfig
 
-	// 支持环境变量覆盖
-	if name := os.Getenv("AGENT_NAME"); name != "" {
-		cfg.Agent.AgentName = name
-	}
-	if token := os.Getenv("AGENT_TOKEN"); token != "" {
-		cfg.Agent.AgentToken = token
-	}
-	if addr := os.Getenv("SERVER_ADDR"); addr != "" {
-		cfg.Server.Address = addr
-	}
-
 	// 读取配置文件
 	data, err := os.ReadFile(path)
 	if err != nil {
-		// 如果配置文件不存在但环境变量已设置，则继续
-		if os.IsNotExist(err) && cfg.Agent.AgentName != "" {
-			return &cfg, nil
+		// 如果配置文件不存在，检查环境变量
+		if os.IsNotExist(err) {
+			if name := os.Getenv("AGENT_NAME"); name != "" {
+				cfg.Agent.AgentName = name
+			}
+			if token := os.Getenv("AGENT_TOKEN"); token != "" {
+				cfg.Agent.AgentToken = token
+			}
+			if addr := os.Getenv("AGENT_ADDRESS"); addr != "" {
+				cfg.Server.Address = addr
+			}
+			// 如果环境变量已设置，则继续
+			if cfg.Agent.AgentName != "" {
+				return &cfg, nil
+			}
 		}
 		return nil, err
 	}
@@ -54,14 +55,14 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 		return nil, err
 	}
 
-	// 环境变量优先级更高
+	// 环境变量优先级更高（覆盖配置文件）
 	if name := os.Getenv("AGENT_NAME"); name != "" {
 		cfg.Agent.AgentName = name
 	}
 	if token := os.Getenv("AGENT_TOKEN"); token != "" {
 		cfg.Agent.AgentToken = token
 	}
-	if addr := os.Getenv("SERVER_ADDR"); addr != "" {
+	if addr := os.Getenv("AGENT_ADDRESS"); addr != "" {
 		cfg.Server.Address = addr
 	}
 

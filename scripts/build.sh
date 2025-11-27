@@ -11,6 +11,9 @@ BUILD_VERSION="${BUILD_VERSION:-dev}"
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE=$(date -u '+%Y-%m-%d_%H:%M:%S')
 
+# Server 地址（可选，用于编译时注入）
+BUILD_URL="${BUILD_URL:-}"
+
 # 输出目录
 BIN_DIR="./bin"
 mkdir -p ${BIN_DIR}
@@ -24,6 +27,9 @@ echo "Target architectures: ${GOARCHS}"
 echo "Version: ${BUILD_VERSION}"
 echo "Git Commit: ${GIT_COMMIT}"
 echo "Build Date: ${BUILD_DATE}"
+if [ -n "${BUILD_URL}" ]; then
+    echo "Build URL: ${BUILD_URL}"
+fi
 echo "---"
 
 # 构建 ldflags，注入版本信息
@@ -31,6 +37,13 @@ LDFLAGS="-w -s"
 LDFLAGS="${LDFLAGS} -X 'main.version=${BUILD_VERSION}'"
 LDFLAGS="${LDFLAGS} -X 'main.gitCommit=${GIT_COMMIT}'"
 LDFLAGS="${LDFLAGS} -X 'main.buildDate=${BUILD_DATE}'"
+
+# 如果设置了 BUILD_URL，注入到 Agent
+if [ -n "${BUILD_URL}" ]; then
+    AGENT_LDFLAGS="${LDFLAGS} -X 'main.BUILD_URL=${BUILD_URL}'"
+else
+    AGENT_LDFLAGS="${LDFLAGS}"
+fi
 
 # 遍历每个架构进行编译
 for ARCH in "${ARCH_ARRAY[@]}"; do
@@ -67,7 +80,7 @@ for ARCH in "${ARCH_ARRAY[@]}"; do
     GOARCH=${ARCH} \
     go build -a -installsuffix cgo \
         -buildvcs=false \
-        -ldflags="${LDFLAGS}" \
+        -ldflags="${AGENT_LDFLAGS}" \
         -o ${OUTPUT} \
         ./cmd/agent
     

@@ -147,11 +147,11 @@ kubectl set image deployment/awecloud-signaling-agent \
 
 ### Server 配置
 
-通过 ConfigMap `awecloud-server-config` 配置：
+通过 ConfigMap `awecloud-signaling-server` 配置：
 
 - `server.toml`: Server 配置文件
 
-通过 Secret `awecloud-secrets` 配置：
+通过 Secret `awecloud-signaling-server` 配置：
 
 - `jwt-secret`: JWT 密钥
 
@@ -165,13 +165,13 @@ kubectl set image deployment/awecloud-signaling-agent \
 
 **通过 ConfigMap 配置**：
 
-`awecloud-agent-config` 包含基础配置：
+`awecloud-signaling-agent` 包含基础配置：
 - Server 连接地址和端口
 - 日志配置
 
 **通过 Secret 配置**：
 
-`awecloud-agent-secret` 包含敏感信息：
+`awecloud-signaling-agent` 包含敏感信息：
 - `agent-token`: Agent 认证 token（从 Server Web 界面创建 Agent 时获取）
 
 **配置优先级**：环境变量 > 配置文件
@@ -185,10 +185,10 @@ kubectl set image deployment/awecloud-signaling-agent \
 kubectl logs -n awecloud deployment/awecloud-signaling-server
 
 # 检查 ConfigMap
-kubectl get cm -n awecloud awecloud-server-config -o yaml
+kubectl get cm -n awecloud awecloud-signaling-server -o yaml
 
 # 检查 Secret
-kubectl get secret -n awecloud awecloud-secrets -o yaml
+kubectl get secret -n awecloud awecloud-signaling-server -o yaml
 ```
 
 ### Agent 无法连接

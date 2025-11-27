@@ -27,16 +27,20 @@ type AgentServiceServer struct {
 	commandQueues map[int64]chan *pb.Command
 	queuesMutex   sync.RWMutex
 
-	// FRP Token
-	frpToken string
+	// FRP 配置
+	frpToken     string
+	frpPublicURL string
+	frpPort      int
 }
 
 // NewAgentServiceServer 创建Agent服务
-func NewAgentServiceServer(frpToken string) *AgentServiceServer {
+func NewAgentServiceServer(frpToken string, frpPublicURL string, frpPort int) *AgentServiceServer {
 	return &AgentServiceServer{
 		agentStreams:  make(map[int64]pb.AgentService_ReceiveCommandsServer),
 		commandQueues: make(map[int64]chan *pb.Command),
 		frpToken:      frpToken,
+		frpPublicURL:  frpPublicURL,
+		frpPort:       frpPort,
 	}
 }
 
@@ -64,11 +68,22 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.RegisterReque
 
 	log.Printf("Agent注册成功: %s (ID: %d)", req.AgentName, agent.ID)
 
+	// 构建 FRP 连接信息
+	// 如果配置了公网 URL，使用公网 URL；否则返回空字符串和端口
+	frpServer := ""
+	frpPort := int32(s.frpPort)
+	if s.frpPublicURL != "" {
+		frpServer = s.frpPublicURL
+		frpPort = 0 // 使用完整 URL 时，端口信息已包含在 URL 中
+	}
+
 	return &pb.RegisterResponse{
-		Success:  true,
-		Message:  "注册成功",
-		AgentId:  agent.ID,
-		FrpToken: s.frpToken, // 返回统一的 FRP Token
+		Success: true,
+		Message: "注册成功",
+		AgentId: agent.ID,
+		Token:   s.frpToken, // 返回统一的隧道认证 Token
+		Server:  frpServer,
+		Port:    frpPort,
 	}, nil
 }
 

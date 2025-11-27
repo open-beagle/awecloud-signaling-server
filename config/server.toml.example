@@ -19,9 +19,16 @@ file = ""
 [server]
 bind_addr = "0.0.0.0"
 bind_port = 7000
-transport_protocol = "websocket"
+protocol = "websocket"
 tls_cert_file = ""
 tls_key_file = ""
-frp_auth_token = "change-this-to-a-secure-random-token"
-frp_server_addr = "127.0.0.1"  # FRP服务器地址（Desktop连接用）
-frp_server_port = 7000          # FRP服务器端口（Desktop连接用）
+token = "change-this-to-a-secure-random-token"
+
+# 公网访问地址（可选）
+# 如果配置了此地址，Desktop 和 Agent 将使用此地址连接 FRP 服务
+# 适用于生产环境中通过反向代理（如 Traefik）暴露 FRP 服务的场景
+# 示例：
+#   - WebSocket: "ws://signaling.example.com/ws"
+#   - WebSocket Secure: "wss://signaling.example.com/ws"
+# 如果不配置（留空），Desktop 将使用连接 Web/gRPC 时的地址 + bind_port
+public_url = ""

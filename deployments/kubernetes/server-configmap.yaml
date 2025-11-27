@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: awecloud-server-config
+  name: awecloud-signaling-server
   namespace: awecloud
 data:
   server.toml: |
@@ -9,6 +9,10 @@ data:
     bind_addr = "0.0.0.0"
     bind_port = 7000
     transport_protocol = "websocket"
+    # 公网访问地址（可选）
+    # 生产环境通过 Traefik 网关暴露时配置此项
+    # 示例: public_url = "wss://signaling.example.com/ws"
+    public_url = ""
 
     [database]
     type = "sqlite"

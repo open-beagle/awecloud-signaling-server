@@ -81,9 +81,9 @@ type AuthResponse struct {
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	SessionToken  string                 `protobuf:"bytes,3,opt,name=session_token,json=sessionToken,proto3" json:"session_token,omitempty"`
 	ExpiresAt     int64                  `protobuf:"varint,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
-	FrpToken      string                 `protobuf:"bytes,5,opt,name=frp_token,json=frpToken,proto3" json:"frp_token,omitempty"`    // FRP认证token
-	FrpServer     string                 `protobuf:"bytes,6,opt,name=frp_server,json=frpServer,proto3" json:"frp_server,omitempty"` // FRP服务器地址
-	FrpPort       int32                  `protobuf:"varint,7,opt,name=frp_port,json=frpPort,proto3" json:"frp_port,omitempty"`      // FRP服务器端口
+	Token         string                 `protobuf:"bytes,5,opt,name=token,proto3" json:"token,omitempty"`   // 隧道认证 token
+	Server        string                 `protobuf:"bytes,6,opt,name=server,proto3" json:"server,omitempty"` // 隧道服务器地址（完整 URL 或空）
+	Port          int32                  `protobuf:"varint,7,opt,name=port,proto3" json:"port,omitempty"`    // 隧道服务器端口（使用 URL 时为 0）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -146,23 +146,23 @@ func (x *AuthResponse) GetExpiresAt() int64 {
 	return 0
 }
 
-func (x *AuthResponse) GetFrpToken() string {
+func (x *AuthResponse) GetToken() string {
 	if x != nil {
-		return x.FrpToken
+		return x.Token
 	}
 	return ""
 }
 
-func (x *AuthResponse) GetFrpServer() string {
+func (x *AuthResponse) GetServer() string {
 	if x != nil {
-		return x.FrpServer
+		return x.Server
 	}
 	return ""
 }
 
-func (x *AuthResponse) GetFrpPort() int32 {
+func (x *AuthResponse) GetPort() int32 {
 	if x != nil {
-		return x.FrpPort
+		return x.Port
 	}
 	return 0
 }
@@ -494,17 +494,16 @@ const file_pkg_proto_client_proto_rawDesc = "" +
 	"\x16pkg/proto/client.proto\x12\x12awecloud.signaling\"O\n" +
 	"\vAuthRequest\x12\x1b\n" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12#\n" +
-	"\rclient_secret\x18\x02 \x01(\tR\fclientSecret\"\xdd\x01\n" +
+	"\rclient_secret\x18\x02 \x01(\tR\fclientSecret\"\xc8\x01\n" +
 	"\fAuthResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12#\n" +
 	"\rsession_token\x18\x03 \x01(\tR\fsessionToken\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\x04 \x01(\x03R\texpiresAt\x12\x1b\n" +
-	"\tfrp_token\x18\x05 \x01(\tR\bfrpToken\x12\x1d\n" +
-	"\n" +
-	"frp_server\x18\x06 \x01(\tR\tfrpServer\x12\x19\n" +
-	"\bfrp_port\x18\a \x01(\x05R\afrpPort\"9\n" +
+	"expires_at\x18\x04 \x01(\x03R\texpiresAt\x12\x14\n" +
+	"\x05token\x18\x05 \x01(\tR\x05token\x12\x16\n" +
+	"\x06server\x18\x06 \x01(\tR\x06server\x12\x12\n" +
+	"\x04port\x18\a \x01(\x05R\x04port\"9\n" +
 	"\x12GetServicesRequest\x12#\n" +
 	"\rsession_token\x18\x01 \x01(\tR\fsessionToken\"l\n" +
 	"\x13GetServicesResponse\x12\x18\n" +

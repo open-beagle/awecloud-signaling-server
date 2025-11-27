@@ -55,3 +55,4 @@ config/agent.toml
 
 # Desktop client (independent git repository)
 /desktop/
+/git/

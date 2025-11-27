@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/constants"
 )
 
 // ProxyCommand 代理命令
@@ -37,9 +40,11 @@ type FRPManager struct {
 	// 命令通道（用于动态管理代理）
 	commandChan chan *ProxyCommand
 
-	// FRP 认证 Token
-	frpToken      string
-	frpTokenMutex sync.RWMutex
+	// 连接配置
+	token      string
+	serverURL  string // 完整的 Server URL（如果配置了公网地址）
+	serverPort int    // Server 端口（如果没有配置公网地址）
+	connMutex  sync.RWMutex
 
 	// 上下文
 	ctx    context.Context
@@ -117,14 +122,53 @@ func (f *FRPManager) runFRPClient() error {
 	}
 	f.mutex.RUnlock()
 
+	// 获取连接配置
+	f.connMutex.RLock()
+	token := f.token
+	serverURL := f.serverURL
+	serverPort := f.serverPort
+	f.connMutex.RUnlock()
+
+	// 解析 Server URL
+	serverAddr := f.config.Server.Address
+	port := f.config.Server.Port
+	websocketPath := constants.DefaultWebSocketPath // 默认路径
+	protocol := "websocket"
+	insecureSkipVerify := true // 默认跳过证书验证（开发环境）
+
+	if serverURL != "" {
+		parsedURL, err := parseServerURL(serverURL)
+		if err != nil {
+			return fmt.Errorf("解析隧道 URL 失败: %w", err)
+		}
+
+		serverAddr = parsedURL.Host
+		port = parsedURL.Port
+		websocketPath = parsedURL.Path
+		protocol = parsedURL.Protocol
+
+		log.Printf("使用隧道 URL: %s (解析为 %s:%d%s, 协议: %s)",
+			serverURL, serverAddr, port, websocketPath, protocol)
+	} else if serverPort > 0 {
+		port = serverPort
+	}
+
 	// 创建FRP客户端配置
 	clientCfg := v1.ClientCommonConfig{
-		ServerAddr: f.config.Server.Address,
-		ServerPort: f.config.Server.Port,
+		ServerAddr: serverAddr,
+		ServerPort: port,
 	}
 
 	// 配置传输协议
-	clientCfg.Transport.Protocol = "websocket"
+	clientCfg.Transport.Protocol = protocol
+
+	// 配置 TLS
+	if protocol == "wss" || f.config.Server.TLSEnable {
+		enable := true
+		clientCfg.Transport.TLS.Enable = &enable
+		clientCfg.Transport.TLS.ServerName = serverAddr
+		log.Printf("FRP客户端TLS已启用（跳过证书验证: %v）", insecureSkipVerify)
+	}
 
 	// 完成配置（填充默认值）- 这是关键步骤！
 	if err := clientCfg.Complete(); err != nil {
@@ -132,34 +176,32 @@ func (f *FRPManager) runFRPClient() error {
 	}
 	log.Println("FRP客户端配置已完成（默认值已填充）")
 
-	// 配置 FRP 认证
-	f.frpTokenMutex.RLock()
-	frpToken := f.frpToken
-	f.frpTokenMutex.RUnlock()
-
-	if frpToken != "" {
+	// 配置认证
+	if token != "" {
 		clientCfg.Auth.Method = v1.AuthMethod("token")
-		clientCfg.Auth.Token = frpToken
-		log.Printf("FRP客户端配置: ServerAddr=%s, ServerPort=%d, Protocol=%s, Auth=token",
-			f.config.Server.Address, f.config.Server.Port, clientCfg.Transport.Protocol)
+		clientCfg.Auth.Token = token
+		log.Printf("FRP客户端配置: ServerAddr=%s, ServerPort=%d, Protocol=%s, Path=%s, Auth=token",
+			serverAddr, port, protocol, websocketPath)
 	} else {
-		log.Printf("FRP客户端配置: ServerAddr=%s, ServerPort=%d, Protocol=%s, Auth=none (等待Token)",
-			f.config.Server.Address, f.config.Server.Port, clientCfg.Transport.Protocol)
+		log.Printf("FRP客户端配置: ServerAddr=%s, ServerPort=%d, Protocol=%s, Path=%s, Auth=none (等待Token)",
+			serverAddr, port, protocol, websocketPath)
 	}
 
-	// 配置TLS
-	if f.config.Server.TLSEnable {
-		enable := true
-		clientCfg.Transport.TLS.Enable = &enable
-		log.Println("FRP客户端TLS已启用")
-	}
-
-	// 创建FRP客户端服务
+	// 创建FRP客户端服务（使用自定义 connector）
 	svr, err := client.NewService(client.ServiceOptions{
 		Common:         &clientCfg,
 		ProxyCfgs:      proxyCfgs,
 		VisitorCfgs:    []v1.VisitorConfigurer{},
 		ConfigFilePath: "",
+		ConnectorCreator: func(ctx context.Context, cfg *v1.ClientCommonConfig) client.Connector {
+			// 使用自定义 connector，支持自定义 WebSocket path 和跳过证书验证
+			connector, err := NewCustomConnector(ctx, cfg, websocketPath, insecureSkipVerify)
+			if err != nil {
+				log.Printf("创建自定义 Connector 失败: %v，使用默认 Connector", err)
+				return client.NewConnector(ctx, cfg)
+			}
+			return connector
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("创建FRP客户端失败: %w", err)
@@ -177,6 +219,61 @@ func (f *FRPManager) runFRPClient() error {
 	}
 
 	return nil
+}
+
+// parseServerURL 解析 Server URL
+func parseServerURL(serverURL string) (*struct {
+	Host     string
+	Port     int
+	Path     string
+	Protocol string
+}, error) {
+	parsedURL, err := url.Parse(serverURL)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &struct {
+		Host     string
+		Port     int
+		Path     string
+		Protocol string
+	}{
+		Host: parsedURL.Hostname(),
+		Path: parsedURL.Path,
+	}
+
+	// 如果路径为空，使用默认路径
+	if result.Path == "" {
+		result.Path = constants.DefaultWebSocketPath
+	}
+
+	// 提取端口
+	if parsedURL.Port() != "" {
+		port, err := strconv.Atoi(parsedURL.Port())
+		if err != nil {
+			return nil, fmt.Errorf("解析端口失败: %w", err)
+		}
+		result.Port = port
+	} else {
+		// 根据协议设置默认端口
+		if parsedURL.Scheme == "wss" || parsedURL.Scheme == "https" {
+			result.Port = 443
+		} else {
+			result.Port = 80
+		}
+	}
+
+	// 确定协议
+	if parsedURL.Scheme == "wss" || parsedURL.Scheme == "https" {
+		result.Protocol = "wss"
+	} else if parsedURL.Scheme == "ws" || parsedURL.Scheme == "http" {
+		result.Protocol = "websocket"
+	} else {
+		result.Protocol = "websocket" // 默认
+	}
+
+	return result, nil
 }
 
 // commandLoop 命令处理循环
@@ -345,15 +442,49 @@ func (f *FRPManager) GetProxies() map[string]*v1.STCPProxyConfig {
 	return proxies
 }
 
-// SetFRPToken 设置 FRP 认证 Token
-func (f *FRPManager) SetFRPToken(token string) {
-	f.frpTokenMutex.Lock()
-	f.frpToken = token
-	f.frpTokenMutex.Unlock()
+// SetToken 设置认证 Token
+func (f *FRPManager) SetToken(token string) {
+	f.connMutex.Lock()
+	f.token = token
+	f.connMutex.Unlock()
 
-	log.Printf("FRP Token 已设置: %s...", token[:16])
+	log.Printf("隧道 Token 已设置: %s...", token[:16])
 
-	// 如果 FRP 客户端正在运行，重启以应用新 Token
+	// 如果客户端正在运行，重启以应用新 Token
+	f.mutex.Lock()
+	if f.service != nil {
+		f.needRestart = true
+		f.service.Close()
+	}
+	f.mutex.Unlock()
+}
+
+// SetServerURL 设置服务器 URL（完整 URL）
+func (f *FRPManager) SetServerURL(url string) {
+	f.connMutex.Lock()
+	f.serverURL = url
+	f.connMutex.Unlock()
+
+	log.Printf("隧道服务器 URL 已设置: %s", url)
+
+	// 如果客户端正在运行，重启以应用新配置
+	f.mutex.Lock()
+	if f.service != nil {
+		f.needRestart = true
+		f.service.Close()
+	}
+	f.mutex.Unlock()
+}
+
+// SetServerPort 设置服务器端口
+func (f *FRPManager) SetServerPort(port int) {
+	f.connMutex.Lock()
+	f.serverPort = port
+	f.connMutex.Unlock()
+
+	log.Printf("隧道服务器端口已设置: %d", port)
+
+	// 如果客户端正在运行，重启以应用新配置
 	f.mutex.Lock()
 	if f.service != nil {
 		f.needRestart = true

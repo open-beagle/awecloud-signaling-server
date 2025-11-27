@@ -1,19 +1,25 @@
 # AWECloud Signaling Agent 配置文件
 
 # Agent 配置
-# 注意：agent_name 和 agent_token 可以通过环境变量覆盖
+# 注意：name 和 token 可以通过环境变量覆盖
 # 环境变量：AGENT_NAME, AGENT_TOKEN
 [agent]
-agent_name = "agent-dev-001"
-agent_token = "your-agent-token-from-server"
+name = "agent-dev-001"
+token = "your-agent-token-from-server"
 
 # Server 连接配置
-# 注意：address 可以通过环境变量 SERVER_ADDR 覆盖
+# Server 地址配置优先级：
+#   1. 环境变量 AGENT_ADDRESS（最高优先级）
+#   2. 配置文件 server.address
+#   3. 编译时注入的 BUILD_URL（通过 -ldflags）
+#   4. 硬编码默认值 "http://localhost:8080"（最低优先级）
+#
+# 注意：
+#   - address 应包含完整的 URL，如 "http://localhost:8080" 或 "https://signaling.example.com"
+#   - Agent 会自动从 Server 获取 FRP 连接信息（地址、端口、token）
+#   - 如果不配置，将使用编译时注入的默认值或硬编码默认值
 [server]
-address = "localhost"
-port = 7000        # FRP服务端口（WebSocket）
-grpc_port = 8080   # gRPC端口（HTTP/2统一端口，同时支持HTTP和gRPC）
-tls_enable = false
+address = "http://localhost:8080"
 
 # 日志配置
 [log]

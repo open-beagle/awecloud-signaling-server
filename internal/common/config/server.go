@@ -23,6 +23,14 @@ type ServerSection struct {
 	FRPAuthToken      string `toml:"frp_auth_token"`  // FRP 认证 Token
 	FRPServerAddr     string `toml:"frp_server_addr"` // FRP 服务器地址
 	FRPServerPort     int    `toml:"frp_server_port"` // FRP 服务器端口
+	PublicURL         string `toml:"public_url"`      // FRP 公网访问地址（完整 URL）
+
+	// WebSocket 路径代理配置（可选）
+	// 如果启用，将在 ProxyListenPort 上监听自定义 WebSocket 路径，并转发到 FRP Server
+	EnableWebSocketProxy bool   `toml:"enable_websocket_proxy"` // 是否启用 WebSocket 路径代理
+	ProxyListenAddr      string `toml:"proxy_listen_addr"`      // 代理监听地址
+	ProxyListenPort      int    `toml:"proxy_listen_port"`      // 代理监听端口
+	WebSocketPath        string `toml:"websocket_path"`         // WebSocket 路径（如 "/ws"）
 }
 
 type DatabaseSection struct {
@@ -77,6 +85,15 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	if cfg.Server.FRPServerPort == 0 {
 		cfg.Server.FRPServerPort = 7000
 	}
+	if cfg.Server.ProxyListenAddr == "" {
+		cfg.Server.ProxyListenAddr = "0.0.0.0"
+	}
+	if cfg.Server.ProxyListenPort == 0 {
+		cfg.Server.ProxyListenPort = 7001
+	}
+	if cfg.Server.WebSocketPath == "" {
+		cfg.Server.WebSocketPath = "/ws"
+	}
 	if cfg.Web.ListenAddr == "" {
 		cfg.Web.ListenAddr = "0.0.0.0"
 	}
@@ -88,6 +105,14 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
+	}
+
+	// 环境变量覆盖（优先级最高）
+	if publicURL := os.Getenv("PUBLIC_URL"); publicURL != "" {
+		cfg.Server.PublicURL = publicURL
+	}
+	if jwtSecret := os.Getenv("JWT_SECRET"); jwtSecret != "" {
+		cfg.Security.JWTSecret = jwtSecret
 	}
 
 	return &cfg, nil

@@ -95,14 +95,23 @@ func (s *ClientServiceServer) Authenticate(ctx context.Context, req *pb.AuthRequ
 
 	log.Printf("Client认证成功: %s", req.ClientId)
 
+	// 构建 FRP 连接信息
+	// 如果配置了公网 URL，使用公网 URL；否则返回空字符串和端口
+	frpServer := ""
+	frpPort := int32(s.config.Server.BindPort)
+	if s.config.Server.PublicURL != "" {
+		frpServer = s.config.Server.PublicURL
+		frpPort = 0 // 使用完整 URL 时，端口信息已包含在 URL 中
+	}
+
 	return &pb.AuthResponse{
 		Success:      true,
 		Message:      "认证成功",
 		SessionToken: tokenString,
 		ExpiresAt:    expiresAt.Unix(),
-		FrpToken:     s.config.Server.FRPAuthToken,
-		FrpServer:    s.config.Server.FRPServerAddr,
-		FrpPort:      int32(s.config.Server.FRPServerPort),
+		Token:        s.config.Server.FRPAuthToken,
+		Server:       frpServer,
+		Port:         frpPort,
 	}, nil
 }
 

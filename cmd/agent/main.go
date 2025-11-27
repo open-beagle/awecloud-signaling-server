@@ -14,6 +14,7 @@ var (
 	version   = "dev"
 	gitCommit = "unknown"
 	buildDate = "unknown"
+	BUILD_URL = "" // 编译时注入的默认 Server 地址
 )
 
 func main() {
@@ -34,6 +35,18 @@ func main() {
 	cfg, err := config.LoadAgentConfig(*configPath)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
+	}
+
+	// 应用配置优先级：环境变量 > 配置文件 > BUILD_URL > 默认值
+	if addr := os.Getenv("AGENT_ADDRESS"); addr != "" {
+		cfg.Server.Address = addr
+		log.Printf("使用环境变量 AGENT_ADDRESS: %s", addr)
+	} else if cfg.Server.Address == "" && BUILD_URL != "" {
+		cfg.Server.Address = BUILD_URL
+		log.Printf("使用编译时注入的 BUILD_URL: %s", BUILD_URL)
+	} else if cfg.Server.Address == "" {
+		cfg.Server.Address = "http://localhost:8080"
+		log.Printf("使用默认 Server 地址: http://localhost:8080")
 	}
 
 	log.Printf("AWECloud Signaling Agent 启动中...")

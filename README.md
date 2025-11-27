@@ -133,6 +133,25 @@ PLATFORMS=linux/amd64,darwin/amd64,windows/amd64 bash scripts/build_desktop.sh
 - [设计文档](docs/design.md) - 系统架构和技术设计
 - [测试规范](docs/test.md) - API 测试规范和流程
 
+### 文档管理规范
+
+**正式文档**：存储在 `docs/` 目录
+
+- 设计文档、API 文档、用户指南等正式文档
+- 需要版本控制和长期维护的文档
+
+**临时文档**：存储在 `.tmp/` 目录
+
+- AI 生成的过程文档和临时文件
+- 调试记录、测试脚本等临时内容
+- 不纳入版本控制（已在 .gitignore 中）
+
+**规则**：
+
+- AI 不得私自在 `docs/` 目录创建文档
+- 所有 AI 生成的过程文档必须放在 `.tmp/` 目录
+- 正式文档的创建需要明确授权
+
 ## License
 
 MIT

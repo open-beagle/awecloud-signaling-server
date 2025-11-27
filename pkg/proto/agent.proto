@@ -30,7 +30,9 @@ message RegisterResponse {
   bool success = 1;
   string message = 2;
   int64 agent_id = 3;
-  string frp_token = 4;  // FRP 认证 Token
+  string token = 4;  // 隧道认证 Token
+  string server = 5; // 隧道服务器地址（完整 URL 或空）
+  int32 port = 6;    // 隧道服务器端口（使用 URL 时为 0）
 }
 
 // Agent心跳请求

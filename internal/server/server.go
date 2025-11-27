@@ -63,7 +63,11 @@ func (s *Server) Run() error {
 	gin.SetMode(gin.ReleaseMode)
 
 	// 创建gRPC服务
-	s.agentService = grpcserver.NewAgentServiceServer(s.config.Server.FRPAuthToken)
+	s.agentService = grpcserver.NewAgentServiceServer(
+		s.config.Server.FRPAuthToken,
+		s.config.Server.PublicURL,
+		s.config.Server.BindPort,
+	)
 	s.clientService = grpcserver.NewClientServiceServer(s.config)
 	s.clientService.SetAgentService(s.agentService) // 设置AgentService用于检查状态
 

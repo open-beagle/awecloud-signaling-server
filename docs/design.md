@@ -115,7 +115,7 @@ AWECloud Signaling/
 ### 1.3 组件详细说明
 
 **Traefik网关路由**：
-- `https://your-domain.com/` → Server:8080 (HTTP/2: RESTful API + gRPC)
+- `https://your-domain.com/` → Server:8080 (HTTP/2 统一端口: Web UI + REST API + gRPC)
 - `wss://your-domain.com/ws` → Server:7000 (WebSocket: FRP信令)
 
 **Server进程**（单一进程，两个服务线程）：
