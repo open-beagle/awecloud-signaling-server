@@ -24,11 +24,9 @@
             <TimeAgo :time="row.created_at" />
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" width="200" fixed="right">
+        <el-table-column :label="t('common.actions')" width="100" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="handleViewToken(row)">
-              {{ t('agent.viewToken') }}
-            </el-button>
+            <el-button size="small" :icon="View" @click="handleViewToken(row)" />
             <el-button
               size="small"
               type="danger"
@@ -49,7 +47,7 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete } from '@element-plus/icons-vue'
+import { Plus, Delete, View } from '@element-plus/icons-vue'
 import { getAgents, deleteAgent } from '@/api/agent'
 import type { Agent } from '@/types/models'
 import StatusTag from '@/components/Common/StatusTag.vue'

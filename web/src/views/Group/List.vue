@@ -20,14 +20,10 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="250" fixed="right">
+        <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="handleMembers(row)">
-              成员管理
-            </el-button>
-            <el-button size="small" @click="handleEdit(row)">
-              编辑
-            </el-button>
+            <el-button size="small" :icon="User" @click="handleMembers(row)" />
+            <el-button size="small" :icon="Edit" @click="handleEdit(row)" />
             <el-button
               size="small"
               type="danger"
@@ -76,7 +72,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete } from '@element-plus/icons-vue'
+import { Plus, Delete, User, Edit } from '@element-plus/icons-vue'
 import { getGroups, createGroup, updateGroup, deleteGroup } from '@/api/group'
 import type { Group } from '@/api/group'
 import MembersDialog from './components/MembersDialog.vue'

@@ -25,30 +25,27 @@
             <TimeAgo :time="row.created_at" />
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" width="280" fixed="right">
+        <el-table-column :label="t('common.actions')" width="150" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="!row.enabled"
               size="small"
               type="success"
+              :icon="CircleCheck"
               @click="handleEnable(row)"
-            >
-              {{ t('client.enable') }}
-            </el-button>
+            />
             <el-button
               v-else
               size="small"
               type="warning"
+              :icon="CircleClose"
               @click="handleDisable(row)"
-            >
-              {{ t('client.disable') }}
-            </el-button>
+            />
             <el-button
               size="small"
+              :icon="Refresh"
               @click="handleRegenerateSecret(row)"
-            >
-              {{ t('client.regenerateSecret') }}
-            </el-button>
+            />
             <el-button
               size="small"
               type="danger"
@@ -76,7 +73,7 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete } from '@element-plus/icons-vue'
+import { Plus, Delete, CircleCheck, CircleClose, Refresh } from '@element-plus/icons-vue'
 import { getClients, enableClient, disableClient, deleteClient, regenerateSecret, type Client } from '@/api/client'
 import TimeAgo from '@/components/Common/TimeAgo.vue'
 import CreateDialog from './components/CreateDialog.vue'

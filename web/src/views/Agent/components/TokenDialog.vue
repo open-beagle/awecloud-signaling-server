@@ -24,9 +24,7 @@
 
     <template #footer>
       <el-button @click="visible = false">{{ t('common.confirm') }}</el-button>
-      <el-button type="warning" :loading="loading" @click="handleRegenerate">
-        {{ t('agent.regenerateToken') }}
-      </el-button>
+      <el-button type="warning" :icon="Refresh" :loading="loading" @click="handleRegenerate" />
     </template>
   </el-dialog>
 </template>
@@ -35,6 +33,7 @@
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Refresh } from '@element-plus/icons-vue'
 import { regenerateToken } from '@/api/agent'
 import type { Agent } from '@/types/models'
 import CopyButton from '@/components/Common/CopyButton.vue'

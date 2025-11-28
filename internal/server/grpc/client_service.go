@@ -197,6 +197,7 @@ func (s *ClientServiceServer) GetServices(ctx context.Context, req *pb.GetServic
 			LocalPort:    int32(instance.LocalPort),
 			AccessType:   accessType,
 			Status:       serviceStatus,
+			LocalIp:      instance.LocalIP,
 		})
 	}
 

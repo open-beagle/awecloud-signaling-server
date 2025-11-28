@@ -52,6 +52,7 @@ message ServiceInfo {
   int32 local_port = 5;
   string access_type = 6;  // 'public', 'private', 'group'
   string status = 7;       // 'online', 'offline'
+  string local_ip = 8;     // Agent端的本地服务IP
 }
 
 // 连接服务请求

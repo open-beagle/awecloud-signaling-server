@@ -131,9 +131,9 @@ for PLATFORM in "${PLATFORM_ARRAY[@]}"; do
     else
         # Linux/Windows 构建产物是可执行文件
         if [ "$OS" = "windows" ]; then
-            BUILD_OUTPUT="build/bin/awecloud-signaling.exe"
+            BUILD_OUTPUT="build/bin/awecloud-signaling-desktop.exe"
         else
-            BUILD_OUTPUT="build/bin/awecloud-signaling"
+            BUILD_OUTPUT="build/bin/awecloud-signaling-desktop"
         fi
         
         if [ -f "${BUILD_OUTPUT}" ]; then

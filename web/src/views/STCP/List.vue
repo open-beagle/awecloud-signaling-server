@@ -43,21 +43,19 @@
             <TimeAgo :time="row.created_at" />
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" width="280" fixed="right">
+        <el-table-column :label="t('common.actions')" width="150" fixed="right">
           <template #default="{ row }">
             <el-button
               size="small"
+              :icon="Setting"
               @click="handleSetAccess(row)"
-            >
-              权限设置
-            </el-button>
+            />
             <el-button
               size="small"
               type="primary"
+              :icon="UserFilled"
               @click="handleGrant(row)"
-            >
-              {{ t('stcp.grantAccess') }}
-            </el-button>
+            />
             <el-button
               size="small"
               type="danger"
@@ -87,7 +85,7 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete } from '@element-plus/icons-vue'
+import { Plus, Delete, Setting, UserFilled } from '@element-plus/icons-vue'
 import { getSTCPInstances, deleteSTCPInstance } from '@/api/stcp'
 import type { STCPInstance } from '@/types/models'
 import TimeAgo from '@/components/Common/TimeAgo.vue'
