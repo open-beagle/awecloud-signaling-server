@@ -116,7 +116,7 @@ for ARCH in "${ARCH_ARRAY[@]}"; do
         CGO_ENABLED=1 \
         GOOS=${GOOS} \
         GOARCH=${ARCH} \
-        go build -a -installsuffix cgo \
+        go build \
             -trimpath \
             -buildvcs=false \
             -ldflags="${LDFLAGS}" \
@@ -149,7 +149,7 @@ for ARCH in "${ARCH_ARRAY[@]}"; do
         CGO_ENABLED=0 \
         GOOS=${GOOS} \
         GOARCH=${ARCH} \
-        go build -a -installsuffix cgo \
+        go build \
             -buildvcs=false \
             -ldflags="${LDFLAGS}" \
             -o ${OUTPUT} \

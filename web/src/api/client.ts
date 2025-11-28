@@ -18,9 +18,17 @@ export interface CreateClientResponse {
   client_secret: string
 }
 
+export interface ClientsResponse {
+  clients: Client[]
+}
+
+export interface RegenerateSecretResponse {
+  client_secret: string
+}
+
 // 获取Client列表
 export function getClients() {
-  return request<{ clients: Client[] }>({
+  return request<ClientsResponse>({
     url: '/api/clients',
     method: 'get'
   })
@@ -61,7 +69,7 @@ export function deleteClient(id: number) {
 
 // 重新生成Secret
 export function regenerateSecret(id: number) {
-  return request<{ client_secret: string }>({
+  return request<RegenerateSecretResponse>({
     url: `/api/clients/${id}/regenerate-secret`,
     method: 'post'
   })

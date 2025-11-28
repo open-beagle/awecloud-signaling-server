@@ -1,16 +1,21 @@
 import axios from 'axios'
-import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
+import type { AxiosInstance, AxiosRequestConfig, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
 
-const request: AxiosInstance = axios.create({
+// 创建自定义的 request 函数，返回类型为 T 而不是 AxiosResponse<T>
+interface RequestInstance extends AxiosInstance {
+  <T = any>(config: AxiosRequestConfig): Promise<T>
+}
+
+const service: AxiosInstance = axios.create({
   baseURL: '',
   timeout: 10000
 })
 
 // 请求拦截器
-request.interceptors.request.use(
-  (config) => {
+service.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
     const token = localStorage.getItem('token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
@@ -23,8 +28,12 @@ request.interceptors.request.use(
 )
 
 // 响应拦截器
-request.interceptors.response.use(
+service.interceptors.response.use(
   (response: AxiosResponse) => {
+    // 如果是blob类型，直接返回data
+    if (response.config.responseType === 'blob') {
+      return response.data
+    }
     return response.data
   },
   (error) => {
@@ -51,5 +60,7 @@ request.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+const request = service as RequestInstance
 
 export default request

@@ -19,7 +19,16 @@ export default {
     copySuccess: 'Copied',
     logout: 'Logout',
     search: 'Search',
-    reset: 'Reset'
+    reset: 'Reset',
+    refresh: 'Refresh',
+    export: 'Export',
+    columnSetting: 'Column Setting',
+    total: 'Total',
+    records: 'records',
+    noData: 'No Data',
+    expand: 'Expand',
+    collapse: 'Collapse',
+    home: 'Home'
   },
   login: {
     title: 'Login',
@@ -37,6 +46,7 @@ export default {
     agents: 'Agents',
     clients: 'Clients',
     stcpInstances: 'STCP Instances',
+    groups: 'Groups',
     auditLogs: 'Audit Logs'
   },
   audit: {
@@ -67,7 +77,7 @@ export default {
   },
   agent: {
     list: 'Agent List',
-    create: 'Create Agent',
+    create: 'Create',
     name: 'Agent Name',
     description: 'Description',
     token: 'Token',
@@ -84,7 +94,7 @@ export default {
   },
   stcp: {
     list: 'STCP Instance List',
-    create: 'Create Instance',
+    create: 'Create',
     instanceName: 'Instance Name',
     agent: 'Agent',
     localIp: 'Local IP',
@@ -100,6 +110,35 @@ export default {
     localIpRequired: 'Local IP is required',
     localPortRequired: 'Local port is required',
     selectAgent: 'Select Agent',
-    noOnlineAgent: 'No online agent'
+    noOnlineAgent: 'No online agent',
+    grantAccess: 'Grant Access',
+    grantToClient: 'Granted Clients',
+    addClient: 'Add Client',
+    selectClient: 'Select Client',
+    grantSuccess: 'Granted successfully',
+    revokeConfirm: 'Are you sure to revoke this access?',
+    revokeSuccess: 'Revoked successfully'
+  },
+  client: {
+    list: 'Client List',
+    create: 'Create',
+    clientId: 'Client ID',
+    clientIdPlaceholder: 'Please enter Client ID',
+    clientIdRequired: 'Client ID is required',
+    clientIdMinLength: 'Client ID must be at least 3 characters',
+    clientIdTip: 'User identifier for Desktop login',
+    clientSecret: 'Client Secret',
+    enabled: 'Status',
+    createdAt: 'Created At',
+    viewSecret: 'View Secret',
+    regenerateSecret: 'Regenerate Secret',
+    disable: 'Disable',
+    enable: 'Enable',
+    deleteConfirm: 'Are you sure to delete this client?',
+    secretTitle: 'Client Secret',
+    secretTip: 'Please save this secret carefully, it will only be displayed once! Client needs to use this secret to login in Desktop application.',
+    regenerateConfirm: 'Are you sure to regenerate secret? The old secret will be invalid',
+    disableConfirm: 'Are you sure to disable this client?',
+    enableConfirm: 'Are you sure to enable this client?'
   }
 }

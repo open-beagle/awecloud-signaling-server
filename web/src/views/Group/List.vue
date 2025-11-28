@@ -5,7 +5,7 @@
         <div class="card-header">
           <span class="card-title">用户组管理</span>
           <el-button type="primary" :icon="Plus" @click="handleCreate">
-            创建组
+            创建
           </el-button>
         </div>
       </template>
@@ -42,7 +42,7 @@
     <!-- 创建/编辑对话框 -->
     <el-dialog
       v-model="dialogVisible"
-      :title="editingGroup ? '编辑组' : '创建组'"
+      :title="editingGroup ? '编辑' : '创建'"
       width="500px"
     >
       <el-form :model="form" label-width="80px">

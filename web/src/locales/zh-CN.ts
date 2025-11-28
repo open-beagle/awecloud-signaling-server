@@ -19,7 +19,16 @@ export default {
     copySuccess: '复制成功',
     logout: '退出登录',
     search: '查询',
-    reset: '重置'
+    reset: '重置',
+    refresh: '刷新',
+    export: '导出',
+    columnSetting: '列设置',
+    total: '共',
+    records: '条记录',
+    noData: '暂无数据',
+    expand: '展开',
+    collapse: '收起',
+    home: '首页'
   },
   login: {
     title: '登录',
@@ -37,6 +46,7 @@ export default {
     agents: 'Agent管理',
     clients: 'Client管理',
     stcpInstances: 'STCP实例',
+    groups: '用户组管理',
     auditLogs: '审计日志'
   },
   audit: {
@@ -67,7 +77,7 @@ export default {
   },
   agent: {
     list: 'Agent列表',
-    create: '创建Agent',
+    create: '创建',
     name: 'Agent名称',
     description: '描述',
     token: 'Token',
@@ -84,7 +94,7 @@ export default {
   },
   stcp: {
     list: 'STCP实例列表',
-    create: '创建实例',
+    create: '创建',
     instanceName: '实例名称',
     agent: '所属Agent',
     localIp: '本地IP',
@@ -111,8 +121,12 @@ export default {
   },
   client: {
     list: 'Client列表',
-    create: '创建Client',
+    create: '创建',
     clientId: 'Client ID',
+    clientIdPlaceholder: '请输入Client ID',
+    clientIdRequired: '请输入Client ID',
+    clientIdMinLength: 'Client ID至少3个字符',
+    clientIdTip: '用于Desktop登录的用户标识',
     clientSecret: 'Client Secret',
     enabled: '状态',
     createdAt: '创建时间',
@@ -122,8 +136,8 @@ export default {
     enable: '启用',
     deleteConfirm: '确认删除此Client吗？',
     secretTitle: 'Client Secret',
-    secretTip: '请妥善保存Secret，关闭后无法再次查看',
-    regenerateConfirm: '确认重新生成Secret吗？旧Secret将失效',
+    secretTip: '请妥善保存此Secret，它只会显示一次！Client需要使用此Secret在Desktop应用中登录。',
+    regenerateConfirm: '重新生成Secret后，旧的Secret将失效，确定继续吗？',
     disableConfirm: '确认禁用此Client吗？',
     enableConfirm: '确认启用此Client吗？'
   }

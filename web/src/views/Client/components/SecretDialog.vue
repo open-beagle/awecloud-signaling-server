@@ -1,27 +1,24 @@
 <template>
   <el-dialog
     v-model="visible"
-    title="Client Secret"
+    :title="t('client.secretTitle')"
     width="600px"
   >
     <el-alert
-      title="重要提示"
+      :title="t('client.secretTip')"
       type="warning"
       :closable="false"
       style="margin-bottom: 20px"
-    >
-      <p>请妥善保存此Secret，它只会显示一次！</p>
-      <p>Client需要使用此Secret在Desktop应用中登录。</p>
-    </el-alert>
+    />
 
     <div class="secret-info">
       <div class="info-item">
-        <label>Client ID:</label>
+        <label>{{ t('client.clientId') }}:</label>
         <div class="value">{{ clientId }}</div>
       </div>
 
       <div class="info-item">
-        <label>Client Secret:</label>
+        <label>{{ t('client.clientSecret') }}:</label>
         <div class="secret-value">
           <el-input
             :model-value="clientSecret"
@@ -35,7 +32,7 @@
             @click="handleCopy"
             style="margin-top: 10px"
           >
-            复制Secret
+            {{ t('common.copy') }}
           </el-button>
         </div>
       </div>
@@ -43,7 +40,7 @@
 
     <template #footer>
       <el-button type="primary" @click="visible = false">
-        我已保存
+        {{ t('common.confirm') }}
       </el-button>
     </template>
   </el-dialog>
@@ -51,6 +48,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { CopyDocument } from '@element-plus/icons-vue'
 
@@ -67,6 +65,8 @@ interface Emits {
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
+const { t } = useI18n()
+
 const visible = ref(false)
 
 watch(() => props.modelValue, (val) => {
@@ -80,9 +80,9 @@ watch(visible, (val) => {
 const handleCopy = async () => {
   try {
     await navigator.clipboard.writeText(props.clientSecret)
-    ElMessage.success('已复制到剪贴板')
+    ElMessage.success(t('common.copySuccess'))
   } catch (error) {
-    ElMessage.error('复制失败，请手动复制')
+    ElMessage.error(t('common.failed'))
   }
 }
 </script>

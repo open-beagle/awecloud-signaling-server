@@ -54,7 +54,7 @@ for ARCH in "${ARCH_ARRAY[@]}"; do
     CGO_ENABLED=1 \
     GOOS=${GOOS} \
     GOARCH=${ARCH} \
-    go build -a -installsuffix cgo \
+    go build \
         -buildvcs=false \
         -ldflags="${LDFLAGS}" \
         -o ${OUTPUT} \
@@ -78,7 +78,7 @@ for ARCH in "${ARCH_ARRAY[@]}"; do
     CGO_ENABLED=0 \
     GOOS=${GOOS} \
     GOARCH=${ARCH} \
-    go build -a -installsuffix cgo \
+    go build \
         -buildvcs=false \
         -ldflags="${AGENT_LDFLAGS}" \
         -o ${OUTPUT} \

@@ -1,136 +1,168 @@
 <template>
-  <div class="audit-logs-container">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <span>{{ $t('audit.title') }}</span>
-          <el-button type="primary" @click="handleExport">
-            {{ $t('audit.export') }}
-          </el-button>
-        </div>
-      </template>
-
-      <!-- 过滤条件 -->
-      <el-form :inline="true" :model="queryParams" class="filter-form">
-        <el-form-item :label="$t('audit.clientId')">
-          <el-input
-            v-model="queryParams.client_id"
-            :placeholder="$t('audit.clientIdPlaceholder')"
-            clearable
-            style="width: 200px"
-          />
-        </el-form-item>
-
-        <el-form-item :label="$t('audit.instanceId')">
-          <el-input
-            v-model="queryParams.stcp_instance_id"
-            :placeholder="$t('audit.instanceIdPlaceholder')"
-            clearable
-            style="width: 200px"
-          />
-        </el-form-item>
-
-        <el-form-item :label="$t('audit.action')">
-          <el-select
-            v-model="queryParams.action"
-            :placeholder="$t('audit.actionPlaceholder')"
-            clearable
-            style="width: 150px"
-          >
-            <el-option label="Connect" value="connect" />
-            <el-option label="Disconnect" value="disconnect" />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item :label="$t('audit.dateRange')">
-          <el-date-picker
-            v-model="dateRange"
-            type="daterange"
-            :start-placeholder="$t('audit.startDate')"
-            :end-placeholder="$t('audit.endDate')"
-            value-format="YYYY-MM-DD"
-            style="width: 300px"
-          />
-        </el-form-item>
-
-        <el-form-item>
-          <el-button type="primary" @click="handleQuery">
-            {{ $t('common.search') }}
-          </el-button>
-          <el-button @click="handleReset">
-            {{ $t('common.reset') }}
-          </el-button>
-        </el-form-item>
+  <div class="audit-logs-page">
+    <!-- 搜索筛选区域 -->
+    <SearchCard :title="t('audit.title')">
+      <el-form :inline="true" :model="queryParams" class="search-form">
+        <el-row :gutter="20">
+          <el-col :xs="24" :sm="12" :md="8" :lg="6">
+            <el-form-item :label="t('audit.clientId')">
+              <el-input
+                v-model="queryParams.client_id"
+                :placeholder="t('audit.clientIdPlaceholder')"
+                clearable
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12" :md="8" :lg="6">
+            <el-form-item :label="t('audit.instanceId')">
+              <el-input
+                v-model="queryParams.stcp_instance_id"
+                :placeholder="t('audit.instanceIdPlaceholder')"
+                clearable
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12" :md="8" :lg="6">
+            <el-form-item :label="t('audit.action')">
+              <el-select
+                v-model="queryParams.action"
+                :placeholder="t('audit.actionPlaceholder')"
+                clearable
+              >
+                <el-option label="Connect" value="connect" />
+                <el-option label="Disconnect" value="disconnect" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12" :md="8" :lg="6">
+            <el-form-item :label="t('common.status')">
+              <el-select
+                v-model="queryParams.success"
+                :placeholder="t('audit.actionPlaceholder')"
+                clearable
+              >
+                <el-option :label="t('audit.success')" :value="true" />
+                <el-option :label="t('audit.failed')" :value="false" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="20">
+          <el-col :xs="24" :sm="24" :md="12" :lg="8">
+            <el-form-item :label="t('audit.dateRange')">
+              <el-date-picker
+                v-model="dateRange"
+                type="daterange"
+                :start-placeholder="t('audit.startDate')"
+                :end-placeholder="t('audit.endDate')"
+                value-format="YYYY-MM-DD"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row>
+          <el-col :span="24" class="form-actions">
+            <el-button @click="handleReset">
+              {{ t('common.reset') }}
+            </el-button>
+            <el-button type="primary" @click="handleQuery">
+              {{ t('common.search') }}
+            </el-button>
+            <el-button type="success" @click="handleExport">
+              <el-icon><Download /></el-icon>
+              {{ t('common.export') }}
+            </el-button>
+          </el-col>
+        </el-row>
       </el-form>
+    </SearchCard>
 
-      <!-- 审计日志表格 -->
+    <!-- 数据表格区域 -->
+    <el-card shadow="never">
+      <TableToolbar 
+        :total="total"
+        :show-column-setting="false"
+        :show-export="false"
+        @refresh="handleQuery"
+      />
+
       <el-table
         v-loading="loading"
         :data="auditLogs"
         border
+        stripe
         style="width: 100%"
       >
-        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column prop="id" label="ID" width="80" align="center" />
         <el-table-column
           prop="client_name"
-          :label="$t('audit.clientName')"
-          width="150"
-        />
-        <el-table-column
-          prop="stcp_instance_name"
-          :label="$t('audit.instanceName')"
-          width="200"
+          :label="t('audit.clientName')"
+          min-width="150"
         >
           <template #default="{ row }">
-            <div>{{ row.stcp_instance_name }}</div>
-            <div class="text-secondary">{{ row.server_address }}</div>
+            <div class="cell-main">{{ row.client_name }}</div>
+            <div class="cell-sub">ID: {{ row.client_id }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="stcp_instance_name"
+          :label="t('audit.instanceName')"
+          min-width="200"
+        >
+          <template #default="{ row }">
+            <div class="cell-main">{{ row.stcp_instance_name }}</div>
+            <div class="cell-sub">{{ row.server_address }}</div>
           </template>
         </el-table-column>
         <el-table-column
           prop="action"
-          :label="$t('audit.action')"
-          width="100"
+          :label="t('audit.action')"
+          width="120"
+          align="center"
         >
           <template #default="{ row }">
-            <el-tag :type="row.action === 'connect' ? 'success' : 'info'">
+            <el-tag :type="row.action === 'connect' ? 'success' : 'info'" size="small">
               {{ row.action }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column
           prop="local_port"
-          :label="$t('audit.localPort')"
+          :label="t('audit.localPort')"
           width="100"
+          align="center"
         />
         <el-table-column
           prop="ip_address"
-          :label="$t('audit.ipAddress')"
+          :label="t('audit.ipAddress')"
           width="150"
         />
         <el-table-column
           prop="success"
-          :label="$t('audit.status')"
+          :label="t('common.status')"
           width="100"
+          align="center"
         >
           <template #default="{ row }">
-            <el-tag :type="row.success ? 'success' : 'danger'">
-              {{ row.success ? $t('audit.success') : $t('audit.failed') }}
+            <el-tag :type="row.success ? 'success' : 'danger'" size="small">
+              {{ row.success ? t('audit.success') : t('audit.failed') }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column
           prop="device_info"
-          :label="$t('audit.deviceInfo')"
-          width="200"
+          :label="t('audit.deviceInfo')"
+          min-width="180"
         >
           <template #default="{ row }">
-            <div>{{ formatOSName(row.device_info) }}</div>
-            <div class="text-secondary">{{ row.device_info.hostname }}</div>
+            <div class="cell-main">{{ formatOSName(row.device_info) }}</div>
+            <div class="cell-sub">{{ row.device_info?.hostname || '-' }}</div>
           </template>
         </el-table-column>
         <el-table-column
           prop="created_at"
-          :label="$t('audit.createdAt')"
+          :label="t('audit.createdAt')"
           width="180"
         >
           <template #default="{ row }">
@@ -139,20 +171,27 @@
         </el-table-column>
         <el-table-column
           prop="error_message"
-          :label="$t('audit.errorMessage')"
+          :label="t('audit.errorMessage')"
           min-width="200"
         >
           <template #default="{ row }">
-            <span v-if="row.error_message" class="text-danger">
+            <span v-if="row.error_message" class="error-text">
               {{ row.error_message }}
             </span>
-            <span v-else class="text-secondary">-</span>
+            <span v-else class="cell-sub">-</span>
           </template>
         </el-table-column>
       </el-table>
 
+      <!-- 空状态 -->
+      <EmptyState 
+        v-if="!loading && auditLogs.length === 0"
+        @action="handleQuery"
+      />
+
       <!-- 分页 -->
       <el-pagination
+        v-if="auditLogs.length > 0"
         v-model:current-page="queryParams.page"
         v-model:page-size="queryParams.page_size"
         :total="total"
@@ -160,7 +199,7 @@
         layout="total, sizes, prev, pager, next, jumper"
         @size-change="handleQuery"
         @current-change="handleQuery"
-        style="margin-top: 20px; justify-content: flex-end"
+        class="pagination"
       />
     </el-card>
   </div>
@@ -169,9 +208,13 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Download } from '@element-plus/icons-vue'
 import { queryAuditLogs, exportAuditLogs, type QueryAuditLogsParams, type AuditLog } from '@/api/audit'
 import { formatTime } from '@/utils/time'
 import { useI18n } from 'vue-i18n'
+import SearchCard from '@/components/Common/SearchCard.vue'
+import TableToolbar from '@/components/Common/TableToolbar.vue'
+import EmptyState from '@/components/Common/EmptyState.vue'
 
 const { t } = useI18n()
 
@@ -180,10 +223,15 @@ const auditLogs = ref<AuditLog[]>([])
 const total = ref(0)
 const dateRange = ref<[string, string] | null>(null)
 
-const queryParams = reactive<QueryAuditLogsParams>({
+interface ExtendedQueryParams extends QueryAuditLogsParams {
+  success?: boolean | string
+}
+
+const queryParams = reactive<ExtendedQueryParams>({
   client_id: '',
   stcp_instance_id: '',
   action: '',
+  success: '',
   start_date: '',
   end_date: '',
   page: 1,
@@ -203,13 +251,9 @@ const handleQuery = async () => {
       queryParams.end_date = ''
     }
 
-    const response = await queryAuditLogs(queryParams)
-    if (response.success) {
-      auditLogs.value = response.logs || []
-      total.value = response.total
-    } else {
-      ElMessage.error(response.message || t('audit.queryFailed'))
-    }
+    const response = await queryAuditLogs(queryParams as QueryAuditLogsParams)
+    auditLogs.value = response.logs || []
+    total.value = response.total
   } catch (error) {
     console.error('Query audit logs error:', error)
     ElMessage.error(t('audit.queryFailed'))
@@ -223,6 +267,7 @@ const handleReset = () => {
   queryParams.client_id = ''
   queryParams.stcp_instance_id = ''
   queryParams.action = ''
+  queryParams.success = ''
   queryParams.start_date = ''
   queryParams.end_date = ''
   queryParams.page = 1
@@ -234,14 +279,14 @@ const handleReset = () => {
 // 导出审计日志
 const handleExport = async () => {
   try {
-    const params = { ...queryParams }
+    const params = { ...queryParams } as QueryAuditLogsParams
     if (dateRange.value) {
       params.start_date = dateRange.value[0]
       params.end_date = dateRange.value[1]
     }
 
     const blob = await exportAuditLogs(params)
-    const url = window.URL.createObjectURL(blob as Blob)
+    const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
     link.download = `audit_logs_${new Date().getTime()}.csv`
@@ -289,26 +334,73 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.audit-logs-container {
-  padding: 20px;
+.audit-logs-page {
+  padding: 0;
 }
 
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.search-form {
+  width: 100%;
 }
 
-.filter-form {
-  margin-bottom: 20px;
+.search-form :deep(.el-form-item) {
+  width: 100%;
+  margin-bottom: 16px;
 }
 
-.text-secondary {
+.search-form :deep(.el-form-item__label) {
+  width: 100px;
+}
+
+.search-form :deep(.el-form-item__content) {
+  flex: 1;
+}
+
+.search-form :deep(.el-input),
+.search-form :deep(.el-select) {
+  width: 100%;
+}
+
+.form-actions {
+  text-align: right;
+  margin-top: 8px;
+}
+
+.cell-main {
+  color: #303133;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.cell-sub {
   color: #909399;
   font-size: 12px;
+  line-height: 1.5;
+  margin-top: 2px;
 }
 
-.text-danger {
+.error-text {
   color: #f56c6c;
+  font-size: 13px;
+}
+
+.pagination {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 响应式适配 */
+@media (max-width: 768px) {
+  .search-form :deep(.el-form-item__label) {
+    width: 80px;
+  }
+  
+  .form-actions {
+    text-align: center;
+  }
+  
+  .form-actions .el-button {
+    margin-bottom: 8px;
+  }
 }
 </style>

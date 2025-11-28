@@ -55,11 +55,11 @@ export function queryAuditLogs(params: QueryAuditLogsParams) {
 }
 
 // 导出审计日志
-export function exportAuditLogs(params: QueryAuditLogsParams) {
+export function exportAuditLogs(params: QueryAuditLogsParams): Promise<Blob> {
   return request({
     url: '/api/v1/admin/audit/connection/export',
     method: 'get',
     params,
     responseType: 'blob'
-  })
+  }) as Promise<Blob>
 }

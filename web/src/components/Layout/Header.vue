@@ -1,10 +1,7 @@
 <template>
   <div class="header">
     <div class="header-left">
-      <el-icon class="menu-icon" @click="toggleSidebar">
-        <Fold v-if="!appStore.sidebarCollapsed" />
-        <Expand v-else />
-      </el-icon>
+      <Logo :collapsed="false" class="header-logo" />
     </div>
     <div class="header-right">
       <el-dropdown @command="handleLanguageChange">
@@ -44,6 +41,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { ElMessage } from 'element-plus'
+import Logo from '@/components/Common/Logo.vue'
 
 const router = useRouter()
 const { t, locale } = useI18n()
@@ -85,14 +83,8 @@ const handleCommand = async (command: string) => {
   align-items: center;
 }
 
-.menu-icon {
-  font-size: 20px;
-  cursor: pointer;
-  color: var(--text-primary);
-}
-
-.menu-icon:hover {
-  color: var(--primary-color);
+.header-logo {
+  padding: 0;
 }
 
 .header-right {
@@ -109,10 +101,14 @@ const handleCommand = async (command: string) => {
   cursor: pointer;
   color: var(--text-primary);
   font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  transition: all 0.3s;
 }
 
 .language-selector:hover,
 .user-info:hover {
   color: var(--primary-color);
+  background-color: #ecf5ff;
 }
 </style>
