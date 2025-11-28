@@ -43,10 +43,10 @@ bash scripts/build.sh
 BUILD_VERSION=v0.1.0 bash scripts/build_desktop.sh
 
 # 构建指定平台
-PLATFORMS=linux/amd64 bash scripts/build_desktop.sh
+BUILD_VERSION=v0.1.0 PLATFORMS=linux/amd64 bash scripts/build_desktop.sh
 
 # 构建多个平台
-PLATFORMS=linux/amd64,darwin/amd64,windows/amd64 bash scripts/build_desktop.sh
+BUILD_VERSION=v0.1.0 PLATFORMS=linux/amd64,darwin/amd64,windows/amd64 bash scripts/build_desktop.sh
 
 # 构建时注入默认 Server 地址（推荐用于企业内部分发）
 BUILD_VERSION=v0.1.0 BUILD_ADDRESS=https://signaling.example.com bash scripts/build_desktop.sh

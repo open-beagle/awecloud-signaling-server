@@ -61,6 +61,111 @@ if ! command -v node &> /dev/null; then
     exit 1
 fi
 
+# installLinuxDeps 安装Linux构建依赖
+installLinuxDeps() {
+    echo -e "${YELLOW}Installing Linux build dependencies...${NC}"
+    
+    # 检查 pkg-config
+    if ! command -v pkg-config &> /dev/null; then
+        echo -e "${RED}Error: pkg-config not found${NC}"
+        echo "Please install: sudo apt-get install pkg-config"
+        exit 1
+    fi
+    
+    # 检查并安装 GTK3
+    if ! pkg-config --exists gtk+-3.0; then
+        echo "Installing GTK3 development libraries..."
+        sudo apt-get update
+        sudo apt-get install -y libgtk-3-dev
+    fi
+    
+    # 检查并安装 WebKit2GTK
+    if ! pkg-config --exists webkit2gtk-4.1 && ! pkg-config --exists webkit2gtk-4.0; then
+        echo "Installing WebKit2GTK development libraries..."
+        sudo apt-get install -y libwebkit2gtk-4.1-dev || sudo apt-get install -y libwebkit2gtk-4.0-dev
+    fi
+    
+    # 如果系统有 webkit2gtk-4.1 但 Wails 需要 webkit2gtk-4.0，创建软链接
+    if pkg-config --exists webkit2gtk-4.1 && ! pkg-config --exists webkit2gtk-4.0; then
+        echo -e "${YELLOW}Creating webkit2gtk-4.0.pc symlink for compatibility...${NC}"
+        # 查找 webkit2gtk-4.1.pc 的实际位置
+        WEBKIT_PC=$(pkg-config --variable=pcfiledir webkit2gtk-4.1 2>/dev/null)
+        if [ -z "$WEBKIT_PC" ]; then
+            # 尝试常见位置
+            for dir in /usr/lib/x86_64-linux-gnu/pkgconfig /usr/lib/pkgconfig /usr/local/lib/pkgconfig; do
+                if [ -f "$dir/webkit2gtk-4.1.pc" ]; then
+                    WEBKIT_PC="$dir"
+                    break
+                fi
+            done
+        fi
+        
+        if [ -n "$WEBKIT_PC" ] && [ -f "$WEBKIT_PC/webkit2gtk-4.1.pc" ]; then
+            sudo ln -sf "$WEBKIT_PC/webkit2gtk-4.1.pc" "$WEBKIT_PC/webkit2gtk-4.0.pc"
+            echo -e "${GREEN}✓ Created symlink: $WEBKIT_PC/webkit2gtk-4.0.pc${NC}"
+        else
+            echo -e "${YELLOW}Warning: Could not create webkit2gtk-4.0.pc symlink${NC}"
+        fi
+    fi
+    
+    echo -e "${GREEN}✓ Linux build dependencies installed${NC}"
+}
+
+# installWindowsDeps 安装Windows交叉编译依赖
+installWindowsDeps() {
+    echo -e "${YELLOW}Installing Windows cross-compilation dependencies...${NC}"
+    
+    # 检查并安装 MinGW-w64
+    if ! command -v x86_64-w64-mingw32-gcc &> /dev/null; then
+        echo "Installing MinGW-w64 compiler..."
+        sudo apt-get update
+        sudo apt-get install -y gcc-mingw-w64-x86-64
+    fi
+    
+    # 检查并安装 NSIS (用于创建安装程序)
+    if ! command -v makensis &> /dev/null; then
+        echo "Installing NSIS..."
+        sudo apt-get install -y nsis
+    fi
+    
+    echo -e "${GREEN}✓ Windows cross-compilation dependencies installed${NC}"
+}
+
+# installMacOSDeps 安装macOS构建依赖
+installMacOSDeps() {
+    # 检查是否在macOS上
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        echo -e "${YELLOW}Installing macOS build dependencies...${NC}"
+        
+        # 检查 Xcode Command Line Tools
+        if ! xcode-select -p &> /dev/null; then
+            echo "Installing Xcode Command Line Tools..."
+            xcode-select --install
+            echo "Please complete the Xcode Command Line Tools installation and run this script again."
+            exit 1
+        fi
+        
+        echo -e "${GREEN}✓ macOS build dependencies OK${NC}"
+    else
+        # 在Linux上交叉编译macOS
+        echo -e "${YELLOW}Warning: Cross-compiling macOS from Linux requires osxcross${NC}"
+        echo -e "${YELLOW}This is complex and not recommended. Consider:${NC}"
+        echo -e "${YELLOW}  1. Building on macOS directly${NC}"
+        echo -e "${YELLOW}  2. Using GitHub Actions with macos-latest runner${NC}"
+        echo ""
+        
+        # 检查是否安装了osxcross
+        if command -v x86_64-apple-darwin20.4-clang &> /dev/null; then
+            echo -e "${GREEN}✓ osxcross detected, will attempt cross-compilation${NC}"
+        else
+            echo -e "${RED}Error: osxcross not found${NC}"
+            echo "Skipping macOS build. To set up osxcross, visit:"
+            echo "  https://github.com/tpoechtrager/osxcross"
+            return 1
+        fi
+    fi
+}
+
 # 进入 Desktop 目录
 cd "${DESKTOP_DIR}"
 
@@ -90,6 +195,22 @@ for PLATFORM in "${PLATFORM_ARRAY[@]}"; do
     echo -e "${GREEN}Building for ${OS}/${ARCH}${NC}"
     echo -e "${GREEN}========================================${NC}"
     
+    # 根据平台安装依赖
+    case "$OS" in
+        linux)
+            installLinuxDeps
+            ;;
+        windows)
+            installWindowsDeps
+            ;;
+        darwin)
+            if ! installMacOSDeps; then
+                echo -e "${YELLOW}Skipping macOS build${NC}"
+                continue
+            fi
+            ;;
+    esac
+    
     # 设置输出文件名
     OUTPUT_NAME="awecloud-signaling-${BUILD_VERSION}-${OS}-${ARCH}"
     if [ "$OS" = "windows" ]; then
@@ -116,16 +237,19 @@ for PLATFORM in "${PLATFORM_ARRAY[@]}"; do
     # 检查构建结果
     if [ "$OS" = "darwin" ]; then
         # macOS 构建产物是 .app 包
-        BUILD_OUTPUT="build/bin/awecloud-signaling.app"
+        BUILD_OUTPUT="build/bin/awecloud-signaling-desktop.app"
         if [ -d "${BUILD_OUTPUT}" ]; then
             echo -e "${GREEN}✓ Build successful: ${BUILD_OUTPUT}${NC}"
             # 创建 zip 包
             cd build/bin
-            zip -r "../../${OUTPUT_DIR}/awecloud-signaling-${BUILD_VERSION}-${OS}-${ARCH}.zip" "awecloud-signaling.app"
+            zip -r "../../${OUTPUT_DIR}/awecloud-signaling-${BUILD_VERSION}-${OS}-${ARCH}.zip" "awecloud-signaling-desktop.app"
             cd ../..
             echo -e "${GREEN}✓ Created: ${OUTPUT_DIR}/awecloud-signaling-${BUILD_VERSION}-${OS}-${ARCH}.zip${NC}"
         else
             echo -e "${RED}✗ Build failed for ${OS}/${ARCH}${NC}"
+            echo -e "${RED}Expected output: ${BUILD_OUTPUT}${NC}"
+            echo -e "${YELLOW}Checking build/bin directory:${NC}"
+            ls -la build/bin/ || echo "build/bin directory not found"
             exit 1
         fi
     else
@@ -146,6 +270,9 @@ for PLATFORM in "${PLATFORM_ARRAY[@]}"; do
             echo "  File size: ${FILE_SIZE}"
         else
             echo -e "${RED}✗ Build failed for ${OS}/${ARCH}${NC}"
+            echo -e "${RED}Expected output: ${BUILD_OUTPUT}${NC}"
+            echo -e "${YELLOW}Checking build/bin directory:${NC}"
+            ls -la build/bin/ || echo "build/bin directory not found"
             exit 1
         fi
     fi
