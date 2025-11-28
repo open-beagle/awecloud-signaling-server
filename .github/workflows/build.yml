@@ -48,6 +48,7 @@ jobs:
             -w /go/src/github.com/open-beagle/awecloud-signaling-server \
             -e BUILD_VERSION=${{ env.BUILD_VERSION }} \
             -e GOARCHS=amd64,arm64 \
+            -e BUILD_TARGETS=server \
             registry.cn-qingdao.aliyuncs.com/wod/golang:1.24-alpine \
             bash ./.beagle/build.sh
 
@@ -85,38 +86,3 @@ jobs:
           docker buildx imagetools create -t registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:${{ env.BUILD_VERSION }} \
             registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:${{ env.BUILD_VERSION }}-amd64 \
             registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:${{ env.BUILD_VERSION }}-arm64
-
-      # Agent Images
-      - name: Build Agent AMD64 image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./.beagle/agent.dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: |
-            registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:${{ env.BUILD_VERSION }}-amd64
-          build-args: |
-            BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-amd64
-            AUTHOR=${{ github.repository_owner }}
-            VERSION=${{ env.BUILD_VERSION }}
-
-      - name: Build Agent ARM64 image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./.beagle/agent.dockerfile
-          platforms: linux/arm64
-          push: true
-          tags: |
-            registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:${{ env.BUILD_VERSION }}-arm64
-          build-args: |
-            BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-arm64
-            AUTHOR=${{ github.repository_owner }}
-            VERSION=${{ env.BUILD_VERSION }}
-
-      - name: Create Agent multi-arch manifest
-        run: |
-          docker buildx imagetools create -t registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:${{ env.BUILD_VERSION }} \
-            registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:${{ env.BUILD_VERSION }}-amd64 \
-            registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:${{ env.BUILD_VERSION }}-arm64

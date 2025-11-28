@@ -110,7 +110,7 @@ func (s *ClientServiceServer) Authenticate(ctx context.Context, req *pb.AuthRequ
 		Message:      "认证成功",
 		SessionToken: tokenString,
 		ExpiresAt:    expiresAt.Unix(),
-		Token:        s.config.Server.FRPAuthToken,
+		Token:        s.config.Server.Token,
 		Server:       frpServer,
 		Port:         frpPort,
 	}, nil

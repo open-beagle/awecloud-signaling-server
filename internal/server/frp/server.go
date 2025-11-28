@@ -75,10 +75,10 @@ func NewFRPServer(cfg *config.ServerConfig) (*FRPServer, error) {
 	log.Println("FRP Server 配置已完成（默认值已填充）")
 
 	// 配置 FRP 认证
-	if cfg.Server.FRPAuthToken != "" {
+	if cfg.Server.Token != "" {
 		svrCfg.Auth.Method = v1.AuthMethod("token")
-		svrCfg.Auth.Token = cfg.Server.FRPAuthToken
-		log.Printf("FRP Server 认证已启用: token=%s...", cfg.Server.FRPAuthToken[:16])
+		svrCfg.Auth.Token = cfg.Server.Token
+		log.Printf("FRP Server 认证已启用: token=%s...", cfg.Server.Token[:min(16, len(cfg.Server.Token))])
 	} else {
 		log.Println("FRP Server 认证未启用（不推荐用于生产环境）")
 	}

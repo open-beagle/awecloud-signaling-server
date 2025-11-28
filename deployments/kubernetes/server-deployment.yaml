@@ -33,6 +33,12 @@ spec:
                 secretKeyRef:
                   name: awecloud-signaling-server
                   key: jwt-secret
+            # FRP Auth Token（必需）
+            - name: TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: awecloud-signaling-server
+                  key: token
             # FRP 公网访问地址（可选）
             # 如果配置，Agent/Desktop 将使用此地址连接 FRP 服务
             # 格式: wss://domain/path 或 ws://domain/path

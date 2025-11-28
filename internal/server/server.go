@@ -67,7 +67,7 @@ func (s *Server) Run() error {
 
 	// 创建gRPC服务
 	s.agentService = grpcserver.NewAgentServiceServer(
-		s.config.Server.FRPAuthToken,
+		s.config.Server.Token,
 		s.config.Server.PublicURL,
 		s.config.Server.BindPort,
 	)

@@ -20,7 +20,7 @@ type ServerSection struct {
 	TransportProtocol string `toml:"transport_protocol"` // tcp, websocket, wss
 	TLSCertFile       string `toml:"tls_cert_file"`
 	TLSKeyFile        string `toml:"tls_key_file"`
-	FRPAuthToken      string `toml:"frp_auth_token"`  // FRP 认证 Token
+	Token             string `toml:"token"`           // FRP 认证 Token
 	FRPServerAddr     string `toml:"frp_server_addr"` // FRP 服务器地址
 	FRPServerPort     int    `toml:"frp_server_port"` // FRP 服务器端口
 	PublicURL         string `toml:"public_url"`      // FRP 公网访问地址（完整 URL）
@@ -113,6 +113,9 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 	if jwtSecret := os.Getenv("JWT_SECRET"); jwtSecret != "" {
 		cfg.Security.JWTSecret = jwtSecret
+	}
+	if token := os.Getenv("TOKEN"); token != "" {
+		cfg.Server.Token = token
 	}
 
 	return &cfg, nil
