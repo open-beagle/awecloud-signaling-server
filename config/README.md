@@ -48,7 +48,19 @@
 
 - `address` - Server地址
 - `port` - Server FRP端口
+- `grpc_port` - gRPC端口
+- `protocol` - 传输协议（tcp/wss）
 - `tls_enable` - 是否启用TLS
+- `public_url` - FRP公网地址（可选），如果配置则忽略Server返回的地址
+
+### [health] - 健康检查配置
+
+- `port` - 健康检查HTTP端口（默认：8090）
+
+### [log] - 日志配置
+
+- `level` - 日志级别（debug/info/warn/error）
+- `file` - 日志文件路径（空表示输出到控制台）
 
 ## 使用说明
 
@@ -175,7 +187,21 @@ chmod 755 data
 
 ## 环境变量
 
-暂不支持环境变量配置，所有配置通过TOML文件。
+Agent支持以下环境变量（优先级高于配置文件）：
+
+- `AGENT_NAME` - Agent名称
+- `AGENT_TOKEN` - Agent认证Token
+- `AGENT_ADDRESS` - Server地址
+- `AGENT_PUBLIC_URL` - FRP公网地址（覆盖Server返回的地址）
+
+示例：
+```bash
+export AGENT_NAME="agent-prod-001"
+export AGENT_TOKEN="your-token-here"
+export AGENT_ADDRESS="https://signaling.example.com"
+export AGENT_PUBLIC_URL="frp.example.com:7000"
+./bin/agent -c config/agent.toml
+```
 
 ## 相关文档
 

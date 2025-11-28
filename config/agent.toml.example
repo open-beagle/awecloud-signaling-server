@@ -21,6 +21,29 @@ token = "your-agent-token-from-server"
 [server]
 address = "http://localhost:8080"
 
+# FRP 公网地址配置（可选）
+# 如果配置了此项，Agent 将使用此地址连接 FRP Server，忽略 Server 返回的地址
+# 适用场景：Server 在内网，但 FRP Server 有独立的公网地址
+# 
+# 配置优先级：
+#   1. 环境变量 AGENT_PUBLIC_URL（最高优先级）
+#   2. 配置文件 server.public_url
+#   3. Server 返回的地址（默认行为）
+#
+# 路径说明：
+#   - 不指定路径：自动使用 FRP 原生路径 /~!frp（内网直连场景）
+#   - 指定 /ws：需要 Traefik 等反向代理做路径重写（公网场景）
+#   - 指定 /~!frp：直接连接 FRP Server（内网场景）
+#
+# 示例：
+#   内网直连（简写）：public_url = "192.168.1.100:7000"  （自动补充 ws:// 和 /~!frp）
+#   内网直连（完整）：public_url = "ws://192.168.1.100:7000"  （自动使用 /~!frp）
+#   公网访问：public_url = "wss://frp.example.com/ws"  （需要 Traefik 重写）
+#   明确指定路径：public_url = "ws://192.168.1.100:7000/~!frp"
+#
+# 注意：留空则使用 Server 返回的地址
+# public_url = ""
+
 # 健康检查配置
 [health]
 port = 8090  # 健康检查HTTP端口，用于Kubernetes探测

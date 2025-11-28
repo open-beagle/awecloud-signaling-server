@@ -193,7 +193,11 @@ func (a *Agent) register() error {
 	}
 
 	// 更新 FRP 连接信息
-	if resp.Server != "" {
+	// 优先使用配置文件或环境变量中的 public_url
+	if a.config.Server.PublicURL != "" {
+		log.Printf("使用配置的 FRP 公网地址: %s (忽略 Server 返回的地址)", a.config.Server.PublicURL)
+		a.frpManager.SetServerURL(a.config.Server.PublicURL)
+	} else if resp.Server != "" {
 		// 使用 Server 返回的完整 URL
 		log.Printf("使用 Server 提供的隧道地址: %s", resp.Server)
 		a.frpManager.SetServerURL(resp.Server)

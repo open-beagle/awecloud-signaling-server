@@ -28,6 +28,7 @@ type ServerConnect struct {
 	GRPCPort  int    `toml:"grpc_port"` // gRPC API端口
 	Protocol  string `toml:"protocol"`  // tcp, wss
 	TLSEnable bool   `toml:"tls_enable"`
+	PublicURL string `toml:"public_url"` // FRP公网地址（可选），如果配置则忽略Server返回的地址
 }
 
 func LoadAgentConfig(path string) (*AgentConfig, error) {
@@ -69,6 +70,9 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	}
 	if addr := os.Getenv("AGENT_ADDRESS"); addr != "" {
 		cfg.Server.Address = addr
+	}
+	if publicURL := os.Getenv("AGENT_PUBLIC_URL"); publicURL != "" {
+		cfg.Server.PublicURL = publicURL
 	}
 
 	// 设置默认值

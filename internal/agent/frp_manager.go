@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -228,6 +229,11 @@ func parseServerURL(serverURL string) (*struct {
 	Path     string
 	Protocol string
 }, error) {
+	// 如果没有协议前缀，添加默认的 ws://
+	if !strings.Contains(serverURL, "://") {
+		serverURL = "ws://" + serverURL
+	}
+
 	parsedURL, err := url.Parse(serverURL)
 	if err != nil {
 		return nil, err
@@ -243,9 +249,10 @@ func parseServerURL(serverURL string) (*struct {
 		Path: parsedURL.Path,
 	}
 
-	// 如果路径为空，使用默认路径
+	// 如果路径为空，使用FRP原生路径（内网直连场景）
+	// 注意：只有在使用Traefik等反向代理时才应该使用 /ws
 	if result.Path == "" {
-		result.Path = constants.DefaultWebSocketPath
+		result.Path = constants.FRPDefaultPath // 使用 /~!frp
 	}
 
 	// 提取端口
