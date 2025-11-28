@@ -21,6 +21,9 @@ RUN set -ex && \
 # Copy binary
 COPY --chown=code:code bin/server-${TARGETOS}-${TARGETARCH} /usr/local/bin/server
 
+# Copy frontend dist files
+COPY --chown=code:code web/dist /home/code/web/dist
+
 # Copy example config as default config
 COPY --chown=code:code config/server.toml.example /home/code/config/server.toml
 
