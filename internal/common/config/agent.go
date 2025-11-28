@@ -9,7 +9,12 @@ import (
 type AgentConfig struct {
 	Agent  AgentSection  `toml:"agent"`
 	Server ServerConnect `toml:"server"`
+	Health HealthSection `toml:"health"`
 	Log    LogConfig     `toml:"log"`
+}
+
+type HealthSection struct {
+	Port int `toml:"port"` // 健康检查HTTP端口，默认8090
 }
 
 type AgentSection struct {
@@ -75,6 +80,9 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	}
 	if cfg.Server.Protocol == "" {
 		cfg.Server.Protocol = "tcp"
+	}
+	if cfg.Health.Port == 0 {
+		cfg.Health.Port = 8090
 	}
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"

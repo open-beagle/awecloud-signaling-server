@@ -310,3 +310,13 @@ func (f *FRPServer) IsProxyActive(proxyName string) bool {
 	proxy, exists := f.proxies[proxyName]
 	return exists && proxy.Status == "active"
 }
+
+// IsRunning 检查FRP Server是否正在运行
+func (f *FRPServer) IsRunning() bool {
+	select {
+	case <-f.ctx.Done():
+		return false
+	default:
+		return true
+	}
+}

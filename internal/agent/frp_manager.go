@@ -508,3 +508,17 @@ func (f *FRPManager) Stop() {
 	f.wg.Wait()
 	log.Println("FRP管理器已停止")
 }
+
+// IsConnected 检查FRP客户端是否已连接
+func (f *FRPManager) IsConnected() bool {
+	f.mutex.RLock()
+	defer f.mutex.RUnlock()
+
+	// 检查service是否存在且token已设置
+	// 注意：这是一个简化的检查，实际连接状态可能需要更复杂的逻辑
+	f.connMutex.RLock()
+	hasToken := f.token != ""
+	f.connMutex.RUnlock()
+
+	return f.service != nil && hasToken
+}

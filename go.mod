@@ -5,9 +5,13 @@ go 1.24.10
 require (
 	github.com/BurntSushi/toml v1.5.0
 	github.com/fatedier/frp v0.65.0
+	github.com/fatedier/golib v0.5.1
 	github.com/gin-gonic/gin v1.11.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
+	github.com/hashicorp/yamux v0.1.1
+	github.com/samber/lo v1.47.0
+	github.com/stretchr/testify v1.11.1
 	golang.org/x/crypto v0.45.0
 	golang.org/x/net v0.47.0
 	google.golang.org/grpc v1.77.0
@@ -25,7 +29,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/coreos/go-oidc/v3 v3.14.1 // indirect
-	github.com/fatedier/golib v0.5.1 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.8 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
@@ -36,7 +40,6 @@ require (
 	github.com/goccy/go-yaml v1.18.0 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect
-	github.com/hashicorp/yamux v0.1.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
@@ -57,13 +60,13 @@ require (
 	github.com/pion/transport/v3 v3.0.1 // indirect
 	github.com/pires/go-proxyproto v0.7.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.19.1 // indirect
 	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.48.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/quic-go v0.54.0 // indirect
-	github.com/samber/lo v1.47.0 // indirect
 	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8 // indirect
 	github.com/spf13/cobra v1.8.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
@@ -89,6 +92,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251124214823-79d6a2a48846 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apimachinery v0.28.8 // indirect
 	k8s.io/utils v0.0.0-20230406110748-d93618cff8a2 // indirect
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect

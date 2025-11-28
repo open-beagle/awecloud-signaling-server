@@ -32,6 +32,9 @@ type Server struct {
 	// gRPC服务
 	agentService  *grpcserver.AgentServiceServer
 	clientService *grpcserver.ClientServiceServer
+
+	// FRP服务
+	frpServer *frp.FRPServer
 }
 
 // GetAgentService 获取AgentService（供API使用）
@@ -112,13 +115,14 @@ func (s *Server) Run() error {
 	}()
 
 	// 启动FRP Server
-	frpServer, err := frp.NewFRPServer(s.config)
+	var err error
+	s.frpServer, err = frp.NewFRPServer(s.config)
 	if err != nil {
 		return fmt.Errorf("创建FRP Server失败: %w", err)
 	}
 
 	go func() {
-		if err := frpServer.Run(); err != nil {
+		if err := s.frpServer.Run(); err != nil {
 			log.Printf("FRP Server运行错误: %v", err)
 		}
 	}()
@@ -138,8 +142,10 @@ func (s *Server) Run() error {
 	s.grpcServer.GracefulStop()
 
 	// 停止FRP Server
-	if err := frpServer.Stop(); err != nil {
-		log.Printf("停止FRP Server失败: %v", err)
+	if s.frpServer != nil {
+		if err := s.frpServer.Stop(); err != nil {
+			log.Printf("停止FRP Server失败: %v", err)
+		}
 	}
 
 	// 停止HTTP服务器
@@ -154,10 +160,10 @@ func (s *Server) Run() error {
 func (s *Server) setupRouter() *gin.Engine {
 	router := gin.Default()
 
-	// 健康检查
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok"})
-	})
+	// 健康检查接口
+	healthAPI := api.NewHealthAPI(s.agentService, s.frpServer)
+	router.GET("/health", healthAPI.Health)
+	router.GET("/health/ready", healthAPI.Ready)
 
 	// 静态文件服务（前端）
 	router.Static("/assets", "./web/dist/assets")

@@ -46,6 +46,24 @@ spec:
               mountPath: /home/code/logs
             - name: config
               mountPath: /home/code/config
+          # 存活性探测 - 检查进程是否存活
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # 就绪性探测 - 检查服务是否就绪
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           resources:
             requests:
               memory: "256Mi"
@@ -53,18 +71,6 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 30
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 5
       volumes:
         - name: data
           persistentVolumeClaim:

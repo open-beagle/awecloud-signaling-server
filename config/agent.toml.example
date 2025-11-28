@@ -21,6 +21,10 @@ token = "your-agent-token-from-server"
 [server]
 address = "http://localhost:8080"
 
+# 健康检查配置
+[health]
+port = 8090  # 健康检查HTTP端口，用于Kubernetes探测
+
 # 日志配置
 [log]
 level = "info"

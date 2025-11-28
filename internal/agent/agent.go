@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/gin-gonic/gin"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
@@ -22,8 +23,10 @@ type Agent struct {
 	config *config.AgentConfig
 
 	// gRPC连接
-	grpcConn   *grpc.ClientConn
-	grpcClient pb.AgentServiceClient
+	grpcConn      *grpc.ClientConn
+	grpcClient    pb.AgentServiceClient
+	grpcConnected bool
+	grpcMutex     sync.RWMutex
 
 	// Agent信息
 	agentID  int64
@@ -78,6 +81,11 @@ func NewAgent(cfg *config.AgentConfig) (*Agent, error) {
 
 // Run 运行Agent
 func (a *Agent) Run() error {
+	// 启动健康检查HTTP服务器
+	if err := a.startHealthServer(); err != nil {
+		return fmt.Errorf("启动健康检查服务器失败: %w", err)
+	}
+
 	// 连接到Server
 	if err := a.connectToServer(); err != nil {
 		return fmt.Errorf("连接Server失败: %w", err)
@@ -146,6 +154,11 @@ func (a *Agent) connectToServer() error {
 
 	a.grpcConn = conn
 	a.grpcClient = pb.NewAgentServiceClient(conn)
+
+	// 标记gRPC已连接
+	a.grpcMutex.Lock()
+	a.grpcConnected = true
+	a.grpcMutex.Unlock()
 
 	log.Println("gRPC连接建立成功")
 	return nil
@@ -397,4 +410,51 @@ func (a *Agent) GetSTCPProxies() []*STCPProxy {
 		proxies = append(proxies, proxy)
 	}
 	return proxies
+}
+
+// IsGRPCConnected 检查gRPC连接是否正常
+func (a *Agent) IsGRPCConnected() bool {
+	a.grpcMutex.RLock()
+	defer a.grpcMutex.RUnlock()
+	return a.grpcConnected && a.grpcConn != nil
+}
+
+// IsFRPConnected 检查FRP连接是否正常
+func (a *Agent) IsFRPConnected() bool {
+	if a.frpManager == nil {
+		return false
+	}
+	return a.frpManager.IsConnected()
+}
+
+// startHealthServer 启动健康检查HTTP服务器
+func (a *Agent) startHealthServer() error {
+	router := gin.New()
+	router.Use(gin.Recovery())
+
+	healthAPI := NewHealthAPI(a)
+
+	// 健康检查接口（根路径，K8s探测用）
+	router.GET("/health", healthAPI.Health)
+	router.GET("/health/ready", healthAPI.Ready)
+
+	// 获取健康检查端口（默认8090）
+	healthPort := 8090
+	if a.config.Health.Port > 0 {
+		healthPort = a.config.Health.Port
+	}
+
+	addr := fmt.Sprintf(":%d", healthPort)
+
+	// 启动HTTP服务器（用于健康检查）
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		log.Printf("健康检查服务器启动在: http://0.0.0.0%s", addr)
+		if err := router.Run(addr); err != nil {
+			log.Printf("健康检查服务器启动失败: %v", err)
+		}
+	}()
+
+	return nil
 }

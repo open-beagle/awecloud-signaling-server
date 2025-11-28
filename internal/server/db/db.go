@@ -93,3 +93,12 @@ func CreateDefaultAdmin(username, password string) error {
 	log.Printf("默认管理员创建成功: %s", username)
 	return nil
 }
+
+// Ping 检查数据库连接是否正常
+func Ping() error {
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return fmt.Errorf("获取数据库连接失败: %w", err)
+	}
+	return sqlDB.Ping()
+}
