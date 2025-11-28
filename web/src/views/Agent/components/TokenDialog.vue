@@ -24,7 +24,9 @@
 
     <template #footer>
       <el-button @click="visible = false">{{ t('common.confirm') }}</el-button>
-      <el-button type="warning" :icon="Refresh" :loading="loading" @click="handleRegenerate" />
+      <el-tooltip content="重新生成Token" placement="top">
+        <el-button type="warning" :icon="Refresh" :loading="loading" @click="handleRegenerate" />
+      </el-tooltip>
     </template>
   </el-dialog>
 </template>

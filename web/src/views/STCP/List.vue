@@ -45,23 +45,29 @@
         </el-table-column>
         <el-table-column :label="t('common.actions')" width="150" fixed="right">
           <template #default="{ row }">
-            <el-button
-              size="small"
-              :icon="Setting"
-              @click="handleSetAccess(row)"
-            />
-            <el-button
-              size="small"
-              type="primary"
-              :icon="UserFilled"
-              @click="handleGrant(row)"
-            />
-            <el-button
-              size="small"
-              type="danger"
-              :icon="Delete"
-              @click="handleDelete(row)"
-            />
+            <el-tooltip content="权限设置" placement="top">
+              <el-button
+                size="small"
+                :icon="Setting"
+                @click="handleSetAccess(row)"
+              />
+            </el-tooltip>
+            <el-tooltip content="授权访问" placement="top">
+              <el-button
+                size="small"
+                type="primary"
+                :icon="UserFilled"
+                @click="handleGrant(row)"
+              />
+            </el-tooltip>
+            <el-tooltip content="删除" placement="top">
+              <el-button
+                size="small"
+                type="danger"
+                :icon="Delete"
+                @click="handleDelete(row)"
+              />
+            </el-tooltip>
           </template>
         </el-table-column>
       </el-table>

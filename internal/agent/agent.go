@@ -225,6 +225,7 @@ func (a *Agent) register() error {
 		return fmt.Errorf("注册失败: %s", resp.Message)
 	}
 
+	oldAgentID := a.agentID
 	a.agentID = resp.AgentId
 	a.frpToken = resp.Token
 
@@ -251,21 +252,97 @@ func (a *Agent) register() error {
 		a.frpManager.SetServerPort(int(resp.Port))
 	}
 
+	// 如果是重新注册（Agent ID变化），需要重新同步所有STCP代理
+	if oldAgentID != 0 && oldAgentID != a.agentID {
+		log.Printf("Agent ID 变化 (%d -> %d)，重新同步STCP代理", oldAgentID, a.agentID)
+		a.resyncSTCPProxies()
+	}
+
 	return nil
 }
 
-// heartbeatLoop 心跳循环
+// resyncSTCPProxies 重新同步所有STCP代理（Server重启后恢复）
+func (a *Agent) resyncSTCPProxies() {
+	a.proxyMutex.RLock()
+	proxies := make([]*STCPProxy, 0, len(a.stcpProxies))
+	for _, proxy := range a.stcpProxies {
+		proxies = append(proxies, proxy)
+	}
+	a.proxyMutex.RUnlock()
+
+	if len(proxies) == 0 {
+		log.Println("没有需要同步的STCP代理")
+		return
+	}
+
+	log.Printf("开始重新同步 %d 个STCP代理", len(proxies))
+
+	for _, proxy := range proxies {
+		log.Printf("重新创建STCP代理: %s", proxy.InstanceName)
+
+		// 重新添加到FRP Manager
+		if err := a.frpManager.AddSTCPProxy(
+			proxy.InstanceName,
+			proxy.SecretKey,
+			proxy.LocalIP,
+			proxy.LocalPort,
+		); err != nil {
+			log.Printf("重新创建FRP代理失败: %s, error: %v", proxy.InstanceName, err)
+
+			// 更新状态为错误
+			a.proxyMutex.Lock()
+			if p, exists := a.stcpProxies[proxy.InstanceName]; exists {
+				p.Status = "error"
+			}
+			a.proxyMutex.Unlock()
+		} else {
+			log.Printf("重新创建FRP代理成功: %s", proxy.InstanceName)
+
+			// 更新状态为运行中
+			a.proxyMutex.Lock()
+			if p, exists := a.stcpProxies[proxy.InstanceName]; exists {
+				p.Status = "running"
+			}
+			a.proxyMutex.Unlock()
+		}
+	}
+
+	log.Printf("STCP代理同步完成")
+}
+
+// heartbeatLoop 心跳循环（支持自动重连）
 func (a *Agent) heartbeatLoop() {
 	defer a.wg.Done()
 
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
+	consecutiveFailures := 0
+	maxFailures := 3
+
 	for {
 		select {
 		case <-ticker.C:
 			if err := a.sendHeartbeat(); err != nil {
-				log.Printf("心跳失败: %v", err)
+				consecutiveFailures++
+				log.Printf("心跳失败 (%d/%d): %v", consecutiveFailures, maxFailures, err)
+
+				// 如果连续失败次数过多，尝试重新注册
+				if consecutiveFailures >= maxFailures {
+					log.Printf("心跳连续失败 %d 次，尝试重新注册", consecutiveFailures)
+					if err := a.register(); err != nil {
+						log.Printf("重新注册失败: %v", err)
+					} else {
+						log.Println("重新注册成功")
+						consecutiveFailures = 0
+					}
+				}
+			} else {
+				// 心跳成功，重置失败计数
+				if consecutiveFailures > 0 {
+					log.Printf("心跳恢复正常")
+					consecutiveFailures = 0
+				}
 			}
 
 		case <-a.ctx.Done():
@@ -293,59 +370,88 @@ func (a *Agent) sendHeartbeat() error {
 	return nil
 }
 
-// receiveCommands 接收命令（双向流）
+// receiveCommands 接收命令（双向流，支持自动重连）
 func (a *Agent) receiveCommands() {
 	defer a.wg.Done()
 
-	log.Println("建立命令接收流...")
+	retryDelay := 5 * time.Second
+	maxRetryDelay := 60 * time.Second
 
-	stream, err := a.grpcClient.ReceiveCommands(a.ctx)
-	if err != nil {
-		log.Printf("建立命令流失败: %v", err)
-		return
-	}
-
-	// 发送初始消息（确认连接，包含agent_id）
-	if err := stream.Send(&pb.CommandResponse{
-		CommandId: fmt.Sprintf("init-%d", a.agentID),
-		Success:   true,
-		Message:   fmt.Sprintf("Agent已连接: %d", a.agentID),
-	}); err != nil {
-		log.Printf("发送初始消息失败: %v", err)
-		return
-	}
-
-	log.Println("命令接收流已建立")
-
-	// 接收命令
 	for {
-		cmd, err := stream.Recv()
-		if err != nil {
-			log.Printf("接收命令失败: %v", err)
-			return
-		}
-
-		log.Printf("收到命令: %s, type=%v, instance=%s",
-			cmd.CommandId, cmd.Type, cmd.InstanceName)
-
-		// 发送到命令处理通道
 		select {
-		case a.commandChan <- cmd:
 		case <-a.ctx.Done():
+			log.Println("命令接收线程退出")
 			return
+		default:
 		}
 
-		// 发送响应
-		resp := &pb.CommandResponse{
-			CommandId: cmd.CommandId,
+		log.Println("建立命令接收流...")
+
+		stream, err := a.grpcClient.ReceiveCommands(a.ctx)
+		if err != nil {
+			log.Printf("建立命令流失败: %v，%v后重试", err, retryDelay)
+			time.Sleep(retryDelay)
+			// 指数退避
+			retryDelay *= 2
+			if retryDelay > maxRetryDelay {
+				retryDelay = maxRetryDelay
+			}
+			continue
+		}
+
+		// 重置重试延迟
+		retryDelay = 5 * time.Second
+
+		// 发送初始消息（确认连接，包含agent_id）
+		if err := stream.Send(&pb.CommandResponse{
+			CommandId: fmt.Sprintf("init-%d", a.agentID),
 			Success:   true,
-			Message:   "命令已接收",
+			Message:   fmt.Sprintf("Agent已连接: %d", a.agentID),
+		}); err != nil {
+			log.Printf("发送初始消息失败: %v，%v后重试", err, retryDelay)
+			time.Sleep(retryDelay)
+			continue
 		}
 
-		if err := stream.Send(resp); err != nil {
-			log.Printf("发送命令响应失败: %v", err)
-			return
+		log.Println("命令接收流已建立")
+
+		// 接收命令
+		streamBroken := false
+		for !streamBroken {
+			cmd, err := stream.Recv()
+			if err != nil {
+				log.Printf("接收命令失败: %v，将重新建立连接", err)
+				streamBroken = true
+				break
+			}
+
+			log.Printf("收到命令: %s, type=%v, instance=%s",
+				cmd.CommandId, cmd.Type, cmd.InstanceName)
+
+			// 发送到命令处理通道
+			select {
+			case a.commandChan <- cmd:
+			case <-a.ctx.Done():
+				return
+			}
+
+			// 发送响应
+			resp := &pb.CommandResponse{
+				CommandId: cmd.CommandId,
+				Success:   true,
+				Message:   "命令已接收",
+			}
+
+			if err := stream.Send(resp); err != nil {
+				log.Printf("发送命令响应失败: %v，将重新建立连接", err)
+				streamBroken = true
+				break
+			}
 		}
+
+		// 流断开，等待后重试
+		log.Printf("命令流已断开，%v后重新连接", retryDelay)
+		time.Sleep(retryDelay)
 	}
 }
 

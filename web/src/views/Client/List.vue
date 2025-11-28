@@ -27,31 +27,37 @@
         </el-table-column>
         <el-table-column :label="t('common.actions')" width="150" fixed="right">
           <template #default="{ row }">
-            <el-button
-              v-if="!row.enabled"
-              size="small"
-              type="success"
-              :icon="CircleCheck"
-              @click="handleEnable(row)"
-            />
-            <el-button
-              v-else
-              size="small"
-              type="warning"
-              :icon="CircleClose"
-              @click="handleDisable(row)"
-            />
-            <el-button
-              size="small"
-              :icon="Refresh"
-              @click="handleRegenerateSecret(row)"
-            />
-            <el-button
-              size="small"
-              type="danger"
-              :icon="Delete"
-              @click="handleDelete(row)"
-            />
+            <el-tooltip v-if="!row.enabled" content="启用" placement="top">
+              <el-button
+                size="small"
+                type="success"
+                :icon="CircleCheck"
+                @click="handleEnable(row)"
+              />
+            </el-tooltip>
+            <el-tooltip v-else content="禁用" placement="top">
+              <el-button
+                size="small"
+                type="warning"
+                :icon="CircleClose"
+                @click="handleDisable(row)"
+              />
+            </el-tooltip>
+            <el-tooltip content="重新生成密钥" placement="top">
+              <el-button
+                size="small"
+                :icon="Refresh"
+                @click="handleRegenerateSecret(row)"
+              />
+            </el-tooltip>
+            <el-tooltip content="删除" placement="top">
+              <el-button
+                size="small"
+                type="danger"
+                :icon="Delete"
+                @click="handleDelete(row)"
+              />
+            </el-tooltip>
           </template>
         </el-table-column>
       </el-table>
