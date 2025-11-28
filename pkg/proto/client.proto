@@ -67,4 +67,5 @@ message ConnectResponse {
   string instance_name = 3;
   string secret_key = 4;
   int32 suggested_local_port = 5;  // 建议的本地端口
+  string server_url = 6;            // 隧道服务器地址（如 wss://signaling.example.com/ws）
 }

@@ -13,6 +13,7 @@ NC='\033[0m' # No Color
 
 # 版本信息
 BUILD_VERSION="${BUILD_VERSION:-dev}"
+BUILD_ADDRESS="${BUILD_ADDRESS:-}"  # 默认 Server 地址（可选）
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE=$(date -u '+%Y-%m-%d_%H:%M:%S')
 
@@ -29,6 +30,7 @@ echo -e "${GREEN}AWECloud Signaling Desktop Builder${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "Version:    ${BUILD_VERSION}"
+echo "Address:    ${BUILD_ADDRESS:-<not set>}"
 echo "Git Commit: ${GIT_COMMIT}"
 echo "Build Date: ${BUILD_DATE}"
 echo "Platforms:  ${PLATFORMS}"
@@ -102,6 +104,9 @@ for PLATFORM in "${PLATFORM_ARRAY[@]}"; do
     LDFLAGS="${LDFLAGS} -X 'main.version=${BUILD_VERSION}'"
     LDFLAGS="${LDFLAGS} -X 'main.gitCommit=${GIT_COMMIT}'"
     LDFLAGS="${LDFLAGS} -X 'main.buildDate=${BUILD_DATE}'"
+    if [ -n "${BUILD_ADDRESS}" ]; then
+        LDFLAGS="${LDFLAGS} -X 'main.defaultServerAddress=${BUILD_ADDRESS}'"
+    fi
     BUILD_FLAGS="${BUILD_FLAGS} -ldflags \"${LDFLAGS}\""
     
     # 执行构建
@@ -171,4 +176,7 @@ echo "  PLATFORMS=linux/amd64,linux/arm64,darwin/amd64,darwin/arm64,windows/amd6
 echo ""
 echo "  # Build with version"
 echo "  BUILD_VERSION=v0.1.0 bash scripts/build_desktop.sh"
+echo ""
+echo "  # Build with default server address"
+echo "  BUILD_VERSION=v0.1.0 BUILD_ADDRESS=https://signaling.example.com bash scripts/build_desktop.sh"
 echo ""

@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: awecloud-signaling-server
-  namespace: awecloud
+  namespace: beagle-access
 data:
   server.toml: |
     [server]

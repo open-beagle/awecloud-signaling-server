@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: awecloud-signaling-agent
-  namespace: awecloud
+  namespace: beagle-access
   labels:
     app: awecloud-signaling-agent
 spec:

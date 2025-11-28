@@ -2,7 +2,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: awecloud-signaling-server
-  namespace: awecloud
+  namespace: beagle-access
 spec:
   accessModes:
     - ReadWriteOnce

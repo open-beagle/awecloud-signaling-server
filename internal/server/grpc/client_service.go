@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
@@ -267,11 +268,19 @@ func (s *ClientServiceServer) ConnectService(ctx context.Context, req *pb.Connec
 
 	log.Printf("Client连接服务: client_id=%d, instance=%s", clientID, instance.InstanceName)
 
+	// 获取隧道服务器地址
+	serverURL := s.config.Server.PublicURL
+	if serverURL == "" {
+		// 如果没有配置 public_url，使用默认地址
+		serverURL = fmt.Sprintf("ws://%s:%d", s.config.Server.BindAddr, s.config.Server.BindPort)
+	}
+
 	return &pb.ConnectResponse{
 		Success:            true,
 		Message:            "连接信息获取成功",
 		InstanceName:       instance.InstanceName,
 		SecretKey:          instance.SecretKey,
 		SuggestedLocalPort: int32(instance.LocalPort),
+		ServerUrl:          serverURL,
 	}, nil
 }
