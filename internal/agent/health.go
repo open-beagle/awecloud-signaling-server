@@ -59,14 +59,13 @@ func (h *HealthAPI) Ready(c *gin.Context) {
 		log.Printf("[HEALTH] gRPC connection check failed")
 	}
 
-	// 检查FRP连接
+	// 检查FRP连接（仅作为信息，不影响就绪状态）
+	// FRP 会自动重连，不需要健康检查干预
 	if h.agent.IsFRPConnected() {
 		checks["frp_connection"] = "ok"
 	} else {
-		checks["frp_connection"] = "error"
-		errors["frp_connection"] = "not connected"
-		allReady = false
-		log.Printf("[HEALTH] FRP connection check failed")
+		checks["frp_connection"] = "initializing"
+		// 不设置 allReady = false，因为 FRP 会自动重连
 	}
 
 	status := "ready"
