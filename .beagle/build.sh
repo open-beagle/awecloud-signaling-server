@@ -5,6 +5,7 @@ set -e
 # 参数配置
 GOARCHS="${GOARCHS:-amd64,arm64}"
 GOOS="${GOOS:-linux}"
+BUILD_TARGETS="${BUILD_TARGETS:-server,agent}"  # 可选: server, agent, 或 server,agent
 
 # 版本信息
 BUILD_VERSION="${BUILD_VERSION:-dev}"
@@ -21,10 +22,21 @@ IFS=',' read -ra ARCH_ARRAY <<< "$GOARCHS"
 echo "Building AWECloud Signaling (CI/CD)"
 echo "Target OS: ${GOOS}"
 echo "Target architectures: ${GOARCHS}"
+echo "Build targets: ${BUILD_TARGETS}"
 echo "Version: ${BUILD_VERSION}"
 echo "Git Commit: ${GIT_COMMIT}"
 echo "Build Date: ${BUILD_DATE}"
 echo "---"
+
+# 检查是否需要构建 server 和 agent
+BUILD_SERVER=false
+BUILD_AGENT=false
+if [[ "${BUILD_TARGETS}" == *"server"* ]]; then
+    BUILD_SERVER=true
+fi
+if [[ "${BUILD_TARGETS}" == *"agent"* ]]; then
+    BUILD_AGENT=true
+fi
 
 # 构建 ldflags，注入版本信息
 LDFLAGS="-w -s"
@@ -74,81 +86,87 @@ fi
 
 # 遍历每个架构进行编译
 for ARCH in "${ARCH_ARRAY[@]}"; do
-    echo "Building Server for ${GOOS}/${ARCH}..."
-    
-    OUTPUT="${BIN_DIR}/server-${GOOS}-${ARCH}"
-    
-    # 设置目标架构
-    export TARGETARCH=${ARCH}
-    
-    # 获取交叉编译器信息
-    XX_CC_TRIPLE=$(xx-info triple)
-    
-    # 设置正确的交叉编译器路径和环境变量
-    if [ "${ARCH}" != "$(go env GOARCH)" ]; then
-        export CC="/${XX_CC_TRIPLE}/usr/bin/gcc"
-        export CXX="/${XX_CC_TRIPLE}/usr/bin/g++"
-        export AR="/${XX_CC_TRIPLE}/usr/bin/ar"
-        export PKG_CONFIG_PATH="/${XX_CC_TRIPLE}/usr/lib/pkgconfig"
-        export CGO_CFLAGS="-I/${XX_CC_TRIPLE}/usr/include"
-        export CGO_LDFLAGS="-L/${XX_CC_TRIPLE}/usr/lib"
-        # 设置 QEMU 的库搜索路径
-        export QEMU_LD_PREFIX="/${XX_CC_TRIPLE}"
-        echo "Using cross-compiler: ${CC}"
-        echo "QEMU_LD_PREFIX: ${QEMU_LD_PREFIX}"
+    # 构建 Server（如果需要）
+    if [ "$BUILD_SERVER" = true ]; then
+        echo "Building Server for ${GOOS}/${ARCH}..."
+        
+        OUTPUT="${BIN_DIR}/server-${GOOS}-${ARCH}"
+        
+        # 设置目标架构
+        export TARGETARCH=${ARCH}
+        
+        # 获取交叉编译器信息
+        XX_CC_TRIPLE=$(xx-info triple)
+        
+        # 设置正确的交叉编译器路径和环境变量
+        if [ "${ARCH}" != "$(go env GOARCH)" ]; then
+            export CC="/${XX_CC_TRIPLE}/usr/bin/gcc"
+            export CXX="/${XX_CC_TRIPLE}/usr/bin/g++"
+            export AR="/${XX_CC_TRIPLE}/usr/bin/ar"
+            export PKG_CONFIG_PATH="/${XX_CC_TRIPLE}/usr/lib/pkgconfig"
+            export CGO_CFLAGS="-I/${XX_CC_TRIPLE}/usr/include"
+            export CGO_LDFLAGS="-L/${XX_CC_TRIPLE}/usr/lib"
+            # 设置 QEMU 的库搜索路径
+            export QEMU_LD_PREFIX="/${XX_CC_TRIPLE}"
+            echo "Using cross-compiler: ${CC}"
+            echo "QEMU_LD_PREFIX: ${QEMU_LD_PREFIX}"
+        fi
+        
+        # 使用标准 go build 进行跨架构编译（支持 CGO）
+        CGO_ENABLED=1 \
+        GOOS=${GOOS} \
+        GOARCH=${ARCH} \
+        go build -a -installsuffix cgo \
+            -trimpath \
+            -buildvcs=false \
+            -ldflags="${LDFLAGS}" \
+            -o ${OUTPUT} \
+            ./cmd/server
+        
+        # 验证二进制文件架构
+        xx-verify ${OUTPUT}
+        
+        # 检查编译是否成功
+        if [ -f "${OUTPUT}" ]; then
+            echo "✓ Successfully built: ${OUTPUT}"
+            ls -lh ${OUTPUT}
+            file ${OUTPUT}
+        else
+            echo "✗ Failed to build: ${OUTPUT}"
+            exit 1
+        fi
+        
+        echo "---"
     fi
     
-    # 使用标准 go build 进行跨架构编译（支持 CGO）
-    CGO_ENABLED=1 \
-    GOOS=${GOOS} \
-    GOARCH=${ARCH} \
-    go build -a -installsuffix cgo \
-        -trimpath \
-        -buildvcs=false \
-        -ldflags="${LDFLAGS}" \
-        -o ${OUTPUT} \
-        ./cmd/server
-    
-    # 验证二进制文件架构
-    xx-verify ${OUTPUT}
-    
-    # 检查编译是否成功
-    if [ -f "${OUTPUT}" ]; then
-        echo "✓ Successfully built: ${OUTPUT}"
-        ls -lh ${OUTPUT}
-        file ${OUTPUT}
-    else
-        echo "✗ Failed to build: ${OUTPUT}"
-        exit 1
+    # 构建 Agent（如果需要）
+    if [ "$BUILD_AGENT" = true ]; then
+        echo "Building Agent for ${GOOS}/${ARCH}..."
+        
+        OUTPUT="${BIN_DIR}/agent-${GOOS}-${ARCH}"
+        
+        # Agent 不需要 CGO，使用标准 Go 交叉编译
+        CGO_ENABLED=0 \
+        GOOS=${GOOS} \
+        GOARCH=${ARCH} \
+        go build -a -installsuffix cgo \
+            -buildvcs=false \
+            -ldflags="${LDFLAGS}" \
+            -o ${OUTPUT} \
+            ./cmd/agent
+        
+        # 检查编译是否成功
+        if [ -f "${OUTPUT}" ]; then
+            echo "✓ Successfully built: ${OUTPUT}"
+            ls -lh ${OUTPUT}
+            file ${OUTPUT}
+        else
+            echo "✗ Failed to build: ${OUTPUT}"
+            exit 1
+        fi
+        
+        echo "---"
     fi
-    
-    echo "---"
-    
-    echo "Building Agent for ${GOOS}/${ARCH}..."
-    
-    OUTPUT="${BIN_DIR}/agent-${GOOS}-${ARCH}"
-    
-    # Agent 不需要 CGO，使用标准 Go 交叉编译
-    CGO_ENABLED=0 \
-    GOOS=${GOOS} \
-    GOARCH=${ARCH} \
-    go build -a -installsuffix cgo \
-        -buildvcs=false \
-        -ldflags="${LDFLAGS}" \
-        -o ${OUTPUT} \
-        ./cmd/agent
-    
-    # 检查编译是否成功
-    if [ -f "${OUTPUT}" ]; then
-        echo "✓ Successfully built: ${OUTPUT}"
-        ls -lh ${OUTPUT}
-        file ${OUTPUT}
-    else
-        echo "✗ Failed to build: ${OUTPUT}"
-        exit 1
-    fi
-    
-    echo "---"
 done
 
 echo ""
