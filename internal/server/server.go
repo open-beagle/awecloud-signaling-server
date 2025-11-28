@@ -78,6 +78,13 @@ func (s *Server) Run() error {
 	pb.RegisterAgentServiceServer(s.grpcServer, s.agentService)
 	pb.RegisterClientServiceServer(s.grpcServer, s.clientService)
 
+	// 创建FRP Server（在设置路由之前，确保健康检查可以访问）
+	var err error
+	s.frpServer, err = frp.NewFRPServer(s.config)
+	if err != nil {
+		return fmt.Errorf("创建FRP Server失败: %w", err)
+	}
+
 	// 创建Gin路由（HTTP处理）
 	ginRouter := s.setupRouter()
 
@@ -114,13 +121,7 @@ func (s *Server) Run() error {
 		}
 	}()
 
-	// 启动FRP Server
-	var err error
-	s.frpServer, err = frp.NewFRPServer(s.config)
-	if err != nil {
-		return fmt.Errorf("创建FRP Server失败: %w", err)
-	}
-
+	// 启动FRP Server（在goroutine中运行）
 	go func() {
 		if err := s.frpServer.Run(); err != nil {
 			log.Printf("FRP Server运行错误: %v", err)
