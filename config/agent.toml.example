@@ -14,8 +14,23 @@ token = "your-agent-token-from-server"
 #   3. 编译时注入的 BUILD_URL（通过 -ldflags）
 #   4. 硬编码默认值 "http://localhost:8080"（最低优先级）
 #
+# 地址格式支持：
+#   - 完整URL: "https://signaling.example.com" (推荐，自动使用443端口)
+#   - 带端口: "https://signaling.example.com:8080"
+#   - HTTP: "http://signaling.example.com" (自动使用80端口)
+#   - 纯域名: "signaling.example.com" (自动补充 http://)
+#   - IP地址: "192.168.1.100" (自动补充 http://)
+#
+# 协议说明：
+#   - https:// - gRPC 使用 TLS 连接（自动跳过证书验证，支持自签名证书）
+#   - http://  - gRPC 使用明文连接
+#
+# 端口说明：
+#   - Server 使用 HTTP/2 统一端口，Web/API 和 gRPC 复用同一端口
+#   - 如果URL中指定了端口，使用指定的端口
+#   - 如果URL中没有端口，https 使用 443，http 使用 80
+#
 # 注意：
-#   - address 应包含完整的 URL，如 "http://localhost:8080" 或 "https://signaling.example.com"
 #   - Agent 会自动从 Server 获取 FRP 连接信息（地址、端口、token）
 #   - 如果不配置，将使用编译时注入的默认值或硬编码默认值
 [server]

@@ -2,15 +2,19 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/gin-gonic/gin"
@@ -138,16 +142,56 @@ func (a *Agent) Run() error {
 
 // connectToServer 连接到Server
 func (a *Agent) connectToServer() error {
-	// gRPC连接地址
-	grpcAddr := fmt.Sprintf("%s:%d", a.config.Server.Address, a.config.Server.GRPCPort)
+	// 解析Server地址
+	// Server地址格式：https://signaling.example.com 或 https://signaling.example.com:8080
+	// gRPC 和 HTTP/API 复用同一个端口（HTTP/2）
+	serverAddr := a.config.Server.Address
 
-	log.Printf("连接到Server gRPC: %s", grpcAddr)
+	// 如果没有协议前缀，添加默认的 http://
+	if !strings.Contains(serverAddr, "://") {
+		serverAddr = "http://" + serverAddr
+	}
 
-	// 创建gRPC连接（暂时不使用TLS）
-	conn, err := grpc.NewClient(
-		grpcAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	parsedURL, err := url.Parse(serverAddr)
+	if err != nil {
+		return fmt.Errorf("解析Server地址失败: %w", err)
+	}
+
+	// 构建gRPC连接地址（host:port）
+	var grpcAddr string
+	if parsedURL.Port() != "" {
+		// URL中指定了端口
+		grpcAddr = parsedURL.Host
+	} else {
+		// URL中没有端口，使用协议默认端口
+		port := 80
+		if parsedURL.Scheme == "https" {
+			port = 443
+		}
+		grpcAddr = fmt.Sprintf("%s:%d", parsedURL.Hostname(), port)
+	}
+
+	log.Printf("连接到Server gRPC: %s (scheme: %s)", grpcAddr, parsedURL.Scheme)
+
+	// 根据协议选择传输凭证
+	var opts []grpc.DialOption
+	if parsedURL.Scheme == "https" {
+		// HTTPS：使用TLS，跳过证书验证（支持自签名证书）
+		tlsConfig := &tls.Config{
+			InsecureSkipVerify: true,
+			ServerName:         parsedURL.Hostname(),
+		}
+		creds := credentials.NewTLS(tlsConfig)
+		opts = append(opts, grpc.WithTransportCredentials(creds))
+		log.Printf("gRPC使用TLS连接（跳过证书验证）")
+	} else {
+		// HTTP：不使用TLS
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		log.Printf("gRPC使用明文连接")
+	}
+
+	// 创建gRPC连接
+	conn, err := grpc.NewClient(grpcAddr, opts...)
 	if err != nil {
 		return err
 	}

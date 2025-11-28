@@ -52,7 +52,7 @@ func main() {
 	log.Printf("AWECloud Signaling Agent 启动中...")
 	log.Printf("版本: %s (commit: %s, built: %s)", version, gitCommit, buildDate)
 	log.Printf("Agent Name: %s", cfg.Agent.AgentName)
-	log.Printf("Server: %s:%d", cfg.Server.Address, cfg.Server.Port)
+	log.Printf("Server Address: %s", cfg.Server.Address)
 
 	// 创建并启动Agent
 	agt, err := agent.NewAgent(cfg)
