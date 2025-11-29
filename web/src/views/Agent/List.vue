@@ -24,19 +24,21 @@
             <TimeAgo :time="row.created_at" />
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" width="100" fixed="right">
+        <el-table-column :label="t('common.actions')" width="120" fixed="right">
           <template #default="{ row }">
-            <el-tooltip content="查看Token" placement="top">
-              <el-button size="small" :icon="View" @click="handleViewToken(row)" />
-            </el-tooltip>
-            <el-tooltip content="删除" placement="top">
-              <el-button
-                size="small"
-                type="danger"
-                :icon="Delete"
-                @click="handleDelete(row)"
-              />
-            </el-tooltip>
+            <div class="action-buttons">
+              <el-tooltip content="查看Token" placement="top">
+                <el-button size="small" :icon="View" @click="handleViewToken(row)" />
+              </el-tooltip>
+              <el-tooltip content="删除" placement="top">
+                <el-button
+                  size="small"
+                  type="danger"
+                  :icon="Delete"
+                  @click="handleDelete(row)"
+                />
+              </el-tooltip>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -135,5 +137,12 @@ onMounted(() => {
   font-size: 18px;
   font-weight: 500;
   color: var(--text-primary);
+}
+
+.action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
 }
 </style>

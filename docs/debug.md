@@ -11,6 +11,7 @@
 ### 允许的构建操作
 
 **开发/调试阶段**（只构建当前架构）
+
 ```bash
 # 构建Server和Agent（当前架构，输出到bin/）
 GOARCHS=$(go env GOARCH) ./scripts/build.sh
@@ -21,6 +22,7 @@ go build -o bin/agent cmd/agent/main.go
 ```
 
 **生产构建**（多架构）
+
 ```bash
 # 构建所有架构（amd64 + arm64）
 ./scripts/build.sh
@@ -43,21 +45,25 @@ BUILD_VERSION=v1.0.0 ./scripts/build.sh
 ## 调试流程
 
 ### 1. 发现问题
+
 - 记录问题现象
 - 收集错误日志
 - 确定问题范围
 
 ### 2. 讨论方案
+
 - 与项目负责人讨论
 - 确定调试方案
 - 评估影响范围
 
 ### 3. 执行调试
+
 - 按照批准的方案执行
 - 记录调试过程
 - 保存调试日志
 
 ### 4. 总结归档
+
 - 记录问题原因
 - 记录解决方案
 - 更新相关文档
@@ -73,20 +79,23 @@ BUILD_VERSION=v1.0.0 ./scripts/build.sh
 简要描述问题
 
 **讨论方案**:
-- 方案1: xxx
-- 方案2: xxx
+
+- 方案 1: xxx
+- 方案 2: xxx
 - 选择: xxx
 
 **调试过程**:
-1. 步骤1
-2. 步骤2
+
+1. 步骤 1
+2. 步骤 2
 
 **解决方案**:
 最终的解决方案
 
 **影响范围**:
-- 文件1
-- 文件2
+
+- 文件 1
+- 文件 2
 
 **状态**: 已解决/进行中/待处理
 ```
@@ -110,22 +119,26 @@ BUILD_VERSION=v1.0.0 ./scripts/build.sh
 需要统一构建方式，支持多架构编译
 
 **讨论方案**:
-- 方案1: 使用 Makefile
-- 方案2: 使用 shell 脚本
+
+- 方案 1: 使用 Makefile
+- 方案 2: 使用 shell 脚本
 - 选择: 使用 `scripts/build.sh`，更灵活，支持版本注入
 
 **调试过程**:
+
 1. 创建 `scripts/build.sh` 脚本
 2. 支持多架构编译（amd64, arm64）
-3. 注入版本信息（版本号、Git提交、构建日期）
+3. 注入版本信息（版本号、Git 提交、构建日期）
 4. 删除 Makefile，统一使用脚本构建
 
 **解决方案**:
+
 - 开发阶段：只构建当前架构 `GOARCHS=$(go env GOARCH) ./scripts/build.sh`
 - 生产构建：构建所有架构 `./scripts/build.sh`
 - 所有二进制文件输出到 `bin/` 目录
 
 **影响范围**:
+
 - 删除 Makefile
 - 创建 scripts/build.sh
 - 更新 docs/debug.md
@@ -137,32 +150,37 @@ BUILD_VERSION=v1.0.0 ./scripts/build.sh
 ### [2025-11-25] 架构重大调整
 
 **问题描述**:
-原架构设计有误，Agent的角色和通信方式理解错误
+原架构设计有误，Agent 的角色和通信方式理解错误
 
 **讨论方案**:
-- 原方案: Agent作为单一FRP Client，直接连接Server-FRP
-- 新方案: Agent分为两个组件
-  - Agent-Web: 通过gRPC与Server-Web通信，接收管理指令
-  - Agent-FRP: 通过WebSocket与Server-FRP通信，建立FRP隧道
+
+- 原方案: Agent 作为单一 FRP Client，直接连接 Server-FRP
+- 新方案: Agent 分为两个组件
+  - Agent-Web: 通过 gRPC 与 Server-Web 通信，接收管理指令
+  - Agent-FRP: 通过 WebSocket 与 Server-FRP 通信，建立 FRP 隧道
 - 选择: 采用新方案，重新设计整个架构
 
 **正确的架构**:
-1. Server分为两个独立组件:
-   - Server-Web (端口8080): 管理界面和API
-   - Server-FRP (端口7000): FRP信令服务
 
-2. Agent分为两个组件:
-   - Agent-Web: 通过gRPC与Server-Web通信
-   - Agent-FRP: 通过WebSocket与Server-FRP通信
+1. Server 分为两个独立组件:
+
+   - Server-Web (端口 8080): 管理界面和 API
+   - Server-FRP (端口 7000): FRP 信令服务
+
+2. Agent 分为两个组件:
+
+   - Agent-Web: 通过 gRPC 与 Server-Web 通信
+   - Agent-FRP: 通过 WebSocket 与 Server-FRP 通信
 
 3. Client (Visitor):
-   - 通过WebSocket与Server-FRP通信
-   - 通过STCP隧道访问Agent-FRP
-   - Agent-FRP才是真正访问SSH/MySQL/Redis的组件
+   - 通过 WebSocket 与 Server-FRP 通信
+   - 通过 STCP 隧道访问 Agent-FRP
+   - Agent-FRP 才是真正访问 SSH/MySQL/Redis 的组件
 
 **影响范围**:
+
 - 整个项目架构
-- Agent实现方式
+- Agent 实现方式
 - 通信协议设计
 - 可能需要调整数据库设计
 

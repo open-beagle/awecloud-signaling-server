@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	ClientService_Authenticate_FullMethodName   = "/awecloud.signaling.ClientService/Authenticate"
+	ClientService_LoginWithToken_FullMethodName = "/awecloud.signaling.ClientService/LoginWithToken"
 	ClientService_GetServices_FullMethodName    = "/awecloud.signaling.ClientService/GetServices"
 	ClientService_ConnectService_FullMethodName = "/awecloud.signaling.ClientService/ConnectService"
 )
@@ -32,6 +33,8 @@ const (
 type ClientServiceClient interface {
 	// Client认证
 	Authenticate(ctx context.Context, in *AuthRequest, opts ...grpc.CallOption) (*AuthResponse, error)
+	// 使用Device Token登录获取JWT
+	LoginWithToken(ctx context.Context, in *LoginWithTokenRequest, opts ...grpc.CallOption) (*LoginWithTokenResponse, error)
 	// 获取可访问服务列表
 	GetServices(ctx context.Context, in *GetServicesRequest, opts ...grpc.CallOption) (*GetServicesResponse, error)
 	// 连接服务（获取连接信息）
@@ -50,6 +53,16 @@ func (c *clientServiceClient) Authenticate(ctx context.Context, in *AuthRequest,
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AuthResponse)
 	err := c.cc.Invoke(ctx, ClientService_Authenticate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *clientServiceClient) LoginWithToken(ctx context.Context, in *LoginWithTokenRequest, opts ...grpc.CallOption) (*LoginWithTokenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LoginWithTokenResponse)
+	err := c.cc.Invoke(ctx, ClientService_LoginWithToken_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +97,8 @@ func (c *clientServiceClient) ConnectService(ctx context.Context, in *ConnectReq
 type ClientServiceServer interface {
 	// Client认证
 	Authenticate(context.Context, *AuthRequest) (*AuthResponse, error)
+	// 使用Device Token登录获取JWT
+	LoginWithToken(context.Context, *LoginWithTokenRequest) (*LoginWithTokenResponse, error)
 	// 获取可访问服务列表
 	GetServices(context.Context, *GetServicesRequest) (*GetServicesResponse, error)
 	// 连接服务（获取连接信息）
@@ -100,6 +115,9 @@ type UnimplementedClientServiceServer struct{}
 
 func (UnimplementedClientServiceServer) Authenticate(context.Context, *AuthRequest) (*AuthResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Authenticate not implemented")
+}
+func (UnimplementedClientServiceServer) LoginWithToken(context.Context, *LoginWithTokenRequest) (*LoginWithTokenResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LoginWithToken not implemented")
 }
 func (UnimplementedClientServiceServer) GetServices(context.Context, *GetServicesRequest) (*GetServicesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetServices not implemented")
@@ -142,6 +160,24 @@ func _ClientService_Authenticate_Handler(srv interface{}, ctx context.Context, d
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ClientServiceServer).Authenticate(ctx, req.(*AuthRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ClientService_LoginWithToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LoginWithTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClientServiceServer).LoginWithToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClientService_LoginWithToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClientServiceServer).LoginWithToken(ctx, req.(*LoginWithTokenRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -192,6 +228,10 @@ var ClientService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Authenticate",
 			Handler:    _ClientService_Authenticate_Handler,
+		},
+		{
+			MethodName: "LoginWithToken",
+			Handler:    _ClientService_LoginWithToken_Handler,
 		},
 		{
 			MethodName: "GetServices",

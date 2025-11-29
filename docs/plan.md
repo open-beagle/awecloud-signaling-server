@@ -2,27 +2,6 @@
 
 > **重要文档**: 本文档是项目开发的核心指导文档，完成任务后必须更新进度。
 
-## 开发规范
-
-### 构建规范
-- ✅ **允许**: 构建项目到 `bin/` 目录
-- ❌ **禁止**: 在其他位置生成可执行文件
-- 📝 **要求**: 使用 `scripts/build.sh` 或标准 go build 命令
-- 🔧 **开发**: 只构建当前架构 `GOARCHS=$(go env GOARCH) ./scripts/build.sh`
-- 🚀 **生产**: 构建所有架构 `./scripts/build.sh`
-
-### 调试规范
-- ❌ **禁止**: 随意调试系统
-- 💬 **要求**: 调试前必须讨论方案
-- 📋 **记录**: 所有调试活动记录在 `docs/debug.md`
-
-### 进度更新规范
-- 📝 **开发计划** (`docs/plan.md`): 完成任务后更新状态
-- 📊 **进度跟踪** (`docs/progress.md`): 每日更新，完成任务后清理详情
-- ❌ **禁止**: 随意创建文档，所有新文档必须经过讨论
-
----
-
 ## 项目概述
 
 基于 FRP 的内网穿透信令服务系统，包含 Server 端、Agent 端和 Desktop 客户端应用。
@@ -136,23 +115,23 @@
    - [ ] 创建 Agent 项目结构
    - [ ] 配置文件解析（agent.toml）
    - [ ] 日志系统搭建
-   - [ ] 双线程架构设计（Agent-Web线程 + Agent-FRP线程）
+   - [ ] 双线程架构设计（Agent-Web 线程 + Agent-FRP 线程）
 
 2. **Agent-Web 线程（gRPC 客户端）**
 
-   - [ ] 实现 gRPC 客户端连接到 Server-Web线程
+   - [ ] 实现 gRPC 客户端连接到 Server-Web 线程
    - [ ] 实现 Agent 注册和认证
    - [ ] 实现心跳机制
    - [ ] 实现接收 Server 指令（双向流）
    - [ ] 实现状态上报
-   - [ ] 实现与 Agent-FRP线程的进程内通信（Go channel）
+   - [ ] 实现与 Agent-FRP 线程的进程内通信（Go channel）
 
 3. **Agent-FRP 线程（FRP 客户端）**
 
    - [ ] 集成 FRP Client 核心代码
-   - [ ] 配置 WebSocket 连接到 Server-FRP线程
+   - [ ] 配置 WebSocket 连接到 Server-FRP 线程
    - [ ] 实现 WebSocket 认证
-   - [ ] 接收 Agent-Web线程的控制指令（进程内通信）
+   - [ ] 接收 Agent-Web 线程的控制指令（进程内通信）
 
 4. **动态代理管理**
 
@@ -377,14 +356,14 @@
 - ✅ Client CRUD
 - ✅ STCP 实例 CRUD
 - ✅ 权限授权
-- ✅ Server-Web线程：gRPC 服务（Agent 和 Client）
-- ✅ Server-FRP线程：WebSocket 信令服务
+- ✅ Server-Web 线程：gRPC 服务（Agent 和 Client）
+- ✅ Server-FRP 线程：WebSocket 信令服务
 - ✅ 两个线程之间进程内通信
 
 **Agent 进程**（单一进程，两个工作线程）
 
-- ✅ Agent-Web线程：gRPC 连接 Server-Web线程
-- ✅ Agent-FRP线程：WebSocket 连接 Server-FRP线程
+- ✅ Agent-Web 线程：gRPC 连接 Server-Web 线程
+- ✅ Agent-FRP 线程：WebSocket 连接 Server-FRP 线程
 - ✅ 两个线程之间进程内通信
 - ✅ 动态创建/删除 STCP Proxy
 - ✅ 心跳机制
@@ -396,8 +375,8 @@
 
 **Desktop 进程**（单一进程，两个工作线程）
 
-- ✅ Desktop-Web线程：gRPC 连接 Server-Web线程
-- ✅ Desktop-FRP线程：WebSocket 连接 Server-FRP线程
+- ✅ Desktop-Web 线程：gRPC 连接 Server-Web 线程
+- ✅ Desktop-FRP 线程：WebSocket 连接 Server-FRP 线程
 - ✅ 两个线程之间进程内通信
 - ✅ 登录和认证
 - ✅ 服务列表
@@ -427,9 +406,9 @@
 **解决方案**
 
 - 每个进程启动两个工作线程（goroutine）
-- Server进程：Server-Web线程（端口8080）和Server-FRP线程（端口7000）
-- Agent进程：Agent-Web线程和Agent-FRP线程
-- Desktop进程：Desktop-Web线程和Desktop-FRP线程
+- Server 进程：Server-Web 线程（端口 8080）和 Server-FRP 线程（端口 7000）
+- Agent 进程：Agent-Web 线程和 Agent-FRP 线程
+- Desktop 进程：Desktop-Web 线程和 Desktop-FRP 线程
 - 使用 Go channel 或接口调用实现进程内通信
 
 ### 2. gRPC 双向流通信
@@ -527,9 +506,9 @@
 **状态**: 部分完成
 
 - [x] 所有 RESTful API 可用（Week 1 提前完成）
-- [ ] gRPC 服务实现完成（Server-Web线程）
-- [ ] FRP Server 集成完成（Server-FRP线程）
-- [ ] Server-Web线程 和 Server-FRP线程 进程内通信完成
+- [ ] gRPC 服务实现完成（Server-Web 线程）
+- [ ] FRP Server 集成完成（Server-FRP 线程）
+- [ ] Server-Web 线程 和 Server-FRP 线程 进程内通信完成
 - [x] 可通过 curl/Postman 测试 RESTful API
 - [ ] 可通过 grpcurl 测试 gRPC API
 
@@ -537,8 +516,8 @@
 
 **状态**: 未开始
 
-- [ ] Agent-Web线程 可通过 gRPC 连接 Server-Web线程
-- [ ] Agent-FRP线程 可通过 WebSocket 连接 Server-FRP线程
+- [ ] Agent-Web 线程 可通过 gRPC 连接 Server-Web 线程
+- [ ] Agent-FRP 线程 可通过 WebSocket 连接 Server-FRP 线程
 - [ ] 两个线程之间进程内通信正常
 - [ ] 可动态创建/删除 STCP 代理
 - [ ] 心跳和状态上报正常
@@ -555,8 +534,8 @@
 
 **状态**: 未开始
 
-- [ ] Desktop-Web线程 可通过 gRPC 连接 Server-Web线程
-- [ ] Desktop-FRP线程 可通过 WebSocket 连接 Server-FRP线程
+- [ ] Desktop-Web 线程 可通过 gRPC 连接 Server-Web 线程
+- [ ] Desktop-FRP 线程 可通过 WebSocket 连接 Server-FRP 线程
 - [ ] 两个线程之间进程内通信正常
 - [ ] 完整功能可用（登录、服务列表、连接/断开）
 - [ ] Windows 安装包可用
@@ -681,4 +660,4 @@ wails dev
 **文档版本**: v1.1  
 **创建日期**: 2025-11-25  
 **最后更新**: 2025-11-25  
-**状态**: 进行中（Week 1已完成）
+**状态**: 进行中（Week 1 已完成）

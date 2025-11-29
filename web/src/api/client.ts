@@ -29,7 +29,7 @@ export interface RegenerateSecretResponse {
 // 获取Client列表
 export function getClients() {
   return request<ClientsResponse>({
-    url: '/api/clients',
+    url: '/api/v1/admin/clients',
     method: 'get'
   })
 }
@@ -37,7 +37,7 @@ export function getClients() {
 // 创建Client
 export function createClient(data: CreateClientRequest) {
   return request<CreateClientResponse>({
-    url: '/api/clients',
+    url: '/api/v1/admin/clients',
     method: 'post',
     data
   })
@@ -46,7 +46,7 @@ export function createClient(data: CreateClientRequest) {
 // 启用Client
 export function enableClient(id: number) {
   return request({
-    url: `/api/clients/${id}/enable`,
+    url: `/api/v1/admin/clients/${id}/enable`,
     method: 'put'
   })
 }
@@ -54,7 +54,7 @@ export function enableClient(id: number) {
 // 禁用Client
 export function disableClient(id: number) {
   return request({
-    url: `/api/clients/${id}/disable`,
+    url: `/api/v1/admin/clients/${id}/disable`,
     method: 'put'
   })
 }
@@ -62,7 +62,7 @@ export function disableClient(id: number) {
 // 删除Client
 export function deleteClient(id: number) {
   return request({
-    url: `/api/clients/${id}`,
+    url: `/api/v1/admin/clients/${id}`,
     method: 'delete'
   })
 }
@@ -70,7 +70,7 @@ export function deleteClient(id: number) {
 // 重新生成Secret
 export function regenerateSecret(id: number) {
   return request<RegenerateSecretResponse>({
-    url: `/api/clients/${id}/regenerate-secret`,
+    url: `/api/v1/admin/clients/${id}/regenerate-secret`,
     method: 'post'
   })
 }

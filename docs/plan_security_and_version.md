@@ -377,7 +377,7 @@
 
 ---
 
-**第一阶段总计**：11.5 天（实际用时：2天）
+**第一阶段总计**：11.5 天（实际用时：2 天）
 
 </details>
 
@@ -744,35 +744,40 @@
 **完成阶段（8/8）**：
 
 #### Server 端（100%）
-- ✅ 阶段 1.1：数据库设计与迁移（0.5天）
-- ✅ 阶段 1.2：Server 端 - Device Token API（1天）
-- ✅ 阶段 1.3：Server 端 - 端口偏好与审计日志 API（1天）
-- ✅ 阶段 1.4：Server 端 - Web 管理界面（1天）
+
+- ✅ 阶段 1.1：数据库设计与迁移（0.5 天）
+- ✅ 阶段 1.2：Server 端 - Device Token API（1 天）
+- ✅ 阶段 1.3：Server 端 - 端口偏好与审计日志 API（1 天）
+- ✅ 阶段 1.4：Server 端 - Web 管理界面（1 天）
 
 #### Desktop 端（100%）
-- ✅ 阶段 1.5：Desktop 端 - 设备指纹与 Token 管理（0.5小时）
-- ✅ 阶段 1.6：Desktop 端 - 登录界面双模式（0.7小时）
-- ✅ 阶段 1.7：Desktop 端 - 设备管理界面（0.3小时）
+
+- ✅ 阶段 1.5：Desktop 端 - 设备指纹与 Token 管理（0.5 小时）
+- ✅ 阶段 1.6：Desktop 端 - 登录界面双模式（0.7 小时）
+- ✅ 阶段 1.7：Desktop 端 - 设备管理界面（0.3 小时）
 
 #### 审计日志完善（100%）
-- ✅ 阶段 1.8：审计日志功能完善（4小时）
-  - 修复FRP配置传递（Server返回FRP token/server/port）
-  - 实现Client JWT认证中间件
-  - 修复GORM外键关联问题（ClientPKID/STCPInstancePKID）
+
+- ✅ 阶段 1.8：审计日志功能完善（4 小时）
+  - 修复 FRP 配置传递（Server 返回 FRP token/server/port）
+  - 实现 Client JWT 认证中间件
+  - 修复 GORM 外键关联问题（ClientPKID/STCPInstancePKID）
   - 优化前端显示（实例名称、设备信息两行显示）
-  - 修复Desktop设备管理页面硬编码问题
+  - 修复 Desktop 设备管理页面硬编码问题
 
 **实际用时**：2 天（原计划 11.5 天）
 
 **关键成果**：
 
 **Server 端**：
+
 - 创建 10 个新文件
 - 实现 10 个 API 端点
 - 完成 Web 审计日志页面
 - 修复 3 个问题
 
 **Desktop 端**：
+
 - 创建 6 个新文件
 - 实现设备指纹收集
 - 实现双模式登录界面
@@ -780,21 +785,24 @@
 - 支持 Token 自动登录
 
 **过程文档**：
-- `.tmp/security_token_implementation.md` - Server端实施记录
-- `.tmp/stage_1_1_to_1_4_complete.md` - Server端完成总结
-- `.tmp/stage_1_5_complete.md` - Desktop设备指纹完成记录
-- `.tmp/stage_1_6_complete.md` - Desktop登录界面完成记录
-- `.tmp/stage_1_7_complete.md` - Desktop设备管理完成记录
+
+- `.tmp/security_token_implementation.md` - Server 端实施记录
+- `.tmp/stage_1_1_to_1_4_complete.md` - Server 端完成总结
+- `.tmp/stage_1_5_complete.md` - Desktop 设备指纹完成记录
+- `.tmp/stage_1_6_complete.md` - Desktop 登录界面完成记录
+- `.tmp/stage_1_7_complete.md` - Desktop 设备管理完成记录
 
 **第一阶段总结**：
+
 - ✅ 所有功能已实现并测试通过
-- ✅ Server端API完整可用
-- ✅ Desktop端功能完整
+- ✅ Server 端 API 完整可用
+- ✅ Desktop 端功能完整
 - ✅ 审计日志系统正常运行
-- ✅ Web管理界面可用
+- ✅ Web 管理界面可用
 
 **下一步**：
-1. 开始第二阶段：Desktop版本管理系统
+
+1. 开始第二阶段：Desktop 版本管理系统
 2. 或根据实际需求调整优先级
 
 ---
@@ -804,6 +812,7 @@
 ### 调试清单
 
 #### Server 端验证
+
 - [ ] 启动 Server：`./bin/server -c config/server.toml`
 - [ ] 访问 Web 管理界面：http://localhost:8080
 - [ ] 登录管理员账号（admin/admin123）
@@ -811,6 +820,7 @@
 - [ ] 测试审计日志导出功能
 
 #### Desktop 端验证
+
 - [ ] 构建 Desktop：`cd desktop && ~/go/bin/wails build`
 - [ ] 启动 Desktop 应用
 - [ ] 测试登录功能（使用 Client ID/Secret）
@@ -821,6 +831,7 @@
 - [ ] 测试服务连接功能
 
 #### 集成测试
+
 - [ ] 创建 STCP 实例
 - [ ] 授权 Client 访问
 - [ ] Desktop 登录并查看服务列表
@@ -828,6 +839,7 @@
 - [ ] 检查审计日志记录
 
 #### 问题记录
+
 - 在 `.tmp/debug_issues.md` 中记录发现的问题
 - 记录解决方案和修复步骤
 
@@ -836,10 +848,12 @@
 Desktop 端当前使用模拟数据，需要集成以下 API：
 
 1. **GetDevices** - 获取设备列表
+
    - API: `GET /api/v1/client/auth/login/devices`
    - 需要在 Desktop 的 `app.go` 中实现 gRPC 调用
 
 2. **OfflineDevice** - 让设备下线
+
    - API: `POST /api/v1/client/auth/login/devices/:device_token/offline`
    - 需要在 Desktop 的 `app.go` 中实现 gRPC 调用
 

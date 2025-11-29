@@ -141,6 +141,8 @@ const handleSubmit = async () => {
         ElMessage.success('更新成功')
         dialogVisible.value = false
         loadGroups()
+      } else {
+        ElMessage.error(res.message || '更新失败')
       }
     } else {
       const res = await createGroup(form.value)
@@ -148,10 +150,13 @@ const handleSubmit = async () => {
         ElMessage.success('创建成功')
         dialogVisible.value = false
         loadGroups()
+      } else {
+        ElMessage.error(res.message || '创建失败')
       }
     }
-  } catch (error) {
-    ElMessage.error('操作失败')
+  } catch (error: any) {
+    console.error('操作失败:', error)
+    ElMessage.error(error.message || error.response?.data?.message || '操作失败')
   }
 }
 

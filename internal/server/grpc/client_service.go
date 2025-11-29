@@ -2,7 +2,6 @@ package grpc
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/auth"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
@@ -67,34 +67,48 @@ func (s *ClientServiceServer) Authenticate(ctx context.Context, req *pb.AuthRequ
 		}, nil
 	}
 
-	// 生成JWT Token
-	expiresAt := time.Now().Add(time.Hour * time.Duration(s.config.Security.JWTExpireHours))
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"client_id": client.ID,
-		"exp":       expiresAt.Unix(),
-	})
+	// 创建Device Token（用于记住登录）
+	// 使用客户端提供的设备信息
+	deviceInfo := auth.DeviceInfo{
+		OS:       "desktop",
+		Arch:     "unknown",
+		Hostname: "desktop-client",
+	}
 
-	tokenString, err := token.SignedString([]byte(s.config.Security.JWTSecret))
+	// 如果客户端提供了设备信息，使用客户端的信息
+	if req.DeviceInfo != nil {
+		deviceInfo.OS = req.DeviceInfo.Os
+		deviceInfo.Arch = req.DeviceInfo.Arch
+		deviceInfo.Hostname = req.DeviceInfo.Hostname
+	}
+
+	deviceToken, err := auth.CreateDeviceToken(db.DB, client.ID, deviceInfo)
 	if err != nil {
-		log.Printf("生成Token失败: %v", err)
+		log.Printf("创建Device Token失败: %v", err)
 		return &pb.AuthResponse{
 			Success: false,
-			Message: "生成Token失败",
+			Message: "创建Device Token失败",
 		}, nil
 	}
 
-	// 创建会话记录
-	session := &model.ClientSession{
-		ClientID:     client.ID,
-		SessionToken: tokenString,
-		ExpiresAt:    expiresAt,
-	}
-	if err := db.DB.Create(session).Error; err != nil {
-		log.Printf("创建会话记录失败: %v", err)
-		// 不影响登录流程
+	// 生成JWT Token
+	expiresAt := time.Now().Add(time.Hour * time.Duration(s.config.Security.JWTExpireHours))
+	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"client_id":    client.ID,
+		"device_token": deviceToken.DeviceToken,
+		"exp":          expiresAt.Unix(),
+	})
+
+	jwtTokenString, err := jwtToken.SignedString([]byte(s.config.Security.JWTSecret))
+	if err != nil {
+		log.Printf("生成JWT Token失败: %v", err)
+		return &pb.AuthResponse{
+			Success: false,
+			Message: "生成JWT Token失败",
+		}, nil
 	}
 
-	log.Printf("Client认证成功: %s", req.ClientId)
+	log.Printf("Client认证成功: %s, device_token=%s", req.ClientId, deviceToken.DeviceToken)
 
 	// 构建 FRP 连接信息
 	// 如果配置了公网 URL，使用公网 URL；否则返回空字符串和端口
@@ -108,11 +122,86 @@ func (s *ClientServiceServer) Authenticate(ctx context.Context, req *pb.AuthRequ
 	return &pb.AuthResponse{
 		Success:      true,
 		Message:      "认证成功",
-		SessionToken: tokenString,
+		SessionToken: jwtTokenString,
 		ExpiresAt:    expiresAt.Unix(),
+		DeviceToken:  deviceToken.DeviceToken,
 		Token:        s.config.Server.Token,
 		Server:       frpServer,
 		Port:         frpPort,
+	}, nil
+}
+
+// LoginWithToken 使用Device Token登录获取JWT
+func (s *ClientServiceServer) LoginWithToken(ctx context.Context, req *pb.LoginWithTokenRequest) (*pb.LoginWithTokenResponse, error) {
+	log.Printf("Device Token登录请求: client_id=%s", req.ClientId)
+
+	// 查询Client
+	var client model.Client
+	if err := db.DB.Where("client_id = ?", req.ClientId).First(&client).Error; err != nil {
+		log.Printf("Client不存在: %s", req.ClientId)
+		return &pb.LoginWithTokenResponse{
+			Success: false,
+			Message: "Client ID错误",
+		}, nil
+	}
+
+	// 检查状态
+	if !client.Enabled {
+		log.Printf("Client已禁用: %s", req.ClientId)
+		return &pb.LoginWithTokenResponse{
+			Success: false,
+			Message: "Client已被禁用",
+		}, nil
+	}
+
+	// 验证Device Token
+	var deviceToken model.DeviceToken
+	if err := db.DB.Where("client_id = ? AND device_token = ? AND revoked = ?",
+		client.ID, req.DeviceToken, false).First(&deviceToken).Error; err != nil {
+		log.Printf("Device Token无效: %s", req.DeviceToken)
+		return &pb.LoginWithTokenResponse{
+			Success: false,
+			Message: "Device Token无效或已过期",
+		}, nil
+	}
+
+	// 检查是否过期
+	if time.Now().After(deviceToken.ExpiresAt) {
+		log.Printf("Device Token已过期: %s", req.DeviceToken)
+		return &pb.LoginWithTokenResponse{
+			Success: false,
+			Message: "Device Token已过期",
+		}, nil
+	}
+
+	// 更新最后使用时间
+	deviceToken.LastUsedAt = time.Now()
+	db.DB.Save(&deviceToken)
+
+	// 生成JWT Token
+	jwtExpiresIn := s.config.Security.JWTExpireHours * 3600
+	expiresAt := time.Now().Add(time.Hour * time.Duration(s.config.Security.JWTExpireHours))
+	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"client_id":    client.ID,
+		"device_token": deviceToken.DeviceToken,
+		"exp":          expiresAt.Unix(),
+	})
+
+	jwtTokenString, err := jwtToken.SignedString([]byte(s.config.Security.JWTSecret))
+	if err != nil {
+		log.Printf("生成JWT Token失败: %v", err)
+		return &pb.LoginWithTokenResponse{
+			Success: false,
+			Message: "生成JWT Token失败",
+		}, nil
+	}
+
+	log.Printf("Device Token验证成功: client_id=%d, device_token=%s", client.ID, deviceToken.DeviceToken)
+
+	return &pb.LoginWithTokenResponse{
+		Success:      true,
+		JwtToken:     jwtTokenString,
+		JwtExpiresIn: int32(jwtExpiresIn),
 	}, nil
 }
 
@@ -272,8 +361,9 @@ func (s *ClientServiceServer) ConnectService(ctx context.Context, req *pb.Connec
 	// 获取隧道服务器地址
 	serverURL := s.config.Server.PublicURL
 	if serverURL == "" {
-		// 如果没有配置 public_url，使用默认地址
-		serverURL = fmt.Sprintf("ws://%s:%d", s.config.Server.BindAddr, s.config.Server.BindPort)
+		// 如果没有配置 public_url，返回空字符串
+		// Desktop 将使用其连接的 Server 地址 + 隧道端口
+		serverURL = ""
 	}
 
 	return &pb.ConnectResponse{

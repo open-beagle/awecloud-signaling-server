@@ -40,7 +40,10 @@ bash scripts/build.sh
 
 ```bash
 # 开发构建
-BUILD_VERSION=v0.1.0 bash scripts/build_desktop.sh
+BUILD_VERSION=v0.1.0 \
+BUILD_ADDRESS=https://signaling.example.com \
+PLATFORMS="windows/amd64" \
+bash scripts/build_desktop.sh
 
 # 构建指定平台
 BUILD_VERSION=v0.1.0 PLATFORMS=linux/amd64 bash scripts/build_desktop.sh
@@ -53,6 +56,7 @@ BUILD_VERSION=v0.1.0 BUILD_ADDRESS=https://signaling.example.com bash scripts/bu
 ```
 
 **前置要求**：
+
 - Server/Agent: Go 1.24+
 - Desktop: Go 1.24+, Node.js 20+, Wails CLI
 
@@ -66,16 +70,6 @@ BUILD_VERSION=v0.1.0 BUILD_ADDRESS=https://signaling.example.com bash scripts/bu
 ./bin/server -c config/server.toml
 ```
 
-**默认管理员账号**：
-
-- 用户名: `admin`
-- 密码: `admin123`
-
-**Server 监听端口**：
-
-- **8080**: HTTP/2 统一端口（Web 界面 + RESTful API + gRPC）
-- **7000**: FRP 信令服务（WebSocket）
-
 ### 3. 启动 Agent
 
 ```bash
@@ -86,48 +80,17 @@ BUILD_VERSION=v0.1.0 BUILD_ADDRESS=https://signaling.example.com bash scripts/bu
 ./bin/agent -c config/agent.toml
 ```
 
-## 开发状态
+## 开发规范
 
-**当前进度**: 约 35% (Week 3 完成)
+> ⚠️ **重要**: AI 开发时必须遵循 [docs/README.md](docs/README.md) 中的开发规范
 
-### 核心里程碑
+### 核心规范
 
-- [x] **里程碑 1: Server 开发完成** ✅
+- **构建规范**: 只允许构建到 `bin/` 目录
+- **调试规范**: 调试前必须讨论方案
+- **文档规范**: 禁止随意创建文档
 
-  - RESTful API 完整实现
-  - gRPC 服务实现（HTTP/2 统一端口）
-  - Server-FRP 线程实现
-  - API 测试通过
-
-- [x] **里程碑 2: Agent 开发完成** ✅
-
-  - Agent-Web 线程（gRPC 客户端）
-  - Agent-FRP 线程（FRP 客户端）
-  - 动态代理管理
-  - 构建测试通过
-
-- [ ] **里程碑 3: Desktop 开发完成** 🔄
-
-  - [x] Desktop-Web 线程（gRPC 客户端）✅
-  - [x] Desktop-FRP 线程（FRP 客户端）✅
-  - [x] Vue 3 前端界面 ✅
-  - [x] Windows 可执行文件 ✅
-  - [ ] 人工联调测试 ⏳
-
-- [ ] **里程碑 4: Web 界面完成**（Week 4-5）
-
-- [ ] **里程碑 5: MVP 发布**（Week 8）
-
-### 周次进度
-
-- [x] Week 1: 数据库模型、RESTful API、测试框架 ✅
-- [x] Week 2: gRPC 服务、Server 内部设计、进程内通信 ✅
-- [x] Week 3: Agent 完整实现、Server-FRP 线程 ✅
-- [ ] Week 4-5: Web 管理界面
-- [ ] Week 6-7: Desktop 客户端应用
-- [ ] Week 8: 测试和优化
-
-**详细进度**: [docs/progress.md](docs/progress.md)
+详细规范请查看：[docs/README.md](docs/README.md)
 
 ## 文档
 

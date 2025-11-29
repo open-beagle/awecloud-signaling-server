@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -319,6 +320,7 @@ func (a *Agent) heartbeatLoop() {
 
 	consecutiveFailures := 0
 	maxFailures := 3
+	lastSuccessLogged := false // 记录是否已打印过成功日志
 
 	for {
 		select {
@@ -326,6 +328,7 @@ func (a *Agent) heartbeatLoop() {
 			if err := a.sendHeartbeat(); err != nil {
 				consecutiveFailures++
 				log.Printf("心跳失败 (%d/%d): %v", consecutiveFailures, maxFailures, err)
+				lastSuccessLogged = false // 失败后重置，下次成功时会打印
 
 				// 如果连续失败次数过多，尝试重新注册
 				if consecutiveFailures >= maxFailures {
@@ -338,11 +341,18 @@ func (a *Agent) heartbeatLoop() {
 					}
 				}
 			} else {
-				// 心跳成功，重置失败计数
+				// 心跳成功
 				if consecutiveFailures > 0 {
+					// 从失败恢复，打印恢复日志
 					log.Printf("心跳恢复正常")
 					consecutiveFailures = 0
+					lastSuccessLogged = true
+				} else if !lastSuccessLogged {
+					// 首次成功，打印一次
+					log.Printf("心跳正常")
+					lastSuccessLogged = true
 				}
+				// 后续成功不打印日志
 			}
 
 		case <-a.ctx.Done():
@@ -366,7 +376,7 @@ func (a *Agent) sendHeartbeat() error {
 		return fmt.Errorf("心跳失败")
 	}
 
-	log.Printf("心跳成功，时间戳: %d", resp.Timestamp)
+	// 不在这里打印日志，由heartbeatLoop统一处理
 	return nil
 }
 
@@ -390,13 +400,20 @@ func (a *Agent) receiveCommands() {
 		stream, err := a.grpcClient.ReceiveCommands(a.ctx)
 		if err != nil {
 			log.Printf("建立命令流失败: %v，%v后重试", err, retryDelay)
-			time.Sleep(retryDelay)
-			// 指数退避
-			retryDelay *= 2
-			if retryDelay > maxRetryDelay {
-				retryDelay = maxRetryDelay
+
+			// 使用select等待，以便能响应context取消
+			select {
+			case <-time.After(retryDelay):
+				// 指数退避
+				retryDelay *= 2
+				if retryDelay > maxRetryDelay {
+					retryDelay = maxRetryDelay
+				}
+				continue
+			case <-a.ctx.Done():
+				log.Println("命令接收线程退出")
+				return
 			}
-			continue
 		}
 
 		// 重置重试延迟
@@ -409,8 +426,15 @@ func (a *Agent) receiveCommands() {
 			Message:   fmt.Sprintf("Agent已连接: %d", a.agentID),
 		}); err != nil {
 			log.Printf("发送初始消息失败: %v，%v后重试", err, retryDelay)
-			time.Sleep(retryDelay)
-			continue
+
+			// 使用select等待，以便能响应context取消
+			select {
+			case <-time.After(retryDelay):
+				continue
+			case <-a.ctx.Done():
+				log.Println("命令接收线程退出")
+				return
+			}
 		}
 
 		log.Println("命令接收流已建立")
@@ -420,9 +444,16 @@ func (a *Agent) receiveCommands() {
 		for !streamBroken {
 			cmd, err := stream.Recv()
 			if err != nil {
-				log.Printf("接收命令失败: %v，将重新建立连接", err)
-				streamBroken = true
-				break
+				// 检查是否是因为context取消导致的错误
+				select {
+				case <-a.ctx.Done():
+					log.Println("命令接收线程退出")
+					return
+				default:
+					log.Printf("接收命令失败: %v，将重新建立连接", err)
+					streamBroken = true
+					break
+				}
 			}
 
 			log.Printf("收到命令: %s, type=%v, instance=%s",
@@ -443,15 +474,37 @@ func (a *Agent) receiveCommands() {
 			}
 
 			if err := stream.Send(resp); err != nil {
-				log.Printf("发送命令响应失败: %v，将重新建立连接", err)
-				streamBroken = true
-				break
+				// 检查是否是因为context取消导致的错误
+				select {
+				case <-a.ctx.Done():
+					log.Println("命令接收线程退出")
+					return
+				default:
+					log.Printf("发送命令响应失败: %v，将重新建立连接", err)
+					streamBroken = true
+					break
+				}
 			}
 		}
 
-		// 流断开，等待后重试
-		log.Printf("命令流已断开，%v后重新连接", retryDelay)
-		time.Sleep(retryDelay)
+		// 再次检查context，避免在停止时打印重连日志
+		select {
+		case <-a.ctx.Done():
+			log.Println("命令接收线程退出")
+			return
+		default:
+			// 流断开，等待后重试
+			log.Printf("命令流已断开，%v后重新连接", retryDelay)
+		}
+
+		// 使用select等待，以便能响应context取消
+		select {
+		case <-time.After(retryDelay):
+			// 继续重试
+		case <-a.ctx.Done():
+			log.Println("命令接收线程退出")
+			return
+		}
 	}
 }
 
@@ -600,13 +653,34 @@ func (a *Agent) startHealthServer() error {
 
 	addr := fmt.Sprintf(":%d", healthPort)
 
+	// 创建HTTP服务器
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: router,
+	}
+
 	// 启动HTTP服务器（用于健康检查）
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
 		log.Printf("健康检查服务器启动在: http://0.0.0.0%s", addr)
-		if err := router.Run(addr); err != nil {
-			log.Printf("健康检查服务器启动失败: %v", err)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("健康检查服务器错误: %v", err)
+		}
+	}()
+
+	// 监听context取消，优雅关闭服务器
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		<-a.ctx.Done()
+		log.Println("正在关闭健康检查服务器...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("健康检查服务器关闭错误: %v", err)
+		} else {
+			log.Println("健康检查服务器已关闭")
 		}
 	}()
 

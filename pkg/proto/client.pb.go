@@ -21,18 +21,80 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// 设备信息
+type DeviceInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Os            string                 `protobuf:"bytes,1,opt,name=os,proto3" json:"os,omitempty"`
+	Arch          string                 `protobuf:"bytes,2,opt,name=arch,proto3" json:"arch,omitempty"`
+	Hostname      string                 `protobuf:"bytes,3,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeviceInfo) Reset() {
+	*x = DeviceInfo{}
+	mi := &file_pkg_proto_client_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeviceInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeviceInfo) ProtoMessage() {}
+
+func (x *DeviceInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_client_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeviceInfo.ProtoReflect.Descriptor instead.
+func (*DeviceInfo) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_client_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *DeviceInfo) GetOs() string {
+	if x != nil {
+		return x.Os
+	}
+	return ""
+}
+
+func (x *DeviceInfo) GetArch() string {
+	if x != nil {
+		return x.Arch
+	}
+	return ""
+}
+
+func (x *DeviceInfo) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
 // Client认证请求
 type AuthRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ClientId      string                 `protobuf:"bytes,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	ClientSecret  string                 `protobuf:"bytes,2,opt,name=client_secret,json=clientSecret,proto3" json:"client_secret,omitempty"`
+	DeviceInfo    *DeviceInfo            `protobuf:"bytes,3,opt,name=device_info,json=deviceInfo,proto3" json:"device_info,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AuthRequest) Reset() {
 	*x = AuthRequest{}
-	mi := &file_pkg_proto_client_proto_msgTypes[0]
+	mi := &file_pkg_proto_client_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -44,7 +106,7 @@ func (x *AuthRequest) String() string {
 func (*AuthRequest) ProtoMessage() {}
 
 func (x *AuthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_client_proto_msgTypes[0]
+	mi := &file_pkg_proto_client_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -57,7 +119,7 @@ func (x *AuthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthRequest.ProtoReflect.Descriptor instead.
 func (*AuthRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_client_proto_rawDescGZIP(), []int{0}
+	return file_pkg_proto_client_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *AuthRequest) GetClientId() string {
@@ -74,6 +136,13 @@ func (x *AuthRequest) GetClientSecret() string {
 	return ""
 }
 
+func (x *AuthRequest) GetDeviceInfo() *DeviceInfo {
+	if x != nil {
+		return x.DeviceInfo
+	}
+	return nil
+}
+
 // Client认证响应
 type AuthResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -81,16 +150,17 @@ type AuthResponse struct {
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	SessionToken  string                 `protobuf:"bytes,3,opt,name=session_token,json=sessionToken,proto3" json:"session_token,omitempty"`
 	ExpiresAt     int64                  `protobuf:"varint,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
-	Token         string                 `protobuf:"bytes,5,opt,name=token,proto3" json:"token,omitempty"`   // 隧道认证 token
-	Server        string                 `protobuf:"bytes,6,opt,name=server,proto3" json:"server,omitempty"` // 隧道服务器地址（完整 URL 或空）
-	Port          int32                  `protobuf:"varint,7,opt,name=port,proto3" json:"port,omitempty"`    // 隧道服务器端口（使用 URL 时为 0）
+	DeviceToken   string                 `protobuf:"bytes,5,opt,name=device_token,json=deviceToken,proto3" json:"device_token,omitempty"` // Device Token（用于记住登录）
+	Token         string                 `protobuf:"bytes,6,opt,name=token,proto3" json:"token,omitempty"`                                // 隧道认证 token
+	Server        string                 `protobuf:"bytes,7,opt,name=server,proto3" json:"server,omitempty"`                              // 隧道服务器地址（完整 URL 或空）
+	Port          int32                  `protobuf:"varint,8,opt,name=port,proto3" json:"port,omitempty"`                                 // 隧道服务器端口（使用 URL 时为 0）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AuthResponse) Reset() {
 	*x = AuthResponse{}
-	mi := &file_pkg_proto_client_proto_msgTypes[1]
+	mi := &file_pkg_proto_client_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -102,7 +172,7 @@ func (x *AuthResponse) String() string {
 func (*AuthResponse) ProtoMessage() {}
 
 func (x *AuthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_client_proto_msgTypes[1]
+	mi := &file_pkg_proto_client_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -115,7 +185,7 @@ func (x *AuthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthResponse.ProtoReflect.Descriptor instead.
 func (*AuthResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_client_proto_rawDescGZIP(), []int{1}
+	return file_pkg_proto_client_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *AuthResponse) GetSuccess() bool {
@@ -146,6 +216,13 @@ func (x *AuthResponse) GetExpiresAt() int64 {
 	return 0
 }
 
+func (x *AuthResponse) GetDeviceToken() string {
+	if x != nil {
+		return x.DeviceToken
+	}
+	return ""
+}
+
 func (x *AuthResponse) GetToken() string {
 	if x != nil {
 		return x.Token
@@ -167,6 +244,128 @@ func (x *AuthResponse) GetPort() int32 {
 	return 0
 }
 
+// 使用Device Token登录请求
+type LoginWithTokenRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ClientId      string                 `protobuf:"bytes,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	DeviceToken   string                 `protobuf:"bytes,2,opt,name=device_token,json=deviceToken,proto3" json:"device_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LoginWithTokenRequest) Reset() {
+	*x = LoginWithTokenRequest{}
+	mi := &file_pkg_proto_client_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LoginWithTokenRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LoginWithTokenRequest) ProtoMessage() {}
+
+func (x *LoginWithTokenRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_client_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LoginWithTokenRequest.ProtoReflect.Descriptor instead.
+func (*LoginWithTokenRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_client_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *LoginWithTokenRequest) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *LoginWithTokenRequest) GetDeviceToken() string {
+	if x != nil {
+		return x.DeviceToken
+	}
+	return ""
+}
+
+// 使用Device Token登录响应
+type LoginWithTokenResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	JwtToken      string                 `protobuf:"bytes,3,opt,name=jwt_token,json=jwtToken,proto3" json:"jwt_token,omitempty"`
+	JwtExpiresIn  int32                  `protobuf:"varint,4,opt,name=jwt_expires_in,json=jwtExpiresIn,proto3" json:"jwt_expires_in,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LoginWithTokenResponse) Reset() {
+	*x = LoginWithTokenResponse{}
+	mi := &file_pkg_proto_client_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LoginWithTokenResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LoginWithTokenResponse) ProtoMessage() {}
+
+func (x *LoginWithTokenResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_client_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LoginWithTokenResponse.ProtoReflect.Descriptor instead.
+func (*LoginWithTokenResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_client_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *LoginWithTokenResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *LoginWithTokenResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *LoginWithTokenResponse) GetJwtToken() string {
+	if x != nil {
+		return x.JwtToken
+	}
+	return ""
+}
+
+func (x *LoginWithTokenResponse) GetJwtExpiresIn() int32 {
+	if x != nil {
+		return x.JwtExpiresIn
+	}
+	return 0
+}
+
 // 获取服务列表请求
 type GetServicesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -177,7 +376,7 @@ type GetServicesRequest struct {
 
 func (x *GetServicesRequest) Reset() {
 	*x = GetServicesRequest{}
-	mi := &file_pkg_proto_client_proto_msgTypes[2]
+	mi := &file_pkg_proto_client_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -189,7 +388,7 @@ func (x *GetServicesRequest) String() string {
 func (*GetServicesRequest) ProtoMessage() {}
 
 func (x *GetServicesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_client_proto_msgTypes[2]
+	mi := &file_pkg_proto_client_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -202,7 +401,7 @@ func (x *GetServicesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetServicesRequest.ProtoReflect.Descriptor instead.
 func (*GetServicesRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_client_proto_rawDescGZIP(), []int{2}
+	return file_pkg_proto_client_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetServicesRequest) GetSessionToken() string {
@@ -223,7 +422,7 @@ type GetServicesResponse struct {
 
 func (x *GetServicesResponse) Reset() {
 	*x = GetServicesResponse{}
-	mi := &file_pkg_proto_client_proto_msgTypes[3]
+	mi := &file_pkg_proto_client_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -235,7 +434,7 @@ func (x *GetServicesResponse) String() string {
 func (*GetServicesResponse) ProtoMessage() {}
 
 func (x *GetServicesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_client_proto_msgTypes[3]
+	mi := &file_pkg_proto_client_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -248,7 +447,7 @@ func (x *GetServicesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetServicesResponse.ProtoReflect.Descriptor instead.
 func (*GetServicesResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_client_proto_rawDescGZIP(), []int{3}
+	return file_pkg_proto_client_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GetServicesResponse) GetSuccess() bool {
@@ -281,7 +480,7 @@ type ServiceInfo struct {
 
 func (x *ServiceInfo) Reset() {
 	*x = ServiceInfo{}
-	mi := &file_pkg_proto_client_proto_msgTypes[4]
+	mi := &file_pkg_proto_client_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -293,7 +492,7 @@ func (x *ServiceInfo) String() string {
 func (*ServiceInfo) ProtoMessage() {}
 
 func (x *ServiceInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_client_proto_msgTypes[4]
+	mi := &file_pkg_proto_client_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -306,7 +505,7 @@ func (x *ServiceInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceInfo.ProtoReflect.Descriptor instead.
 func (*ServiceInfo) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_client_proto_rawDescGZIP(), []int{4}
+	return file_pkg_proto_client_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ServiceInfo) GetInstanceId() int64 {
@@ -376,7 +575,7 @@ type ConnectRequest struct {
 
 func (x *ConnectRequest) Reset() {
 	*x = ConnectRequest{}
-	mi := &file_pkg_proto_client_proto_msgTypes[5]
+	mi := &file_pkg_proto_client_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -388,7 +587,7 @@ func (x *ConnectRequest) String() string {
 func (*ConnectRequest) ProtoMessage() {}
 
 func (x *ConnectRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_client_proto_msgTypes[5]
+	mi := &file_pkg_proto_client_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -401,7 +600,7 @@ func (x *ConnectRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectRequest.ProtoReflect.Descriptor instead.
 func (*ConnectRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_client_proto_rawDescGZIP(), []int{5}
+	return file_pkg_proto_client_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ConnectRequest) GetSessionToken() string {
@@ -433,7 +632,7 @@ type ConnectResponse struct {
 
 func (x *ConnectResponse) Reset() {
 	*x = ConnectResponse{}
-	mi := &file_pkg_proto_client_proto_msgTypes[6]
+	mi := &file_pkg_proto_client_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -445,7 +644,7 @@ func (x *ConnectResponse) String() string {
 func (*ConnectResponse) ProtoMessage() {}
 
 func (x *ConnectResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_client_proto_msgTypes[6]
+	mi := &file_pkg_proto_client_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -458,7 +657,7 @@ func (x *ConnectResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConnectResponse.ProtoReflect.Descriptor instead.
 func (*ConnectResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_client_proto_rawDescGZIP(), []int{6}
+	return file_pkg_proto_client_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ConnectResponse) GetSuccess() bool {
@@ -507,19 +706,35 @@ var File_pkg_proto_client_proto protoreflect.FileDescriptor
 
 const file_pkg_proto_client_proto_rawDesc = "" +
 	"\n" +
-	"\x16pkg/proto/client.proto\x12\x12awecloud.signaling\"O\n" +
+	"\x16pkg/proto/client.proto\x12\x12awecloud.signaling\"L\n" +
+	"\n" +
+	"DeviceInfo\x12\x0e\n" +
+	"\x02os\x18\x01 \x01(\tR\x02os\x12\x12\n" +
+	"\x04arch\x18\x02 \x01(\tR\x04arch\x12\x1a\n" +
+	"\bhostname\x18\x03 \x01(\tR\bhostname\"\x90\x01\n" +
 	"\vAuthRequest\x12\x1b\n" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12#\n" +
-	"\rclient_secret\x18\x02 \x01(\tR\fclientSecret\"\xc8\x01\n" +
+	"\rclient_secret\x18\x02 \x01(\tR\fclientSecret\x12?\n" +
+	"\vdevice_info\x18\x03 \x01(\v2\x1e.awecloud.signaling.DeviceInfoR\n" +
+	"deviceInfo\"\xeb\x01\n" +
 	"\fAuthResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12#\n" +
 	"\rsession_token\x18\x03 \x01(\tR\fsessionToken\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\x04 \x01(\x03R\texpiresAt\x12\x14\n" +
-	"\x05token\x18\x05 \x01(\tR\x05token\x12\x16\n" +
-	"\x06server\x18\x06 \x01(\tR\x06server\x12\x12\n" +
-	"\x04port\x18\a \x01(\x05R\x04port\"9\n" +
+	"expires_at\x18\x04 \x01(\x03R\texpiresAt\x12!\n" +
+	"\fdevice_token\x18\x05 \x01(\tR\vdeviceToken\x12\x14\n" +
+	"\x05token\x18\x06 \x01(\tR\x05token\x12\x16\n" +
+	"\x06server\x18\a \x01(\tR\x06server\x12\x12\n" +
+	"\x04port\x18\b \x01(\x05R\x04port\"W\n" +
+	"\x15LoginWithTokenRequest\x12\x1b\n" +
+	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12!\n" +
+	"\fdevice_token\x18\x02 \x01(\tR\vdeviceToken\"\x8f\x01\n" +
+	"\x16LoginWithTokenResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1b\n" +
+	"\tjwt_token\x18\x03 \x01(\tR\bjwtToken\x12$\n" +
+	"\x0ejwt_expires_in\x18\x04 \x01(\x05R\fjwtExpiresIn\"9\n" +
 	"\x12GetServicesRequest\x12#\n" +
 	"\rsession_token\x18\x01 \x01(\tR\fsessionToken\"l\n" +
 	"\x13GetServicesResponse\x12\x18\n" +
@@ -550,9 +765,10 @@ const file_pkg_proto_client_proto_rawDesc = "" +
 	"secret_key\x18\x04 \x01(\tR\tsecretKey\x120\n" +
 	"\x14suggested_local_port\x18\x05 \x01(\x05R\x12suggestedLocalPort\x12\x1d\n" +
 	"\n" +
-	"server_url\x18\x06 \x01(\tR\tserverUrl2\x9d\x02\n" +
+	"server_url\x18\x06 \x01(\tR\tserverUrl2\x86\x03\n" +
 	"\rClientService\x12Q\n" +
-	"\fAuthenticate\x12\x1f.awecloud.signaling.AuthRequest\x1a .awecloud.signaling.AuthResponse\x12^\n" +
+	"\fAuthenticate\x12\x1f.awecloud.signaling.AuthRequest\x1a .awecloud.signaling.AuthResponse\x12g\n" +
+	"\x0eLoginWithToken\x12).awecloud.signaling.LoginWithTokenRequest\x1a*.awecloud.signaling.LoginWithTokenResponse\x12^\n" +
 	"\vGetServices\x12&.awecloud.signaling.GetServicesRequest\x1a'.awecloud.signaling.GetServicesResponse\x12Y\n" +
 	"\x0eConnectService\x12\".awecloud.signaling.ConnectRequest\x1a#.awecloud.signaling.ConnectResponseB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
 
@@ -568,29 +784,35 @@ func file_pkg_proto_client_proto_rawDescGZIP() []byte {
 	return file_pkg_proto_client_proto_rawDescData
 }
 
-var file_pkg_proto_client_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_pkg_proto_client_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_pkg_proto_client_proto_goTypes = []any{
-	(*AuthRequest)(nil),         // 0: awecloud.signaling.AuthRequest
-	(*AuthResponse)(nil),        // 1: awecloud.signaling.AuthResponse
-	(*GetServicesRequest)(nil),  // 2: awecloud.signaling.GetServicesRequest
-	(*GetServicesResponse)(nil), // 3: awecloud.signaling.GetServicesResponse
-	(*ServiceInfo)(nil),         // 4: awecloud.signaling.ServiceInfo
-	(*ConnectRequest)(nil),      // 5: awecloud.signaling.ConnectRequest
-	(*ConnectResponse)(nil),     // 6: awecloud.signaling.ConnectResponse
+	(*DeviceInfo)(nil),             // 0: awecloud.signaling.DeviceInfo
+	(*AuthRequest)(nil),            // 1: awecloud.signaling.AuthRequest
+	(*AuthResponse)(nil),           // 2: awecloud.signaling.AuthResponse
+	(*LoginWithTokenRequest)(nil),  // 3: awecloud.signaling.LoginWithTokenRequest
+	(*LoginWithTokenResponse)(nil), // 4: awecloud.signaling.LoginWithTokenResponse
+	(*GetServicesRequest)(nil),     // 5: awecloud.signaling.GetServicesRequest
+	(*GetServicesResponse)(nil),    // 6: awecloud.signaling.GetServicesResponse
+	(*ServiceInfo)(nil),            // 7: awecloud.signaling.ServiceInfo
+	(*ConnectRequest)(nil),         // 8: awecloud.signaling.ConnectRequest
+	(*ConnectResponse)(nil),        // 9: awecloud.signaling.ConnectResponse
 }
 var file_pkg_proto_client_proto_depIdxs = []int32{
-	4, // 0: awecloud.signaling.GetServicesResponse.services:type_name -> awecloud.signaling.ServiceInfo
-	0, // 1: awecloud.signaling.ClientService.Authenticate:input_type -> awecloud.signaling.AuthRequest
-	2, // 2: awecloud.signaling.ClientService.GetServices:input_type -> awecloud.signaling.GetServicesRequest
-	5, // 3: awecloud.signaling.ClientService.ConnectService:input_type -> awecloud.signaling.ConnectRequest
-	1, // 4: awecloud.signaling.ClientService.Authenticate:output_type -> awecloud.signaling.AuthResponse
-	3, // 5: awecloud.signaling.ClientService.GetServices:output_type -> awecloud.signaling.GetServicesResponse
-	6, // 6: awecloud.signaling.ClientService.ConnectService:output_type -> awecloud.signaling.ConnectResponse
-	4, // [4:7] is the sub-list for method output_type
-	1, // [1:4] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	0, // 0: awecloud.signaling.AuthRequest.device_info:type_name -> awecloud.signaling.DeviceInfo
+	7, // 1: awecloud.signaling.GetServicesResponse.services:type_name -> awecloud.signaling.ServiceInfo
+	1, // 2: awecloud.signaling.ClientService.Authenticate:input_type -> awecloud.signaling.AuthRequest
+	3, // 3: awecloud.signaling.ClientService.LoginWithToken:input_type -> awecloud.signaling.LoginWithTokenRequest
+	5, // 4: awecloud.signaling.ClientService.GetServices:input_type -> awecloud.signaling.GetServicesRequest
+	8, // 5: awecloud.signaling.ClientService.ConnectService:input_type -> awecloud.signaling.ConnectRequest
+	2, // 6: awecloud.signaling.ClientService.Authenticate:output_type -> awecloud.signaling.AuthResponse
+	4, // 7: awecloud.signaling.ClientService.LoginWithToken:output_type -> awecloud.signaling.LoginWithTokenResponse
+	6, // 8: awecloud.signaling.ClientService.GetServices:output_type -> awecloud.signaling.GetServicesResponse
+	9, // 9: awecloud.signaling.ClientService.ConnectService:output_type -> awecloud.signaling.ConnectResponse
+	6, // [6:10] is the sub-list for method output_type
+	2, // [2:6] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_pkg_proto_client_proto_init() }
@@ -604,7 +826,7 @@ func file_pkg_proto_client_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_client_proto_rawDesc), len(file_pkg_proto_client_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

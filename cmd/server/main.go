@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server"
 )
 
@@ -57,12 +58,22 @@ func main() {
 }
 
 func initLogger(cfg config.LogConfig) error {
-	if cfg.File != "" {
-		// 创建日志目录
-		if err := os.MkdirAll("logs", 0755); err != nil {
-			return fmt.Errorf("创建日志目录失败: %w", err)
-		}
-		// 这里可以配置更复杂的日志系统
+	logFile := cfg.File
+	if logFile == "" {
+		logFile = "logs/server.log"
 	}
+
+	// 创建日志目录
+	if err := os.MkdirAll("logs", 0755); err != nil {
+		return fmt.Errorf("创建日志目录失败: %w", err)
+	}
+
+	// 设置轮转日志
+	_, err := logger.SetupLogger(logFile)
+	if err != nil {
+		return fmt.Errorf("设置日志失败: %w", err)
+	}
+
+	log.Printf("日志输出到: %s (最大5000行，自动轮转)", logFile)
 	return nil
 }

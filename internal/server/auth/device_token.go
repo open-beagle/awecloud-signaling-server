@@ -110,9 +110,8 @@ func RevokeDeviceToken(db *gorm.DB, clientID int64, token string) error {
 
 // DeleteDeviceToken 删除Device Token记录
 func DeleteDeviceToken(db *gorm.DB, clientID int64, token string) error {
-	// 只能删除已撤销或已过期的Token
-	result := db.Where("client_id = ? AND device_token = ? AND (revoked = ? OR expires_at < ?)",
-		clientID, token, true, time.Now()).
+	// 直接删除Device Token（不需要先撤销）
+	result := db.Where("client_id = ? AND device_token = ?", clientID, token).
 		Delete(&model.DeviceToken{})
 
 	if result.Error != nil {
@@ -120,7 +119,7 @@ func DeleteDeviceToken(db *gorm.DB, clientID int64, token string) error {
 	}
 
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("无法删除活跃的Device Token，请先撤销")
+		return fmt.Errorf("Device Token不存在")
 	}
 
 	return nil

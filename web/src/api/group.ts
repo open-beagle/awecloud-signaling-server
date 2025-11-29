@@ -23,32 +23,32 @@ export interface GroupMember {
 }
 
 export const getGroups = () => {
-  return request.get<any, ApiResponse<Group[]>>('/groups')
+  return request.get<any, ApiResponse<Group[]>>('/api/v1/admin/groups')
 }
 
 export const createGroup = (data: { name: string; description?: string }) => {
-  return request.post<any, ApiResponse<Group>>('/groups', data)
+  return request.post<any, ApiResponse<Group>>('/api/v1/admin/groups', data)
 }
 
 export const updateGroup = (id: number, data: { name?: string; description?: string }) => {
-  return request.put<any, ApiResponse>(`/groups/${id}`, data)
+  return request.put<any, ApiResponse>(`/api/v1/admin/groups/${id}`, data)
 }
 
 export const deleteGroup = (id: number) => {
-  return request.delete<any, ApiResponse>(`/groups/${id}`)
+  return request.delete<any, ApiResponse>(`/api/v1/admin/groups/${id}`)
 }
 
 export const getGroupMembers = (groupId: number) => {
-  return request.get<any, ApiResponse<GroupMember[]>>(`/groups/${groupId}/members`)
+  return request.get<any, ApiResponse<GroupMember[]>>(`/api/v1/admin/groups/${groupId}/members`)
 }
 
 export const addGroupMember = (groupId: number, clientId: number, role: string = 'member') => {
-  return request.post<any, ApiResponse>(`/groups/${groupId}/members`, {
+  return request.post<any, ApiResponse>(`/api/v1/admin/groups/${groupId}/members`, {
     client_id: clientId,
     role
   })
 }
 
 export const removeGroupMember = (groupId: number, clientId: number) => {
-  return request.delete<any, ApiResponse>(`/groups/${groupId}/members/${clientId}`)
+  return request.delete<any, ApiResponse>(`/api/v1/admin/groups/${groupId}/members/${clientId}`)
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/agent"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 )
 
 var (
@@ -30,6 +31,16 @@ func main() {
 		fmt.Printf("Build Date: %s\n", buildDate)
 		os.Exit(0)
 	}
+
+	// 初始化日志
+	logFile := "logs/agent.log"
+	if err := os.MkdirAll("logs", 0755); err != nil {
+		log.Fatalf("创建日志目录失败: %v", err)
+	}
+	if _, err := logger.SetupLogger(logFile); err != nil {
+		log.Fatalf("设置日志失败: %v", err)
+	}
+	log.Printf("日志输出到: %s (最大5000行，自动轮转)", logFile)
 
 	// 加载配置
 	cfg, err := config.LoadAgentConfig(*configPath)

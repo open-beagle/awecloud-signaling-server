@@ -9,6 +9,9 @@ service ClientService {
   // Client认证
   rpc Authenticate(AuthRequest) returns (AuthResponse);
   
+  // 使用Device Token登录获取JWT
+  rpc LoginWithToken(LoginWithTokenRequest) returns (LoginWithTokenResponse);
+  
   // 获取可访问服务列表
   rpc GetServices(GetServicesRequest) returns (GetServicesResponse);
   
@@ -16,10 +19,18 @@ service ClientService {
   rpc ConnectService(ConnectRequest) returns (ConnectResponse);
 }
 
+// 设备信息
+message DeviceInfo {
+  string os = 1;
+  string arch = 2;
+  string hostname = 3;
+}
+
 // Client认证请求
 message AuthRequest {
   string client_id = 1;
   string client_secret = 2;
+  DeviceInfo device_info = 3;
 }
 
 // Client认证响应
@@ -28,9 +39,24 @@ message AuthResponse {
   string message = 2;
   string session_token = 3;
   int64 expires_at = 4;
-  string token = 5;  // 隧道认证 token
-  string server = 6; // 隧道服务器地址（完整 URL 或空）
-  int32 port = 7;    // 隧道服务器端口（使用 URL 时为 0）
+  string device_token = 5; // Device Token（用于记住登录）
+  string token = 6;  // 隧道认证 token
+  string server = 7; // 隧道服务器地址（完整 URL 或空）
+  int32 port = 8;    // 隧道服务器端口（使用 URL 时为 0）
+}
+
+// 使用Device Token登录请求
+message LoginWithTokenRequest {
+  string client_id = 1;
+  string device_token = 2;
+}
+
+// 使用Device Token登录响应
+message LoginWithTokenResponse {
+  bool success = 1;
+  string message = 2;
+  string jwt_token = 3;
+  int32 jwt_expires_in = 4;
 }
 
 // 获取服务列表请求

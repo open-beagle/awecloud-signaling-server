@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -104,7 +105,15 @@ func (s *Server) Run() error {
 	// 创建HTTP/2服务器
 	// 使用h2c（HTTP/2 Cleartext）支持非TLS的HTTP/2
 	h2s := &http2.Server{}
-	addr := fmt.Sprintf("%s:%d", s.config.Web.ListenAddr, s.config.Web.ListenPort)
+
+	// 构建监听地址
+	listenAddr := s.config.Web.ListenAddr
+	if listenAddr == "" || listenAddr == "0.0.0.0" {
+		// 明确使用 0.0.0.0 以确保监听IPv4
+		listenAddr = "0.0.0.0"
+	}
+	addr := fmt.Sprintf("%s:%d", listenAddr, s.config.Web.ListenPort)
+
 	s.httpServer = &http.Server{
 		Addr:    addr,
 		Handler: h2c.NewHandler(handler, h2s),
@@ -116,7 +125,15 @@ func (s *Server) Run() error {
 		log.Printf("  - Web管理界面: http://%s/", addr)
 		log.Printf("  - RESTful API: http://%s/api/...", addr)
 		log.Printf("  - gRPC服务: %s (HTTP/2)", addr)
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+
+		// 明确使用tcp4网络以确保监听IPv4
+		listener, err := net.Listen("tcp4", addr)
+		if err != nil {
+			log.Fatalf("创建监听器失败: %v", err)
+		}
+		log.Printf("监听器创建成功: %s (IPv4)", listener.Addr())
+
+		if err := s.httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("服务器启动失败: %v", err)
 		}
 	}()
@@ -158,8 +175,40 @@ func (s *Server) Run() error {
 	return nil
 }
 
+// customLogger 自定义日志中间件，health接口只在状态变化时打印
+func (s *Server) customLogger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+
+		c.Next()
+
+		// health接口只在状态变化时打印
+		if path == "/health" || path == "/health/ready" {
+			if c.Writer.Header().Get("X-Log-Status-Change") == "true" {
+				log.Printf("[%s] %s %d %v",
+					c.Request.Method,
+					path,
+					c.Writer.Status(),
+					time.Since(start))
+			}
+			return
+		}
+
+		// 其他接口正常打印
+		log.Printf("[%s] %s %d %v",
+			c.Request.Method,
+			path,
+			c.Writer.Status(),
+			time.Since(start))
+	}
+}
+
 func (s *Server) setupRouter() *gin.Engine {
-	router := gin.Default()
+	// 使用自定义日志中间件
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(s.customLogger())
 
 	// 健康检查接口
 	healthAPI := api.NewHealthAPI(s.agentService, s.frpServer)
@@ -173,94 +222,102 @@ func (s *Server) setupRouter() *gin.Engine {
 	// API路由组
 	apiGroup := router.Group("/api")
 	{
-		// 管理员认证
-		adminAPI := api.NewAdminAPI(s.config)
-		apiGroup.POST("/admin/login", adminAPI.Login)
-		apiGroup.POST("/admin/logout", adminAPI.Logout)
-
-		// 需要认证的路由
-		authGroup := apiGroup.Group("")
-		authGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret))
-		{
-			// Agent管理
-			agentAPI := api.NewAgentAPI()
-			authGroup.GET("/agents", agentAPI.List)
-			authGroup.POST("/agents", agentAPI.Create)
-			authGroup.DELETE("/agents/:id", agentAPI.Delete)
-			authGroup.POST("/agents/:id/regenerate-token", agentAPI.RegenerateToken)
-
-			// Client管理
-			clientAPI := api.NewClientAPI()
-			authGroup.GET("/clients", clientAPI.List)
-			authGroup.POST("/clients", clientAPI.Create)
-			authGroup.PUT("/clients/:id/disable", clientAPI.Disable)
-			authGroup.PUT("/clients/:id/enable", clientAPI.Enable)
-			authGroup.DELETE("/clients/:id", clientAPI.Delete)
-			authGroup.POST("/clients/:id/regenerate-secret", clientAPI.RegenerateSecret)
-
-			// STCP实例管理
-			stcpAPI := api.NewSTCPAPI()
-			stcpAPI.SetAgentService(s.agentService) // 注入AgentService
-			authGroup.GET("/stcp-instances", stcpAPI.List)
-			authGroup.POST("/stcp-instances", stcpAPI.Create)
-			authGroup.DELETE("/stcp-instances/:id", stcpAPI.Delete)
-			authGroup.GET("/stcp-instances/:id/accesses", stcpAPI.ListAccesses)
-			authGroup.POST("/stcp-instances/:id/grant", stcpAPI.GrantAccess)
-			authGroup.POST("/stcp-instances/:id/revoke", stcpAPI.RevokeAccess)
-			authGroup.PUT("/stcp-instances/:id/access-type", stcpAPI.SetAccessType)
-
-			// 组管理
-			groupAPI := api.NewGroupAPI()
-			authGroup.GET("/groups", groupAPI.GetGroups)
-			authGroup.POST("/groups", groupAPI.CreateGroup)
-			authGroup.PUT("/groups/:id", groupAPI.UpdateGroup)
-			authGroup.DELETE("/groups/:id", groupAPI.DeleteGroup)
-			authGroup.GET("/groups/:id/members", groupAPI.GetGroupMembers)
-			authGroup.POST("/groups/:id/members", groupAPI.AddGroupMember)
-			authGroup.DELETE("/groups/:id/members/:client_id", groupAPI.RemoveGroupMember)
-		}
-
-		// Client端API（不需要管理员认证）
+		// 保留旧版API用于向后兼容（已废弃）
 		clientAuthAPI := api.NewClientAuthAPI(s.config)
-		apiGroup.POST("/client/auth", clientAuthAPI.Auth)
-		apiGroup.GET("/client/services", clientAuthAPI.GetServices)
+		apiGroup.POST("/client/auth", clientAuthAPI.Auth) // 已废弃，使用 /api/v1/client/auth/login
 
-		// Device Token API（v1）
+		// v1 API
 		v1Group := apiGroup.Group("/v1")
 		{
-			// Device Token认证API（不需要JWT认证）
-			deviceTokenAPI := api.NewDeviceTokenAPI(s.config)
-			v1Group.POST("/client/auth/login", deviceTokenAPI.LoginWithSecret)
-			v1Group.POST("/client/auth/login/token", deviceTokenAPI.LoginWithToken)
-
-			// Device Token管理API（需要JWT认证）
-			deviceAuthGroup := v1Group.Group("/client/auth/login")
-			deviceAuthGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret))
+			// ==================== 管理员API ====================
+			adminGroup := v1Group.Group("/admin")
 			{
-				deviceAuthGroup.GET("/devices", deviceTokenAPI.ListDevices)
-				deviceAuthGroup.POST("/devices/:device_token/offline", deviceTokenAPI.OfflineDevice)
-				deviceAuthGroup.DELETE("/devices/:device_token", deviceTokenAPI.DeleteDevice)
+				// 管理员认证（不需要JWT认证）
+				adminAPI := api.NewAdminAPI(s.config)
+				adminGroup.POST("/auth/login", adminAPI.Login)
+				adminGroup.POST("/auth/logout", adminAPI.Logout)
+
+				// 需要管理员认证的路由
+				adminAuthGroup := adminGroup.Group("")
+				adminAuthGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret))
+				{
+					// Agent管理
+					agentAPI := api.NewAgentAPI()
+					adminAuthGroup.GET("/agents", agentAPI.List)
+					adminAuthGroup.POST("/agents", agentAPI.Create)
+					adminAuthGroup.DELETE("/agents/:id", agentAPI.Delete)
+					adminAuthGroup.POST("/agents/:id/regenerate-token", agentAPI.RegenerateToken)
+
+					// Client管理
+					clientAPI := api.NewClientAPI()
+					adminAuthGroup.GET("/clients", clientAPI.List)
+					adminAuthGroup.POST("/clients", clientAPI.Create)
+					adminAuthGroup.PUT("/clients/:id/disable", clientAPI.Disable)
+					adminAuthGroup.PUT("/clients/:id/enable", clientAPI.Enable)
+					adminAuthGroup.DELETE("/clients/:id", clientAPI.Delete)
+					adminAuthGroup.POST("/clients/:id/regenerate-secret", clientAPI.RegenerateSecret)
+
+					// STCP实例管理
+					stcpAPI := api.NewSTCPAPI()
+					stcpAPI.SetAgentService(s.agentService) // 注入AgentService
+					adminAuthGroup.GET("/stcp-instances", stcpAPI.List)
+					adminAuthGroup.POST("/stcp-instances", stcpAPI.Create)
+					adminAuthGroup.DELETE("/stcp-instances/:id", stcpAPI.Delete)
+					adminAuthGroup.GET("/stcp-instances/:id/accesses", stcpAPI.ListAccesses)
+					adminAuthGroup.POST("/stcp-instances/:id/grant", stcpAPI.GrantAccess)
+					adminAuthGroup.POST("/stcp-instances/:id/revoke", stcpAPI.RevokeAccess)
+					adminAuthGroup.PUT("/stcp-instances/:id/access-type", stcpAPI.SetAccessType)
+
+					// 组管理
+					groupAPI := api.NewGroupAPI()
+					adminAuthGroup.GET("/groups", groupAPI.GetGroups)
+					adminAuthGroup.POST("/groups", groupAPI.CreateGroup)
+					adminAuthGroup.PUT("/groups/:id", groupAPI.UpdateGroup)
+					adminAuthGroup.DELETE("/groups/:id", groupAPI.DeleteGroup)
+					adminAuthGroup.GET("/groups/:id/members", groupAPI.GetGroupMembers)
+					adminAuthGroup.POST("/groups/:id/members", groupAPI.AddGroupMember)
+					adminAuthGroup.DELETE("/groups/:id/members/:client_id", groupAPI.RemoveGroupMember)
+
+					// 审计日志
+					auditLogAPI := api.NewAuditLogAPI()
+					adminAuthGroup.GET("/audit/connection", auditLogAPI.QueryAuditLogs)
+					adminAuthGroup.GET("/audit/connection/export", auditLogAPI.ExportAuditLogs)
+				}
 			}
 
-			// 端口偏好API（需要Client JWT认证）
-			portPrefAPI := api.NewPortPreferenceAPI()
-			auditLogAPI := api.NewAuditLogAPI()
-
-			v1ClientGroup := v1Group.Group("/client")
-			v1ClientGroup.Use(api.ClientAuthMiddleware(s.config.Security.JWTSecret))
+			// ==================== Client API ====================
+			clientGroup := v1Group.Group("/client")
 			{
-				v1ClientGroup.GET("/preferences/port", portPrefAPI.GetPortPreferences)
-				v1ClientGroup.POST("/preferences/port", portPrefAPI.SavePortPreference)
-				// 客户端记录审计日志（需要Client JWT认证）
-				v1ClientGroup.POST("/audit/connection", auditLogAPI.RecordConnection)
-			}
+				// Client认证（不需要JWT认证）
+				deviceTokenAPI := api.NewDeviceTokenAPI(s.config)
+				clientGroup.POST("/auth/login", deviceTokenAPI.LoginWithSecret)
+				clientGroup.POST("/auth/login/token", deviceTokenAPI.LoginWithToken)
 
-			// 管理员查询审计日志（需要管理员认证）
-			v1AdminGroup := v1Group.Group("/admin")
-			v1AdminGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret))
-			{
-				v1AdminGroup.GET("/audit/connection", auditLogAPI.QueryAuditLogs)
-				v1AdminGroup.GET("/audit/connection/export", auditLogAPI.ExportAuditLogs)
+				// 需要Client JWT认证的路由
+				clientAuthGroup := clientGroup.Group("")
+				clientAuthGroup.Use(api.ClientAuthMiddleware(s.config.Security.JWTSecret))
+				{
+					// 服务列表
+					clientAuthGroup.GET("/services", clientAuthAPI.GetServices)
+
+					// Device Token管理
+					clientAuthGroup.GET("/auth/login/devices", deviceTokenAPI.ListDevices)
+					clientAuthGroup.POST("/auth/login/devices/:device_token/offline", deviceTokenAPI.OfflineDevice)
+					clientAuthGroup.DELETE("/auth/login/devices/:device_token", deviceTokenAPI.DeleteDevice)
+
+					// 端口偏好
+					portPrefAPI := api.NewPortPreferenceAPI()
+					clientAuthGroup.GET("/preferences/port", portPrefAPI.GetPortPreferences)
+					clientAuthGroup.POST("/preferences/port", portPrefAPI.SavePortPreference)
+
+					// 审计日志
+					auditLogAPI := api.NewAuditLogAPI()
+					clientAuthGroup.POST("/audit/connection", auditLogAPI.RecordConnection)
+
+					// 隧道配置
+					tunnelConfigAPI := api.NewTunnelConfigAPI(s.config)
+					clientAuthGroup.GET("/tunnel/config", tunnelConfigAPI.GetTunnelConfig)
+				}
 			}
 		}
 	}

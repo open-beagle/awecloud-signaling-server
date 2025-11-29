@@ -3,6 +3,7 @@ package api
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -126,8 +127,9 @@ func (a *DeviceTokenAPI) LoginWithSecret(c *gin.Context) {
 	// 生成JWT Token
 	jwtExpiresIn := a.config.Security.JWTExpireHours * 3600
 	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"client_id": client.ID,
-		"exp":       time.Now().Add(time.Hour * time.Duration(a.config.Security.JWTExpireHours)).Unix(),
+		"client_id":    client.ID,
+		"device_token": deviceToken.DeviceToken,
+		"exp":          time.Now().Add(time.Hour * time.Duration(a.config.Security.JWTExpireHours)).Unix(),
 	})
 
 	jwtTokenString, err := jwtToken.SignedString([]byte(a.config.Security.JWTSecret))
@@ -199,8 +201,9 @@ func (a *DeviceTokenAPI) LoginWithToken(c *gin.Context) {
 	// 生成JWT Token
 	jwtExpiresIn := a.config.Security.JWTExpireHours * 3600
 	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"client_id": client.ID,
-		"exp":       time.Now().Add(time.Hour * time.Duration(a.config.Security.JWTExpireHours)).Unix(),
+		"client_id":    client.ID,
+		"device_token": deviceToken.DeviceToken,
+		"exp":          time.Now().Add(time.Hour * time.Duration(a.config.Security.JWTExpireHours)).Unix(),
 	})
 
 	jwtTokenString, err := jwtToken.SignedString([]byte(a.config.Security.JWTSecret))
@@ -224,7 +227,7 @@ func (a *DeviceTokenAPI) LoginWithToken(c *gin.Context) {
 // ListDevices 列出用户已登录的设备
 func (a *DeviceTokenAPI) ListDevices(c *gin.Context) {
 	// 从JWT获取client_id
-	clientID, exists := c.Get("client_id")
+	clientIDRaw, exists := c.Get("client_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, DeviceListResponse{
 			Success: false,
@@ -233,11 +236,33 @@ func (a *DeviceTokenAPI) ListDevices(c *gin.Context) {
 		return
 	}
 
-	// 获取当前使用的token（如果有）
-	currentToken := c.GetHeader("X-Device-Token")
+	// 转换client_id为int64
+	var clientID int64
+	switch v := clientIDRaw.(type) {
+	case float64:
+		clientID = int64(v)
+	case int64:
+		clientID = v
+	case int:
+		clientID = int64(v)
+	default:
+		log.Printf("无效的client_id类型: %T", clientIDRaw)
+		c.JSON(http.StatusInternalServerError, DeviceListResponse{
+			Success: false,
+			Message: "内部错误",
+		})
+		return
+	}
+
+	// 获取当前使用的JWT token（从Authorization header）
+	authHeader := c.GetHeader("Authorization")
+	currentJWT := ""
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		currentJWT = strings.TrimPrefix(authHeader, "Bearer ")
+	}
 
 	// 查询设备列表
-	tokens, err := auth.ListDeviceTokens(db.DB, int64(clientID.(float64)))
+	tokens, err := auth.ListDeviceTokens(db.DB, clientID)
 	if err != nil {
 		log.Printf("查询设备列表失败: %v", err)
 		c.JSON(http.StatusInternalServerError, DeviceListResponse{
@@ -251,6 +276,23 @@ func (a *DeviceTokenAPI) ListDevices(c *gin.Context) {
 	devices := make([]DeviceTokenInfo, 0, len(tokens))
 	for _, token := range tokens {
 		deviceInfo, _ := auth.DeviceInfoFromJSON(token.DeviceInfo)
+
+		// 判断是否是当前设备：比较JWT token
+		isCurrent := false
+		if currentJWT != "" {
+			// 解析当前JWT，获取device_token claim
+			jwtToken, err := jwt.Parse(currentJWT, func(t *jwt.Token) (interface{}, error) {
+				return []byte(a.config.Security.JWTSecret), nil
+			})
+			if err == nil && jwtToken.Valid {
+				if claims, ok := jwtToken.Claims.(jwt.MapClaims); ok {
+					if deviceToken, exists := claims["device_token"]; exists {
+						isCurrent = (deviceToken == token.DeviceToken)
+					}
+				}
+			}
+		}
+
 		devices = append(devices, DeviceTokenInfo{
 			DeviceToken: token.DeviceToken,
 			DeviceInfo:  deviceInfo,
@@ -258,7 +300,7 @@ func (a *DeviceTokenAPI) ListDevices(c *gin.Context) {
 			LastUsedAt:  token.LastUsedAt.Format(time.RFC3339),
 			ExpiresAt:   token.ExpiresAt.Format(time.RFC3339),
 			Revoked:     token.Revoked,
-			IsCurrent:   token.DeviceToken == currentToken,
+			IsCurrent:   isCurrent,
 		})
 	}
 

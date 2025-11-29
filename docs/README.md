@@ -2,6 +2,28 @@
 
 > ⚠️ **重要规范**: 禁止随意创建文档，所有文档创建必须经过讨论和批准。
 
+## 开发规范
+
+### 构建规范
+
+- ✅ **允许**: 构建项目到 `bin/` 目录
+- ❌ **禁止**: 在其他位置生成可执行文件
+- 📝 **要求**: 使用 `scripts/build.sh` 或标准 go build 命令
+- 🔧 **开发**: 只构建当前架构 `GOARCHS=$(go env GOARCH) ./scripts/build.sh`
+- 🚀 **生产**: 构建所有架构 `./scripts/build.sh`
+
+### 调试规范
+
+- ❌ **禁止**: 随意调试系统
+- 💬 **要求**: 调试前必须讨论方案
+- 📋 **记录**: 所有调试活动记录在 `docs/debug.md`
+
+### 进度更新规范
+
+- 📝 **开发计划** (`docs/plan.md`): 完成任务后更新状态
+- 📊 **进度跟踪** (`docs/progress.md`): 每日更新，完成任务后清理详情
+- ❌ **禁止**: 随意创建文档，所有新文档必须经过讨论
+
 ## 核心文档
 
 ### 📋 开发计划 (`plan.md`)
@@ -42,7 +64,7 @@
   - `design_server.md` - Server 进程内部设计（重要）
   - `design_http2.md` - HTTP/2 统一端口设计（重要）
   - `design_security_token_audit.md` - 安全令牌与审计日志设计（重要）
-  - `design_version_control.md` - Desktop版本管理设计（重要）
+  - `design_version_control.md` - Desktop 版本管理设计（重要）
   - `design_public_url.md` - 公网地址配置设计（待实现）
   - `design_server_access_control.md` - 访问控制系统设计（未来功能）
   - `design_server_web.md` - Web 管理界面设计
@@ -57,7 +79,7 @@
 **设计变更** - 重要设计决策的记录
 
 - 2025-11-27: HTTP/2 统一端口设计
-  - 将HTTP和gRPC合并到端口8080
+  - 将 HTTP 和 gRPC 合并到端口 8080
   - 详细的变更原因和实施计划
 
 ### 🧪 测试规范 (`test.md`)
@@ -89,6 +111,7 @@
 - 与 Server 通过 gRPC 和 FRP 通信
 
 **Desktop 文档**:
+
 - `../desktop/docs/README.md` - Desktop 文档索引
 - `../desktop/docs/development.md` - 开发指南
 - `../desktop/docs/user-guide.md` - 用户手册
@@ -200,13 +223,14 @@ tests/
 ## 最近更新
 
 ### 2025-11-27
+
 - 新增 `design_security_token_audit.md` - 安全令牌与审计日志设计
-  - Device Token系统：替代明文secret存储
-  - Desktop登录双模式设计
+  - Device Token 系统：替代明文 secret 存储
+  - Desktop 登录双模式设计
   - 审计日志系统：记录用户连接行为
   - 设备管理功能：查看、下线、删除设备
-- 新增 `design_version_control.md` - Desktop版本管理设计
-  - Server端设置最低支持版本
-  - Desktop端版本检查和强制升级
-  - Web管理界面版本管理功能
+- 新增 `design_version_control.md` - Desktop 版本管理设计
+  - Server 端设置最低支持版本
+  - Desktop 端版本检查和强制升级
+  - Web 管理界面版本管理功能
   - 版本发布流程规范

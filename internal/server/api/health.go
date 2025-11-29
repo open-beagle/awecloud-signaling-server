@@ -15,14 +15,20 @@ type HealthAPI struct {
 	startTime    time.Time
 	agentService *grpcserver.AgentServiceServer
 	frpServer    *frp.FRPServer
+
+	// 状态缓存，用于检测变化
+	lastHealthStatus string
+	lastReadyStatus  string
 }
 
 // NewHealthAPI 创建健康检查API实例
 func NewHealthAPI(agentService *grpcserver.AgentServiceServer, frpServer *frp.FRPServer) *HealthAPI {
 	return &HealthAPI{
-		startTime:    time.Now(),
-		agentService: agentService,
-		frpServer:    frpServer,
+		startTime:        time.Now(),
+		agentService:     agentService,
+		frpServer:        frpServer,
+		lastHealthStatus: "",
+		lastReadyStatus:  "",
 	}
 }
 
@@ -35,8 +41,16 @@ func NewHealthAPI(agentService *grpcserver.AgentServiceServer, frpServer *frp.FR
 // @Failure 503 {object} map[string]interface{} "服务不可用"
 // @Router /health [get]
 func (h *HealthAPI) Health(c *gin.Context) {
+	status := "ok"
+
+	// 只在状态变化时打印日志
+	if h.lastHealthStatus != status {
+		c.Writer.Header().Set("X-Log-Status-Change", "true")
+		h.lastHealthStatus = status
+	}
+
 	c.JSON(200, gin.H{
-		"status":    "ok",
+		"status":    status,
 		"timestamp": time.Now().Format(time.RFC3339),
 	})
 }
@@ -86,6 +100,12 @@ func (h *HealthAPI) Ready(c *gin.Context) {
 	if !allReady {
 		status = "not_ready"
 		statusCode = 503
+	}
+
+	// 只在状态变化时打印日志
+	if h.lastReadyStatus != status {
+		c.Writer.Header().Set("X-Log-Status-Change", "true")
+		h.lastReadyStatus = status
 	}
 
 	response := gin.H{

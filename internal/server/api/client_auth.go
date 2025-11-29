@@ -118,6 +118,56 @@ func (a *ClientAuthAPI) Auth(c *gin.Context) {
 	})
 }
 
+// GetTunnelConfig 获取隧道配置
+func (a *ClientAuthAPI) GetTunnelConfig(c *gin.Context) {
+	// 从Authorization header获取token
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "未提供认证信息",
+		})
+		return
+	}
+
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "认证格式错误",
+		})
+		return
+	}
+
+	// 验证Token
+	token, err := jwt.Parse(parts[1], func(token *jwt.Token) (interface{}, error) {
+		return []byte(a.config.Security.JWTSecret), nil
+	})
+
+	if err != nil || !token.Valid {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "Token无效或已过期",
+		})
+		return
+	}
+
+	// 构建 FRP 连接信息
+	frpServer := ""
+	frpPort := a.config.Server.BindPort
+	if a.config.Server.PublicURL != "" {
+		frpServer = a.config.Server.PublicURL
+		frpPort = 0 // 使用完整 URL 时，端口信息已包含在 URL 中
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"token":   a.config.Server.Token,
+		"server":  frpServer,
+		"port":    frpPort,
+	})
+}
+
 func (a *ClientAuthAPI) GetServices(c *gin.Context) {
 	// 从Authorization header获取token
 	authHeader := c.GetHeader("Authorization")

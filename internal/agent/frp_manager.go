@@ -88,7 +88,24 @@ func (f *FRPManager) Run() error {
 		default:
 			// 创建FRP客户端并运行
 			if err := f.runFRPClient(); err != nil {
-				log.Printf("FRP客户端错误: %v", err)
+				// 检查是否是因为context取消导致的错误
+				select {
+				case <-f.ctx.Done():
+					log.Println("FRP管理器收到停止信号")
+					f.wg.Wait()
+					return nil
+				default:
+					log.Printf("FRP客户端错误: %v", err)
+				}
+			}
+
+			// 再次检查context，避免在停止时继续重试
+			select {
+			case <-f.ctx.Done():
+				log.Println("FRP管理器收到停止信号")
+				f.wg.Wait()
+				return nil
+			default:
 			}
 
 			// 检查是否需要重启
@@ -148,8 +165,8 @@ func (f *FRPManager) runFRPClient() error {
 		websocketPath = parsedURL.Path
 		protocol = parsedURL.Protocol
 
-		log.Printf("使用隧道 URL: %s (解析为 %s:%d%s, 协议: %s)",
-			serverURL, serverAddr, port, websocketPath, protocol)
+		log.Printf("使用隧道 URL: %s (解析为 %s://%s:%d%s)",
+			serverURL, protocol, serverAddr, port, websocketPath)
 	} else if serverPort > 0 {
 		port = serverPort
 	}
