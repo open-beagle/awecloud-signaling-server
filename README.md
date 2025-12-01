@@ -41,7 +41,7 @@ bash scripts/build.sh
 ```bash
 # 开发构建
 BUILD_VERSION=v0.1.0 \
-BUILD_ADDRESS=https://signaling.example.com \
+BUILD_ADDRESS=${SIGNALING_ADDRESS} \
 PLATFORMS="windows/amd64" \
 bash scripts/build_desktop.sh
 
