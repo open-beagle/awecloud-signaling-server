@@ -40,6 +40,18 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true }
       },
       {
+        path: 'groups/:id/members',
+        name: 'GroupMembers',
+        component: () => import('@/views/Group/Members.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'stcp-instances/:id/access',
+        name: 'STCPAccess',
+        component: () => import('@/views/STCP/Access.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
         path: 'audit-logs',
         name: 'AuditLogs',
         component: () => import('@/views/Audit/AuditLogs.vue'),

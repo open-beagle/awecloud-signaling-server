@@ -299,12 +299,20 @@ func (a *STCPAPI) ListAccesses(c *gin.Context) {
 
 	// 查询访问权限列表
 	var accesses []model.STCPAccess
-	if err := db.DB.Preload("Client").Where("stcp_instance_id = ?", id).Find(&accesses).Error; err != nil {
+	if err := db.DB.Where("stcp_instance_id = ?", id).Find(&accesses).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, STCPResponse{
 			Success: false,
 			Message: "查询失败",
 		})
 		return
+	}
+
+	// 手动加载 Client 信息
+	for i := range accesses {
+		var client model.Client
+		if err := db.DB.First(&client, accesses[i].ClientID).Error; err == nil {
+			accesses[i].Client = &client
+		}
 	}
 
 	c.JSON(http.StatusOK, STCPResponse{

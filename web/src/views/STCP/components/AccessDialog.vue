@@ -11,23 +11,23 @@
       </el-form-item>
       
       <el-form-item label="访问权限">
-        <el-radio-group v-model="form.access_type">
-          <el-radio label="public">
-            <div>
-              <div><strong>Public</strong> - 所有用户可访问</div>
-              <div style="font-size: 12px; color: #999">适用于团队共享的开发环境</div>
+        <el-radio-group v-model="form.access_type" class="vertical-radio-group">
+          <el-radio label="public" class="radio-item">
+            <div class="radio-content">
+              <div class="radio-title"><strong>Public</strong> - 所有用户可访问</div>
+              <div class="radio-desc">适用于团队共享的开发环境</div>
             </div>
           </el-radio>
-          <el-radio label="private">
-            <div>
-              <div><strong>Private</strong> - 仅授权用户可访问</div>
-              <div style="font-size: 12px; color: #999">适用于个人开发环境或敏感服务</div>
+          <el-radio label="private" class="radio-item">
+            <div class="radio-content">
+              <div class="radio-title"><strong>Private</strong> - 仅授权用户可访问</div>
+              <div class="radio-desc">适用于个人开发环境或敏感服务</div>
             </div>
           </el-radio>
-          <el-radio label="group">
-            <div>
-              <div><strong>Group</strong> - 组成员可访问</div>
-              <div style="font-size: 12px; color: #999">适用于团队协作场景</div>
+          <el-radio label="group" class="radio-item">
+            <div class="radio-content">
+              <div class="radio-title"><strong>Group</strong> - 组成员可访问</div>
+              <div class="radio-desc">适用于团队协作场景</div>
             </div>
           </el-radio>
         </el-radio-group>
@@ -137,14 +137,58 @@ watch(() => props.modelValue, (val) => {
 </script>
 
 <style scoped>
-:deep(.el-radio) {
-  display: block;
-  margin: 10px 0;
-  height: auto;
+.vertical-radio-group {
+  width: 100%;
+}
+
+.radio-item {
+  display: flex !important;
+  align-items: flex-start;
+  width: 100%;
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 4px;
+  transition: all 0.3s;
+}
+
+.radio-item:hover {
+  border-color: var(--el-color-primary);
+  background-color: var(--el-fill-color-light);
+}
+
+.radio-content {
+  flex: 1;
+  margin-left: 8px;
+}
+
+.radio-title {
+  font-size: 14px;
   line-height: 1.5;
+  margin-bottom: 4px;
+}
+
+.radio-desc {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.4;
+}
+
+:deep(.el-radio) {
+  display: flex;
+  align-items: flex-start;
+  height: auto;
+  white-space: normal;
+  margin-right: 0;
 }
 
 :deep(.el-radio__label) {
+  flex: 1;
   white-space: normal;
+  padding-left: 0;
+}
+
+:deep(.el-radio__input) {
+  margin-top: 2px;
 }
 </style>

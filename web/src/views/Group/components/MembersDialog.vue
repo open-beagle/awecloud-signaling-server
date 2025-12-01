@@ -122,8 +122,8 @@ const loadMembers = async () => {
 const loadClients = async () => {
   try {
     const res = await getClients()
-    if (res.success && res.data) {
-      allClients.value = res.data
+    if (res.success && res.clients) {
+      allClients.value = res.clients
     }
   } catch (error) {
     ElMessage.error('加载用户列表失败')

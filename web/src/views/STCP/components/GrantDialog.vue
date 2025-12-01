@@ -26,7 +26,11 @@
       </div>
 
       <el-table v-loading="loading" :data="grantedClients" stripe>
-        <el-table-column prop="client_id" :label="t('client.clientId')" min-width="200" />
+        <el-table-column :label="t('stcp.user')" min-width="200">
+          <template #default="{ row }">
+            {{ row.client?.client_id || '-' }}
+          </template>
+        </el-table-column>
         <el-table-column :label="t('agent.createdAt')" width="100">
           <template #default="{ row }">
             <TimeAgo :time="row.created_at" />
@@ -133,8 +137,8 @@ const loadGrantedClients = async () => {
 const loadClients = async () => {
   try {
     const res = await getClients()
-    if (res.success && res.data) {
-      allClients.value = res.data
+    if (res.success && res.clients) {
+      allClients.value = res.clients
     }
   } catch (error) {
     // ignore

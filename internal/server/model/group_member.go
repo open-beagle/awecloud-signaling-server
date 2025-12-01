@@ -11,7 +11,7 @@ type GroupMember struct {
 
 	// 关联
 	Group  *Group  `gorm:"foreignKey:GroupID" json:"group,omitempty"`
-	Client *Client `gorm:"foreignKey:ClientID" json:"client,omitempty"`
+	Client *Client `gorm:"foreignKey:ClientID" json:"client"`
 }
 
 func (GroupMember) TableName() string {

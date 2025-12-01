@@ -115,6 +115,7 @@ export default {
     grantToClient: 'Granted Clients',
     addClient: 'Add Client',
     selectClient: 'Select Client',
+    user: 'User',
     grantSuccess: 'Granted successfully',
     revokeConfirm: 'Are you sure to revoke this access?',
     revokeSuccess: 'Revoked successfully'

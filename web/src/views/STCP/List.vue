@@ -79,16 +79,12 @@
       :instance="selectedInstance"
       @success="loadInstances"
     />
-    <GrantDialog
-      v-model="grantDialogVisible"
-      :instance="selectedInstance"
-      @success="loadInstances"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete, Setting, UserFilled } from '@element-plus/icons-vue'
@@ -97,14 +93,13 @@ import type { STCPInstance } from '@/types/models'
 import TimeAgo from '@/components/Common/TimeAgo.vue'
 import CreateDialog from './components/CreateDialog.vue'
 import AccessDialog from './components/AccessDialog.vue'
-import GrantDialog from './components/GrantDialog.vue'
 
 const { t } = useI18n()
+const router = useRouter()
 
 const loading = ref(false)
 const instances = ref<STCPInstance[]>([])
 const createDialogVisible = ref(false)
-const grantDialogVisible = ref(false)
 const accessDialogVisible = ref(false)
 const selectedInstance = ref<STCPInstance | null>(null)
 
@@ -132,8 +127,15 @@ const handleSetAccess = (instance: STCPInstance) => {
 }
 
 const handleGrant = (instance: STCPInstance) => {
-  selectedInstance.value = instance
-  grantDialogVisible.value = true
+  router.push({
+    name: 'STCPAccess',
+    params: {
+      id: instance.id,
+      name: instance.instance_name,
+      ip: instance.local_ip,
+      port: instance.local_port
+    }
+  })
 }
 
 const handleDelete = async (instance: STCPInstance) => {

@@ -11,7 +11,7 @@ type STCPAccess struct {
 
 	// 关联
 	STCPInstance *STCPInstance `gorm:"foreignKey:STCPInstanceID" json:"stcp_instance,omitempty"`
-	Client       *Client       `gorm:"foreignKey:ClientID" json:"client,omitempty"`
+	Client       *Client       `gorm:"foreignKey:ClientID" json:"client"`
 }
 
 func (STCPAccess) TableName() string {

@@ -162,12 +162,26 @@ func (a *GroupAPI) GetGroupMembers(c *gin.Context) {
 	groupID := c.Param("id")
 
 	var members []model.GroupMember
-	if err := db.DB.Preload("Client").Where("group_id = ?", groupID).Find(&members).Error; err != nil {
+	if err := db.DB.Where("group_id = ?", groupID).Find(&members).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "查询失败",
 		})
 		return
+	}
+
+	// 手动加载 Client 信息
+	for i := range members {
+		var client model.Client
+		err := db.DB.First(&client, members[i].ClientID).Error
+		if err != nil {
+			// 记录错误但继续处理
+			c.Header("X-Debug-Client-Error", err.Error())
+		} else {
+			// 不要隐藏 client_secret
+			client.ClientSecret = ""
+			members[i].Client = &client
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

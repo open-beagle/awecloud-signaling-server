@@ -65,30 +65,23 @@
         <el-button type="primary" @click="handleSubmit">确定</el-button>
       </template>
     </el-dialog>
-
-    <!-- 成员管理对话框 -->
-    <MembersDialog
-      v-model="membersDialogVisible"
-      :group="selectedGroup"
-      @success="loadGroups"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete, User, Edit } from '@element-plus/icons-vue'
 import { getGroups, createGroup, updateGroup, deleteGroup } from '@/api/group'
 import type { Group } from '@/api/group'
-import MembersDialog from './components/MembersDialog.vue'
+
+const router = useRouter()
 
 const loading = ref(false)
 const groups = ref<Group[]>([])
 const dialogVisible = ref(false)
-const membersDialogVisible = ref(false)
 const editingGroup = ref<Group | null>(null)
-const selectedGroup = ref<Group | null>(null)
 
 const form = ref({
   name: '',
@@ -161,8 +154,13 @@ const handleSubmit = async () => {
 }
 
 const handleMembers = (group: Group) => {
-  selectedGroup.value = group
-  membersDialogVisible.value = true
+  router.push({
+    name: 'GroupMembers',
+    params: {
+      id: group.id,
+      name: group.name
+    }
+  })
 }
 
 const handleDelete = async (group: Group) => {

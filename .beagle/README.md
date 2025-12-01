@@ -20,14 +20,20 @@ scripts/
 **本地开发构建**（使用 `scripts/build.sh`）：
 
 ```bash
-# 设置版本（可选）
-export BUILD_VERSION=v0.1.0
+# 构建前端代码
+BUILD_VERSION=v0.1.0 bash scripts/build_frontend.sh
 
-# 只构建当前架构
-GOARCHS=$(go env GOARCH) bash ./scripts/build.sh
-
-# 或构建多架构（需要安装交叉编译工具链）
-GOARCHS=amd64,arm64 bash ./scripts/build.sh
+# 构建后端代码
+# 在 golang:1.24-alpine 容器中构建
+docker pull registry.cn-qingdao.aliyuncs.com/wod/golang:1.24-alpine && \
+docker run --rm \
+   -v $(pwd):/go/src/github.com/open-beagle/awecloud-signaling-server \
+   -v $HOME/go/pkg:/go/pkg \
+   -w /go/src/github.com/open-beagle/awecloud-signaling-server \
+   -e BUILD_VERSION=v0.1.0 \
+   -e GOARCHS=amd64,arm64 \
+   registry.cn-qingdao.aliyuncs.com/wod/golang:1.24-alpine \
+   bash ./.beagle/build.sh
 
 # 输出在 bin/ 目录
 # bin/server-linux-amd64
@@ -36,20 +42,6 @@ GOARCHS=amd64,arm64 bash ./scripts/build.sh
 # bin/agent-linux-arm64
 # bin/server -> server-linux-amd64 (符号链接)
 # bin/agent -> agent-linux-amd64 (符号链接)
-```
-
-**CI/CD 构建**（使用 `.beagle/build.sh` 和 xx-go）：
-
-```bash
-# 在 golang:1.24-alpine 容器中构建
-docker pull registry.cn-qingdao.aliyuncs.com/wod/golang:1.24-alpine && \
-docker run --rm --user 1000:1000 \
-   -v $(pwd):/go/src/github.com/open-beagle/awecloud-signaling-server \
-   -w /go/src/github.com/open-beagle/awecloud-signaling-server \
-   -e BUILD_VERSION=v0.1.0 \
-   -e GOARCHS=amd64,arm64 \
-   registry.cn-qingdao.aliyuncs.com/wod/golang:1.24-alpine \
-   bash ./.beagle/build.sh
 ```
 
 ### 查看版本信息
@@ -70,13 +62,29 @@ docker run --rm --user 1000:1000 \
 
 ### 2. 构建 Docker 镜像
 
+前提：已完成二进制文件构建（步骤 1）和前端构建（`cd web && npm run build`）
+
 ```bash
-# 设置版本和镜像仓库（可选）
+# 设置版本和镜像仓库
 export BUILD_VERSION=v0.1.0
 export REGISTRY=registry.cn-qingdao.aliyuncs.com/wod
+export AUTHOR=open-beagle
 
-# 构建
-bash .beagle/local-docker-build.sh
+# 构建 Server 镜像
+docker build -f .beagle/server.dockerfile \
+  --build-arg BASE=${REGISTRY}/alpine:3 \
+  --build-arg AUTHOR=${AUTHOR} \
+  --build-arg VERSION=${BUILD_VERSION} \
+  -t ${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION} \
+  .
+
+# 构建 Agent 镜像
+docker build -f .beagle/agent.dockerfile \
+  --build-arg BASE=${REGISTRY}/alpine:3 \
+  --build-arg AUTHOR=${AUTHOR} \
+  --build-arg VERSION=${BUILD_VERSION} \
+  -t ${REGISTRY}/awecloud-signaling-agent:${BUILD_VERSION} \
+  .
 
 # 查看镜像
 docker images | grep awecloud-signaling

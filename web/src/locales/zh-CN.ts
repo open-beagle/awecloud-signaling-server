@@ -115,6 +115,7 @@ export default {
     grantToClient: '已授权的Client',
     addClient: '添加Client',
     selectClient: '选择Client',
+    user: '用户',
     grantSuccess: '授权成功',
     revokeConfirm: '确认撤销此授权吗？',
     revokeSuccess: '撤销成功'
