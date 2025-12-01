@@ -51,6 +51,11 @@ type FRPServer struct {
 	proxies    map[string]*ProxyInfo // proxy_name -> proxy info
 	proxyMutex sync.RWMutex
 
+	// 连接统计（用于判断是否变化）
+	lastAgentCount   int
+	lastDesktopCount int
+	lastProxyCount   int
+
 	// 上下文
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -161,7 +166,7 @@ func (f *FRPServer) monitorConnections() {
 	}
 }
 
-// logConnectionStats 记录连接统计
+// logConnectionStats 记录连接统计（只在数量变化时打印）
 func (f *FRPServer) logConnectionStats() {
 	f.connMutex.RLock()
 	agentCount := 0
@@ -179,8 +184,14 @@ func (f *FRPServer) logConnectionStats() {
 	proxyCount := len(f.proxies)
 	f.proxyMutex.RUnlock()
 
-	log.Printf("FRP连接统计: Agent=%d, Desktop=%d, Proxy=%d",
-		agentCount, desktopCount, proxyCount)
+	// 只在数量变化时打印
+	if agentCount != f.lastAgentCount || desktopCount != f.lastDesktopCount || proxyCount != f.lastProxyCount {
+		log.Printf("FRP连接统计: Agent=%d, Desktop=%d, Proxy=%d",
+			agentCount, desktopCount, proxyCount)
+		f.lastAgentCount = agentCount
+		f.lastDesktopCount = desktopCount
+		f.lastProxyCount = proxyCount
+	}
 }
 
 // RegisterConnection 注册连接（由FRP事件触发）

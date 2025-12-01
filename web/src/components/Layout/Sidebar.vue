@@ -15,16 +15,16 @@
           <span>{{ t('menu.agents') }}</span>
         </template>
       </el-menu-item>
-      <el-menu-item index="/clients">
-        <template #title>
-          <el-icon><User /></el-icon>
-          <span>{{ t('menu.clients') }}</span>
-        </template>
-      </el-menu-item>
       <el-menu-item index="/stcp-instances">
         <template #title>
           <el-icon><Connection /></el-icon>
           <span>{{ t('menu.stcpInstances') }}</span>
+        </template>
+      </el-menu-item>
+      <el-menu-item index="/clients">
+        <template #title>
+          <el-icon><User /></el-icon>
+          <span>{{ t('menu.clients') }}</span>
         </template>
       </el-menu-item>
       <el-menu-item index="/groups">

@@ -27,9 +27,9 @@ func InitDB(cfg config.DatabaseSection) error {
 		return fmt.Errorf("创建数据库目录失败: %w", err)
 	}
 
-	// 连接数据库
+	// 连接数据库（默认 Warn 级别，不打印 SQL 语句）
 	DB, err = gorm.Open(sqlite.Open(cfg.Path), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
 		return fmt.Errorf("连接数据库失败: %w", err)

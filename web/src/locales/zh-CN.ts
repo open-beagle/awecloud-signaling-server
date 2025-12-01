@@ -44,9 +44,9 @@ export default {
   },
   menu: {
     agents: 'Agent管理',
-    clients: 'Client管理',
     stcpInstances: 'STCP实例',
-    groups: '用户组管理',
+    clients: 'Client管理',
+    groups: 'Group管理',
     auditLogs: '审计日志'
   },
   audit: {

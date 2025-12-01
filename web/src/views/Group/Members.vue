@@ -1,11 +1,6 @@
 <template>
   <div class="members-page">
-    <el-breadcrumb separator="/" class="breadcrumb">
-      <el-breadcrumb-item :to="{ path: '/groups' }">用户组管理</el-breadcrumb-item>
-      <el-breadcrumb-item>{{ group?.name || '成员管理' }}</el-breadcrumb-item>
-    </el-breadcrumb>
-
-    <el-card>
+    <el-card class="members-card">
       <template #header>
         <div class="card-header">
           <span class="card-title">成员管理</span>
@@ -184,10 +179,25 @@ onMounted(() => {
 <style scoped>
 .members-page {
   width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
-.breadcrumb {
-  margin-bottom: 20px;
+.members-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.members-card :deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.members-card :deep(.el-table) {
+  flex: 1;
 }
 
 .card-header {

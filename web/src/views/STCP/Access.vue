@@ -1,10 +1,5 @@
 <template>
   <div class="access-page">
-    <el-breadcrumb separator="/" class="breadcrumb">
-      <el-breadcrumb-item :to="{ path: '/stcp-instances' }">STCP实例</el-breadcrumb-item>
-      <el-breadcrumb-item>{{ instance?.instance_name || '授权管理' }}</el-breadcrumb-item>
-    </el-breadcrumb>
-
     <el-card v-if="instance" class="instance-card">
       <div class="instance-info">
         <p><strong>实例名称:</strong> {{ instance.instance_name }}</p>
@@ -12,7 +7,7 @@
       </div>
     </el-card>
 
-    <el-card>
+    <el-card class="access-card">
       <template #header>
         <div class="card-header">
           <span class="card-title">授权管理</span>
@@ -193,10 +188,9 @@ onMounted(() => {
 <style scoped>
 .access-page {
   width: 100%;
-}
-
-.breadcrumb {
-  margin-bottom: 20px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .instance-card {
@@ -215,6 +209,22 @@ onMounted(() => {
 
 .instance-info p:last-child {
   margin-bottom: 0;
+}
+
+.access-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.access-card :deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.access-card :deep(.el-table) {
+  flex: 1;
 }
 
 .card-header {

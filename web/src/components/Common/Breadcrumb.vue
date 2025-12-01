@@ -24,14 +24,26 @@ const breadcrumbMap: Record<string, string> = {
 
 const items = computed(() => {
   const path = route.path
-  const title = breadcrumbMap[path]
-  
-  if (!title) return []
-  
-  return [
-    { path: '/', title: t('common.home') },
-    { path, title: t(title) }
+  const breadcrumbs: Array<{ path: string; title: string }> = [
+    { path: '/', title: t('common.home') }
   ]
+  
+  // 处理二级页面
+  if (path.startsWith('/groups/') && path.includes('/members')) {
+    breadcrumbs.push({ path: '/groups', title: 'Group管理' })
+    breadcrumbs.push({ path: '', title: '成员管理' })
+  } else if (path.startsWith('/stcp-instances/') && path.includes('/access')) {
+    breadcrumbs.push({ path: '/stcp-instances', title: 'STCP管理' })
+    breadcrumbs.push({ path: '', title: '授权管理' })
+  } else {
+    // 一级页面
+    const title = breadcrumbMap[path]
+    if (title) {
+      breadcrumbs.push({ path, title: t(title) })
+    }
+  }
+  
+  return breadcrumbs
 })
 </script>
 

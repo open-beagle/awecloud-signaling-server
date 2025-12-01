@@ -26,17 +26,8 @@ PLATFORMS="${PLATFORMS:-windows/amd64}"  # 默认仅构建 Windows amd64
 DESKTOP_DIR="./desktop"
 OUTPUT_DIR="./bin"
 
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}AWECloud Signaling Desktop Builder${NC}"
-echo -e "${GREEN}========================================${NC}"
-echo ""
-echo "Version:      ${BUILD_VERSION}"
-echo "Build Number: ${BUILD_NUMBER}"
-echo "Address:      ${BUILD_ADDRESS:-<not set>}"
-echo "Git Commit:   ${GIT_COMMIT}"
-echo "Build Date:   ${BUILD_DATE}"
-echo "Platforms:    ${PLATFORMS}"
-echo ""
+echo -e "${GREEN}Building Desktop ${BUILD_VERSION} (${PLATFORMS})${NC}"
+[ -n "${BUILD_ADDRESS}" ] && echo "Address: ${BUILD_ADDRESS}"
 
 # 检查 Desktop 目录是否存在
 if [ ! -d "${DESKTOP_DIR}" ]; then
@@ -168,20 +159,18 @@ installMacOSDeps() {
     fi
 }
 
-# 进入 Desktop 目录
+# 进入 Desktop 目录（使用 desktop 的 go.mod）
 cd "${DESKTOP_DIR}"
 
 # 安装前端依赖
-echo -e "${YELLOW}Installing frontend dependencies...${NC}"
 cd frontend
 if [ ! -d "node_modules" ]; then
-    npm install
-else
-    echo "Frontend dependencies already installed, skipping..."
+    echo "Installing frontend dependencies..."
+    npm install > /dev/null 2>&1
 fi
 cd ..
 
-# 创建输出目录
+# 创建输出目录（相对于项目根目录）
 mkdir -p "../${OUTPUT_DIR}"
 
 # 解析平台列表
@@ -193,20 +182,18 @@ for PLATFORM in "${PLATFORM_ARRAY[@]}"; do
     IFS='/' read -r OS ARCH <<< "$PLATFORM"
     
     echo ""
-    echo -e "${GREEN}========================================${NC}"
-    echo -e "${GREEN}Building for ${OS}/${ARCH}${NC}"
-    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}Building ${OS}/${ARCH}...${NC}"
     
-    # 根据平台安装依赖
+    # 根据平台检查依赖（静默）
     case "$OS" in
         linux)
-            installLinuxDeps
+            installLinuxDeps > /dev/null 2>&1 || true
             ;;
         windows)
-            installWindowsDeps
+            installWindowsDeps > /dev/null 2>&1 || true
             ;;
         darwin)
-            if ! installMacOSDeps; then
+            if ! installMacOSDeps > /dev/null 2>&1; then
                 echo -e "${YELLOW}Skipping macOS build${NC}"
                 continue
             fi
@@ -229,25 +216,30 @@ for PLATFORM in "${PLATFORM_ARRAY[@]}"; do
     LDFLAGS="${LDFLAGS} -X 'main.buildDate=${BUILD_DATE}'"
     LDFLAGS="${LDFLAGS} -X 'main.buildNumber=${BUILD_NUMBER}'"
     if [ -n "${BUILD_ADDRESS}" ]; then
-        LDFLAGS="${LDFLAGS} -X 'main.BUILD_URL=${BUILD_ADDRESS}'"
+        # 使用 desktop/go.mod 中的 module 路径
+        LDFLAGS="${LDFLAGS} -X 'github.com/open-beagle/awecloud-signaling-desktop/internal/config.buildAddress=${BUILD_ADDRESS}'"
     fi
     BUILD_FLAGS="${BUILD_FLAGS} -ldflags \"${LDFLAGS}\""
     
-    # 执行构建
-    echo "Building with: wails build ${BUILD_FLAGS}"
-    eval "wails build ${BUILD_FLAGS}"
+    # 执行构建（隐藏详细输出）
+    eval "wails build ${BUILD_FLAGS}" > /tmp/wails_build.log 2>&1 || {
+        echo -e "${RED}Build failed, showing log:${NC}"
+        cat /tmp/wails_build.log
+        exit 1
+    }
     
     # 检查构建结果
     if [ "$OS" = "darwin" ]; then
         # macOS 构建产物是 .app 包
+
         BUILD_OUTPUT="build/bin/awecloud-signaling-desktop.app"
         if [ -d "${BUILD_OUTPUT}" ]; then
-            echo -e "${GREEN}✓ Build successful: ${BUILD_OUTPUT}${NC}"
             # 创建 zip 包
             cd build/bin
-            zip -r "../../${OUTPUT_DIR}/awecloud-signaling-${BUILD_VERSION}-${OS}-${ARCH}.zip" "awecloud-signaling-desktop.app"
+            zip -r "../../${OUTPUT_DIR}/awecloud-signaling-${BUILD_VERSION}-${OS}-${ARCH}.zip" "awecloud-signaling-desktop.app" > /dev/null 2>&1
             cd ../..
-            echo -e "${GREEN}✓ Created: ${OUTPUT_DIR}/awecloud-signaling-${BUILD_VERSION}-${OS}-${ARCH}.zip${NC}"
+            FILE_SIZE=$(du -h "${OUTPUT_DIR}/awecloud-signaling-${BUILD_VERSION}-${OS}-${ARCH}.zip" | cut -f1)
+            echo -e "${GREEN}✓ ${OUTPUT_DIR}/awecloud-signaling-${BUILD_VERSION}-${OS}-${ARCH}.zip (${FILE_SIZE})${NC}"
         else
             echo -e "${RED}✗ Build failed for ${OS}/${ARCH}${NC}"
             echo -e "${RED}Expected output: ${BUILD_OUTPUT}${NC}"
@@ -264,18 +256,13 @@ for PLATFORM in "${PLATFORM_ARRAY[@]}"; do
         fi
         
         if [ -f "${BUILD_OUTPUT}" ]; then
-            echo -e "${GREEN}✓ Build successful: ${BUILD_OUTPUT}${NC}"
-            # 复制到输出目录（去掉 desktop 子目录）
+            # 复制到输出目录
             cp "${BUILD_OUTPUT}" "../${OUTPUT_DIR}/${OUTPUT_NAME}"
-            echo -e "${GREEN}✓ Copied to: ${OUTPUT_DIR}/${OUTPUT_NAME}${NC}"
-            # 显示文件大小
             FILE_SIZE=$(ls -lh "../${OUTPUT_DIR}/${OUTPUT_NAME}" | awk '{print $5}')
-            echo "  File size: ${FILE_SIZE}"
+            echo -e "${GREEN}✓ ${OUTPUT_DIR}/${OUTPUT_NAME} (${FILE_SIZE})${NC}"
         else
-            echo -e "${RED}✗ Build failed for ${OS}/${ARCH}${NC}"
-            echo -e "${RED}Expected output: ${BUILD_OUTPUT}${NC}"
-            echo -e "${YELLOW}Checking build/bin directory:${NC}"
-            ls -la build/bin/ || echo "build/bin directory not found"
+            echo -e "${RED}✗ Build failed${NC}"
+            cat /tmp/wails_build.log
             exit 1
         fi
     fi
@@ -284,29 +271,4 @@ done
 # 返回项目根目录
 cd ..
 
-echo ""
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}All builds completed successfully!${NC}"
-echo -e "${GREEN}========================================${NC}"
-echo ""
-echo "Output directory: ${OUTPUT_DIR}/"
-ls -lh "${OUTPUT_DIR}/"
-
-echo ""
-echo -e "${YELLOW}Usage examples:${NC}"
-echo ""
-echo "  # Build for current platform"
-echo "  bash scripts/build_desktop.sh"
-echo ""
-echo "  # Build for specific platform"
-echo "  PLATFORMS=linux/amd64 bash scripts/build_desktop.sh"
-echo ""
-echo "  # Build for multiple platforms"
-echo "  PLATFORMS=linux/amd64,linux/arm64,darwin/amd64,darwin/arm64,windows/amd64 bash scripts/build_desktop.sh"
-echo ""
-echo "  # Build with version"
-echo "  BUILD_VERSION=v0.1.0 bash scripts/build_desktop.sh"
-echo ""
-echo "  # Build with default server address"
-echo "  BUILD_VERSION=v0.1.0 BUILD_ADDRESS=https://signaling.example.com bash scripts/build_desktop.sh"
-echo ""
+echo -e "${GREEN}Build complete!${NC}"

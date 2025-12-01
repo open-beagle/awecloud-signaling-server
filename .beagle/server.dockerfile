@@ -1,14 +1,13 @@
-ARG BASE
+ARG BASE=alpine:3
 
 FROM ${BASE}
 
-ARG AUTHOR
-ARG VERSION
-
-LABEL author=${AUTHOR} version=${VERSION}
-
+ARG AUTHOR=mengkzhaoyun@gmail.com
+ARG VERSION=v0.1.0
 ARG TARGETOS
 ARG TARGETARCH
+
+LABEL author=${AUTHOR} version=${VERSION}
 
 # Create user and directories
 RUN set -ex && \

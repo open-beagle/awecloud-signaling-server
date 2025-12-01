@@ -20,7 +20,8 @@ func GenerateDeviceToken() string {
 	return "dt_" + uuid.New().String()
 }
 
-// CreateDeviceToken 创建Device Token记录
+// CreateDeviceToken 创建或更新Device Token记录
+// 如果该设备已存在记录，则生成新token并更新；否则创建新记录
 func CreateDeviceToken(db *gorm.DB, clientID int64, deviceInfo DeviceInfo) (*model.DeviceToken, error) {
 	// 生成设备指纹
 	fingerprint := GenerateFingerprint(deviceInfo)
@@ -31,13 +32,37 @@ func CreateDeviceToken(db *gorm.DB, clientID int64, deviceInfo DeviceInfo) (*mod
 		return nil, err
 	}
 
-	// 生成Token
-	token := GenerateDeviceToken()
-
 	// 计算过期时间
 	expiresAt := time.Now().Add(DeviceTokenExpireDays * 24 * time.Hour)
 
-	// 创建记录
+	// 查找是否已存在该设备的记录
+	var existingToken model.DeviceToken
+	err = db.Where("client_id = ? AND device_fingerprint = ?", clientID, fingerprint).
+		First(&existingToken).Error
+
+	if err == nil {
+		// 设备已存在，生成新token并更新记录
+		newToken := GenerateDeviceToken()
+		existingToken.DeviceToken = newToken
+		existingToken.DeviceInfo = deviceInfoJSON
+		existingToken.LastUsedAt = time.Now()
+		existingToken.ExpiresAt = expiresAt
+		existingToken.Revoked = false
+
+		if err := db.Save(&existingToken).Error; err != nil {
+			return nil, fmt.Errorf("更新Device Token失败: %w", err)
+		}
+
+		return &existingToken, nil
+	}
+
+	if err != gorm.ErrRecordNotFound {
+		return nil, fmt.Errorf("查询Device Token失败: %w", err)
+	}
+
+	// 设备不存在，创建新记录
+	token := GenerateDeviceToken()
+
 	deviceToken := &model.DeviceToken{
 		ClientID:          clientID,
 		DeviceToken:       token,
