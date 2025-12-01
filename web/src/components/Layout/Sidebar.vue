@@ -39,6 +39,12 @@
           <span>{{ t('menu.auditLogs') }}</span>
         </template>
       </el-menu-item>
+      <el-menu-item index="/system/config">
+        <template #title>
+          <el-icon><Setting /></el-icon>
+          <span>{{ t('menu.systemConfig') }}</span>
+        </template>
+      </el-menu-item>
     </el-menu>
     <div class="sidebar-footer">
       <el-icon class="collapse-icon" @click="toggleSidebar">

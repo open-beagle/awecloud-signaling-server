@@ -47,7 +47,8 @@ export default {
     stcpInstances: 'STCP实例',
     clients: 'Client管理',
     groups: 'Group管理',
-    auditLogs: '审计日志'
+    auditLogs: '审计日志',
+    systemConfig: '系统配置'
   },
   audit: {
     title: '连接审计日志',

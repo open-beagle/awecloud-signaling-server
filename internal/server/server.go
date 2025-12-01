@@ -229,6 +229,9 @@ func (s *Server) setupRouter() *gin.Engine {
 		// v1 API
 		v1Group := apiGroup.Group("/v1")
 		{
+			// ==================== 公开API（不需要认证）====================
+			v1Group.GET("/public/system/config", api.GetPublicSystemConfig)
+
 			// ==================== 管理员API ====================
 			adminGroup := v1Group.Group("/admin")
 			{
@@ -282,6 +285,10 @@ func (s *Server) setupRouter() *gin.Engine {
 					auditLogAPI := api.NewAuditLogAPI()
 					adminAuthGroup.GET("/audit/connection", auditLogAPI.QueryAuditLogs)
 					adminAuthGroup.GET("/audit/connection/export", auditLogAPI.ExportAuditLogs)
+
+					// 系统配置
+					adminAuthGroup.GET("/system/config", api.GetSystemConfig)
+					adminAuthGroup.PUT("/system/config", api.UpdateSystemConfig)
 				}
 			}
 

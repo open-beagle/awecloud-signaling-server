@@ -58,6 +58,7 @@ func autoMigrate() error {
 		&model.DeviceToken{},
 		&model.PortPreference{},
 		&model.ConnectionAuditLog{},
+		&model.SystemConfig{},
 	)
 }
 

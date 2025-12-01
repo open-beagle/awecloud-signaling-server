@@ -56,6 +56,12 @@ const routes: RouteRecordRaw[] = [
         name: 'AuditLogs',
         component: () => import('@/views/Audit/AuditLogs.vue'),
         meta: { requiresAuth: true }
+      },
+      {
+        path: 'system/config',
+        name: 'SystemConfig',
+        component: () => import('@/views/System/Config.vue'),
+        meta: { requiresAuth: true }
       }
     ]
   }
