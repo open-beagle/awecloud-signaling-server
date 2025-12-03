@@ -1,12 +1,13 @@
 # Traefik IngressRoute for AWECloud Signaling Server
 # 
 # 功能说明：
-# 1. FRP WebSocket 路由：/ws 路径重写为 /~!frp，转发到 7000 端口
-# 2. HTTP/gRPC 统一路由：使用 h2c (HTTP/2 Cleartext) 同时支持 Web 和 gRPC，转发到 8080 端口
+# 1. FRP WebSocket 路由（自定义路径）：/ws 路径重写为 /~!frp，转发到 7000 端口
+# 2. FRP WebSocket 路由（原生路径）：/~!frp 直接转发到 7000 端口（不重写）
+# 3. HTTP/gRPC 统一路由：使用 h2c (HTTP/2 Cleartext) 同时支持 Web 和 gRPC，转发到 8080 端口
 #
 # 关键配置：
 # - scheme: h2c - 使用 HTTP/2 协议与后端通信，支持 gRPC
-# - Middleware - 路径重写 /ws → /~!frp
+# - Middleware - 路径重写 /ws → /~!frp（仅用于自定义路径）
 #
 # 部署命令：
 #   kubectl apply -f server-ingressroute.yaml
@@ -24,7 +25,7 @@ spec:
   entryPoints:
     - websecure
   routes:
-    # FRP WebSocket 路由（优先级高）
+    # FRP WebSocket 路由 - 自定义路径（优先级高）
     # 匹配 /ws 路径，重写为 /~!frp 后转发到 FRP Server
     - kind: Rule
       match: Host(`signaling.example.com`) && PathPrefix(`/ws`)
@@ -33,6 +34,14 @@ spec:
           port: 7000
       middlewares:
         - name: awecloud-signaling-server
+
+    # FRP WebSocket 路由 - 原生路径
+    # 匹配 /~!frp 路径，直接转发到 FRP Server（不重写）
+    - kind: Rule
+      match: Host(`signaling.example.com`) && PathPrefix(`/~!frp`)
+      services:
+        - name: awecloud-signaling-server
+          port: 7000
 
     # HTTP/gRPC 统一路由
     # 使用 h2c (HTTP/2 Cleartext) 同时支持 Web 和 gRPC

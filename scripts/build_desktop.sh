@@ -26,8 +26,17 @@ PLATFORMS="${PLATFORMS:-windows/amd64}"  # 默认仅构建 Windows amd64
 DESKTOP_DIR="./desktop"
 OUTPUT_DIR="./bin"
 
-echo -e "${GREEN}Building Desktop ${BUILD_VERSION} (${PLATFORMS})${NC}"
-[ -n "${BUILD_ADDRESS}" ] && echo "Address: ${BUILD_ADDRESS}"
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}Building AWECloud Signaling Desktop${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo -e "Version:      ${YELLOW}${BUILD_VERSION}${NC}"
+echo -e "Git Commit:   ${YELLOW}${GIT_COMMIT}${NC}"
+echo -e "Build Number: ${YELLOW}${BUILD_NUMBER}${NC}"
+echo -e "Build Date:   ${YELLOW}${BUILD_DATE}${NC}"
+[ -n "${BUILD_ADDRESS}" ] && echo -e "Server Addr:  ${YELLOW}${BUILD_ADDRESS}${NC}"
+echo -e "Platforms:    ${YELLOW}${PLATFORMS}${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo ""
 
 # 检查 Desktop 目录是否存在
 if [ ! -d "${DESKTOP_DIR}" ]; then
