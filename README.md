@@ -31,9 +31,6 @@ awecloud-signaling-server/
 # 开发构建（只构建当前架构）
 BUILD_VERSION=v0.1.0 GOARCHS=$(go env GOARCH) bash scripts/build.sh
 BUILD_VERSION=v0.1.0 bash scripts/build_frontend.sh
-
-# 生产构建（构建所有架构）
-bash scripts/build.sh
 ```
 
 **Desktop 客户端**：

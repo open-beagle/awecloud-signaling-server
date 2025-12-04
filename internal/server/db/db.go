@@ -57,6 +57,7 @@ func autoMigrate() error {
 		&model.ClientSession{},
 		&model.DeviceToken{},
 		&model.PortPreference{},
+		&model.ServiceFavorite{},
 		&model.ConnectionAuditLog{},
 		&model.SystemConfig{},
 	)

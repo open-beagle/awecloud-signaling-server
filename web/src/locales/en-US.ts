@@ -47,7 +47,9 @@ export default {
     clients: 'Clients',
     stcpInstances: 'STCP Instances',
     groups: 'Groups',
-    auditLogs: 'Audit Logs'
+    favorites: 'Favorites',
+    auditLogs: 'Audit Logs',
+    systemConfig: 'System Config'
   },
   audit: {
     title: 'Connection Audit Logs',

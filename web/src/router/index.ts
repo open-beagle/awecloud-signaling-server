@@ -62,6 +62,12 @@ const routes: RouteRecordRaw[] = [
         name: 'SystemConfig',
         component: () => import('@/views/System/Config.vue'),
         meta: { requiresAuth: true }
+      },
+      {
+        path: 'favorites',
+        name: 'Favorites',
+        component: () => import('@/views/Favorite/List.vue'),
+        meta: { requiresAuth: true }
       }
     ]
   }

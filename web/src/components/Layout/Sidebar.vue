@@ -33,6 +33,12 @@
           <span>{{ t('menu.groups') }}</span>
         </template>
       </el-menu-item>
+      <el-menu-item index="/favorites">
+        <template #title>
+          <el-icon><Star /></el-icon>
+          <span>{{ t('menu.favorites') }}</span>
+        </template>
+      </el-menu-item>
       <el-menu-item index="/audit-logs">
         <template #title>
           <el-icon><Document /></el-icon>
@@ -60,6 +66,7 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import { Star } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const { t } = useI18n()

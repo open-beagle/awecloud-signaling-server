@@ -289,6 +289,10 @@ func (s *Server) setupRouter() *gin.Engine {
 					// 系统配置
 					adminAuthGroup.GET("/system/config", api.GetSystemConfig)
 					adminAuthGroup.PUT("/system/config", api.UpdateSystemConfig)
+
+					// 收藏管理
+					serviceFavoriteAPI := api.NewServiceFavoriteAPI()
+					adminAuthGroup.GET("/favorites", serviceFavoriteAPI.GetAllFavorites)
 				}
 			}
 
@@ -316,6 +320,12 @@ func (s *Server) setupRouter() *gin.Engine {
 					portPrefAPI := api.NewPortPreferenceAPI()
 					clientAuthGroup.GET("/preferences/port", portPrefAPI.GetPortPreferences)
 					clientAuthGroup.POST("/preferences/port", portPrefAPI.SavePortPreference)
+
+					// 服务收藏
+					serviceFavoriteAPI := api.NewServiceFavoriteAPI()
+					clientAuthGroup.GET("/favorites", serviceFavoriteAPI.GetServiceFavorites)
+					clientAuthGroup.POST("/favorites/toggle", serviceFavoriteAPI.ToggleFavorite)
+					clientAuthGroup.PUT("/favorites/port", serviceFavoriteAPI.UpdateFavoritePort)
 
 					// 审计日志
 					auditLogAPI := api.NewAuditLogAPI()

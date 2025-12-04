@@ -1,3 +1,117 @@
+# 变更记录
+
+## 2025-12-04: 服务收藏功能
+
+### 功能概述
+
+在 Desktop 应用中新增服务收藏功能，用户可以收藏常用的服务，收藏状态保存在服务器端，支持多设备同步。同时新增一键连接所有收藏服务的功能，提升用户体验。
+
+### Server 端变更
+
+#### 1. 数据库变更
+
+新增 `service_favorites` 表：
+
+```sql
+CREATE TABLE service_favorites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    stcp_instance_id INTEGER NOT NULL,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (stcp_instance_id) REFERENCES stcp_instances(id) ON DELETE CASCADE,
+    UNIQUE(client_id, stcp_instance_id)
+);
+```
+
+**新增文件**：
+
+- `internal/server/model/service_favorite.go` - 收藏数据模型
+- `internal/server/api/service_favorite.go` - 收藏 API 实现
+
+**修改文件**：
+
+- `internal/server/db/db.go` - 添加表迁移
+- `internal/server/server.go` - 注册 API 路由
+
+#### 2. API 变更
+
+新增两个 API 接口：
+
+1. **GET /api/v1/client/favorites** - 获取用户的收藏列表
+
+   - 需要 JWT 认证
+   - 返回：`{ success: bool, favorites: []int64 }`
+
+2. **POST /api/v1/client/favorites/toggle** - 切换收藏状态
+   - 需要 JWT 认证
+   - 请求：`{ stcp_instance_id: int64 }`
+   - 返回：`{ success: bool, is_favorite: bool, message: string }`
+
+### Desktop 端变更
+
+#### 1. 后端变更
+
+**新增文件**：
+
+- `desktop/internal/client/favorite.go` - 收藏 API 客户端
+
+**修改文件**：
+
+- `desktop/internal/client/client.go` - 添加收藏客户端字段和方法
+- `desktop/internal/client/auth.go` - 初始化收藏客户端
+- `desktop/internal/models/service.go` - 添加 `is_favorite` 字段
+- `desktop/app.go` - 添加 `ToggleFavorite` 方法，在 `GetServices` 中获取收藏状态
+
+#### 2. 前端变更
+
+**修改文件**：
+
+- `desktop/frontend/src/stores/services.ts` - 简化收藏逻辑，移除 localStorage
+- `desktop/frontend/src/components/ServiceCard.vue` - 添加收藏图标和交互
+- `desktop/frontend/src/views/Services.vue` - 更新筛选逻辑
+
+**功能特性**：
+
+- 服务卡片右上角显示收藏图标（⭐）
+- 点击图标切换收藏状态
+- 筛选标签从"共 X 个已连接"改为"共 X 个收藏"
+- 支持按收藏状态筛选服务
+- 收藏状态保存在服务器，支持多设备同步
+- **智能默认筛选**：
+  - 有收藏时：默认只显示收藏的服务
+  - 无收藏但有在线服务：默认显示在线服务
+  - 无收藏且无在线服务：默认显示离线服务
+- **新增**：一键连接/断开收藏服务按钮（⚡ 图标）
+  - **智能切换**：根据当前状态自动切换功能
+    - 默认状态（有未连接的收藏）：黄色按钮，点击连接所有断开的收藏
+    - 已连接状态（所有收藏都已连接）：红色按钮，点击断开所有已连接的收藏
+  - 依次连接/断开，避免并发过多
+  - 显示确认对话框，避免误操作
+  - 显示操作进度和结果统计
+  - 操作失败时显示详细信息
+
+### 实现细节
+
+1. **数据流程**：
+
+   - Desktop 启动 → 登录 → 获取服务列表 → 服务列表包含收藏状态
+   - 用户点击收藏 → 调用后端 API → 更新服务器数据 → 乐观更新 UI
+
+2. **多设备同步**：
+
+   - 收藏数据存储在服务器端
+   - 每次获取服务列表时自动同步收藏状态
+   - 不同设备登录同一账号，收藏状态保持一致
+
+3. **错误处理**：
+   - 使用乐观更新策略，先更新 UI
+   - 如果 API 调用失败，回滚 UI 状态
+   - 不影响服务列表的正常显示
+
+---
+
 # 配置文件精简设计变更分析
 
 ## 变更概述
