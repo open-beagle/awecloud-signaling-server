@@ -11,7 +11,7 @@ LABEL author=${AUTHOR} version=${VERSION}
 
 # Create user and directories
 RUN set -ex && \
-    apk add --no-cache ca-certificates sqlite-libs && \
+    apk add --no-cache ca-certificates sqlite-libs sqlite && \
     addgroup -g 1000 code && \
     adduser -D -u 1000 -G code code && \
     mkdir -p /home/code/data /home/code/logs /home/code/certs /home/code/config && \
