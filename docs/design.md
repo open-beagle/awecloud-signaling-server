@@ -585,7 +585,37 @@ Web 管理界面供管理员管理系统资源。详细设计请参考 [Web 界�
 - `desktop_download_url`：下载地址
 - `version_check_enabled`：是否启用版本检查
 
-## 13. 隧道Token安全设计（待实现）
+## 13. Desktop 客户端下载 API
+
+系统提供智能的 Desktop 客户端下载 API，自动识别操作系统并提供最新版本。详细设计请参考 [Desktop 客户端下载 API 设计文档](./design_api_download.md)。
+
+**核心功能**：
+
+- **智能识别**：自动从 User-Agent 检测操作系统
+- **版本管理**：从配置的存储地址获取最新版本信息
+- **多种方式**：支持 JSON 信息获取和直接下载重定向
+- **灵活配置**：管理员在系统配置中设置下载地址
+- **隐私保护**：存储地址不硬编码在代码中
+
+**API 端点**：
+
+- `GET /api/v1/public/download/desktop` - 获取下载信息（JSON）
+- `GET /api/v1/public/download/desktop/direct` - 直接下载（重定向）
+- `GET /api/v1/public/download/desktop/versions` - 列出所有版本
+
+**存储目录结构**：
+
+```
+your-storage-path/
+├── version.json                                    # 版本信息
+├── awecloud-signaling-v0.1.0-windows-amd64.exe    # 版本文件
+├── awecloud-signaling-v0.1.0-linux-amd64
+├── awecloud-signaling-v0.1.0-darwin-universal.zip
+├── awecloud-signaling-v0.2.0-windows-amd64.exe    # 其他版本
+└── ...
+```
+
+## 14. 隧道Token安全设计（待实现）
 
 ### 13.1 当前状态
 
@@ -619,7 +649,7 @@ Web 管理界面供管理员管理系统资源。详细设计请参考 [Web 界�
 
 **注意**：此功能尚未实现，当前系统使用统一Token。
 
-## 14. 关键变更总结
+## 15. 关键变更总结
 
 ### 13.1 架构设计要点
 

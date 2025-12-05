@@ -94,6 +94,8 @@ BUILD_VERSION=v0.1.0 BUILD_ADDRESS=https://signaling.example.com bash scripts/bu
 - [开发计划](docs/plan.md) - 完整的开发计划和任务清单
 - [进度跟踪](docs/progress.md) - 每日更新的进度记录
 - [设计文档](docs/design.md) - 系统架构和技术设计
+- [API 设计](docs/design_api.md) - RESTful/gRPC/WebSocket API 详细设计
+- [下载 API](docs/design_api_download.md) - Desktop 客户端下载 API 设计
 - [测试规范](docs/test.md) - API 测试规范和流程
 
 ### 文档管理规范

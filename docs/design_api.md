@@ -1269,9 +1269,53 @@ Authorization: Bearer <admin-jwt-token>
 - Content-Type: `text/csv` 或 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
 - 文件下载
 
-### 2.10 版本管理 API
+### 2.10 Desktop 客户端下载 API
 
-#### 2.10.1 检查 Desktop 版本（Client 调用）
+**详细设计**: 参见 [Desktop 客户端下载 API 设计](./design_api_download.md)
+
+#### 2.10.1 获取下载信息（JSON）
+
+```
+GET /api/v1/public/download/desktop
+```
+
+**参数**:
+- `os` (可选): 指定操作系统 (`windows`, `linux`, `darwin`, `macos`)
+
+**响应**:
+```json
+{
+  "version": "v0.1.0",
+  "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v0.1.0-windows-amd64.exe",
+  "filename": "awecloud-signaling-v0.1.0-windows-amd64.exe",
+  "os": "windows",
+  "arch": "amd64",
+  "build_date": "2025-12-05T10:30:00Z"
+}
+```
+
+#### 2.10.2 直接下载（重定向）
+
+```
+GET /api/v1/public/download/desktop/direct
+```
+
+**参数**:
+- `os` (可选): 指定操作系统
+
+**行为**: 自动重定向到对应平台的下载链接
+
+#### 2.10.3 列出所有版本
+
+```
+GET /api/v1/public/download/desktop/versions
+```
+
+**响应**: 返回所有平台的下载信息
+
+### 2.11 版本管理 API
+
+#### 2.11.1 检查 Desktop 版本（Client 调用）
 
 ```
 POST /api/v1/client/version/check

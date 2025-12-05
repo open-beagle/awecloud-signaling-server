@@ -232,6 +232,12 @@ func (s *Server) setupRouter() *gin.Engine {
 			// ==================== 公开API（不需要认证）====================
 			v1Group.GET("/public/system/config", api.GetPublicSystemConfig)
 
+			// 桌面客户端下载API
+			downloadAPI := api.NewDownloadAPI()
+			v1Group.GET("/public/download/desktop", downloadAPI.GetDesktopDownload)              // 获取下载信息（JSON）
+			v1Group.GET("/public/download/desktop/direct", downloadAPI.GetDesktopDownloadDirect) // 直接重定向下载
+			v1Group.GET("/public/download/desktop/versions", downloadAPI.ListDesktopVersions)    // 列出所有版本
+
 			// ==================== 管理员API ====================
 			adminGroup := v1Group.Group("/admin")
 			{
