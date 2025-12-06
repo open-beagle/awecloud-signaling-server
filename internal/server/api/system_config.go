@@ -18,6 +18,7 @@ func GetSystemConfig(c *gin.Context) {
 		config = model.SystemConfig{
 			ID:                1,
 			ClientDownloadURL: "",
+			DesktopMinVersion: "1.0.0",
 		}
 	}
 
@@ -31,6 +32,7 @@ func GetSystemConfig(c *gin.Context) {
 func UpdateSystemConfig(c *gin.Context) {
 	var req struct {
 		ClientDownloadURL string `json:"client_download_url"`
+		DesktopMinVersion string `json:"desktop_min_version"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -49,6 +51,10 @@ func UpdateSystemConfig(c *gin.Context) {
 		config = model.SystemConfig{
 			ID:                1,
 			ClientDownloadURL: req.ClientDownloadURL,
+			DesktopMinVersion: req.DesktopMinVersion,
+		}
+		if config.DesktopMinVersion == "" {
+			config.DesktopMinVersion = "1.0.0"
 		}
 		if err := db.DB.Create(&config).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -60,6 +66,9 @@ func UpdateSystemConfig(c *gin.Context) {
 	} else {
 		// 存在则更新
 		config.ClientDownloadURL = req.ClientDownloadURL
+		if req.DesktopMinVersion != "" {
+			config.DesktopMinVersion = req.DesktopMinVersion
+		}
 		if err := db.DB.Save(&config).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,

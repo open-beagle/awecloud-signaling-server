@@ -29,27 +29,18 @@ awecloud-signaling-server/
 
 ```bash
 # 开发构建（只构建当前架构）
-BUILD_VERSION=v0.1.0 GOARCHS=$(go env GOARCH) bash scripts/build.sh
-BUILD_VERSION=v0.1.0 bash scripts/build_frontend.sh
+BUILD_VERSION=v0.1.1 GOARCHS=$(go env GOARCH) bash scripts/build.sh
+BUILD_VERSION=v0.1.1 bash scripts/build_frontend.sh
 ```
 
 **Desktop 客户端**：
 
 ```bash
 # 开发构建
-BUILD_VERSION=v0.1.0 \
+BUILD_VERSION=v0.1.1 \
 BUILD_ADDRESS=${SIGNALING_ADDRESS} \
 PLATFORMS="windows/amd64" \
 bash scripts/build_desktop.sh
-
-# 构建指定平台
-BUILD_VERSION=v0.1.0 PLATFORMS=linux/amd64 bash scripts/build_desktop.sh
-
-# 构建多个平台
-BUILD_VERSION=v0.1.0 PLATFORMS=linux/amd64,darwin/amd64,windows/amd64 bash scripts/build_desktop.sh
-
-# 构建时注入默认 Server 地址（推荐用于企业内部分发）
-BUILD_VERSION=v0.1.0 BUILD_ADDRESS=https://signaling.example.com bash scripts/build_desktop.sh
 ```
 
 **前置要求**：
@@ -62,9 +53,6 @@ BUILD_VERSION=v0.1.0 BUILD_ADDRESS=https://signaling.example.com bash scripts/bu
 ```bash
 # 使用启动脚本（推荐）
 ./scripts/run_server.sh
-
-# 或直接运行
-./bin/server -c config/server.toml
 ```
 
 ### 3. 启动 Agent
@@ -72,9 +60,6 @@ BUILD_VERSION=v0.1.0 BUILD_ADDRESS=https://signaling.example.com bash scripts/bu
 ```bash
 # 或使用启动脚本
 ./scripts/run_agent.sh
-
-# 或直接运行
-./bin/agent -c config/agent.toml
 ```
 
 ## 开发规范

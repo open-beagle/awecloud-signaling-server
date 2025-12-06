@@ -241,6 +241,9 @@ func (s *Server) setupRouter() *gin.Engine {
 			v1Group.GET("/public/download/desktop/direct", downloadAPI.GetDesktopDownloadDirect) // 直接重定向下载
 			v1Group.GET("/public/download/desktop/versions", downloadAPI.ListDesktopVersions)    // 列出所有版本
 
+			// 客户端版本检查API
+			v1Group.POST("/client/version/check", api.CheckVersion)
+
 			// ==================== 管理员API ====================
 			adminGroup := v1Group.Group("/admin")
 			{

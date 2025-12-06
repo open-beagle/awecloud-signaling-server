@@ -3,6 +3,7 @@ import request from '@/utils/request'
 export interface SystemConfig {
   id: number
   client_download_url: string
+  desktop_min_version: string
   created_at: string
   updated_at: string
 }
@@ -16,7 +17,10 @@ export function getSystemConfig() {
 }
 
 // 更新系统配置
-export function updateSystemConfig(data: { client_download_url: string }) {
+export function updateSystemConfig(data: {
+  client_download_url: string
+  desktop_min_version: string
+}) {
   return request<{ success: boolean; message: string; data: SystemConfig }>({
     url: '/api/v1/admin/system/config',
     method: 'put',

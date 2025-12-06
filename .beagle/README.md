@@ -21,7 +21,7 @@ scripts/
 
 ```bash
 # 构建前端代码
-BUILD_VERSION=v0.1.0 bash scripts/build_frontend.sh
+BUILD_VERSION=v0.1.1 bash scripts/build_frontend.sh
 
 # 构建后端代码
 # 在 golang:1.24-alpine 容器中构建
@@ -30,7 +30,7 @@ docker run --rm \
    -v $(pwd):/go/src/github.com/open-beagle/awecloud-signaling-server \
    -v $HOME/go/pkg:/go/pkg \
    -w /go/src/github.com/open-beagle/awecloud-signaling-server \
-   -e BUILD_VERSION=v0.1.0 \
+   -e BUILD_VERSION=v0.1.1 \
    -e GOARCHS=amd64,arm64 \
    registry.cn-qingdao.aliyuncs.com/wod/golang:1.24-alpine \
    bash ./.beagle/build.sh
@@ -55,7 +55,7 @@ docker run --rm \
 
 # 输出示例：
 # AWECloud Signaling Server
-# Version:    v0.1.0
+# Version:    v0.1.1
 # Git Commit: abc1234
 # Build Date: 2025-11-26_10:30:00
 ```
@@ -66,7 +66,7 @@ docker run --rm \
 
 ```bash
 # 设置版本和镜像仓库
-export BUILD_VERSION=v0.1.0
+export BUILD_VERSION=v0.1.1
 export REGISTRY=registry.cn-qingdao.aliyuncs.com/wod
 export AUTHOR=open-beagle
 
@@ -97,10 +97,10 @@ docker images | grep awecloud-signaling
 docker login registry.cn-qingdao.aliyuncs.com
 
 # 推送 Server 镜像
-docker push registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.0
+docker push registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.1
 
 # 推送 Agent 镜像
-docker push registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.0
+docker push registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.1
 ```
 
 ## GitHub Actions 自动构建
@@ -121,8 +121,8 @@ docker push registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.0
 
 ### 镜像标签
 
-- Server: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.0`
-- Agent: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.0`
+- Server: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.1`
+- Agent: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.1`
 
 ## 架构支持
 
@@ -154,7 +154,7 @@ docker push registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.0
 - Y: 次版本号（功能增加）
 - Z: 修订号（bug 修复）
 
-当前版本：`v0.1.0`
+当前版本：`v0.1.1`
 
 ## 注意事项
 

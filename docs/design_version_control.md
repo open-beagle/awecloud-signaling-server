@@ -1,11 +1,12 @@
-# Desktop版本管理设计文档
+# Desktop 版本管理设计文档
 
 ## 1. 概述
 
-本文档描述Desktop客户端的版本管理机制，确保客户端版本符合服务端要求，提升系统安全性和稳定性。
+本文档描述 Desktop 客户端的版本管理机制，确保客户端版本符合服务端要求，提升系统安全性和稳定性。
 
 **相关文档**：
-- 详细的API设计请参考 [API设计文档](./design_api.md) 的 `2.9 版本管理API`
+
+- 详细的 API 设计请参考 [API 设计文档](./design_api.md) 的 `2.9 版本管理API`
 - 详细的数据库设计请参考 [数据库设计文档](./design_database.md) 的 `2.10 系统设置表`
 
 ## 2. 需求背景
@@ -13,19 +14,22 @@
 ### 2.1 问题描述
 
 在系统发布后，可能会出现以下情况：
-- 旧版本Desktop存在安全漏洞
-- 旧版本Desktop与新版Server API不兼容
+
+- 旧版本 Desktop 存在安全漏洞
+- 旧版本 Desktop 与新版 Server API 不兼容
 - 需要强制用户升级到新版本
 
 ### 2.2 解决方案
 
-**Server端**：
-- 设置最低支持的Desktop版本号
-- 管理员可以在Web界面修改最低版本要求
+**Server 端**：
 
-**Desktop端**：
+- 设置最低支持的 Desktop 版本号
+- 管理员可以在 Web 界面修改最低版本要求
+
+**Desktop 端**：
+
 - 每次登录时上报自己的版本号
-- 如果版本低于Server要求的最低版本，强制升级
+- 如果版本低于 Server 要求的最低版本，强制升级
 - 显示升级提示和下载链接
 
 ## 3. 版本号规范
@@ -41,7 +45,8 @@ MAJOR.MINOR.PATCH
 ```
 
 **版本号说明**：
-- **MAJOR**（主版本号）：不兼容的API变更
+
+- **MAJOR**（主版本号）：不兼容的 API 变更
 - **MINOR**（次版本号）：向后兼容的功能新增
 - **PATCH**（修订号）：向后兼容的问题修正
 
@@ -66,35 +71,30 @@ func CompareVersion(v1, v2 string) int {
 
 **system_settings** - 系统设置表
 
-存储系统级别的配置项，包括Desktop版本管理相关设置。
+存储系统级别的配置项，包括 Desktop 版本管理相关设置。
 
 详细的表结构设计请参考 [数据库设计文档](./design_database.md) 的 `2.10 系统设置表`。
 
 ### 4.2 预定义设置项
 
-| setting_key | 默认值 | 说明 |
-|-------------|--------|------|
-| `desktop_min_version` | `1.0.0` | Desktop最低支持版本 |
-| `desktop_latest_version` | `1.0.0` | Desktop最新版本（可选） |
-| `desktop_download_url` | `https://...` | Desktop下载地址 |
-| `version_check_enabled` | `true` | 是否启用版本检查 |
+| setting_key           | 默认值  | 说明                 |
+| --------------------- | ------- | -------------------- |
+| `desktop_min_version` | `1.0.0` | Desktop 最低支持版本 |
 
-## 5. API设计
+## 5. API 设计
 
-详细的API设计请参考 [API设计文档](./design_api.md) 的 `2.9 版本管理API`。
+详细的 API 设计请参考 [API 设计文档](./design_api.md) 的 `2.9 版本管理API`。
 
-### 5.1 Desktop版本检查API
+### 5.1 Desktop 版本检查 API
 
-- `POST /api/v1/client/version/check` - Desktop检查版本是否符合要求
+- `POST /api/v1/client/version/check` - Desktop 检查版本是否符合要求
 
-### 5.2 管理员版本管理API
+### 5.2 管理员版本管理 API
 
 - `GET /api/v1/admin/settings/version` - 获取版本设置
 - `PUT /api/v1/admin/settings/version/min` - 更新最低版本要求
-- `PUT /api/v1/admin/settings/version/download-url` - 更新下载地址
-- `PUT /api/v1/admin/settings/version/check-enabled` - 启用/禁用版本检查
 
-## 6. Desktop客户端实现
+## 6. Desktop 客户端实现
 
 ### 6.1 版本检查流程
 
@@ -106,9 +106,9 @@ sequenceDiagram
 
     User->>Desktop: 启动应用
     Desktop->>Desktop: 读取本地版本号<br/>(编译时写入)
-    
+
     Desktop->>Server: POST /api/v1/client/version/check<br/>{client_version: "1.0.0"}
-    
+
     alt 版本符合要求
         Server-->>Desktop: {version_valid: true}
         Desktop->>Desktop: 继续正常登录流程
@@ -171,184 +171,82 @@ go build -ldflags "\
 │  ⚠️ 您的版本过低，需要升级                   │
 │                                             │
 │  当前版本: 1.0.0                            │
-│  最低要求: 1.1.0                            │
 │  最新版本: 1.2.0                            │
 │                                             │
 │  为了您的安全和更好的体验，                  │
 │  请升级到最新版本。                          │
 │                                             │
-│  [立即下载]  [稍后提醒]                      │
+│            [立即下载]                        │
 │                                             │
 └─────────────────────────────────────────────┘
 ```
 
 **注意**：
-- 如果`force_upgrade: true`，则只显示"立即下载"按钮
-- 点击"立即下载"打开浏览器访问下载链接
+
+- 点击"立即下载"打开浏览器访问 Server 端的下载页面
 - 强制升级时，阻止用户继续使用应用
 
-### 6.4 版本检查代码示例
+## 7. Web 管理界面设计
 
-```go
-// desktop/internal/client/version_check.go
-package client
+### 7.1 系统配置页面（集成版本管理）
 
-import (
-    "fmt"
-    "github.com/your-org/awecloud-desktop/internal/version"
-)
+**路由**：`/system/config`
 
-type VersionCheckResponse struct {
-    Success            bool   `json:"success"`
-    VersionValid       bool   `json:"version_valid"`
-    MinVersion         string `json:"min_version"`
-    LatestVersion      string `json:"latest_version"`
-    CurrentVersion     string `json:"current_version"`
-    DownloadURL        string `json:"download_url"`
-    Message            string `json:"message"`
-    ForceUpgrade       bool   `json:"force_upgrade"`
-    VersionCheckEnabled bool  `json:"version_check_enabled"`
-}
+**菜单位置**：系统管理 > 系统配置
 
-func CheckVersion(serverURL string) (*VersionCheckResponse, error) {
-    req := map[string]string{
-        "client_version": version.GetVersion(),
-        "os":            runtime.GOOS,
-        "arch":          runtime.GOARCH,
-    }
-    
-    resp := &VersionCheckResponse{}
-    err := httpPost(serverURL+"/api/v1/client/version/check", req, resp)
-    if err != nil {
-        return nil, err
-    }
-    
-    return resp, nil
-}
-
-func (c *Client) ValidateVersion() error {
-    resp, err := CheckVersion(c.serverURL)
-    if err != nil {
-        return fmt.Errorf("version check failed: %w", err)
-    }
-    
-    if !resp.VersionValid && resp.ForceUpgrade {
-        // 显示强制升级界面
-        ShowUpgradeDialog(resp)
-        return fmt.Errorf("version too old, upgrade required")
-    }
-    
-    return nil
-}
-```
-
-## 7. Web管理界面设计
-
-### 7.1 版本管理页面
-
-**路由**：`/admin/settings/version`
-
-**界面布局**：
+**界面设计**：
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  系统设置 > 版本管理                                 │
-├─────────────────────────────────────────────────────┤
-│                                                     │
-│  Desktop客户端版本管理                               │
-│                                                     │
-│  ┌─────────────────────────────────────────────┐   │
-│  │ 启用版本检查                                  │   │
-│  │ ☑ 启用（取消勾选将允许所有版本登录）           │   │
-│  └─────────────────────────────────────────────┘   │
-│                                                     │
-│  ┌─────────────────────────────────────────────┐   │
-│  │ 最低支持版本                                  │   │
-│  │ [1.0.0                    ] [更新]           │   │
-│  │ 低于此版本的客户端将无法登录                   │   │
-│  └─────────────────────────────────────────────┘   │
-│                                                     │
-│  ┌─────────────────────────────────────────────┐   │
-│  │ 最新版本（可选）                              │   │
-│  │ [1.2.0                    ] [更新]           │   │
-│  │ 用于提示用户有新版本可用                       │   │
-│  └─────────────────────────────────────────────┘   │
-│                                                     │
-│  ┌─────────────────────────────────────────────┐   │
-│  │ 下载地址                                      │   │
-│  │ [https://github.com/...   ] [更新]           │   │
-│  │ 用户点击升级时跳转的下载页面                   │   │
-│  └─────────────────────────────────────────────┘   │
-│                                                     │
-│  最后更新: 2025-11-27 10:30:00 by admin            │
-│                                                     │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│  系统配置                                                            │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  客户端下载地址                                                      │
+│  ┌───────────────────────────────────────────────────────────┐     │
+│  │ https://cdn.example.com/downloads                         │     │
+│  └───────────────────────────────────────────────────────────┘     │
+│  设置客户端文件存储的基础URL，系统会自动拼接文件名生成完整下载链接   │
+│                                                                     │
+│  客户端最低版本                                                      │
+│  ┌──────────────────┐                                              │
+│  │ 1.0.0            │                                              │
+│  └──────────────────┘                                              │
+│  低于此版本的客户端将无法登录，强制用户升级到新版本                  │
+│                                                                     │
+│  ┌────────┐                                                        │
+│  │  保存  │                                                        │
+│  └────────┘                                                        │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 7.2 Vue组件示例
+**说明**：
 
-```vue
-<!-- web/src/views/admin/VersionSettings.vue -->
-<template>
-  <div class="version-settings">
-    <el-card>
-      <template #header>
-        <span>Desktop客户端版本管理</span>
-      </template>
-      
-      <el-form :model="form" label-width="150px">
-        <el-form-item label="启用版本检查">
-          <el-switch v-model="form.enabled" @change="updateEnabled" />
-          <div class="form-tip">取消勾选将允许所有版本登录</div>
-        </el-form-item>
-        
-        <el-form-item label="最低支持版本">
-          <el-input v-model="form.minVersion" style="width: 200px" />
-          <el-button type="primary" @click="updateMinVersion">更新</el-button>
-          <div class="form-tip">低于此版本的客户端将无法登录</div>
-        </el-form-item>
-        
-        <el-form-item label="最新版本">
-          <el-input v-model="form.latestVersion" style="width: 200px" />
-          <el-button type="primary" @click="updateLatestVersion">更新</el-button>
-          <div class="form-tip">用于提示用户有新版本可用</div>
-        </el-form-item>
-        
-        <el-form-item label="下载地址">
-          <el-input v-model="form.downloadUrl" style="width: 400px" />
-          <el-button type="primary" @click="updateDownloadUrl">更新</el-button>
-          <div class="form-tip">用户点击升级时跳转的下载页面</div>
-        </el-form-item>
-      </el-form>
-      
-      <div class="update-info">
-        最后更新: {{ form.updatedAt }} by {{ form.updatedBy }}
-      </div>
-    </el-card>
-  </div>
-</template>
-```
+- 版本管理功能直接集成到现有的系统配置页面中
+- 无需创建单独的版本管理页面
+- 与客户端下载地址配置放在一起，逻辑更清晰
+- 统一的保存按钮，一次性保存所有配置
 
 ## 8. 实施计划
 
-### 8.1 第一阶段：数据库和API
+### 8.1 第一阶段：数据库和 API
 
 1. 创建`system_settings`表
-2. 实现版本检查API
-3. 实现管理员版本管理API
+2. 实现版本检查 API
+3. 实现管理员版本管理 API
 4. 添加单元测试
 
-### 8.2 第二阶段：Desktop客户端
+### 8.2 第二阶段：Desktop 客户端
 
 1. 实现版本号注入机制
 2. 实现版本检查逻辑
 3. 实现强制升级界面
 4. 集成到登录流程
 
-### 8.3 第三阶段：Web管理界面
+### 8.3 第三阶段：Web 管理界面
 
-1. 实现版本管理页面
-2. 添加到系统设置菜单
+1. 在现有系统配置页面中添加版本管理字段
+2. 更新系统配置 API 以支持版本管理
 3. 测试版本管理功能
 
 ### 8.4 第四阶段：测试和发布
@@ -362,50 +260,54 @@ func (c *Client) ValidateVersion() error {
 ### 9.1 发布新版本
 
 1. **更新版本号**：
+
    ```bash
    # 修改 VERSION 文件
    echo "1.1.0" > VERSION
    ```
 
 2. **构建新版本**：
+
    ```bash
    ./scripts/build_desktop.sh
    ```
 
-3. **创建Git标签**：
+3. **创建 Git 标签**：
+
    ```bash
    git tag -a v1.1.0 -m "Release version 1.1.0"
    git push origin v1.1.0
    ```
 
-4. **上传到GitHub Releases**：
-   - 创建新的Release
-   - 上传编译好的二进制文件
-   - 编写Release Notes
+4. **上传到 GitHub Releases**：
 
-5. **更新Server设置**（如果需要强制升级）：
-   - 登录Web管理界面
-   - 进入"系统设置 > 版本管理"
-   - 更新最低支持版本
+   - 创建新的 Release
+   - 上传编译好的二进制文件
+   - 编写 Release Notes
+
+5. **更新 Server 设置**（如果需要强制升级）：
+   - 登录 Web 管理界面
+   - 进入"系统管理 > 系统配置"
+   - 更新客户端最低版本
 
 ### 9.2 版本号递增规则
 
-- **修复Bug**：递增PATCH版本（1.0.0 → 1.0.1）
-- **新增功能**：递增MINOR版本（1.0.1 → 1.1.0）
-- **重大变更**：递增MAJOR版本（1.1.0 → 2.0.0）
+- **修复 Bug**：递增 PATCH 版本（1.0.0 → 1.0.1）
+- **新增功能**：递增 MINOR 版本（1.0.1 → 1.1.0）
+- **重大变更**：递增 MAJOR 版本（1.1.0 → 2.0.0）
 
 ## 10. 安全考虑
 
 ### 10.1 版本检查绕过防护
 
-- 版本检查在Server端进行，Desktop无法绕过
-- 即使Desktop伪造版本号，Server也会在后续API调用中验证
-- 建议在JWT Token中包含Desktop版本号
+- 版本检查在 Server 端进行，Desktop 无法绕过
+- 即使 Desktop 伪造版本号，Server 也会在后续 API 调用中验证
+- 建议在 JWT Token 中包含 Desktop 版本号
 
 ### 10.2 下载链接安全
 
-- 使用HTTPS下载链接
-- 建议使用官方GitHub Releases或可信CDN
+- 使用 HTTPS 下载链接
+- 建议使用官方 GitHub Releases 或可信 CDN
 - 提供文件校验和（SHA256）
 
 ### 10.3 版本回退
@@ -429,7 +331,8 @@ func (c *Client) ValidateVersion() error {
 ## 12. 总结
 
 版本管理机制确保了：
-- ✅ Desktop客户端版本可控
+
+- ✅ Desktop 客户端版本可控
 - ✅ 可以强制用户升级到安全版本
 - ✅ 管理员可以灵活配置版本要求
 - ✅ 用户体验友好（提供下载链接）

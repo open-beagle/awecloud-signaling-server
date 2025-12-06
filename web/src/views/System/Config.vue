@@ -25,6 +25,20 @@
           </div>
         </el-form-item>
 
+        <el-form-item label="客户端最低版本">
+          <div class="form-item-content">
+            <el-input
+              v-model="form.desktop_min_version"
+              placeholder="请输入最低支持版本（如：1.0.0 或 v1.0.0）"
+              clearable
+              style="width: 300px"
+            />
+            <div class="form-item-tip">
+              低于此版本的客户端将无法登录，强制用户升级到新版本（支持 v 前缀）
+            </div>
+          </div>
+        </el-form-item>
+
         <el-form-item>
           <el-button type="primary" :loading="saving" @click="handleSave">
             保存
@@ -46,7 +60,8 @@ const formRef = ref()
 const saving = ref(false)
 
 const form = ref({
-  client_download_url: ''
+  client_download_url: '',
+  desktop_min_version: '1.0.0'
 })
 
 const downloadPageUrl = computed(() => {
@@ -62,6 +77,7 @@ const loadConfig = async () => {
     const res = await getSystemConfig()
     if (res.success && res.data) {
       form.value.client_download_url = res.data.client_download_url || ''
+      form.value.desktop_min_version = res.data.desktop_min_version || '1.0.0'
     }
   } catch (error) {
     console.error('加载配置失败:', error)
@@ -73,10 +89,18 @@ onMounted(() => {
 })
 
 const handleSave = async () => {
+  // 验证版本号格式（支持可选的 v 或 V 前缀）
+  const versionRegex = /^[vV]?\d+\.\d+\.\d+$/
+  if (form.value.desktop_min_version && !versionRegex.test(form.value.desktop_min_version)) {
+    ElMessage.error('版本号格式不正确，请使用 x.y.z 或 vx.y.z 格式（如：1.0.0 或 v1.0.0）')
+    return
+  }
+
   saving.value = true
   try {
     const res = await updateSystemConfig({
-      client_download_url: form.value.client_download_url
+      client_download_url: form.value.client_download_url,
+      desktop_min_version: form.value.desktop_min_version
     })
     if (res.success) {
       ElMessage.success('保存成功')

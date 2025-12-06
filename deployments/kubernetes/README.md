@@ -100,22 +100,22 @@ kubectl logs -f -n awecloud deployment/awecloud-signaling-agent
 
 ## 镜像版本
 
-当前使用的镜像版本：`v0.1.0`
+当前使用的镜像版本：`v0.1.1`
 
-- Server: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.0`
-- Agent: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.0`
+- Server: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.1`
+- Agent: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.1`
 
 ## 更新镜像
 
 ```bash
 # 更新 Server
 kubectl set image deployment/awecloud-signaling-server \
-  server=registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.0 \
+  server=registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.1 \
   -n awecloud
 
 # 更新 Agent
 kubectl set image deployment/awecloud-signaling-agent \
-  agent=registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.0 \
+  agent=registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.1 \
   -n awecloud
 ```
 
@@ -127,7 +127,6 @@ kubectl set image deployment/awecloud-signaling-agent \
   - Agent-FRP 连接
   - Desktop-FRP 连接
   - 协调 STCP 隧道建立
-  
 - **8080**: Server-Web 线程（HTTP/2 统一端口）
   - Web 管理界面（HTTP）
   - RESTful API（HTTP）
@@ -160,18 +159,21 @@ kubectl set image deployment/awecloud-signaling-agent \
 **通过环境变量配置**（推荐）：
 
 在 `agent-deployment.yaml` 中配置：
+
 - `AGENT_NAME`: Agent 名称（直接在 Deployment 中设置）
 - `AGENT_TOKEN`: Agent 认证 token（从 Secret 获取）
 
 **通过 ConfigMap 配置**：
 
 `awecloud-signaling-agent` 包含基础配置：
+
 - Server 连接地址和端口
 - 日志配置
 
 **通过 Secret 配置**：
 
 `awecloud-signaling-agent` 包含敏感信息：
+
 - `agent-token`: Agent 认证 token（从 Server Web 界面创建 Agent 时获取）
 
 **配置优先级**：环境变量 > 配置文件
