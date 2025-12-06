@@ -3,6 +3,7 @@
 ## 概述
 
 Server 提供智能的桌面客户端下载 API，能够：
+
 - 自动识别客户端操作系统
 - 提供最新版本的下载链接
 - 支持直接下载或获取下载信息
@@ -37,10 +38,12 @@ your-storage-path/
 **描述**: 返回适合当前操作系统的下载信息（JSON 格式）
 
 **参数**:
+
 - `os` (可选): 指定操作系统 (`windows`, `linux`, `darwin`/`macos`)
   - 如果不提供，自动从 User-Agent 检测
 
 **响应示例**:
+
 ```json
 {
   "version": "v0.1.0",
@@ -53,6 +56,7 @@ your-storage-path/
 ```
 
 **使用示例**:
+
 ```bash
 # 自动检测操作系统
 curl https://your-server.example.com/api/v1/public/download/desktop
@@ -68,9 +72,11 @@ curl https://your-server.example.com/api/v1/public/download/desktop?os=macos
 **描述**: 直接重定向到下载链接，适合浏览器直接访问
 
 **参数**:
+
 - `os` (可选): 指定操作系统 (`windows`, `linux`, `darwin`/`macos`)
 
 **使用示例**:
+
 ```bash
 # 浏览器访问，自动下载
 https://your-server.example.com/api/v1/public/download/desktop/direct
@@ -86,6 +92,7 @@ https://your-server.example.com/api/v1/public/download/desktop/direct?os=macos
 **描述**: 列出所有平台的下载信息
 
 **响应示例**:
+
 ```json
 {
   "version": "v0.1.0",
@@ -164,7 +171,7 @@ API 通过以下方式检测操作系统：
 ```typescript
 // 获取下载信息
 async function getDownloadInfo() {
-  const response = await fetch('/api/v1/public/download/desktop');
+  const response = await fetch("/api/v1/public/download/desktop");
   const data = await response.json();
   console.log(`最新版本: ${data.version}`);
   console.log(`下载链接: ${data.download_url}`);
@@ -173,12 +180,12 @@ async function getDownloadInfo() {
 
 // 直接下载
 function downloadDesktop() {
-  window.location.href = '/api/v1/public/download/desktop/direct';
+  window.location.href = "/api/v1/public/download/desktop/direct";
 }
 
 // 获取所有平台的下载链接
 async function getAllDownloads() {
-  const response = await fetch('/api/v1/public/download/desktop/versions');
+  const response = await fetch("/api/v1/public/download/desktop/versions");
   const data = await response.json();
   return data.downloads;
 }
@@ -196,12 +203,8 @@ async function getAllDownloads() {
 <a href="/api/v1/public/download/desktop/direct?os=windows">
   下载 Windows 版本
 </a>
-<a href="/api/v1/public/download/desktop/direct?os=macos">
-  下载 macOS 版本
-</a>
-<a href="/api/v1/public/download/desktop/direct?os=linux">
-  下载 Linux 版本
-</a>
+<a href="/api/v1/public/download/desktop/direct?os=macos"> 下载 macOS 版本 </a>
+<a href="/api/v1/public/download/desktop/direct?os=linux"> 下载 Linux 版本 </a>
 ```
 
 ## 注意事项
@@ -209,7 +212,7 @@ async function getAllDownloads() {
 1. **存储配置**: 管理员需要在 Web 界面的"系统配置"中设置"客户端下载地址"
 2. **公开访问**: 确保存储服务（S3/OSS/CDN）的文件设置为公开读取
 3. **CORS 配置**: 如果前端跨域访问，需要配置存储服务的 CORS 策略
-4. **缓存策略**: 
+4. **缓存策略**:
    - `version.json`：设置较短的缓存时间（如 1 分钟）
    - `*-v0.x.x-*` 文件：可以长期缓存（如 1 年）
 5. **文件大小**: macOS 的 .zip 文件通常比其他平台大，注意下载体验

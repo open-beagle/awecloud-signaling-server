@@ -42,10 +42,14 @@ export default {
     usernameRequired: 'Username is required',
     passwordRequired: 'Password is required'
   },
+  app: {
+    title: 'Signaling Server',
+    shortTitle: 'Signaling'
+  },
   menu: {
     agents: 'Agents',
     clients: 'Clients',
-    stcpInstances: 'STCP Instances',
+    stcpInstances: 'Services',
     groups: 'Groups',
     favorites: 'Favorites',
     auditLogs: 'Audit Logs',

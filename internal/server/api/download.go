@@ -1,11 +1,8 @@
 package api
 
 import (
-	"encoding/json"
-	"fmt"
+	"log"
 	"net/http"
-	"path"
-	"runtime"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -14,251 +11,188 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
-// DownloadInfo 下载信息
+type DownloadAPI struct{}
+
+func NewDownloadAPI() *DownloadAPI {
+	return &DownloadAPI{}
+}
+
+// DownloadInfo 单个平台的下载信息
 type DownloadInfo struct {
 	Version     string `json:"version"`
 	DownloadURL string `json:"download_url"`
 	Filename    string `json:"filename"`
 	OS          string `json:"os"`
 	Arch        string `json:"arch"`
-	BuildDate   string `json:"build_date,omitempty"`
 }
 
-// VersionInfo S3 上的版本信息
-type VersionInfo struct {
-	Version   string `json:"version"`
-	BuildDate string `json:"build_date"`
+// AllDownloadsResponse 所有平台的下载信息
+type AllDownloadsResponse struct {
+	Success   bool                    `json:"success"`
+	Version   string                  `json:"version,omitempty"`
+	Downloads map[string]DownloadInfo `json:"downloads,omitempty"`
+	Message   string                  `json:"message,omitempty"`
 }
 
-// 不再硬编码 S3 地址，完全依赖系统配置
-
-// DownloadAPI 下载API
-type DownloadAPI struct{}
-
-// NewDownloadAPI 创建下载API实例
-func NewDownloadAPI() *DownloadAPI {
-	return &DownloadAPI{}
+// getClientDownloadURL 从系统配置获取客户端下载地址
+func getClientDownloadURL() (string, error) {
+	var config model.SystemConfig
+	if err := db.DB.First(&config).Error; err != nil {
+		return "", err
+	}
+	return config.ClientDownloadURL, nil
 }
 
-// GetDesktopDownload 获取桌面客户端下载链接（智能识别操作系统）
-func (d *DownloadAPI) GetDesktopDownload(c *gin.Context) {
-	r := c.Request
-	// 从 User-Agent 或查询参数获取操作系统信息
-	osType := r.URL.Query().Get("os")
-	if osType == "" {
-		osType = detectOSFromUserAgent(r.UserAgent())
+// detectOS 从 User-Agent 或查询参数检测操作系统
+func detectOS(c *gin.Context) string {
+	// 优先使用查询参数
+	if osParam := c.Query("os"); osParam != "" {
+		osParam = strings.ToLower(osParam)
+		// 标准化 macOS 别名
+		if osParam == "macos" || osParam == "mac" {
+			return "darwin"
+		}
+		return osParam
 	}
 
-	// 获取最新版本信息
-	versionInfo, err := getLatestVersion()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("获取版本信息失败: %v", err)})
+	// 从 User-Agent 检测
+	userAgent := strings.ToLower(c.GetHeader("User-Agent"))
+
+	if strings.Contains(userAgent, "windows") || strings.Contains(userAgent, "win64") || strings.Contains(userAgent, "win32") {
+		return "windows"
+	}
+	if strings.Contains(userAgent, "macintosh") || strings.Contains(userAgent, "mac os x") || strings.Contains(userAgent, "darwin") {
+		return "darwin"
+	}
+	if strings.Contains(userAgent, "linux") || strings.Contains(userAgent, "x11") {
+		return "linux"
+	}
+
+	// 默认返回 windows
+	return "windows"
+}
+
+// buildDownloadInfo 构建下载信息
+func buildDownloadInfo(baseURL, osType string) DownloadInfo {
+	version := "v0.1.0"
+	arch := "amd64"
+
+	var filename string
+	switch osType {
+	case "windows":
+		filename = "awecloud-signaling-" + version + "-windows-" + arch + ".exe"
+	case "linux":
+		filename = "awecloud-signaling-" + version + "-linux-" + arch
+	case "darwin":
+		arch = "universal"
+		filename = "awecloud-signaling-" + version + "-darwin-" + arch + ".zip"
+	default:
+		filename = "awecloud-signaling-" + version + "-windows-amd64.exe"
+		osType = "windows"
+	}
+
+	// 确保 baseURL 以斜杠结尾
+	if !strings.HasSuffix(baseURL, "/") {
+		baseURL += "/"
+	}
+
+	return DownloadInfo{
+		Version:     version,
+		DownloadURL: baseURL + filename,
+		Filename:    filename,
+		OS:          osType,
+		Arch:        arch,
+	}
+}
+
+// buildAllDownloads 构建所有平台的下载信息
+func buildAllDownloads(baseURL string) map[string]DownloadInfo {
+	downloads := make(map[string]DownloadInfo)
+
+	// Windows
+	downloads["windows"] = buildDownloadInfo(baseURL, "windows")
+
+	// Linux
+	downloads["linux"] = buildDownloadInfo(baseURL, "linux")
+
+	// macOS (darwin)
+	downloads["darwin"] = buildDownloadInfo(baseURL, "darwin")
+	downloads["macos"] = buildDownloadInfo(baseURL, "darwin") // 别名
+
+	return downloads
+}
+
+// GetDesktopDownload 获取桌面客户端下载信息（公开接口，无需认证）
+// 根据 User-Agent 或 os 参数返回适合的下载信息
+func (a *DownloadAPI) GetDesktopDownload(c *gin.Context) {
+	// 获取系统配置中的下载地址
+	baseURL, err := getClientDownloadURL()
+	if err != nil || baseURL == "" {
+		log.Printf("[Download] 获取下载地址失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "下载服务未配置",
+		})
 		return
 	}
 
-	// 根据操作系统生成下载信息
-	downloadInfo := generateDownloadInfo(osType, versionInfo)
+	// 检测操作系统
+	osType := detectOS(c)
+	log.Printf("[Download] 检测到操作系统: %s, User-Agent: %s", osType, c.GetHeader("User-Agent"))
 
-	c.JSON(http.StatusOK, downloadInfo)
+	// 构建下载信息
+	downloadInfo := buildDownloadInfo(baseURL, osType)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"version":      downloadInfo.Version,
+		"download_url": downloadInfo.DownloadURL,
+		"filename":     downloadInfo.Filename,
+		"os":           downloadInfo.OS,
+		"arch":         downloadInfo.Arch,
+	})
 }
 
-// GetDesktopDownloadDirect 直接重定向到下载链接
-func (d *DownloadAPI) GetDesktopDownloadDirect(c *gin.Context) {
-	r := c.Request
-	// 从 User-Agent 或查询参数获取操作系统信息
-	osType := r.URL.Query().Get("os")
-	if osType == "" {
-		osType = detectOSFromUserAgent(r.UserAgent())
-	}
-
-	// 获取最新版本信息
-	versionInfo, err := getLatestVersion()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("获取版本信息失败: %v", err)})
+// GetDesktopDownloadDirect 直接重定向到最新版本下载（公开接口）
+func (a *DownloadAPI) GetDesktopDownloadDirect(c *gin.Context) {
+	// 获取系统配置中的下载地址
+	baseURL, err := getClientDownloadURL()
+	if err != nil || baseURL == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "下载服务未配置",
+		})
 		return
 	}
 
-	// 根据操作系统生成下载信息
-	downloadInfo := generateDownloadInfo(osType, versionInfo)
+	// 检测操作系统
+	osType := detectOS(c)
+
+	// 构建下载信息
+	downloadInfo := buildDownloadInfo(baseURL, osType)
 
 	// 重定向到下载链接
 	c.Redirect(http.StatusFound, downloadInfo.DownloadURL)
 }
 
-// ListDesktopVersions 列出所有可用版本
-func (d *DownloadAPI) ListDesktopVersions(c *gin.Context) {
-	// 获取最新版本信息
-	versionInfo, err := getLatestVersion()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("获取版本信息失败: %v", err)})
+// ListDesktopVersions 列出所有可用版本（公开接口）
+func (a *DownloadAPI) ListDesktopVersions(c *gin.Context) {
+	// 获取系统配置中的下载地址
+	baseURL, err := getClientDownloadURL()
+	if err != nil || baseURL == "" {
+		c.JSON(http.StatusOK, AllDownloadsResponse{
+			Success: false,
+			Message: "下载服务未配置",
+		})
 		return
 	}
 
-	// 生成所有平台的下载信息
-	downloads := map[string]*DownloadInfo{
-		"windows": generateDownloadInfo("windows", versionInfo),
-		"linux":   generateDownloadInfo("linux", versionInfo),
-		"darwin":  generateDownloadInfo("darwin", versionInfo),
-		"macos":   generateDownloadInfo("darwin", versionInfo), // 别名
-	}
+	// 构建所有平台的下载信息
+	downloads := buildAllDownloads(baseURL)
 
-	response := gin.H{
-		"version":    versionInfo.Version,
-		"build_date": versionInfo.BuildDate,
-		"downloads":  downloads,
-	}
-
-	c.JSON(http.StatusOK, response)
-}
-
-// detectOSFromUserAgent 从 User-Agent 检测操作系统
-func detectOSFromUserAgent(userAgent string) string {
-	ua := strings.ToLower(userAgent)
-
-	if strings.Contains(ua, "windows") || strings.Contains(ua, "win64") || strings.Contains(ua, "win32") {
-		return "windows"
-	}
-	if strings.Contains(ua, "macintosh") || strings.Contains(ua, "mac os x") || strings.Contains(ua, "darwin") {
-		return "darwin"
-	}
-	if strings.Contains(ua, "linux") || strings.Contains(ua, "x11") {
-		return "linux"
-	}
-
-	// 默认返回服务器运行的操作系统
-	return runtime.GOOS
-}
-
-// getLatestVersion 从配置的地址获取最新版本信息
-func getLatestVersion() (*VersionInfo, error) {
-	// 从系统配置获取基础地址
-	var config model.SystemConfig
-	var baseURL string
-
-	if err := db.DB.First(&config).Error; err == nil && config.ClientDownloadURL != "" {
-		configURL := strings.TrimSpace(config.ClientDownloadURL)
-
-		// 提取基础路径
-		// 如果是完整文件 URL，提取目录部分
-		if strings.Contains(configURL, "awecloud-signaling-") &&
-			(strings.HasSuffix(configURL, ".exe") ||
-				strings.HasSuffix(configURL, ".zip") ||
-				!strings.Contains(path.Base(configURL), ".")) {
-			baseURL = path.Dir(configURL)
-		} else {
-			// 如果是目录 URL，去掉尾部斜杠
-			baseURL = strings.TrimRight(configURL, "/")
-		}
-	}
-
-	// 如果没有配置，返回默认版本
-	if baseURL == "" {
-		return &VersionInfo{
-			Version:   "v0.1.0",
-			BuildDate: "",
-		}, nil
-	}
-
-	// 从配置的地址获取 version.json
-	versionURL := fmt.Sprintf("%s/version.json", baseURL)
-
-	resp, err := http.Get(versionURL)
-	if err != nil {
-		// 如果获取失败，返回默认版本
-		return &VersionInfo{
-			Version:   "v0.1.0",
-			BuildDate: "",
-		}, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		// 如果文件不存在，返回默认版本
-		return &VersionInfo{
-			Version:   "v0.1.0",
-			BuildDate: "",
-		}, nil
-	}
-
-	var versionInfo VersionInfo
-	if err := json.NewDecoder(resp.Body).Decode(&versionInfo); err != nil {
-		return nil, fmt.Errorf("解析版本信息失败: %w", err)
-	}
-
-	return &versionInfo, nil
-}
-
-// generateDownloadInfo 生成下载信息
-func generateDownloadInfo(osType string, versionInfo *VersionInfo) *DownloadInfo {
-	var filename string
-	var arch string
-
-	// 使用带版本号的文件名（兼容现有 Server 存储的 URL）
-	switch osType {
-	case "windows":
-		filename = fmt.Sprintf("awecloud-signaling-%s-windows-amd64.exe", versionInfo.Version)
-		arch = "amd64"
-	case "linux":
-		filename = fmt.Sprintf("awecloud-signaling-%s-linux-amd64", versionInfo.Version)
-		arch = "amd64"
-	case "darwin", "macos":
-		filename = fmt.Sprintf("awecloud-signaling-%s-darwin-universal.zip", versionInfo.Version)
-		arch = "universal"
-		osType = "darwin"
-	default:
-		// 默认 Linux
-		filename = fmt.Sprintf("awecloud-signaling-%s-linux-amd64", versionInfo.Version)
-		arch = "amd64"
-		osType = "linux"
-	}
-
-	// 从系统配置获取下载地址
-	downloadURL := getDownloadURL(filename)
-
-	// 如果没有配置下载地址，返回空 URL（前端需要提示管理员配置）
-	if downloadURL == "" {
-		downloadURL = "" // 保持为空，让前端显示错误提示
-	}
-
-	return &DownloadInfo{
-		Version:     versionInfo.Version,
-		DownloadURL: downloadURL,
-		Filename:    filename,
-		OS:          osType,
-		Arch:        arch,
-		BuildDate:   versionInfo.BuildDate,
-	}
-}
-
-// getDownloadURL 获取下载 URL
-// 从系统配置获取基础地址，拼接文件名
-// 支持三种配置格式：
-// 1. https://xxx/path/ （带尾部斜杠）
-// 2. https://xxx/path （不带尾部斜杠）
-// 3. https://xxx/path/awecloud-signaling-v0.1.0-windows-amd64.exe （完整文件 URL）
-func getDownloadURL(filename string) string {
-	// 从数据库获取系统配置
-	var config model.SystemConfig
-	if err := db.DB.First(&config).Error; err == nil && config.ClientDownloadURL != "" {
-		configURL := strings.TrimSpace(config.ClientDownloadURL)
-
-		// 判断配置的 URL 是否是完整的文件 URL（包含文件名）
-		// 检查是否包含 awecloud-signaling- 且以文件扩展名结尾
-		if strings.Contains(configURL, "awecloud-signaling-") &&
-			(strings.HasSuffix(configURL, ".exe") ||
-				strings.HasSuffix(configURL, ".zip") ||
-				!strings.Contains(path.Base(configURL), ".")) {
-			// 提取基础路径（去掉文件名）
-			baseURL := path.Dir(configURL)
-			return fmt.Sprintf("%s/%s", baseURL, filename)
-		}
-
-		// 如果配置的是目录 URL
-		// 去掉尾部斜杠，统一处理
-		baseURL := strings.TrimRight(configURL, "/")
-		return fmt.Sprintf("%s/%s", baseURL, filename)
-	}
-
-	// 如果没有配置，返回空字符串（调用方需要处理）
-	return ""
+	c.JSON(http.StatusOK, AllDownloadsResponse{
+		Success:   true,
+		Version:   "v0.1.0",
+		Downloads: downloads,
+	})
 }

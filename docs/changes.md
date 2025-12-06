@@ -1,5 +1,140 @@
 # 变更记录
 
+## 2025-12-06: 下载页面功能
+
+### 功能概述
+
+在 Server 端新增免登录的下载页面，用户可以在不登录的情况下查看和下载客户端。登录页的"下载客户端"按钮改为跳转到下载页面，而不是直接下载文件。
+
+### Server 端变更
+
+#### 1. API 变更
+
+新增公开 API 接口（无需认证）：
+
+1. **GET /api/v1/public/download/desktop** - 获取桌面客户端下载信息
+
+   - 无需认证
+   - 返回：`{ success: bool, version: string, downloads: []DownloadItem, changelog_url: string }`
+   - 自动扫描 `bin` 目录下的客户端文件
+
+2. **GET /api/v1/public/download/desktop/direct** - 直接重定向到下载文件
+
+   - 无需认证
+   - 参数：`platform` (windows/linux/darwin), `arch` (amd64/arm64)
+   - 重定向到对应的下载文件
+
+3. **GET /api/v1/public/download/desktop/versions** - 列出所有可用版本
+   - 无需认证
+   - 目前返回当前版本，未来可扩展支持多版本
+
+**新增文件**：
+
+- `internal/server/api/download.go` - 下载 API 实现
+
+**修改文件**：
+
+- `internal/server/server.go` - 添加静态文件服务 `/downloads` 路由
+
+#### 2. 静态文件服务
+
+- 新增 `/downloads` 路由，映射到 `./bin` 目录
+- 支持直接下载客户端文件
+
+### Web 端变更
+
+#### 1. 新增下载页面
+
+**新增文件**：
+
+- `web/src/views/Download.vue` - 下载页面组件
+- `web/src/api/download.ts` - 下载 API 调用
+
+**修改文件**：
+
+- `web/src/router/index.ts` - 添加 `/download` 路由（公开访问）
+
+**页面功能**：
+
+- 显示所有可用平台的下载选项（Windows、Linux、macOS）
+- 显示版本信息和文件大小
+- 提供返回登录页的链接
+- 提供查看更新日志的链接
+- 响应式设计，支持移动端
+
+#### 2. 登录页面变更
+
+**修改文件**：
+
+- `web/src/views/Login.vue` - 修改下载按钮行为
+
+**变更内容**：
+
+- "下载客户端"按钮改为跳转到 `/download` 页面
+- 移除直接下载逻辑
+- 移除系统配置中的 `client_download_url` 字段依赖
+- 下载按钮始终显示（不再依赖配置）
+
+#### 3. 登录后下载入口变更
+
+**修改文件**：
+
+- `web/src/components/Layout/Header.vue` - 修改头部"客户端"按钮行为
+- `web/src/views/System/Config.vue` - 修改系统配置页面
+
+**变更内容**：
+
+- 头部"客户端"按钮改为跳转到 `/download` 页面（新窗口打开）
+- 按钮始终显示（不再依赖系统配置）
+- 移除 `client_download_url` 配置项的加载逻辑
+- 系统配置页面改为显示"前往下载页面"按钮和下载页面 URL
+
+### 实现细节
+
+1. **下载地址配置**：
+
+   - 管理员在系统配置中设置"客户端下载地址"
+   - 支持目录 URL（如 `https://cdn.example.com/downloads/`）
+   - API 自动拼接文件名生成完整下载链接
+
+2. **操作系统检测**：
+
+   - 后端：从 User-Agent 或 `os` 查询参数检测
+   - 前端：使用 `navigator.userAgent` 检测用户系统
+   - 自动推荐适合用户系统的客户端
+
+3. **文件命名规范**：
+
+   - Windows: `awecloud-signaling-v0.1.0-windows-amd64.exe`
+   - Linux: `awecloud-signaling-v0.1.0-linux-amd64`
+   - macOS: `awecloud-signaling-v0.1.0-darwin-universal.zip`
+
+4. **用户体验**：
+   - 自动检测用户系统并标记"推荐"
+   - 推荐的系统排在第一位
+   - 显示文件名和架构信息
+   - 一键下载，无需登录
+
+### 优势
+
+1. **更好的用户体验**：
+
+   - 用户可以在不登录的情况下下载客户端
+   - 可以查看所有平台的下载选项
+   - 显示版本信息和文件大小
+
+2. **便于维护**：
+
+   - 自动扫描文件，无需手动配置
+   - 支持多平台、多架构
+   - 便于后续添加版本管理功能
+
+3. **安全性**：
+   - 公开访问，但有路径保护
+   - 不暴露服务器敏感信息
+
+---
+
 ## 2025-12-04: 服务收藏功能
 
 ### 功能概述

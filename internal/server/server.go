@@ -219,6 +219,9 @@ func (s *Server) setupRouter() *gin.Engine {
 	router.Static("/assets", "./web/dist/assets")
 	router.StaticFile("/favicon.ico", "./web/dist/favicon.ico")
 
+	// 下载文件服务（客户端下载）
+	router.Static("/downloads", "./bin")
+
 	// API路由组
 	apiGroup := router.Group("/api")
 	{

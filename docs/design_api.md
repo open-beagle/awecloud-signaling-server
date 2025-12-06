@@ -674,42 +674,45 @@ DELETE /api/v1/admin/groups/:id/members/:client_id
 
 **认证流程说明**:
 
-Desktop客户端的认证分为两个阶段：
+Desktop 客户端的认证分为两个阶段：
 
-**阶段1：登录（获取JWT Token）**
+**阶段 1：登录（获取 JWT Token）**
 
-支持两种登录方式，最终都返回JWT Token：
+支持两种登录方式，最终都返回 JWT Token：
 
-1. **Secret登录** (`POST /api/v1/client/auth/login`)
-   - 用途：首次登录或Device Token过期
+1. **Secret 登录** (`POST /api/v1/client/auth/login`)
+
+   - 用途：首次登录或 Device Token 过期
    - 输入：`client_id` + `client_secret` + 设备信息
    - 输出：`device_token` + `jwt_token`
-   - 安全：Secret不保存到本地，只在登录时使用
+   - 安全：Secret 不保存到本地，只在登录时使用
 
-2. **Device Token登录** (`POST /api/v1/client/auth/login/token`)
+2. **Device Token 登录** (`POST /api/v1/client/auth/login/token`)
    - 用途：自动登录（记住登录）
    - 输入：`client_id` + `device_token` + 设备指纹
    - 输出：`jwt_token`
-   - 安全：Device Token保存到本地，有效期7天，可远程撤销
+   - 安全：Device Token 保存到本地，有效期 7 天，可远程撤销
 
-**阶段2：API认证（使用JWT Token）**
+**阶段 2：API 认证（使用 JWT Token）**
 
-所有后续API调用统一使用JWT Token认证，不关心用户使用哪种方式登录：
+所有后续 API 调用统一使用 JWT Token 认证，不关心用户使用哪种方式登录：
 
 ```
 Authorization: Bearer <jwt_token>
 ```
 
-JWT Token特点：
-- 有效期：24小时
-- 用途：所有API调用（服务列表、隧道配置、设备管理等）
-- 刷新：JWT过期后需要重新登录（使用Device Token自动登录）
+JWT Token 特点：
+
+- 有效期：24 小时
+- 用途：所有 API 调用（服务列表、隧道配置、设备管理等）
+- 刷新：JWT 过期后需要重新登录（使用 Device Token 自动登录）
 
 **安全设计**:
-- ✅ Secret不保存到本地
-- ✅ Device Token可远程撤销
-- ✅ JWT短期有效，降低泄露风险
-- ✅ 设备指纹验证，防止Token被盗用
+
+- ✅ Secret 不保存到本地
+- ✅ Device Token 可远程撤销
+- ✅ JWT 短期有效，降低泄露风险
+- ✅ 设备指纹验证，防止 Token 被盗用
 
 ---
 
@@ -1070,13 +1073,14 @@ Authorization: Bearer <jwt-token>
 GET /api/v1/client/tunnel/config
 ```
 
-**说明**: Desktop 客户端在连接服务前调用此接口获取隧道配置（FRP连接信息）
+**说明**: Desktop 客户端在连接服务前调用此接口获取隧道配置（FRP 连接信息）
 
 **设计原则**:
+
 - 登录时不返回隧道配置
 - 按需获取：只在连接服务时获取
-- 不在本地保存：每次连接都从Server获取最新配置
-- 为未来独立Token做准备：支持为每个Client分配独立的隧道Token
+- 不在本地保存：每次连接都从 Server 获取最新配置
+- 为未来独立 Token 做准备：支持为每个 Client 分配独立的隧道 Token
 
 **请求头**:
 
@@ -1098,14 +1102,14 @@ Authorization: Bearer <jwt-token>
 **字段说明**:
 
 - `tunnel_server`: 隧道服务器地址
-  - 如果配置了`public_url`，返回完整URL（如：`wss://your-domain.com/ws`）
+  - 如果配置了`public_url`，返回完整 URL（如：`wss://your-domain.com/ws`）
   - 如果未配置，返回空字符串，客户端使用`tunnel_port`构建地址
 - `tunnel_port`: 隧道服务器端口
-  - 如果`tunnel_server`为完整URL，此字段为0
+  - 如果`tunnel_server`为完整 URL，此字段为 0
   - 否则返回实际端口号（如：7000）
-- `tunnel_token`: 隧道认证Token
-  - 当前：所有Client共享Server配置中的统一Token
-  - 未来：每个Client拥有独立的Token（待实现）
+- `tunnel_token`: 隧道认证 Token
+  - 当前：所有 Client 共享 Server 配置中的统一 Token
+  - 未来：每个 Client 拥有独立的 Token（待实现）
 
 **使用流程**:
 
@@ -1121,10 +1125,10 @@ Authorization: Bearer <jwt-token>
 
 **安全性**:
 
-- ✅ 不在本地保存Token，避免泄露风险
-- ✅ 使用JWT认证，确保只有合法用户能获取
-- ✅ 按需获取，减少Token暴露时间
-- ⏳ 未来支持每个Client独立Token（参见 `docs/design_tunnel_token.md`）
+- ✅ 不在本地保存 Token，避免泄露风险
+- ✅ 使用 JWT 认证，确保只有合法用户能获取
+- ✅ 按需获取，减少 Token 暴露时间
+- ⏳ 未来支持每个 Client 独立 Token（参见 `docs/design_tunnel_token.md`）
 
 **错误响应**:
 
@@ -1138,7 +1142,7 @@ Authorization: Bearer <jwt-token>
 **HTTP 状态码**:
 
 - `200 OK`: 成功获取配置
-- `401 Unauthorized`: JWT Token无效或过期
+- `401 Unauthorized`: JWT Token 无效或过期
 - `500 Internal Server Error`: 服务器内部错误
 
 #### 2.9.11 记录连接审计日志
@@ -1280,9 +1284,11 @@ GET /api/v1/public/download/desktop
 ```
 
 **参数**:
+
 - `os` (可选): 指定操作系统 (`windows`, `linux`, `darwin`, `macos`)
 
 **响应**:
+
 ```json
 {
   "version": "v0.1.0",
@@ -1301,6 +1307,7 @@ GET /api/v1/public/download/desktop/direct
 ```
 
 **参数**:
+
 - `os` (可选): 指定操作系统
 
 **行为**: 自动重定向到对应平台的下载链接
@@ -1799,4 +1806,5 @@ wss://your-domain.com/ws?type=client&session_token=xxx
 **最后更新**: 2025-11-29
 
 **更新日志**:
+
 - 2025-11-29: 新增隧道配置接口 `GET /api/v1/client/tunnel/config`

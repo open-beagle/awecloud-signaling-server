@@ -11,16 +11,17 @@
         ref="formRef"
         :model="form"
         label-width="150px"
-        style="max-width: 600px"
       >
         <el-form-item label="客户端下载地址">
-          <el-input
-            v-model="form.client_download_url"
-            placeholder="请输入客户端下载地址"
-            clearable
-          />
-          <div class="form-item-tip">
-            设置后，登录页将显示"下载客户端"按钮
+          <div class="form-item-content">
+            <el-input
+              v-model="form.client_download_url"
+              placeholder="请输入客户端文件存储的基础URL（如：https://cdn.example.com/downloads）"
+              clearable
+            />
+            <div class="form-item-tip">
+              设置客户端文件存储的基础URL，系统会自动拼接文件名生成完整下载链接
+            </div>
           </div>
         </el-form-item>
 
@@ -35,16 +36,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getSystemConfig, updateSystemConfig } from '@/api/system'
 
+const router = useRouter()
 const formRef = ref()
 const saving = ref(false)
 
 const form = ref({
   client_download_url: ''
 })
+
+const downloadPageUrl = computed(() => {
+  return window.location.origin + '/download'
+})
+
+const goToDownloadPage = () => {
+  window.open('/download', '_blank')
+}
 
 const loadConfig = async () => {
   try {
@@ -56,6 +67,10 @@ const loadConfig = async () => {
     console.error('加载配置失败:', error)
   }
 }
+
+onMounted(() => {
+  loadConfig()
+})
 
 const handleSave = async () => {
   saving.value = true
@@ -72,10 +87,6 @@ const handleSave = async () => {
     saving.value = false
   }
 }
-
-onMounted(() => {
-  loadConfig()
-})
 </script>
 
 <style scoped>
@@ -92,11 +103,26 @@ onMounted(() => {
 .card-title {
   font-size: 18px;
   font-weight: 500;
+  color: var(--text-primary);
+}
+
+:deep(.el-form-item__content) {
+  flex: 1;
+}
+
+.form-item-content {
+  width: 100%;
+  max-width: 800px;
+}
+
+.form-item-content .el-input {
+  width: 100%;
 }
 
 .form-item-tip {
   font-size: 12px;
   color: var(--el-text-color-secondary);
-  margin-top: 4px;
+  margin-top: 8px;
+  line-height: 1.5;
 }
 </style>

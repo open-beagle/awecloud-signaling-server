@@ -4,7 +4,7 @@
       <Logo :collapsed="false" class="header-logo" />
     </div>
     <div class="header-right">
-      <span v-if="clientDownloadUrl" class="client-download" @click="handleDownloadClient">
+      <span class="client-download" @click="handleDownloadClient">
         <el-icon><Download /></el-icon>
         客户端
       </span>
@@ -39,20 +39,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { ElMessage } from 'element-plus'
 import Logo from '@/components/Common/Logo.vue'
-import { getPublicSystemConfig } from '@/api/system'
 
 const router = useRouter()
 const { t, locale } = useI18n()
 const authStore = useAuthStore()
 const appStore = useAppStore()
-const clientDownloadUrl = ref('')
 
 const currentLanguage = computed(() => {
   return locale.value === 'zh-CN' ? '中文' : 'English'
@@ -76,25 +74,10 @@ const handleCommand = async (command: string) => {
 }
 
 const handleDownloadClient = () => {
-  if (clientDownloadUrl.value) {
-    window.open(clientDownloadUrl.value, '_blank')
-  }
+  window.open('/download', '_blank')
 }
 
-const loadSystemConfig = async () => {
-  try {
-    const res = await getPublicSystemConfig()
-    if (res.success && res.data) {
-      clientDownloadUrl.value = res.data.client_download_url || ''
-    }
-  } catch (error) {
-    console.error('加载系统配置失败:', error)
-  }
-}
 
-onMounted(() => {
-  loadSystemConfig()
-})
 </script>
 
 <style scoped>

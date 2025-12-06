@@ -42,11 +42,15 @@ export default {
     usernameRequired: '请输入用户名',
     passwordRequired: '请输入密码'
   },
+  app: {
+    title: '信令服务',
+    shortTitle: '信令'
+  },
   menu: {
-    agents: 'Agent管理',
-    stcpInstances: 'STCP实例',
-    clients: 'Client管理',
-    groups: 'Group管理',
+    agents: '代理管理',
+    stcpInstances: '服务实例',
+    clients: '客户管理',
+    groups: '分组管理',
     favorites: '收藏管理',
     auditLogs: '审计日志',
     systemConfig: '系统配置'

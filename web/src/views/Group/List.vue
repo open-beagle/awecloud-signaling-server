@@ -200,5 +200,6 @@ onMounted(() => {
 .card-title {
   font-size: 18px;
   font-weight: 500;
+  color: var(--text-primary);
 }
 </style>

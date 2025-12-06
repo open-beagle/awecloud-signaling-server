@@ -4,11 +4,10 @@ FROM ${BASE}
 
 ARG AUTHOR
 ARG VERSION
-
-LABEL author=${AUTHOR} version=${VERSION}
-
 ARG TARGETOS
 ARG TARGETARCH
+
+LABEL author=${AUTHOR} version=${VERSION}
 
 # Create user and directories
 RUN set -ex && \

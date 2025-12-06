@@ -10,44 +10,44 @@
       router
     >
       <el-menu-item index="/agents">
+        <el-icon><Monitor /></el-icon>
         <template #title>
-          <el-icon><Monitor /></el-icon>
           <span>{{ t('menu.agents') }}</span>
         </template>
       </el-menu-item>
       <el-menu-item index="/stcp-instances">
+        <el-icon><Connection /></el-icon>
         <template #title>
-          <el-icon><Connection /></el-icon>
           <span>{{ t('menu.stcpInstances') }}</span>
         </template>
       </el-menu-item>
       <el-menu-item index="/clients">
+        <el-icon><User /></el-icon>
         <template #title>
-          <el-icon><User /></el-icon>
           <span>{{ t('menu.clients') }}</span>
         </template>
       </el-menu-item>
       <el-menu-item index="/groups">
+        <el-icon><UserFilled /></el-icon>
         <template #title>
-          <el-icon><UserFilled /></el-icon>
           <span>{{ t('menu.groups') }}</span>
         </template>
       </el-menu-item>
       <el-menu-item index="/favorites">
+        <el-icon><Star /></el-icon>
         <template #title>
-          <el-icon><Star /></el-icon>
           <span>{{ t('menu.favorites') }}</span>
         </template>
       </el-menu-item>
       <el-menu-item index="/audit-logs">
+        <el-icon><Document /></el-icon>
         <template #title>
-          <el-icon><Document /></el-icon>
           <span>{{ t('menu.auditLogs') }}</span>
         </template>
       </el-menu-item>
       <el-menu-item index="/system/config">
+        <el-icon><Setting /></el-icon>
         <template #title>
-          <el-icon><Setting /></el-icon>
           <span>{{ t('menu.systemConfig') }}</span>
         </template>
       </el-menu-item>

@@ -3,12 +3,16 @@
     <img src="@/assets/logo.png" class="logo-icon" alt="Logo" />
     
     <transition name="fade">
-      <span v-if="!collapsed" class="logo-text">Signaling Server</span>
+      <span v-if="!collapsed" class="logo-text">{{ t('app.title') }}</span>
     </transition>
   </div>
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
+
 defineProps<{
   collapsed?: boolean
 }>()

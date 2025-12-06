@@ -3,7 +3,7 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>收藏管理</span>
+          <span class="card-title">收藏管理</span>
           <el-button type="primary" :icon="Refresh" @click="loadFavorites" :loading="loading">
             刷新
           </el-button>
@@ -57,20 +57,19 @@
         :data="filteredFavorites"
         v-loading="loading"
         stripe
-        style="width: 100%"
       >
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="client_name" label="用户" width="200" />
-        <el-table-column prop="instance_name" label="服务名称" width="200" />
-        <el-table-column prop="agent_name" label="Agent" width="150" />
+        <el-table-column prop="client_name" label="用户" min-width="150" />
+        <el-table-column prop="instance_name" label="服务名称" min-width="150" />
+        <el-table-column prop="agent_name" label="Agent" min-width="120" />
         <el-table-column prop="local_port" label="本地端口" width="120">
           <template #default="{ row }">
             <el-tag v-if="row.local_port > 0" type="success">{{ row.local_port }}</el-tag>
             <el-tag v-else type="info">默认</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180" />
-        <el-table-column prop="updated_at" label="更新时间" width="180" />
+        <el-table-column prop="created_at" label="创建时间" min-width="160" />
+        <el-table-column prop="updated_at" label="更新时间" min-width="160" />
       </el-table>
 
       <!-- 分页 -->
@@ -207,13 +206,19 @@ onMounted(() => {
 
 <style scoped>
 .favorite-list {
-  padding: 20px;
+  width: 100%;
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.card-title {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text-primary);
 }
 
 .stats-row {

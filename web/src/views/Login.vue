@@ -44,7 +44,7 @@
             {{ t('login.login') }}
           </el-button>
         </el-form-item>
-        <el-form-item v-if="clientDownloadUrl">
+        <el-form-item>
           <el-button
             size="large"
             style="width: 100%"
@@ -60,12 +60,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
-import { getPublicSystemConfig } from '@/api/system'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -73,7 +72,6 @@ const authStore = useAuthStore()
 
 const formRef = ref<FormInstance>()
 const loading = ref(false)
-const clientDownloadUrl = ref('')
 
 const form = reactive({
   username: '',
@@ -109,25 +107,10 @@ const handleLogin = async () => {
 }
 
 const handleDownloadClient = () => {
-  if (clientDownloadUrl.value) {
-    window.open(clientDownloadUrl.value, '_blank')
-  }
+  router.push('/download')
 }
 
-const loadSystemConfig = async () => {
-  try {
-    const res = await getPublicSystemConfig()
-    if (res.success && res.data) {
-      clientDownloadUrl.value = res.data.client_download_url || ''
-    }
-  } catch (error) {
-    console.error('加载系统配置失败:', error)
-  }
-}
 
-onMounted(() => {
-  loadSystemConfig()
-})
 </script>
 
 <style scoped>

@@ -19,7 +19,9 @@ const breadcrumbMap: Record<string, string> = {
   '/clients': 'menu.clients',
   '/stcp-instances': 'menu.stcpInstances',
   '/groups': 'menu.groups',
-  '/audit-logs': 'menu.auditLogs'
+  '/favorites': 'menu.favorites',
+  '/audit-logs': 'menu.auditLogs',
+  '/system/config': 'menu.systemConfig'
 }
 
 const items = computed(() => {

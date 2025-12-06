@@ -10,6 +10,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false }
   },
   {
+    path: '/download',
+    name: 'Download',
+    component: () => import('@/views/Download.vue'),
+    meta: { requiresAuth: false }
+  },
+  {
     path: '/',
     component: () => import('@/components/Layout/Layout.vue'),
     redirect: '/agents',
