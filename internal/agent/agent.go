@@ -120,10 +120,10 @@ func (a *Agent) Run() error {
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
-		log.Println("启动FRP客户端...")
+		log.Println("启动隧道客户端...")
 		if err := a.frpManager.Run(); err != nil {
-			log.Printf("FRP客户端错误: %v", err)
-			log.Println("FRP客户端已停止，但Agent-Web线程继续运行")
+			log.Printf("隧道客户端错误: %v", err)
+			log.Println("隧道客户端已停止，但Agent-Web线程继续运行")
 		}
 	}()
 
@@ -253,7 +253,7 @@ func (a *Agent) register() error {
 	// 更新 FRP 连接信息
 	// 优先使用配置文件或环境变量中的 public_url
 	if a.config.Server.PublicURL != "" {
-		log.Printf("使用配置的 FRP 公网地址: %s (忽略 Server 返回的地址)", a.config.Server.PublicURL)
+		log.Printf("使用配置的隧道公网地址: %s (忽略 Server 返回的地址)", a.config.Server.PublicURL)
 		a.frpManager.SetServerURL(a.config.Server.PublicURL)
 	} else if resp.Server != "" {
 		// 使用 Server 返回的完整 URL
@@ -300,7 +300,7 @@ func (a *Agent) resyncSTCPProxies() {
 			proxy.LocalIP,
 			proxy.LocalPort,
 		); err != nil {
-			log.Printf("重新创建FRP代理失败: %s, error: %v", proxy.InstanceName, err)
+			log.Printf("重新创建隧道代理失败: %s, error: %v", proxy.InstanceName, err)
 
 			// 更新状态为错误
 			a.proxyMutex.Lock()
@@ -309,7 +309,7 @@ func (a *Agent) resyncSTCPProxies() {
 			}
 			a.proxyMutex.Unlock()
 		} else {
-			log.Printf("重新创建FRP代理成功: %s", proxy.InstanceName)
+			log.Printf("重新创建隧道代理成功: %s", proxy.InstanceName)
 
 			// 更新状态为运行中
 			a.proxyMutex.Lock()
@@ -584,7 +584,7 @@ func (a *Agent) handleCreateSTCP(cmd *pb.Command) {
 
 	// 通知Agent-FRP线程创建实际的FRP代理
 	if err := a.frpManager.AddSTCPProxy(cmd.InstanceName, cmd.SecretKey, cmd.LocalIp, cmd.LocalPort); err != nil {
-		log.Printf("创建FRP代理失败: %v", err)
+		log.Printf("创建隧道代理失败: %v", err)
 
 		// 更新状态为错误
 		a.proxyMutex.Lock()
@@ -613,7 +613,7 @@ func (a *Agent) handleDeleteSTCP(cmd *pb.Command) {
 
 	// 通知Agent-FRP线程删除实际的FRP代理
 	if err := a.frpManager.RemoveSTCPProxy(cmd.InstanceName); err != nil {
-		log.Printf("删除FRP代理失败: %v", err)
+		log.Printf("删除隧道代理失败: %v", err)
 		return
 	}
 
@@ -652,7 +652,7 @@ func (a *Agent) handleCreateTCP(cmd *pb.Command) {
 
 	// 通知Agent-FRP线程创建实际的FRP代理
 	if err := a.frpManager.AddTCPProxy(cmd.ServiceName, cmd.LocalIp, cmd.LocalPort, cmd.RemotePort); err != nil {
-		log.Printf("创建FRP TCP代理失败: %v", err)
+		log.Printf("创建TCP隧道代理失败: %v", err)
 
 		// 更新状态为错误
 		a.proxyMutex.Lock()
@@ -681,7 +681,7 @@ func (a *Agent) handleDeleteTCP(cmd *pb.Command) {
 
 	// 通知Agent-FRP线程删除实际的FRP代理
 	if err := a.frpManager.RemoveTCPProxy(cmd.ServiceName); err != nil {
-		log.Printf("删除FRP TCP代理失败: %v", err)
+		log.Printf("删除TCP隧道代理失败: %v", err)
 		return
 	}
 

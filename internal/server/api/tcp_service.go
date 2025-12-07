@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -194,13 +195,18 @@ func allocatePort() (int, error) {
 		portStart, _ = strconv.Atoi(portStartCfg.SettingValue)
 	}
 
-	// 查询最大端口
-	var maxPort int
-	if err := db.DB.Model(&model.TCPService{}).Select("MAX(remote_port)").Scan(&maxPort).Error; err != nil || maxPort == 0 {
+	// 查询最大端口（使用 sql.NullInt64 处理 NULL 值）
+	var maxPort sql.NullInt64
+	if err := db.DB.Model(&model.TCPService{}).Select("MAX(remote_port)").Scan(&maxPort).Error; err != nil {
+		return 0, fmt.Errorf("查询最大端口失败: %w", err)
+	}
+
+	// 如果没有记录或最大端口为 NULL，返回起始端口
+	if !maxPort.Valid || maxPort.Int64 == 0 {
 		return portStart, nil
 	}
 
-	nextPort := maxPort + 1
+	nextPort := int(maxPort.Int64) + 1
 	if nextPort > 65535 {
 		return 0, fmt.Errorf("无可用端口，请删除不使用的TCP服务")
 	}
