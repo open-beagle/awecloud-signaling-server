@@ -42,6 +42,7 @@ type Agent struct {
 
 	// STCP代理管理
 	stcpProxies map[string]*STCPProxy // instance_name -> proxy
+	tcpProxies  map[string]*TCPProxy  // service_name -> proxy
 	proxyMutex  sync.RWMutex
 
 	// FRP客户端管理
@@ -63,6 +64,16 @@ type STCPProxy struct {
 	Status       string // "running", "stopped", "error"
 }
 
+// TCPProxy TCP代理信息
+type TCPProxy struct {
+	ServiceName string
+	LocalIP     string
+	LocalPort   int32
+	RemotePort  int32
+	CreatedAt   time.Time
+	Status      string // "running", "stopped", "error"
+}
+
 // NewAgent 创建Agent
 func NewAgent(cfg *config.AgentConfig) (*Agent, error) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -78,6 +89,7 @@ func NewAgent(cfg *config.AgentConfig) (*Agent, error) {
 		config:      cfg,
 		commandChan: make(chan *pb.Command, 100),
 		stcpProxies: make(map[string]*STCPProxy),
+		tcpProxies:  make(map[string]*TCPProxy),
 		frpManager:  frpManager,
 		ctx:         ctx,
 		cancel:      cancel,
@@ -534,6 +546,12 @@ func (a *Agent) handleCommand(cmd *pb.Command) {
 	case pb.Command_DELETE_STCP:
 		a.handleDeleteSTCP(cmd)
 
+	case pb.Command_CREATE_TCP:
+		a.handleCreateTCP(cmd)
+
+	case pb.Command_DELETE_TCP:
+		a.handleDeleteTCP(cmd)
+
 	default:
 		log.Printf("未知命令类型: %v", cmd.Type)
 	}
@@ -607,6 +625,74 @@ func (a *Agent) handleDeleteSTCP(cmd *pb.Command) {
 	log.Printf("STCP代理删除成功: %s (剩余: %d个)", cmd.InstanceName, len(a.stcpProxies))
 }
 
+// handleCreateTCP 处理创建TCP命令
+func (a *Agent) handleCreateTCP(cmd *pb.Command) {
+	log.Printf("创建TCP代理: service=%s, local=%s:%d, remote_port=%d",
+		cmd.ServiceName, cmd.LocalIp, cmd.LocalPort, cmd.RemotePort)
+
+	// 检查是否已存在
+	a.proxyMutex.Lock()
+	if _, exists := a.tcpProxies[cmd.ServiceName]; exists {
+		log.Printf("TCP代理已存在: %s", cmd.ServiceName)
+		a.proxyMutex.Unlock()
+		return
+	}
+
+	// 创建代理记录
+	proxy := &TCPProxy{
+		ServiceName: cmd.ServiceName,
+		LocalIP:     cmd.LocalIp,
+		LocalPort:   cmd.LocalPort,
+		RemotePort:  cmd.RemotePort,
+		CreatedAt:   time.Now(),
+		Status:      "running",
+	}
+	a.tcpProxies[cmd.ServiceName] = proxy
+	a.proxyMutex.Unlock()
+
+	// 通知Agent-FRP线程创建实际的FRP代理
+	if err := a.frpManager.AddTCPProxy(cmd.ServiceName, cmd.LocalIp, cmd.LocalPort, cmd.RemotePort); err != nil {
+		log.Printf("创建FRP TCP代理失败: %v", err)
+
+		// 更新状态为错误
+		a.proxyMutex.Lock()
+		if p, exists := a.tcpProxies[cmd.ServiceName]; exists {
+			p.Status = "error"
+		}
+		a.proxyMutex.Unlock()
+		return
+	}
+
+	log.Printf("TCP代理创建成功: %s (总计: %d个)", cmd.ServiceName, len(a.tcpProxies))
+}
+
+// handleDeleteTCP 处理删除TCP命令
+func (a *Agent) handleDeleteTCP(cmd *pb.Command) {
+	log.Printf("删除TCP代理: service=%s", cmd.ServiceName)
+
+	// 检查代理是否存在
+	a.proxyMutex.Lock()
+	if _, exists := a.tcpProxies[cmd.ServiceName]; !exists {
+		log.Printf("TCP代理不存在: %s", cmd.ServiceName)
+		a.proxyMutex.Unlock()
+		return
+	}
+	a.proxyMutex.Unlock()
+
+	// 通知Agent-FRP线程删除实际的FRP代理
+	if err := a.frpManager.RemoveTCPProxy(cmd.ServiceName); err != nil {
+		log.Printf("删除FRP TCP代理失败: %v", err)
+		return
+	}
+
+	// 删除代理记录
+	a.proxyMutex.Lock()
+	delete(a.tcpProxies, cmd.ServiceName)
+	a.proxyMutex.Unlock()
+
+	log.Printf("TCP代理删除成功: %s (剩余: %d个)", cmd.ServiceName, len(a.tcpProxies))
+}
+
 // GetSTCPProxies 获取所有STCP代理（用于状态上报）
 func (a *Agent) GetSTCPProxies() []*STCPProxy {
 	a.proxyMutex.RLock()
@@ -614,6 +700,18 @@ func (a *Agent) GetSTCPProxies() []*STCPProxy {
 
 	proxies := make([]*STCPProxy, 0, len(a.stcpProxies))
 	for _, proxy := range a.stcpProxies {
+		proxies = append(proxies, proxy)
+	}
+	return proxies
+}
+
+// GetTCPProxies 获取所有TCP代理（用于状态上报）
+func (a *Agent) GetTCPProxies() []*TCPProxy {
+	a.proxyMutex.RLock()
+	defer a.proxyMutex.RUnlock()
+
+	proxies := make([]*TCPProxy, 0, len(a.tcpProxies))
+	for _, proxy := range a.tcpProxies {
 		proxies = append(proxies, proxy)
 	}
 	return proxies

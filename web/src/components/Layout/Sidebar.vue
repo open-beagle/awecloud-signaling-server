@@ -15,12 +15,18 @@
           <span>{{ t('menu.agents') }}</span>
         </template>
       </el-menu-item>
-      <el-menu-item index="/stcp-instances">
-        <el-icon><Connection /></el-icon>
+      <el-sub-menu index="services">
         <template #title>
-          <span>{{ t('menu.stcpInstances') }}</span>
+          <el-icon><Connection /></el-icon>
+          <span>{{ t('menu.serviceManagement') }}</span>
         </template>
-      </el-menu-item>
+        <el-menu-item index="/services/stcp">
+          {{ t('menu.stcpInstances') }}
+        </el-menu-item>
+        <el-menu-item index="/services/tcp">
+          {{ t('menu.tcpServices') }}
+        </el-menu-item>
+      </el-sub-menu>
       <el-menu-item index="/clients">
         <el-icon><User /></el-icon>
         <template #title>
@@ -148,6 +154,49 @@ const toggleSidebar = () => {
   font-weight: 500;
 }
 
+/* 子菜单样式 */
+:deep(.el-sub-menu) {
+  background-color: #ffffff !important;
+}
+
+:deep(.el-sub-menu__title) {
+  height: 56px;
+  line-height: 56px;
+  padding: 0 20px !important;
+  background-color: #ffffff !important;
+  color: #303133 !important;
+}
+
+:deep(.el-sub-menu__title:hover) {
+  background-color: #ecf5ff !important;
+}
+
+:deep(.el-sub-menu__title .el-icon) {
+  font-size: 18px;
+  width: 18px;
+  height: 18px;
+  margin-right: 12px !important;
+}
+
+/* 子菜单项样式 */
+:deep(.el-sub-menu .el-menu-item) {
+  height: 48px;
+  line-height: 48px;
+  padding-left: 52px !important; /* 增加左侧缩进 */
+  background-color: #fafafa !important;
+  font-size: 14px;
+}
+
+:deep(.el-sub-menu .el-menu-item:hover) {
+  background-color: #ecf5ff !important;
+}
+
+:deep(.el-sub-menu .el-menu-item.is-active) {
+  background-color: #ecf5ff !important;
+  color: #409eff !important;
+  font-weight: 500;
+}
+
 /* 折叠状态下的样式 */
 :deep(.el-menu--collapse .el-menu-item) {
   padding: 0 !important;
@@ -156,6 +205,11 @@ const toggleSidebar = () => {
 
 :deep(.el-menu--collapse .el-menu-item .el-icon) {
   margin-right: 0;
+}
+
+:deep(.el-menu--collapse .el-sub-menu__title) {
+  padding: 0 !important;
+  text-align: center;
 }
 
 /* 侧边栏底部折叠按钮 */

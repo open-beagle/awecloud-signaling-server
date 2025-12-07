@@ -293,6 +293,18 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.POST("/stcp-instances/:id/revoke", stcpAPI.RevokeAccess)
 					adminAuthGroup.PUT("/stcp-instances/:id/access-type", stcpAPI.SetAccessType)
 
+					// TCP服务管理
+					tcpServiceAPI := api.NewTCPServiceAPI()
+					tcpServiceAPI.SetAgentService(s.agentService) // 注入AgentService
+					adminAuthGroup.GET("/tcp-services", api.GetTCPServices)
+					adminAuthGroup.POST("/tcp-services", api.CreateTCPService)
+					adminAuthGroup.PUT("/tcp-services/:id", api.UpdateTCPService)
+					adminAuthGroup.DELETE("/tcp-services/:id", api.DeleteTCPService)
+					adminAuthGroup.PUT("/tcp-services/:id/enable", tcpServiceAPI.EnableTCPService)
+					adminAuthGroup.PUT("/tcp-services/:id/disable", tcpServiceAPI.DisableTCPService)
+					adminAuthGroup.GET("/settings/tcp-service", api.GetTCPServiceConfig)
+					adminAuthGroup.PUT("/settings/tcp-service", api.UpdateTCPServiceConfig)
+
 					// 组管理
 					groupAPI := api.NewGroupAPI()
 					adminAuthGroup.GET("/groups", groupAPI.GetGroups)

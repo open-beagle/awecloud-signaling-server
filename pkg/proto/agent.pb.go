@@ -26,6 +26,8 @@ type Command_Type int32
 const (
 	Command_CREATE_STCP Command_Type = 0
 	Command_DELETE_STCP Command_Type = 1
+	Command_CREATE_TCP  Command_Type = 2
+	Command_DELETE_TCP  Command_Type = 3
 )
 
 // Enum value maps for Command_Type.
@@ -33,10 +35,14 @@ var (
 	Command_Type_name = map[int32]string{
 		0: "CREATE_STCP",
 		1: "DELETE_STCP",
+		2: "CREATE_TCP",
+		3: "DELETE_TCP",
 	}
 	Command_Type_value = map[string]int32{
 		"CREATE_STCP": 0,
 		"DELETE_STCP": 1,
+		"CREATE_TCP":  2,
+		"DELETE_TCP":  3,
 	}
 )
 
@@ -313,13 +319,18 @@ func (x *HeartbeatResponse) GetTimestamp() int64 {
 
 // Server指令
 type Command struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	CommandId     string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
-	Type          Command_Type           `protobuf:"varint,2,opt,name=type,proto3,enum=awecloud.signaling.Command_Type" json:"type,omitempty"`
-	InstanceName  string                 `protobuf:"bytes,3,opt,name=instance_name,json=instanceName,proto3" json:"instance_name,omitempty"`
-	SecretKey     string                 `protobuf:"bytes,4,opt,name=secret_key,json=secretKey,proto3" json:"secret_key,omitempty"`
-	LocalIp       string                 `protobuf:"bytes,5,opt,name=local_ip,json=localIp,proto3" json:"local_ip,omitempty"`
-	LocalPort     int32                  `protobuf:"varint,6,opt,name=local_port,json=localPort,proto3" json:"local_port,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	CommandId string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	Type      Command_Type           `protobuf:"varint,2,opt,name=type,proto3,enum=awecloud.signaling.Command_Type" json:"type,omitempty"`
+	// STCP相关字段
+	InstanceName string `protobuf:"bytes,3,opt,name=instance_name,json=instanceName,proto3" json:"instance_name,omitempty"`
+	SecretKey    string `protobuf:"bytes,4,opt,name=secret_key,json=secretKey,proto3" json:"secret_key,omitempty"`
+	// TCP相关字段
+	ServiceName string `protobuf:"bytes,5,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
+	RemotePort  int32  `protobuf:"varint,6,opt,name=remote_port,json=remotePort,proto3" json:"remote_port,omitempty"`
+	// 公共字段
+	LocalIp       string `protobuf:"bytes,7,opt,name=local_ip,json=localIp,proto3" json:"local_ip,omitempty"`
+	LocalPort     int32  `protobuf:"varint,8,opt,name=local_port,json=localPort,proto3" json:"local_port,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -380,6 +391,20 @@ func (x *Command) GetSecretKey() string {
 		return x.SecretKey
 	}
 	return ""
+}
+
+func (x *Command) GetServiceName() string {
+	if x != nil {
+		return x.ServiceName
+	}
+	return ""
+}
+
+func (x *Command) GetRemotePort() int32 {
+	if x != nil {
+		return x.RemotePort
+	}
+	return 0
 }
 
 func (x *Command) GetLocalIp() string {
@@ -638,20 +663,27 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"agentToken\"K\n" +
 	"\x11HeartbeatResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1c\n" +
-	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\"\x86\x02\n" +
+	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\"\xea\x02\n" +
 	"\aCommand\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x124\n" +
 	"\x04type\x18\x02 \x01(\x0e2 .awecloud.signaling.Command.TypeR\x04type\x12#\n" +
 	"\rinstance_name\x18\x03 \x01(\tR\finstanceName\x12\x1d\n" +
 	"\n" +
-	"secret_key\x18\x04 \x01(\tR\tsecretKey\x12\x19\n" +
-	"\blocal_ip\x18\x05 \x01(\tR\alocalIp\x12\x1d\n" +
+	"secret_key\x18\x04 \x01(\tR\tsecretKey\x12!\n" +
+	"\fservice_name\x18\x05 \x01(\tR\vserviceName\x12\x1f\n" +
+	"\vremote_port\x18\x06 \x01(\x05R\n" +
+	"remotePort\x12\x19\n" +
+	"\blocal_ip\x18\a \x01(\tR\alocalIp\x12\x1d\n" +
 	"\n" +
-	"local_port\x18\x06 \x01(\x05R\tlocalPort\"(\n" +
+	"local_port\x18\b \x01(\x05R\tlocalPort\"H\n" +
 	"\x04Type\x12\x0f\n" +
 	"\vCREATE_STCP\x10\x00\x12\x0f\n" +
-	"\vDELETE_STCP\x10\x01\"d\n" +
+	"\vDELETE_STCP\x10\x01\x12\x0e\n" +
+	"\n" +
+	"CREATE_TCP\x10\x02\x12\x0e\n" +
+	"\n" +
+	"DELETE_TCP\x10\x03\"d\n" +
 	"\x0fCommandResponse\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x18\n" +

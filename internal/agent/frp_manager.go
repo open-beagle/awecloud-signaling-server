@@ -20,8 +20,11 @@ import (
 // ProxyCommand 代理命令
 type ProxyCommand struct {
 	Action       string // "add" or "remove"
-	InstanceName string
-	SecretKey    string
+	ProxyType    string // "stcp" or "tcp"
+	InstanceName string // STCP实例名称
+	ServiceName  string // TCP服务名称
+	SecretKey    string // STCP密钥
+	RemotePort   int32  // TCP远程端口
 	LocalIP      string
 	LocalPort    int32
 	Response     chan error // 用于返回操作结果
@@ -35,8 +38,9 @@ type FRPManager struct {
 	service *client.Service
 
 	// 代理配置
-	proxies map[string]*v1.STCPProxyConfig // instance_name -> proxy config
-	mutex   sync.RWMutex
+	proxies    map[string]*v1.STCPProxyConfig // instance_name -> STCP proxy config
+	tcpProxies map[string]*v1.TCPProxyConfig  // service_name -> TCP proxy config
+	mutex      sync.RWMutex
 
 	// 命令通道（用于动态管理代理）
 	commandChan chan *ProxyCommand
@@ -63,6 +67,7 @@ func NewFRPManager(cfg *config.AgentConfig, ctx context.Context) (*FRPManager, e
 	return &FRPManager{
 		config:      cfg,
 		proxies:     make(map[string]*v1.STCPProxyConfig),
+		tcpProxies:  make(map[string]*v1.TCPProxyConfig),
 		commandChan: make(chan *ProxyCommand, 10),
 		ctx:         frpCtx,
 		cancel:      cancel,
@@ -132,10 +137,13 @@ func (f *FRPManager) Run() error {
 
 // runFRPClient 运行FRP客户端
 func (f *FRPManager) runFRPClient() error {
-	// 获取当前代理配置
+	// 获取当前代理配置（STCP + TCP）
 	f.mutex.RLock()
-	proxyCfgs := make([]v1.ProxyConfigurer, 0, len(f.proxies))
+	proxyCfgs := make([]v1.ProxyConfigurer, 0, len(f.proxies)+len(f.tcpProxies))
 	for _, cfg := range f.proxies {
+		proxyCfgs = append(proxyCfgs, cfg)
+	}
+	for _, cfg := range f.tcpProxies {
 		proxyCfgs = append(proxyCfgs, cfg)
 	}
 	f.mutex.RUnlock()
@@ -326,10 +334,18 @@ func (f *FRPManager) handleCommand(cmd *ProxyCommand) {
 
 	switch cmd.Action {
 	case "add":
-		err = f.addProxyInternal(cmd.InstanceName, cmd.SecretKey, cmd.LocalIP, cmd.LocalPort)
+		if cmd.ProxyType == "tcp" {
+			err = f.addTCPProxyInternal(cmd.ServiceName, cmd.LocalIP, cmd.LocalPort, cmd.RemotePort)
+		} else {
+			err = f.addProxyInternal(cmd.InstanceName, cmd.SecretKey, cmd.LocalIP, cmd.LocalPort)
+		}
 
 	case "remove":
-		err = f.removeProxyInternal(cmd.InstanceName)
+		if cmd.ProxyType == "tcp" {
+			err = f.removeTCPProxyInternal(cmd.ServiceName)
+		} else {
+			err = f.removeProxyInternal(cmd.InstanceName)
+		}
 
 	default:
 		err = fmt.Errorf("未知命令: %s", cmd.Action)
@@ -403,12 +419,74 @@ func (f *FRPManager) removeProxyInternal(instanceName string) error {
 	return nil
 }
 
+// addTCPProxyInternal 内部添加TCP代理
+func (f *FRPManager) addTCPProxyInternal(serviceName string, localIP string, localPort int32, remotePort int32) error {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+
+	// 检查是否已存在
+	if _, exists := f.tcpProxies[serviceName]; exists {
+		return fmt.Errorf("TCP代理已存在: %s", serviceName)
+	}
+
+	// 创建TCP代理配置
+	proxyConfig := &v1.TCPProxyConfig{
+		ProxyBaseConfig: v1.ProxyBaseConfig{
+			Name: serviceName,
+			Type: "tcp",
+			ProxyBackend: v1.ProxyBackend{
+				LocalIP:   localIP,
+				LocalPort: int(localPort),
+			},
+		},
+		RemotePort: int(remotePort),
+	}
+
+	f.tcpProxies[serviceName] = proxyConfig
+	f.needRestart = true
+
+	logger.Infof("FRP TCP代理已添加: %s -> %s:%d (远程端口: %d, 总计: %d个)",
+		serviceName, localIP, localPort, remotePort, len(f.tcpProxies))
+
+	// 停止当前FRP客户端以触发重启
+	if f.service != nil {
+		f.service.Close()
+	}
+
+	return nil
+}
+
+// removeTCPProxyInternal 内部删除TCP代理
+func (f *FRPManager) removeTCPProxyInternal(serviceName string) error {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+
+	// 检查是否存在
+	if _, exists := f.tcpProxies[serviceName]; !exists {
+		return fmt.Errorf("TCP代理不存在: %s", serviceName)
+	}
+
+	// 删除代理
+	delete(f.tcpProxies, serviceName)
+	f.needRestart = true
+
+	logger.Infof("FRP TCP代理已删除: %s (剩余: %d个)", serviceName, len(f.tcpProxies))
+
+	// 停止当前FRP客户端以触发重启
+	if f.service != nil {
+		f.service.Close()
+	}
+
+	return nil
+}
+
 // AddSTCPProxy 添加STCP代理（公共接口）
 func (f *FRPManager) AddSTCPProxy(instanceName, secretKey, localIP string, localPort int32) error {
 	respChan := make(chan error, 1)
 
 	cmd := &ProxyCommand{
 		Action:       "add",
+		ProxyType:    "stcp",
 		InstanceName: instanceName,
 		SecretKey:    secretKey,
 		LocalIP:      localIP,
@@ -438,8 +516,66 @@ func (f *FRPManager) RemoveSTCPProxy(instanceName string) error {
 
 	cmd := &ProxyCommand{
 		Action:       "remove",
+		ProxyType:    "stcp",
 		InstanceName: instanceName,
 		Response:     respChan,
+	}
+
+	// 发送命令
+	select {
+	case f.commandChan <- cmd:
+	case <-f.ctx.Done():
+		return fmt.Errorf("FRP管理器已停止")
+	}
+
+	// 等待响应
+	select {
+	case err := <-respChan:
+		return err
+	case <-f.ctx.Done():
+		return fmt.Errorf("FRP管理器已停止")
+	}
+}
+
+// AddTCPProxy 添加TCP代理（公共接口）
+func (f *FRPManager) AddTCPProxy(serviceName, localIP string, localPort int32, remotePort int32) error {
+	respChan := make(chan error, 1)
+
+	cmd := &ProxyCommand{
+		Action:      "add",
+		ProxyType:   "tcp",
+		ServiceName: serviceName,
+		LocalIP:     localIP,
+		LocalPort:   localPort,
+		RemotePort:  remotePort,
+		Response:    respChan,
+	}
+
+	// 发送命令
+	select {
+	case f.commandChan <- cmd:
+	case <-f.ctx.Done():
+		return fmt.Errorf("FRP管理器已停止")
+	}
+
+	// 等待响应
+	select {
+	case err := <-respChan:
+		return err
+	case <-f.ctx.Done():
+		return fmt.Errorf("FRP管理器已停止")
+	}
+}
+
+// RemoveTCPProxy 删除TCP代理（公共接口）
+func (f *FRPManager) RemoveTCPProxy(serviceName string) error {
+	respChan := make(chan error, 1)
+
+	cmd := &ProxyCommand{
+		Action:      "remove",
+		ProxyType:   "tcp",
+		ServiceName: serviceName,
+		Response:    respChan,
 	}
 
 	// 发送命令

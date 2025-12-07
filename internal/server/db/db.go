@@ -46,7 +46,7 @@ func InitDB(cfg config.DatabaseSection) error {
 
 // autoMigrate 自动迁移数据库表
 func autoMigrate() error {
-	return DB.AutoMigrate(
+	err := DB.AutoMigrate(
 		&model.Admin{},
 		&model.Agent{},
 		&model.Client{},
@@ -60,7 +60,44 @@ func autoMigrate() error {
 		&model.ServiceFavorite{},
 		&model.ConnectionAuditLog{},
 		&model.SystemConfig{},
+		&model.SystemSettings{},
+		&model.TCPService{},
+		&model.TCPServiceAccessLog{},
 	)
+	if err != nil {
+		return err
+	}
+
+	// 初始化TCP服务配置
+	return initTCPServiceConfig()
+}
+
+// initTCPServiceConfig 初始化TCP服务配置
+func initTCPServiceConfig() error {
+	configs := []model.SystemSettings{
+		{
+			SettingKey:   "tcp_service_port_start",
+			SettingValue: "9000",
+			Description:  "TCP服务端口起始值",
+		},
+		{
+			SettingKey:   "tcp_service_max_per_agent",
+			SettingValue: "50",
+			Description:  "每个Agent最多创建的TCP服务数量",
+		},
+	}
+
+	for _, cfg := range configs {
+		var count int64
+		DB.Model(&model.SystemSettings{}).Where("setting_key = ?", cfg.SettingKey).Count(&count)
+		if count == 0 {
+			if err := DB.Create(&cfg).Error; err != nil {
+				return fmt.Errorf("初始化配置 %s 失败: %w", cfg.SettingKey, err)
+			}
+		}
+	}
+
+	return nil
 }
 
 // CreateDefaultAdmin 创建默认管理员

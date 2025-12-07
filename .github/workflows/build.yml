@@ -16,26 +16,26 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 获取完整的 git 历史，确保 BUILD_NUMBER 正确
-      
+          fetch-depth: 0 # 获取完整的 git 历史，确保 BUILD_NUMBER 正确
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
           cache-dependency-path: web/package-lock.json
-      
+
       - name: Build Frontend
         run: bash ./scripts/build_frontend.sh
-      
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      
+
       - name: Login to Aliyun Container Registry
         uses: docker/login-action@v3
         with:

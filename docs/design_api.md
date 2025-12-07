@@ -516,6 +516,94 @@ PUT /api/v1/admin/stcp-instances/:id/access-type
 }
 ```
 
+### 2.7 TCP 服务管理
+
+#### 2.7.1 获取 TCP 服务列表
+
+```
+GET /api/v1/admin/tcp-services
+```
+
+**查询参数**：
+
+- `agent_id` (可选): 按 Agent ID 过滤
+- `enabled` (可选): 按启用状态过滤
+
+#### 2.7.2 创建 TCP 服务
+
+```
+POST /api/v1/admin/tcp-services
+```
+
+**说明**：不需要指定 `remote_port`，由系统自动分配。创建后默认为禁用状态。
+
+#### 2.7.3 更新 TCP 服务
+
+```
+PUT /api/v1/admin/tcp-services/:id
+```
+
+**说明**：可更新描述、访问控制等，但不能修改端口。
+
+#### 2.7.4 删除 TCP 服务
+
+```
+DELETE /api/v1/admin/tcp-services/:id
+```
+
+**说明**：删除服务会释放端口。
+
+#### 2.7.5 启用 TCP 服务
+
+```
+PUT /api/v1/admin/tcp-services/:id/enable
+```
+
+**说明**：启用后 Server 端开始监听端口。
+
+#### 2.7.6 禁用 TCP 服务
+
+```
+PUT /api/v1/admin/tcp-services/:id/disable
+```
+
+**说明**：禁用后 Server 端停止监听端口，但端口仍被占用。
+
+#### 2.7.7 设置 IP 白名单
+
+```
+PUT /api/v1/admin/tcp-services/:id/whitelist
+```
+
+#### 2.7.8 获取 TCP 服务访问日志
+
+```
+GET /api/v1/admin/tcp-services/:id/logs
+```
+
+**查询参数**：
+
+- `start_date` (可选): 开始日期
+- `end_date` (可选): 结束日期
+- `page` (可选): 页码，默认 1
+- `page_size` (可选): 每页数量，默认 50
+
+#### 2.7.9 获取 TCP 服务配置
+
+```
+GET /api/v1/admin/settings/tcp-service
+```
+
+**说明**：返回端口起始值、每 Agent 最大服务数等配置。
+
+#### 2.7.10 更新 TCP 服务配置
+
+```
+PUT /api/v1/admin/settings/tcp-service
+```
+
+**说明**：可更新端口起始值和每 Agent 最大服务数。
+
 ### 2.8 用户组管理
 
 #### 2.8.1 获取所有组
@@ -670,7 +758,7 @@ DELETE /api/v1/admin/groups/:id/members/:client_id
 }
 ```
 
-### 2.8 Client 端 API
+### 2.9 Client 端 API
 
 **认证流程说明**:
 
@@ -1191,9 +1279,9 @@ Authorization: Bearer <jwt-token>
 }
 ```
 
-### 2.9 管理员审计日志 API
+### 2.10 管理员审计日志 API
 
-#### 2.9.1 查询连接审计日志
+#### 2.10.1 查询连接审计日志
 
 ```
 GET /api/v1/admin/audit/connection
@@ -1273,7 +1361,7 @@ Authorization: Bearer <admin-jwt-token>
 - Content-Type: `text/csv` 或 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
 - 文件下载
 
-### 2.10 Desktop 客户端下载 API
+### 2.11 Desktop 客户端下载 API
 
 **详细设计**: 参见 [Desktop 客户端下载 API 设计](./design_api_download.md)
 
@@ -1320,9 +1408,9 @@ GET /api/v1/public/download/desktop/versions
 
 **响应**: 返回所有平台的下载信息
 
-### 2.11 版本管理 API
+### 2.12 版本管理 API
 
-#### 2.11.1 检查 Desktop 版本（Client 调用）
+#### 2.12.1 检查 Desktop 版本（Client 调用）
 
 ```
 POST /api/v1/client/version/check
@@ -1486,7 +1574,7 @@ Cookie: session=<admin-session>
 }
 ```
 
-### 2.12 错误码
+### 2.13 错误码
 
 | 错误码 | 说明                     |
 | ------ | ------------------------ |

@@ -66,6 +66,7 @@
   - `design_security_token_audit.md` - 安全令牌与审计日志设计（重要）
   - `design_version_control.md` - Desktop 版本管理设计（重要）
   - `design_api_download.md` - Desktop 客户端下载 API 设计（重要）
+  - `design_server_tcp_service_management.md` - TCP 服务管理设计（新功能）
   - `design_public_url.md` - 公网地址配置设计（待实现）
   - `design_server_access_control.md` - 访问控制系统设计（未来功能）
   - `design_server_web.md` - Web 管理界面设计
@@ -222,6 +223,19 @@ tests/
 - **维护者**: 项目团队
 
 ## 最近更新
+
+### 2025-12-07
+
+- 新增 `design_server_tcp_service_management.md` - TCP 服务管理设计
+  - 允许 Server 端在指定 Agent 端创建 TCP 服务实例
+  - 自动端口分配机制（从 9000 开始）
+  - 服务默认禁用，需手动启用
+  - 端口只在删除时释放，禁用不释放
+- 新增 `implementation_tcp_service_management.md` - TCP 服务管理实施计划
+  - 4 个阶段的详细实施计划
+  - 完整的测试策略（单元、集成、性能）
+  - 监控和告警方案
+  - 风险管理和应急预案
 
 ### 2025-12-05
 

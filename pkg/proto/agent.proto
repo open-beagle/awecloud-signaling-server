@@ -52,14 +52,24 @@ message Command {
   enum Type {
     CREATE_STCP = 0;
     DELETE_STCP = 1;
+    CREATE_TCP = 2;
+    DELETE_TCP = 3;
   }
   
   string command_id = 1;
   Type type = 2;
+  
+  // STCP相关字段
   string instance_name = 3;
   string secret_key = 4;
-  string local_ip = 5;
-  int32 local_port = 6;
+  
+  // TCP相关字段
+  string service_name = 5;
+  int32 remote_port = 6;
+  
+  // 公共字段
+  string local_ip = 7;
+  int32 local_port = 8;
 }
 
 // 指令响应
