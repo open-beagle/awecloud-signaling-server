@@ -1,11 +1,11 @@
 package api
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
@@ -58,7 +58,7 @@ func (a *ServiceFavoriteAPI) GetServiceFavorites(c *gin.Context) {
 	var favorites []model.ServiceFavorite
 	if err := db.DB.Where("client_id = ?", int64(clientID.(float64))).
 		Find(&favorites).Error; err != nil {
-		log.Printf("查询服务收藏失败: %v", err)
+		logger.Infof("查询服务收藏失败: %v", err)
 		c.JSON(http.StatusInternalServerError, GetServiceFavoritesResponse{
 			Success: false,
 			Message: "查询服务收藏失败",
@@ -92,7 +92,7 @@ func (a *ServiceFavoriteAPI) ToggleFavorite(c *gin.Context) {
 		return
 	}
 
-	log.Printf("[ServiceFavorite] ToggleFavorite: instance_id=%d, local_port=%d", req.STCPInstanceID, req.LocalPort)
+	logger.Infof("[ServiceFavorite] ToggleFavorite: instance_id=%d, local_port=%d", req.STCPInstanceID, req.LocalPort)
 
 	// 从JWT获取client_id
 	clientID, exists := c.Get("client_id")
@@ -129,10 +129,10 @@ func (a *ServiceFavoriteAPI) ToggleFavorite(c *gin.Context) {
 			STCPInstanceID: req.STCPInstanceID,
 			LocalPort:      req.LocalPort,
 		}
-		log.Printf("[ServiceFavorite] Creating favorite: client_id=%d, instance_id=%d, local_port=%d",
+		logger.Infof("[ServiceFavorite] Creating favorite: client_id=%d, instance_id=%d, local_port=%d",
 			favorite.ClientID, favorite.STCPInstanceID, favorite.LocalPort)
 		if err := db.DB.Create(&favorite).Error; err != nil {
-			log.Printf("创建服务收藏失败: %v", err)
+			logger.Infof("创建服务收藏失败: %v", err)
 			c.JSON(http.StatusInternalServerError, ToggleFavoriteResponse{
 				Success: false,
 				Message: "收藏失败",
@@ -143,7 +143,7 @@ func (a *ServiceFavoriteAPI) ToggleFavorite(c *gin.Context) {
 	} else {
 		// 记录存在，删除收藏
 		if err := db.DB.Delete(&favorite).Error; err != nil {
-			log.Printf("删除服务收藏失败: %v", err)
+			logger.Infof("删除服务收藏失败: %v", err)
 			c.JSON(http.StatusInternalServerError, ToggleFavoriteResponse{
 				Success: false,
 				Message: "取消收藏失败",
@@ -204,7 +204,7 @@ func (a *ServiceFavoriteAPI) UpdateFavoritePort(c *gin.Context) {
 	// 更新端口
 	favorite.LocalPort = req.LocalPort
 	if err := db.DB.Save(&favorite).Error; err != nil {
-		log.Printf("更新收藏端口失败: %v", err)
+		logger.Infof("更新收藏端口失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": "更新端口失败",
@@ -241,14 +241,32 @@ type GetAllFavoritesResponse struct {
 
 // GetAllFavorites 获取所有用户的收藏列表（管理员）
 func (a *ServiceFavoriteAPI) GetAllFavorites(c *gin.Context) {
-	log.Printf("[ServiceFavorite] GetAllFavorites called")
+	logger.Infof("[ServiceFavorite] GetAllFavorites called")
 
-	// 查询所有收藏记录，关联用户和服务信息
-	var favorites []model.ServiceFavorite
-	if err := db.DB.Preload("Client").Preload("STCPInstance").Preload("STCPInstance.Agent").
-		Order("created_at DESC").
-		Find(&favorites).Error; err != nil {
-		log.Printf("查询所有收藏失败: %v", err)
+	// 使用 JOIN 查询，避免 Preload 的字段名冲突问题
+	type FavoriteWithRelations struct {
+		model.ServiceFavorite
+		ClientName   string `gorm:"column:client_name"`
+		InstanceName string `gorm:"column:instance_name"`
+		AgentName    string `gorm:"column:agent_name"`
+	}
+
+	var results []FavoriteWithRelations
+	err := db.DB.Table("service_favorites").
+		Select(`
+			service_favorites.*,
+			clients.client_id as client_name,
+			stcp_instances.instance_name,
+			agents.agent_name
+		`).
+		Joins("LEFT JOIN clients ON service_favorites.client_id = clients.id").
+		Joins("LEFT JOIN stcp_instances ON service_favorites.stcp_instance_id = stcp_instances.id").
+		Joins("LEFT JOIN agents ON stcp_instances.agent_id = agents.id").
+		Order("service_favorites.created_at DESC").
+		Scan(&results).Error
+
+	if err != nil {
+		logger.Errorf("查询所有收藏失败: %v", err)
 		c.JSON(http.StatusInternalServerError, GetAllFavoritesResponse{
 			Success: false,
 			Message: "查询收藏列表失败",
@@ -256,37 +274,30 @@ func (a *ServiceFavoriteAPI) GetAllFavorites(c *gin.Context) {
 		return
 	}
 
-	log.Printf("[ServiceFavorite] Found %d favorites", len(favorites))
+	logger.Infof("[ServiceFavorite] Found %d favorites", len(results))
 
 	// 构建响应
-	items := make([]FavoriteListItem, 0, len(favorites))
-	for _, fav := range favorites {
+	items := make([]FavoriteListItem, 0, len(results))
+	for _, result := range results {
 		item := FavoriteListItem{
-			ID:             fav.ID,
-			ClientID:       fav.ClientID,
-			STCPInstanceID: fav.STCPInstanceID,
-			LocalPort:      fav.LocalPort,
-			CreatedAt:      fav.CreatedAt.Format("2006-01-02 15:04:05"),
-			UpdatedAt:      fav.UpdatedAt.Format("2006-01-02 15:04:05"),
+			ID:             result.ID,
+			ClientID:       result.ClientID,
+			ClientName:     result.ClientName,
+			STCPInstanceID: result.STCPInstanceID,
+			InstanceName:   result.InstanceName,
+			AgentName:      result.AgentName,
+			LocalPort:      result.LocalPort,
+			CreatedAt:      result.CreatedAt.Format("2006-01-02 15:04:05"),
+			UpdatedAt:      result.UpdatedAt.Format("2006-01-02 15:04:05"),
 		}
 
-		// 获取Client名称
-		if fav.Client.ID > 0 {
-			item.ClientName = fav.Client.ClientID
-		}
-
-		// 获取STCP实例名称和Agent名称
-		if fav.STCPInstance.ID > 0 {
-			item.InstanceName = fav.STCPInstance.InstanceName
-			if fav.STCPInstance.Agent.ID > 0 {
-				item.AgentName = fav.STCPInstance.Agent.AgentName
-			}
-		}
+		logger.Infof("[ServiceFavorite] Favorite ID=%d, ClientName=%s, InstanceName=%s, AgentName=%s",
+			result.ID, result.ClientName, result.InstanceName, result.AgentName)
 
 		items = append(items, item)
 	}
 
-	log.Printf("[ServiceFavorite] Returning %d items", len(items))
+	logger.Infof("[ServiceFavorite] Returning %d items", len(items))
 
 	c.JSON(http.StatusOK, GetAllFavoritesResponse{
 		Success:    true,

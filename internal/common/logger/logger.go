@@ -33,7 +33,8 @@ func NewRotatingWriter(filePath string) (*RotatingWriter, error) {
 	// 计算现有行数
 	lineCount, err := countLines(filePath)
 	if err != nil {
-		log.Printf("Warning: failed to count existing lines: %v", err)
+		// 使用标准输出，因为 logrus 可能还未初始化
+		fmt.Fprintf(os.Stderr, "Warning: failed to count existing lines: %v\n", err)
 		lineCount = 0
 	}
 
@@ -62,7 +63,7 @@ func (w *RotatingWriter) Write(p []byte) (n int, err error) {
 	// 检查是否需要轮转
 	if w.lineCount >= MaxLogLines {
 		if err := w.rotate(); err != nil {
-			log.Printf("Warning: failed to rotate log: %v", err)
+			fmt.Fprintf(os.Stderr, "Warning: failed to rotate log: %v\n", err)
 		}
 	}
 
@@ -105,7 +106,7 @@ func (w *RotatingWriter) rotate() error {
 	w.file = file
 	w.lineCount = len(lines)
 
-	log.Printf("Log rotated: kept %d lines (removed %d lines)", w.lineCount, len(splitLines(content))-w.lineCount)
+	fmt.Fprintf(os.Stdout, "Log rotated: kept %d lines (removed %d lines)\n", w.lineCount, len(splitLines(content))-w.lineCount)
 	return nil
 }
 

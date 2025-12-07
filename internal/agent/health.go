@@ -1,10 +1,11 @@
 package agent
 
 import (
-	"log"
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 )
 
 // HealthAPI Agent健康检查API
@@ -56,7 +57,7 @@ func (h *HealthAPI) Ready(c *gin.Context) {
 		checks["grpc_connection"] = "error"
 		errors["grpc_connection"] = "not connected"
 		allReady = false
-		log.Printf("[HEALTH] gRPC connection check failed")
+		logger.Infof("[HEALTH] gRPC connection check failed")
 	}
 
 	// 检查FRP连接（仅作为信息，不影响就绪状态）

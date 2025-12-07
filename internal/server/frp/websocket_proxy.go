@@ -3,13 +3,13 @@ package frp
 import (
 	"bufio"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/constants"
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 )
 
 // WebSocketPathProxy WebSocket 路径代理
@@ -51,7 +51,7 @@ func NewWebSocketPathProxy(listenAddr, targetAddr, customPath string) *WebSocket
 
 // Start 启动代理
 func (p *WebSocketPathProxy) Start() error {
-	log.Printf("WebSocket 路径代理启动: %s%s -> %s%s",
+	logger.Infof("WebSocket 路径代理启动: %s%s -> %s%s",
 		p.listenAddr, p.customPath, p.targetAddr, constants.FRPDefaultPath)
 	return p.server.ListenAndServe()
 }
@@ -72,7 +72,7 @@ func (p *WebSocketPathProxy) handleWebSocket(w http.ResponseWriter, r *http.Requ
 	// 连接到 FRP Server
 	serverConn, err := net.DialTimeout("tcp", p.targetAddr, 10*time.Second)
 	if err != nil {
-		log.Printf("连接 FRP Server 失败: %v", err)
+		logger.Infof("连接 FRP Server 失败: %v", err)
 		http.Error(w, "Failed to connect to backend", http.StatusBadGateway)
 		return
 	}
@@ -85,7 +85,7 @@ func (p *WebSocketPathProxy) handleWebSocket(w http.ResponseWriter, r *http.Requ
 
 	// 将修改后的请求发送到 FRP Server
 	if err := modifiedReq.Write(serverConn); err != nil {
-		log.Printf("发送请求到 FRP Server 失败: %v", err)
+		logger.Infof("发送请求到 FRP Server 失败: %v", err)
 		http.Error(w, "Failed to forward request", http.StatusBadGateway)
 		return
 	}
@@ -94,14 +94,14 @@ func (p *WebSocketPathProxy) handleWebSocket(w http.ResponseWriter, r *http.Requ
 	serverReader := bufio.NewReader(serverConn)
 	resp, err := http.ReadResponse(serverReader, modifiedReq)
 	if err != nil {
-		log.Printf("读取 FRP Server 响应失败: %v", err)
+		logger.Infof("读取 FRP Server 响应失败: %v", err)
 		http.Error(w, "Failed to read backend response", http.StatusBadGateway)
 		return
 	}
 
 	// 检查是否成功升级到 WebSocket
 	if resp.StatusCode != http.StatusSwitchingProtocols {
-		log.Printf("WebSocket 升级失败: %d %s", resp.StatusCode, resp.Status)
+		logger.Infof("WebSocket 升级失败: %d %s", resp.StatusCode, resp.Status)
 		http.Error(w, "Backend refused WebSocket upgrade", http.StatusBadGateway)
 		return
 	}
@@ -109,25 +109,25 @@ func (p *WebSocketPathProxy) handleWebSocket(w http.ResponseWriter, r *http.Requ
 	// Hijack 客户端连接
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
-		log.Printf("ResponseWriter 不支持 Hijack")
+		logger.Infof("ResponseWriter 不支持 Hijack")
 		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
 		return
 	}
 
 	clientConn, clientBuf, err := hijacker.Hijack()
 	if err != nil {
-		log.Printf("Hijack 客户端连接失败: %v", err)
+		logger.Infof("Hijack 客户端连接失败: %v", err)
 		return
 	}
 	defer clientConn.Close()
 
 	// 将 FRP Server 的响应发送给客户端
 	if err := resp.Write(clientConn); err != nil {
-		log.Printf("发送响应到客户端失败: %v", err)
+		logger.Infof("发送响应到客户端失败: %v", err)
 		return
 	}
 
-	log.Printf("WebSocket 连接建立: %s%s -> %s%s (客户端: %s)",
+	logger.Infof("WebSocket 连接建立: %s%s -> %s%s (客户端: %s)",
 		p.listenAddr, p.customPath, p.targetAddr, constants.FRPDefaultPath, r.RemoteAddr)
 
 	// 双向转发数据
@@ -148,7 +148,7 @@ func (p *WebSocketPathProxy) handleWebSocket(w http.ResponseWriter, r *http.Requ
 	// 等待任一方向出错或关闭
 	<-errChan
 
-	log.Printf("WebSocket 连接关闭: %s", r.RemoteAddr)
+	logger.Infof("WebSocket 连接关闭: %s", r.RemoteAddr)
 }
 
 // isWebSocketUpgrade 检查是否是 WebSocket 升级请求

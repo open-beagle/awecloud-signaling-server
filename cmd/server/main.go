@@ -38,42 +38,21 @@ func main() {
 	}
 
 	// 初始化日志
-	if err := initLogger(cfg.Log); err != nil {
+	if err := logger.InitLogrus(cfg.Log.Level, cfg.Log.File); err != nil {
 		log.Fatalf("初始化日志失败: %v", err)
 	}
 
-	log.Printf("AWECloud Signaling Server 启动中...")
-	log.Printf("版本: %s (commit: %s, built: %s)", version, gitCommit, buildDate)
-	log.Printf("配置文件: %s", *configPath)
+	logger.Infof("AWECloud Signaling Server 启动中...")
+	logger.Infof("版本: %s (commit: %s, built: %s)", version, gitCommit, buildDate)
+	logger.Infof("配置文件: %s", *configPath)
 
 	// 创建并启动服务器
 	srv, err := server.NewServer(cfg)
 	if err != nil {
-		log.Fatalf("创建服务器失败: %v", err)
+		logger.Fatalf("创建服务器失败: %v", err)
 	}
 
 	if err := srv.Run(); err != nil {
-		log.Fatalf("服务器运行失败: %v", err)
+		logger.Fatalf("服务器运行失败: %v", err)
 	}
-}
-
-func initLogger(cfg config.LogConfig) error {
-	logFile := cfg.File
-	if logFile == "" {
-		logFile = "logs/server.log"
-	}
-
-	// 创建日志目录
-	if err := os.MkdirAll("logs", 0755); err != nil {
-		return fmt.Errorf("创建日志目录失败: %w", err)
-	}
-
-	// 设置轮转日志
-	_, err := logger.SetupLogger(logFile)
-	if err != nil {
-		return fmt.Errorf("设置日志失败: %w", err)
-	}
-
-	log.Printf("日志输出到: %s (最大5000行，自动轮转)", logFile)
-	return nil
 }

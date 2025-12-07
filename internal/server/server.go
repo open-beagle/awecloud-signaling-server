@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -18,6 +17,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/api"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/frp"
@@ -63,8 +63,18 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 }
 
 func (s *Server) Run() error {
-	// 设置Gin模式
-	gin.SetMode(gin.ReleaseMode)
+	// 根据配置的日志级别设置 Gin 模式
+	switch s.config.Log.Level {
+	case "debug":
+		gin.SetMode(gin.DebugMode)
+		logger.Info("Gin 运行在 Debug 模式")
+	case "info", "warn", "error":
+		gin.SetMode(gin.ReleaseMode)
+		logger.Info("Gin 运行在 Release 模式")
+	default:
+		gin.SetMode(gin.ReleaseMode)
+		logger.Info("Gin 运行在 Release 模式（默认）")
+	}
 
 	// 创建gRPC服务
 	s.agentService = grpcserver.NewAgentServiceServer(
@@ -121,27 +131,27 @@ func (s *Server) Run() error {
 
 	// 启动统一服务器（HTTP + gRPC）
 	go func() {
-		log.Printf("Server启动在: http://%s", addr)
-		log.Printf("  - Web管理界面: http://%s/", addr)
-		log.Printf("  - RESTful API: http://%s/api/...", addr)
-		log.Printf("  - gRPC服务: %s (HTTP/2)", addr)
+		logger.Infof("Server启动在: http://%s", addr)
+		logger.Infof("  - Web管理界面: http://%s/", addr)
+		logger.Infof("  - RESTful API: http://%s/api/...", addr)
+		logger.Infof("  - gRPC服务: %s (HTTP/2)", addr)
 
 		// 明确使用tcp4网络以确保监听IPv4
 		listener, err := net.Listen("tcp4", addr)
 		if err != nil {
-			log.Fatalf("创建监听器失败: %v", err)
+			logger.Fatalf("创建监听器失败: %v", err)
 		}
-		log.Printf("监听器创建成功: %s (IPv4)", listener.Addr())
+		logger.Infof("监听器创建成功: %s (IPv4)", listener.Addr())
 
 		if err := s.httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("服务器启动失败: %v", err)
+			logger.Fatalf("服务器启动失败: %v", err)
 		}
 	}()
 
 	// 启动FRP Server（在goroutine中运行）
 	go func() {
 		if err := s.frpServer.Run(); err != nil {
-			log.Printf("FRP Server运行错误: %v", err)
+			logger.Errorf("FRP Server运行错误: %v", err)
 		}
 	}()
 
@@ -150,7 +160,7 @@ func (s *Server) Run() error {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("正在关闭服务器...")
+	logger.Info("正在关闭服务器...")
 
 	// 优雅关闭
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -162,7 +172,7 @@ func (s *Server) Run() error {
 	// 停止FRP Server
 	if s.frpServer != nil {
 		if err := s.frpServer.Stop(); err != nil {
-			log.Printf("停止FRP Server失败: %v", err)
+			logger.Errorf("停止FRP Server失败: %v", err)
 		}
 	}
 
@@ -171,7 +181,7 @@ func (s *Server) Run() error {
 		return fmt.Errorf("服务器关闭失败: %w", err)
 	}
 
-	log.Println("服务器已关闭")
+	logger.Info("服务器已关闭")
 	return nil
 }
 
@@ -186,7 +196,7 @@ func (s *Server) customLogger() gin.HandlerFunc {
 		// health接口只在状态变化时打印
 		if path == "/health" || path == "/health/ready" {
 			if c.Writer.Header().Get("X-Log-Status-Change") == "true" {
-				log.Printf("[%s] %s %d %v",
+				logger.Infof("[%s] %s %d %v",
 					c.Request.Method,
 					path,
 					c.Writer.Status(),
@@ -196,7 +206,7 @@ func (s *Server) customLogger() gin.HandlerFunc {
 		}
 
 		// 其他接口正常打印
-		log.Printf("[%s] %s %d %v",
+		logger.Infof("[%s] %s %d %v",
 			c.Request.Method,
 			path,
 			c.Writer.Status(),

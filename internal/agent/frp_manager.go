@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/url"
 	"strconv"
 	"strings"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/constants"
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 )
 
 // ProxyCommand 代理命令
@@ -71,7 +71,7 @@ func NewFRPManager(cfg *config.AgentConfig, ctx context.Context) (*FRPManager, e
 
 // Run 运行FRP管理器
 func (f *FRPManager) Run() error {
-	log.Printf("FRP管理器启动，连接到: %s:%d", f.config.Server.Address, f.config.Server.Port)
+	logger.Infof("FRP管理器启动，连接到: %s:%d", f.config.Server.Address, f.config.Server.Port)
 
 	// 启动命令处理循环
 	f.wg.Add(1)
@@ -81,7 +81,7 @@ func (f *FRPManager) Run() error {
 	for {
 		select {
 		case <-f.ctx.Done():
-			log.Println("FRP管理器收到停止信号")
+			logger.Info("FRP管理器收到停止信号")
 			f.wg.Wait()
 			return nil
 
@@ -91,18 +91,18 @@ func (f *FRPManager) Run() error {
 				// 检查是否是因为context取消导致的错误
 				select {
 				case <-f.ctx.Done():
-					log.Println("FRP管理器收到停止信号")
+					logger.Info("FRP管理器收到停止信号")
 					f.wg.Wait()
 					return nil
 				default:
-					log.Printf("FRP客户端错误: %v", err)
+					logger.Infof("FRP客户端错误: %v", err)
 				}
 			}
 
 			// 再次检查context，避免在停止时继续重试
 			select {
 			case <-f.ctx.Done():
-				log.Println("FRP管理器收到停止信号")
+				logger.Info("FRP管理器收到停止信号")
 				f.wg.Wait()
 				return nil
 			default:
@@ -116,7 +116,7 @@ func (f *FRPManager) Run() error {
 
 			if !needRestart {
 				// 如果不是主动重启，说明是异常退出，等待一段时间后重试
-				log.Println("FRP客户端异常退出，5秒后重试...")
+				logger.Info("FRP客户端异常退出，5秒后重试...")
 				select {
 				case <-time.After(5 * time.Second):
 				case <-f.ctx.Done():
@@ -124,7 +124,7 @@ func (f *FRPManager) Run() error {
 					return nil
 				}
 			} else {
-				log.Println("FRP客户端正在重启以应用新配置...")
+				logger.Info("FRP客户端正在重启以应用新配置...")
 			}
 		}
 	}
@@ -165,7 +165,7 @@ func (f *FRPManager) runFRPClient() error {
 		websocketPath = parsedURL.Path
 		protocol = parsedURL.Protocol
 
-		log.Printf("使用隧道 URL: %s (解析为 %s://%s:%d%s)",
+		logger.Infof("使用隧道 URL: %s (解析为 %s://%s:%d%s)",
 			serverURL, protocol, serverAddr, port, websocketPath)
 	} else if serverPort > 0 {
 		port = serverPort
@@ -177,6 +177,11 @@ func (f *FRPManager) runFRPClient() error {
 		ServerPort: port,
 	}
 
+	// 配置 FRP 日志级别
+	clientCfg.Log.Level = f.config.Log.Level // 从配置文件读取日志级别
+	clientCfg.Log.To = "console"
+	logger.Infof("FRP客户端日志级别: %s", f.config.Log.Level)
+
 	// 配置传输协议
 	clientCfg.Transport.Protocol = protocol
 
@@ -185,23 +190,23 @@ func (f *FRPManager) runFRPClient() error {
 		enable := true
 		clientCfg.Transport.TLS.Enable = &enable
 		clientCfg.Transport.TLS.ServerName = serverAddr
-		log.Printf("FRP客户端TLS已启用（跳过证书验证: %v）", insecureSkipVerify)
+		logger.Infof("FRP客户端TLS已启用（跳过证书验证: %v）", insecureSkipVerify)
 	}
 
 	// 完成配置（填充默认值）- 这是关键步骤！
 	if err := clientCfg.Complete(); err != nil {
 		return fmt.Errorf("完成FRP客户端配置失败: %w", err)
 	}
-	log.Println("FRP客户端配置已完成（默认值已填充）")
+	logger.Info("FRP客户端配置已完成（默认值已填充）")
 
 	// 配置认证
 	if token != "" {
 		clientCfg.Auth.Method = v1.AuthMethod("token")
 		clientCfg.Auth.Token = token
-		log.Printf("FRP客户端配置: ServerAddr=%s, ServerPort=%d, Protocol=%s, Path=%s, Auth=token",
+		logger.Infof("FRP客户端配置: ServerAddr=%s, ServerPort=%d, Protocol=%s, Path=%s, Auth=token",
 			serverAddr, port, protocol, websocketPath)
 	} else {
-		log.Printf("FRP客户端配置: ServerAddr=%s, ServerPort=%d, Protocol=%s, Path=%s, Auth=none (等待Token)",
+		logger.Infof("FRP客户端配置: ServerAddr=%s, ServerPort=%d, Protocol=%s, Path=%s, Auth=none (等待Token)",
 			serverAddr, port, protocol, websocketPath)
 	}
 
@@ -215,7 +220,7 @@ func (f *FRPManager) runFRPClient() error {
 			// 使用自定义 connector，支持自定义 WebSocket path 和跳过证书验证
 			connector, err := NewCustomConnector(ctx, cfg, websocketPath, insecureSkipVerify)
 			if err != nil {
-				log.Printf("创建自定义 Connector 失败: %v，使用默认 Connector", err)
+				logger.Infof("创建自定义 Connector 失败: %v，使用默认 Connector", err)
 				return client.NewConnector(ctx, cfg)
 			}
 			return connector
@@ -229,7 +234,7 @@ func (f *FRPManager) runFRPClient() error {
 	f.service = svr
 	f.mutex.Unlock()
 
-	log.Printf("FRP客户端已创建，代理数量: %d", len(proxyCfgs))
+	logger.Infof("FRP客户端已创建，代理数量: %d", len(proxyCfgs))
 
 	// 启动FRP客户端（会阻塞直到停止或出错）
 	if err := svr.Run(f.ctx); err != nil {
@@ -363,7 +368,7 @@ func (f *FRPManager) addProxyInternal(instanceName, secretKey, localIP string, l
 	f.proxies[instanceName] = proxyConfig
 	f.needRestart = true
 
-	log.Printf("FRP STCP代理已添加: %s -> %s:%d (总计: %d个)",
+	logger.Infof("FRP STCP代理已添加: %s -> %s:%d (总计: %d个)",
 		instanceName, localIP, localPort, len(f.proxies))
 
 	// 停止当前FRP客户端以触发重启
@@ -388,7 +393,7 @@ func (f *FRPManager) removeProxyInternal(instanceName string) error {
 	delete(f.proxies, instanceName)
 	f.needRestart = true
 
-	log.Printf("FRP STCP代理已删除: %s (剩余: %d个)", instanceName, len(f.proxies))
+	logger.Infof("FRP STCP代理已删除: %s (剩余: %d个)", instanceName, len(f.proxies))
 
 	// 停止当前FRP客户端以触发重启
 	if f.service != nil {
@@ -472,7 +477,7 @@ func (f *FRPManager) SetToken(token string) {
 	f.token = token
 	f.connMutex.Unlock()
 
-	log.Printf("隧道 Token 已设置: %s...", token[:16])
+	logger.Infof("隧道 Token 已设置: %s...", token[:16])
 
 	// 如果客户端正在运行，重启以应用新 Token
 	f.mutex.Lock()
@@ -489,7 +494,7 @@ func (f *FRPManager) SetServerURL(url string) {
 	f.serverURL = url
 	f.connMutex.Unlock()
 
-	log.Printf("隧道服务器 URL 已设置: %s", url)
+	logger.Infof("隧道服务器 URL 已设置: %s", url)
 
 	// 如果客户端正在运行，重启以应用新配置
 	f.mutex.Lock()
@@ -506,7 +511,7 @@ func (f *FRPManager) SetServerPort(port int) {
 	f.serverPort = port
 	f.connMutex.Unlock()
 
-	log.Printf("隧道服务器端口已设置: %d", port)
+	logger.Infof("隧道服务器端口已设置: %d", port)
 
 	// 如果客户端正在运行，重启以应用新配置
 	f.mutex.Lock()
@@ -519,7 +524,7 @@ func (f *FRPManager) SetServerPort(port int) {
 
 // Stop 停止FRP管理器
 func (f *FRPManager) Stop() {
-	log.Println("正在停止FRP管理器...")
+	logger.Info("正在停止FRP管理器...")
 	f.cancel()
 
 	// 停止FRP客户端
@@ -530,7 +535,7 @@ func (f *FRPManager) Stop() {
 	f.mutex.Unlock()
 
 	f.wg.Wait()
-	log.Println("FRP管理器已停止")
+	logger.Info("FRP管理器已停止")
 }
 
 // IsConnected 检查FRP客户端是否已连接

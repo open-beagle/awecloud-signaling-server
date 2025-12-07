@@ -3,7 +3,6 @@ package frp
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/fatedier/frp/server"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 )
 
 // ConnectionType 连接类型
@@ -72,20 +72,27 @@ func NewFRPServer(cfg *config.ServerConfig) (*FRPServer, error) {
 		BindPort: cfg.Server.BindPort,
 	}
 
+	// 配置 FRP 日志级别
+	svrCfg.Log = v1.LogConfig{
+		Level: cfg.Log.Level, // 从配置文件读取日志级别
+		To:    "console",
+	}
+	logger.Infof("FRP Server 日志级别: %s", cfg.Log.Level)
+
 	// 完成配置（填充默认值）- 这是关键步骤！
 	if err := svrCfg.Complete(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("完成FRP Server配置失败: %w", err)
 	}
-	log.Println("FRP Server 配置已完成（默认值已填充）")
+	logger.Info("FRP Server 配置已完成（默认值已填充）")
 
 	// 配置 FRP 认证
 	if cfg.Server.Token != "" {
 		svrCfg.Auth.Method = v1.AuthMethod("token")
 		svrCfg.Auth.Token = cfg.Server.Token
-		log.Printf("FRP Server 认证已启用: token=%s...", cfg.Server.Token[:min(16, len(cfg.Server.Token))])
+		logger.Infof("FRP Server 认证已启用: token=%s...", cfg.Server.Token[:min(16, len(cfg.Server.Token))])
 	} else {
-		log.Println("FRP Server 认证未启用（不推荐用于生产环境）")
+		logger.Info("FRP Server 认证未启用（不推荐用于生产环境）")
 	}
 
 	// 配置TLS
@@ -97,12 +104,12 @@ func NewFRPServer(cfg *config.ServerConfig) (*FRPServer, error) {
 				KeyFile:  cfg.Server.TLSKeyFile,
 			},
 		}
-		log.Println("FRP Server TLS已启用")
+		logger.Info("FRP Server TLS已启用")
 	}
 
 	// 注意：FRP Server 自动支持所有传输协议（TCP, KCP, QUIC, WebSocket, WSS）
 	// 通过 muxer 在同一端口上复用，无需额外配置
-	log.Println("FRP Server 将自动支持所有传输协议（TCP, WebSocket 等）")
+	logger.Info("FRP Server 将自动支持所有传输协议（TCP, WebSocket 等）")
 
 	// 创建FRP Server实例
 	svr, err := server.NewService(svrCfg)
@@ -123,8 +130,8 @@ func NewFRPServer(cfg *config.ServerConfig) (*FRPServer, error) {
 
 // Run 运行FRP服务器
 func (f *FRPServer) Run() error {
-	log.Printf("FRP Server启动在: %s:%d", f.config.Server.BindAddr, f.config.Server.BindPort)
-	log.Printf("传输协议: %s", f.config.Server.TransportProtocol)
+	logger.Infof("FRP Server启动在: %s:%d", f.config.Server.BindAddr, f.config.Server.BindPort)
+	logger.Infof("传输协议: %s", f.config.Server.TransportProtocol)
 
 	// 启动连接监控
 	f.wg.Add(1)
@@ -141,10 +148,10 @@ func (f *FRPServer) Run() error {
 
 // Stop 停止FRP服务器
 func (f *FRPServer) Stop() error {
-	log.Println("正在停止FRP Server...")
+	logger.Info("正在停止FRP Server...")
 	f.cancel()
 	f.wg.Wait()
-	log.Println("FRP Server已停止")
+	logger.Info("FRP Server已停止")
 	return nil
 }
 
@@ -186,7 +193,7 @@ func (f *FRPServer) logConnectionStats() {
 
 	// 只在数量变化时打印
 	if agentCount != f.lastAgentCount || desktopCount != f.lastDesktopCount || proxyCount != f.lastProxyCount {
-		log.Printf("FRP连接统计: Agent=%d, Desktop=%d, Proxy=%d",
+		logger.Infof("FRP连接统计: Agent=%d, Desktop=%d, Proxy=%d",
 			agentCount, desktopCount, proxyCount)
 		f.lastAgentCount = agentCount
 		f.lastDesktopCount = desktopCount
@@ -207,7 +214,7 @@ func (f *FRPServer) RegisterConnection(name string, connType ConnectionType) {
 		LastActive:  now,
 	}
 
-	log.Printf("FRP连接已注册: %s (类型: %s)", name, connType)
+	logger.Infof("FRP连接已注册: %s (类型: %s)", name, connType)
 }
 
 // UnregisterConnection 注销连接
@@ -217,7 +224,7 @@ func (f *FRPServer) UnregisterConnection(name string) {
 
 	if conn, exists := f.connections[name]; exists {
 		delete(f.connections, name)
-		log.Printf("FRP连接已注销: %s (类型: %s)", name, conn.Type)
+		logger.Infof("FRP连接已注销: %s (类型: %s)", name, conn.Type)
 	}
 }
 
@@ -244,7 +251,7 @@ func (f *FRPServer) RegisterProxy(name, proxyType, agentName string) {
 		Status:    "active",
 	}
 
-	log.Printf("FRP代理已注册: %s (类型: %s, Agent: %s)", name, proxyType, agentName)
+	logger.Infof("FRP代理已注册: %s (类型: %s, Agent: %s)", name, proxyType, agentName)
 }
 
 // UnregisterProxy 注销代理
@@ -254,7 +261,7 @@ func (f *FRPServer) UnregisterProxy(name string) {
 
 	if proxy, exists := f.proxies[name]; exists {
 		delete(f.proxies, name)
-		log.Printf("FRP代理已注销: %s (Agent: %s)", name, proxy.AgentName)
+		logger.Infof("FRP代理已注销: %s (Agent: %s)", name, proxy.AgentName)
 	}
 }
 

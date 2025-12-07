@@ -207,9 +207,6 @@ func (a *AuditLogAPI) QueryAuditLogs(c *gin.Context) {
 		deviceInfo, _ := auth.DeviceInfoFromJSON(auditLog.DeviceInfo)
 
 		clientName := ""
-		log.Printf("Debug: audit_log_id=%d, client_pk_id=%d, Client.ID=%d, Client.ClientID=%s",
-			auditLog.ID, auditLog.ClientPKID, auditLog.Client.ID, auditLog.Client.ClientID)
-
 		if auditLog.Client.ClientID != "" {
 			clientName = auditLog.Client.ClientID
 		} else {

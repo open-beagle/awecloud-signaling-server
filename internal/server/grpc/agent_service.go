@@ -3,13 +3,13 @@ package grpc
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
@@ -46,12 +46,12 @@ func NewAgentServiceServer(frpToken string, frpPublicURL string, frpPort int) *A
 
 // Register Agent注册
 func (s *AgentServiceServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
-	log.Printf("Agent注册请求: %s", req.AgentName)
+	logger.Infof("Agent注册请求: %s", req.AgentName)
 
 	// 查询Agent
 	var agent model.Agent
 	if err := db.DB.Where("agent_name = ? AND agent_token = ?", req.AgentName, req.AgentToken).First(&agent).Error; err != nil {
-		log.Printf("Agent认证失败: %v", err)
+		logger.Infof("Agent认证失败: %v", err)
 		return &pb.RegisterResponse{
 			Success: false,
 			Message: "Agent认证失败",
@@ -63,10 +63,10 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.RegisterReque
 	now := time.Now()
 	agent.LastHeartbeat = &now
 	if err := db.DB.Save(&agent).Error; err != nil {
-		log.Printf("更新Agent状态失败: %v", err)
+		logger.Infof("更新Agent状态失败: %v", err)
 	}
 
-	log.Printf("Agent注册成功: %s (ID: %d)", req.AgentName, agent.ID)
+	logger.Infof("Agent注册成功: %s (ID: %d)", req.AgentName, agent.ID)
 
 	// 构建 FRP 连接信息
 	// 如果配置了公网 URL，使用公网 URL；否则返回空字符串和端口
@@ -100,7 +100,7 @@ func (s *AgentServiceServer) Heartbeat(ctx context.Context, req *pb.HeartbeatReq
 	agent.LastHeartbeat = &now
 	agent.Status = "online"
 	if err := db.DB.Save(&agent).Error; err != nil {
-		log.Printf("更新心跳失败: %v", err)
+		logger.Infof("更新心跳失败: %v", err)
 	}
 
 	return &pb.HeartbeatResponse{
@@ -121,11 +121,11 @@ func (s *AgentServiceServer) ReceiveCommands(stream pb.AgentService_ReceiveComma
 	// CommandId格式："init-{agent_id}"
 	var agentID int64
 	if _, err := fmt.Sscanf(initResp.CommandId, "init-%d", &agentID); err != nil {
-		log.Printf("解析Agent ID失败: %v, 使用默认值1", err)
+		logger.Infof("解析Agent ID失败: %v, 使用默认值1", err)
 		agentID = 1
 	}
 
-	log.Printf("Agent连接建立: agent_id=%d, message=%s", agentID, initResp.Message)
+	logger.Infof("Agent连接建立: agent_id=%d, message=%s", agentID, initResp.Message)
 
 	// 注册stream
 	s.streamsMutex.Lock()
@@ -149,7 +149,7 @@ func (s *AgentServiceServer) ReceiveCommands(stream pb.AgentService_ReceiveComma
 		delete(s.agentStreams, agentID)
 		s.streamsMutex.Unlock()
 
-		log.Printf("Agent连接断开: %d", agentID)
+		logger.Infof("Agent连接断开: %d", agentID)
 	}()
 
 	// 启动接收响应的goroutine
@@ -159,7 +159,7 @@ func (s *AgentServiceServer) ReceiveCommands(stream pb.AgentService_ReceiveComma
 			if err != nil {
 				return
 			}
-			log.Printf("收到Agent响应: command_id=%s, success=%v", resp.CommandId, resp.Success)
+			logger.Infof("收到Agent响应: command_id=%s, success=%v", resp.CommandId, resp.Success)
 		}
 	}()
 
@@ -168,10 +168,10 @@ func (s *AgentServiceServer) ReceiveCommands(stream pb.AgentService_ReceiveComma
 		select {
 		case cmd := <-cmdQueue:
 			if err := stream.Send(cmd); err != nil {
-				log.Printf("发送命令失败: %v", err)
+				logger.Infof("发送命令失败: %v", err)
 				return err
 			}
-			log.Printf("发送命令: %s", cmd.CommandId)
+			logger.Infof("发送命令: %s", cmd.CommandId)
 
 		case <-stream.Context().Done():
 			return stream.Context().Err()
@@ -181,7 +181,7 @@ func (s *AgentServiceServer) ReceiveCommands(stream pb.AgentService_ReceiveComma
 
 // ReportStatus 状态上报
 func (s *AgentServiceServer) ReportStatus(ctx context.Context, req *pb.StatusReport) (*pb.StatusResponse, error) {
-	log.Printf("收到Agent状态上报: agent_id=%d, stcp_count=%d", req.AgentId, len(req.StcpStatuses))
+	logger.Infof("收到Agent状态上报: agent_id=%d, stcp_count=%d", req.AgentId, len(req.StcpStatuses))
 
 	// TODO: 保存状态信息到数据库或缓存
 
@@ -224,16 +224,16 @@ func (s *AgentServiceServer) syncSTCPInstances(agentID int64) {
 	// 查询该Agent的所有STCP实例
 	var instances []model.STCPInstance
 	if err := db.DB.Where("agent_id = ?", agentID).Find(&instances).Error; err != nil {
-		log.Printf("查询Agent STCP实例失败: %v", err)
+		logger.Infof("查询Agent STCP实例失败: %v", err)
 		return
 	}
 
 	if len(instances) == 0 {
-		log.Printf("Agent %d 没有需要同步的STCP实例", agentID)
+		logger.Infof("Agent %d 没有需要同步的STCP实例", agentID)
 		return
 	}
 
-	log.Printf("开始同步Agent %d 的 %d 个STCP实例", agentID, len(instances))
+	logger.Infof("开始同步Agent %d 的 %d 个STCP实例", agentID, len(instances))
 
 	// 为每个实例发送创建命令
 	for _, instance := range instances {
@@ -247,14 +247,14 @@ func (s *AgentServiceServer) syncSTCPInstances(agentID int64) {
 		}
 
 		if err := s.SendCommand(agentID, cmd); err != nil {
-			log.Printf("同步STCP实例失败: instance=%s, error=%v", instance.InstanceName, err)
+			logger.Infof("同步STCP实例失败: instance=%s, error=%v", instance.InstanceName, err)
 		} else {
-			log.Printf("已同步STCP实例: instance=%s", instance.InstanceName)
+			logger.Infof("已同步STCP实例: instance=%s", instance.InstanceName)
 		}
 
 		// 避免发送过快
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	log.Printf("Agent %d 的STCP实例同步完成", agentID)
+	logger.Infof("Agent %d 的STCP实例同步完成", agentID)
 }

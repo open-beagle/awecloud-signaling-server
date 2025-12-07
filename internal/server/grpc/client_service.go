@@ -2,7 +2,6 @@ package grpc
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -10,6 +9,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/auth"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
@@ -37,12 +37,12 @@ func (s *ClientServiceServer) SetAgentService(agentService *AgentServiceServer) 
 
 // Authenticate Client认证
 func (s *ClientServiceServer) Authenticate(ctx context.Context, req *pb.AuthRequest) (*pb.AuthResponse, error) {
-	log.Printf("Client认证请求: %s", req.ClientId)
+	logger.Infof("Client认证请求: %s", req.ClientId)
 
 	// 查询Client
 	var client model.Client
 	if err := db.DB.Where("client_id = ?", req.ClientId).First(&client).Error; err != nil {
-		log.Printf("Client不存在: %s", req.ClientId)
+		logger.Infof("Client不存在: %s", req.ClientId)
 		return &pb.AuthResponse{
 			Success: false,
 			Message: "Client ID或Secret错误",
@@ -51,7 +51,7 @@ func (s *ClientServiceServer) Authenticate(ctx context.Context, req *pb.AuthRequ
 
 	// 验证Secret
 	if client.ClientSecret != req.ClientSecret {
-		log.Printf("Client密钥错误: %s", req.ClientId)
+		logger.Infof("Client密钥错误: %s", req.ClientId)
 		return &pb.AuthResponse{
 			Success: false,
 			Message: "Client ID或Secret错误",
@@ -60,7 +60,7 @@ func (s *ClientServiceServer) Authenticate(ctx context.Context, req *pb.AuthRequ
 
 	// 检查状态
 	if !client.Enabled {
-		log.Printf("Client已禁用: %s", req.ClientId)
+		logger.Infof("Client已禁用: %s", req.ClientId)
 		return &pb.AuthResponse{
 			Success: false,
 			Message: "Client已被禁用",
@@ -84,7 +84,7 @@ func (s *ClientServiceServer) Authenticate(ctx context.Context, req *pb.AuthRequ
 
 	deviceToken, err := auth.CreateDeviceToken(db.DB, client.ID, deviceInfo)
 	if err != nil {
-		log.Printf("创建Device Token失败: %v", err)
+		logger.Infof("创建Device Token失败: %v", err)
 		return &pb.AuthResponse{
 			Success: false,
 			Message: "创建Device Token失败",
@@ -101,14 +101,14 @@ func (s *ClientServiceServer) Authenticate(ctx context.Context, req *pb.AuthRequ
 
 	jwtTokenString, err := jwtToken.SignedString([]byte(s.config.Security.JWTSecret))
 	if err != nil {
-		log.Printf("生成JWT Token失败: %v", err)
+		logger.Infof("生成JWT Token失败: %v", err)
 		return &pb.AuthResponse{
 			Success: false,
 			Message: "生成JWT Token失败",
 		}, nil
 	}
 
-	log.Printf("Client认证成功: %s, device_token=%s", req.ClientId, deviceToken.DeviceToken)
+	logger.Infof("Client认证成功: %s, device_token=%s", req.ClientId, deviceToken.DeviceToken)
 
 	// 构建 FRP 连接信息
 	// 如果配置了公网 URL，使用公网 URL；否则返回空字符串和端口
@@ -133,12 +133,12 @@ func (s *ClientServiceServer) Authenticate(ctx context.Context, req *pb.AuthRequ
 
 // LoginWithToken 使用Device Token登录获取JWT
 func (s *ClientServiceServer) LoginWithToken(ctx context.Context, req *pb.LoginWithTokenRequest) (*pb.LoginWithTokenResponse, error) {
-	log.Printf("Device Token登录请求: client_id=%s", req.ClientId)
+	logger.Infof("Device Token登录请求: client_id=%s", req.ClientId)
 
 	// 查询Client
 	var client model.Client
 	if err := db.DB.Where("client_id = ?", req.ClientId).First(&client).Error; err != nil {
-		log.Printf("Client不存在: %s", req.ClientId)
+		logger.Infof("Client不存在: %s", req.ClientId)
 		return &pb.LoginWithTokenResponse{
 			Success: false,
 			Message: "Client ID错误",
@@ -147,7 +147,7 @@ func (s *ClientServiceServer) LoginWithToken(ctx context.Context, req *pb.LoginW
 
 	// 检查状态
 	if !client.Enabled {
-		log.Printf("Client已禁用: %s", req.ClientId)
+		logger.Infof("Client已禁用: %s", req.ClientId)
 		return &pb.LoginWithTokenResponse{
 			Success: false,
 			Message: "Client已被禁用",
@@ -158,7 +158,7 @@ func (s *ClientServiceServer) LoginWithToken(ctx context.Context, req *pb.LoginW
 	var deviceToken model.DeviceToken
 	if err := db.DB.Where("client_id = ? AND device_token = ? AND revoked = ?",
 		client.ID, req.DeviceToken, false).First(&deviceToken).Error; err != nil {
-		log.Printf("Device Token无效: %s", req.DeviceToken)
+		logger.Infof("Device Token无效: %s", req.DeviceToken)
 		return &pb.LoginWithTokenResponse{
 			Success: false,
 			Message: "Device Token无效或已过期",
@@ -167,7 +167,7 @@ func (s *ClientServiceServer) LoginWithToken(ctx context.Context, req *pb.LoginW
 
 	// 检查是否过期
 	if time.Now().After(deviceToken.ExpiresAt) {
-		log.Printf("Device Token已过期: %s", req.DeviceToken)
+		logger.Infof("Device Token已过期: %s", req.DeviceToken)
 		return &pb.LoginWithTokenResponse{
 			Success: false,
 			Message: "Device Token已过期",
@@ -189,14 +189,14 @@ func (s *ClientServiceServer) LoginWithToken(ctx context.Context, req *pb.LoginW
 
 	jwtTokenString, err := jwtToken.SignedString([]byte(s.config.Security.JWTSecret))
 	if err != nil {
-		log.Printf("生成JWT Token失败: %v", err)
+		logger.Infof("生成JWT Token失败: %v", err)
 		return &pb.LoginWithTokenResponse{
 			Success: false,
 			Message: "生成JWT Token失败",
 		}, nil
 	}
 
-	log.Printf("Device Token验证成功: client_id=%d, device_token=%s", client.ID, deviceToken.DeviceToken)
+	logger.Infof("Device Token验证成功: client_id=%d, device_token=%s", client.ID, deviceToken.DeviceToken)
 
 	return &pb.LoginWithTokenResponse{
 		Success:      true,
@@ -229,7 +229,7 @@ func (s *ClientServiceServer) GetServices(ctx context.Context, req *pb.GetServic
 	// 1. 查询所有 public 服务
 	var publicInstances []model.STCPInstance
 	if err := db.DB.Preload("Agent").Where("access_type = ?", "public").Find(&publicInstances).Error; err != nil {
-		log.Printf("查询 public 服务失败: %v", err)
+		logger.Infof("查询 public 服务失败: %v", err)
 		return nil, status.Error(codes.Internal, "查询失败")
 	}
 	allInstances = append(allInstances, publicInstances...)
@@ -239,7 +239,7 @@ func (s *ClientServiceServer) GetServices(ctx context.Context, req *pb.GetServic
 	if err := db.DB.Preload("STCPInstance").Preload("STCPInstance.Agent").
 		Where("client_id = ?", clientID).
 		Find(&privateAccess).Error; err != nil {
-		log.Printf("查询 private 服务失败: %v", err)
+		logger.Infof("查询 private 服务失败: %v", err)
 		return nil, status.Error(codes.Internal, "查询失败")
 	}
 	for _, access := range privateAccess {
@@ -254,7 +254,7 @@ func (s *ClientServiceServer) GetServices(ctx context.Context, req *pb.GetServic
 		Joins("JOIN group_members ON group_members.group_id = stcp_instances.group_id").
 		Where("group_members.client_id = ? AND stcp_instances.access_type = ?", clientID, "group").
 		Find(&groupInstances).Error; err != nil {
-		log.Printf("查询 group 服务失败: %v", err)
+		logger.Infof("查询 group 服务失败: %v", err)
 		return nil, status.Error(codes.Internal, "查询失败")
 	}
 	allInstances = append(allInstances, groupInstances...)
@@ -290,7 +290,7 @@ func (s *ClientServiceServer) GetServices(ctx context.Context, req *pb.GetServic
 		})
 	}
 
-	log.Printf("返回服务列表: client_id=%d, count=%d", clientID, len(services))
+	logger.Infof("返回服务列表: client_id=%d, count=%d", clientID, len(services))
 
 	return &pb.GetServicesResponse{
 		Success:  true,
@@ -319,7 +319,7 @@ func (s *ClientServiceServer) ConnectService(ctx context.Context, req *pb.Connec
 	// 查询STCP实例
 	var instance model.STCPInstance
 	if err := db.DB.First(&instance, req.InstanceId).Error; err != nil {
-		log.Printf("STCP实例不存在: %d", req.InstanceId)
+		logger.Infof("STCP实例不存在: %d", req.InstanceId)
 		return &pb.ConnectResponse{
 			Success: false,
 			Message: "服务不存在",
@@ -349,14 +349,14 @@ func (s *ClientServiceServer) ConnectService(ctx context.Context, req *pb.Connec
 	}
 
 	if !hasAccess {
-		log.Printf("Client无权限访问该服务: client_id=%d, instance_id=%d, access_type=%s", clientID, req.InstanceId, instance.AccessType)
+		logger.Infof("Client无权限访问该服务: client_id=%d, instance_id=%d, access_type=%s", clientID, req.InstanceId, instance.AccessType)
 		return &pb.ConnectResponse{
 			Success: false,
 			Message: "无权限访问该服务",
 		}, nil
 	}
 
-	log.Printf("Client连接服务: client_id=%d, instance=%s", clientID, instance.InstanceName)
+	logger.Infof("Client连接服务: client_id=%d, instance=%s", clientID, instance.InstanceName)
 
 	// 获取隧道服务器地址
 	serverURL := s.config.Server.PublicURL
