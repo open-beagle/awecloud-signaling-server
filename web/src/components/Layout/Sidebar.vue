@@ -24,7 +24,7 @@
           {{ t('menu.stcpInstances') }}
         </el-menu-item>
         <el-menu-item index="/services/tcp">
-          {{ t('menu.tcpServices') }}
+          {{ t('menu.tcpInstances') }}
         </el-menu-item>
       </el-sub-menu>
       <el-menu-item index="/clients">

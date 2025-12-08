@@ -58,7 +58,7 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true }
       },
       {
-        path: 'stcp-instances/:id/access',
+        path: 'services/stcp/:id/access',
         name: 'STCPAccess',
         component: () => import('@/views/STCP/Access.vue'),
         meta: { requiresAuth: true }

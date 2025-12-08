@@ -69,10 +69,10 @@ func (p *WebSocketPathProxy) handleWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// 连接到 FRP Server
+	// 连接到 Tunnel Server
 	serverConn, err := net.DialTimeout("tcp", p.targetAddr, 10*time.Second)
 	if err != nil {
-		logger.Infof("连接 FRP Server 失败: %v", err)
+		logger.Infof("连接 Tunnel Server 失败: %v", err)
 		http.Error(w, "Failed to connect to backend", http.StatusBadGateway)
 		return
 	}
@@ -83,18 +83,18 @@ func (p *WebSocketPathProxy) handleWebSocket(w http.ResponseWriter, r *http.Requ
 	modifiedReq.URL.Path = constants.FRPDefaultPath
 	modifiedReq.RequestURI = constants.FRPDefaultPath
 
-	// 将修改后的请求发送到 FRP Server
+	// 将修改后的请求发送到 Tunnel Server
 	if err := modifiedReq.Write(serverConn); err != nil {
-		logger.Infof("发送请求到 FRP Server 失败: %v", err)
+		logger.Infof("发送请求到 Tunnel Server 失败: %v", err)
 		http.Error(w, "Failed to forward request", http.StatusBadGateway)
 		return
 	}
 
-	// 读取 FRP Server 的响应
+	// 读取 Tunnel Server 的响应
 	serverReader := bufio.NewReader(serverConn)
 	resp, err := http.ReadResponse(serverReader, modifiedReq)
 	if err != nil {
-		logger.Infof("读取 FRP Server 响应失败: %v", err)
+		logger.Infof("读取 Tunnel Server 响应失败: %v", err)
 		http.Error(w, "Failed to read backend response", http.StatusBadGateway)
 		return
 	}

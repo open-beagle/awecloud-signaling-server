@@ -151,7 +151,7 @@ func (s *Server) Run() error {
 	// 启动FRP Server（在goroutine中运行）
 	go func() {
 		if err := s.frpServer.Run(); err != nil {
-			logger.Errorf("FRP Server运行错误: %v", err)
+			logger.Errorf("Tunnel Server运行错误: %v", err)
 		}
 	}()
 
@@ -172,7 +172,7 @@ func (s *Server) Run() error {
 	// 停止FRP Server
 	if s.frpServer != nil {
 		if err := s.frpServer.Stop(); err != nil {
-			logger.Errorf("停止FRP Server失败: %v", err)
+			logger.Errorf("停止Tunnel Server失败: %v", err)
 		}
 	}
 

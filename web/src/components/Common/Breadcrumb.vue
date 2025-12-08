@@ -17,7 +17,6 @@ const { t } = useI18n()
 const breadcrumbMap: Record<string, string> = {
   '/agents': 'menu.agents',
   '/clients': 'menu.clients',
-  '/stcp-instances': 'menu.stcpInstances',
   '/groups': 'menu.groups',
   '/favorites': 'menu.favorites',
   '/audit-logs': 'menu.auditLogs',
@@ -30,13 +29,21 @@ const items = computed(() => {
     { path: '/', title: t('common.home') }
   ]
   
-  // 处理二级页面
-  if (path.startsWith('/groups/') && path.includes('/members')) {
+  // 处理服务管理相关页面
+  if (path.startsWith('/services/stcp/') && path.includes('/access')) {
+    // STCP授权管理页面
+    breadcrumbs.push({ path: '', title: t('menu.serviceManagement') })
+    breadcrumbs.push({ path: '/services/stcp', title: t('menu.stcpInstances') })
+    breadcrumbs.push({ path: '', title: t('stcp.grantAccess') })
+  } else if (path.startsWith('/services/stcp')) {
+    breadcrumbs.push({ path: '', title: t('menu.serviceManagement') })
+    breadcrumbs.push({ path: '/services/stcp', title: t('menu.stcpInstances') })
+  } else if (path.startsWith('/services/tcp')) {
+    breadcrumbs.push({ path: '', title: t('menu.serviceManagement') })
+    breadcrumbs.push({ path: '/services/tcp', title: t('menu.tcpInstances') })
+  } else if (path.startsWith('/groups/') && path.includes('/members')) {
     breadcrumbs.push({ path: '/groups', title: 'Group管理' })
     breadcrumbs.push({ path: '', title: '成员管理' })
-  } else if (path.startsWith('/stcp-instances/') && path.includes('/access')) {
-    breadcrumbs.push({ path: '/stcp-instances', title: 'STCP管理' })
-    breadcrumbs.push({ path: '', title: '授权管理' })
   } else {
     // 一级页面
     const title = breadcrumbMap[path]
