@@ -608,9 +608,9 @@ Web 管理界面供管理员管理系统资源。详细设计请参考 [Web 界�
 ```
 your-storage-path/
 ├── version.json                                    # 版本信息
-├── awecloud-signaling-v0.1.0-windows-amd64.exe    # 版本文件
-├── awecloud-signaling-v0.1.0-linux-amd64
-├── awecloud-signaling-v0.1.0-darwin-universal.zip
+├── awecloud-signaling-v1.0.x-windows-amd64.exe    # 版本文件
+├── awecloud-signaling-v1.0.x-linux-amd64
+├── awecloud-signaling-v1.0.x-darwin-universal.zip
 ├── awecloud-signaling-v0.2.0-windows-amd64.exe    # 其他版本
 └── ...
 ```

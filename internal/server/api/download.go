@@ -1,9 +1,14 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -24,15 +29,31 @@ type DownloadInfo struct {
 	Filename    string `json:"filename"`
 	OS          string `json:"os"`
 	Arch        string `json:"arch"`
+	BuildDate   string `json:"build_date,omitempty"`
+}
+
+// VersionInfo version.json 的结构
+type VersionInfo struct {
+	Version   string `json:"version"`
+	BuildDate string `json:"build_date"`
 }
 
 // AllDownloadsResponse 所有平台的下载信息
 type AllDownloadsResponse struct {
 	Success   bool                    `json:"success"`
 	Version   string                  `json:"version,omitempty"`
+	BuildDate string                  `json:"build_date,omitempty"`
 	Downloads map[string]DownloadInfo `json:"downloads,omitempty"`
 	Message   string                  `json:"message,omitempty"`
 }
+
+// 版本信息缓存
+var (
+	cachedVersionInfo *VersionInfo
+	versionCacheMutex sync.RWMutex
+	versionCacheTime  time.Time
+	versionCacheTTL   = 1 * time.Minute // 缓存1分钟
+)
 
 // getClientDownloadURL 从系统配置获取客户端下载地址
 func getClientDownloadURL() (string, error) {
@@ -41,6 +62,73 @@ func getClientDownloadURL() (string, error) {
 		return "", err
 	}
 	return config.ClientDownloadURL, nil
+}
+
+// fetchVersionInfo 从远程获取版本信息
+func fetchVersionInfo(baseURL string) (*VersionInfo, error) {
+	// 检查缓存
+	versionCacheMutex.RLock()
+	if cachedVersionInfo != nil && time.Since(versionCacheTime) < versionCacheTTL {
+		info := cachedVersionInfo
+		versionCacheMutex.RUnlock()
+		return info, nil
+	}
+	versionCacheMutex.RUnlock()
+
+	// 构建 version.json URL
+	versionURL := baseURL
+	if !strings.HasSuffix(versionURL, "/") {
+		versionURL += "/"
+	}
+	versionURL += "version.json"
+
+	// 发起 HTTP 请求
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+	resp, err := client.Get(versionURL)
+	if err != nil {
+		return nil, fmt.Errorf("获取版本信息失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("获取版本信息失败: HTTP %d", resp.StatusCode)
+	}
+
+	// 读取响应
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取版本信息失败: %w", err)
+	}
+
+	// 解析 JSON
+	var versionInfo VersionInfo
+	if err := json.Unmarshal(body, &versionInfo); err != nil {
+		return nil, fmt.Errorf("解析版本信息失败: %w", err)
+	}
+
+	// 更新缓存
+	versionCacheMutex.Lock()
+	cachedVersionInfo = &versionInfo
+	versionCacheTime = time.Now()
+	versionCacheMutex.Unlock()
+
+	return &versionInfo, nil
+}
+
+// getVersionInfo 获取版本信息（带降级处理）
+func getVersionInfo(baseURL string) *VersionInfo {
+	versionInfo, err := fetchVersionInfo(baseURL)
+	if err != nil {
+		log.Printf("[Download] 获取版本信息失败，使用默认版本: %v", err)
+		// 降级：使用默认版本
+		return &VersionInfo{
+			Version:   "v0.1.0",
+			BuildDate: time.Now().Format(time.RFC3339),
+		}
+	}
+	return versionInfo
 }
 
 // detectOS 从 User-Agent 或查询参数检测操作系统
@@ -73,8 +161,9 @@ func detectOS(c *gin.Context) string {
 }
 
 // buildDownloadInfo 构建下载信息
-func buildDownloadInfo(baseURL, osType string) DownloadInfo {
-	version := "v0.1.0"
+func buildDownloadInfo(baseURL, osType string, versionInfo *VersionInfo) DownloadInfo {
+	version := versionInfo.Version
+	buildDate := versionInfo.BuildDate
 	arch := "amd64"
 
 	var filename string
@@ -102,22 +191,23 @@ func buildDownloadInfo(baseURL, osType string) DownloadInfo {
 		Filename:    filename,
 		OS:          osType,
 		Arch:        arch,
+		BuildDate:   buildDate,
 	}
 }
 
 // buildAllDownloads 构建所有平台的下载信息
-func buildAllDownloads(baseURL string) map[string]DownloadInfo {
+func buildAllDownloads(baseURL string, versionInfo *VersionInfo) map[string]DownloadInfo {
 	downloads := make(map[string]DownloadInfo)
 
 	// Windows
-	downloads["windows"] = buildDownloadInfo(baseURL, "windows")
+	downloads["windows"] = buildDownloadInfo(baseURL, "windows", versionInfo)
 
 	// Linux
-	downloads["linux"] = buildDownloadInfo(baseURL, "linux")
+	downloads["linux"] = buildDownloadInfo(baseURL, "linux", versionInfo)
 
 	// macOS (darwin)
-	downloads["darwin"] = buildDownloadInfo(baseURL, "darwin")
-	downloads["macos"] = buildDownloadInfo(baseURL, "darwin") // 别名
+	downloads["darwin"] = buildDownloadInfo(baseURL, "darwin", versionInfo)
+	downloads["macos"] = buildDownloadInfo(baseURL, "darwin", versionInfo) // 别名
 
 	return downloads
 }
@@ -136,12 +226,15 @@ func (a *DownloadAPI) GetDesktopDownload(c *gin.Context) {
 		return
 	}
 
+	// 获取版本信息
+	versionInfo := getVersionInfo(baseURL)
+
 	// 检测操作系统
 	osType := detectOS(c)
 	log.Printf("[Download] 检测到操作系统: %s, User-Agent: %s", osType, c.GetHeader("User-Agent"))
 
 	// 构建下载信息
-	downloadInfo := buildDownloadInfo(baseURL, osType)
+	downloadInfo := buildDownloadInfo(baseURL, osType, versionInfo)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":      true,
@@ -150,6 +243,7 @@ func (a *DownloadAPI) GetDesktopDownload(c *gin.Context) {
 		"filename":     downloadInfo.Filename,
 		"os":           downloadInfo.OS,
 		"arch":         downloadInfo.Arch,
+		"build_date":   downloadInfo.BuildDate,
 	})
 }
 
@@ -165,11 +259,14 @@ func (a *DownloadAPI) GetDesktopDownloadDirect(c *gin.Context) {
 		return
 	}
 
+	// 获取版本信息
+	versionInfo := getVersionInfo(baseURL)
+
 	// 检测操作系统
 	osType := detectOS(c)
 
 	// 构建下载信息
-	downloadInfo := buildDownloadInfo(baseURL, osType)
+	downloadInfo := buildDownloadInfo(baseURL, osType, versionInfo)
 
 	// 重定向到下载链接
 	c.Redirect(http.StatusFound, downloadInfo.DownloadURL)
@@ -187,12 +284,16 @@ func (a *DownloadAPI) ListDesktopVersions(c *gin.Context) {
 		return
 	}
 
+	// 获取版本信息
+	versionInfo := getVersionInfo(baseURL)
+
 	// 构建所有平台的下载信息
-	downloads := buildAllDownloads(baseURL)
+	downloads := buildAllDownloads(baseURL, versionInfo)
 
 	c.JSON(http.StatusOK, AllDownloadsResponse{
 		Success:   true,
-		Version:   "v0.1.0",
+		Version:   versionInfo.Version,
+		BuildDate: versionInfo.BuildDate,
 		Downloads: downloads,
 	})
 }

@@ -105,9 +105,9 @@
 
 3. **文件命名规范**：
 
-   - Windows: `awecloud-signaling-v0.1.0-windows-amd64.exe`
-   - Linux: `awecloud-signaling-v0.1.0-linux-amd64`
-   - macOS: `awecloud-signaling-v0.1.0-darwin-universal.zip`
+   - Windows: `awecloud-signaling-v1.0.x-windows-amd64.exe`
+   - Linux: `awecloud-signaling-v1.0.x-linux-amd64`
+   - macOS: `awecloud-signaling-v1.0.x-darwin-universal.zip`
 
 4. **用户体验**：
    - 自动检测用户系统并标记"推荐"

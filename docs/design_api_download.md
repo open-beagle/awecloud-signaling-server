@@ -14,16 +14,16 @@ Server 提供智能的桌面客户端下载 API，能够：
 
 1. **目录 URL（推荐）**：`https://your-cdn.example.com/path/to/files`
 2. **带斜杠的目录 URL**：`https://your-cdn.example.com/path/to/files/`
-3. **完整文件 URL**：`https://your-cdn.example.com/path/to/files/awecloud-signaling-v0.1.0-windows-amd64.exe`
+3. **完整文件 URL**：`https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-windows-amd64.exe`
 
 **存储目录结构**：
 
 ```
 your-storage-path/
 ├── version.json                                      # 最新版本信息
-├── awecloud-signaling-v0.1.0-windows-amd64.exe     # 版本文件
-├── awecloud-signaling-v0.1.0-linux-amd64
-├── awecloud-signaling-v0.1.0-darwin-universal.zip
+├── awecloud-signaling-v1.0.x-windows-amd64.exe     # 版本文件
+├── awecloud-signaling-v1.0.x-linux-amd64
+├── awecloud-signaling-v1.0.x-darwin-universal.zip
 ├── awecloud-signaling-v0.2.0-windows-amd64.exe     # 其他版本
 ├── awecloud-signaling-v0.2.0-linux-amd64
 └── awecloud-signaling-v0.2.0-darwin-universal.zip
@@ -46,9 +46,9 @@ your-storage-path/
 
 ```json
 {
-  "version": "v0.1.0",
-  "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v0.1.0-windows-amd64.exe",
-  "filename": "awecloud-signaling-v0.1.0-windows-amd64.exe",
+  "version": "v1.0.x",
+  "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-windows-amd64.exe",
+  "filename": "awecloud-signaling-v1.0.x-windows-amd64.exe",
   "os": "windows",
   "arch": "amd64",
   "build_date": "2025-12-05T10:30:00Z"
@@ -95,37 +95,37 @@ https://your-server.example.com/api/v1/public/download/desktop/direct?os=macos
 
 ```json
 {
-  "version": "v0.1.0",
+  "version": "v1.0.x",
   "build_date": "2025-12-05T10:30:00Z",
   "downloads": {
     "windows": {
-      "version": "v0.1.0",
-      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v0.1.0-windows-amd64.exe",
-      "filename": "awecloud-signaling-v0.1.0-windows-amd64.exe",
+      "version": "v1.0.x",
+      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-windows-amd64.exe",
+      "filename": "awecloud-signaling-v1.0.x-windows-amd64.exe",
       "os": "windows",
       "arch": "amd64",
       "build_date": "2025-12-05T10:30:00Z"
     },
     "linux": {
-      "version": "v0.1.0",
-      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v0.1.0-linux-amd64",
-      "filename": "awecloud-signaling-v0.1.0-linux-amd64",
+      "version": "v1.0.x",
+      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-linux-amd64",
+      "filename": "awecloud-signaling-v1.0.x-linux-amd64",
       "os": "linux",
       "arch": "amd64",
       "build_date": "2025-12-05T10:30:00Z"
     },
     "darwin": {
-      "version": "v0.1.0",
-      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v0.1.0-darwin-universal.zip",
-      "filename": "awecloud-signaling-v0.1.0-darwin-universal.zip",
+      "version": "v1.0.x",
+      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-universal.zip",
+      "filename": "awecloud-signaling-v1.0.x-darwin-universal.zip",
       "os": "darwin",
       "arch": "universal",
       "build_date": "2025-12-05T10:30:00Z"
     },
     "macos": {
-      "version": "v0.1.0",
-      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v0.1.0-darwin-universal.zip",
-      "filename": "awecloud-signaling-v0.1.0-darwin-universal.zip",
+      "version": "v1.0.x",
+      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-universal.zip",
+      "filename": "awecloud-signaling-v1.0.x-darwin-universal.zip",
       "os": "darwin",
       "arch": "universal",
       "build_date": "2025-12-05T10:30:00Z"
@@ -151,7 +151,7 @@ API 通过以下方式检测操作系统：
 
 ```json
 {
-  "version": "v0.1.0",
+  "version": "v1.0.x",
   "build_date": "2025-12-05T10:30:00Z"
 }
 ```
@@ -159,7 +159,7 @@ API 通过以下方式检测操作系统：
 ### 自动更新流程
 
 1. GitHub Actions 构建完成后，上传到 S3
-2. 上传带版本号的文件（如 `awecloud-signaling-v0.1.0-windows-amd64.exe`）作为归档
+2. 上传带版本号的文件（如 `awecloud-signaling-v1.0.x-windows-amd64.exe`）作为归档
 3. 同时上传 `latest` 文件（如 `awecloud-signaling-latest-windows-amd64.exe`）覆盖旧版本
 4. 更新 `version.json` 文件
 5. 客户端通过 API 获取最新版本信息

@@ -1379,9 +1379,9 @@ GET /api/v1/public/download/desktop
 
 ```json
 {
-  "version": "v0.1.0",
-  "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v0.1.0-windows-amd64.exe",
-  "filename": "awecloud-signaling-v0.1.0-windows-amd64.exe",
+  "version": "v1.0.x",
+  "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-windows-amd64.exe",
+  "filename": "awecloud-signaling-v1.0.x-windows-amd64.exe",
   "os": "windows",
   "arch": "amd64",
   "build_date": "2025-12-05T10:30:00Z"
