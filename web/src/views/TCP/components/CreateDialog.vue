@@ -25,14 +25,14 @@
           style="width: 100%"
         >
           <el-option
-            v-for="agent in onlineAgents"
+            v-for="agent in agents"
             :key="agent.id"
-            :label="agent.agent_name"
+            :label="`${agent.agent_name} ${agent.status === 'offline' ? '(离线)' : ''}`"
             :value="agent.id"
           />
         </el-select>
-        <div v-if="onlineAgents.length === 0" class="tip-text">
-          {{ t('tcp.noOnlineAgent') }}
+        <div v-if="agents.length === 0" class="tip-text">
+          {{ t('tcp.noAgent') }}
         </div>
       </el-form-item>
 
@@ -160,9 +160,10 @@ const rules: FormRules = {
   ]
 }
 
-const onlineAgents = computed(() => {
-  return agents.value.filter(agent => agent.status === 'online')
-})
+// 移除onlineAgents过滤，显示所有Agent（包括离线的）
+// const onlineAgents = computed(() => {
+//   return agents.value.filter(agent => agent.status === 'online')
+// })
 
 const loadAgents = async () => {
   try {

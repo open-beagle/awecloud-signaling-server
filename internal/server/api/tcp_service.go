@@ -100,9 +100,11 @@ func CreateTCPService(c *gin.Context) {
 		return
 	}
 
-	// 检查服务名称是否已存在
+	// 检查服务名称在该Agent下是否已存在
 	var count int64
-	if err := db.DB.Model(&model.TCPService{}).Where("service_name = ?", req.ServiceName).Count(&count).Error; err != nil {
+	if err := db.DB.Model(&model.TCPService{}).
+		Where("service_name = ? AND agent_id = ?", req.ServiceName, req.AgentID).
+		Count(&count).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "检查服务名称失败: " + err.Error(),
@@ -112,7 +114,7 @@ func CreateTCPService(c *gin.Context) {
 	if count > 0 {
 		c.JSON(http.StatusConflict, gin.H{
 			"success": false,
-			"error":   "服务名称已存在",
+			"error":   "该Agent下已存在同名服务",
 		})
 		return
 	}
@@ -162,7 +164,7 @@ func CreateTCPService(c *gin.Context) {
 	// 创建TCP服务
 	service := model.TCPService{
 		ServiceName:   req.ServiceName,
-		AgentID:       uint(req.AgentID),
+		AgentID:       req.AgentID,
 		LocalIP:       req.LocalIP,
 		LocalPort:     req.LocalPort,
 		RemotePort:    remotePort,
@@ -314,17 +316,8 @@ func (t *TCPServiceAPI) EnableTCPService(c *gin.Context) {
 		return
 	}
 
-	// 检查Agent是否在线
-	if t.agentService != nil && !t.agentService.IsAgentOnline(int64(service.AgentID)) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"error":   "Agent离线，无法启用TCP服务",
-		})
-		return
-	}
-
-	// 发送gRPC命令给Agent创建TCP代理
-	if t.agentService != nil {
+	// 发送gRPC命令给Agent创建TCP代理（如果Agent在线）
+	if t.agentService != nil && t.agentService.IsAgentOnline(int64(service.AgentID)) {
 		cmd := &pb.Command{
 			CommandId:   fmt.Sprintf("tcp-enable-%d-%d", service.ID, time.Now().Unix()),
 			Type:        pb.Command_CREATE_TCP,
@@ -342,6 +335,7 @@ func (t *TCPServiceAPI) EnableTCPService(c *gin.Context) {
 			return
 		}
 	}
+	// 如果Agent离线，只更新数据库状态，Agent上线后会自动同步
 
 	// 更新状态
 	if err := db.DB.Model(&service).Update("enabled", true).Error; err != nil {
@@ -352,9 +346,15 @@ func (t *TCPServiceAPI) EnableTCPService(c *gin.Context) {
 		return
 	}
 
+	// 根据Agent在线状态返回不同消息
+	message := "TCP实例已启用"
+	if t.agentService != nil && !t.agentService.IsAgentOnline(int64(service.AgentID)) {
+		message = "TCP实例已启用（Agent离线，将在Agent上线后自动同步）"
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "TCP实例已启用",
+		"message": message,
 	})
 }
 

@@ -9,8 +9,8 @@ import (
 // TCPService TCP实例实例
 type TCPService struct {
 	ID            uint           `json:"id" gorm:"primaryKey"`
-	ServiceName   string         `json:"service_name" gorm:"uniqueIndex;not null"`
-	AgentID       uint           `json:"agent_id" gorm:"not null;index"`
+	ServiceName   string         `json:"service_name" gorm:"uniqueIndex:idx_agent_service;not null"`
+	AgentID       int64          `json:"agent_id" gorm:"uniqueIndex:idx_agent_service;not null;index"`
 	LocalIP       string         `json:"local_ip" gorm:"not null"`
 	LocalPort     int            `json:"local_port" gorm:"not null"`
 	RemotePort    int            `json:"remote_port" gorm:"not null;index"`

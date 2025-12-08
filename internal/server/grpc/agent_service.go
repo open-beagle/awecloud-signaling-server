@@ -213,6 +213,16 @@ func (s *AgentServiceServer) IsAgentOnline(agentID int64) bool {
 	s.streamsMutex.RLock()
 	defer s.streamsMutex.RUnlock()
 	_, exists := s.agentStreams[agentID]
+
+	// 调试日志：显示所有在线的Agent
+	if !exists {
+		onlineAgents := make([]int64, 0, len(s.agentStreams))
+		for id := range s.agentStreams {
+			onlineAgents = append(onlineAgents, id)
+		}
+		logger.Debugf("Agent %d 不在线，当前在线的Agent: %v", agentID, onlineAgents)
+	}
+
 	return exists
 }
 

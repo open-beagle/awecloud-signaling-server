@@ -186,9 +186,14 @@ func (f *FRPManager) runFRPClient() error {
 	}
 
 	// 配置 FRP 日志级别
-	clientCfg.Log.Level = f.config.Log.Level // 从配置文件读取日志级别
+	// FRP库的日志比较冗余，默认设置为warn级别，只显示警告和错误
+	frpLogLevel := "warn"
+	if f.config.Log.Level == "debug" {
+		frpLogLevel = "info" // 如果应用日志是debug，FRP设置为info
+	}
+	clientCfg.Log.Level = frpLogLevel
 	clientCfg.Log.To = "console"
-	logger.Debugf("隧道客户端日志级别: %s", f.config.Log.Level)
+	logger.Debugf("隧道客户端日志级别: %s", frpLogLevel)
 
 	// 配置传输协议
 	clientCfg.Transport.Protocol = protocol

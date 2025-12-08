@@ -114,14 +114,8 @@ func (a *Agent) Run() error {
 		return fmt.Errorf("注册失败: %w", err)
 	}
 
-	// 同步已启用的TCP实例
-	if err := a.syncEnabledTCPServices(); err != nil {
-		logger.Infof("同步TCP实例失败: %v (继续运行)", err)
-	}
-
 	// 启动Agent-FRP线程（FRP客户端）
-	// 注意：FRP客户端可能需要额外配置（如认证token）
-	// 如果连接失败，不影响Agent-Web线程的运行
+	// 注意：必须在同步TCP实例之前启动，因为同步时需要FRP Manager处理命令
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
@@ -131,6 +125,14 @@ func (a *Agent) Run() error {
 			logger.Debug("隧道客户端已停止，但Agent-Web线程继续运行")
 		}
 	}()
+
+	// 等待FRP Manager启动完成
+	time.Sleep(100 * time.Millisecond)
+
+	// 同步已启用的TCP实例
+	if err := a.syncEnabledTCPServices(); err != nil {
+		logger.Infof("同步TCP实例失败: %v (继续运行)", err)
+	}
 
 	// 启动心跳
 	a.wg.Add(1)
@@ -181,10 +183,14 @@ func (a *Agent) connectToServer() error {
 		// URL中指定了端口
 		grpcAddr = parsedURL.Host
 	} else {
-		// URL中没有端口，使用协议默认端口
-		port := 80
-		if parsedURL.Scheme == "https" {
-			port = 443
+		// URL中没有端口，使用配置文件中的grpc_port
+		port := a.config.Server.GRPCPort
+		if port == 0 {
+			// 如果配置文件也没有指定，使用协议默认端口
+			port = 80
+			if parsedURL.Scheme == "https" {
+				port = 443
+			}
 		}
 		grpcAddr = fmt.Sprintf("%s:%d", parsedURL.Hostname(), port)
 	}
@@ -426,7 +432,7 @@ func (a *Agent) syncEnabledTCPServices() error {
 			service.LocalPort,
 			service.RemotePort,
 		); err != nil {
-			logger.Debugf("创建TCP隧道代理失败: %s, error: %v", service.ServiceName, err)
+			logger.Infof("TCP实例同步失败: %s, error: %v", service.ServiceName, err)
 
 			// 更新状态为错误
 			a.proxyMutex.Lock()
@@ -435,11 +441,11 @@ func (a *Agent) syncEnabledTCPServices() error {
 			}
 			a.proxyMutex.Unlock()
 		} else {
-			logger.Debugf("TCP实例同步成功: %s", service.ServiceName)
+			logger.Infof("TCP实例同步成功: %s", service.ServiceName)
 		}
 	}
 
-	logger.Debug("TCP实例同步完成")
+	logger.Info("TCP实例同步完成")
 	return nil
 }
 
@@ -854,6 +860,9 @@ func (a *Agent) IsFRPConnected() bool {
 
 // startHealthServer 启动健康检查HTTP服务器
 func (a *Agent) startHealthServer() error {
+	// 设置GIN为release模式，减少日志输出
+	gin.SetMode(gin.ReleaseMode)
+
 	router := gin.New()
 	router.Use(gin.Recovery())
 

@@ -31,7 +31,7 @@ docker run --rm \
    -v $HOME/go/pkg:/go/pkg \
    -w /go/src/github.com/open-beagle/awecloud-signaling-server \
    -e BUILD_VERSION=v0.1.1 \
-   -e GOARCHS=amd64,arm64 \
+   -e GOARCHS=amd64 \
    registry.cn-qingdao.aliyuncs.com/wod/golang:1.24-alpine \
    bash ./.beagle/build.sh
 
