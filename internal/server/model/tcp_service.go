@@ -6,7 +6,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// TCPService TCP服务实例
+// TCPService TCP实例实例
 type TCPService struct {
 	ID            uint           `json:"id" gorm:"primaryKey"`
 	ServiceName   string         `json:"service_name" gorm:"uniqueIndex;not null"`
@@ -28,13 +28,13 @@ func (TCPService) TableName() string {
 	return "tcp_services"
 }
 
-// TCPServiceWithAgent TCP服务实例（包含Agent信息）
+// TCPServiceWithAgent TCP实例实例（包含Agent信息）
 type TCPServiceWithAgent struct {
 	TCPService
 	AgentName string `json:"agent_name" gorm:"-"`
 }
 
-// TCPServiceAccessLog TCP服务访问日志
+// TCPServiceAccessLog TCP实例访问日志
 type TCPServiceAccessLog struct {
 	ID              uint      `json:"id" gorm:"primaryKey"`
 	TCPServiceID    uint      `json:"tcp_service_id" gorm:"not null;index"`

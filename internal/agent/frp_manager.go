@@ -22,7 +22,7 @@ type ProxyCommand struct {
 	Action       string // "add" or "remove"
 	ProxyType    string // "stcp" or "tcp"
 	InstanceName string // STCP实例名称
-	ServiceName  string // TCP服务名称
+	ServiceName  string // TCP实例名称
 	SecretKey    string // STCP密钥
 	RemotePort   int32  // TCP远程端口
 	LocalIP      string

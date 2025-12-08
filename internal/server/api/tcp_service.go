@@ -15,7 +15,7 @@ import (
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
-// TCPServiceAPI TCP服务API
+// TCPServiceAPI TCP实例API
 type TCPServiceAPI struct {
 	agentService *grpcserver.AgentServiceServer
 }
@@ -182,7 +182,7 @@ func CreateTCPService(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    service,
-		"message": fmt.Sprintf("TCP服务创建成功，端口%d已分配。请启用服务以开始使用。", remotePort),
+		"message": fmt.Sprintf("TCP实例创建成功，端口%d已分配。请启用服务以开始使用。", remotePort),
 	})
 }
 
@@ -248,7 +248,7 @@ func UpdateTCPService(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "TCP服务已更新",
+		"message": "TCP实例已更新",
 	})
 }
 
@@ -261,7 +261,7 @@ func DeleteTCPService(c *gin.Context) {
 	if err := db.DB.First(&service, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
-			"error":   "TCP服务不存在",
+			"error":   "TCP实例不存在",
 		})
 		return
 	}
@@ -283,7 +283,7 @@ func DeleteTCPService(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "TCP服务删除成功",
+		"message": "TCP实例删除成功",
 	})
 }
 
@@ -301,7 +301,7 @@ func (t *TCPServiceAPI) EnableTCPService(c *gin.Context) {
 	if err := db.DB.First(&service, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
-			"error":   "TCP服务不存在",
+			"error":   "TCP实例不存在",
 		})
 		return
 	}
@@ -309,7 +309,7 @@ func (t *TCPServiceAPI) EnableTCPService(c *gin.Context) {
 	if service.Enabled {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"error":   "TCP服务已启用",
+			"error":   "TCP实例已启用",
 		})
 		return
 	}
@@ -354,7 +354,7 @@ func (t *TCPServiceAPI) EnableTCPService(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "TCP服务已启用",
+		"message": "TCP实例已启用",
 	})
 }
 
@@ -372,7 +372,7 @@ func (t *TCPServiceAPI) DisableTCPService(c *gin.Context) {
 	if err := db.DB.First(&service, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
-			"error":   "TCP服务不存在",
+			"error":   "TCP实例不存在",
 		})
 		return
 	}
@@ -380,7 +380,7 @@ func (t *TCPServiceAPI) DisableTCPService(c *gin.Context) {
 	if !service.Enabled {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"error":   "TCP服务已禁用",
+			"error":   "TCP实例已禁用",
 		})
 		return
 	}
@@ -416,7 +416,7 @@ func (t *TCPServiceAPI) DisableTCPService(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "TCP服务已禁用",
+		"message": "TCP实例已禁用",
 	})
 }
 
@@ -504,6 +504,6 @@ func UpdateTCPServiceConfig(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "TCP服务配置已更新",
+		"message": "TCP实例配置已更新",
 	})
 }

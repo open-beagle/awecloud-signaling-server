@@ -78,7 +78,7 @@ func initTCPServiceConfig() error {
 		{
 			SettingKey:   "tcp_service_port_start",
 			SettingValue: "9000",
-			Description:  "TCP服务端口起始值",
+			Description:  "TCP实例端口起始值",
 		},
 		{
 			SettingKey:   "tcp_service_max_per_agent",

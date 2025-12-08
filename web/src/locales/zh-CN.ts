@@ -151,7 +151,7 @@ export default {
     enableConfirm: '确认启用此Client吗？'
   },
   tcp: {
-    list: 'TCP服务列表',
+    list: 'TCP实例列表',
     create: '创建TCP服务',
     serviceName: '服务名称',
     agent: '所属Agent',

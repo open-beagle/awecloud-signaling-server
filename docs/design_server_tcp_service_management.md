@@ -237,7 +237,7 @@ Server 端无需特殊配置，FRP Server 会自动监听 Agent 请求的 remote
    ↓
 12. Server-FRP开始监听remote_port
    ↓
-13. TCP服务启用成功
+13. TCP实例启用成功
 ```
 
 **端口分配算法**：
@@ -361,7 +361,7 @@ Agent-FRP
 ├── Client管理
 ├── 服务管理 (新增上级菜单)
 │   ├── STCP实例 (原STCP实例管理，路径改为 /admin/services/stcp)
-│   └── TCP服务 (新增，路径为 /admin/services/tcp)
+│   └── TCP实例 (新增，路径为 /admin/services/tcp)
 ├── 系统设置
 └── 退出登录
 ```

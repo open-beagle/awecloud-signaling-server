@@ -570,7 +570,7 @@ agents (Agent) ←──────────────┐
   │    stcp_access (访问控制)  │
   │    ↓ (N:M)                 │
   │                            │
-  └─ tcp_services (TCP服务)    │
+  └─ tcp_services (TCP实例)    │
        ↓ (1:N)                 │
        tcp_service_access_logs │
                                │

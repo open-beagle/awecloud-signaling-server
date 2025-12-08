@@ -43,7 +43,7 @@ export interface ApiResponse<T = any> {
   data?: T
 }
 
-// TCP服务模型
+// TCP实例模型
 export interface TCPService {
   id: number
   service_name: string
@@ -60,7 +60,7 @@ export interface TCPService {
   updated_at: string
 }
 
-// TCP服务配置
+// TCP实例配置
 export interface TCPServiceConfig {
   tcp_service_port_start: string
   tcp_service_max_per_agent: string
