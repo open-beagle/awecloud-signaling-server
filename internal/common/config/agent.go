@@ -18,16 +18,12 @@ type HealthSection struct {
 }
 
 type AgentSection struct {
-	AgentName  string `toml:"agent_name"`
-	AgentToken string `toml:"agent_token"`
+	AgentName  string `toml:"name"`  // 配置文件中使用 name
+	AgentToken string `toml:"token"` // 配置文件中使用 token
 }
 
 type ServerConnect struct {
-	Address   string `toml:"address"`
-	Port      int    `toml:"port"`      // FRP服务端口
-	GRPCPort  int    `toml:"grpc_port"` // gRPC API端口
-	Protocol  string `toml:"protocol"`  // tcp, wss
-	TLSEnable bool   `toml:"tls_enable"`
+	Address   string `toml:"address"`    // Server地址（HTTP/2统一端口，支持完整URL）
 	PublicURL string `toml:"public_url"` // FRP公网地址（可选），如果配置则忽略Server返回的地址
 }
 
@@ -76,20 +72,14 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	}
 
 	// 设置默认值
-	if cfg.Server.Port == 0 {
-		cfg.Server.Port = 7000
-	}
-	if cfg.Server.GRPCPort == 0 {
-		cfg.Server.GRPCPort = 8081
-	}
-	if cfg.Server.Protocol == "" {
-		cfg.Server.Protocol = "tcp"
-	}
 	if cfg.Health.Port == 0 {
 		cfg.Health.Port = 8090
 	}
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
+	}
+	if cfg.Server.Address == "" {
+		cfg.Server.Address = "http://localhost:8080"
 	}
 
 	return &cfg, nil

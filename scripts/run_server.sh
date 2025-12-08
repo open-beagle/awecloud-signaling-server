@@ -26,10 +26,6 @@ echo "=========================================="
 echo "配置文件: $CONFIG_FILE"
 echo ""
 
-# 编译Server
-echo "编译Server..."
-go build -o bin/server ./cmd/server
-
 # 运行Server
 echo "启动Server..."
 echo ""

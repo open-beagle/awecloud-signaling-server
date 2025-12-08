@@ -301,3 +301,37 @@ func (s *AgentServiceServer) GetEnabledTCPServices(ctx context.Context, req *pb.
 		Services: pbServices,
 	}, nil
 }
+
+// GetEnabledSTCPVisitors 获取Agent的已启用STCP访问列表
+func (s *AgentServiceServer) GetEnabledSTCPVisitors(ctx context.Context, req *pb.GetSTCPVisitorsRequest) (*pb.GetSTCPVisitorsResponse, error) {
+	logger.Infof("Agent请求STCP访问列表: agent_name=%s", req.AgentName)
+
+	// 查询该Agent的所有已启用STCP访问
+	var visitors []model.STCPVisitor
+	if err := db.DB.Where("agent_name = ? AND enabled = ?", req.AgentName, true).Find(&visitors).Error; err != nil {
+		logger.Errorf("查询STCP访问失败: %v", err)
+		return &pb.GetSTCPVisitorsResponse{
+			Success:  false,
+			Visitors: nil,
+		}, status.Error(codes.Internal, "查询STCP访问失败")
+	}
+
+	// 转换为proto格式
+	pbVisitors := make([]*pb.STCPVisitorInfo, 0, len(visitors))
+	for _, visitor := range visitors {
+		pbVisitors = append(pbVisitors, &pb.STCPVisitorInfo{
+			VisitorName: visitor.VisitorName,
+			ServerName:  visitor.ServerName,
+			SecretKey:   visitor.SecretKey,
+			BindAddr:    visitor.BindAddr,
+			BindPort:    int32(visitor.BindPort),
+		})
+	}
+
+	logger.Infof("返回%d个已启用的STCP访问给Agent %s", len(pbVisitors), req.AgentName)
+
+	return &pb.GetSTCPVisitorsResponse{
+		Success:  true,
+		Visitors: pbVisitors,
+	}, nil
+}

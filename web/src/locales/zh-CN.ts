@@ -50,6 +50,7 @@ export default {
     agents: '代理管理',
     serviceManagement: '服务管理',
     stcpInstances: 'STCP实例',
+    stcpVisitors: 'STCP访问',
     tcpInstances: 'TCP实例',
     clients: '客户管理',
     groups: '分组管理',

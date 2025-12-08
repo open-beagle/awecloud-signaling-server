@@ -35,6 +35,9 @@ const items = computed(() => {
     breadcrumbs.push({ path: '', title: t('menu.serviceManagement') })
     breadcrumbs.push({ path: '/services/stcp', title: t('menu.stcpInstances') })
     breadcrumbs.push({ path: '', title: t('stcp.grantAccess') })
+  } else if (path.startsWith('/services/stcp-visitors')) {
+    breadcrumbs.push({ path: '', title: t('menu.serviceManagement') })
+    breadcrumbs.push({ path: '/services/stcp-visitors', title: t('menu.stcpVisitors') })
   } else if (path.startsWith('/services/stcp')) {
     breadcrumbs.push({ path: '', title: t('menu.serviceManagement') })
     breadcrumbs.push({ path: '/services/stcp', title: t('menu.stcpInstances') })

@@ -26,10 +26,6 @@ echo "=========================================="
 echo "配置文件: $CONFIG_FILE"
 echo ""
 
-# 编译Agent
-echo "编译Agent..."
-go build -o bin/agent ./cmd/agent
-
 # 运行Agent
 echo "启动Agent..."
 echo ""

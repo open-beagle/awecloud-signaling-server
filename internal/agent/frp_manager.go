@@ -20,14 +20,19 @@ import (
 // ProxyCommand 代理命令
 type ProxyCommand struct {
 	Action       string // "add" or "remove"
-	ProxyType    string // "stcp" or "tcp"
+	ProxyType    string // "stcp", "tcp", or "stcp_visitor"
 	InstanceName string // STCP实例名称
 	ServiceName  string // TCP实例名称
 	SecretKey    string // STCP密钥
 	RemotePort   int32  // TCP远程端口
 	LocalIP      string
 	LocalPort    int32
-	Response     chan error // 用于返回操作结果
+	// STCP Visitor相关字段
+	VisitorName string     // STCP visitor名称
+	ServerName  string     // 要访问的STCP服务名称
+	BindAddr    string     // visitor绑定地址
+	BindPort    int32      // visitor绑定端口
+	Response    chan error // 用于返回操作结果
 }
 
 // FRPManager FRP客户端管理器（Agent-FRP线程）
@@ -38,9 +43,10 @@ type FRPManager struct {
 	service *client.Service
 
 	// 代理配置
-	proxies    map[string]*v1.STCPProxyConfig // instance_name -> STCP proxy config
-	tcpProxies map[string]*v1.TCPProxyConfig  // service_name -> TCP proxy config
-	mutex      sync.RWMutex
+	proxies      map[string]*v1.STCPProxyConfig   // instance_name -> STCP proxy config
+	tcpProxies   map[string]*v1.TCPProxyConfig    // service_name -> TCP proxy config
+	stcpVisitors map[string]*v1.STCPVisitorConfig // visitor_name -> STCP visitor config
+	mutex        sync.RWMutex
 
 	// 命令通道（用于动态管理代理）
 	commandChan chan *ProxyCommand
@@ -65,18 +71,19 @@ func NewFRPManager(cfg *config.AgentConfig, ctx context.Context) (*FRPManager, e
 	frpCtx, cancel := context.WithCancel(ctx)
 
 	return &FRPManager{
-		config:      cfg,
-		proxies:     make(map[string]*v1.STCPProxyConfig),
-		tcpProxies:  make(map[string]*v1.TCPProxyConfig),
-		commandChan: make(chan *ProxyCommand, 10),
-		ctx:         frpCtx,
-		cancel:      cancel,
+		config:       cfg,
+		proxies:      make(map[string]*v1.STCPProxyConfig),
+		tcpProxies:   make(map[string]*v1.TCPProxyConfig),
+		stcpVisitors: make(map[string]*v1.STCPVisitorConfig),
+		commandChan:  make(chan *ProxyCommand, 10),
+		ctx:          frpCtx,
+		cancel:       cancel,
 	}, nil
 }
 
 // Run 运行FRP管理器
 func (f *FRPManager) Run() error {
-	logger.Debugf("隧道管理器启动，连接到: %s:%d", f.config.Server.Address, f.config.Server.Port)
+	logger.Debugf("隧道管理器启动，连接到: %s", f.config.Server.Address)
 
 	// 启动命令处理循环
 	f.wg.Add(1)
@@ -137,7 +144,7 @@ func (f *FRPManager) Run() error {
 
 // runFRPClient 运行FRP客户端
 func (f *FRPManager) runFRPClient() error {
-	// 获取当前代理配置（STCP + TCP）
+	// 获取当前代理配置（STCP + TCP）和visitor配置
 	f.mutex.RLock()
 	proxyCfgs := make([]v1.ProxyConfigurer, 0, len(f.proxies)+len(f.tcpProxies))
 	for _, cfg := range f.proxies {
@@ -145,6 +152,11 @@ func (f *FRPManager) runFRPClient() error {
 	}
 	for _, cfg := range f.tcpProxies {
 		proxyCfgs = append(proxyCfgs, cfg)
+	}
+
+	visitorCfgs := make([]v1.VisitorConfigurer, 0, len(f.stcpVisitors))
+	for _, cfg := range f.stcpVisitors {
+		visitorCfgs = append(visitorCfgs, cfg)
 	}
 	f.mutex.RUnlock()
 
@@ -155,11 +167,11 @@ func (f *FRPManager) runFRPClient() error {
 	serverPort := f.serverPort
 	f.connMutex.RUnlock()
 
-	// 解析 Server URL
-	serverAddr := f.config.Server.Address
-	port := f.config.Server.Port
-	websocketPath := constants.DefaultWebSocketPath // 默认路径
-	protocol := "websocket"
+	// 解析 Server URL（从注册响应获取）
+	var serverAddr string
+	var port int
+	var websocketPath string
+	var protocol string
 	insecureSkipVerify := true // 默认跳过证书验证（开发环境）
 
 	if serverURL != "" {
@@ -176,7 +188,13 @@ func (f *FRPManager) runFRPClient() error {
 		logger.Debugf("使用隧道 URL: %s (解析为 %s://%s:%d%s)",
 			serverURL, protocol, serverAddr, port, websocketPath)
 	} else if serverPort > 0 {
+		// 使用Server注册响应中的端口
 		port = serverPort
+		serverAddr = f.config.Server.Address
+		websocketPath = constants.DefaultWebSocketPath
+		protocol = "websocket"
+	} else {
+		return fmt.Errorf("未获取到隧道服务器连接信息")
 	}
 
 	// 创建FRP客户端配置
@@ -198,8 +216,8 @@ func (f *FRPManager) runFRPClient() error {
 	// 配置传输协议
 	clientCfg.Transport.Protocol = protocol
 
-	// 配置 TLS
-	if protocol == "wss" || f.config.Server.TLSEnable {
+	// 配置 TLS（根据协议判断）
+	if protocol == "wss" {
 		enable := true
 		clientCfg.Transport.TLS.Enable = &enable
 		clientCfg.Transport.TLS.ServerName = serverAddr
@@ -227,7 +245,7 @@ func (f *FRPManager) runFRPClient() error {
 	svr, err := client.NewService(client.ServiceOptions{
 		Common:         &clientCfg,
 		ProxyCfgs:      proxyCfgs,
-		VisitorCfgs:    []v1.VisitorConfigurer{},
+		VisitorCfgs:    visitorCfgs,
 		ConfigFilePath: "",
 		ConnectorCreator: func(ctx context.Context, cfg *v1.ClientCommonConfig) client.Connector {
 			// 使用自定义 connector，支持自定义 WebSocket path 和跳过证书验证
@@ -247,7 +265,7 @@ func (f *FRPManager) runFRPClient() error {
 	f.service = svr
 	f.mutex.Unlock()
 
-	logger.Debugf("隧道客户端已创建，代理数量: %d", len(proxyCfgs))
+	logger.Debugf("隧道客户端已创建，代理数量: %d, visitor数量: %d", len(proxyCfgs), len(visitorCfgs))
 
 	// 启动FRP客户端（会阻塞直到停止或出错）
 	if err := svr.Run(f.ctx); err != nil {
@@ -339,16 +357,22 @@ func (f *FRPManager) handleCommand(cmd *ProxyCommand) {
 
 	switch cmd.Action {
 	case "add":
-		if cmd.ProxyType == "tcp" {
+		switch cmd.ProxyType {
+		case "tcp":
 			err = f.addTCPProxyInternal(cmd.ServiceName, cmd.LocalIP, cmd.LocalPort, cmd.RemotePort)
-		} else {
+		case "stcp_visitor":
+			err = f.addSTCPVisitorInternal(cmd.VisitorName, cmd.ServerName, cmd.SecretKey, cmd.BindAddr, cmd.BindPort)
+		default: // "stcp"
 			err = f.addProxyInternal(cmd.InstanceName, cmd.SecretKey, cmd.LocalIP, cmd.LocalPort)
 		}
 
 	case "remove":
-		if cmd.ProxyType == "tcp" {
+		switch cmd.ProxyType {
+		case "tcp":
 			err = f.removeTCPProxyInternal(cmd.ServiceName)
-		} else {
+		case "stcp_visitor":
+			err = f.removeSTCPVisitorInternal(cmd.VisitorName)
+		default: // "stcp"
 			err = f.removeProxyInternal(cmd.InstanceName)
 		}
 
@@ -691,4 +715,122 @@ func (f *FRPManager) IsConnected() bool {
 	f.connMutex.RUnlock()
 
 	return f.service != nil && hasToken
+}
+
+// AddSTCPVisitor 添加STCP visitor代理（公共接口）
+func (f *FRPManager) AddSTCPVisitor(visitorName, serverName, secretKey, bindAddr string, bindPort int32) error {
+	respChan := make(chan error, 1)
+
+	cmd := &ProxyCommand{
+		Action:      "add",
+		ProxyType:   "stcp_visitor",
+		VisitorName: visitorName,
+		ServerName:  serverName,
+		SecretKey:   secretKey,
+		BindAddr:    bindAddr,
+		BindPort:    bindPort,
+		Response:    respChan,
+	}
+
+	// 发送命令
+	select {
+	case f.commandChan <- cmd:
+	case <-f.ctx.Done():
+		return fmt.Errorf("FRP管理器已停止")
+	}
+
+	// 等待响应
+	select {
+	case err := <-respChan:
+		return err
+	case <-f.ctx.Done():
+		return fmt.Errorf("FRP管理器已停止")
+	}
+}
+
+// RemoveSTCPVisitor 删除STCP visitor代理（公共接口）
+func (f *FRPManager) RemoveSTCPVisitor(visitorName string) error {
+	respChan := make(chan error, 1)
+
+	cmd := &ProxyCommand{
+		Action:      "remove",
+		ProxyType:   "stcp_visitor",
+		VisitorName: visitorName,
+		Response:    respChan,
+	}
+
+	// 发送命令
+	select {
+	case f.commandChan <- cmd:
+	case <-f.ctx.Done():
+		return fmt.Errorf("FRP管理器已停止")
+	}
+
+	// 等待响应
+	select {
+	case err := <-respChan:
+		return err
+	case <-f.ctx.Done():
+		return fmt.Errorf("FRP管理器已停止")
+	}
+}
+
+// addSTCPVisitorInternal 内部添加STCP visitor代理
+func (f *FRPManager) addSTCPVisitorInternal(visitorName, serverName, secretKey, bindAddr string, bindPort int32) error {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+
+	// 检查是否已存在
+	if _, exists := f.stcpVisitors[visitorName]; exists {
+		return fmt.Errorf("visitor已存在: %s", visitorName)
+	}
+
+	// 创建STCP visitor代理配置
+	visitorConfig := &v1.STCPVisitorConfig{
+		VisitorBaseConfig: v1.VisitorBaseConfig{
+			Name:       visitorName,
+			Type:       "stcp",
+			ServerName: serverName,
+			SecretKey:  secretKey,
+			BindAddr:   bindAddr,
+			BindPort:   int(bindPort),
+		},
+	}
+
+	f.stcpVisitors[visitorName] = visitorConfig
+	f.needRestart = true
+
+	logger.Debugf("隧道 STCP visitor已添加: %s -> %s (绑定: %s:%d, 总计: %d个)",
+		visitorName, serverName, bindAddr, bindPort, len(f.stcpVisitors))
+
+	// 停止当前FRP客户端以触发重启
+	if f.service != nil {
+		f.service.Close()
+	}
+
+	return nil
+}
+
+// removeSTCPVisitorInternal 内部删除STCP visitor代理
+func (f *FRPManager) removeSTCPVisitorInternal(visitorName string) error {
+	f.mutex.Lock()
+	defer f.mutex.Unlock()
+
+	// 检查是否存在
+	if _, exists := f.stcpVisitors[visitorName]; !exists {
+		return fmt.Errorf("visitor不存在: %s", visitorName)
+	}
+
+	// 删除visitor
+	delete(f.stcpVisitors, visitorName)
+	f.needRestart = true
+
+	logger.Debugf("隧道 STCP visitor已删除: %s (剩余: %d个)", visitorName, len(f.stcpVisitors))
+
+	// 停止当前FRP客户端以触发重启
+	if f.service != nil {
+		f.service.Close()
+	}
+
+	return nil
 }

@@ -129,6 +129,11 @@ func (a *Agent) Run() error {
 	// 等待FRP Manager启动完成
 	time.Sleep(100 * time.Millisecond)
 
+	// 同步已启用的STCP访问（visitor端）
+	if err := a.syncEnabledSTCPVisitors(); err != nil {
+		logger.Infof("同步STCP访问失败: %v (继续运行)", err)
+	}
+
 	// 同步已启用的TCP实例
 	if err := a.syncEnabledTCPServices(); err != nil {
 		logger.Infof("同步TCP实例失败: %v (继续运行)", err)
@@ -183,14 +188,10 @@ func (a *Agent) connectToServer() error {
 		// URL中指定了端口
 		grpcAddr = parsedURL.Host
 	} else {
-		// URL中没有端口，使用配置文件中的grpc_port
-		port := a.config.Server.GRPCPort
-		if port == 0 {
-			// 如果配置文件也没有指定，使用协议默认端口
-			port = 80
-			if parsedURL.Scheme == "https" {
-				port = 443
-			}
+		// URL中没有端口，使用协议默认端口
+		port := 80
+		if parsedURL.Scheme == "https" {
+			port = 443
 		}
 		grpcAddr = fmt.Sprintf("%s:%d", parsedURL.Hostname(), port)
 	}
@@ -678,6 +679,12 @@ func (a *Agent) handleCommand(cmd *pb.Command) {
 	case pb.Command_DELETE_TCP:
 		a.handleDeleteTCP(cmd)
 
+	case pb.Command_CREATE_STCP_VISITOR:
+		a.handleCreateSTCPVisitor(cmd)
+
+	case pb.Command_DELETE_STCP_VISITOR:
+		a.handleDeleteSTCPVisitor(cmd)
+
 	default:
 		logger.Infof("未知命令类型: %v", cmd.Type)
 	}
@@ -912,4 +919,84 @@ func (a *Agent) startHealthServer() error {
 	}()
 
 	return nil
+}
+
+// syncEnabledSTCPVisitors 从Server同步已启用的STCP访问
+func (a *Agent) syncEnabledSTCPVisitors() error {
+	logger.Debug("开始同步已启用的STCP访问...")
+
+	// 调用gRPC获取STCP访问列表
+	resp, err := a.grpcClient.GetEnabledSTCPVisitors(a.ctx, &pb.GetSTCPVisitorsRequest{
+		AgentName: a.config.Agent.AgentName,
+	})
+
+	if err != nil {
+		return fmt.Errorf("获取STCP访问列表失败: %w", err)
+	}
+
+	if !resp.Success {
+		return fmt.Errorf("获取STCP访问列表失败: Server返回失败")
+	}
+
+	if len(resp.Visitors) == 0 {
+		logger.Debug("没有已启用的STCP访问需要同步")
+		return nil
+	}
+
+	logger.Infof("同步%d个已启用的STCP访问", len(resp.Visitors))
+
+	// 创建STCP visitor代理
+	for _, visitor := range resp.Visitors {
+		logger.Debugf("同步STCP访问: %s (目标服务: %s, 绑定: %s:%d)",
+			visitor.VisitorName, visitor.ServerName, visitor.BindAddr, visitor.BindPort)
+
+		// 添加到FRP Manager
+		if err := a.frpManager.AddSTCPVisitor(
+			visitor.VisitorName,
+			visitor.ServerName,
+			visitor.SecretKey,
+			visitor.BindAddr,
+			visitor.BindPort,
+		); err != nil {
+			logger.Infof("STCP访问同步失败: %s, error: %v", visitor.VisitorName, err)
+		} else {
+			logger.Infof("STCP访问同步成功: %s", visitor.VisitorName)
+		}
+	}
+
+	logger.Info("STCP访问同步完成")
+	return nil
+}
+
+// handleCreateSTCPVisitor 处理创建STCP visitor命令
+func (a *Agent) handleCreateSTCPVisitor(cmd *pb.Command) {
+	logger.Infof("创建STCP visitor: visitor=%s, server=%s, bind=%s:%d",
+		cmd.VisitorName, cmd.ServerName, cmd.BindAddr, cmd.BindPort)
+
+	// 通知Agent-FRP线程创建实际的FRP visitor
+	if err := a.frpManager.AddSTCPVisitor(
+		cmd.VisitorName,
+		cmd.ServerName,
+		cmd.SecretKey,
+		cmd.BindAddr,
+		cmd.BindPort,
+	); err != nil {
+		logger.Infof("创建STCP visitor失败: %v", err)
+		return
+	}
+
+	logger.Infof("STCP visitor创建成功: %s", cmd.VisitorName)
+}
+
+// handleDeleteSTCPVisitor 处理删除STCP visitor命令
+func (a *Agent) handleDeleteSTCPVisitor(cmd *pb.Command) {
+	logger.Infof("删除STCP visitor: visitor=%s", cmd.VisitorName)
+
+	// 通知Agent-FRP线程删除实际的FRP visitor
+	if err := a.frpManager.RemoveSTCPVisitor(cmd.VisitorName); err != nil {
+		logger.Infof("删除STCP visitor失败: %v", err)
+		return
+	}
+
+	logger.Infof("STCP visitor删除成功: %s", cmd.VisitorName)
 }

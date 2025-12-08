@@ -7,6 +7,7 @@
       background-color="#ffffff"
       text-color="#303133"
       active-text-color="#409eff"
+      :unique-opened="false"
       router
     >
       <el-menu-item index="/agents">
@@ -22,6 +23,9 @@
         </template>
         <el-menu-item index="/services/stcp">
           {{ t('menu.stcpInstances') }}
+        </el-menu-item>
+        <el-menu-item index="/services/stcp-visitors">
+          {{ t('menu.stcpVisitors') }}
         </el-menu-item>
         <el-menu-item index="/services/tcp">
           {{ t('menu.tcpInstances') }}
@@ -165,10 +169,43 @@ const toggleSidebar = () => {
   padding: 0 20px !important;
   background-color: #ffffff !important;
   color: #303133 !important;
+  transition: background-color 0.15s ease !important;
 }
 
 :deep(.el-sub-menu__title:hover) {
   background-color: #ecf5ff !important;
+}
+
+/* 优化子菜单展开动画性能 - 完全禁用动画 */
+:deep(.el-menu--inline) {
+  transition: none !important;
+  animation: none !important;
+}
+
+:deep(.el-sub-menu .el-menu) {
+  transition: none !important;
+  animation: none !important;
+}
+
+:deep(.el-sub-menu .el-menu-item) {
+  transition: background-color 0.15s ease !important;
+}
+
+:deep(.el-sub-menu__icon-arrow) {
+  transition: transform 0.15s ease !important;
+}
+
+/* 禁用 collapse 动画 */
+:deep(.el-menu--collapse .el-sub-menu) {
+  transition: none !important;
+}
+
+/* 使用 GPU 加速 */
+:deep(.el-sub-menu),
+:deep(.el-menu-item) {
+  will-change: auto;
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 
 :deep(.el-sub-menu__title .el-icon) {

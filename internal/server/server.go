@@ -305,6 +305,16 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.GET("/settings/tcp-service", api.GetTCPServiceConfig)
 					adminAuthGroup.PUT("/settings/tcp-service", api.UpdateTCPServiceConfig)
 
+					// STCP访问列表
+					stcpVisitorAPI := api.NewSTCPVisitorAPI()
+					stcpVisitorAPI.SetAgentService(s.agentService) // 注入AgentService
+					adminAuthGroup.GET("/stcp-visitors", api.GetSTCPVisitors)
+					adminAuthGroup.POST("/stcp-visitors", api.CreateSTCPVisitor)
+					adminAuthGroup.PUT("/stcp-visitors/:id", api.UpdateSTCPVisitor)
+					adminAuthGroup.DELETE("/stcp-visitors/:id", api.DeleteSTCPVisitor)
+					adminAuthGroup.PUT("/stcp-visitors/:id/enable", stcpVisitorAPI.EnableSTCPVisitor)
+					adminAuthGroup.PUT("/stcp-visitors/:id/disable", stcpVisitorAPI.DisableSTCPVisitor)
+
 					// 组管理
 					groupAPI := api.NewGroupAPI()
 					adminAuthGroup.GET("/groups", groupAPI.GetGroups)

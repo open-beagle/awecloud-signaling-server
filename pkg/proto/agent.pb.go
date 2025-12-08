@@ -7,12 +7,11 @@
 package proto
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -25,10 +24,12 @@ const (
 type Command_Type int32
 
 const (
-	Command_CREATE_STCP Command_Type = 0
-	Command_DELETE_STCP Command_Type = 1
-	Command_CREATE_TCP  Command_Type = 2
-	Command_DELETE_TCP  Command_Type = 3
+	Command_CREATE_STCP         Command_Type = 0
+	Command_DELETE_STCP         Command_Type = 1
+	Command_CREATE_TCP          Command_Type = 2
+	Command_DELETE_TCP          Command_Type = 3
+	Command_CREATE_STCP_VISITOR Command_Type = 4
+	Command_DELETE_STCP_VISITOR Command_Type = 5
 )
 
 // Enum value maps for Command_Type.
@@ -38,12 +39,16 @@ var (
 		1: "DELETE_STCP",
 		2: "CREATE_TCP",
 		3: "DELETE_TCP",
+		4: "CREATE_STCP_VISITOR",
+		5: "DELETE_STCP_VISITOR",
 	}
 	Command_Type_value = map[string]int32{
-		"CREATE_STCP": 0,
-		"DELETE_STCP": 1,
-		"CREATE_TCP":  2,
-		"DELETE_TCP":  3,
+		"CREATE_STCP":         0,
+		"DELETE_STCP":         1,
+		"CREATE_TCP":          2,
+		"DELETE_TCP":          3,
+		"CREATE_STCP_VISITOR": 4,
+		"DELETE_STCP_VISITOR": 5,
 	}
 )
 
@@ -330,8 +335,13 @@ type Command struct {
 	ServiceName string `protobuf:"bytes,5,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
 	RemotePort  int32  `protobuf:"varint,6,opt,name=remote_port,json=remotePort,proto3" json:"remote_port,omitempty"`
 	// 公共字段
-	LocalIp       string `protobuf:"bytes,7,opt,name=local_ip,json=localIp,proto3" json:"local_ip,omitempty"`
-	LocalPort     int32  `protobuf:"varint,8,opt,name=local_port,json=localPort,proto3" json:"local_port,omitempty"`
+	LocalIp   string `protobuf:"bytes,7,opt,name=local_ip,json=localIp,proto3" json:"local_ip,omitempty"`
+	LocalPort int32  `protobuf:"varint,8,opt,name=local_port,json=localPort,proto3" json:"local_port,omitempty"`
+	// STCP Visitor相关字段
+	VisitorName   string `protobuf:"bytes,9,opt,name=visitor_name,json=visitorName,proto3" json:"visitor_name,omitempty"`
+	ServerName    string `protobuf:"bytes,10,opt,name=server_name,json=serverName,proto3" json:"server_name,omitempty"`
+	BindAddr      string `protobuf:"bytes,11,opt,name=bind_addr,json=bindAddr,proto3" json:"bind_addr,omitempty"`
+	BindPort      int32  `protobuf:"varint,12,opt,name=bind_port,json=bindPort,proto3" json:"bind_port,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -418,6 +428,34 @@ func (x *Command) GetLocalIp() string {
 func (x *Command) GetLocalPort() int32 {
 	if x != nil {
 		return x.LocalPort
+	}
+	return 0
+}
+
+func (x *Command) GetVisitorName() string {
+	if x != nil {
+		return x.VisitorName
+	}
+	return ""
+}
+
+func (x *Command) GetServerName() string {
+	if x != nil {
+		return x.ServerName
+	}
+	return ""
+}
+
+func (x *Command) GetBindAddr() string {
+	if x != nil {
+		return x.BindAddr
+	}
+	return ""
+}
+
+func (x *Command) GetBindPort() int32 {
+	if x != nil {
+		return x.BindPort
 	}
 	return 0
 }
@@ -686,7 +724,7 @@ func (x *GetTCPServicesRequest) GetAgentId() int64 {
 	return 0
 }
 
-// TCP实例信息
+// TCP服务信息
 type TCPServiceInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ServiceName   string                 `protobuf:"bytes,1,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
@@ -808,6 +846,181 @@ func (x *GetTCPServicesResponse) GetServices() []*TCPServiceInfo {
 	return nil
 }
 
+// 获取STCP访问请求
+type GetSTCPVisitorsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AgentName     string                 `protobuf:"bytes,1,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSTCPVisitorsRequest) Reset() {
+	*x = GetSTCPVisitorsRequest{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSTCPVisitorsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSTCPVisitorsRequest) ProtoMessage() {}
+
+func (x *GetSTCPVisitorsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSTCPVisitorsRequest.ProtoReflect.Descriptor instead.
+func (*GetSTCPVisitorsRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *GetSTCPVisitorsRequest) GetAgentName() string {
+	if x != nil {
+		return x.AgentName
+	}
+	return ""
+}
+
+// STCP访问信息
+type STCPVisitorInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VisitorName   string                 `protobuf:"bytes,1,opt,name=visitor_name,json=visitorName,proto3" json:"visitor_name,omitempty"`
+	ServerName    string                 `protobuf:"bytes,2,opt,name=server_name,json=serverName,proto3" json:"server_name,omitempty"`
+	SecretKey     string                 `protobuf:"bytes,3,opt,name=secret_key,json=secretKey,proto3" json:"secret_key,omitempty"`
+	BindAddr      string                 `protobuf:"bytes,4,opt,name=bind_addr,json=bindAddr,proto3" json:"bind_addr,omitempty"`
+	BindPort      int32                  `protobuf:"varint,5,opt,name=bind_port,json=bindPort,proto3" json:"bind_port,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *STCPVisitorInfo) Reset() {
+	*x = STCPVisitorInfo{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *STCPVisitorInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*STCPVisitorInfo) ProtoMessage() {}
+
+func (x *STCPVisitorInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use STCPVisitorInfo.ProtoReflect.Descriptor instead.
+func (*STCPVisitorInfo) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *STCPVisitorInfo) GetVisitorName() string {
+	if x != nil {
+		return x.VisitorName
+	}
+	return ""
+}
+
+func (x *STCPVisitorInfo) GetServerName() string {
+	if x != nil {
+		return x.ServerName
+	}
+	return ""
+}
+
+func (x *STCPVisitorInfo) GetSecretKey() string {
+	if x != nil {
+		return x.SecretKey
+	}
+	return ""
+}
+
+func (x *STCPVisitorInfo) GetBindAddr() string {
+	if x != nil {
+		return x.BindAddr
+	}
+	return ""
+}
+
+func (x *STCPVisitorInfo) GetBindPort() int32 {
+	if x != nil {
+		return x.BindPort
+	}
+	return 0
+}
+
+// 获取STCP访问响应
+type GetSTCPVisitorsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Visitors      []*STCPVisitorInfo     `protobuf:"bytes,2,rep,name=visitors,proto3" json:"visitors,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSTCPVisitorsResponse) Reset() {
+	*x = GetSTCPVisitorsResponse{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSTCPVisitorsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSTCPVisitorsResponse) ProtoMessage() {}
+
+func (x *GetSTCPVisitorsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSTCPVisitorsResponse.ProtoReflect.Descriptor instead.
+func (*GetSTCPVisitorsResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *GetSTCPVisitorsResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *GetSTCPVisitorsResponse) GetVisitors() []*STCPVisitorInfo {
+	if x != nil {
+		return x.Visitors
+	}
+	return nil
+}
+
 var File_pkg_proto_agent_proto protoreflect.FileDescriptor
 
 const file_pkg_proto_agent_proto_rawDesc = "" +
@@ -831,7 +1044,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"agentToken\"K\n" +
 	"\x11HeartbeatResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1c\n" +
-	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\"\xea\x02\n" +
+	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\"\x9a\x04\n" +
 	"\aCommand\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x124\n" +
@@ -844,14 +1057,22 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"remotePort\x12\x19\n" +
 	"\blocal_ip\x18\a \x01(\tR\alocalIp\x12\x1d\n" +
 	"\n" +
-	"local_port\x18\b \x01(\x05R\tlocalPort\"H\n" +
+	"local_port\x18\b \x01(\x05R\tlocalPort\x12!\n" +
+	"\fvisitor_name\x18\t \x01(\tR\vvisitorName\x12\x1f\n" +
+	"\vserver_name\x18\n" +
+	" \x01(\tR\n" +
+	"serverName\x12\x1b\n" +
+	"\tbind_addr\x18\v \x01(\tR\bbindAddr\x12\x1b\n" +
+	"\tbind_port\x18\f \x01(\x05R\bbindPort\"z\n" +
 	"\x04Type\x12\x0f\n" +
 	"\vCREATE_STCP\x10\x00\x12\x0f\n" +
 	"\vDELETE_STCP\x10\x01\x12\x0e\n" +
 	"\n" +
 	"CREATE_TCP\x10\x02\x12\x0e\n" +
 	"\n" +
-	"DELETE_TCP\x10\x03\"d\n" +
+	"DELETE_TCP\x10\x03\x12\x17\n" +
+	"\x13CREATE_STCP_VISITOR\x10\x04\x12\x17\n" +
+	"\x13DELETE_STCP_VISITOR\x10\x05\"d\n" +
 	"\x0fCommandResponse\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x18\n" +
@@ -878,13 +1099,28 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"remotePort\"r\n" +
 	"\x16GetTCPServicesResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12>\n" +
-	"\bservices\x18\x02 \x03(\v2\".awecloud.signaling.TCPServiceInfoR\bservices2\xde\x03\n" +
+	"\bservices\x18\x02 \x03(\v2\".awecloud.signaling.TCPServiceInfoR\bservices\"7\n" +
+	"\x16GetSTCPVisitorsRequest\x12\x1d\n" +
+	"\n" +
+	"agent_name\x18\x01 \x01(\tR\tagentName\"\xae\x01\n" +
+	"\x0fSTCPVisitorInfo\x12!\n" +
+	"\fvisitor_name\x18\x01 \x01(\tR\vvisitorName\x12\x1f\n" +
+	"\vserver_name\x18\x02 \x01(\tR\n" +
+	"serverName\x12\x1d\n" +
+	"\n" +
+	"secret_key\x18\x03 \x01(\tR\tsecretKey\x12\x1b\n" +
+	"\tbind_addr\x18\x04 \x01(\tR\bbindAddr\x12\x1b\n" +
+	"\tbind_port\x18\x05 \x01(\x05R\bbindPort\"t\n" +
+	"\x17GetSTCPVisitorsResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12?\n" +
+	"\bvisitors\x18\x02 \x03(\v2#.awecloud.signaling.STCPVisitorInfoR\bvisitors2\xd1\x04\n" +
 	"\fAgentService\x12U\n" +
 	"\bRegister\x12#.awecloud.signaling.RegisterRequest\x1a$.awecloud.signaling.RegisterResponse\x12X\n" +
 	"\tHeartbeat\x12$.awecloud.signaling.HeartbeatRequest\x1a%.awecloud.signaling.HeartbeatResponse\x12W\n" +
 	"\x0fReceiveCommands\x12#.awecloud.signaling.CommandResponse\x1a\x1b.awecloud.signaling.Command(\x010\x01\x12T\n" +
 	"\fReportStatus\x12 .awecloud.signaling.StatusReport\x1a\".awecloud.signaling.StatusResponse\x12n\n" +
-	"\x15GetEnabledTCPServices\x12).awecloud.signaling.GetTCPServicesRequest\x1a*.awecloud.signaling.GetTCPServicesResponseB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
+	"\x15GetEnabledTCPServices\x12).awecloud.signaling.GetTCPServicesRequest\x1a*.awecloud.signaling.GetTCPServicesResponse\x12q\n" +
+	"\x16GetEnabledSTCPVisitors\x12*.awecloud.signaling.GetSTCPVisitorsRequest\x1a+.awecloud.signaling.GetSTCPVisitorsResponseB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
 
 var (
 	file_pkg_proto_agent_proto_rawDescOnce sync.Once
@@ -899,41 +1135,47 @@ func file_pkg_proto_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_pkg_proto_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_pkg_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_pkg_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_pkg_proto_agent_proto_goTypes = []any{
-	(Command_Type)(0),              // 0: awecloud.signaling.Command.Type
-	(*RegisterRequest)(nil),        // 1: awecloud.signaling.RegisterRequest
-	(*RegisterResponse)(nil),       // 2: awecloud.signaling.RegisterResponse
-	(*HeartbeatRequest)(nil),       // 3: awecloud.signaling.HeartbeatRequest
-	(*HeartbeatResponse)(nil),      // 4: awecloud.signaling.HeartbeatResponse
-	(*Command)(nil),                // 5: awecloud.signaling.Command
-	(*CommandResponse)(nil),        // 6: awecloud.signaling.CommandResponse
-	(*StatusReport)(nil),           // 7: awecloud.signaling.StatusReport
-	(*STCPStatus)(nil),             // 8: awecloud.signaling.STCPStatus
-	(*StatusResponse)(nil),         // 9: awecloud.signaling.StatusResponse
-	(*GetTCPServicesRequest)(nil),  // 10: awecloud.signaling.GetTCPServicesRequest
-	(*TCPServiceInfo)(nil),         // 11: awecloud.signaling.TCPServiceInfo
-	(*GetTCPServicesResponse)(nil), // 12: awecloud.signaling.GetTCPServicesResponse
+	(Command_Type)(0),               // 0: awecloud.signaling.Command.Type
+	(*RegisterRequest)(nil),         // 1: awecloud.signaling.RegisterRequest
+	(*RegisterResponse)(nil),        // 2: awecloud.signaling.RegisterResponse
+	(*HeartbeatRequest)(nil),        // 3: awecloud.signaling.HeartbeatRequest
+	(*HeartbeatResponse)(nil),       // 4: awecloud.signaling.HeartbeatResponse
+	(*Command)(nil),                 // 5: awecloud.signaling.Command
+	(*CommandResponse)(nil),         // 6: awecloud.signaling.CommandResponse
+	(*StatusReport)(nil),            // 7: awecloud.signaling.StatusReport
+	(*STCPStatus)(nil),              // 8: awecloud.signaling.STCPStatus
+	(*StatusResponse)(nil),          // 9: awecloud.signaling.StatusResponse
+	(*GetTCPServicesRequest)(nil),   // 10: awecloud.signaling.GetTCPServicesRequest
+	(*TCPServiceInfo)(nil),          // 11: awecloud.signaling.TCPServiceInfo
+	(*GetTCPServicesResponse)(nil),  // 12: awecloud.signaling.GetTCPServicesResponse
+	(*GetSTCPVisitorsRequest)(nil),  // 13: awecloud.signaling.GetSTCPVisitorsRequest
+	(*STCPVisitorInfo)(nil),         // 14: awecloud.signaling.STCPVisitorInfo
+	(*GetSTCPVisitorsResponse)(nil), // 15: awecloud.signaling.GetSTCPVisitorsResponse
 }
 var file_pkg_proto_agent_proto_depIdxs = []int32{
 	0,  // 0: awecloud.signaling.Command.type:type_name -> awecloud.signaling.Command.Type
 	8,  // 1: awecloud.signaling.StatusReport.stcp_statuses:type_name -> awecloud.signaling.STCPStatus
 	11, // 2: awecloud.signaling.GetTCPServicesResponse.services:type_name -> awecloud.signaling.TCPServiceInfo
-	1,  // 3: awecloud.signaling.AgentService.Register:input_type -> awecloud.signaling.RegisterRequest
-	3,  // 4: awecloud.signaling.AgentService.Heartbeat:input_type -> awecloud.signaling.HeartbeatRequest
-	6,  // 5: awecloud.signaling.AgentService.ReceiveCommands:input_type -> awecloud.signaling.CommandResponse
-	7,  // 6: awecloud.signaling.AgentService.ReportStatus:input_type -> awecloud.signaling.StatusReport
-	10, // 7: awecloud.signaling.AgentService.GetEnabledTCPServices:input_type -> awecloud.signaling.GetTCPServicesRequest
-	2,  // 8: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.RegisterResponse
-	4,  // 9: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.HeartbeatResponse
-	5,  // 10: awecloud.signaling.AgentService.ReceiveCommands:output_type -> awecloud.signaling.Command
-	9,  // 11: awecloud.signaling.AgentService.ReportStatus:output_type -> awecloud.signaling.StatusResponse
-	12, // 12: awecloud.signaling.AgentService.GetEnabledTCPServices:output_type -> awecloud.signaling.GetTCPServicesResponse
-	8,  // [8:13] is the sub-list for method output_type
-	3,  // [3:8] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	14, // 3: awecloud.signaling.GetSTCPVisitorsResponse.visitors:type_name -> awecloud.signaling.STCPVisitorInfo
+	1,  // 4: awecloud.signaling.AgentService.Register:input_type -> awecloud.signaling.RegisterRequest
+	3,  // 5: awecloud.signaling.AgentService.Heartbeat:input_type -> awecloud.signaling.HeartbeatRequest
+	6,  // 6: awecloud.signaling.AgentService.ReceiveCommands:input_type -> awecloud.signaling.CommandResponse
+	7,  // 7: awecloud.signaling.AgentService.ReportStatus:input_type -> awecloud.signaling.StatusReport
+	10, // 8: awecloud.signaling.AgentService.GetEnabledTCPServices:input_type -> awecloud.signaling.GetTCPServicesRequest
+	13, // 9: awecloud.signaling.AgentService.GetEnabledSTCPVisitors:input_type -> awecloud.signaling.GetSTCPVisitorsRequest
+	2,  // 10: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.RegisterResponse
+	4,  // 11: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.HeartbeatResponse
+	5,  // 12: awecloud.signaling.AgentService.ReceiveCommands:output_type -> awecloud.signaling.Command
+	9,  // 13: awecloud.signaling.AgentService.ReportStatus:output_type -> awecloud.signaling.StatusResponse
+	12, // 14: awecloud.signaling.AgentService.GetEnabledTCPServices:output_type -> awecloud.signaling.GetTCPServicesResponse
+	15, // 15: awecloud.signaling.AgentService.GetEnabledSTCPVisitors:output_type -> awecloud.signaling.GetSTCPVisitorsResponse
+	10, // [10:16] is the sub-list for method output_type
+	4,  // [4:10] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_pkg_proto_agent_proto_init() }
@@ -947,7 +1189,7 @@ func file_pkg_proto_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_agent_proto_rawDesc), len(file_pkg_proto_agent_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   12,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

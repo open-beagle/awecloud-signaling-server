@@ -20,6 +20,9 @@ service AgentService {
   
   // 获取已启用的TCP服务列表
   rpc GetEnabledTCPServices(GetTCPServicesRequest) returns (GetTCPServicesResponse);
+  
+  // 获取已启用的STCP访问列表
+  rpc GetEnabledSTCPVisitors(GetSTCPVisitorsRequest) returns (GetSTCPVisitorsResponse);
 }
 
 // Agent注册请求
@@ -57,6 +60,8 @@ message Command {
     DELETE_STCP = 1;
     CREATE_TCP = 2;
     DELETE_TCP = 3;
+    CREATE_STCP_VISITOR = 4;
+    DELETE_STCP_VISITOR = 5;
   }
   
   string command_id = 1;
@@ -73,6 +78,12 @@ message Command {
   // 公共字段
   string local_ip = 7;
   int32 local_port = 8;
+  
+  // STCP Visitor相关字段
+  string visitor_name = 9;
+  string server_name = 10;
+  string bind_addr = 11;
+  int32 bind_port = 12;
 }
 
 // 指令响应
@@ -116,4 +127,24 @@ message TCPServiceInfo {
 message GetTCPServicesResponse {
   bool success = 1;
   repeated TCPServiceInfo services = 2;
+}
+
+// 获取STCP访问请求
+message GetSTCPVisitorsRequest {
+  string agent_name = 1;
+}
+
+// STCP访问信息
+message STCPVisitorInfo {
+  string visitor_name = 1;
+  string server_name = 2;
+  string secret_key = 3;
+  string bind_addr = 4;
+  int32 bind_port = 5;
+}
+
+// 获取STCP访问响应
+message GetSTCPVisitorsResponse {
+  bool success = 1;
+  repeated STCPVisitorInfo visitors = 2;
 }

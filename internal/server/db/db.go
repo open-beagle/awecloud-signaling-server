@@ -54,6 +54,7 @@ func autoMigrate() error {
 		&model.GroupMember{},
 		&model.STCPInstance{},
 		&model.STCPAccess{},
+		&model.STCPVisitor{},
 		&model.ClientSession{},
 		&model.DeviceToken{},
 		&model.PortPreference{},
