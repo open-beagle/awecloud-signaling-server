@@ -258,3 +258,36 @@ func (s *AgentServiceServer) syncSTCPInstances(agentID int64) {
 
 	logger.Infof("Agent %d 的STCP实例同步完成", agentID)
 }
+
+// GetEnabledTCPServices 获取Agent的已启用TCP服务列表
+func (s *AgentServiceServer) GetEnabledTCPServices(ctx context.Context, req *pb.GetTCPServicesRequest) (*pb.GetTCPServicesResponse, error) {
+	logger.Infof("Agent请求TCP服务列表: agent_id=%d", req.AgentId)
+
+	// 查询该Agent的所有已启用TCP服务
+	var services []model.TCPService
+	if err := db.DB.Where("agent_id = ? AND enabled = ?", req.AgentId, true).Find(&services).Error; err != nil {
+		logger.Errorf("查询TCP服务失败: %v", err)
+		return &pb.GetTCPServicesResponse{
+			Success:  false,
+			Services: nil,
+		}, status.Error(codes.Internal, "查询TCP服务失败")
+	}
+
+	// 转换为proto格式
+	pbServices := make([]*pb.TCPServiceInfo, 0, len(services))
+	for _, service := range services {
+		pbServices = append(pbServices, &pb.TCPServiceInfo{
+			ServiceName: service.ServiceName,
+			LocalIp:     service.LocalIP,
+			LocalPort:   int32(service.LocalPort),
+			RemotePort:  int32(service.RemotePort),
+		})
+	}
+
+	logger.Infof("返回%d个已启用的TCP服务给Agent %d", len(pbServices), req.AgentId)
+
+	return &pb.GetTCPServicesResponse{
+		Success:  true,
+		Services: pbServices,
+	}, nil
+}

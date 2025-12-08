@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
@@ -114,16 +114,21 @@ func (a *Agent) Run() error {
 		return fmt.Errorf("注册失败: %w", err)
 	}
 
+	// 同步已启用的TCP实例
+	if err := a.syncEnabledTCPServices(); err != nil {
+		logger.Infof("同步TCP实例失败: %v (继续运行)", err)
+	}
+
 	// 启动Agent-FRP线程（FRP客户端）
 	// 注意：FRP客户端可能需要额外配置（如认证token）
 	// 如果连接失败，不影响Agent-Web线程的运行
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
-		log.Println("启动隧道客户端...")
+		logger.Debug("启动隧道客户端...")
 		if err := a.frpManager.Run(); err != nil {
-			log.Printf("隧道客户端错误: %v", err)
-			log.Println("隧道客户端已停止，但Agent-Web线程继续运行")
+			logger.Debugf("隧道客户端错误: %v", err)
+			logger.Debug("隧道客户端已停止，但Agent-Web线程继续运行")
 		}
 	}()
 
@@ -144,12 +149,12 @@ func (a *Agent) Run() error {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("正在关闭Agent...")
+	logger.Info("正在关闭Agent...")
 	a.cancel()
 	a.frpManager.Stop()
 	a.wg.Wait()
 
-	log.Println("Agent已关闭")
+	logger.Info("Agent已关闭")
 	return nil
 }
 
@@ -184,7 +189,7 @@ func (a *Agent) connectToServer() error {
 		grpcAddr = fmt.Sprintf("%s:%d", parsedURL.Hostname(), port)
 	}
 
-	log.Printf("连接到Server gRPC: %s (scheme: %s)", grpcAddr, parsedURL.Scheme)
+	logger.Debugf("连接到Server gRPC: %s (scheme: %s)", grpcAddr, parsedURL.Scheme)
 
 	// 根据协议选择传输凭证
 	var opts []grpc.DialOption
@@ -196,11 +201,11 @@ func (a *Agent) connectToServer() error {
 		}
 		creds := credentials.NewTLS(tlsConfig)
 		opts = append(opts, grpc.WithTransportCredentials(creds))
-		log.Printf("gRPC使用TLS连接（跳过证书验证）")
+		logger.Debug("gRPC使用TLS连接（跳过证书验证）")
 	} else {
 		// HTTP：不使用TLS
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		log.Printf("gRPC使用明文连接")
+		logger.Debug("gRPC使用明文连接")
 	}
 
 	// 创建gRPC连接
@@ -217,13 +222,13 @@ func (a *Agent) connectToServer() error {
 	a.grpcConnected = true
 	a.grpcMutex.Unlock()
 
-	log.Println("gRPC连接建立成功")
+	logger.Debug("gRPC连接建立成功")
 	return nil
 }
 
 // register 注册Agent
 func (a *Agent) register() error {
-	log.Printf("注册Agent: %s", a.config.Agent.AgentName)
+	logger.Infof("注册Agent: %s", a.config.Agent.AgentName)
 
 	resp, err := a.grpcClient.Register(a.ctx, &pb.RegisterRequest{
 		AgentName:  a.config.Agent.AgentName,
@@ -243,32 +248,34 @@ func (a *Agent) register() error {
 	a.frpToken = resp.Token
 
 	if a.frpToken != "" {
-		log.Printf("注册成功，Agent ID: %d, Token: %s...", a.agentID, a.frpToken[:16])
+		logger.Infof("注册成功，Agent ID: %d", a.agentID)
+		logger.Debugf("Token: %s...", a.frpToken[:16])
 		// 将 Token 传递给 FRP Manager
 		a.frpManager.SetToken(a.frpToken)
 	} else {
-		log.Printf("注册成功，Agent ID: %d (无 Token)", a.agentID)
+		logger.Infof("注册成功，Agent ID: %d (无 Token)", a.agentID)
 	}
 
 	// 更新 FRP 连接信息
 	// 优先使用配置文件或环境变量中的 public_url
 	if a.config.Server.PublicURL != "" {
-		log.Printf("使用配置的隧道公网地址: %s (忽略 Server 返回的地址)", a.config.Server.PublicURL)
+		logger.Debugf("使用配置的隧道公网地址: %s (忽略 Server 返回的地址)", a.config.Server.PublicURL)
 		a.frpManager.SetServerURL(a.config.Server.PublicURL)
 	} else if resp.Server != "" {
 		// 使用 Server 返回的完整 URL
-		log.Printf("使用 Server 提供的隧道地址: %s", resp.Server)
+		logger.Debugf("使用 Server 提供的隧道地址: %s", resp.Server)
 		a.frpManager.SetServerURL(resp.Server)
 	} else if resp.Port > 0 {
 		// 使用 Server 地址 + 端口
-		log.Printf("使用隧道端口: %d", resp.Port)
+		logger.Debugf("使用隧道端口: %d", resp.Port)
 		a.frpManager.SetServerPort(int(resp.Port))
 	}
 
-	// 如果是重新注册（Agent ID变化），需要重新同步所有STCP代理
+	// 如果是重新注册（Agent ID变化），需要重新同步所有代理
 	if oldAgentID != 0 && oldAgentID != a.agentID {
-		log.Printf("Agent ID 变化 (%d -> %d)，重新同步STCP代理", oldAgentID, a.agentID)
+		logger.Debugf("Agent ID 变化 (%d -> %d)，重新同步所有代理", oldAgentID, a.agentID)
 		a.resyncSTCPProxies()
+		a.resyncTCPProxies()
 	}
 
 	return nil
@@ -284,14 +291,14 @@ func (a *Agent) resyncSTCPProxies() {
 	a.proxyMutex.RUnlock()
 
 	if len(proxies) == 0 {
-		log.Println("没有需要同步的STCP代理")
+		logger.Debug("没有需要同步的STCP代理")
 		return
 	}
 
-	log.Printf("开始重新同步 %d 个STCP代理", len(proxies))
+	logger.Debugf("开始重新同步 %d 个STCP代理", len(proxies))
 
 	for _, proxy := range proxies {
-		log.Printf("重新创建STCP代理: %s", proxy.InstanceName)
+		logger.Debugf("重新创建STCP代理: %s", proxy.InstanceName)
 
 		// 重新添加到FRP Manager
 		if err := a.frpManager.AddSTCPProxy(
@@ -300,7 +307,7 @@ func (a *Agent) resyncSTCPProxies() {
 			proxy.LocalIP,
 			proxy.LocalPort,
 		); err != nil {
-			log.Printf("重新创建隧道代理失败: %s, error: %v", proxy.InstanceName, err)
+			logger.Debugf("重新创建隧道代理失败: %s, error: %v", proxy.InstanceName, err)
 
 			// 更新状态为错误
 			a.proxyMutex.Lock()
@@ -309,7 +316,7 @@ func (a *Agent) resyncSTCPProxies() {
 			}
 			a.proxyMutex.Unlock()
 		} else {
-			log.Printf("重新创建隧道代理成功: %s", proxy.InstanceName)
+			logger.Debugf("重新创建隧道代理成功: %s", proxy.InstanceName)
 
 			// 更新状态为运行中
 			a.proxyMutex.Lock()
@@ -320,7 +327,120 @@ func (a *Agent) resyncSTCPProxies() {
 		}
 	}
 
-	log.Printf("STCP代理同步完成")
+	logger.Debug("STCP代理同步完成")
+}
+
+// resyncTCPProxies 重新同步所有TCP代理（Server重启后恢复）
+func (a *Agent) resyncTCPProxies() {
+	a.proxyMutex.RLock()
+	proxies := make([]*TCPProxy, 0, len(a.tcpProxies))
+	for _, proxy := range a.tcpProxies {
+		proxies = append(proxies, proxy)
+	}
+	a.proxyMutex.RUnlock()
+
+	if len(proxies) == 0 {
+		logger.Debug("没有需要同步的TCP代理")
+		return
+	}
+
+	logger.Debugf("开始重新同步 %d 个TCP代理", len(proxies))
+
+	for _, proxy := range proxies {
+		logger.Debugf("重新创建TCP代理: %s", proxy.ServiceName)
+
+		// 重新添加到FRP Manager
+		if err := a.frpManager.AddTCPProxy(
+			proxy.ServiceName,
+			proxy.LocalIP,
+			proxy.LocalPort,
+			proxy.RemotePort,
+		); err != nil {
+			logger.Debugf("重新创建TCP隧道代理失败: %s, error: %v", proxy.ServiceName, err)
+
+			// 更新状态为错误
+			a.proxyMutex.Lock()
+			if p, exists := a.tcpProxies[proxy.ServiceName]; exists {
+				p.Status = "error"
+			}
+			a.proxyMutex.Unlock()
+		} else {
+			logger.Debugf("重新创建TCP隧道代理成功: %s", proxy.ServiceName)
+
+			// 更新状态为运行中
+			a.proxyMutex.Lock()
+			if p, exists := a.tcpProxies[proxy.ServiceName]; exists {
+				p.Status = "running"
+			}
+			a.proxyMutex.Unlock()
+		}
+	}
+
+	logger.Debug("TCP代理同步完成")
+}
+
+// syncEnabledTCPServices 从Server同步已启用的TCP实例
+func (a *Agent) syncEnabledTCPServices() error {
+	logger.Debug("开始同步已启用的TCP实例...")
+
+	// 调用gRPC获取TCP实例列表
+	resp, err := a.grpcClient.GetEnabledTCPServices(a.ctx, &pb.GetTCPServicesRequest{
+		AgentId: a.agentID,
+	})
+
+	if err != nil {
+		return fmt.Errorf("获取TCP实例列表失败: %w", err)
+	}
+
+	if !resp.Success {
+		return fmt.Errorf("获取TCP实例列表失败: Server返回失败")
+	}
+
+	if len(resp.Services) == 0 {
+		logger.Debug("没有已启用的TCP实例需要同步")
+		return nil
+	}
+
+	logger.Infof("同步%d个已启用的TCP实例", len(resp.Services))
+
+	// 创建TCP代理
+	for _, service := range resp.Services {
+		logger.Debugf("同步TCP实例: %s (本地: %s:%d, 远程端口: %d)",
+			service.ServiceName, service.LocalIp, service.LocalPort, service.RemotePort)
+
+		// 添加到内存
+		a.proxyMutex.Lock()
+		a.tcpProxies[service.ServiceName] = &TCPProxy{
+			ServiceName: service.ServiceName,
+			LocalIP:     service.LocalIp,
+			LocalPort:   service.LocalPort,
+			RemotePort:  service.RemotePort,
+			Status:      "running",
+		}
+		a.proxyMutex.Unlock()
+
+		// 添加到FRP Manager
+		if err := a.frpManager.AddTCPProxy(
+			service.ServiceName,
+			service.LocalIp,
+			service.LocalPort,
+			service.RemotePort,
+		); err != nil {
+			logger.Debugf("创建TCP隧道代理失败: %s, error: %v", service.ServiceName, err)
+
+			// 更新状态为错误
+			a.proxyMutex.Lock()
+			if p, exists := a.tcpProxies[service.ServiceName]; exists {
+				p.Status = "error"
+			}
+			a.proxyMutex.Unlock()
+		} else {
+			logger.Debugf("TCP实例同步成功: %s", service.ServiceName)
+		}
+	}
+
+	logger.Debug("TCP实例同步完成")
+	return nil
 }
 
 // heartbeatLoop 心跳循环（支持自动重连）
@@ -339,16 +459,16 @@ func (a *Agent) heartbeatLoop() {
 		case <-ticker.C:
 			if err := a.sendHeartbeat(); err != nil {
 				consecutiveFailures++
-				log.Printf("心跳失败 (%d/%d): %v", consecutiveFailures, maxFailures, err)
+				logger.Infof("心跳失败 (%d/%d): %v", consecutiveFailures, maxFailures, err)
 				lastSuccessLogged = false // 失败后重置，下次成功时会打印
 
 				// 如果连续失败次数过多，尝试重新注册
 				if consecutiveFailures >= maxFailures {
-					log.Printf("心跳连续失败 %d 次，尝试重新注册", consecutiveFailures)
+					logger.Infof("心跳连续失败 %d 次，尝试重新注册", consecutiveFailures)
 					if err := a.register(); err != nil {
-						log.Printf("重新注册失败: %v", err)
+						logger.Infof("重新注册失败: %v", err)
 					} else {
-						log.Println("重新注册成功")
+						logger.Info("重新注册成功")
 						consecutiveFailures = 0
 					}
 				}
@@ -356,12 +476,12 @@ func (a *Agent) heartbeatLoop() {
 				// 心跳成功
 				if consecutiveFailures > 0 {
 					// 从失败恢复，打印恢复日志
-					log.Printf("心跳恢复正常")
+					logger.Infof("心跳恢复正常")
 					consecutiveFailures = 0
 					lastSuccessLogged = true
 				} else if !lastSuccessLogged {
 					// 首次成功，打印一次
-					log.Printf("心跳正常")
+					logger.Infof("心跳正常")
 					lastSuccessLogged = true
 				}
 				// 后续成功不打印日志
@@ -402,16 +522,16 @@ func (a *Agent) receiveCommands() {
 	for {
 		select {
 		case <-a.ctx.Done():
-			log.Println("命令接收线程退出")
+			logger.Debug("命令接收线程退出")
 			return
 		default:
 		}
 
-		log.Println("建立命令接收流...")
+		logger.Debug("建立命令接收流...")
 
 		stream, err := a.grpcClient.ReceiveCommands(a.ctx)
 		if err != nil {
-			log.Printf("建立命令流失败: %v，%v后重试", err, retryDelay)
+			logger.Debugf("建立命令流失败: %v，%v后重试", err, retryDelay)
 
 			// 使用select等待，以便能响应context取消
 			select {
@@ -423,7 +543,7 @@ func (a *Agent) receiveCommands() {
 				}
 				continue
 			case <-a.ctx.Done():
-				log.Println("命令接收线程退出")
+				logger.Info("命令接收线程退出")
 				return
 			}
 		}
@@ -437,19 +557,19 @@ func (a *Agent) receiveCommands() {
 			Success:   true,
 			Message:   fmt.Sprintf("Agent已连接: %d", a.agentID),
 		}); err != nil {
-			log.Printf("发送初始消息失败: %v，%v后重试", err, retryDelay)
+			logger.Infof("发送初始消息失败: %v，%v后重试", err, retryDelay)
 
 			// 使用select等待，以便能响应context取消
 			select {
 			case <-time.After(retryDelay):
 				continue
 			case <-a.ctx.Done():
-				log.Println("命令接收线程退出")
+				logger.Debug("命令接收线程退出")
 				return
 			}
 		}
 
-		log.Println("命令接收流已建立")
+		logger.Debug("命令接收流已建立")
 
 		// 接收命令
 		streamBroken := false
@@ -459,16 +579,16 @@ func (a *Agent) receiveCommands() {
 				// 检查是否是因为context取消导致的错误
 				select {
 				case <-a.ctx.Done():
-					log.Println("命令接收线程退出")
+					logger.Info("命令接收线程退出")
 					return
 				default:
-					log.Printf("接收命令失败: %v，将重新建立连接", err)
+					logger.Infof("接收命令失败: %v，将重新建立连接", err)
 					streamBroken = true
 					break
 				}
 			}
 
-			log.Printf("收到命令: %s, type=%v, instance=%s",
+			logger.Infof("收到命令: %s, type=%v, instance=%s",
 				cmd.CommandId, cmd.Type, cmd.InstanceName)
 
 			// 发送到命令处理通道
@@ -489,10 +609,10 @@ func (a *Agent) receiveCommands() {
 				// 检查是否是因为context取消导致的错误
 				select {
 				case <-a.ctx.Done():
-					log.Println("命令接收线程退出")
+					logger.Info("命令接收线程退出")
 					return
 				default:
-					log.Printf("发送命令响应失败: %v，将重新建立连接", err)
+					logger.Infof("发送命令响应失败: %v，将重新建立连接", err)
 					streamBroken = true
 					break
 				}
@@ -502,11 +622,11 @@ func (a *Agent) receiveCommands() {
 		// 再次检查context，避免在停止时打印重连日志
 		select {
 		case <-a.ctx.Done():
-			log.Println("命令接收线程退出")
+			logger.Info("命令接收线程退出")
 			return
 		default:
 			// 流断开，等待后重试
-			log.Printf("命令流已断开，%v后重新连接", retryDelay)
+			logger.Infof("命令流已断开，%v后重新连接", retryDelay)
 		}
 
 		// 使用select等待，以便能响应context取消
@@ -514,7 +634,7 @@ func (a *Agent) receiveCommands() {
 		case <-time.After(retryDelay):
 			// 继续重试
 		case <-a.ctx.Done():
-			log.Println("命令接收线程退出")
+			logger.Info("命令接收线程退出")
 			return
 		}
 	}
@@ -537,7 +657,7 @@ func (a *Agent) processCommands() {
 
 // handleCommand 处理单个命令
 func (a *Agent) handleCommand(cmd *pb.Command) {
-	log.Printf("处理命令: %s", cmd.CommandId)
+	logger.Infof("处理命令: %s", cmd.CommandId)
 
 	switch cmd.Type {
 	case pb.Command_CREATE_STCP:
@@ -553,19 +673,19 @@ func (a *Agent) handleCommand(cmd *pb.Command) {
 		a.handleDeleteTCP(cmd)
 
 	default:
-		log.Printf("未知命令类型: %v", cmd.Type)
+		logger.Infof("未知命令类型: %v", cmd.Type)
 	}
 }
 
 // handleCreateSTCP 处理创建STCP命令
 func (a *Agent) handleCreateSTCP(cmd *pb.Command) {
-	log.Printf("创建STCP代理: instance=%s, local=%s:%d, secret=%s",
+	logger.Infof("创建STCP代理: instance=%s, local=%s:%d, secret=%s",
 		cmd.InstanceName, cmd.LocalIp, cmd.LocalPort, cmd.SecretKey)
 
 	// 检查是否已存在
 	a.proxyMutex.Lock()
 	if _, exists := a.stcpProxies[cmd.InstanceName]; exists {
-		log.Printf("STCP代理已存在: %s", cmd.InstanceName)
+		logger.Infof("STCP代理已存在: %s", cmd.InstanceName)
 		a.proxyMutex.Unlock()
 		return
 	}
@@ -584,7 +704,7 @@ func (a *Agent) handleCreateSTCP(cmd *pb.Command) {
 
 	// 通知Agent-FRP线程创建实际的FRP代理
 	if err := a.frpManager.AddSTCPProxy(cmd.InstanceName, cmd.SecretKey, cmd.LocalIp, cmd.LocalPort); err != nil {
-		log.Printf("创建隧道代理失败: %v", err)
+		logger.Infof("创建隧道代理失败: %v", err)
 
 		// 更新状态为错误
 		a.proxyMutex.Lock()
@@ -595,17 +715,17 @@ func (a *Agent) handleCreateSTCP(cmd *pb.Command) {
 		return
 	}
 
-	log.Printf("STCP代理创建成功: %s (总计: %d个)", cmd.InstanceName, len(a.stcpProxies))
+	logger.Infof("STCP代理创建成功: %s (总计: %d个)", cmd.InstanceName, len(a.stcpProxies))
 }
 
 // handleDeleteSTCP 处理删除STCP命令
 func (a *Agent) handleDeleteSTCP(cmd *pb.Command) {
-	log.Printf("删除STCP代理: instance=%s", cmd.InstanceName)
+	logger.Infof("删除STCP代理: instance=%s", cmd.InstanceName)
 
 	// 检查代理是否存在
 	a.proxyMutex.Lock()
 	if _, exists := a.stcpProxies[cmd.InstanceName]; !exists {
-		log.Printf("STCP代理不存在: %s", cmd.InstanceName)
+		logger.Infof("STCP代理不存在: %s", cmd.InstanceName)
 		a.proxyMutex.Unlock()
 		return
 	}
@@ -613,7 +733,7 @@ func (a *Agent) handleDeleteSTCP(cmd *pb.Command) {
 
 	// 通知Agent-FRP线程删除实际的FRP代理
 	if err := a.frpManager.RemoveSTCPProxy(cmd.InstanceName); err != nil {
-		log.Printf("删除隧道代理失败: %v", err)
+		logger.Infof("删除隧道代理失败: %v", err)
 		return
 	}
 
@@ -622,18 +742,18 @@ func (a *Agent) handleDeleteSTCP(cmd *pb.Command) {
 	delete(a.stcpProxies, cmd.InstanceName)
 	a.proxyMutex.Unlock()
 
-	log.Printf("STCP代理删除成功: %s (剩余: %d个)", cmd.InstanceName, len(a.stcpProxies))
+	logger.Infof("STCP代理删除成功: %s (剩余: %d个)", cmd.InstanceName, len(a.stcpProxies))
 }
 
 // handleCreateTCP 处理创建TCP命令
 func (a *Agent) handleCreateTCP(cmd *pb.Command) {
-	log.Printf("创建TCP代理: service=%s, local=%s:%d, remote_port=%d",
+	logger.Infof("创建TCP代理: service=%s, local=%s:%d, remote_port=%d",
 		cmd.ServiceName, cmd.LocalIp, cmd.LocalPort, cmd.RemotePort)
 
 	// 检查是否已存在
 	a.proxyMutex.Lock()
 	if _, exists := a.tcpProxies[cmd.ServiceName]; exists {
-		log.Printf("TCP代理已存在: %s", cmd.ServiceName)
+		logger.Infof("TCP代理已存在: %s", cmd.ServiceName)
 		a.proxyMutex.Unlock()
 		return
 	}
@@ -652,7 +772,7 @@ func (a *Agent) handleCreateTCP(cmd *pb.Command) {
 
 	// 通知Agent-FRP线程创建实际的FRP代理
 	if err := a.frpManager.AddTCPProxy(cmd.ServiceName, cmd.LocalIp, cmd.LocalPort, cmd.RemotePort); err != nil {
-		log.Printf("创建TCP隧道代理失败: %v", err)
+		logger.Infof("创建TCP隧道代理失败: %v", err)
 
 		// 更新状态为错误
 		a.proxyMutex.Lock()
@@ -663,17 +783,17 @@ func (a *Agent) handleCreateTCP(cmd *pb.Command) {
 		return
 	}
 
-	log.Printf("TCP代理创建成功: %s (总计: %d个)", cmd.ServiceName, len(a.tcpProxies))
+	logger.Infof("TCP代理创建成功: %s (总计: %d个)", cmd.ServiceName, len(a.tcpProxies))
 }
 
 // handleDeleteTCP 处理删除TCP命令
 func (a *Agent) handleDeleteTCP(cmd *pb.Command) {
-	log.Printf("删除TCP代理: service=%s", cmd.ServiceName)
+	logger.Infof("删除TCP代理: service=%s", cmd.ServiceName)
 
 	// 检查代理是否存在
 	a.proxyMutex.Lock()
 	if _, exists := a.tcpProxies[cmd.ServiceName]; !exists {
-		log.Printf("TCP代理不存在: %s", cmd.ServiceName)
+		logger.Infof("TCP代理不存在: %s", cmd.ServiceName)
 		a.proxyMutex.Unlock()
 		return
 	}
@@ -681,7 +801,7 @@ func (a *Agent) handleDeleteTCP(cmd *pb.Command) {
 
 	// 通知Agent-FRP线程删除实际的FRP代理
 	if err := a.frpManager.RemoveTCPProxy(cmd.ServiceName); err != nil {
-		log.Printf("删除TCP隧道代理失败: %v", err)
+		logger.Infof("删除TCP隧道代理失败: %v", err)
 		return
 	}
 
@@ -690,7 +810,7 @@ func (a *Agent) handleDeleteTCP(cmd *pb.Command) {
 	delete(a.tcpProxies, cmd.ServiceName)
 	a.proxyMutex.Unlock()
 
-	log.Printf("TCP代理删除成功: %s (剩余: %d个)", cmd.ServiceName, len(a.tcpProxies))
+	logger.Infof("TCP代理删除成功: %s (剩余: %d个)", cmd.ServiceName, len(a.tcpProxies))
 }
 
 // GetSTCPProxies 获取所有STCP代理（用于状态上报）
@@ -761,9 +881,9 @@ func (a *Agent) startHealthServer() error {
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
-		log.Printf("健康检查服务器启动在: http://0.0.0.0%s", addr)
+		logger.Infof("健康检查服务器启动在: http://0.0.0.0%s", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("健康检查服务器错误: %v", err)
+			logger.Infof("健康检查服务器错误: %v", err)
 		}
 	}()
 
@@ -772,13 +892,13 @@ func (a *Agent) startHealthServer() error {
 	go func() {
 		defer a.wg.Done()
 		<-a.ctx.Done()
-		log.Println("正在关闭健康检查服务器...")
+		logger.Info("正在关闭健康检查服务器...")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			log.Printf("健康检查服务器关闭错误: %v", err)
+			logger.Infof("健康检查服务器关闭错误: %v", err)
 		} else {
-			log.Println("健康检查服务器已关闭")
+			logger.Info("健康检查服务器已关闭")
 		}
 	}()
 

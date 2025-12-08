@@ -76,7 +76,7 @@ func NewFRPManager(cfg *config.AgentConfig, ctx context.Context) (*FRPManager, e
 
 // Run 运行FRP管理器
 func (f *FRPManager) Run() error {
-	logger.Infof("隧道管理器启动，连接到: %s:%d", f.config.Server.Address, f.config.Server.Port)
+	logger.Debugf("隧道管理器启动，连接到: %s:%d", f.config.Server.Address, f.config.Server.Port)
 
 	// 启动命令处理循环
 	f.wg.Add(1)
@@ -86,7 +86,7 @@ func (f *FRPManager) Run() error {
 	for {
 		select {
 		case <-f.ctx.Done():
-			logger.Info("隧道管理器收到停止信号")
+			logger.Debug("隧道管理器收到停止信号")
 			f.wg.Wait()
 			return nil
 
@@ -96,18 +96,18 @@ func (f *FRPManager) Run() error {
 				// 检查是否是因为context取消导致的错误
 				select {
 				case <-f.ctx.Done():
-					logger.Info("隧道管理器收到停止信号")
+					logger.Debug("隧道管理器收到停止信号")
 					f.wg.Wait()
 					return nil
 				default:
-					logger.Infof("隧道客户端错误: %v", err)
+					logger.Debugf("隧道客户端错误: %v", err)
 				}
 			}
 
 			// 再次检查context，避免在停止时继续重试
 			select {
 			case <-f.ctx.Done():
-				logger.Info("隧道管理器收到停止信号")
+				logger.Debug("隧道管理器收到停止信号")
 				f.wg.Wait()
 				return nil
 			default:
@@ -121,7 +121,7 @@ func (f *FRPManager) Run() error {
 
 			if !needRestart {
 				// 如果不是主动重启，说明是异常退出，等待一段时间后重试
-				logger.Info("隧道客户端异常退出，5秒后重试...")
+				logger.Info("客户端异常退出，5秒后重试...")
 				select {
 				case <-time.After(5 * time.Second):
 				case <-f.ctx.Done():
@@ -129,7 +129,7 @@ func (f *FRPManager) Run() error {
 					return nil
 				}
 			} else {
-				logger.Info("隧道客户端正在重启以应用新配置...")
+				logger.Info("客户端正在重启以应用新配置...")
 			}
 		}
 	}
@@ -173,7 +173,7 @@ func (f *FRPManager) runFRPClient() error {
 		websocketPath = parsedURL.Path
 		protocol = parsedURL.Protocol
 
-		logger.Infof("使用隧道 URL: %s (解析为 %s://%s:%d%s)",
+		logger.Debugf("使用隧道 URL: %s (解析为 %s://%s:%d%s)",
 			serverURL, protocol, serverAddr, port, websocketPath)
 	} else if serverPort > 0 {
 		port = serverPort
@@ -188,7 +188,7 @@ func (f *FRPManager) runFRPClient() error {
 	// 配置 FRP 日志级别
 	clientCfg.Log.Level = f.config.Log.Level // 从配置文件读取日志级别
 	clientCfg.Log.To = "console"
-	logger.Infof("隧道客户端日志级别: %s", f.config.Log.Level)
+	logger.Debugf("隧道客户端日志级别: %s", f.config.Log.Level)
 
 	// 配置传输协议
 	clientCfg.Transport.Protocol = protocol
@@ -198,23 +198,23 @@ func (f *FRPManager) runFRPClient() error {
 		enable := true
 		clientCfg.Transport.TLS.Enable = &enable
 		clientCfg.Transport.TLS.ServerName = serverAddr
-		logger.Infof("隧道客户端TLS已启用（跳过证书验证: %v）", insecureSkipVerify)
+		logger.Debugf("隧道客户端TLS已启用（跳过证书验证: %v）", insecureSkipVerify)
 	}
 
 	// 完成配置（填充默认值）- 这是关键步骤！
 	if err := clientCfg.Complete(); err != nil {
 		return fmt.Errorf("完成隧道客户端配置失败: %w", err)
 	}
-	logger.Info("隧道客户端配置已完成（默认值已填充）")
+	logger.Debug("隧道客户端配置已完成（默认值已填充）")
 
 	// 配置认证
 	if token != "" {
 		clientCfg.Auth.Method = v1.AuthMethod("token")
 		clientCfg.Auth.Token = token
-		logger.Infof("隧道客户端配置: ServerAddr=%s, ServerPort=%d, Protocol=%s, Path=%s, Auth=token",
+		logger.Debugf("隧道客户端配置: ServerAddr=%s, ServerPort=%d, Protocol=%s, Path=%s, Auth=token",
 			serverAddr, port, protocol, websocketPath)
 	} else {
-		logger.Infof("隧道客户端配置: ServerAddr=%s, ServerPort=%d, Protocol=%s, Path=%s, Auth=none (等待Token)",
+		logger.Debugf("隧道客户端配置: ServerAddr=%s, ServerPort=%d, Protocol=%s, Path=%s, Auth=none (等待Token)",
 			serverAddr, port, protocol, websocketPath)
 	}
 
@@ -228,7 +228,7 @@ func (f *FRPManager) runFRPClient() error {
 			// 使用自定义 connector，支持自定义 WebSocket path 和跳过证书验证
 			connector, err := NewCustomConnector(ctx, cfg, websocketPath, insecureSkipVerify)
 			if err != nil {
-				logger.Infof("创建自定义 Connector 失败: %v，使用默认 Connector", err)
+				logger.Debugf("创建自定义 Connector 失败: %v，使用默认 Connector", err)
 				return client.NewConnector(ctx, cfg)
 			}
 			return connector
@@ -242,7 +242,7 @@ func (f *FRPManager) runFRPClient() error {
 	f.service = svr
 	f.mutex.Unlock()
 
-	logger.Infof("隧道客户端已创建，代理数量: %d", len(proxyCfgs))
+	logger.Debugf("隧道客户端已创建，代理数量: %d", len(proxyCfgs))
 
 	// 启动FRP客户端（会阻塞直到停止或出错）
 	if err := svr.Run(f.ctx); err != nil {
@@ -384,7 +384,7 @@ func (f *FRPManager) addProxyInternal(instanceName, secretKey, localIP string, l
 	f.proxies[instanceName] = proxyConfig
 	f.needRestart = true
 
-	logger.Infof("隧道 STCP代理已添加: %s -> %s:%d (总计: %d个)",
+	logger.Debugf("隧道 STCP代理已添加: %s -> %s:%d (总计: %d个)",
 		instanceName, localIP, localPort, len(f.proxies))
 
 	// 停止当前FRP客户端以触发重启
@@ -409,7 +409,7 @@ func (f *FRPManager) removeProxyInternal(instanceName string) error {
 	delete(f.proxies, instanceName)
 	f.needRestart = true
 
-	logger.Infof("隧道 STCP代理已删除: %s (剩余: %d个)", instanceName, len(f.proxies))
+	logger.Debugf("隧道 STCP代理已删除: %s (剩余: %d个)", instanceName, len(f.proxies))
 
 	// 停止当前FRP客户端以触发重启
 	if f.service != nil {
@@ -445,7 +445,7 @@ func (f *FRPManager) addTCPProxyInternal(serviceName string, localIP string, loc
 	f.tcpProxies[serviceName] = proxyConfig
 	f.needRestart = true
 
-	logger.Infof("隧道 TCP代理已添加: %s -> %s:%d (远程端口: %d, 总计: %d个)",
+	logger.Debugf("隧道 TCP代理已添加: %s -> %s:%d (远程端口: %d, 总计: %d个)",
 		serviceName, localIP, localPort, remotePort, len(f.tcpProxies))
 
 	// 停止当前FRP客户端以触发重启
@@ -470,7 +470,7 @@ func (f *FRPManager) removeTCPProxyInternal(serviceName string) error {
 	delete(f.tcpProxies, serviceName)
 	f.needRestart = true
 
-	logger.Infof("隧道 TCP代理已删除: %s (剩余: %d个)", serviceName, len(f.tcpProxies))
+	logger.Debugf("隧道 TCP代理已删除: %s (剩余: %d个)", serviceName, len(f.tcpProxies))
 
 	// 停止当前FRP客户端以触发重启
 	if f.service != nil {
@@ -613,7 +613,7 @@ func (f *FRPManager) SetToken(token string) {
 	f.token = token
 	f.connMutex.Unlock()
 
-	logger.Infof("隧道 Token 已设置: %s...", token[:16])
+	logger.Debugf("隧道 Token 已设置: %s...", token[:16])
 
 	// 如果客户端正在运行，重启以应用新 Token
 	f.mutex.Lock()
@@ -630,7 +630,7 @@ func (f *FRPManager) SetServerURL(url string) {
 	f.serverURL = url
 	f.connMutex.Unlock()
 
-	logger.Infof("隧道服务器 URL 已设置: %s", url)
+	logger.Debugf("隧道服务器 URL 已设置: %s", url)
 
 	// 如果客户端正在运行，重启以应用新配置
 	f.mutex.Lock()
@@ -647,7 +647,7 @@ func (f *FRPManager) SetServerPort(port int) {
 	f.serverPort = port
 	f.connMutex.Unlock()
 
-	logger.Infof("隧道服务器端口已设置: %d", port)
+	logger.Debugf("隧道服务器端口已设置: %d", port)
 
 	// 如果客户端正在运行，重启以应用新配置
 	f.mutex.Lock()
@@ -671,7 +671,7 @@ func (f *FRPManager) Stop() {
 	f.mutex.Unlock()
 
 	f.wg.Wait()
-	logger.Info("隧道管理器已停止")
+	logger.Info("客户端管理器已停止")
 }
 
 // IsConnected 检查FRP客户端是否已连接
