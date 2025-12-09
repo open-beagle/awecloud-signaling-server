@@ -357,7 +357,7 @@ visitorConfig := &v1.STCPVisitorConfig{
         Name:       instanceName + "-visitor",
         Type:       "stcp",
         ServerName: instanceName,  // 对应 Agent 端的 STCP Proxy 名称
-        BindAddr:   "127.0.0.1",
+        BindAddr:   "0.0.0.0",     // 允许局域网访问
         BindPort:   localPort,
     },
     SecretKey: secretKey,  // 从 Server 获取
@@ -606,9 +606,9 @@ Desktop 使用本地配置文件存储用户设置：
 
 ### 10.3 本地端口安全
 
-- 默认只监听 127.0.0.1
-- 不允许外部访问
-- 端口冲突检测
+- 默认监听 0.0.0.0（允许局域网访问）
+- 支持端口冲突检测
+- 通过STCP隧道加密保护数据安全
 
 ## 11. 性能优化
 

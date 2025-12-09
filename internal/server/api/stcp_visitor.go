@@ -76,7 +76,6 @@ func CreateSTCPVisitor(c *gin.Context) {
 		VisitorName string `json:"visitor_name" binding:"required"`
 		AgentName   string `json:"agent_name" binding:"required"`
 		ServerName  string `json:"server_name" binding:"required"`
-		SecretKey   string `json:"secret_key" binding:"required"`
 		BindAddr    string `json:"bind_addr"`
 		BindPort    int    `json:"bind_port" binding:"required"`
 		Description string `json:"description"`
@@ -119,17 +118,27 @@ func CreateSTCPVisitor(c *gin.Context) {
 		return
 	}
 
-	// 设置默认值
-	if req.BindAddr == "" {
-		req.BindAddr = "127.0.0.1"
+	// 查询目标STCP实例以获取密钥
+	var stcpInstance model.STCPInstance
+	if err := db.DB.Where("instance_name = ?", req.ServerName).First(&stcpInstance).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "目标STCP服务不存在",
+		})
+		return
 	}
 
-	// 创建STCP访问
+	// 设置默认值
+	if req.BindAddr == "" {
+		req.BindAddr = "0.0.0.0"
+	}
+
+	// 创建STCP访问，使用从STCP实例获取的密钥
 	visitor := model.STCPVisitor{
 		VisitorName: req.VisitorName,
 		AgentName:   req.AgentName,
 		ServerName:  req.ServerName,
-		SecretKey:   req.SecretKey,
+		SecretKey:   stcpInstance.SecretKey,
 		BindAddr:    req.BindAddr,
 		BindPort:    req.BindPort,
 		Description: req.Description,

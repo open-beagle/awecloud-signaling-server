@@ -22,14 +22,9 @@
         <div class="form-tip">填写目标Agent上的STCP实例名称</div>
       </el-form-item>
 
-      <el-form-item label="密钥" prop="secret_key">
-        <el-input v-model="form.secret_key" type="password" show-password placeholder="与目标服务的密钥一致" />
-        <div class="form-tip">必须与目标STCP服务的密钥完全一致</div>
-      </el-form-item>
-
       <el-form-item label="绑定地址" prop="bind_addr">
         <el-input v-model="form.bind_addr" placeholder="本地绑定地址" />
-        <div class="form-tip">默认 127.0.0.1，仅本机访问</div>
+        <div class="form-tip">默认 0.0.0.0，允许局域网访问</div>
       </el-form-item>
 
       <el-form-item label="绑定端口" prop="bind_port">
@@ -71,8 +66,7 @@ const form = reactive({
   visitor_name: '',
   agent_name: '',
   server_name: '',
-  secret_key: '',
-  bind_addr: '127.0.0.1',
+  bind_addr: '0.0.0.0',
   bind_port: null,
   description: ''
 })
@@ -86,9 +80,6 @@ const rules = {
   ],
   server_name: [
     { required: true, message: '请输入目标服务名称', trigger: 'blur' }
-  ],
-  secret_key: [
-    { required: true, message: '请输入密钥', trigger: 'blur' }
   ],
   bind_addr: [
     { required: true, message: '请输入绑定地址', trigger: 'blur' }

@@ -21,8 +21,8 @@ CREATE TABLE stcp_visitors (
     visitor_name TEXT NOT NULL,              -- visitor名称（唯一标识）
     agent_id INTEGER NOT NULL,               -- 所属Agent ID
     server_name TEXT NOT NULL,               -- 要访问的STCP服务名称
-    secret_key TEXT NOT NULL,                -- STCP密钥（与server端一致）
-    bind_addr TEXT DEFAULT '127.0.0.1',      -- 本地绑定地址
+    secret_key TEXT NOT NULL,                -- STCP密钥（自动从目标STCP实例获取）
+    bind_addr TEXT DEFAULT '0.0.0.0',        -- 本地绑定地址（允许局域网访问）
     bind_port INTEGER NOT NULL,              -- 本地绑定端口
     description TEXT,                        -- 描述
     enabled BOOLEAN DEFAULT false,           -- 是否启用
@@ -54,8 +54,7 @@ POST /api/v1/admin/stcp-visitors
     "visitor_name": "访问socks5",
     "agent_id": 2,
     "server_name": "socks5",
-    "secret_key": "xxx",
-    "bind_addr": "127.0.0.1",
+    "bind_addr": "0.0.0.0",
     "bind_port": 1080,
     "description": "访问Agent1的socks5服务"
 }
@@ -179,9 +178,8 @@ bind_port = 1080
 **创建对话框**：
 - 访问名称（必填）
 - 所属Agent（下拉选择）
-- 目标STCP服务名称（必填）
-- 密钥（必填，与server端一致）
-- 本地绑定地址（默认127.0.0.1）
+- 目标STCP服务名称（必填，系统自动从该实例获取密钥）
+- 本地绑定地址（默认0.0.0.0，允许局域网访问）
 - 本地绑定端口（必填）
 - 描述（可选）
 

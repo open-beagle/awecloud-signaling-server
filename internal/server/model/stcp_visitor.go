@@ -13,7 +13,7 @@ type STCPVisitor struct {
 	AgentName   string         `json:"agent_name" gorm:"uniqueIndex:idx_agent_visitor;not null;index"`
 	ServerName  string         `json:"server_name" gorm:"not null"`
 	SecretKey   string         `json:"secret_key" gorm:"not null"`
-	BindAddr    string         `json:"bind_addr" gorm:"default:'127.0.0.1'"`
+	BindAddr    string         `json:"bind_addr" gorm:"default:'0.0.0.0'"`
 	BindPort    int            `json:"bind_port" gorm:"not null"`
 	Description string         `json:"description"`
 	Enabled     bool           `json:"enabled" gorm:"default:false;index"`
