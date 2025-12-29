@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: agent
-          image: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.1
+          image: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.2
           imagePullPolicy: Always
           env:
             # Agent 标识（必需）

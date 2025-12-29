@@ -6,7 +6,7 @@ on:
       - main
 
 env:
-  BUILD_VERSION: v0.1.1
+  BUILD_VERSION: v0.1.2
 
 jobs:
   build:

@@ -100,22 +100,22 @@ kubectl logs -f -n awecloud deployment/awecloud-signaling-agent
 
 ## 镜像版本
 
-当前使用的镜像版本：`v0.1.1`
+当前使用的镜像版本：`v0.1.2`
 
-- Server: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.1`
-- Agent: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.1`
+- Server: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.2`
+- Agent: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.2`
 
 ## 更新镜像
 
 ```bash
 # 更新 Server
 kubectl set image deployment/awecloud-signaling-server \
-  server=registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.1 \
+  server=registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.2 \
   -n awecloud
 
 # 更新 Agent
 kubectl set image deployment/awecloud-signaling-agent \
-  agent=registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.1 \
+  agent=registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.2 \
   -n awecloud
 ```
 
