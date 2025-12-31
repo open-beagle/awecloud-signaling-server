@@ -209,21 +209,39 @@ func (s *AgentServiceServer) SendCommand(agentID int64, cmd *pb.Command) error {
 }
 
 // IsAgentOnline 检查Agent是否在线
+// 优先检查 gRPC 流连接，如果流不存在则检查数据库心跳时间
 func (s *AgentServiceServer) IsAgentOnline(agentID int64) bool {
+	// 首先检查是否有活跃的 gRPC 流连接
 	s.streamsMutex.RLock()
-	defer s.streamsMutex.RUnlock()
-	_, exists := s.agentStreams[agentID]
+	_, streamExists := s.agentStreams[agentID]
+	s.streamsMutex.RUnlock()
 
-	// 调试日志：显示所有在线的Agent
-	if !exists {
-		onlineAgents := make([]int64, 0, len(s.agentStreams))
-		for id := range s.agentStreams {
-			onlineAgents = append(onlineAgents, id)
-		}
-		logger.Debugf("Agent %d 不在线，当前在线的Agent: %v", agentID, onlineAgents)
+	if streamExists {
+		return true
 	}
 
-	return exists
+	// 如果没有流连接，检查数据库中的心跳时间
+	// 如果最近 60 秒内有心跳，认为 Agent 在线
+	var agent model.Agent
+	if err := db.DB.First(&agent, agentID).Error; err != nil {
+		logger.Debugf("Agent %d 不存在: %v", agentID, err)
+		return false
+	}
+
+	if agent.LastHeartbeat == nil {
+		logger.Debugf("Agent %d 从未发送过心跳", agentID)
+		return false
+	}
+
+	// 检查心跳是否在 60 秒内
+	heartbeatAge := time.Since(*agent.LastHeartbeat)
+	isOnline := heartbeatAge < 60*time.Second
+
+	if !isOnline {
+		logger.Debugf("Agent %d 心跳超时: 最后心跳 %v 前", agentID, heartbeatAge)
+	}
+
+	return isOnline
 }
 
 // syncSTCPInstances 同步Agent的所有STCP实例

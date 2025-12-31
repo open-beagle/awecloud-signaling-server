@@ -76,6 +76,7 @@ docker build -f .beagle/server.dockerfile \
   --build-arg AUTHOR=${AUTHOR} \
   --build-arg VERSION=${BUILD_VERSION} \
   -t ${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION} \
+  --push \
   .
 
 # 构建 Agent 镜像
@@ -84,23 +85,9 @@ docker build -f .beagle/agent.dockerfile \
   --build-arg AUTHOR=${AUTHOR} \
   --build-arg VERSION=${BUILD_VERSION} \
   -t ${REGISTRY}/awecloud-signaling-agent:${BUILD_VERSION} \
+  --push \
   .
 
-# 查看镜像
-docker images | grep awecloud-signaling
-```
-
-### 3. 推送镜像
-
-```bash
-# 登录阿里云容器镜像服务
-docker login registry.cn-qingdao.aliyuncs.com
-
-# 推送 Server 镜像
-docker push registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.2
-
-# 推送 Agent 镜像
-docker push registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.2
 ```
 
 ## GitHub Actions 自动构建
