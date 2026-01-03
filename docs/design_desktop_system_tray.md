@@ -2,46 +2,40 @@
 
 ## 1. 概述
 
-为 Desktop 客户端添加系统托盘功能，实现点击窗口右上角最小化按钮时，窗口隐藏到系统托盘区域。
+为 Desktop 客户端添加系统托盘功能，实现点击窗口关闭按钮时隐藏到系统托盘。
 
 **目标平台**: Windows、macOS、Linux
 
 **核心功能**:
 
-1. 点击右上角最小化按钮 → 窗口隐藏到系统托盘
-2. 点击右上角关闭按钮 → 直接退出应用
-3. 双击/单击托盘图标 → 恢复窗口显示
+1. 点击右上角关闭按钮 → 窗口隐藏到系统托盘
+2. 点击右上角最小化按钮 → 正常最小化到任务栏
+3. 单击/双击托盘图标 → 恢复窗口显示
 4. 托盘图标右键菜单 → 显示窗口 / 退出
 
 ## 2. 技术方案
 
-### 2.1 Wails v2 系统托盘支持现状
+### 2.1 采用 Wails v3
 
-根据 [Wails GitHub Issue #1521](https://github.com/wailsapp/wails/issues/1521)：
+Wails v3 原生支持系统托盘，无需第三方库。
 
-- **Wails v2** 没有原生系统托盘支持
-- **Wails v3** 已实现原生系统托盘（标签：`Implemented in v3`）
-- **Wails v2 的解决方案**：使用第三方库 `energye/systray` 或 `fyne-io/systray`
+**官方文档**: <https://v3alpha.wails.io/features/menus/systray/>
 
-### 2.2 推荐方案
+**平台支持**:
 
-使用 **`github.com/energye/systray`** 库，这是社区验证过的方案，与 Wails v2 集成良好。
+| 平台    | 支持状态                      |
+| ------- | ----------------------------- |
+| Windows | ✅ 完全支持                   |
+| macOS   | ✅ 完全支持                   |
+| Linux   | ✅ 支持（部分 DE 可能不支持） |
 
-| 平台    | 支持状态                                                      |
-| ------- | ------------------------------------------------------------- |
-| Windows | ✅ 完全支持                                                   |
-| Linux   | ✅ 支持（需要 DBus/AppIndicator）                             |
-| macOS   | ⚠️ 有冲突（AppDelegate 重复定义），需要使用 `fyne-io/systray` |
+### 2.2 图标要求
 
-### 2.3 依赖安装
-
-```bash
-# Windows/Linux
-go get github.com/energye/systray
-
-# macOS（如需支持）
-go get fyne.io/systray
-```
+| 平台    | 尺寸           | 格式     | 说明                       |
+| ------- | -------------- | -------- | -------------------------- |
+| Windows | 16x16 或 32x32 | PNG, ICO | 通知区域                   |
+| macOS   | 18x18 到 22x22 | PNG      | 菜单栏，推荐 Template 图标 |
+| Linux   | 22x22 到 48x48 | PNG, SVG | 因 DE 而异                 |
 
 ## 3. 实现方案
 
@@ -49,122 +43,99 @@ go get fyne.io/systray
 
 ```
 desktop/
-├── internal/
-│   └── tray/
-│       ├── tray.go           # 系统托盘管理
-│       └── icon.go           # 托盘图标资源（嵌入）
-├── build/
-│   └── tray/
-│       ├── icon.ico          # Windows 托盘图标
-│       └── icon.png          # Linux 托盘图标
+├── assets/
+│   ├── icon.png          # 通用托盘图标
+│   └── icon-dark.png     # macOS 深色模式图标（可选）
+├── main.go               # 应用入口
+└── app.go                # 应用逻辑
 ```
 
-### 3.2 核心代码示例
+### 3.2 核心代码
 
 ```go
 package main
 
 import (
-    "context"
-    "os"
-
-    "github.com/energye/systray"
-    "github.com/wailsapp/wails/v2"
-    "github.com/wailsapp/wails/v2/pkg/options"
-    "github.com/wailsapp/wails/v2/pkg/runtime"
+    _ "embed"
+    "github.com/wailsapp/wails/v3/pkg/application"
 )
 
-//go:embed build/tray/icon.ico
-var trayIcon []byte
+//go:embed assets/icon.png
+var icon []byte
 
-type App struct {
-    ctx context.Context
-}
+func main() {
+    app := application.New(application.Options{
+        Name: "AWECloud Signaling",
+        Mac: application.MacOptions{
+            ApplicationShouldTerminateAfterLastWindowClosed: false,
+        },
+    })
 
-func (a *App) startup(ctx context.Context) {
-    a.ctx = ctx
-    // 启动系统托盘
-    go systray.Run(a.onTrayReady, a.onTrayExit)
-}
+    // 创建系统托盘
+    systray := app.NewSystemTray()
+    systray.SetIcon(icon)
+    systray.SetLabel("Signaling")
 
-func (a *App) onTrayReady() {
-    systray.SetIcon(trayIcon)
-    systray.SetTitle("AWECloud Signaling")
-    systray.SetTooltip("AWECloud Signaling Desktop")
-
-    // 添加菜单项
-    showItem := systray.AddMenuItem("显示窗口", "显示主窗口")
-    systray.AddSeparator()
-    exitItem := systray.AddMenuItem("退出", "退出应用")
+    // 创建托盘菜单
+    menu := app.NewMenu()
+    menu.Add("显示窗口").OnClick(func(ctx *application.Context) {
+        window.Show()
+        window.SetFocus()
+    })
+    menu.AddSeparator()
+    menu.Add("退出").OnClick(func(ctx *application.Context) {
+        app.Quit()
+    })
+    systray.SetMenu(menu)
 
     // 单击托盘图标显示窗口
-    systray.SetOnClick(func() {
-        runtime.WindowShow(a.ctx)
+    systray.OnClick(func() {
+        window.Show()
+        window.SetFocus()
     })
 
     // 右键显示菜单
-    systray.SetOnRClick(func(menu systray.IMenu) {
-        menu.ShowMenu()
+    systray.OnRightClick(func() {
+        systray.OpenMenu()
     })
 
-    // 菜单项点击事件
-    showItem.Click(func() {
-        runtime.WindowShow(a.ctx)
+    // 创建主窗口（默认隐藏）
+    window := app.NewWebviewWindow(application.WebviewWindowOptions{
+        Title:  "AWECloud Signaling",
+        Width:  1024,
+        Height: 768,
+        Hidden: true,
     })
 
-    exitItem.Click(func() {
-        systray.Quit()
-        runtime.Quit(a.ctx)
+    // 窗口关闭时隐藏到托盘
+    window.OnWindowEvent(events.Common.WindowClosing, func(e *application.WindowEvent) {
+        e.Cancel() // 阻止关闭
+        window.Hide()
     })
-}
 
-func (a *App) onTrayExit() {
-    // 清理资源
-}
-
-func main() {
-    app := &App{}
-
-    wails.Run(&options.App{
-        Title:             "awecloud-signaling",
-        Width:             1024,
-        Height:            768,
-        HideWindowOnClose: true,  // 关闭时隐藏而不是退出
-        OnStartup:         app.startup,
-        OnShutdown:        app.shutdown,
-        Bind:              []interface{}{app},
-    })
+    app.Run()
 }
 ```
 
-### 3.3 前端配合
+### 3.3 托盘菜单设计
 
-前端需要拦截最小化按钮，调用后端方法隐藏窗口：
-
-```typescript
-// 最小化到托盘
-const minimizeToTray = async () => {
-  await HideWindow(); // 调用后端 runtime.WindowHide()
-};
-```
-
-### 3.4 托盘菜单设计
-
-| 菜单项   | 功能                                     |
-| -------- | ---------------------------------------- |
-| 显示窗口 | 调用 `runtime.WindowShow()`              |
-| 退出     | 调用 `systray.Quit()` + `runtime.Quit()` |
+| 菜单项   | 功能             |
+| -------- | ---------------- |
+| 显示窗口 | 显示并聚焦主窗口 |
+| 退出     | 完全退出应用     |
 
 ## 4. 业务流程
 
-### 4.1 最小化到托盘
+### 4.1 关闭到托盘
 
 ```
-用户点击最小化按钮
+用户点击关闭按钮
     ↓
-前端调用 HideWindow()
+WindowClosing 事件触发
     ↓
-后端调用 runtime.WindowHide()
+调用 e.Cancel() 阻止关闭
+    ↓
+调用 window.Hide()
     ↓
 窗口隐藏，托盘图标保持显示
 ```
@@ -174,58 +145,57 @@ const minimizeToTray = async () => {
 ```
 用户单击托盘图标 / 点击"显示窗口"菜单
     ↓
-systray 回调触发
+OnClick 回调触发
     ↓
-调用 runtime.WindowShow()
+调用 window.Show() + window.SetFocus()
     ↓
-窗口恢复显示
+窗口恢复显示并获得焦点
 ```
 
 ### 4.3 退出应用
 
 ```
-用户点击关闭按钮 / 托盘菜单"退出"
+用户点击托盘菜单"退出"
     ↓
-调用 systray.Quit()
-    ↓
-调用 runtime.Quit()
+调用 app.Quit()
     ↓
 应用退出
 ```
 
-## 5. 实现计划
+## 5. macOS 特殊处理
 
-| 阶段    | 内容                                     | 工时   |
-| ------- | ---------------------------------------- | ------ |
-| Phase 1 | 集成 energye/systray，实现 Windows 托盘  | 0.5 天 |
-| Phase 2 | 前端拦截最小化按钮                       | 0.5 天 |
-| Phase 3 | Linux 测试和适配                         | 0.5 天 |
-| Phase 4 | macOS 适配（可选，需要 fyne-io/systray） | 0.5 天 |
+```go
+// 使用 Template 图标（自动适应深色模式）
+systray.SetTemplateIcon(iconBytes)
 
-## 6. 注意事项
+// 设置标签（显示在图标旁边）
+systray.SetLabel("Signaling")
 
-1. **macOS 兼容性**：`energye/systray` 与 Wails 在 macOS 上有 AppDelegate 冲突，需要使用 `fyne-io/systray` 的修改版本
-2. **Linux 依赖**：部分 Linux 发行版需要安装 AppIndicator 支持
-3. **图标格式**：Windows 用 .ico，Linux 用 .png
-4. **goroutine**：`systray.Run()` 需要在独立 goroutine 中运行
+// 设置图标位置
+systray.SetIconPosition(application.IconPositionRight)
 
-## 7. 当前状态
+// 阻止最后一个窗口关闭时退出应用
+Mac: application.MacOptions{
+    ApplicationShouldTerminateAfterLastWindowClosed: false,
+}
+```
 
-**状态**: 待实现
+## 6. 实现计划
 
-当前实现：
+| 阶段    | 内容               | 工时   |
+| ------- | ------------------ | ------ |
+| Phase 1 | 升级 Wails v2 → v3 | 1-2 天 |
+| Phase 2 | 实现系统托盘功能   | 0.5 天 |
+| Phase 3 | 测试三平台         | 0.5 天 |
 
-- ✅ 点击关闭按钮直接退出
-- ✅ 点击最小化按钮正常最小化到任务栏
-- ❌ 系统托盘功能
+详细升级指南见 `docs/changes_wails_v3.md`
 
-## 8. 参考资料
+## 7. 参考资料
 
-- [Wails Issue #1521 - Support Tray Menus](https://github.com/wailsapp/wails/issues/1521)
-- [energye/systray](https://github.com/energye/systray)
-- [fyne-io/systray](https://github.com/fyne-io/systray)
+- [Wails v3 System Tray 文档](https://wails.io/docs/learn/systray)
+- [Wails v3 迁移指南](https://wails.io/docs/guides/migrating)
 
 ---
 
-**文档版本**: v1.3
-**更新日期**: 2024-12-28
+**文档版本**: v2.0
+**更新日期**: 2025-12-29

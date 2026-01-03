@@ -80,6 +80,9 @@
 
 **设计变更** - 重要设计决策的记录
 
+- 2025-12-29: Wails v3 升级计划（详见 `changes_wails_v3.md`）
+  - 为实现系统托盘功能，升级 Wails v2 → v3
+  - 设计文档：`design_desktop_system_tray.md`
 - 2025-11-27: HTTP/2 统一端口设计
   - 将 HTTP 和 gRPC 合并到端口 8080
   - 详细的变更原因和实施计划
