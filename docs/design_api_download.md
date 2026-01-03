@@ -21,12 +21,14 @@ Server 提供智能的桌面客户端下载 API，能够：
 ```
 your-storage-path/
 ├── version.json                                      # 最新版本信息
-├── awecloud-signaling-v1.0.x-windows-amd64.exe     # 版本文件
-├── awecloud-signaling-v1.0.x-linux-amd64
-├── awecloud-signaling-v1.0.x-darwin-universal.zip
-├── awecloud-signaling-v0.2.0-windows-amd64.exe     # 其他版本
+├── awecloud-signaling-v1.0.x-windows-amd64.exe      # Windows x64
+├── awecloud-signaling-v1.0.x-linux-amd64            # Linux x64
+├── awecloud-signaling-v1.0.x-darwin-arm64           # macOS Apple Silicon
+├── awecloud-signaling-v1.0.x-darwin-amd64           # macOS Intel
+├── awecloud-signaling-v0.2.0-windows-amd64.exe      # 其他版本
 ├── awecloud-signaling-v0.2.0-linux-amd64
-└── awecloud-signaling-v0.2.0-darwin-universal.zip
+├── awecloud-signaling-v0.2.0-darwin-arm64
+└── awecloud-signaling-v0.2.0-darwin-amd64
 ```
 
 ## API 端点
@@ -114,20 +116,36 @@ https://your-server.example.com/api/v1/public/download/desktop/direct?os=macos
       "arch": "amd64",
       "build_date": "2025-12-05T10:30:00Z"
     },
-    "darwin": {
+    "darwin-arm64": {
       "version": "v1.0.x",
-      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-universal.zip",
-      "filename": "awecloud-signaling-v1.0.x-darwin-universal.zip",
+      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-arm64",
+      "filename": "awecloud-signaling-v1.0.x-darwin-arm64",
       "os": "darwin",
-      "arch": "universal",
+      "arch": "arm64",
       "build_date": "2025-12-05T10:30:00Z"
     },
-    "macos": {
+    "darwin-amd64": {
       "version": "v1.0.x",
-      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-universal.zip",
-      "filename": "awecloud-signaling-v1.0.x-darwin-universal.zip",
+      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-amd64",
+      "filename": "awecloud-signaling-v1.0.x-darwin-amd64",
       "os": "darwin",
-      "arch": "universal",
+      "arch": "amd64",
+      "build_date": "2025-12-05T10:30:00Z"
+    },
+    "macos-arm64": {
+      "version": "v1.0.x",
+      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-arm64",
+      "filename": "awecloud-signaling-v1.0.x-darwin-arm64",
+      "os": "darwin",
+      "arch": "arm64",
+      "build_date": "2025-12-05T10:30:00Z"
+    },
+    "macos-amd64": {
+      "version": "v1.0.x",
+      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-amd64",
+      "filename": "awecloud-signaling-v1.0.x-darwin-amd64",
+      "os": "darwin",
+      "arch": "amd64",
       "build_date": "2025-12-05T10:30:00Z"
     }
   }

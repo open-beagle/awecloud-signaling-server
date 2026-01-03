@@ -112,10 +112,19 @@ const getPlatformName = (platform: string) => {
 
 const getArchName = (arch: string) => {
   const names: Record<string, string> = {
-    amd64: '64位',
-    arm64: 'ARM64'
+    amd64: '64位 (Intel)',
+    arm64: 'ARM64 (Apple Silicon)',
+    universal: '通用版'
   }
   return names[arch] || arch
+}
+
+const isRecommended = (item: DownloadItem): boolean => {
+  if (recommendedOS.value === 'darwin') {
+    // macOS 默认推荐 arm64
+    return item.os === 'darwin' && item.arch === 'arm64'
+  }
+  return item.os === recommendedOS.value
 }
 
 const loadDownloads = async () => {
@@ -135,18 +144,26 @@ const loadDownloads = async () => {
       const downloadMap = res.downloads
       const downloadList: DownloadItem[] = []
       
-      // 优先添加推荐的系统
-      if (downloadMap[recommendedOS.value]) {
-        downloadList.push(downloadMap[recommendedOS.value])
+      // 定义显示顺序（去重，只显示主要平台）
+      const platformOrder = [
+        'windows',
+        'darwin-arm64',  // macOS Apple Silicon
+        'darwin-amd64',  // macOS Intel
+        'linux'
+      ]
+      
+      // 按顺序添加，推荐的放前面
+      const recommendedKey = recommendedOS.value === 'darwin' ? 'darwin-arm64' : recommendedOS.value
+      
+      // 先添加推荐的
+      if (downloadMap[recommendedKey]) {
+        downloadList.push(downloadMap[recommendedKey])
       }
       
-      // 添加其他系统
-      const otherSystems = ['windows', 'darwin', 'linux'].filter(
-        os => os !== recommendedOS.value && downloadMap[os]
-      )
-      otherSystems.forEach(os => {
-        if (downloadMap[os]) {
-          downloadList.push(downloadMap[os])
+      // 添加其他平台
+      platformOrder.forEach(key => {
+        if (key !== recommendedKey && downloadMap[key]) {
+          downloadList.push(downloadMap[key])
         }
       })
       
@@ -169,10 +186,6 @@ const handleDownload = (item: DownloadItem) => {
   // 直接下载文件
   window.location.href = item.download_url
   ElMessage.success('开始下载...')
-}
-
-const isRecommended = (item: DownloadItem): boolean => {
-  return item.os === recommendedOS.value
 }
 
 const goToLogin = () => {

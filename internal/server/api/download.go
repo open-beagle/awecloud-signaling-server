@@ -131,53 +131,78 @@ func getVersionInfo(baseURL string) *VersionInfo {
 	return versionInfo
 }
 
-// detectOS 从 User-Agent 或查询参数检测操作系统
-func detectOS(c *gin.Context) string {
+// detectOS 从 User-Agent 或查询参数检测操作系统和架构
+func detectOS(c *gin.Context) (string, string) {
+	osType := ""
+	arch := "amd64" // 默认架构
+
 	// 优先使用查询参数
 	if osParam := c.Query("os"); osParam != "" {
 		osParam = strings.ToLower(osParam)
 		// 标准化 macOS 别名
 		if osParam == "macos" || osParam == "mac" {
-			return "darwin"
+			osType = "darwin"
+		} else {
+			osType = osParam
 		}
-		return osParam
 	}
 
-	// 从 User-Agent 检测
-	userAgent := strings.ToLower(c.GetHeader("User-Agent"))
-
-	if strings.Contains(userAgent, "windows") || strings.Contains(userAgent, "win64") || strings.Contains(userAgent, "win32") {
-		return "windows"
-	}
-	if strings.Contains(userAgent, "macintosh") || strings.Contains(userAgent, "mac os x") || strings.Contains(userAgent, "darwin") {
-		return "darwin"
-	}
-	if strings.Contains(userAgent, "linux") || strings.Contains(userAgent, "x11") {
-		return "linux"
+	// 检查架构参数
+	if archParam := c.Query("arch"); archParam != "" {
+		arch = strings.ToLower(archParam)
 	}
 
-	// 默认返回 windows
-	return "windows"
+	// 如果没有指定 OS，从 User-Agent 检测
+	if osType == "" {
+		userAgent := strings.ToLower(c.GetHeader("User-Agent"))
+
+		if strings.Contains(userAgent, "windows") || strings.Contains(userAgent, "win64") || strings.Contains(userAgent, "win32") {
+			osType = "windows"
+		} else if strings.Contains(userAgent, "macintosh") || strings.Contains(userAgent, "mac os x") || strings.Contains(userAgent, "darwin") {
+			osType = "darwin"
+			// 检测 macOS 架构
+			if strings.Contains(userAgent, "arm64") || strings.Contains(userAgent, "aarch64") {
+				arch = "arm64"
+			}
+		} else if strings.Contains(userAgent, "linux") || strings.Contains(userAgent, "x11") {
+			osType = "linux"
+		} else {
+			// 默认返回 windows
+			osType = "windows"
+		}
+	}
+
+	return osType, arch
 }
 
 // buildDownloadInfo 构建下载信息
-func buildDownloadInfo(baseURL, osType string, versionInfo *VersionInfo) DownloadInfo {
+func buildDownloadInfo(baseURL, osType, arch string, versionInfo *VersionInfo) DownloadInfo {
 	version := versionInfo.Version
 	buildDate := versionInfo.BuildDate
-	arch := "amd64"
+
+	// 默认架构
+	if arch == "" {
+		arch = "amd64"
+	}
 
 	var filename string
 	switch osType {
 	case "windows":
+		arch = "amd64" // Windows 只支持 amd64
 		filename = "awecloud-signaling-" + version + "-windows-" + arch + ".exe"
 	case "linux":
+		arch = "amd64" // Linux 只支持 amd64
 		filename = "awecloud-signaling-" + version + "-linux-" + arch
 	case "darwin":
-		arch = "universal"
-		filename = "awecloud-signaling-" + version + "-darwin-" + arch + ".zip"
+		// macOS 支持 arm64 和 amd64
+		if arch != "arm64" {
+			arch = "amd64"
+		}
+		filename = "awecloud-signaling-" + version + "-darwin-" + arch
 	default:
 		filename = "awecloud-signaling-" + version + "-windows-amd64.exe"
 		osType = "windows"
+		arch = "amd64"
 	}
 
 	// 确保 baseURL 以斜杠结尾
@@ -200,14 +225,22 @@ func buildAllDownloads(baseURL string, versionInfo *VersionInfo) map[string]Down
 	downloads := make(map[string]DownloadInfo)
 
 	// Windows
-	downloads["windows"] = buildDownloadInfo(baseURL, "windows", versionInfo)
+	downloads["windows"] = buildDownloadInfo(baseURL, "windows", "amd64", versionInfo)
 
 	// Linux
-	downloads["linux"] = buildDownloadInfo(baseURL, "linux", versionInfo)
+	downloads["linux"] = buildDownloadInfo(baseURL, "linux", "amd64", versionInfo)
 
-	// macOS (darwin)
-	downloads["darwin"] = buildDownloadInfo(baseURL, "darwin", versionInfo)
-	downloads["macos"] = buildDownloadInfo(baseURL, "darwin", versionInfo) // 别名
+	// macOS (darwin) - arm64 (Apple Silicon)
+	downloads["darwin-arm64"] = buildDownloadInfo(baseURL, "darwin", "arm64", versionInfo)
+	downloads["macos-arm64"] = buildDownloadInfo(baseURL, "darwin", "arm64", versionInfo) // 别名
+
+	// macOS (darwin) - amd64 (Intel)
+	downloads["darwin-amd64"] = buildDownloadInfo(baseURL, "darwin", "amd64", versionInfo)
+	downloads["macos-amd64"] = buildDownloadInfo(baseURL, "darwin", "amd64", versionInfo) // 别名
+
+	// 兼容旧的 darwin/macos 键（默认返回 arm64）
+	downloads["darwin"] = buildDownloadInfo(baseURL, "darwin", "arm64", versionInfo)
+	downloads["macos"] = buildDownloadInfo(baseURL, "darwin", "arm64", versionInfo)
 
 	return downloads
 }
@@ -229,12 +262,12 @@ func (a *DownloadAPI) GetDesktopDownload(c *gin.Context) {
 	// 获取版本信息
 	versionInfo := getVersionInfo(baseURL)
 
-	// 检测操作系统
-	osType := detectOS(c)
-	log.Printf("[Download] 检测到操作系统: %s, User-Agent: %s", osType, c.GetHeader("User-Agent"))
+	// 检测操作系统和架构
+	osType, arch := detectOS(c)
+	log.Printf("[Download] 检测到操作系统: %s, 架构: %s, User-Agent: %s", osType, arch, c.GetHeader("User-Agent"))
 
 	// 构建下载信息
-	downloadInfo := buildDownloadInfo(baseURL, osType, versionInfo)
+	downloadInfo := buildDownloadInfo(baseURL, osType, arch, versionInfo)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":      true,
@@ -262,11 +295,11 @@ func (a *DownloadAPI) GetDesktopDownloadDirect(c *gin.Context) {
 	// 获取版本信息
 	versionInfo := getVersionInfo(baseURL)
 
-	// 检测操作系统
-	osType := detectOS(c)
+	// 检测操作系统和架构
+	osType, arch := detectOS(c)
 
 	// 构建下载信息
-	downloadInfo := buildDownloadInfo(baseURL, osType, versionInfo)
+	downloadInfo := buildDownloadInfo(baseURL, osType, arch, versionInfo)
 
 	// 重定向到下载链接
 	c.Redirect(http.StatusFound, downloadInfo.DownloadURL)
