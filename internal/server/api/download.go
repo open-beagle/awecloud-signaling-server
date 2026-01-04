@@ -198,7 +198,7 @@ func buildDownloadInfo(baseURL, osType, arch string, versionInfo *VersionInfo) D
 		if arch != "arm64" {
 			arch = "amd64"
 		}
-		filename = "awecloud-signaling-" + version + "-darwin-" + arch
+		filename = "awecloud-signaling-" + version + "-darwin-" + arch + ".zip"
 	default:
 		filename = "awecloud-signaling-" + version + "-windows-amd64.exe"
 		osType = "windows"
