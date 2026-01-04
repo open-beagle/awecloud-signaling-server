@@ -23,13 +23,15 @@ your-storage-path/
 ├── version.json                                      # 最新版本信息
 ├── awecloud-signaling-v1.0.x-windows-amd64.exe      # Windows x64
 ├── awecloud-signaling-v1.0.x-linux-amd64            # Linux x64
-├── awecloud-signaling-v1.0.x-darwin-arm64           # macOS Apple Silicon
-├── awecloud-signaling-v1.0.x-darwin-amd64           # macOS Intel
+├── awecloud-signaling-v1.0.x-darwin-arm64.zip       # macOS Apple Silicon (.app 压缩包)
+├── awecloud-signaling-v1.0.x-darwin-amd64.zip       # macOS Intel (.app 压缩包)
 ├── awecloud-signaling-v0.2.0-windows-amd64.exe      # 其他版本
 ├── awecloud-signaling-v0.2.0-linux-amd64
-├── awecloud-signaling-v0.2.0-darwin-arm64
-└── awecloud-signaling-v0.2.0-darwin-amd64
+├── awecloud-signaling-v0.2.0-darwin-arm64.zip
+└── awecloud-signaling-v0.2.0-darwin-amd64.zip
 ```
+
+> **macOS 打包说明**：macOS 版本打包为 `.app.zip` 格式，用户下载后解压即可双击运行，无需命令行操作。
 
 ## API 端点
 
@@ -118,32 +120,32 @@ https://your-server.example.com/api/v1/public/download/desktop/direct?os=macos
     },
     "darwin-arm64": {
       "version": "v1.0.x",
-      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-arm64",
-      "filename": "awecloud-signaling-v1.0.x-darwin-arm64",
+      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-arm64.zip",
+      "filename": "awecloud-signaling-v1.0.x-darwin-arm64.zip",
       "os": "darwin",
       "arch": "arm64",
       "build_date": "2025-12-05T10:30:00Z"
     },
     "darwin-amd64": {
       "version": "v1.0.x",
-      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-amd64",
-      "filename": "awecloud-signaling-v1.0.x-darwin-amd64",
+      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-amd64.zip",
+      "filename": "awecloud-signaling-v1.0.x-darwin-amd64.zip",
       "os": "darwin",
       "arch": "amd64",
       "build_date": "2025-12-05T10:30:00Z"
     },
     "macos-arm64": {
       "version": "v1.0.x",
-      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-arm64",
-      "filename": "awecloud-signaling-v1.0.x-darwin-arm64",
+      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-arm64.zip",
+      "filename": "awecloud-signaling-v1.0.x-darwin-arm64.zip",
       "os": "darwin",
       "arch": "arm64",
       "build_date": "2025-12-05T10:30:00Z"
     },
     "macos-amd64": {
       "version": "v1.0.x",
-      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-amd64",
-      "filename": "awecloud-signaling-v1.0.x-darwin-amd64",
+      "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-darwin-amd64.zip",
+      "filename": "awecloud-signaling-v1.0.x-darwin-amd64.zip",
       "os": "darwin",
       "arch": "amd64",
       "build_date": "2025-12-05T10:30:00Z"
@@ -233,7 +235,10 @@ async function getAllDownloads() {
 4. **缓存策略**:
    - `version.json`：设置较短的缓存时间（如 1 分钟）
    - `*-v0.x.x-*` 文件：可以长期缓存（如 1 年）
-5. **文件大小**: macOS 的 .zip 文件通常比其他平台大，注意下载体验
+5. **文件格式**:
+   - Windows: `.exe` 可执行文件
+   - Linux: 无后缀二进制文件
+   - macOS: `.zip` 压缩包（内含 `.app` 应用程序），用户解压后双击即可运行
 6. **版本归档**: 每次发布都会保留带版本号的文件，方便回滚或下载历史版本
 7. **隐私保护**: 存储地址不会硬编码在代码中，完全由管理员配置
 
