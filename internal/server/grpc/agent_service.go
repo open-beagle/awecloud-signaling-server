@@ -46,7 +46,7 @@ func NewAgentServiceServer(frpToken string, frpPublicURL string, frpPort int) *A
 
 // Register Agent注册
 func (s *AgentServiceServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
-	logger.Infof("Agent注册请求: %s", req.AgentName)
+	logger.Infof("Agent注册请求: %s, version=%s", req.AgentName, req.Version)
 
 	// 查询Agent
 	var agent model.Agent
@@ -58,15 +58,18 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.RegisterReque
 		}, nil
 	}
 
-	// 更新状态为在线
+	// 更新状态为在线，同时更新版本
 	agent.Status = "online"
 	now := time.Now()
 	agent.LastHeartbeat = &now
+	if req.Version != "" {
+		agent.Version = req.Version
+	}
 	if err := db.DB.Save(&agent).Error; err != nil {
 		logger.Infof("更新Agent状态失败: %v", err)
 	}
 
-	logger.Infof("Agent注册成功: %s (ID: %d)", req.AgentName, agent.ID)
+	logger.Infof("Agent注册成功: %s (ID: %d, Version: %s)", req.AgentName, agent.ID, agent.Version)
 
 	// 构建 FRP 连接信息
 	// 如果配置了公网 URL，使用公网 URL；否则返回空字符串和端口
@@ -95,10 +98,13 @@ func (s *AgentServiceServer) Heartbeat(ctx context.Context, req *pb.HeartbeatReq
 		return nil, status.Error(codes.Unauthenticated, "Agent认证失败")
 	}
 
-	// 更新心跳时间
+	// 更新心跳时间和版本
 	now := time.Now()
 	agent.LastHeartbeat = &now
 	agent.Status = "online"
+	if req.Version != "" {
+		agent.Version = req.Version
+	}
 	if err := db.DB.Save(&agent).Error; err != nil {
 		logger.Infof("更新心跳失败: %v", err)
 	}

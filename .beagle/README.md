@@ -21,18 +21,18 @@ scripts/
 
 ```bash
 # 构建前端代码
-BUILD_VERSION=v0.1.2 bash scripts/build_frontend.sh
+BUILD_VERSION=v0.1.3 bash scripts/build_frontend.sh
 
 # 构建后端代码
-# 在 golang:1.24-alpine 容器中构建
-docker pull registry.cn-qingdao.aliyuncs.com/wod/golang:1.24-alpine && \
+# 在 golang:1.25-alpine 容器中构建
+docker pull registry.cn-qingdao.aliyuncs.com/wod/golang:1.25-alpine && \
 docker run --rm \
    -v $(pwd):/go/src/github.com/open-beagle/awecloud-signaling-server \
    -v $HOME/go/pkg:/go/pkg \
    -w /go/src/github.com/open-beagle/awecloud-signaling-server \
-   -e BUILD_VERSION=v0.1.2 \
+   -e BUILD_VERSION=v0.1.3 \
    -e GOARCHS=amd64 \
-   registry.cn-qingdao.aliyuncs.com/wod/golang:1.24-alpine \
+   registry.cn-qingdao.aliyuncs.com/wod/golang:1.25-alpine \
    bash ./.beagle/build.sh
 
 # 输出在 bin/ 目录
@@ -55,7 +55,7 @@ docker run --rm \
 
 # 输出示例：
 # AWECloud Signaling Server
-# Version:    v0.1.2
+# Version:    v0.1.3
 # Git Commit: abc1234
 # Build Date: 2025-11-26_10:30:00
 ```
@@ -66,7 +66,7 @@ docker run --rm \
 
 ```bash
 # 设置版本和镜像仓库
-export BUILD_VERSION=v0.1.2
+export BUILD_VERSION=v0.1.3
 export REGISTRY=registry.cn-qingdao.aliyuncs.com/wod
 export AUTHOR=open-beagle
 
@@ -99,7 +99,7 @@ docker build -f .beagle/agent.dockerfile \
 
 ### 构建流程
 
-1. 使用 `golang:1.24-alpine` 镜像和 `xx-go` 工具交叉编译（amd64 + arm64）
+1. 使用 `golang:1.25-alpine` 镜像和 `xx-go` 工具交叉编译（amd64 + arm64）
    - Server: CGO_ENABLED=1（支持 SQLite）
    - Agent: CGO_ENABLED=0（纯 Go）
 2. 构建 Docker 镜像（amd64 + arm64）
@@ -108,8 +108,8 @@ docker build -f .beagle/agent.dockerfile \
 
 ### 镜像标签
 
-- Server: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.2`
-- Agent: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.2`
+- Server: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.1.3`
+- Agent: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.3`
 
 ## 架构支持
 
@@ -141,7 +141,7 @@ docker build -f .beagle/agent.dockerfile \
 - Y: 次版本号（功能增加）
 - Z: 修订号（bug 修复）
 
-当前版本：`v0.1.2`
+当前版本：`v0.1.3`
 
 ## 注意事项
 

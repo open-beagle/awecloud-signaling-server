@@ -4,6 +4,8 @@ export interface Agent {
   agent_name: string
   description: string
   agent_token: string
+  version: string
+  last_heartbeat: string
   created_at: string
   updated_at: string
   status?: 'online' | 'offline'

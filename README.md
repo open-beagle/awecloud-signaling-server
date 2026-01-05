@@ -29,8 +29,8 @@ awecloud-signaling-server/
 
 ```bash
 # 开发构建（只构建当前架构）
-BUILD_VERSION=v0.1.2 GOARCHS=$(go env GOARCH) bash scripts/build.sh
-BUILD_VERSION=v0.1.2 bash scripts/build_frontend.sh
+BUILD_VERSION=v0.1.3 GOARCHS=$(go env GOARCH) bash scripts/build.sh
+BUILD_VERSION=v0.1.3 bash scripts/build_frontend.sh
 ```
 
 **Desktop 客户端**：
@@ -45,8 +45,8 @@ bash scripts/build_desktop.sh
 
 **前置要求**：
 
-- Server/Agent: Go 1.24+
-- Desktop: Go 1.24+, Node.js 20+, Wails CLI
+- Server/Agent: Go 1.25+
+- Desktop: Go 1.25+, Node.js 20+, Wails CLI
 
 ### 2. 启动 Server
 

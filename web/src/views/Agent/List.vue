@@ -19,6 +19,16 @@
             <StatusTag :status="row.status || 'offline'" />
           </template>
         </el-table-column>
+        <el-table-column prop="version" :label="t('agent.version')" width="100">
+          <template #default="{ row }">
+            <span>{{ row.version || '-' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('agent.lastHeartbeat')" width="120">
+          <template #default="{ row }">
+            <TimeAgo :time="row.last_heartbeat" />
+          </template>
+        </el-table-column>
         <el-table-column :label="t('agent.createdAt')" width="100">
           <template #default="{ row }">
             <TimeAgo :time="row.created_at" />

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -38,9 +39,20 @@ func (a *AgentAPI) List(c *gin.Context) {
 		return
 	}
 
-	// 不返回token
+	// 实时计算在线状态（基于心跳时间，60秒内有心跳认为在线）
+	now := time.Now()
 	for i := range agents {
-		agents[i].AgentToken = ""
+		agents[i].AgentToken = "" // 不返回token
+		if agents[i].LastHeartbeat != nil {
+			heartbeatAge := now.Sub(*agents[i].LastHeartbeat)
+			if heartbeatAge < 60*time.Second {
+				agents[i].Status = "online"
+			} else {
+				agents[i].Status = "offline"
+			}
+		} else {
+			agents[i].Status = "offline"
+		}
 	}
 
 	c.JSON(http.StatusOK, AgentResponse{

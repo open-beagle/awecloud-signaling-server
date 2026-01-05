@@ -87,6 +87,8 @@ export default {
     name: 'Agent Name',
     description: 'Description',
     token: 'Token',
+    version: 'Version',
+    lastHeartbeat: 'Last Online',
     createdAt: 'Created At',
     viewToken: 'View Token',
     regenerateToken: 'Regenerate Token',

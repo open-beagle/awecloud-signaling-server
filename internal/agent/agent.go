@@ -25,7 +25,8 @@ import (
 
 // Agent Agent进程
 type Agent struct {
-	config *config.AgentConfig
+	config  *config.AgentConfig
+	version string // Agent版本
 
 	// gRPC连接
 	grpcConn      *grpc.ClientConn
@@ -75,7 +76,7 @@ type TCPProxy struct {
 }
 
 // NewAgent 创建Agent
-func NewAgent(cfg *config.AgentConfig) (*Agent, error) {
+func NewAgent(cfg *config.AgentConfig, version string) (*Agent, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// 创建FRP管理器
@@ -87,6 +88,7 @@ func NewAgent(cfg *config.AgentConfig) (*Agent, error) {
 
 	return &Agent{
 		config:      cfg,
+		version:     version,
 		commandChan: make(chan *pb.Command, 100),
 		stcpProxies: make(map[string]*STCPProxy),
 		tcpProxies:  make(map[string]*TCPProxy),
@@ -235,11 +237,12 @@ func (a *Agent) connectToServer() error {
 
 // register 注册Agent
 func (a *Agent) register() error {
-	logger.Infof("注册Agent: %s", a.config.Agent.AgentName)
+	logger.Infof("注册Agent: %s (version: %s)", a.config.Agent.AgentName, a.version)
 
 	resp, err := a.grpcClient.Register(a.ctx, &pb.RegisterRequest{
 		AgentName:  a.config.Agent.AgentName,
 		AgentToken: a.config.Agent.AgentToken,
+		Version:    a.version,
 	})
 
 	if err != nil {
@@ -505,6 +508,7 @@ func (a *Agent) sendHeartbeat() error {
 	resp, err := a.grpcClient.Heartbeat(a.ctx, &pb.HeartbeatRequest{
 		AgentId:    a.agentID,
 		AgentToken: a.config.Agent.AgentToken,
+		Version:    a.version,
 	})
 
 	if err != nil {

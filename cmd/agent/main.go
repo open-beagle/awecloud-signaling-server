@@ -65,7 +65,7 @@ func main() {
 	logger.Infof("Server Address: %s", cfg.Server.Address)
 
 	// 创建并启动Agent
-	agt, err := agent.NewAgent(cfg)
+	agt, err := agent.NewAgent(cfg, version)
 	if err != nil {
 		logger.Fatalf("创建Agent失败: %v", err)
 	}

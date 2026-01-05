@@ -90,6 +90,8 @@ export default {
     name: 'Agent名称',
     description: '描述',
     token: 'Token',
+    version: '版本',
+    lastHeartbeat: '最后在线',
     createdAt: '创建时间',
     viewToken: '查看Token',
     regenerateToken: '重新生成Token',
