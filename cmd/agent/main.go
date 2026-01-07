@@ -15,6 +15,7 @@ var (
 	version   = "dev"
 	gitCommit = "unknown"
 	buildDate = "unknown"
+	goVersion = "unknown"
 	BUILD_URL = "" // 编译时注入的默认 Server 地址
 )
 
@@ -29,6 +30,7 @@ func main() {
 		fmt.Printf("Version:    %s\n", version)
 		fmt.Printf("Git Commit: %s\n", gitCommit)
 		fmt.Printf("Build Date: %s\n", buildDate)
+		fmt.Printf("Go Version: %s\n", goVersion)
 		os.Exit(0)
 	}
 
@@ -60,7 +62,7 @@ func main() {
 	}
 
 	logger.Infof("AWECloud Signaling Agent 启动中...")
-	logger.Infof("版本: %s (commit: %s, built: %s)", version, gitCommit, buildDate)
+	logger.Infof("版本: %s (commit: %s, built: %s, go: %s)", version, gitCommit, buildDate, goVersion)
 	logger.Infof("Agent Name: %s", cfg.Agent.AgentName)
 	logger.Infof("Server Address: %s", cfg.Server.Address)
 

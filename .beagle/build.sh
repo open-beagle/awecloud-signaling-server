@@ -11,6 +11,7 @@ BUILD_TARGETS="${BUILD_TARGETS:-server,agent}"  # 可选: server, agent, 或 ser
 BUILD_VERSION="${BUILD_VERSION:-dev}"
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE=$(date -u '+%Y-%m-%d_%H:%M:%S')
+BUILD_GO=$(go version | awk '{print $3}')
 
 # 输出目录
 BIN_DIR="./bin"
@@ -26,6 +27,7 @@ echo "Build targets: ${BUILD_TARGETS}"
 echo "Version: ${BUILD_VERSION}"
 echo "Git Commit: ${GIT_COMMIT}"
 echo "Build Date: ${BUILD_DATE}"
+echo "Go Version: ${BUILD_GO}"
 echo "---"
 
 # 检查是否需要构建 server 和 agent
@@ -43,6 +45,7 @@ LDFLAGS="-w -s"
 LDFLAGS="${LDFLAGS} -X 'main.version=${BUILD_VERSION}'"
 LDFLAGS="${LDFLAGS} -X 'main.gitCommit=${GIT_COMMIT}'"
 LDFLAGS="${LDFLAGS} -X 'main.buildDate=${BUILD_DATE}'"
+LDFLAGS="${LDFLAGS} -X 'main.goVersion=${BUILD_GO}'"
 
 # 安装跨架构编译依赖（需要 root 权限）
 if [ "$(id -u)" -eq 0 ]; then

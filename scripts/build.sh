@@ -10,6 +10,7 @@ GOOS="${GOOS:-linux}"
 BUILD_VERSION="${BUILD_VERSION:-dev}"
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE=$(date -u '+%Y-%m-%d_%H:%M:%S')
+BUILD_GO=$(go version | awk '{print $3}')
 
 # Server 地址（可选，用于编译时注入）
 BUILD_URL="${BUILD_URL:-}"
@@ -27,6 +28,7 @@ echo "Target architectures: ${GOARCHS}"
 echo "Version: ${BUILD_VERSION}"
 echo "Git Commit: ${GIT_COMMIT}"
 echo "Build Date: ${BUILD_DATE}"
+echo "Go Version: ${BUILD_GO}"
 if [ -n "${BUILD_URL}" ]; then
     echo "Build URL: ${BUILD_URL}"
 fi
@@ -37,6 +39,7 @@ LDFLAGS="-w -s"
 LDFLAGS="${LDFLAGS} -X 'main.version=${BUILD_VERSION}'"
 LDFLAGS="${LDFLAGS} -X 'main.gitCommit=${GIT_COMMIT}'"
 LDFLAGS="${LDFLAGS} -X 'main.buildDate=${BUILD_DATE}'"
+LDFLAGS="${LDFLAGS} -X 'main.goVersion=${BUILD_GO}'"
 
 # 如果设置了 BUILD_URL，注入到 Agent
 if [ -n "${BUILD_URL}" ]; then

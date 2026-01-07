@@ -15,6 +15,7 @@ var (
 	version   = "dev"
 	gitCommit = "unknown"
 	buildDate = "unknown"
+	goVersion = "unknown"
 )
 
 func main() {
@@ -28,6 +29,7 @@ func main() {
 		fmt.Printf("Version:    %s\n", version)
 		fmt.Printf("Git Commit: %s\n", gitCommit)
 		fmt.Printf("Build Date: %s\n", buildDate)
+		fmt.Printf("Go Version: %s\n", goVersion)
 		os.Exit(0)
 	}
 
@@ -43,7 +45,7 @@ func main() {
 	}
 
 	logger.Infof("AWECloud Signaling Server 启动中...")
-	logger.Infof("版本: %s (commit: %s, built: %s)", version, gitCommit, buildDate)
+	logger.Infof("版本: %s (commit: %s, built: %s, go: %s)", version, gitCommit, buildDate, goVersion)
 	logger.Infof("配置文件: %s", *configPath)
 
 	// 创建并启动服务器
