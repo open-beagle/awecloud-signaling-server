@@ -1,0 +1,163 @@
+<svg viewBox="0 0 1200 900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
+    </marker>
+    <marker id="arrowhead-red" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#dc3545"/>
+    </marker>
+    <marker id="arrowhead-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#28a745"/>
+    </marker>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="1200" height="900" fill="#f8f9fa"/>
+
+  <!-- 标题 -->
+  <text x="600" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#333">Tailscale 多租户安全架构</text>
+
+  <!-- Headscale 控制平面 -->
+  <rect x="400" y="70" width="400" height="120" rx="10" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
+  <text x="600" y="100" text-anchor="middle" font-size="16" font-weight="bold" fill="#1976d2">Headscale 控制平面</text>
+  <text x="600" y="125" text-anchor="middle" font-size="12" fill="#666">ACL 策略管理 | 节点认证 | 密钥分发</text>
+  <rect x="420" y="140" width="160" height="35" rx="5" fill="#fff" stroke="#1976d2"/>
+  <text x="500" y="162" text-anchor="middle" font-size="11" fill="#333">ACL Policy Engine</text>
+  <rect x="620" y="140" width="160" height="35" rx="5" fill="#fff" stroke="#1976d2"/>
+  <text x="700" y="162" text-anchor="middle" font-size="11" fill="#333">Node Registry</text>
+
+  <!-- Server 管理平面 -->
+  <rect x="850" y="70" width="300" height="120" rx="10" fill="#fff3e0" stroke="#f57c00" stroke-width="2"/>
+  <text x="1000" y="100" text-anchor="middle" font-size="16" font-weight="bold" fill="#f57c00">Server 管理平面</text>
+  <text x="1000" y="125" text-anchor="middle" font-size="12" fill="#666">权限管理 | 服务配置 | 审计日志</text>
+  <rect x="870" y="140" width="120" height="35" rx="5" fill="#fff" stroke="#f57c00"/>
+  <text x="930" y="162" text-anchor="middle" font-size="11" fill="#333">Permission API</text>
+  <rect x="1010" y="140" width="120" height="35" rx="5" fill="#fff" stroke="#f57c00"/>
+  <text x="1070" y="162" text-anchor="middle" font-size="11" fill="#333">ACL Sync</text>
+
+  <!-- Server 到 Headscale 的连接 -->
+  <line x1="850" y1="130" x2="800" y2="130" stroke="#666" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="825" y="120" text-anchor="middle" font-size="10" fill="#666">更新 ACL</text>
+
+  <!-- 分隔线 -->
+  <line x1="50" y1="220" x2="1150" y2="220" stroke="#ddd" stroke-width="2" stroke-dasharray="5,5"/>
+  <text x="600" y="240" text-anchor="middle" font-size="14" fill="#999">Tailscale 网络层 (WireGuard)</text>
+
+  <!-- 内网 Agent 区域 -->
+  <rect x="50" y="270" width="350" height="280" rx="10" fill="#e8f5e9" stroke="#4caf50" stroke-width="2"/>
+  <text x="225" y="300" text-anchor="middle" font-size="16" font-weight="bold" fill="#4caf50">内网 Agent 区域</text>
+  <text x="225" y="320" text-anchor="middle" font-size="11" fill="#666">100.64.0.0/16 | 高信任</text>
+
+  <!-- Agent-A -->
+  <rect x="70" y="340" width="140" height="80" rx="8" fill="#fff" stroke="#4caf50" stroke-width="2"/>
+  <text x="140" y="365" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Agent-A</text>
+  <text x="140" y="385" text-anchor="middle" font-size="10" fill="#666">100.64.0.1</text>
+  <text x="140" y="405" text-anchor="middle" font-size="10" fill="#4caf50">:3306 MySQL</text>
+
+  <!-- Agent-B -->
+  <rect x="240" y="340" width="140" height="80" rx="8" fill="#fff" stroke="#4caf50" stroke-width="2"/>
+  <text x="310" y="365" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Agent-B</text>
+  <text x="310" y="385" text-anchor="middle" font-size="10" fill="#666">100.64.0.2</text>
+  <text x="310" y="405" text-anchor="middle" font-size="10" fill="#4caf50">:443 Gateway</text>
+
+  <!-- 内网 Agent 互访 -->
+  <line x1="210" y1="380" x2="240" y2="380" stroke="#4caf50" stroke-width="2" marker-end="url(#arrowhead-green)"/>
+  <text x="225" y="450" text-anchor="middle" font-size="10" fill="#4caf50">✓ 同组 Agent 互访</text>
+
+  <!-- 内网服务 -->
+  <rect x="70" y="470" width="310" height="60" rx="8" fill="#c8e6c9" stroke="#4caf50"/>
+  <text x="225" y="495" text-anchor="middle" font-size="12" fill="#333">内网服务: MySQL, Redis, Gateway</text>
+  <text x="225" y="515" text-anchor="middle" font-size="10" fill="#666">192.168.1.0/24</text>
+
+  <!-- 外部 Agent 区域 -->
+  <rect x="430" y="270" width="250" height="280" rx="10" fill="#ffebee" stroke="#f44336" stroke-width="2"/>
+  <text x="555" y="300" text-anchor="middle" font-size="16" font-weight="bold" fill="#f44336">外部 Agent 区域</text>
+  <text x="555" y="320" text-anchor="middle" font-size="11" fill="#666">100.64.x.x | 低信任 | 无分组</text>
+
+  <!-- Agent-C (外部) -->
+  <rect x="480" y="340" width="150" height="80" rx="8" fill="#fff" stroke="#f44336" stroke-width="2"/>
+  <text x="555" y="365" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Agent-C</text>
+  <text x="555" y="385" text-anchor="middle" font-size="10" fill="#666">100.64.10.1</text>
+  <text x="555" y="405" text-anchor="middle" font-size="10" fill="#f44336">外部服务器</text>
+
+  <!-- 外部 Agent 限制 -->
+  <rect x="450" y="450" width="210" height="80" rx="5" fill="#ffcdd2"/>
+  <text x="555" y="475" text-anchor="middle" font-size="11" font-weight="bold" fill="#c62828">ACL 限制</text>
+  <text x="555" y="495" text-anchor="middle" font-size="10" fill="#c62828">✓ 仅允许访问授权端口</text>
+  <text x="555" y="515" text-anchor="middle" font-size="10" fill="#c62828">✗ 禁止访问其他 Agent</text>
+
+  <!-- 外部到内网的限制连接 -->
+  <line x1="480" y1="380" x2="400" y2="380" stroke="#f44336" stroke-width="2" stroke-dasharray="5,5"/>
+  <text x="440" y="370" text-anchor="middle" font-size="10" fill="#f44336">受限</text>
+
+  <!-- Desktop 区域 -->
+  <rect x="710" y="270" width="440" height="280" rx="10" fill="#f3e5f5" stroke="#9c27b0" stroke-width="2"/>
+  <text x="930" y="300" text-anchor="middle" font-size="16" font-weight="bold" fill="#9c27b0">Desktop 区域</text>
+  <text x="930" y="320" text-anchor="middle" font-size="11" fill="#666">100.65.0.0/16 | 按需授权 | 固定 IP</text>
+
+  <!-- Desktop-1 (有权限) -->
+  <rect x="730" y="340" width="130" height="100" rx="8" fill="#fff" stroke="#4caf50" stroke-width="2"/>
+  <text x="795" y="365" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Desktop-1</text>
+  <text x="795" y="385" text-anchor="middle" font-size="10" fill="#666">100.65.0.1</text>
+  <text x="795" y="405" text-anchor="middle" font-size="10" fill="#333">员工张三</text>
+  <rect x="740" y="415" width="110" height="18" rx="3" fill="#c8e6c9"/>
+  <text x="795" y="428" text-anchor="middle" font-size="9" fill="#2e7d32">✓ MySQL 已授权</text>
+
+  <!-- Desktop-2 (无权限) -->
+  <rect x="880" y="340" width="130" height="100" rx="8" fill="#fff" stroke="#f44336" stroke-width="2"/>
+  <text x="945" y="365" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Desktop-2</text>
+  <text x="945" y="385" text-anchor="middle" font-size="10" fill="#666">100.65.0.10</text>
+  <text x="945" y="405" text-anchor="middle" font-size="10" fill="#333">员工李四</text>
+  <rect x="890" y="415" width="110" height="18" rx="3" fill="#ffcdd2"/>
+  <text x="945" y="428" text-anchor="middle" font-size="9" fill="#c62828">✗ MySQL 未授权</text>
+
+  <!-- Desktop-3 (已撤销) -->
+  <rect x="1030" y="340" width="110" height="100" rx="8" fill="#fff" stroke="#ff9800" stroke-width="2"/>
+  <text x="1085" y="365" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Desktop-3</text>
+  <text x="1085" y="385" text-anchor="middle" font-size="10" fill="#666">100.65.0.11</text>
+  <text x="1085" y="405" text-anchor="middle" font-size="10" fill="#333">员工王五</text>
+  <rect x="1035" y="415" width="100" height="18" rx="3" fill="#ffe0b2"/>
+  <text x="1085" y="428" text-anchor="middle" font-size="9" fill="#e65100">⚠ 权限已撤销</text>
+
+  <!-- 访问控制说明 -->
+  <rect x="730" y="470" width="410" height="60" rx="5" fill="#e1bee7"/>
+  <text x="935" y="495" text-anchor="middle" font-size="11" font-weight="bold" fill="#7b1fa2">ACL 动态控制</text>
+  <text x="935" y="515" text-anchor="middle" font-size="10" fill="#7b1fa2">权限变更 → Server 更新 ACL → Headscale 推送 → 即时生效</text>
+
+  <!-- 连接线: Desktop-1 到 Agent-A (允许) -->
+  <path d="M 730 390 Q 600 390 400 390" fill="none" stroke="#4caf50" stroke-width="2" marker-end="url(#arrowhead-green)"/>
+  <text x="550" y="380" text-anchor="middle" font-size="10" fill="#4caf50">✓ ACL 允许</text>
+
+  <!-- 连接线: Desktop-2 到 Agent-A (拒绝) -->
+  <path d="M 880 400 Q 700 450 400 400" fill="none" stroke="#f44336" stroke-width="2" stroke-dasharray="5,5"/>
+  <text x="640" y="440" text-anchor="middle" font-size="10" fill="#f44336">✗ ACL 拒绝</text>
+
+  <!-- 图例 -->
+  <rect x="50" y="580" width="1100" height="100" rx="10" fill="#fff" stroke="#ddd"/>
+  <text x="600" y="605" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">图例说明</text>
+
+  <rect x="80" y="620" width="20" height="20" fill="#e8f5e9" stroke="#4caf50"/>
+  <text x="110" y="635" font-size="11" fill="#333">内网 Agent (高信任)</text>
+
+  <rect x="280" y="620" width="20" height="20" fill="#ffebee" stroke="#f44336"/>
+  <text x="310" y="635" font-size="11" fill="#333">外部 Agent (低信任)</text>
+
+  <rect x="480" y="620" width="20" height="20" fill="#f3e5f5" stroke="#9c27b0"/>
+  <text x="510" y="635" font-size="11" fill="#333">Desktop (按需授权)</text>
+
+  <line x1="680" y1="630" x2="730" y2="630" stroke="#4caf50" stroke-width="2" marker-end="url(#arrowhead-green)"/>
+  <text x="780" y="635" font-size="11" fill="#333">允许访问</text>
+
+  <line x1="880" y1="630" x2="930" y2="630" stroke="#f44336" stroke-width="2" stroke-dasharray="5,5"/>
+  <text x="980" y="635" font-size="11" fill="#333">拒绝访问</text>
+
+  <!-- 安全要点 -->
+  <rect x="50" y="700" width="1100" height="180" rx="10" fill="#fff" stroke="#1976d2" stroke-width="2"/>
+  <text x="600" y="730" text-anchor="middle" font-size="16" font-weight="bold" fill="#1976d2">安全要点</text>
+
+  <text x="80" y="760" font-size="12" fill="#333">1. Agent 隔离: 外部 Agent (无分组) 只能访问显式授权的端口，无法横向移动</text>
+  <text x="80" y="785" font-size="12" fill="#333">2. Desktop 隔离: 每个 Desktop 只能访问被授权的服务，权限撤销后 ACL 立即生效</text>
+  <text x="80" y="810" font-size="12" fill="#333">3. 固定 IP: Agent (100.64.x.x) 和 Desktop (100.65.x.x) 都使用固定 IP，便于管理</text>
+  <text x="80" y="835" font-size="12" fill="#333">4. 双重验证: Server 应用层权限检查 + Headscale 网络层 ACL 控制</text>
+  <text x="80" y="860" font-size="12" fill="#333">5. 网段隔离: Agent 和 Desktop 分开网段，一眼区分节点类型</text>
+</svg>

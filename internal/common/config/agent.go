@@ -7,10 +7,11 @@ import (
 )
 
 type AgentConfig struct {
-	Agent  AgentSection  `toml:"agent"`
-	Server ServerConnect `toml:"server"`
-	Health HealthSection `toml:"health"`
-	Log    LogConfig     `toml:"log"`
+	Agent     AgentSection   `toml:"agent"`
+	Server    ServerConnect  `toml:"server"`
+	Tailscale TailscaleAgent `toml:"tailscale"`
+	Health    HealthSection  `toml:"health"`
+	Log       LogConfig      `toml:"log"`
 }
 
 type HealthSection struct {
@@ -25,6 +26,11 @@ type AgentSection struct {
 type ServerConnect struct {
 	Address   string `toml:"address"`    // Server地址（HTTP/2统一端口，支持完整URL）
 	PublicURL string `toml:"public_url"` // FRP公网地址（可选），如果配置则忽略Server返回的地址
+}
+
+// TailscaleAgent Agent 端 Tailscale 配置
+type TailscaleAgent struct {
+	StateDir string `toml:"state_dir"` // Tailscale 状态存储目录
 }
 
 func LoadAgentConfig(path string) (*AgentConfig, error) {

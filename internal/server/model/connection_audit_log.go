@@ -20,8 +20,7 @@ type ConnectionAuditLog struct {
 	CreatedAt         time.Time `gorm:"autoCreateTime;index:idx_audit_logs_created_at" json:"created_at"`
 
 	// 关联
-	Client       Client       `gorm:"foreignKey:ClientPKID;references:ID" json:"-"`
-	STCPInstance STCPInstance `gorm:"foreignKey:STCPInstancePKID;references:ID" json:"-"`
+	Client Client `gorm:"foreignKey:ClientPKID;references:ID" json:"-"`
 }
 
 // TableName 指定表名

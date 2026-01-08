@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-// ServiceFavorite 服务收藏表
+// ServiceFavorite 服务收藏表（废弃，保留兼容）
 type ServiceFavorite struct {
 	ID             int64     `gorm:"primaryKey" json:"id"`
 	ClientID       int64     `gorm:"column:client_id;not null;index:idx_service_favorites_client_id;uniqueIndex:idx_client_instance" json:"client_id"`
@@ -14,9 +14,7 @@ type ServiceFavorite struct {
 	UpdatedAt      time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 
 	// 关联
-	// 使用 ClientPKID 避免与 Client.ClientID 字段名冲突
-	Client       Client       `gorm:"foreignKey:ClientID;references:ID;constraint:OnDelete:CASCADE" json:"-"`
-	STCPInstance STCPInstance `gorm:"foreignKey:STCPInstanceID;references:ID;constraint:OnDelete:CASCADE" json:"-"`
+	Client Client `gorm:"foreignKey:ClientID;references:ID;constraint:OnDelete:CASCADE" json:"-"`
 }
 
 // TableName 指定表名

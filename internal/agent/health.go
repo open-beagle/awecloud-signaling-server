@@ -23,13 +23,6 @@ func NewHealthAPI(agent *Agent) *HealthAPI {
 }
 
 // Health 基础健康检查
-// @Summary 基础健康检查
-// @Description 用于Kubernetes Liveness Probe，检查进程是否存活
-// @Tags Health
-// @Produce json
-// @Success 200 {object} map[string]interface{} "服务正常运行"
-// @Failure 503 {object} map[string]interface{} "服务不可用"
-// @Router /health [get]
 func (h *HealthAPI) Health(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"status":    "ok",
@@ -38,13 +31,6 @@ func (h *HealthAPI) Health(c *gin.Context) {
 }
 
 // Ready 就绪性检查
-// @Summary 就绪性检查
-// @Description 用于Kubernetes Readiness Probe，检查Agent是否准备好工作
-// @Tags Health
-// @Produce json
-// @Success 200 {object} map[string]interface{} "Agent就绪"
-// @Failure 503 {object} map[string]interface{} "Agent未就绪"
-// @Router /health/ready [get]
 func (h *HealthAPI) Ready(c *gin.Context) {
 	checks := make(map[string]string)
 	errors := make(map[string]string)
@@ -60,13 +46,12 @@ func (h *HealthAPI) Ready(c *gin.Context) {
 		logger.Infof("[HEALTH] gRPC connection check failed")
 	}
 
-	// 检查FRP连接（仅作为信息，不影响就绪状态）
-	// FRP 会自动重连，不需要健康检查干预
-	if h.agent.IsFRPConnected() {
-		checks["frp_connection"] = "ok"
+	// 检查 Tailscale 连接
+	if h.agent.IsTailscaleConnected() {
+		checks["tailscale_connection"] = "ok"
 	} else {
-		checks["frp_connection"] = "initializing"
-		// 不设置 allReady = false，因为 FRP 会自动重连
+		checks["tailscale_connection"] = "initializing"
+		// 不设置 allReady = false，因为 Tailscale 会自动重连
 	}
 
 	status := "ready"
@@ -77,9 +62,11 @@ func (h *HealthAPI) Ready(c *gin.Context) {
 	}
 
 	response := gin.H{
-		"status":    status,
-		"timestamp": time.Now().Format(time.RFC3339),
-		"checks":    checks,
+		"status":       status,
+		"timestamp":    time.Now().Format(time.RFC3339),
+		"checks":       checks,
+		"tailscale_ip": h.agent.GetTailscaleIP(),
+		"proxy_count":  h.agent.GetProxyCount(),
 	}
 
 	if len(errors) > 0 {

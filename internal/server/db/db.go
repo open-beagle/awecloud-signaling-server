@@ -52,50 +52,18 @@ func autoMigrate() error {
 		&model.Client{},
 		&model.Group{},
 		&model.GroupMember{},
-		&model.STCPInstance{},
-		&model.STCPAccess{},
-		&model.STCPVisitor{},
+		&model.STCPAccess{}, // 废弃，保留兼容
 		&model.ClientSession{},
 		&model.DeviceToken{},
-		&model.PortPreference{},
-		&model.ServiceFavorite{},
+		&model.PortPreference{},  // 废弃，保留兼容
+		&model.ServiceFavorite{}, // 废弃，保留兼容
 		&model.ConnectionAuditLog{},
 		&model.SystemConfig{},
 		&model.SystemSettings{},
-		&model.TCPService{},
-		&model.TCPServiceAccessLog{},
+		&model.ProxyService{}, // Tailscale 端口映射服务
 	)
 	if err != nil {
 		return err
-	}
-
-	// 初始化TCP服务配置
-	return initTCPServiceConfig()
-}
-
-// initTCPServiceConfig 初始化TCP服务配置
-func initTCPServiceConfig() error {
-	configs := []model.SystemSettings{
-		{
-			SettingKey:   "tcp_service_port_start",
-			SettingValue: "9000",
-			Description:  "TCP实例端口起始值",
-		},
-		{
-			SettingKey:   "tcp_service_max_per_agent",
-			SettingValue: "50",
-			Description:  "每个Agent最多创建的TCP服务数量",
-		},
-	}
-
-	for _, cfg := range configs {
-		var count int64
-		DB.Model(&model.SystemSettings{}).Where("setting_key = ?", cfg.SettingKey).Count(&count)
-		if count == 0 {
-			if err := DB.Create(&cfg).Error; err != nil {
-				return fmt.Errorf("初始化配置 %s 失败: %w", cfg.SettingKey, err)
-			}
-		}
 	}
 
 	return nil

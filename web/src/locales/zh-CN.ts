@@ -49,6 +49,7 @@ export default {
   menu: {
     agents: '代理管理',
     serviceManagement: '服务管理',
+    services: '端口映射',
     stcpInstances: 'STCP实例',
     stcpVisitors: 'STCP访问',
     tcpInstances: 'TCP实例',
@@ -194,5 +195,41 @@ export default {
     all: '全部',
     enabledOnly: '仅启用',
     disabledOnly: '仅禁用'
+  },
+  service: {
+    title: '端口映射服务',
+    create: '创建服务',
+    name: '服务名称',
+    agent: '所属Agent',
+    listenPort: '监听端口',
+    listenAddr: '监听地址',
+    targetAddr: '目标地址',
+    status: '状态',
+    connections: '连接数',
+    remark: '备注',
+    running: '运行中',
+    stopped: '已停止',
+    start: '启动',
+    stop: '停止',
+    filterAgent: '按Agent筛选',
+    filterStatus: '按状态筛选',
+    allAgents: '全部Agent',
+    allStatus: '全部状态',
+    selectAgent: '选择Agent',
+    namePlaceholder: '请输入服务名称',
+    targetAddrPlaceholder: '如 192.168.1.100:3306'
+  },
+  tailscale: {
+    title: 'Tailscale 配置',
+    status: 'Tailscale 状态',
+    headscaleUrl: 'Headscale 地址',
+    headscaleOnline: 'Headscale 在线',
+    headscaleOffline: 'Headscale 离线',
+    totalNodes: '总节点数',
+    onlineNodes: '在线节点',
+    agentsConnected: '已连接Agent',
+    clientsConnected: '已连接Client',
+    sync: '同步状态',
+    syncSuccess: '同步成功'
   }
 }

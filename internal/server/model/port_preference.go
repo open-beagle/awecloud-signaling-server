@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-// PortPreference 端口偏好表
+// PortPreference 端口偏好表（废弃，保留兼容）
 type PortPreference struct {
 	ID             int64     `gorm:"primaryKey" json:"id"`
 	ClientID       int64     `gorm:"not null;index:idx_port_preferences_client_id" json:"client_id"`
@@ -14,8 +14,7 @@ type PortPreference struct {
 	UpdatedAt      time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 
 	// 关联
-	Client       Client       `gorm:"foreignKey:ClientID;constraint:OnDelete:CASCADE" json:"-"`
-	STCPInstance STCPInstance `gorm:"foreignKey:STCPInstanceID;constraint:OnDelete:CASCADE" json:"-"`
+	Client Client `gorm:"foreignKey:ClientID;constraint:OnDelete:CASCADE" json:"-"`
 }
 
 // TableName 指定表名

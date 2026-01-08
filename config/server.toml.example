@@ -1,34 +1,41 @@
 # AWECloud Signaling Server 配置文件
 
+# Web/API 服务配置
 [web]
 listen_addr = "0.0.0.0"
 listen_port = 8080
 default_admin_username = "admin"
 default_admin_password = "admin123"
 
+# 安全配置
 [security]
 jwt_secret = "your-secret-key-change-in-production"
+jwt_expire_hours = 24
 
+# 数据库配置
 [database]
+type = "sqlite"
 path = "data/server.db"
 
+# 日志配置
 [log]
 level = "info"
 file = ""
 
-[server]
-bind_addr = "0.0.0.0"
-bind_port = 7000
-protocol = "websocket"
-tls_cert_file = ""
-tls_key_file = ""
-token = "change-this-to-a-secure-random-token"
+# Tailscale/Headscale 配置
+# Server 通过 Headscale API 管理节点和认证
+[tailscale]
+# Headscale API 地址
+# 环境变量：HEADSCALE_URL
+headscale_url = "http://headscale:8080"
 
-# 公网访问地址（可选）
-# 如果配置了此地址，Desktop 和 Agent 将使用此地址连接 FRP 服务
-# 适用于生产环境中通过反向代理（如 Traefik）暴露 FRP 服务的场景
-# 示例：
-#   - WebSocket: "ws://signaling.example.com/ws"
-#   - WebSocket Secure: "wss://signaling.example.com/ws"
-# 如果不配置（留空），Desktop 将使用连接 Web/gRPC 时的地址 + bind_port
-public_url = ""
+# Headscale API 密钥（建议通过环境变量配置）
+# 环境变量：HEADSCALE_API_KEY
+# 生成方式：headscale apikeys create --expiration 365d
+headscale_api_key = ""
+
+# Headscale 用户名
+# 创建 PreAuthKey 时需要指定用户，所有 Agent/Desktop 节点注册到此用户下
+# 环境变量：HEADSCALE_USER
+# 创建用户：headscale users create default
+user = "default"

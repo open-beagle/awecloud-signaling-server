@@ -20,7 +20,6 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/api"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
-	"github.com/open-beagle/awecloud-signaling-server/internal/server/frp"
 	grpcserver "github.com/open-beagle/awecloud-signaling-server/internal/server/grpc"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
@@ -33,9 +32,6 @@ type Server struct {
 	// gRPC服务
 	agentService  *grpcserver.AgentServiceServer
 	clientService *grpcserver.ClientServiceServer
-
-	// FRP服务
-	frpServer *frp.FRPServer
 }
 
 // GetAgentService 获取AgentService（供API使用）
@@ -77,49 +73,33 @@ func (s *Server) Run() error {
 	}
 
 	// 创建gRPC服务
-	s.agentService = grpcserver.NewAgentServiceServer(
-		s.config.Server.Token,
-		s.config.Server.PublicURL,
-		s.config.Server.BindPort,
-	)
+	s.agentService = grpcserver.NewAgentServiceServerWithConfig(s.config)
 	s.clientService = grpcserver.NewClientServiceServer(s.config)
-	s.clientService.SetAgentService(s.agentService) // 设置AgentService用于检查状态
+	s.clientService.SetAgentService(s.agentService)
 
 	s.grpcServer = grpc.NewServer()
 	pb.RegisterAgentServiceServer(s.grpcServer, s.agentService)
 	pb.RegisterClientServiceServer(s.grpcServer, s.clientService)
 
-	// 创建FRP Server（在设置路由之前，确保健康检查可以访问）
-	var err error
-	s.frpServer, err = frp.NewFRPServer(s.config)
-	if err != nil {
-		return fmt.Errorf("创建FRP Server失败: %w", err)
-	}
-
-	// 创建Gin路由（HTTP处理）
+	// 创建Gin路由
 	ginRouter := s.setupRouter()
 
 	// 创建统一处理器（HTTP/2: 同时支持HTTP和gRPC）
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 根据Content-Type区分请求类型
 		if r.ProtoMajor == 2 && strings.HasPrefix(
 			r.Header.Get("Content-Type"), "application/grpc") {
-			// gRPC请求
 			s.grpcServer.ServeHTTP(w, r)
 		} else {
-			// HTTP请求
 			ginRouter.ServeHTTP(w, r)
 		}
 	})
 
 	// 创建HTTP/2服务器
-	// 使用h2c（HTTP/2 Cleartext）支持非TLS的HTTP/2
 	h2s := &http2.Server{}
 
 	// 构建监听地址
 	listenAddr := s.config.Web.ListenAddr
 	if listenAddr == "" || listenAddr == "0.0.0.0" {
-		// 明确使用 0.0.0.0 以确保监听IPv4
 		listenAddr = "0.0.0.0"
 	}
 	addr := fmt.Sprintf("%s:%d", listenAddr, s.config.Web.ListenPort)
@@ -136,7 +116,6 @@ func (s *Server) Run() error {
 		logger.Infof("  - RESTful API: http://%s/api/...", addr)
 		logger.Infof("  - gRPC服务: %s (HTTP/2)", addr)
 
-		// 明确使用tcp4网络以确保监听IPv4
 		listener, err := net.Listen("tcp4", addr)
 		if err != nil {
 			logger.Fatalf("创建监听器失败: %v", err)
@@ -145,13 +124,6 @@ func (s *Server) Run() error {
 
 		if err := s.httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 			logger.Fatalf("服务器启动失败: %v", err)
-		}
-	}()
-
-	// 启动FRP Server（在goroutine中运行）
-	go func() {
-		if err := s.frpServer.Run(); err != nil {
-			logger.Errorf("Tunnel Server运行错误: %v", err)
 		}
 	}()
 
@@ -169,13 +141,6 @@ func (s *Server) Run() error {
 	// 停止gRPC服务器
 	s.grpcServer.GracefulStop()
 
-	// 停止FRP Server
-	if s.frpServer != nil {
-		if err := s.frpServer.Stop(); err != nil {
-			logger.Errorf("停止Tunnel Server失败: %v", err)
-		}
-	}
-
 	// 停止HTTP服务器
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		return fmt.Errorf("服务器关闭失败: %w", err)
@@ -185,7 +150,7 @@ func (s *Server) Run() error {
 	return nil
 }
 
-// customLogger 自定义日志中间件，health接口只在状态变化时打印
+// customLogger 自定义日志中间件
 func (s *Server) customLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -215,13 +180,12 @@ func (s *Server) customLogger() gin.HandlerFunc {
 }
 
 func (s *Server) setupRouter() *gin.Engine {
-	// 使用自定义日志中间件
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(s.customLogger())
 
 	// 健康检查接口
-	healthAPI := api.NewHealthAPI(s.agentService, s.frpServer)
+	healthAPI := api.NewHealthAPI(s.agentService)
 	router.GET("/health", healthAPI.Health)
 	router.GET("/health/ready", healthAPI.Ready)
 
@@ -237,19 +201,19 @@ func (s *Server) setupRouter() *gin.Engine {
 	{
 		// 保留旧版API用于向后兼容（已废弃）
 		clientAuthAPI := api.NewClientAuthAPI(s.config)
-		apiGroup.POST("/client/auth", clientAuthAPI.Auth) // 已废弃，使用 /api/v1/client/auth/login
+		apiGroup.POST("/client/auth", clientAuthAPI.Auth)
 
 		// v1 API
 		v1Group := apiGroup.Group("/v1")
 		{
-			// ==================== 公开API（不需要认证）====================
+			// ==================== 公开API ====================
 			v1Group.GET("/public/system/config", api.GetPublicSystemConfig)
 
 			// 桌面客户端下载API
 			downloadAPI := api.NewDownloadAPI()
-			v1Group.GET("/public/download/desktop", downloadAPI.GetDesktopDownload)              // 获取下载信息（JSON）
-			v1Group.GET("/public/download/desktop/direct", downloadAPI.GetDesktopDownloadDirect) // 直接重定向下载
-			v1Group.GET("/public/download/desktop/versions", downloadAPI.ListDesktopVersions)    // 列出所有版本
+			v1Group.GET("/public/download/desktop", downloadAPI.GetDesktopDownload)
+			v1Group.GET("/public/download/desktop/direct", downloadAPI.GetDesktopDownloadDirect)
+			v1Group.GET("/public/download/desktop/versions", downloadAPI.ListDesktopVersions)
 
 			// 客户端版本检查API
 			v1Group.POST("/client/version/check", api.CheckVersion)
@@ -257,7 +221,7 @@ func (s *Server) setupRouter() *gin.Engine {
 			// ==================== 管理员API ====================
 			adminGroup := v1Group.Group("/admin")
 			{
-				// 管理员认证（不需要JWT认证）
+				// 管理员认证
 				adminAPI := api.NewAdminAPI(s.config)
 				adminGroup.POST("/auth/login", adminAPI.Login)
 				adminGroup.POST("/auth/logout", adminAPI.Logout)
@@ -282,38 +246,23 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.DELETE("/clients/:id", clientAPI.Delete)
 					adminAuthGroup.POST("/clients/:id/regenerate-secret", clientAPI.RegenerateSecret)
 
-					// STCP实例管理
-					stcpAPI := api.NewSTCPAPI()
-					stcpAPI.SetAgentService(s.agentService) // 注入AgentService
-					adminAuthGroup.GET("/stcp-instances", stcpAPI.List)
-					adminAuthGroup.POST("/stcp-instances", stcpAPI.Create)
-					adminAuthGroup.DELETE("/stcp-instances/:id", stcpAPI.Delete)
-					adminAuthGroup.GET("/stcp-instances/:id/accesses", stcpAPI.ListAccesses)
-					adminAuthGroup.POST("/stcp-instances/:id/grant", stcpAPI.GrantAccess)
-					adminAuthGroup.POST("/stcp-instances/:id/revoke", stcpAPI.RevokeAccess)
-					adminAuthGroup.PUT("/stcp-instances/:id/access-type", stcpAPI.SetAccessType)
+					// 端口映射服务管理（Tailscale）
+					proxyServiceAPI := api.NewProxyServiceAPI()
+					proxyServiceAPI.SetAgentService(s.agentService)
+					adminAuthGroup.GET("/services", proxyServiceAPI.List)
+					adminAuthGroup.POST("/services", proxyServiceAPI.Create)
+					adminAuthGroup.PUT("/services/:id", proxyServiceAPI.Update)
+					adminAuthGroup.DELETE("/services/:id", proxyServiceAPI.Delete)
+					adminAuthGroup.PUT("/services/:id/start", proxyServiceAPI.Start)
+					adminAuthGroup.PUT("/services/:id/stop", proxyServiceAPI.Stop)
+					adminAuthGroup.GET("/services/:id/stats", proxyServiceAPI.Stats)
+					adminAuthGroup.GET("/agents/:agent_id/services", proxyServiceAPI.ListByAgent)
 
-					// TCP实例管理
-					tcpServiceAPI := api.NewTCPServiceAPI()
-					tcpServiceAPI.SetAgentService(s.agentService) // 注入AgentService
-					adminAuthGroup.GET("/tcp-services", api.GetTCPServices)
-					adminAuthGroup.POST("/tcp-services", api.CreateTCPService)
-					adminAuthGroup.PUT("/tcp-services/:id", api.UpdateTCPService)
-					adminAuthGroup.DELETE("/tcp-services/:id", api.DeleteTCPService)
-					adminAuthGroup.PUT("/tcp-services/:id/enable", tcpServiceAPI.EnableTCPService)
-					adminAuthGroup.PUT("/tcp-services/:id/disable", tcpServiceAPI.DisableTCPService)
-					adminAuthGroup.GET("/settings/tcp-service", api.GetTCPServiceConfig)
-					adminAuthGroup.PUT("/settings/tcp-service", api.UpdateTCPServiceConfig)
-
-					// STCP访问列表
-					stcpVisitorAPI := api.NewSTCPVisitorAPI()
-					stcpVisitorAPI.SetAgentService(s.agentService) // 注入AgentService
-					adminAuthGroup.GET("/stcp-visitors", api.GetSTCPVisitors)
-					adminAuthGroup.POST("/stcp-visitors", api.CreateSTCPVisitor)
-					adminAuthGroup.PUT("/stcp-visitors/:id", api.UpdateSTCPVisitor)
-					adminAuthGroup.DELETE("/stcp-visitors/:id", api.DeleteSTCPVisitor)
-					adminAuthGroup.PUT("/stcp-visitors/:id/enable", stcpVisitorAPI.EnableSTCPVisitor)
-					adminAuthGroup.PUT("/stcp-visitors/:id/disable", stcpVisitorAPI.DisableSTCPVisitor)
+					// Tailscale 管理
+					tailscaleAPI := api.NewTailscaleAPI(s.config)
+					adminAuthGroup.GET("/tailscale/status", tailscaleAPI.Status)
+					adminAuthGroup.POST("/tailscale/sync", tailscaleAPI.Sync)
+					adminAuthGroup.GET("/tailscale/nodes", tailscaleAPI.Nodes)
 
 					// 组管理
 					groupAPI := api.NewGroupAPI()
@@ -343,7 +292,7 @@ func (s *Server) setupRouter() *gin.Engine {
 			// ==================== Client API ====================
 			clientGroup := v1Group.Group("/client")
 			{
-				// Client认证（不需要JWT认证）
+				// Client认证
 				deviceTokenAPI := api.NewDeviceTokenAPI(s.config)
 				clientGroup.POST("/auth/login", deviceTokenAPI.LoginWithSecret)
 				clientGroup.POST("/auth/login/token", deviceTokenAPI.LoginWithToken)
@@ -354,6 +303,11 @@ func (s *Server) setupRouter() *gin.Engine {
 				{
 					// 服务列表
 					clientAuthGroup.GET("/services", clientAuthAPI.GetServices)
+					clientAuthGroup.GET("/services/v2", clientAuthAPI.GetServicesV2)
+
+					// Tailscale 认证
+					clientAuthGroup.POST("/tailscale/auth", clientAuthAPI.GetTailscaleAuth)
+					clientAuthGroup.DELETE("/tailscale/disconnect", clientAuthAPI.DisconnectTailscale)
 
 					// Device Token管理
 					clientAuthGroup.GET("/auth/login/devices", deviceTokenAPI.ListDevices)
@@ -383,14 +337,12 @@ func (s *Server) setupRouter() *gin.Engine {
 		}
 	}
 
-	// SPA路由支持（必须在所有路由之后）
+	// SPA路由支持
 	router.NoRoute(func(c *gin.Context) {
-		// 如果是API请求，返回404
 		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api" {
 			c.JSON(404, gin.H{"error": "Not Found"})
 			return
 		}
-		// 否则返回index.html（SPA）
 		c.File("./web/dist/index.html")
 	})
 

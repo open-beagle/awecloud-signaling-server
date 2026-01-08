@@ -25,6 +25,8 @@ const (
 	AgentService_ReportStatus_FullMethodName           = "/awecloud.signaling.AgentService/ReportStatus"
 	AgentService_GetEnabledTCPServices_FullMethodName  = "/awecloud.signaling.AgentService/GetEnabledTCPServices"
 	AgentService_GetEnabledSTCPVisitors_FullMethodName = "/awecloud.signaling.AgentService/GetEnabledSTCPVisitors"
+	AgentService_ReportTailscaleStatus_FullMethodName  = "/awecloud.signaling.AgentService/ReportTailscaleStatus"
+	AgentService_ReportProxyStatus_FullMethodName      = "/awecloud.signaling.AgentService/ReportProxyStatus"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -45,6 +47,10 @@ type AgentServiceClient interface {
 	GetEnabledTCPServices(ctx context.Context, in *GetTCPServicesRequest, opts ...grpc.CallOption) (*GetTCPServicesResponse, error)
 	// 获取已启用的STCP访问列表
 	GetEnabledSTCPVisitors(ctx context.Context, in *GetSTCPVisitorsRequest, opts ...grpc.CallOption) (*GetSTCPVisitorsResponse, error)
+	// [Tailscale] 上报 Tailscale 状态
+	ReportTailscaleStatus(ctx context.Context, in *TailscaleStatusReport, opts ...grpc.CallOption) (*StatusResponse, error)
+	// [Tailscale] 上报端口映射状态
+	ReportProxyStatus(ctx context.Context, in *ProxyStatusReport, opts ...grpc.CallOption) (*StatusResponse, error)
 }
 
 type agentServiceClient struct {
@@ -118,6 +124,26 @@ func (c *agentServiceClient) GetEnabledSTCPVisitors(ctx context.Context, in *Get
 	return out, nil
 }
 
+func (c *agentServiceClient) ReportTailscaleStatus(ctx context.Context, in *TailscaleStatusReport, opts ...grpc.CallOption) (*StatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StatusResponse)
+	err := c.cc.Invoke(ctx, AgentService_ReportTailscaleStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentServiceClient) ReportProxyStatus(ctx context.Context, in *ProxyStatusReport, opts ...grpc.CallOption) (*StatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StatusResponse)
+	err := c.cc.Invoke(ctx, AgentService_ReportProxyStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -136,6 +162,10 @@ type AgentServiceServer interface {
 	GetEnabledTCPServices(context.Context, *GetTCPServicesRequest) (*GetTCPServicesResponse, error)
 	// 获取已启用的STCP访问列表
 	GetEnabledSTCPVisitors(context.Context, *GetSTCPVisitorsRequest) (*GetSTCPVisitorsResponse, error)
+	// [Tailscale] 上报 Tailscale 状态
+	ReportTailscaleStatus(context.Context, *TailscaleStatusReport) (*StatusResponse, error)
+	// [Tailscale] 上报端口映射状态
+	ReportProxyStatus(context.Context, *ProxyStatusReport) (*StatusResponse, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -163,6 +193,12 @@ func (UnimplementedAgentServiceServer) GetEnabledTCPServices(context.Context, *G
 }
 func (UnimplementedAgentServiceServer) GetEnabledSTCPVisitors(context.Context, *GetSTCPVisitorsRequest) (*GetSTCPVisitorsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetEnabledSTCPVisitors not implemented")
+}
+func (UnimplementedAgentServiceServer) ReportTailscaleStatus(context.Context, *TailscaleStatusReport) (*StatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReportTailscaleStatus not implemented")
+}
+func (UnimplementedAgentServiceServer) ReportProxyStatus(context.Context, *ProxyStatusReport) (*StatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReportProxyStatus not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -282,6 +318,42 @@ func _AgentService_GetEnabledSTCPVisitors_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_ReportTailscaleStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TailscaleStatusReport)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).ReportTailscaleStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_ReportTailscaleStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).ReportTailscaleStatus(ctx, req.(*TailscaleStatusReport))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentService_ReportProxyStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProxyStatusReport)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).ReportProxyStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_ReportProxyStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).ReportProxyStatus(ctx, req.(*ProxyStatusReport))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -308,6 +380,14 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetEnabledSTCPVisitors",
 			Handler:    _AgentService_GetEnabledSTCPVisitors_Handler,
+		},
+		{
+			MethodName: "ReportTailscaleStatus",
+			Handler:    _AgentService_ReportTailscaleStatus_Handler,
+		},
+		{
+			MethodName: "ReportProxyStatus",
+			Handler:    _AgentService_ReportProxyStatus_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

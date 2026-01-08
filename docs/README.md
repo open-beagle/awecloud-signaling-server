@@ -66,6 +66,12 @@
   - `design_security_token_audit.md` - 安全令牌与审计日志设计（重要）
   - `design_version_control.md` - Desktop 版本管理设计（重要）
   - `design_api_download.md` - Desktop 客户端下载 API 设计（重要）
+  - `design_tailscale_upgrade.md` - Tailscale 升级方案设计（新）
+  - `design_tailscale_infrastructure.md` - Tailscale 基础设施设计（新）
+  - `design_tailscale_server_web.md` - Tailscale 升级 Server Web 变更设计（新）
+  - `design_tailscale_server.md` - Tailscale 升级 Server 端变更设计（新）
+  - `design_tailscale_agent.md` - Tailscale 升级 Agent 端变更设计（新）
+  - `design_tailscale_desktop.md` - Tailscale 升级 Desktop 端变更设计（新）
   - `design_server_tcp_service_management.md` - TCP 服务管理设计（新功能）
   - `design_public_url.md` - 公网地址配置设计（待实现）
   - `design_server_access_control.md` - 访问控制系统设计（未来功能）
@@ -226,6 +232,39 @@ tests/
 - **维护者**: 项目团队
 
 ## 最近更新
+
+### 2025-01-07
+
+- 新增 `design_tailscale_upgrade.md` - Tailscale 升级方案设计
+  - 升级必要性分析（流量绕行、带宽瓶颈）
+  - 升级前后架构对比（FRP vs Tailscale）
+  - Headscale + DERP 部署方案
+  - 使用场景：访问群晖 Drive、访问 K8s Service
+  - 架构图：`assets/tailscale_architecture.svg`
+- 新增 `design_tailscale_server_web.md` - Tailscale 升级 Server Web 变更设计
+  - 菜单结构变更（服务管理简化为一级菜单）
+  - Agent 列表新增 Tailscale IP、Services 数量字段
+  - 服务管理合并 STCP/TCP 为统一的端口映射
+  - 数据模型变更和 API 变更说明
+- 新增 `design_tailscale_server.md` - Tailscale 升级 Server 端变更设计
+  - 数据模型变更（Agent 新增字段、新增 ProxyService）
+  - gRPC 服务变更（新增端口映射指令）
+  - API 接口变更（新增服务管理 API）
+  - Headscale 集成设计
+  - 数据库迁移方案
+- 新增 `design_tailscale_agent.md` - Tailscale 升级 Agent 端变更设计
+  - TailscaleManager 模块设计
+  - ProxyManager TCP 代理管理
+  - 启动流程和命令处理变更
+  - 配置文件变更
+- 新增 `design_tailscale_desktop.md` - Tailscale 升级 Desktop 端变更设计
+  - TailscaleManager 和 LocalProxy 模块设计
+  - 登录流程和服务访问流程变更
+  - 前端界面变更
+  - API 调用变更
+- 新增 `changes_agent.md` - Agent 列表功能增强
+  - 修复在线状态显示不准确问题
+  - 新增版本和最后在线时间字段
 
 ### 2025-12-07
 

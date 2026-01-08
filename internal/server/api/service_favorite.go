@@ -104,12 +104,12 @@ func (a *ServiceFavoriteAPI) ToggleFavorite(c *gin.Context) {
 		return
 	}
 
-	// 检查STCP实例是否存在
-	var instance model.STCPInstance
-	if err := db.DB.First(&instance, req.STCPInstanceID).Error; err != nil {
+	// 检查端口映射服务是否存在
+	var service model.ProxyService
+	if err := db.DB.First(&service, req.STCPInstanceID).Error; err != nil {
 		c.JSON(http.StatusNotFound, ToggleFavoriteResponse{
 			Success: false,
-			Message: "服务实例不存在",
+			Message: "服务不存在",
 		})
 		return
 	}

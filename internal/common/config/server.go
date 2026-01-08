@@ -7,13 +7,15 @@ import (
 )
 
 type ServerConfig struct {
-	Server   ServerSection   `toml:"server"`
-	Database DatabaseSection `toml:"database"`
-	Web      WebSection      `toml:"web"`
-	Security SecuritySection `toml:"security"`
-	Log      LogConfig       `toml:"log"`
+	Server    ServerSection    `toml:"server"`
+	Database  DatabaseSection  `toml:"database"`
+	Web       WebSection       `toml:"web"`
+	Security  SecuritySection  `toml:"security"`
+	Log       LogConfig        `toml:"log"`
+	Tailscale TailscaleSection `toml:"tailscale"`
 }
 
+// ServerSection FRP 配置（废弃，保留兼容）
 type ServerSection struct {
 	BindAddr          string `toml:"bind_addr"`
 	BindPort          int    `toml:"bind_port"`
@@ -31,6 +33,13 @@ type ServerSection struct {
 	ProxyListenAddr      string `toml:"proxy_listen_addr"`      // 代理监听地址
 	ProxyListenPort      int    `toml:"proxy_listen_port"`      // 代理监听端口
 	WebSocketPath        string `toml:"websocket_path"`         // WebSocket 路径（如 "/ws"）
+}
+
+// TailscaleSection Tailscale 配置
+type TailscaleSection struct {
+	HeadscaleURL    string `toml:"headscale_url"`     // Headscale API 地址
+	HeadscaleAPIKey string `toml:"headscale_api_key"` // Headscale API 密钥（从环境变量获取）
+	User            string `toml:"user"`              // Headscale 用户名
 }
 
 type DatabaseSection struct {
@@ -116,6 +125,25 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 	if token := os.Getenv("TOKEN"); token != "" {
 		cfg.Server.Token = token
+	}
+
+	// Tailscale 配置默认值
+	if cfg.Tailscale.HeadscaleURL == "" {
+		cfg.Tailscale.HeadscaleURL = "http://headscale:8080"
+	}
+	if cfg.Tailscale.User == "" {
+		cfg.Tailscale.User = "default"
+	}
+
+	// Tailscale 环境变量覆盖
+	if headscaleURL := os.Getenv("HEADSCALE_URL"); headscaleURL != "" {
+		cfg.Tailscale.HeadscaleURL = headscaleURL
+	}
+	if headscaleAPIKey := os.Getenv("HEADSCALE_API_KEY"); headscaleAPIKey != "" {
+		cfg.Tailscale.HeadscaleAPIKey = headscaleAPIKey
+	}
+	if user := os.Getenv("HEADSCALE_USER"); user != "" {
+		cfg.Tailscale.User = user
 	}
 
 	return &cfg, nil

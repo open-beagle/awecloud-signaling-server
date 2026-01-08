@@ -21,6 +21,9 @@
           <el-icon><Connection /></el-icon>
           <span>{{ t('menu.serviceManagement') }}</span>
         </template>
+        <el-menu-item index="/services">
+          {{ t('menu.services') }}
+        </el-menu-item>
         <el-menu-item index="/services/stcp">
           {{ t('menu.stcpInstances') }}
         </el-menu-item>

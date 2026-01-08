@@ -29,35 +29,17 @@ token = "your-agent-token-from-server"
 #   - Server 使用 HTTP/2 统一端口，Web/API 和 gRPC 复用同一端口
 #   - 如果URL中指定了端口，使用指定的端口
 #   - 如果URL中没有端口，https 使用 443，http 使用 80
-#
-# 注意：
-#   - Agent 会自动从 Server 获取 FRP 连接信息（地址、端口、token）
-#   - 如果不配置，将使用编译时注入的默认值或硬编码默认值
 [server]
 address = "http://localhost:8080"
 
-# FRP 公网地址配置（可选）
-# 如果配置了此项，Agent 将使用此地址连接 FRP Server，忽略 Server 返回的地址
-# 适用场景：Server 在内网，但 FRP Server 有独立的公网地址
-# 
-# 配置优先级：
-#   1. 环境变量 AGENT_PUBLIC_URL（最高优先级）
-#   2. 配置文件 server.public_url
-#   3. Server 返回的地址（默认行为）
-#
-# 路径说明：
-#   - 不指定路径：自动使用 FRP 原生路径 /~!frp（内网直连场景）
-#   - 指定 /ws：需要 Traefik 等反向代理做路径重写（公网场景）
-#   - 指定 /~!frp：直接连接 FRP Server（内网场景）
-#
-# 示例：
-#   内网直连（简写）：public_url = "192.168.1.100:7000"  （自动补充 ws:// 和 /~!frp）
-#   内网直连（完整）：public_url = "ws://192.168.1.100:7000"  （自动使用 /~!frp）
-#   公网访问：public_url = "wss://frp.example.com/ws"  （需要 Traefik 重写）
-#   明确指定路径：public_url = "ws://192.168.1.100:7000/~!frp"
-#
-# 注意：留空则使用 Server 返回的地址
-# public_url = ""
+# Tailscale 配置
+# Agent 通过 Tailscale (tsnet) 连接到 Headscale 控制平面
+# 认证信息（ControlURL、AuthKey）由 Server 在注册时下发
+[tailscale]
+# Tailscale 状态存储目录
+# 用于存储节点密钥和状态信息
+# 默认：~/.awecloud-agent/tailscale
+state_dir = ""
 
 # 健康检查配置
 [health]

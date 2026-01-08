@@ -205,7 +205,7 @@ func (s *ClientServiceServer) LoginWithToken(ctx context.Context, req *pb.LoginW
 	}, nil
 }
 
-// GetServices 获取可访问服务列表
+// GetServices 获取可访问服务列表（废弃，保留兼容）
 func (s *ClientServiceServer) GetServices(ctx context.Context, req *pb.GetServicesRequest) (*pb.GetServicesResponse, error) {
 	// 验证Token
 	token, err := jwt.Parse(req.SessionToken, func(token *jwt.Token) (interface{}, error) {
@@ -223,70 +223,36 @@ func (s *ClientServiceServer) GetServices(ctx context.Context, req *pb.GetServic
 
 	clientID := int64(claims["client_id"].(float64))
 
-	// 权限过滤逻辑：查询用户可访问的服务
-	var allInstances []model.STCPInstance
-
-	// 1. 查询所有 public 服务
-	var publicInstances []model.STCPInstance
-	if err := db.DB.Preload("Agent").Where("access_type = ?", "public").Find(&publicInstances).Error; err != nil {
-		logger.Infof("查询 public 服务失败: %v", err)
+	// 查询所有端口映射服务（Tailscale 模式）
+	var proxyServices []model.ProxyService
+	if err := db.DB.Preload("Agent").Find(&proxyServices).Error; err != nil {
+		logger.Infof("查询端口映射服务失败: %v", err)
 		return nil, status.Error(codes.Internal, "查询失败")
 	}
-	allInstances = append(allInstances, publicInstances...)
-
-	// 2. 查询用户有权限的 private 服务
-	var privateAccess []model.STCPAccess
-	if err := db.DB.Preload("STCPInstance").Preload("STCPInstance.Agent").
-		Where("client_id = ?", clientID).
-		Find(&privateAccess).Error; err != nil {
-		logger.Infof("查询 private 服务失败: %v", err)
-		return nil, status.Error(codes.Internal, "查询失败")
-	}
-	for _, access := range privateAccess {
-		if access.STCPInstance != nil && access.STCPInstance.AccessType == "private" {
-			allInstances = append(allInstances, *access.STCPInstance)
-		}
-	}
-
-	// 3. 查询用户所在组的 group 服务
-	var groupInstances []model.STCPInstance
-	if err := db.DB.Preload("Agent").
-		Joins("JOIN group_members ON group_members.group_id = stcp_instances.group_id").
-		Where("group_members.client_id = ? AND stcp_instances.access_type = ?", clientID, "group").
-		Find(&groupInstances).Error; err != nil {
-		logger.Infof("查询 group 服务失败: %v", err)
-		return nil, status.Error(codes.Internal, "查询失败")
-	}
-	allInstances = append(allInstances, groupInstances...)
 
 	// 构建服务列表
-	services := make([]*pb.ServiceInfo, 0, len(allInstances))
-	for _, instance := range allInstances {
+	services := make([]*pb.ServiceInfo, 0, len(proxyServices))
+	for _, service := range proxyServices {
 		agentName := ""
-		if instance.Agent != nil {
-			agentName = instance.Agent.AgentName
-		}
-
-		accessType := instance.AccessType
-		if accessType == "" {
-			accessType = "public"
+		if service.Agent != nil {
+			agentName = service.Agent.AgentName
 		}
 
 		// 检查状态
 		serviceStatus := "offline"
-		if s.agentService != nil && s.agentService.IsAgentOnline(instance.AgentID) {
+		if s.agentService != nil && s.agentService.IsAgentOnline(service.AgentID) {
 			serviceStatus = "online"
 		}
 
 		services = append(services, &pb.ServiceInfo{
-			InstanceId:   instance.ID,
-			InstanceName: instance.InstanceName,
+			InstanceId:   service.ID,
+			InstanceName: service.Name,
 			AgentName:    agentName,
-			Description:  instance.Description,
-			LocalPort:    int32(instance.LocalPort),
-			AccessType:   accessType,
+			Description:  service.Remark,
+			LocalPort:    int32(service.ListenPort),
+			AccessType:   "public",
 			Status:       serviceStatus,
-			LocalIp:      instance.LocalIP,
+			LocalIp:      service.TargetAddr,
 		})
 	}
 
@@ -298,7 +264,7 @@ func (s *ClientServiceServer) GetServices(ctx context.Context, req *pb.GetServic
 	}, nil
 }
 
-// ConnectService 连接服务（获取连接信息）
+// ConnectService 连接服务（废弃，保留兼容）
 func (s *ClientServiceServer) ConnectService(ctx context.Context, req *pb.ConnectRequest) (*pb.ConnectResponse, error) {
 	// 验证Token
 	token, err := jwt.Parse(req.SessionToken, func(token *jwt.Token) (interface{}, error) {
@@ -316,62 +282,24 @@ func (s *ClientServiceServer) ConnectService(ctx context.Context, req *pb.Connec
 
 	clientID := int64(claims["client_id"].(float64))
 
-	// 查询STCP实例
-	var instance model.STCPInstance
-	if err := db.DB.First(&instance, req.InstanceId).Error; err != nil {
-		logger.Infof("STCP实例不存在: %d", req.InstanceId)
+	// 查询端口映射服务
+	var service model.ProxyService
+	if err := db.DB.Preload("Agent").First(&service, req.InstanceId).Error; err != nil {
+		logger.Infof("端口映射服务不存在: %d", req.InstanceId)
 		return &pb.ConnectResponse{
 			Success: false,
 			Message: "服务不存在",
 		}, nil
 	}
 
-	// 检查权限
-	hasAccess := false
-	switch instance.AccessType {
-	case "public", "":
-		// Public 服务，所有用户可访问
-		hasAccess = true
-	case "private":
-		// Private 服务，检查 stcp_access 表
-		var access model.STCPAccess
-		if err := db.DB.Where("client_id = ? AND stcp_instance_id = ?", clientID, req.InstanceId).First(&access).Error; err == nil {
-			hasAccess = true
-		}
-	case "group":
-		// Group 服务，检查用户是否在组中
-		if instance.GroupID != nil {
-			var member model.GroupMember
-			if err := db.DB.Where("client_id = ? AND group_id = ?", clientID, *instance.GroupID).First(&member).Error; err == nil {
-				hasAccess = true
-			}
-		}
-	}
-
-	if !hasAccess {
-		logger.Infof("Client无权限访问该服务: client_id=%d, instance_id=%d, access_type=%s", clientID, req.InstanceId, instance.AccessType)
-		return &pb.ConnectResponse{
-			Success: false,
-			Message: "无权限访问该服务",
-		}, nil
-	}
-
-	logger.Infof("Client连接服务: client_id=%d, instance=%s", clientID, instance.InstanceName)
-
-	// 获取隧道服务器地址
-	serverURL := s.config.Server.PublicURL
-	if serverURL == "" {
-		// 如果没有配置 public_url，返回空字符串
-		// Desktop 将使用其连接的 Server 地址 + 隧道端口
-		serverURL = ""
-	}
+	logger.Infof("Client连接服务: client_id=%d, service=%s", clientID, service.Name)
 
 	return &pb.ConnectResponse{
 		Success:            true,
 		Message:            "连接信息获取成功",
-		InstanceName:       instance.InstanceName,
-		SecretKey:          instance.SecretKey,
-		SuggestedLocalPort: int32(instance.LocalPort),
-		ServerUrl:          serverURL,
+		InstanceName:       service.Name,
+		SecretKey:          "",
+		SuggestedLocalPort: int32(service.ListenPort),
+		ServerUrl:          s.config.Server.PublicURL,
 	}, nil
 }

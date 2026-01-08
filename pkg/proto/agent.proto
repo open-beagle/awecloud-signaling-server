@@ -23,6 +23,12 @@ service AgentService {
   
   // 获取已启用的STCP访问列表
   rpc GetEnabledSTCPVisitors(GetSTCPVisitorsRequest) returns (GetSTCPVisitorsResponse);
+
+  // [Tailscale] 上报 Tailscale 状态
+  rpc ReportTailscaleStatus(TailscaleStatusReport) returns (StatusResponse);
+
+  // [Tailscale] 上报端口映射状态
+  rpc ReportProxyStatus(ProxyStatusReport) returns (StatusResponse);
 }
 
 // Agent注册请求
@@ -37,9 +43,14 @@ message RegisterResponse {
   bool success = 1;
   string message = 2;
   int64 agent_id = 3;
-  string token = 4;  // 隧道认证 Token
-  string server = 5; // 隧道服务器地址（完整 URL 或空）
-  int32 port = 6;    // 隧道服务器端口（使用 URL 时为 0）
+  string token = 4;  // 隧道认证 Token (FRP, 废弃)
+  string server = 5; // 隧道服务器地址 (FRP, 废弃)
+  int32 port = 6;    // 隧道服务器端口 (FRP, 废弃)
+
+  // [Tailscale] 新增字段
+  string control_url = 7;   // Headscale 控制平面 URL
+  string auth_key = 8;      // Tailscale 预认证密钥
+  string derp_url = 9;      // DERP 服务器 URL
 }
 
 // Agent心跳请求
@@ -47,6 +58,11 @@ message HeartbeatRequest {
   int64 agent_id = 1;
   string agent_token = 2;
   string version = 3;  // Agent版本
+
+  // [Tailscale] 新增字段
+  string tailscale_ip = 4;  // Tailscale IP
+  bool ts_connected = 5;    // Tailscale 连接状态
+  string ts_conn_type = 6;  // 连接方式: p2p / derp
 }
 
 // Agent心跳响应
@@ -64,6 +80,11 @@ message Command {
     DELETE_TCP = 3;
     CREATE_STCP_VISITOR = 4;
     DELETE_STCP_VISITOR = 5;
+
+    // [Tailscale] 新增命令类型
+    START_PROXY = 10;   // 启动端口映射
+    STOP_PROXY = 11;    // 停止端口映射
+    SYNC_PROXIES = 12;  // 同步所有端口映射
   }
   
   string command_id = 1;
@@ -86,6 +107,16 @@ message Command {
   string server_name = 10;
   string bind_addr = 11;
   int32 bind_port = 12;
+
+  // [Tailscale] 端口映射相关字段
+  ProxyCommand proxy_command = 13;
+}
+
+// [Tailscale] 端口映射指令
+message ProxyCommand {
+  string name = 1;         // 服务名称
+  int32 listen_port = 2;   // 监听端口
+  string target_addr = 3;  // 目标地址，如 192.168.1.100:3306
 }
 
 // 指令响应
@@ -149,4 +180,31 @@ message STCPVisitorInfo {
 message GetSTCPVisitorsResponse {
   bool success = 1;
   repeated STCPVisitorInfo visitors = 2;
+}
+
+// [Tailscale] Tailscale 状态上报
+message TailscaleStatusReport {
+  int64 agent_id = 1;
+  string tailscale_ip = 2;   // Tailscale IP
+  bool connected = 3;        // 连接状态
+  string conn_type = 4;      // 连接方式: p2p / derp
+  int32 latency_ms = 5;      // 延迟（毫秒）
+}
+
+// [Tailscale] 端口映射状态
+message ProxyStatus {
+  string name = 1;           // 服务名称
+  int32 listen_port = 2;     // 监听端口
+  string target_addr = 3;    // 目标地址
+  string status = 4;         // 状态: running / stopped / error
+  int32 connections = 5;     // 当前连接数
+  int64 bytes_in = 6;        // 入站流量
+  int64 bytes_out = 7;       // 出站流量
+  string error_msg = 8;      // 错误信息（status=error 时）
+}
+
+// [Tailscale] 端口映射状态上报
+message ProxyStatusReport {
+  int64 agent_id = 1;
+  repeated ProxyStatus proxies = 2;
 }

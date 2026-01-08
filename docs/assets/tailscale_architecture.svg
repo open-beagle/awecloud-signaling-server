@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800">
+  <defs>
+    <linearGradient id="cloudGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#e3f2fd;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#bbdefb;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="serverGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#fff3e0;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ffe0b2;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="internalGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#e8f5e9;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#c8e6c9;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="officeGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#fce4ec;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f8bbd9;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="homeGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f3e5f5;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#e1bee7;stop-opacity:1" />
+    </linearGradient>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
+    </marker>
+    <marker id="arrowheadGreen" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4caf50"/>
+    </marker>
+    <marker id="arrowheadBlue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2196f3"/>
+    </marker>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="1200" height="800" fill="#fafafa"/>
+  
+  <!-- 标题 -->
+  <text x="600" y="35" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#333">
+    Tailscale 升级架构图
+  </text>
+
+  <!-- 互联网云 -->
+  <rect x="400" y="60" width="400" height="200" rx="20" fill="url(#cloudGrad)" stroke="#1976d2" stroke-width="2"/>
+  <text x="600" y="85" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#1976d2">
+    互联网 (公网 Server)
+  </text>
+
+  <!-- Headscale + DERP -->
+  <rect x="450" y="100" width="300" height="70" rx="8" fill="url(#serverGrad)" stroke="#f57c00" stroke-width="2"/>
+  <text x="600" y="125" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#e65100">Headscale + 内嵌 DERP</text>
+  <text x="600" y="142" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">控制平面 + 备用中继</text>
+  <text x="600" y="158" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#888">密钥交换 / 路由同步 / STUN:3479</text>
+
+  <!-- Server-Web -->
+  <rect x="520" y="185" width="160" height="55" rx="8" fill="#fff" stroke="#9e9e9e" stroke-width="1"/>
+  <text x="600" y="207" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#424242">Server-Web</text>
+  <text x="600" y="222" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">gRPC 管理 / ACL 同步</text>
+
+  <!-- 公司内网区域 -->
+  <rect x="50" y="320" width="350" height="420" rx="15" fill="url(#internalGrad)" stroke="#388e3c" stroke-width="2"/>
+  <text x="225" y="345" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#2e7d32">
+    公司内网 (Agent 网段: 100.64.0.0/16)
+  </text>
+
+  <!-- Agent (Tailscale) -->
+  <rect x="80" y="370" width="140" height="90" rx="8" fill="#fff" stroke="#4caf50" stroke-width="2"/>
+  <text x="150" y="395" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#2e7d32">Agent</text>
+  <text x="150" y="412" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">Tailscale Client</text>
+  <text x="150" y="428" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#4caf50">100.64.0.1</text>
+  <text x="150" y="448" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#888">子网路由器 (固定IP)</text>
+
+  <!-- Agent-2 -->
+  <rect x="240" y="370" width="140" height="90" rx="8" fill="#fff" stroke="#4caf50" stroke-width="2"/>
+  <text x="310" y="395" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#2e7d32">Agent-2</text>
+  <text x="310" y="412" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">Tailscale Client</text>
+  <text x="310" y="428" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#4caf50">100.64.0.2</text>
+  <text x="310" y="448" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#888">NAS 网关 (固定IP)</text>
+
+  <!-- K8s -->
+  <rect x="80" y="490" width="140" height="80" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
+  <text x="150" y="515" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#1565c0">Kubernetes</text>
+  <text x="150" y="532" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">Service: 10.96.0.0/12</text>
+  <text x="150" y="548" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">Pod: 10.244.0.0/16</text>
+  <text x="150" y="562" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#888">my-app.svc.cluster.local</text>
+
+  <!-- 群晖 -->
+  <rect x="240" y="490" width="140" height="80" rx="8" fill="#e8eaf6" stroke="#3f51b5" stroke-width="2"/>
+  <text x="310" y="515" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#303f9f">群晖 NAS</text>
+  <text x="310" y="532" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">192.168.1.100</text>
+  <text x="310" y="548" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">Drive: 6690</text>
+  <text x="310" y="562" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#888">DSM: 5000</text>
+
+  <!-- 其他内网服务 -->
+  <rect x="80" y="600" width="300" height="50" rx="8" fill="#fff3e0" stroke="#ff9800" stroke-width="1" stroke-dasharray="4"/>
+  <text x="230" y="625" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#e65100">其他内网服务 (192.168.0.0/16)</text>
+  <text x="230" y="640" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#888">MySQL / Redis / GitLab / Jenkins ...</text>
+
+  <!-- 办公网络区域 -->
+  <rect x="450" y="320" width="300" height="200" rx="15" fill="url(#officeGrad)" stroke="#c2185b" stroke-width="2"/>
+  <text x="600" y="345" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#ad1457">
+    办公网络 (Desktop 网段: 100.65.0.0/16)
+  </text>
+
+  <!-- Desktop (办公) -->
+  <rect x="480" y="370" width="120" height="80" rx="8" fill="#fff" stroke="#e91e63" stroke-width="2"/>
+  <text x="540" y="395" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#c2185b">Desktop</text>
+  <text x="540" y="412" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">Tailscale Client</text>
+  <text x="540" y="428" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#e91e63">100.65.0.1</text>
+  <text x="540" y="445" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#888">张三-公司电脑</text>
+
+  <!-- Desktop (办公2) -->
+  <rect x="620" y="420" width="110" height="70" rx="8" fill="#fff" stroke="#e91e63" stroke-width="1"/>
+  <text x="675" y="445" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#c2185b">Desktop</text>
+  <text x="675" y="460" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#666">100.65.0.10</text>
+  <text x="675" y="480" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#888">李四-公司电脑</text>
+
+  <!-- 员工家里区域 -->
+  <rect x="800" y="320" width="350" height="200" rx="15" fill="url(#homeGrad)" stroke="#7b1fa2" stroke-width="2"/>
+  <text x="975" y="345" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#6a1b9a">
+    员工家里 (Desktop 网段: 100.65.0.0/16)
+  </text>
+
+  <!-- Desktop (家里) -->
+  <rect x="830" y="370" width="120" height="80" rx="8" fill="#fff" stroke="#9c27b0" stroke-width="2"/>
+  <text x="890" y="395" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#7b1fa2">Desktop</text>
+  <text x="890" y="412" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">Tailscale Client</text>
+  <text x="890" y="428" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#9c27b0">100.65.0.2</text>
+  <text x="890" y="445" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#888">张三-家里电脑</text>
+
+  <!-- Desktop (家里2) -->
+  <rect x="970" y="420" width="110" height="70" rx="8" fill="#fff" stroke="#9c27b0" stroke-width="1"/>
+  <text x="1025" y="445" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#7b1fa2">Desktop</text>
+  <text x="1025" y="460" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#666">100.65.0.11</text>
+  <text x="1025" y="480" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#888">李四-家里电脑</text>
+
+  <!-- 连接线 -->
+  
+  <!-- Headscale 到各节点的控制连接 (虚线) -->
+  <path d="M 600 170 L 600 260 L 150 260 L 150 370" stroke="#f57c00" stroke-width="1.5" stroke-dasharray="5,3" fill="none" marker-end="url(#arrowhead)"/>
+  <path d="M 600 170 L 600 260 L 540 260 L 540 370" stroke="#f57c00" stroke-width="1.5" stroke-dasharray="5,3" fill="none" marker-end="url(#arrowhead)"/>
+  <path d="M 600 170 L 600 260 L 890 260 L 890 370" stroke="#f57c00" stroke-width="1.5" stroke-dasharray="5,3" fill="none" marker-end="url(#arrowhead)"/>
+
+  <!-- P2P 直连 (办公网络 → 公司内网) - 绿色粗线 -->
+  <path d="M 480 410 L 220 410" stroke="#4caf50" stroke-width="4" fill="none" marker-end="url(#arrowheadGreen)"/>
+  <rect x="280" y="395" width="120" height="30" rx="4" fill="#e8f5e9" stroke="#4caf50" stroke-width="1"/>
+  <text x="340" y="408" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" font-weight="bold" fill="#2e7d32">P2P 直连</text>
+  <text x="340" y="420" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#4caf50">延迟 ~2ms ✓</text>
+
+  <!-- DERP 中继 (员工家里 → 公司内网) - 蓝色线 -->
+  <path d="M 830 410 L 750 410 L 750 300 L 600 170" stroke="#2196f3" stroke-width="2" fill="none"/>
+  <path d="M 600 170 L 450 300 L 220 430" stroke="#2196f3" stroke-width="2" fill="none" marker-end="url(#arrowheadBlue)"/>
+  <rect x="680" y="280" width="100" height="30" rx="4" fill="#e3f2fd" stroke="#2196f3" stroke-width="1"/>
+  <text x="730" y="293" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" font-weight="bold" fill="#1565c0">DERP 中继</text>
+  <text x="730" y="305" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#2196f3">P2P失败时</text>
+
+  <!-- Agent 到内网服务的连接 -->
+  <line x1="150" y1="460" x2="150" y2="490" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <line x1="310" y1="460" x2="310" y2="490" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <line x1="150" y1="570" x2="150" y2="600" stroke="#666" stroke-width="1" stroke-dasharray="3"/>
+
+  <!-- 图例 -->
+  <rect x="50" y="720" width="1100" height="60" rx="8" fill="#fff" stroke="#e0e0e0" stroke-width="1"/>
+  <text x="100" y="745" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#333">图例:</text>
+  
+  <line x1="150" y1="740" x2="200" y2="740" stroke="#4caf50" stroke-width="4"/>
+  <text x="210" y="745" font-family="Arial, sans-serif" font-size="10" fill="#333">P2P 直连 (WireGuard)</text>
+  
+  <line x1="350" y1="740" x2="400" y2="740" stroke="#2196f3" stroke-width="2"/>
+  <text x="410" y="745" font-family="Arial, sans-serif" font-size="10" fill="#333">DERP 中继</text>
+  
+  <line x1="520" y1="740" x2="570" y2="740" stroke="#f57c00" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="580" y="745" font-family="Arial, sans-serif" font-size="10" fill="#333">控制平面 (密钥/路由)</text>
+  
+  <rect x="750" y="730" width="15" height="15" rx="2" fill="url(#internalGrad)" stroke="#388e3c" stroke-width="1"/>
+  <text x="775" y="742" font-family="Arial, sans-serif" font-size="10" fill="#333">Agent 100.64.x.x</text>
+  
+  <rect x="890" y="730" width="15" height="15" rx="2" fill="url(#officeGrad)" stroke="#c2185b" stroke-width="1"/>
+  <text x="915" y="742" font-family="Arial, sans-serif" font-size="10" fill="#333">Desktop 100.65.x.x</text>
+
+  <!-- 关键优势说明 -->
+  <text x="100" y="765" font-family="Arial, sans-serif" font-size="9" fill="#666">
+    ✓ 网段隔离: Agent (100.64.0.0/16) / Desktop (100.65.0.0/16) | ✓ 固定IP: 断线不回收 | ✓ ACL控制: Server同步Headscale策略
+  </text>
+</svg>

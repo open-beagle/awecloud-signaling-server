@@ -1,0 +1,82 @@
+# Agent Deployment (Tailscale 版本)
+# 新增 Tailscale 支持，内置 TCP 代理
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: awecloud-signaling-agent
+  namespace: beagle-access
+  labels:
+    app: awecloud-signaling-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: awecloud-signaling-agent
+  template:
+    metadata:
+      labels:
+        app: awecloud-signaling-agent
+    spec:
+      containers:
+        - name: agent
+          image: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.2.0
+          imagePullPolicy: Always
+          env:
+            # Agent 标识（必需）
+            - name: AGENT_NAME
+              value: "agent-k8s-001"
+            # Agent 认证 Token（必需，从 Secret 获取）
+            - name: AGENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: awecloud-signaling-agent
+                  key: agent-token
+            # Server 地址
+            - name: AGENT_ADDRESS
+              value: "https://signaling.example.com"
+          volumeMounts:
+            - name: logs
+              mountPath: /home/code/logs
+            # Tailscale 状态存储
+            - name: tailscale-state
+              mountPath: /var/lib/awecloud-agent/tailscale
+          ports:
+            - name: health
+              containerPort: 8090
+              protocol: TCP
+          # Tailscale 需要 NET_ADMIN 权限
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+          # 存活性探测
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # 就绪性探测
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+      volumes:
+        - name: logs
+          emptyDir: {}
+        # Tailscale 状态存储（使用 emptyDir，重启后重新注册）
+        - name: tailscale-state
+          emptyDir: {}

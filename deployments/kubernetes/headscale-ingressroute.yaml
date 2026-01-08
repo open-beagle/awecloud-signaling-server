@@ -1,0 +1,64 @@
+# Traefik IngressRoute for AWECloud Signaling Server (Tailscale 版本)
+#
+# 路由规则：
+# 1. /headscale/* → Headscale 控制平面
+# 2. /ts2021      → Headscale Tailscale 协议
+# 3. /derp        → DERP 中继服务
+# 4. /*           → Server 业务 API（默认）
+#
+# 部署命令：
+#   kubectl apply -f server-ingressroute-tailscale.yaml
+
+---
+apiVersion: bcc.bd-apaas.com/v1alpha1
+kind: IngressRoute
+metadata:
+  name: headscale
+  namespace: beagle-access
+  labels:
+    app: headscale
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    # Headscale 控制平面路由
+    # 匹配 /headscale/* 路径，去除前缀后转发到 Headscale
+    - kind: Rule
+      match: Host(`signaling.example.com`) && PathPrefix(`/headscale`)
+      services:
+        - name: headscale
+          port: 8080
+      middlewares:
+        - name: headscale-stripprefix
+
+    # Tailscale 协议路由
+    # 匹配 /ts2021 路径，直接转发到 Headscale
+    - kind: Rule
+      match: Host(`signaling.example.com`) && PathPrefix(`/ts2021`)
+      services:
+        - name: headscale
+          port: 8080
+
+    # DERP 中继路由
+    # 匹配 /derp 路径，转发到 Headscale DERP 端口
+    - kind: Rule
+      match: Host(`signaling.example.com`) && PathPrefix(`/derp`)
+      services:
+        - name: headscale
+          port: 8080
+
+  tls: {}
+
+---
+# Middleware: 去除 /headscale 前缀
+apiVersion: bcc.bd-apaas.com/v1alpha1
+kind: Middleware
+metadata:
+  name: headscale-stripprefix
+  namespace: beagle-access
+  labels:
+    app: headscale
+spec:
+  stripPrefix:
+    prefixes:
+      - /headscale

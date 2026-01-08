@@ -1,0 +1,96 @@
+<svg viewBox="0 0 1000 750" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
+    </marker>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="1000" height="750" fill="#fafafa"/>
+
+  <!-- 标题 -->
+  <text x="500" y="35" text-anchor="middle" font-size="20" font-weight="bold" fill="#333">Desktop 访问服务流程</text>
+
+  <!-- 阶段 1 标题 -->
+  <rect x="50" y="60" width="400" height="30" rx="5" fill="#fff3e0"/>
+  <text x="250" y="80" text-anchor="middle" font-size="14" font-weight="bold" fill="#f57c00">阶段 1: 获取服务列表 (Server)</text>
+
+  <!-- Desktop -->
+  <rect x="100" y="110" width="120" height="50" rx="8" fill="#f3e5f5" stroke="#9c27b0" stroke-width="2"/>
+  <text x="160" y="140" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Desktop</text>
+
+  <!-- 箭头到 Server -->
+  <line x1="220" y1="135" x2="330" y2="135" stroke="#666" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="275" y="125" text-anchor="middle" font-size="10" fill="#666">GET /services</text>
+
+  <!-- Server -->
+  <rect x="340" y="110" width="120" height="50" rx="8" fill="#fff3e0" stroke="#f57c00" stroke-width="2"/>
+  <text x="400" y="140" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Server</text>
+
+  <!-- Server 权限过滤 -->
+  <rect x="340" y="180" width="200" height="80" rx="5" fill="#fff" stroke="#f57c00"/>
+  <text x="440" y="200" text-anchor="middle" font-size="11" font-weight="bold" fill="#f57c00">权限过滤</text>
+  <text x="440" y="220" text-anchor="middle" font-size="10" fill="#666">public → 所有人可见</text>
+  <text x="440" y="235" text-anchor="middle" font-size="10" fill="#666">private → 仅创建者</text>
+  <text x="440" y="250" text-anchor="middle" font-size="10" fill="#666">group → 仅组成员</text>
+
+  <!-- 返回服务列表 -->
+  <line x1="340" y1="145" x2="220" y2="145" stroke="#4caf50" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="275" y="165" text-anchor="middle" font-size="9" fill="#4caf50">[{ip, port}, ...]</text>
+
+  <!-- 分隔线 -->
+  <line x1="50" y1="290" x2="950" y2="290" stroke="#ddd" stroke-width="2" stroke-dasharray="5,5"/>
+
+  <!-- 阶段 2 标题 -->
+  <rect x="50" y="310" width="400" height="30" rx="5" fill="#e3f2fd"/>
+  <text x="250" y="330" text-anchor="middle" font-size="14" font-weight="bold" fill="#1976d2">阶段 2: 直接连接 (Tailscale 网络)</text>
+
+  <!-- Desktop -->
+  <rect x="100" y="360" width="120" height="50" rx="8" fill="#f3e5f5" stroke="#9c27b0" stroke-width="2"/>
+  <text x="160" y="380" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Desktop</text>
+  <text x="160" y="400" text-anchor="middle" font-size="9" fill="#666">100.65.0.1</text>
+
+  <!-- Tailscale 网络 -->
+  <rect x="280" y="350" width="200" height="70" rx="10" fill="#e8eaf6" stroke="#3f51b5" stroke-width="2" stroke-dasharray="5,5"/>
+  <text x="380" y="375" text-anchor="middle" font-size="11" fill="#3f51b5">Tailscale 网络</text>
+  <text x="380" y="395" text-anchor="middle" font-size="10" fill="#666">WireGuard 加密隧道</text>
+  <text x="380" y="410" text-anchor="middle" font-size="9" fill="#999">Server 不参与!</text>
+
+  <!-- Agent -->
+  <rect x="540" y="360" width="120" height="50" rx="8" fill="#e8f5e9" stroke="#4caf50" stroke-width="2"/>
+  <text x="600" y="380" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">Agent</text>
+  <text x="600" y="400" text-anchor="middle" font-size="9" fill="#666">100.64.0.1:3306</text>
+
+  <!-- 连接箭头 -->
+  <line x1="220" y1="385" x2="280" y2="385" stroke="#3f51b5" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="480" y1="385" x2="540" y2="385" stroke="#3f51b5" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Headscale ACL -->
+  <rect x="700" y="340" width="250" height="100" rx="10" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
+  <text x="825" y="365" text-anchor="middle" font-size="12" font-weight="bold" fill="#1976d2">Headscale ACL 检查</text>
+  <text x="825" y="390" text-anchor="middle" font-size="10" fill="#666">src: 100.65.0.1 (Desktop)</text>
+  <text x="825" y="410" text-anchor="middle" font-size="10" fill="#666">dst: 100.64.0.1:3306 (Agent)</text>
+  <text x="825" y="430" text-anchor="middle" font-size="10" fill="#1976d2">ACL 允许? → 连接成功/拒绝</text>
+
+  <!-- ACL 检查箭头 -->
+  <line x1="660" y1="385" x2="700" y2="385" stroke="#1976d2" stroke-width="2" stroke-dasharray="3,3"/>
+
+  <!-- 安全隐患警告 -->
+  <rect x="50" y="470" width="900" height="100" rx="10" fill="#ffebee" stroke="#f44336" stroke-width="2"/>
+  <text x="500" y="500" text-anchor="middle" font-size="14" font-weight="bold" fill="#c62828">⚠️ 安全隐患</text>
+  <text x="500" y="525" text-anchor="middle" font-size="12" fill="#c62828">如果 Desktop 记住了 100.64.0.1:3306，即使 Server 不再返回这个服务</text>
+  <text x="500" y="545" text-anchor="middle" font-size="12" fill="#c62828">Desktop 仍然可以直接通过 Tailscale 连接（除非 Headscale ACL 拒绝）</text>
+
+  <!-- 解决方案 -->
+  <rect x="50" y="590" width="900" height="140" rx="10" fill="#e8f5e9" stroke="#4caf50" stroke-width="2"/>
+  <text x="500" y="620" text-anchor="middle" font-size="14" font-weight="bold" fill="#2e7d32">✅ 解决方案: Server 同步管理 ACL</text>
+
+  <text x="80" y="655" font-size="12" fill="#333">授权时:</text>
+  <text x="150" y="655" font-size="11" fill="#666">Server 添加权限记录 + 调用 Headscale API 添加 ACL 规则</text>
+
+  <text x="80" y="685" font-size="12" fill="#333">撤销时:</text>
+  <text x="150" y="685" font-size="11" fill="#666">Server 删除权限记录 + 调用 Headscale API 删除 ACL 规则 → 立即生效</text>
+
+  <text x="80" y="715" font-size="12" fill="#333">固定 IP:</text>
+  <text x="150" y="715" font-size="11" fill="#666">Agent (100.64.x.x) 和 Desktop (100.65.x.x) 都使用固定 IP，便于 ACL 管理</text>
+</svg>

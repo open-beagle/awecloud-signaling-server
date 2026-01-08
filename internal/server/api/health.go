@@ -6,7 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
-	"github.com/open-beagle/awecloud-signaling-server/internal/server/frp"
 	grpcserver "github.com/open-beagle/awecloud-signaling-server/internal/server/grpc"
 )
 
@@ -14,7 +13,6 @@ import (
 type HealthAPI struct {
 	startTime    time.Time
 	agentService *grpcserver.AgentServiceServer
-	frpServer    *frp.FRPServer
 
 	// 状态缓存，用于检测变化
 	lastHealthStatus string
@@ -22,24 +20,16 @@ type HealthAPI struct {
 }
 
 // NewHealthAPI 创建健康检查API实例
-func NewHealthAPI(agentService *grpcserver.AgentServiceServer, frpServer *frp.FRPServer) *HealthAPI {
+func NewHealthAPI(agentService *grpcserver.AgentServiceServer) *HealthAPI {
 	return &HealthAPI{
 		startTime:        time.Now(),
 		agentService:     agentService,
-		frpServer:        frpServer,
 		lastHealthStatus: "",
 		lastReadyStatus:  "",
 	}
 }
 
 // Health 基础健康检查
-// @Summary 基础健康检查
-// @Description 用于Kubernetes Liveness Probe，检查进程是否存活
-// @Tags Health
-// @Produce json
-// @Success 200 {object} map[string]interface{} "服务正常运行"
-// @Failure 503 {object} map[string]interface{} "服务不可用"
-// @Router /health [get]
 func (h *HealthAPI) Health(c *gin.Context) {
 	status := "ok"
 
@@ -56,13 +46,6 @@ func (h *HealthAPI) Health(c *gin.Context) {
 }
 
 // Ready 就绪性检查
-// @Summary 就绪性检查
-// @Description 用于Kubernetes Readiness Probe，检查服务是否准备好接收流量
-// @Tags Health
-// @Produce json
-// @Success 200 {object} map[string]interface{} "服务就绪"
-// @Failure 503 {object} map[string]interface{} "服务未就绪"
-// @Router /health/ready [get]
 func (h *HealthAPI) Ready(c *gin.Context) {
 	checks := make(map[string]string)
 	errors := make(map[string]string)
@@ -77,16 +60,7 @@ func (h *HealthAPI) Ready(c *gin.Context) {
 		checks["database"] = "ok"
 	}
 
-	// 检查FRP Server状态
-	if h.frpServer != nil && h.frpServer.IsRunning() {
-		checks["frp_server"] = "ok"
-	} else {
-		checks["frp_server"] = "error"
-		errors["frp_server"] = "not running"
-		allReady = false
-	}
-
-	// 检查gRPC Server状态（如果AgentService存在则认为gRPC正常）
+	// 检查gRPC Server状态
 	if h.agentService != nil {
 		checks["grpc_server"] = "ok"
 	} else {

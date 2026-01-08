@@ -9,6 +9,10 @@ export interface Agent {
   created_at: string
   updated_at: string
   status?: 'online' | 'offline'
+  // Tailscale 相关字段
+  tailscale_ip?: string
+  ts_connected?: boolean
+  ts_conn_type?: string
 }
 
 // STCP实例模型

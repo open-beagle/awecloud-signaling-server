@@ -1,27 +1,28 @@
-# Web管理界面设计方案
+# Web 管理界面设计方案
 
 ## 1. 概述
 
-Web管理界面是AWECloud Signaling Server的管理后台，供管理员管理Agent、Client和STCP实例。
+Web 管理界面是 AWECloud Signaling Server 的管理后台，供管理员管理 Agent、Client 和 STCP 实例。
 
 ### 1.1 技术栈
 
 - **前端框架**: Vue 3 (Composition API)
-- **UI组件库**: Element Plus
+- **UI 组件库**: Element Plus
 - **路由**: Vue Router 4
 - **状态管理**: Pinia
-- **HTTP客户端**: Axios
-- **WebSocket**: 原生WebSocket API
+- **HTTP 客户端**: Axios
+- **WebSocket**: 原生 WebSocket API
 - **国际化**: vue-i18n
 - **构建工具**: Vite
 - **语言**: TypeScript
 
 ### 1.2 部署方式
 
-前端打包后嵌入Server，实现单一部署：
+前端打包后嵌入 Server，实现单一部署：
+
 - 前端构建产物放在 `web/dist/`
-- Server通过静态文件服务提供前端页面
-- 前后端通过RESTful API通信
+- Server 通过静态文件服务提供前端页面
+- 前后端通过 RESTful API 通信
 
 ## 2. 功能模块
 
@@ -30,118 +31,134 @@ Web管理界面是AWECloud Signaling Server的管理后台，供管理员管理A
 **路由**: `/login`
 
 **功能**:
+
 - 管理员登录（用户名+密码）
-- 记住登录状态（JWT Token存储在localStorage）
+- 记住登录状态（JWT Token 存储在 localStorage）
 - 登录失败提示
 
 **界面元素**:
+
 - 用户名输入框
 - 密码输入框
 - 登录按钮
-- 系统标题和Logo
+- 系统标题和 Logo
 
 ### 2.2 仪表盘
 
 **路由**: `/admin/dashboard`
 
 **功能**:
+
 - 系统概览统计
-- Agent在线状态
+- Agent 在线状态
 - 最近活动日志
 
 **数据展示**:
-- Agent总数 / 在线数量
-- Client总数 / 启用数量
-- STCP实例总数
-- Agent列表（名称、状态、最后心跳时间）
 
-### 2.3 Agent管理
+- Agent 总数 / 在线数量
+- Client 总数 / 启用数量
+- STCP 实例总数
+- Agent 列表（名称、状态、最后心跳时间）
+
+### 2.3 Agent 管理
 
 **路由**: `/admin/agents`
 
 **功能**:
-- Agent列表展示
-- 创建Agent
-- 删除Agent
-- 重新生成Token
-- 查看Agent详情
+
+- Agent 列表展示
+- 创建 Agent
+- 删除 Agent
+- 重新生成 Token
+- 查看 Agent 详情
 
 **列表字段**:
+
 - ID
-- Agent名称
+- Agent 名称
 - 描述
 - 状态（在线/离线）
 - 创建时间
-- 操作（查看Token、删除）
+- 操作（查看 Token、删除）
 
-**创建Agent表单**:
-- Agent名称（必填）
+**创建 Agent 表单**:
+
+- Agent 名称（必填）
 - 描述（可选）
 
-**查看Token弹窗**:
-- 显示Agent Token
+**查看 Token 弹窗**:
+
+- 显示 Agent Token
 - 复制按钮
 - 重新生成按钮
 
-### 2.4 Client管理
+### 2.4 Client 管理
 
 **路由**: `/admin/clients`
 
 **功能**:
-- Client列表展示
-- 创建Client
-- 启用/禁用Client
-- 删除Client
-- 重新生成Secret
-- 查看Client详情
+
+- Client 列表展示
+- 创建 Client
+- 启用/禁用 Client
+- 删除 Client
+- 重新生成 Secret
+- 查看 Client 详情
 
 **列表字段**:
+
 - ID
 - Client ID（用户名/邮箱）
-- Client名称
+- Client 名称
 - 状态（启用/禁用）
 - 创建时间
-- 操作（查看Secret、启用/禁用、删除）
+- 操作（查看 Secret、启用/禁用、删除）
 
-**创建Client表单**:
+**创建 Client 表单**:
+
 - Client ID（必填，用户名或邮箱）
-- Client名称（必填）
+- Client 名称（必填）
 
-**查看Secret弹窗**:
-- 显示Client Secret
+**查看 Secret 弹窗**:
+
+- 显示 Client Secret
 - 复制按钮
 - 重新生成按钮
 
-### 2.5 STCP实例管理
+### 2.5 STCP 实例管理
 
 **路由**: `/admin/stcp-instances`
 
 **功能**:
-- STCP实例列表展示
-- 创建STCP实例
-- 删除STCP实例
-- 管理访问权限（授权/撤销Client访问）
+
+- STCP 实例列表展示
+- 创建 STCP 实例
+- 删除 STCP 实例
+- 管理访问权限（授权/撤销 Client 访问）
 
 **列表字段**:
+
 - ID
 - 实例名称
-- 所属Agent
+- 所属 Agent
 - 本地地址（IP:Port）
 - 描述
-- 授权Client数量
+- 授权 Client 数量
 - 创建时间
 - 操作（管理权限、删除）
 
-**创建STCP实例表单**:
-- 选择Agent（下拉框）
+**创建 STCP 实例表单**:
+
+- 选择 Agent（下拉框）
 - 实例名称（必填）
-- 本地IP（必填）
+- 本地 IP（必填）
 - 本地端口（必填）
 - 描述（可选）
 
 **管理权限弹窗**:
-- 已授权Client列表（可撤销）
-- 未授权Client列表（可授权）
+
+- 已授权 Client 列表（可撤销）
+- 未授权 Client 列表（可授权）
 
 ## 3. 界面布局
 
@@ -259,49 +276,50 @@ web/
 ```typescript
 const routes = [
   {
-    path: '/login',
-    name: 'Login',
-    component: () => import('@/views/Login.vue')
+    path: "/login",
+    name: "Login",
+    component: () => import("@/views/Login.vue"),
   },
   {
-    path: '/admin',
+    path: "/admin",
     component: Layout,
-    redirect: '/admin/dashboard',
+    redirect: "/admin/dashboard",
     meta: { requiresAuth: true },
     children: [
       {
-        path: 'dashboard',
-        name: 'Dashboard',
-        component: () => import('@/views/Dashboard.vue')
+        path: "dashboard",
+        name: "Dashboard",
+        component: () => import("@/views/Dashboard.vue"),
       },
       {
-        path: 'agents',
-        name: 'Agents',
-        component: () => import('@/views/Agent/List.vue')
+        path: "agents",
+        name: "Agents",
+        component: () => import("@/views/Agent/List.vue"),
       },
       {
-        path: 'clients',
-        name: 'Clients',
-        component: () => import('@/views/Client/List.vue')
+        path: "clients",
+        name: "Clients",
+        component: () => import("@/views/Client/List.vue"),
       },
       {
-        path: 'stcp-instances',
-        name: 'STCPInstances',
-        component: () => import('@/views/STCP/List.vue')
-      }
-    ]
-  }
-]
+        path: "stcp-instances",
+        name: "STCPInstances",
+        component: () => import("@/views/STCP/List.vue"),
+      },
+    ],
+  },
+];
 ```
 
 ### 4.3 状态管理
 
 **认证状态 (auth.ts)**:
+
 ```typescript
-export const useAuthStore = defineStore('auth', {
+export const useAuthStore = defineStore("auth", {
   state: () => ({
-    token: localStorage.getItem('token') || '',
-    username: ''
+    token: localStorage.getItem("token") || "",
+    username: "",
   }),
   actions: {
     async login(username: string, password: string) {
@@ -311,49 +329,51 @@ export const useAuthStore = defineStore('auth', {
     logout() {
       // 清除token
       // 跳转到登录页
-    }
-  }
-})
+    },
+  },
+});
 ```
 
 **应用状态 (app.ts)**:
+
 ```typescript
-export const useAppStore = defineStore('app', {
+export const useAppStore = defineStore("app", {
   state: () => ({
     sidebarCollapsed: false,
-    loading: false
-  })
-})
+    loading: false,
+  }),
+});
 ```
 
-### 4.4 API封装
+### 4.4 API 封装
 
-**Axios实例配置**:
+**Axios 实例配置**:
+
 ```typescript
 const request = axios.create({
-  baseURL: '/api',
-  timeout: 10000
-})
+  baseURL: "/api",
+  timeout: 10000,
+});
 
 // 请求拦截器：添加Token
-request.interceptors.request.use(config => {
-  const token = localStorage.getItem('token')
+request.interceptors.request.use((config) => {
+  const token = localStorage.getItem("token");
   if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+    config.headers.Authorization = `Bearer ${token}`;
   }
-  return config
-})
+  return config;
+});
 
 // 响应拦截器：处理错误
 request.interceptors.response.use(
-  response => response.data,
-  error => {
+  (response) => response.data,
+  (error) => {
     if (error.response?.status === 401) {
       // 跳转到登录页
     }
-    return Promise.reject(error)
+    return Promise.reject(error);
   }
-)
+);
 ```
 
 ## 5. 核心页面设计
@@ -361,54 +381,63 @@ request.interceptors.response.use(
 ### 5.1 登录页
 
 **布局**:
+
 - 居中卡片式登录框
-- 系统Logo和标题
+- 系统 Logo 和标题
 - 用户名和密码输入框
 - 登录按钮
 
 **交互**:
+
 - 表单验证（必填项）
 - 登录成功跳转到仪表盘
 - 登录失败显示错误提示
 
-### 5.2 Agent列表页
+### 5.2 Agent 列表页
 
 **顶部操作栏**:
-- 创建Agent按钮（右侧）
+
+- 创建 Agent 按钮（右侧）
 - 搜索框（可选）
 
 **数据表格**:
+
 - 列：ID、名称、描述、状态、创建时间、操作
 - 状态标签：在线（绿色）、离线（灰色）
-- 操作按钮：查看Token、删除
+- 操作按钮：查看 Token、删除
 
-**创建Agent弹窗**:
+**创建 Agent 弹窗**:
+
 - 表单：名称（必填）、描述（可选）
-- 提交后显示生成的Token
-- 提示：请妥善保存Token，关闭后无法再次查看
+- 提交后显示生成的 Token
+- 提示：请妥善保存 Token，关闭后无法再次查看
 
-### 5.3 STCP实例列表页
+### 5.3 STCP 实例列表页
 
 **顶部操作栏**:
+
 - 创建实例按钮
-- Agent筛选下拉框（可选）
+- Agent 筛选下拉框（可选）
 
 **数据表格**:
+
 - 列：ID、名称、Agent、本地地址、授权数、创建时间、操作
 - 本地地址格式：192.168.1.100:3306
-- 授权数：显示已授权的Client数量
+- 授权数：显示已授权的 Client 数量
 - 操作按钮：管理权限、删除
 
 **创建实例弹窗**:
-- 选择Agent（下拉框，只显示在线的Agent）
+
+- 选择 Agent（下拉框，只显示在线的 Agent）
 - 实例名称（必填）
-- 本地IP（必填）
+- 本地 IP（必填）
 - 本地端口（必填，数字）
 - 描述（可选）
 
 **管理权限弹窗**:
-- 左侧：已授权Client列表（带撤销按钮）
-- 右侧：未授权Client列表（带授权按钮）
+
+- 左侧：已授权 Client 列表（带撤销按钮）
+- 右侧：未授权 Client 列表（带授权按钮）
 - 实时更新授权状态
 
 ## 6. 国际化设计
@@ -416,182 +445,187 @@ request.interceptors.response.use(
 ### 6.1 语言配置
 
 **中文语言包** (locales/zh-CN.ts):
+
 ```typescript
 export default {
   common: {
-    confirm: '确认',
-    cancel: '取消',
-    save: '保存',
-    delete: '删除',
-    edit: '编辑',
-    search: '搜索',
-    reset: '重置',
-    create: '创建',
-    actions: '操作',
-    status: '状态',
-    online: '在线',
-    offline: '离线'
+    confirm: "确认",
+    cancel: "取消",
+    save: "保存",
+    delete: "删除",
+    edit: "编辑",
+    search: "搜索",
+    reset: "重置",
+    create: "创建",
+    actions: "操作",
+    status: "状态",
+    online: "在线",
+    offline: "离线",
   },
   login: {
-    title: '登录',
-    username: '用户名',
-    password: '密码',
-    login: '登录',
-    loginSuccess: '登录成功',
-    loginFailed: '登录失败'
+    title: "登录",
+    username: "用户名",
+    password: "密码",
+    login: "登录",
+    loginSuccess: "登录成功",
+    loginFailed: "登录失败",
   },
   menu: {
-    dashboard: '仪表盘',
-    agents: 'Agent管理',
-    stcpInstances: 'STCP实例'
+    dashboard: "仪表盘",
+    agents: "Agent管理",
+    stcpInstances: "STCP实例",
   },
   agent: {
-    list: 'Agent列表',
-    create: '创建Agent',
-    name: 'Agent名称',
-    description: '描述',
-    token: 'Token',
-    createdAt: '创建时间',
-    viewToken: '查看Token',
-    deleteConfirm: '确认删除此Agent吗？'
+    list: "Agent列表",
+    create: "创建Agent",
+    name: "Agent名称",
+    description: "描述",
+    token: "Token",
+    createdAt: "创建时间",
+    viewToken: "查看Token",
+    deleteConfirm: "确认删除此Agent吗？",
   },
   stcp: {
-    list: 'STCP实例列表',
-    create: '创建实例',
-    instanceName: '实例名称',
-    agent: '所属Agent',
-    localIp: '本地IP',
-    localPort: '本地端口',
-    localAddress: '本地地址'
-  }
-}
+    list: "STCP实例列表",
+    create: "创建实例",
+    instanceName: "实例名称",
+    agent: "所属Agent",
+    localIp: "本地IP",
+    localPort: "本地端口",
+    localAddress: "本地地址",
+  },
+};
 ```
 
 **英文语言包** (locales/en-US.ts):
+
 ```typescript
 export default {
   common: {
-    confirm: 'Confirm',
-    cancel: 'Cancel',
-    save: 'Save',
-    delete: 'Delete',
-    edit: 'Edit',
-    search: 'Search',
-    reset: 'Reset',
-    create: 'Create',
-    actions: 'Actions',
-    status: 'Status',
-    online: 'Online',
-    offline: 'Offline'
+    confirm: "Confirm",
+    cancel: "Cancel",
+    save: "Save",
+    delete: "Delete",
+    edit: "Edit",
+    search: "Search",
+    reset: "Reset",
+    create: "Create",
+    actions: "Actions",
+    status: "Status",
+    online: "Online",
+    offline: "Offline",
   },
   login: {
-    title: 'Login',
-    username: 'Username',
-    password: 'Password',
-    login: 'Login',
-    loginSuccess: 'Login successful',
-    loginFailed: 'Login failed'
+    title: "Login",
+    username: "Username",
+    password: "Password",
+    login: "Login",
+    loginSuccess: "Login successful",
+    loginFailed: "Login failed",
   },
   menu: {
-    dashboard: 'Dashboard',
-    agents: 'Agents',
-    stcpInstances: 'STCP Instances'
+    dashboard: "Dashboard",
+    agents: "Agents",
+    stcpInstances: "STCP Instances",
   },
   agent: {
-    list: 'Agent List',
-    create: 'Create Agent',
-    name: 'Agent Name',
-    description: 'Description',
-    token: 'Token',
-    createdAt: 'Created At',
-    viewToken: 'View Token',
-    deleteConfirm: 'Are you sure to delete this agent?'
+    list: "Agent List",
+    create: "Create Agent",
+    name: "Agent Name",
+    description: "Description",
+    token: "Token",
+    createdAt: "Created At",
+    viewToken: "View Token",
+    deleteConfirm: "Are you sure to delete this agent?",
   },
   stcp: {
-    list: 'STCP Instance List',
-    create: 'Create Instance',
-    instanceName: 'Instance Name',
-    agent: 'Agent',
-    localIp: 'Local IP',
-    localPort: 'Local Port',
-    localAddress: 'Local Address'
-  }
-}
+    list: "STCP Instance List",
+    create: "Create Instance",
+    instanceName: "Instance Name",
+    agent: "Agent",
+    localIp: "Local IP",
+    localPort: "Local Port",
+    localAddress: "Local Address",
+  },
+};
 ```
 
-### 6.2 i18n配置
+### 6.2 i18n 配置
 
 **main.ts**:
+
 ```typescript
-import { createI18n } from 'vue-i18n'
-import zhCN from './locales/zh-CN'
-import enUS from './locales/en-US'
+import { createI18n } from "vue-i18n";
+import zhCN from "./locales/zh-CN";
+import enUS from "./locales/en-US";
 
 const i18n = createI18n({
   legacy: false,
-  locale: localStorage.getItem('locale') || 'zh-CN',
-  fallbackLocale: 'zh-CN',
+  locale: localStorage.getItem("locale") || "zh-CN",
+  fallbackLocale: "zh-CN",
   messages: {
-    'zh-CN': zhCN,
-    'en-US': enUS
-  }
-})
+    "zh-CN": zhCN,
+    "en-US": enUS,
+  },
+});
 
-app.use(i18n)
+app.use(i18n);
 ```
 
 ### 6.3 使用方式
 
 **在组件中使用**:
+
 ```vue
 <template>
-  <el-button>{{ t('common.confirm') }}</el-button>
-  <h1>{{ t('agent.list') }}</h1>
+  <el-button>{{ t("common.confirm") }}</el-button>
+  <h1>{{ t("agent.list") }}</h1>
 </template>
 
 <script setup lang="ts">
-import { useI18n } from 'vue-i18n'
+import { useI18n } from "vue-i18n";
 
-const { t, locale } = useI18n()
+const { t, locale } = useI18n();
 
 // 切换语言
 const switchLanguage = (lang: string) => {
-  locale.value = lang
-  localStorage.setItem('locale', lang)
-}
+  locale.value = lang;
+  localStorage.setItem("locale", lang);
+};
 </script>
 ```
 
 ### 6.4 语言切换
 
-**Header组件**:
+**Header 组件**:
+
 - 右上角添加语言切换下拉菜单
 - 选项：中文、English
-- 切换后立即生效，保存到localStorage
+- 切换后立即生效，保存到 localStorage
 
 ## 7. 开发流程
 
 ### 6.1 第一阶段：项目初始化
 
-1. 创建Vue 3项目（使用Vite）
+1. 创建 Vue 3 项目（使用 Vite）
 2. 安装依赖（Element Plus、Vue Router、Pinia、Axios）
-3. 配置TypeScript
-4. 配置Vite代理（开发环境）
+3. 配置 TypeScript
+4. 配置 Vite 代理（开发环境）
 5. 创建基础目录结构
 
 ### 6.2 第二阶段：基础功能
 
 1. 实现登录页
-2. 实现Layout布局
+2. 实现 Layout 布局
 3. 实现路由守卫（认证检查）
-4. 封装API请求
+4. 封装 API 请求
 5. 实现仪表盘（简单版）
 
 ### 6.3 第三阶段：核心功能
 
-1. 实现Agent管理（列表、创建、删除）
-2. 实现Client管理（列表、创建、启用/禁用）
-3. 实现STCP实例管理（列表、创建、删除）
+1. 实现 Agent 管理（列表、创建、删除）
+2. 实现 Client 管理（列表、创建、启用/禁用）
+3. 实现 STCP 实例管理（列表、创建、删除）
 4. 实现权限管理（授权/撤销）
 
 ### 6.4 第四阶段：优化和完善
@@ -602,72 +636,74 @@ const switchLanguage = (lang: string) => {
 4. 响应式适配
 5. 性能优化
 
-## 7. WebSocket实时更新
+## 7. WebSocket 实时更新
 
-### 7.1 WebSocket连接
+### 7.1 WebSocket 连接
 
 **连接地址**: `ws://localhost:8080/ws/admin` (开发环境)
 
 **连接时机**:
+
 - 用户登录成功后建立连接
-- 携带JWT Token进行认证
+- 携带 JWT Token 进行认证
 - 连接断开后自动重连
 
-**WebSocket封装** (utils/websocket.ts):
+**WebSocket 封装** (utils/websocket.ts):
+
 ```typescript
 class WebSocketClient {
-  private ws: WebSocket | null = null
-  private reconnectTimer: number | null = null
-  private heartbeatTimer: number | null = null
+  private ws: WebSocket | null = null;
+  private reconnectTimer: number | null = null;
+  private heartbeatTimer: number | null = null;
 
   connect(token: string) {
-    const url = `${WS_BASE_URL}/ws/admin?token=${token}`
-    this.ws = new WebSocket(url)
-    
+    const url = `${WS_BASE_URL}/ws/admin?token=${token}`;
+    this.ws = new WebSocket(url);
+
     this.ws.onopen = () => {
-      console.log('WebSocket connected')
-      this.startHeartbeat()
-    }
-    
+      console.log("WebSocket connected");
+      this.startHeartbeat();
+    };
+
     this.ws.onmessage = (event) => {
-      const data = JSON.parse(event.data)
-      this.handleMessage(data)
-    }
-    
+      const data = JSON.parse(event.data);
+      this.handleMessage(data);
+    };
+
     this.ws.onclose = () => {
-      console.log('WebSocket disconnected')
-      this.reconnect(token)
-    }
+      console.log("WebSocket disconnected");
+      this.reconnect(token);
+    };
   }
-  
+
   private handleMessage(data: any) {
     // 分发消息到对应的处理器
     switch (data.type) {
-      case 'agent_online':
+      case "agent_online":
         // 更新Agent状态为在线
-        break
-      case 'agent_offline':
+        break;
+      case "agent_offline":
         // 更新Agent状态为离线
-        break
-      case 'stcp_created':
+        break;
+      case "stcp_created":
         // STCP实例创建成功
-        break
-      case 'stcp_deleted':
+        break;
+      case "stcp_deleted":
         // STCP实例删除成功
-        break
+        break;
     }
   }
-  
+
   private reconnect(token: string) {
     // 5秒后重连
     this.reconnectTimer = setTimeout(() => {
-      this.connect(token)
-    }, 5000)
+      this.connect(token);
+    }, 5000);
   }
-  
+
   disconnect() {
     if (this.ws) {
-      this.ws.close()
+      this.ws.close();
     }
   }
 }
@@ -675,7 +711,8 @@ class WebSocketClient {
 
 ### 7.2 消息类型
 
-**Agent状态变更**:
+**Agent 状态变更**:
+
 ```json
 {
   "type": "agent_online",
@@ -698,7 +735,8 @@ class WebSocketClient {
 }
 ```
 
-**STCP实例变更**:
+**STCP 实例变更**:
+
 ```json
 {
   "type": "stcp_created",
@@ -713,59 +751,63 @@ class WebSocketClient {
 ### 7.3 状态同步
 
 **WebSocket Store** (stores/websocket.ts):
+
 ```typescript
-export const useWebSocketStore = defineStore('websocket', {
+export const useWebSocketStore = defineStore("websocket", {
   state: () => ({
     connected: false,
-    client: null as WebSocketClient | null
+    client: null as WebSocketClient | null,
   }),
   actions: {
     connect(token: string) {
-      this.client = new WebSocketClient()
-      this.client.connect(token)
-      this.connected = true
+      this.client = new WebSocketClient();
+      this.client.connect(token);
+      this.connected = true;
     },
     disconnect() {
       if (this.client) {
-        this.client.disconnect()
-        this.connected = false
+        this.client.disconnect();
+        this.connected = false;
       }
-    }
-  }
-})
+    },
+  },
+});
 ```
 
-## 8. 与Server集成
+## 8. 与 Server 集成
 
 ### 7.1 开发环境
 
-**Vite代理配置** (vite.config.ts):
+**Vite 代理配置** (vite.config.ts):
+
 ```typescript
 export default defineConfig({
   server: {
     proxy: {
-      '/api': {
-        target: 'http://localhost:8080',
-        changeOrigin: true
-      }
-    }
-  }
-})
+      "/api": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
+    },
+  },
+});
 ```
 
 ### 7.2 生产环境
 
 **构建配置**:
+
 ```typescript
 export default defineConfig({
   build: {
-    outDir: '../internal/server/web/dist',
-    emptyOutDir: true
-  }
-})
+    outDir: "../internal/server/web/dist",
+    emptyOutDir: true,
+  },
+});
 ```
 
-**Server静态文件服务** (internal/server/server.go):
+**Server 静态文件服务** (internal/server/server.go):
+
 ```go
 // 提供静态文件服务
 router.Static("/", "./web/dist")
@@ -781,15 +823,17 @@ apiGroup := router.Group("/api")
 
 ### 8.1 功能优先级
 
-**MVP核心功能**:
+**MVP 核心功能**:
+
 - [x] 登录功能
-- [x] Agent管理（列表、创建、删除、查看Token）
-- [x] STCP实例管理（列表、创建、删除）
-- [x] WebSocket实时状态更新
+- [x] Agent 管理（列表、创建、删除、查看 Token）
+- [x] STCP 实例管理（列表、创建、删除）
+- [x] WebSocket 实时状态更新
 - [x] 国际化（中英文切换）
 
 **暂不实现**:
-- [ ] Client管理（后续版本）
+
+- [ ] Client 管理（后续版本）
 - [ ] 权限管理（后续版本）
 - [ ] 仪表盘统计（后续版本）
 - [ ] 搜索和筛选（后续版本）
@@ -799,65 +843,65 @@ apiGroup := router.Group("/api")
 
 ### 8.2 界面风格
 
-- [ ] 使用Element Plus默认主题
+- [ ] 使用 Element Plus 默认主题
 - [ ] 还是自定义主题？
 
 ### 8.3 实时更新
 
-- [x] 使用WebSocket实时推送Agent状态
-  - Server推送Agent上线/离线事件
-  - 前端自动更新Agent状态显示
+- [x] 使用 WebSocket 实时推送 Agent 状态
+  - Server 推送 Agent 上线/离线事件
+  - 前端自动更新 Agent 状态显示
   - 仪表盘实时更新统计数据
 
 ### 8.4 国际化
 
 - [x] 支持中英文切换
-  - 使用vue-i18n
+  - 使用 vue-i18n
   - 默认语言：中文
-  - 语言切换按钮在Header
+  - 语言切换按钮在 Header
 
-## 10. MVP开发计划
+## 10. MVP 开发计划
 
-### 10.1 第一阶段：项目初始化（0.5天）
+### 10.1 第一阶段：项目初始化（0.5 天）
 
-- [ ] 创建Vue 3项目（使用Vite）
+- [ ] 创建 Vue 3 项目（使用 Vite）
 - [ ] 安装依赖（Element Plus、Vue Router、Pinia、Axios、vue-i18n）
-- [ ] 配置TypeScript
-- [ ] 配置Vite代理
+- [ ] 配置 TypeScript
+- [ ] 配置 Vite 代理
 - [ ] 创建基础目录结构
 - [ ] 配置国际化
 
-### 10.2 第二阶段：基础功能（1天）
+### 10.2 第二阶段：基础功能（1 天）
 
 - [ ] 实现登录页（中英文）
-- [ ] 实现Layout布局（Header + Sidebar）
+- [ ] 实现 Layout 布局（Header + Sidebar）
 - [ ] 实现路由守卫
-- [ ] 封装API请求
-- [ ] 封装WebSocket连接
+- [ ] 封装 API 请求
+- [ ] 封装 WebSocket 连接
 
-### 10.3 第三阶段：Agent管理（1天）
+### 10.3 第三阶段：Agent 管理（1 天）
 
-- [ ] Agent列表页
-- [ ] 创建Agent弹窗
-- [ ] 查看Token弹窗
-- [ ] 删除Agent功能
-- [ ] WebSocket实时更新Agent状态
+- [ ] Agent 列表页
+- [ ] 创建 Agent 弹窗
+- [ ] 查看 Token 弹窗
+- [ ] 删除 Agent 功能
+- [ ] WebSocket 实时更新 Agent 状态
 
-### 10.4 第四阶段：STCP实例管理（1天）
+### 10.4 第四阶段：STCP 实例管理（1 天）
 
-- [ ] STCP实例列表页
-- [ ] 创建实例弹窗（选择Agent）
+- [ ] STCP 实例列表页
+- [ ] 创建实例弹窗（选择 Agent）
 - [ ] 删除实例功能
-- [ ] WebSocket实时更新
+- [ ] WebSocket 实时更新
 
-### 10.5 第五阶段：集成和调试（0.5天）
+### 10.5 第五阶段：集成和调试（0.5 天）
 
 - [ ] 前后端联调
-- [ ] 修复bug
+- [ ] 修复 bug
 - [ ] 优化用户体验
 - [ ] 构建生产版本
 
-**总计**: 约4天（MVP核心功能）
+**总计**: 约 4 天（MVP 核心功能）
 
 ---
 
@@ -871,21 +915,21 @@ apiGroup := router.Group("/api")
 ### 已确认的设计决策
 
 ✅ **技术栈**: Vue 3 + Element Plus + TypeScript + Vite  
-✅ **配色方案**: 参考图片的蓝色系配色（#4A7BF7主色）  
+✅ **配色方案**: 参考图片的蓝色系配色（#4A7BF7 主色）  
 ✅ **国际化**: 支持中英文切换（vue-i18n）  
-✅ **实时更新**: WebSocket推送Agent状态  
-✅ **MVP范围**: 登录 + Agent管理 + STCP实例管理  
-✅ **开发周期**: 约4天  
+✅ **实时更新**: WebSocket 推送 Agent 状态  
+✅ **MVP 范围**: 登录 + Agent 管理 + STCP 实例管理  
+✅ **开发周期**: 约 4 天
 
 ### 暂不实现的功能
 
-❌ Client管理  
+❌ Client 管理  
 ❌ 权限管理  
 ❌ 仪表盘统计  
 ❌ 搜索和筛选  
 ❌ 性能优化  
-❌ 单元测试  
+❌ 单元测试
 
 ### 下一步
 
-开始实现MVP核心功能
+开始实现 MVP 核心功能
