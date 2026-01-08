@@ -18,6 +18,11 @@ type Agent struct {
 	TsRegisteredAt *time.Time `json:"ts_registered_at"`                      // Tailscale 注册时间
 	TsNodeKey      string     `gorm:"size:255" json:"ts_node_key,omitempty"` // Tailscale 节点密钥（内部使用）
 
+	// 分组管理（安全架构）
+	// 相同 GroupName 的 Agent 自动归为一组，同组 Agent 可以互访所有端口
+	// 空字符串表示无分组，该 Agent 只能访问显式授权的服务
+	GroupName string `gorm:"size:100;index" json:"group_name"` // 分组名称
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

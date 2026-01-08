@@ -114,18 +114,28 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.RegisterReque
 		// 从数据库获取配置（或使用默认值）
 		authKeyExpiry := 24 * time.Hour // 默认 24 小时
 
-		// 创建预认证密钥（非临时节点，Agent 需要持久化）
-		user := s.config.Tailscale.User
-		authKey, err := s.headscaleClient.CreatePreAuthKey(ctx, user, authKeyExpiry, false)
+		// 为每个 Agent 创建独立的 Headscale User
+		// User 命名规则：agent-{agent_name}
+		userName := fmt.Sprintf("agent-%s", req.AgentName)
+
+		// 获取或创建 User
+		user, err := s.headscaleClient.GetOrCreateUser(ctx, userName)
 		if err != nil {
-			logger.Errorf("创建 Tailscale 预认证密钥失败: %v", err)
+			logger.Errorf("获取或创建 Headscale User 失败: %v", err)
 			// 不影响注册，继续返回成功
 		} else {
-			resp.ControlUrl = s.config.Tailscale.HeadscaleURL
-			resp.AuthKey = authKey.Key
-			// DERP URL 从数据库配置获取，这里使用默认值
-			resp.DerpUrl = s.config.Tailscale.HeadscaleURL + "/derp"
-			logger.Infof("已为 Agent %s 创建 Tailscale 预认证密钥", req.AgentName)
+			// 创建预认证密钥（非临时节点，Agent 需要持久化）
+			authKey, err := s.headscaleClient.CreatePreAuthKey(ctx, user.Name, authKeyExpiry, false)
+			if err != nil {
+				logger.Errorf("创建 Tailscale 预认证密钥失败: %v", err)
+				// 不影响注册，继续返回成功
+			} else {
+				resp.ControlUrl = s.config.Tailscale.HeadscaleURL
+				resp.AuthKey = authKey.Key
+				// DERP URL 从数据库配置获取，这里使用默认值
+				resp.DerpUrl = s.config.Tailscale.HeadscaleURL + "/derp"
+				logger.Infof("已为 Agent %s 创建 Tailscale 预认证密钥（User: %s）", req.AgentName, userName)
+			}
 		}
 	} else {
 		// FRP 模式（废弃，保留兼容）

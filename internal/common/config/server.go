@@ -39,7 +39,9 @@ type ServerSection struct {
 type TailscaleSection struct {
 	HeadscaleURL    string `toml:"headscale_url"`     // Headscale API 地址
 	HeadscaleAPIKey string `toml:"headscale_api_key"` // Headscale API 密钥（从环境变量获取）
-	User            string `toml:"user"`              // Headscale 用户名
+	// User 字段已废弃，每个 Agent/Desktop 使用独立的 User
+	// Agent User: agent-{agent_name}
+	// Desktop User: desktop-{client_id}
 }
 
 type DatabaseSection struct {
@@ -131,9 +133,6 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	if cfg.Tailscale.HeadscaleURL == "" {
 		cfg.Tailscale.HeadscaleURL = "http://headscale:8080"
 	}
-	if cfg.Tailscale.User == "" {
-		cfg.Tailscale.User = "default"
-	}
 
 	// Tailscale 环境变量覆盖
 	if headscaleURL := os.Getenv("HEADSCALE_URL"); headscaleURL != "" {
@@ -141,9 +140,6 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 	if headscaleAPIKey := os.Getenv("HEADSCALE_API_KEY"); headscaleAPIKey != "" {
 		cfg.Tailscale.HeadscaleAPIKey = headscaleAPIKey
-	}
-	if user := os.Getenv("HEADSCALE_USER"); user != "" {
-		cfg.Tailscale.User = user
 	}
 
 	return &cfg, nil

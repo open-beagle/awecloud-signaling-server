@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -294,6 +295,16 @@ func (a *ClientAuthAPI) GetTailscaleAuth(c *gin.Context) {
 
 	clientID := int64(claims["client_id"].(float64))
 
+	// 获取 Client 信息
+	var client model.Client
+	if err := db.DB.First(&client, clientID).Error; err != nil {
+		c.JSON(http.StatusNotFound, TailscaleAuthResponse{
+			Success: false,
+			Message: "Client 不存在",
+		})
+		return
+	}
+
 	// 检查 Headscale 客户端
 	if a.headscaleClient == nil {
 		c.JSON(http.StatusServiceUnavailable, TailscaleAuthResponse{
@@ -303,10 +314,24 @@ func (a *ClientAuthAPI) GetTailscaleAuth(c *gin.Context) {
 		return
 	}
 
-	// 创建预认证密钥（临时节点，Desktop 断开后自动清理）
+	// 为每个 Desktop 创建独立的 Headscale User
+	// User 命名规则：desktop-{client_id}
+	userName := fmt.Sprintf("desktop-%s", client.ClientID)
+
+	// 获取或创建 User
+	user, err := a.headscaleClient.GetOrCreateUser(c.Request.Context(), userName)
+	if err != nil {
+		logger.Errorf("获取或创建 Headscale User 失败: %v", err)
+		c.JSON(http.StatusInternalServerError, TailscaleAuthResponse{
+			Success: false,
+			Message: "创建用户失败",
+		})
+		return
+	}
+
+	// 创建预认证密钥（非临时节点，Desktop 需要固定 IP 以支持服务暴露）
 	authKeyExpiry := 24 * time.Hour
-	user := a.config.Tailscale.User
-	authKey, err := a.headscaleClient.CreatePreAuthKey(c.Request.Context(), user, authKeyExpiry, true)
+	authKey, err := a.headscaleClient.CreatePreAuthKey(c.Request.Context(), user.Name, authKeyExpiry, false)
 	if err != nil {
 		logger.Errorf("创建 Tailscale 预认证密钥失败: %v", err)
 		c.JSON(http.StatusInternalServerError, TailscaleAuthResponse{
@@ -316,7 +341,7 @@ func (a *ClientAuthAPI) GetTailscaleAuth(c *gin.Context) {
 		return
 	}
 
-	logger.Infof("为 Client %d 创建 Tailscale 预认证密钥", clientID)
+	logger.Infof("为 Client %d 创建 Tailscale 预认证密钥（User: %s）", clientID, userName)
 
 	c.JSON(http.StatusOK, TailscaleAuthResponse{
 		Success:    true,

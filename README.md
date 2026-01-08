@@ -29,15 +29,15 @@ awecloud-signaling-server/
 
 ```bash
 # 开发构建（只构建当前架构）
-BUILD_VERSION=v0.1.3 GOARCHS=$(go env GOARCH) bash scripts/build.sh
-BUILD_VERSION=v0.1.3 bash scripts/build_frontend.sh
+BUILD_VERSION=v0.2.0 GOARCHS=$(go env GOARCH) bash scripts/build.sh
+BUILD_VERSION=v0.2.0 bash scripts/build_frontend.sh
 ```
 
 **Desktop 客户端**：
 
 ```bash
 # 开发构建
-BUILD_VERSION=v0.1.2 \
+BUILD_VERSION=v0.2.0 \
 BUILD_ADDRESS=${SIGNALING_ADDRESS} \
 PLATFORMS="windows/amd64" \
 bash scripts/build_desktop.sh

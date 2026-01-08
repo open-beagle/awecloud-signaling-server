@@ -234,6 +234,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					agentAPI := api.NewAgentAPI()
 					adminAuthGroup.GET("/agents", agentAPI.List)
 					adminAuthGroup.POST("/agents", agentAPI.Create)
+					adminAuthGroup.PUT("/agents/:id", agentAPI.Update)
 					adminAuthGroup.DELETE("/agents/:id", agentAPI.Delete)
 					adminAuthGroup.POST("/agents/:id/regenerate-token", agentAPI.RegenerateToken)
 
@@ -257,6 +258,19 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.PUT("/services/:id/stop", proxyServiceAPI.Stop)
 					adminAuthGroup.GET("/services/:id/stats", proxyServiceAPI.Stats)
 					adminAuthGroup.GET("/agents/:agent_id/services", proxyServiceAPI.ListByAgent)
+
+					// 服务权限管理（安全架构）
+					servicePermAPI := api.NewServicePermissionAPI(s.config)
+					adminAuthGroup.GET("/services/:id/permissions", servicePermAPI.ListServicePermissions)
+					adminAuthGroup.POST("/services/:id/permissions", servicePermAPI.AddServicePermission)
+					adminAuthGroup.DELETE("/services/:id/permissions/:pid", servicePermAPI.RemoveServicePermission)
+					adminAuthGroup.PUT("/services/:id/access-type", servicePermAPI.UpdateServiceAccessType)
+
+					// Agent 服务权限管理（安全架构）
+					agentPermAPI := api.NewAgentServicePermissionAPI(s.config)
+					adminAuthGroup.GET("/agent-permissions", agentPermAPI.ListAgentServicePermissions)
+					adminAuthGroup.POST("/agent-permissions", agentPermAPI.AddAgentServicePermission)
+					adminAuthGroup.DELETE("/agent-permissions/:id", agentPermAPI.RemoveAgentServicePermission)
 
 					// Tailscale 管理
 					tailscaleAPI := api.NewTailscaleAPI(s.config)

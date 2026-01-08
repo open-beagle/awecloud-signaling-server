@@ -88,6 +88,74 @@ type ListNodesResponse struct {
 	Nodes []Node `json:"nodes"`
 }
 
+// ACLRule ACL 规则
+type ACLRule struct {
+	Action string   `json:"action"` // accept, deny
+	Src    []string `json:"src"`    // 源地址列表
+	Dst    []string `json:"dst"`    // 目标地址列表（格式：IP:port 或 IP:*）
+}
+
+// ACLPolicy ACL 策略
+type ACLPolicy struct {
+	ACLs      []ACLRule           `json:"acls"`
+	Groups    map[string][]string `json:"groups,omitempty"`
+	TagOwners map[string][]string `json:"tagOwners,omitempty"`
+	Hosts     map[string]string   `json:"hosts,omitempty"`
+}
+
+// CreateUser 创建用户
+func (c *Client) CreateUser(ctx context.Context, name string) (*User, error) {
+	req := struct {
+		Name string `json:"name"`
+	}{
+		Name: name,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	resp, err := c.doRequest(ctx, "POST", "/api/v1/user", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create user: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("create user failed: status=%d, body=%s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var result struct {
+		User User `json:"user"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	return &result.User, nil
+}
+
+// GetOrCreateUser 获取或创建用户
+func (c *Client) GetOrCreateUser(ctx context.Context, name string) (*User, error) {
+	// 先尝试获取用户列表
+	users, err := c.ListUsers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+
+	// 检查用户是否已存在
+	for _, user := range users {
+		if user.Name == name {
+			return &user, nil
+		}
+	}
+
+	// 用户不存在，创建新用户
+	return c.CreateUser(ctx, name)
+}
+
 // CreatePreAuthKey 创建预认证密钥
 func (c *Client) CreatePreAuthKey(ctx context.Context, user string, expiry time.Duration, ephemeral bool) (*PreAuthKey, error) {
 	req := CreatePreAuthKeyRequest{
@@ -224,6 +292,76 @@ func (c *Client) ListUsers(ctx context.Context) ([]User, error) {
 	}
 
 	return result.Users, nil
+}
+
+// GetACLPolicy 获取当前 ACL 策略
+func (c *Client) GetACLPolicy(ctx context.Context) (*ACLPolicy, error) {
+	resp, err := c.doRequest(ctx, "GET", "/api/v1/policy", nil)
+	if err != nil {
+		return nil, fmt.Errorf("get acl policy: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		// 没有 ACL 策略，返回空策略
+		return &ACLPolicy{ACLs: []ACLRule{}}, nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("get acl policy failed: status=%d, body=%s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var result struct {
+		Policy string `json:"policy"` // Headscale 返回的是 JSON 字符串
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	// 解析 policy JSON 字符串
+	var policy ACLPolicy
+	if result.Policy != "" {
+		if err := json.Unmarshal([]byte(result.Policy), &policy); err != nil {
+			return nil, fmt.Errorf("parse policy: %w", err)
+		}
+	}
+
+	return &policy, nil
+}
+
+// SetACLPolicy 设置 ACL 策略
+func (c *Client) SetACLPolicy(ctx context.Context, policy *ACLPolicy) error {
+	// 将策略序列化为 JSON 字符串
+	policyJSON, err := json.Marshal(policy)
+	if err != nil {
+		return fmt.Errorf("marshal policy: %w", err)
+	}
+
+	// Headscale API 需要将策略作为字符串发送
+	reqBody := struct {
+		Policy string `json:"policy"`
+	}{
+		Policy: string(policyJSON),
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+
+	resp, err := c.doRequest(ctx, "PUT", "/api/v1/policy", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("set acl policy: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("set acl policy failed: status=%d, body=%s", resp.StatusCode, string(bodyBytes))
+	}
+
+	return nil
 }
 
 // doRequest 执行 HTTP 请求

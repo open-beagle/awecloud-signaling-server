@@ -21,6 +21,12 @@ func NewAgentAPI() *AgentAPI {
 
 type CreateAgentRequest struct {
 	AgentName string `json:"agent_name" binding:"required"`
+	GroupName string `json:"group_name"` // 分组名称（可选）
+}
+
+type UpdateAgentRequest struct {
+	GroupName   *string `json:"group_name"`  // 分组名称
+	Description *string `json:"description"` // 描述
 }
 
 type AgentResponse struct {
@@ -86,6 +92,7 @@ func (a *AgentAPI) Create(c *gin.Context) {
 		AgentName:  req.AgentName,
 		AgentToken: token,
 		Status:     "offline",
+		GroupName:  req.GroupName, // 设置分组
 	}
 
 	if err := db.DB.Create(agent).Error; err != nil {
@@ -99,6 +106,59 @@ func (a *AgentAPI) Create(c *gin.Context) {
 	c.JSON(http.StatusOK, AgentResponse{
 		Success: true,
 		Message: "创建成功",
+		Data:    agent,
+	})
+}
+
+// Update 更新 Agent 信息（分组、描述等）
+func (a *AgentAPI) Update(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, AgentResponse{
+			Success: false,
+			Message: "无效的ID",
+		})
+		return
+	}
+
+	var req UpdateAgentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, AgentResponse{
+			Success: false,
+			Message: "请求参数错误",
+		})
+		return
+	}
+
+	// 查询 Agent
+	var agent model.Agent
+	if err := db.DB.First(&agent, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, AgentResponse{
+			Success: false,
+			Message: "Agent不存在",
+		})
+		return
+	}
+
+	// 更新字段
+	if req.GroupName != nil {
+		agent.GroupName = *req.GroupName
+	}
+	if req.Description != nil {
+		agent.Description = *req.Description
+	}
+
+	if err := db.DB.Save(&agent).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, AgentResponse{
+			Success: false,
+			Message: "更新失败",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, AgentResponse{
+		Success: true,
+		Message: "更新成功",
 		Data:    agent,
 	})
 }

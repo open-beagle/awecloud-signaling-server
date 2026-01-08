@@ -60,7 +60,11 @@ func autoMigrate() error {
 		&model.ConnectionAuditLog{},
 		&model.SystemConfig{},
 		&model.SystemSettings{},
-		&model.ProxyService{}, // Tailscale 端口映射服务
+		&model.ProxyService{},           // Tailscale 端口映射服务
+		&model.ServicePermission{},      // Desktop 服务访问权限（安全架构）
+		&model.AgentServicePermission{}, // Agent 服务访问权限（安全架构）
+		&model.DesktopInstance{},        // Desktop 多实例支持（安全架构）
+		&model.DesktopService{},         // Desktop 暴露的服务（安全架构）
 	)
 	if err != nil {
 		return err

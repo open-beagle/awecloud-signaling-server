@@ -27,15 +27,24 @@ file = ""
 [tailscale]
 # Headscale API 地址
 # 环境变量：HEADSCALE_URL
+# 
+# 配置说明：
+# 1. 本地开发（本地运行 Headscale）：
+#    headscale_url = "http://localhost:8080"
+# 
+# 2. Kubernetes 环境（通过 Ingress）：
+#    headscale_url = "https://ts.ali.wodcloud.com/headscale"
+#    或 headscale_url = "http://ts.ali.wodcloud.com/headscale"
+# 
+# 3. Kubernetes 环境（通过 port-forward）：
+#    kubectl port-forward -n beagle-access svc/headscale 8080:8080
+#    headscale_url = "http://localhost:8080"
+# 
+# 4. Kubernetes 环境（集群内部访问）：
+#    headscale_url = "http://headscale.beagle-access.svc.cluster.local:8080"
 headscale_url = "http://headscale:8080"
 
 # Headscale API 密钥（建议通过环境变量配置）
 # 环境变量：HEADSCALE_API_KEY
 # 生成方式：headscale apikeys create --expiration 365d
 headscale_api_key = ""
-
-# Headscale 用户名
-# 创建 PreAuthKey 时需要指定用户，所有 Agent/Desktop 节点注册到此用户下
-# 环境变量：HEADSCALE_USER
-# 创建用户：headscale users create default
-user = "default"

@@ -46,7 +46,6 @@ type TailscaleResponse struct {
 type TailscaleStatus struct {
 	HeadscaleURL     string `json:"headscale_url"`
 	HeadscaleOnline  bool   `json:"headscale_online"`
-	User             string `json:"user"`
 	TotalNodes       int    `json:"total_nodes"`
 	OnlineNodes      int    `json:"online_nodes"`
 	AgentsConnected  int    `json:"agents_connected"`
@@ -65,7 +64,6 @@ func (a *TailscaleAPI) Status(c *gin.Context) {
 
 	status := TailscaleStatus{
 		HeadscaleURL: a.config.Tailscale.HeadscaleURL,
-		User:         a.config.Tailscale.User,
 	}
 
 	// 获取 Headscale 节点列表

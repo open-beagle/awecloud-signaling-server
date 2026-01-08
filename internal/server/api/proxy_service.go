@@ -35,6 +35,10 @@ type CreateProxyServiceRequest struct {
 	ListenPort int    `json:"listen_port" binding:"required"`
 	TargetAddr string `json:"target_addr" binding:"required"`
 	Remark     string `json:"remark"`
+	// 权限控制字段
+	AccessType string `json:"access_type"` // public, private, group（默认 public）
+	OwnerID    int64  `json:"owner_id"`    // 创建者 Client ID（private 时使用）
+	GroupID    *int64 `json:"group_id"`    // 所属组 ID（group 时使用）
 }
 
 // UpdateProxyServiceRequest 更新端口映射请求
@@ -132,6 +136,15 @@ func (a *ProxyServiceAPI) Create(c *gin.Context) {
 		TargetAddr: req.TargetAddr,
 		Status:     model.ProxyStatusStopped,
 		Remark:     req.Remark,
+		// 权限控制字段
+		AccessType: req.AccessType,
+		OwnerID:    req.OwnerID,
+		GroupID:    req.GroupID,
+	}
+
+	// 设置默认访问类型
+	if service.AccessType == "" {
+		service.AccessType = model.AccessTypePublic
 	}
 
 	if err := db.DB.Create(service).Error; err != nil {
