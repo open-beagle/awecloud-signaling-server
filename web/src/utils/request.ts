@@ -45,16 +45,35 @@ service.interceptors.response.use(
         localStorage.removeItem('token')
         router.push('/login')
       } else if (status === 403) {
-        ElMessage.error('没有权限')
+        ElMessage.error('没有权限访问此资源')
       } else if (status === 404) {
         ElMessage.error('请求的资源不存在')
+      } else if (status === 409) {
+        // 冲突错误（如端口冲突）
+        ElMessage.error(data?.message || '操作冲突，请检查输入')
       } else if (status === 500) {
-        ElMessage.error('服务器错误')
+        ElMessage.error(data?.message || '服务器内部错误，请稍后重试')
+      } else if (status === 502) {
+        ElMessage.error('网关错误，服务暂时不可用')
+      } else if (status === 503) {
+        ElMessage.error('服务暂时不可用，请稍后重试')
+      } else if (status === 504) {
+        ElMessage.error('请求超时，请检查网络连接')
       } else {
-        ElMessage.error(data?.message || '请求失败')
+        ElMessage.error(data?.message || `请求失败 (${status})`)
+      }
+    } else if (error.request) {
+      // 请求已发出但没有收到响应
+      if (error.code === 'ECONNABORTED') {
+        ElMessage.error('请求超时，请检查网络连接后重试')
+      } else if (error.code === 'ERR_NETWORK') {
+        ElMessage.error('网络连接失败，请检查网络设置')
+      } else {
+        ElMessage.error('网络错误，无法连接到服务器')
       }
     } else {
-      ElMessage.error('网络错误')
+      // 请求配置出错
+      ElMessage.error('请求配置错误')
     }
     
     return Promise.reject(error)

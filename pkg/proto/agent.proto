@@ -29,6 +29,12 @@ service AgentService {
 
   // [Tailscale] 上报端口映射状态
   rpc ReportProxyStatus(ProxyStatusReport) returns (StatusResponse);
+
+  // [Tailscale] 获取 Tailscale 状态
+  rpc GetTailscaleState(GetStateRequest) returns (GetStateResponse);
+
+  // [Tailscale] 保存 Tailscale 状态
+  rpc SaveTailscaleState(SaveStateRequest) returns (SaveStateResponse);
 }
 
 // Agent注册请求
@@ -207,4 +213,28 @@ message ProxyStatus {
 message ProxyStatusReport {
   int64 agent_id = 1;
   repeated ProxyStatus proxies = 2;
+}
+
+// [Tailscale] 获取状态请求
+message GetStateRequest {
+  int64 agent_id = 1;      // Agent ID
+  string agent_token = 2;  // Agent 认证令牌
+}
+
+// [Tailscale] 获取状态响应
+message GetStateResponse {
+  bytes state_data = 1;  // Tailscale 状态序列化数据（压缩后）
+  bool exists = 2;       // 是否存在历史状态
+}
+
+// [Tailscale] 保存状态请求
+message SaveStateRequest {
+  int64 agent_id = 1;      // Agent ID
+  string agent_token = 2;  // Agent 认证令牌
+  bytes state_data = 3;    // Tailscale 状态序列化数据（压缩后）
+}
+
+// [Tailscale] 保存状态响应
+message SaveStateResponse {
+  bool success = 1;  // 是否保存成功
 }

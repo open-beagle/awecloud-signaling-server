@@ -1,106 +1,95 @@
 # AWECloud Signaling Server
 
-基于 FRP 的内网穿透信令服务系统。
+安全的内网穿透访问系统，通过 Tailscale/Headscale 建立安全隧道，允许用户通过 Desktop 客户端访问内网服务。
 
-## 项目结构
+**核心功能**：
+
+- 通过 Tailscale/Headscale 建立安全隧道
+- 设备令牌认证，绑定硬件指纹
+- 服务权限管理（公开/私有/分组访问）
+- 连接审计日志
+- Desktop 客户端版本控制
+
+## 核心模块
 
 ```
 awecloud-signaling-server/
 ├── cmd/
-│   ├── server/          # Server端程序
-│   └── agent/           # Agent端程序
+│   ├── server/          # Server 入口
+│   └── agent/           # Agent 入口
 ├── internal/
-│   ├── server/          # Server端实现
-│   ├── agent/           # Agent端实现
-│   └── common/          # 公共代码
+│   ├── server/          # Server 实现（API/gRPC/数据库）
+│   ├── agent/           # Agent 实现（Tailscale/代理管理）
+│   └── common/          # 公共代码（配置/日志）
+├── pkg/proto/           # Protocol Buffers 定义
+├── web/                 # Web 管理界面（Vue 3）
+├── desktop/             # Desktop 客户端（独立仓库）
 ├── config/              # 配置文件
-├── docs/                # 文档
-├── web/                 # Web管理界面
-└── desktop/             # Desktop客户端（独立仓库）
+└── docs/                # 文档
 ```
 
-**注意**: Desktop 客户端是独立的 Git 仓库，位于 `desktop/` 目录。
+**Server**：部署在公有云，作为信令服务器和流量中继，提供 REST API、gRPC 服务和 Web 管理界面。
+
+**Agent**：部署在内网环境，通过 Tailscale 连接到 Server，提供对内网服务的访问。
+
+**Desktop**：桌面客户端应用（独立 Git 仓库），供终端用户访问内网服务。
+
+**Web**：Vue 3 管理界面，用于管理 Agent、Client、Service 等资源。
+
+## 开发框架
+
+**Go 1.25+**
+
+- Gin - HTTP 路由和中间件
+- gRPC - Agent/Desktop 通信
+- GORM - ORM，使用 SQLite
+- Tailscale - 网络隧道
+
+**Vue 3 + TypeScript**
+
+- Element Plus - UI 组件库
+- Pinia - 状态管理
+- Vite - 构建工具
+
+**Desktop 客户端**
+
+- Wails v3 - Go + Web 桌面框架
 
 ## 快速开始
 
-### 1. 编译
+### 环境要求
 
-**Server 和 Agent**：
+- Go 1.25+
+- Node.js 20+（Web 和 Desktop）
+- Wails CLI（Desktop）
+
+### 构建命令
 
 ```bash
-# 开发构建（只构建当前架构）
+# Server & Agent（开发构建，仅当前架构）
 BUILD_VERSION=v0.2.0 GOARCHS=$(go env GOARCH) bash scripts/build.sh
+
+# Web 前端
 BUILD_VERSION=v0.2.0 bash scripts/build_frontend.sh
-```
 
-**Desktop 客户端**：
-
-```bash
-# 开发构建
+# Desktop 客户端
 BUILD_VERSION=v0.2.0 \
 BUILD_ADDRESS=${SIGNALING_ADDRESS} \
 PLATFORMS="windows/amd64" \
 bash scripts/build_desktop.sh
 ```
 
-**前置要求**：
-
-- Server/Agent: Go 1.25+
-- Desktop: Go 1.25+, Node.js 20+, Wails CLI
-
-### 2. 启动 Server
+### 运行命令
 
 ```bash
-# 使用启动脚本（推荐）
+# 启动 Server
 ./scripts/run_server.sh
-```
+# 或：./bin/server -c config/server.toml
 
-### 3. 启动 Agent
-
-```bash
-# 或使用启动脚本
+# 启动 Agent
 ./scripts/run_agent.sh
+# 或：./bin/agent -c config/agent.toml
 ```
-
-## 开发规范
-
-> ⚠️ **重要**: AI 开发时必须遵循 [docs/README.md](docs/README.md) 中的开发规范
-
-### 核心规范
-
-- **构建规范**: 只允许构建到 `bin/` 目录
-- **调试规范**: 调试前必须讨论方案
-- **文档规范**: 禁止随意创建文档
-
-详细规范请查看：[docs/README.md](docs/README.md)
-
-## 文档
-
-- [开发计划](docs/plan.md) - 完整的开发计划和任务清单
-- [进度跟踪](docs/progress.md) - 每日更新的进度记录
-- [设计文档](docs/design.md) - 系统架构和技术设计
-- [API 设计](docs/design_api.md) - RESTful/gRPC/WebSocket API 详细设计
-- [下载 API](docs/design_api_download.md) - Desktop 客户端下载 API 设计
-- [测试规范](docs/test.md) - API 测试规范和流程
-
-### 文档管理规范
-
-**正式文档**：存储在 `docs/` 目录
-
-- 设计文档、API 文档、用户指南等正式文档
-- 需要版本控制和长期维护的文档
-
-**临时文档**：存储在 `.tmp/` 目录
-
-- AI 生成的过程文档和临时文件
-- 调试记录、测试脚本等临时内容
-- 不纳入版本控制（已在 .gitignore 中）
-
-**规则**：
-
-- AI 不得私自在 `docs/` 目录创建文档
-- 所有 AI 生成的过程文档必须放在 `.tmp/` 目录
-- 正式文档的创建需要明确授权
 
 ## License
 

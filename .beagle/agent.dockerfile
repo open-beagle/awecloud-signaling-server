@@ -14,7 +14,7 @@ RUN set -ex && \
     apk add --no-cache ca-certificates && \
     addgroup -g 1000 code && \
     adduser -D -u 1000 -G code code && \
-    mkdir -p /home/code/logs /home/code/config && \
+    mkdir -p /home/code/logs /home/code/config /home/code/.config/awecloud-signaling && \
     chown -R code:code /home/code
 
 # Copy binary
@@ -30,5 +30,8 @@ WORKDIR /home/code
 
 # Declare volume for logs
 VOLUME ["/home/code/logs"]
+
+# Declare volume for state (optional, for persistent state)
+VOLUME ["/home/code/.config/awecloud-signaling"]
 
 CMD ["agent", "-c", "/home/code/config/agent.toml"]

@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 
 	"github.com/BurntSushi/toml"
 )
@@ -30,7 +31,8 @@ type ServerConnect struct {
 
 // TailscaleAgent Agent 端 Tailscale 配置
 type TailscaleAgent struct {
-	StateDir string `toml:"state_dir"` // Tailscale 状态存储目录
+	StateDir          string `toml:"state_dir"`           // Tailscale 状态存储目录，支持 ~ 扩展
+	StateSyncInterval int    `toml:"state_sync_interval"` // 状态同步到 Server 的间隔（分钟），默认 5
 }
 
 func LoadAgentConfig(path string) (*AgentConfig, error) {
@@ -76,6 +78,15 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	if publicURL := os.Getenv("AGENT_PUBLIC_URL"); publicURL != "" {
 		cfg.Server.PublicURL = publicURL
 	}
+	if stateDir := os.Getenv("TAILSCALE_STATE_DIR"); stateDir != "" {
+		cfg.Tailscale.StateDir = stateDir
+	}
+	if syncInterval := os.Getenv("TAILSCALE_STATE_SYNC_INTERVAL"); syncInterval != "" {
+		// 尝试解析为整数
+		if interval, err := strconv.Atoi(syncInterval); err == nil {
+			cfg.Tailscale.StateSyncInterval = interval
+		}
+	}
 
 	// 设置默认值
 	if cfg.Health.Port == 0 {
@@ -86,6 +97,12 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	}
 	if cfg.Server.Address == "" {
 		cfg.Server.Address = "http://localhost:8080"
+	}
+	if cfg.Tailscale.StateDir == "" {
+		cfg.Tailscale.StateDir = "~/.config/awecloud-signaling/"
+	}
+	if cfg.Tailscale.StateSyncInterval == 0 {
+		cfg.Tailscale.StateSyncInterval = 5
 	}
 
 	return &cfg, nil

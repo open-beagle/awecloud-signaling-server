@@ -483,3 +483,72 @@ func (s *AgentServiceServer) SendProxyCommand(agentID int64, action string, serv
 
 	return s.SendCommand(agentID, cmd)
 }
+
+// GetTailscaleState 获取 Agent 的 Tailscale 状态
+func (s *AgentServiceServer) GetTailscaleState(ctx context.Context, req *pb.GetStateRequest) (*pb.GetStateResponse, error) {
+	logger.Infof("Agent 请求获取 Tailscale 状态: agent_id=%d", req.AgentId)
+
+	// 验证 Agent 认证
+	var agent model.Agent
+	if err := db.DB.Where("id = ? AND agent_token = ?", req.AgentId, req.AgentToken).First(&agent).Error; err != nil {
+		logger.Warnf("Agent 认证失败: agent_id=%d", req.AgentId)
+		return nil, status.Error(codes.Unauthenticated, "Agent 认证失败")
+	}
+
+	// 查询状态数据
+	var state model.AgentTailscaleState
+	err := db.DB.Where("agent_id = ?", req.AgentId).First(&state).Error
+	if err != nil {
+		// 状态不存在，返回空状态
+		logger.Infof("Agent %d 没有历史 Tailscale 状态", req.AgentId)
+		return &pb.GetStateResponse{
+			StateData: nil,
+			Exists:    false,
+		}, nil
+	}
+
+	logger.Infof("Agent %d 获取 Tailscale 状态成功，数据大小: %d bytes", req.AgentId, len(state.StateData))
+	return &pb.GetStateResponse{
+		StateData: state.StateData,
+		Exists:    true,
+	}, nil
+}
+
+// SaveTailscaleState 保存 Agent 的 Tailscale 状态
+func (s *AgentServiceServer) SaveTailscaleState(ctx context.Context, req *pb.SaveStateRequest) (*pb.SaveStateResponse, error) {
+	logger.Infof("Agent 请求保存 Tailscale 状态: agent_id=%d, data_size=%d bytes", req.AgentId, len(req.StateData))
+
+	// 验证 Agent 认证
+	var agent model.Agent
+	if err := db.DB.Where("id = ? AND agent_token = ?", req.AgentId, req.AgentToken).First(&agent).Error; err != nil {
+		logger.Warnf("Agent 认证失败: agent_id=%d", req.AgentId)
+		return nil, status.Error(codes.Unauthenticated, "Agent 认证失败")
+	}
+
+	// 查询是否已存在状态记录
+	var state model.AgentTailscaleState
+	err := db.DB.Where("agent_id = ?", req.AgentId).First(&state).Error
+
+	if err != nil {
+		// 不存在，创建新记录
+		state = model.AgentTailscaleState{
+			AgentID:   req.AgentId,
+			StateData: req.StateData,
+		}
+		if err := db.DB.Create(&state).Error; err != nil {
+			logger.Errorf("创建 Tailscale 状态失败: %v", err)
+			return &pb.SaveStateResponse{Success: false}, nil
+		}
+		logger.Infof("Agent %d 创建 Tailscale 状态成功", req.AgentId)
+	} else {
+		// 已存在，更新记录
+		state.StateData = req.StateData
+		if err := db.DB.Save(&state).Error; err != nil {
+			logger.Errorf("更新 Tailscale 状态失败: %v", err)
+			return &pb.SaveStateResponse{Success: false}, nil
+		}
+		logger.Infof("Agent %d 更新 Tailscale 状态成功", req.AgentId)
+	}
+
+	return &pb.SaveStateResponse{Success: true}, nil
+}

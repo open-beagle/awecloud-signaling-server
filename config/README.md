@@ -1,210 +1,109 @@
 # 配置文件说明
 
-## 文件列表
+## 配置文件分类
 
-- `server.toml` - Server配置文件（开发环境）
-- `agent.toml` - Agent配置文件（开发环境）
-- `server.toml.example` - Server配置模板
-- `agent.toml.example` - Agent配置模板
+### 1. 运行时配置（每次部署可能不同）
 
-## Server配置 (server.toml)
+#### `server.toml.example` / `server.toml`
 
-### [web] - Web服务配置
+- **用途**: Server 运行时配置
+- **包含**: 数据库连接、API 地址、密钥等
+- **使用**:
+  - 开发: 复制 `server.toml.example` 为 `server.toml` 并修改
+  - 生产: 通过环境变量或 ConfigMap 覆盖
 
-- `listen_addr` - 监听地址（默认：0.0.0.0）
-- `listen_port` - HTTP端口（默认：8080）
-- `default_admin_username` - 默认管理员用户名
-- `default_admin_password` - 默认管理员密码
+#### `agent.toml.example` / `agent.toml`
 
-### [security] - 安全配置
+- **用途**: Agent 运行时配置
+- **包含**: Server 连接地址、认证信息等
+- **使用**: 同上
 
-- `jwt_secret` - JWT密钥（生产环境必须修改）
+### 2. 静态配置（设计时确定，很少改动）
 
-### [database] - 数据库配置
+#### `network.toml`
 
-- `path` - SQLite数据库文件路径
+- **用途**: Tailscale 网段规划
+- **包含**: Agent/Desktop/Server 的 IP 网段分配
+- **特点**:
+  - 设计时确定，编译时 Copy 到镜像
+  - 启动时读取并写入数据库（如果数据库为空）
+  - 运行时可在 Web 界面修改，修改后存储在数据库
+  - 数据库配置优先级高于此文件
 
-### [log] - 日志配置
+## 配置优先级
 
-- `level` - 日志级别（debug/info/warn/error）
-- `file` - 日志文件路径（空表示输出到控制台）
+### 运行时配置优先级
 
-### [server] - FRP服务配置
-
-- `bind_addr` - FRP监听地址
-- `bind_port` - FRP端口（默认：7000）
-- `transport_protocol` - 传输协议（websocket）
-- `tls_cert_file` - TLS证书文件（可选）
-- `tls_key_file` - TLS密钥文件（可选）
-
-## Agent配置 (agent.toml)
-
-### [agent] - Agent配置
-
-- `agent_name` - Agent名称
-- `agent_token` - Agent认证Token（从Server获取）
-
-### [server] - Server连接配置
-
-- `address` - Server地址
-- `port` - Server FRP端口
-- `grpc_port` - gRPC端口
-- `protocol` - 传输协议（tcp/wss）
-- `tls_enable` - 是否启用TLS
-- `public_url` - FRP公网地址（可选），如果配置则忽略Server返回的地址
-
-### [health] - 健康检查配置
-
-- `port` - 健康检查HTTP端口（默认：8090）
-
-### [log] - 日志配置
-
-- `level` - 日志级别（debug/info/warn/error）
-- `file` - 日志文件路径（空表示输出到控制台）
-
-## 使用说明
-
-### 1. 开发环境
-
-配置文件已经创建好，可以直接使用：
-
-```bash
-# 启动Server
-go run cmd/server/main.go -c config/server.toml
-
-# 或使用VSCode调试（F5）
+```
+环境变量 > server.toml > 默认值
 ```
 
-### 2. 生产环境
+### 网段配置优先级
 
-复制示例文件并修改：
-
-```bash
-cp config/server.toml.example config/server.toml
-cp config/agent.toml.example config/agent.toml
-
-# 修改配置
-vim config/server.toml
+```
+数据库 > network.toml > 硬编码默认值
 ```
 
-**重要**：生产环境必须修改：
-- `jwt_secret` - 使用强密码
-- `default_admin_password` - 修改默认密码
-- `tls_cert_file` 和 `tls_key_file` - 启用TLS
+## Dockerfile 使用示例
 
-### 3. Agent配置
+```dockerfile
+# 复制静态配置（设计时确定）
+COPY config/network.toml /app/config/
 
-Agent的token需要从Server获取：
+# 复制运行时配置模板（可选）
+COPY config/server.toml.example /app/config/
 
-1. 启动Server
-2. 登录Web界面（http://localhost:8080）
-3. 创建Agent，获取token
-4. 将token填入 `config/agent.toml`
-5. 启动Agent
-
-## 端口说明
-
-- **8080** - Web管理界面和API
-- **8081** - gRPC服务（Agent连接）
-- **7000** - FRP信令服务（WebSocket）
-
-## 安全建议
-
-### 开发环境
-
-- 使用默认配置即可
-- 不需要TLS
-
-### 生产环境
-
-1. **修改默认密码**
-   ```toml
-   default_admin_password = "strong-password-here"
-   ```
-
-2. **使用强JWT密钥**
-   ```toml
-   jwt_secret = "use-a-long-random-string-here"
-   ```
-
-3. **启用TLS**
-   ```toml
-   tls_cert_file = "/path/to/cert.pem"
-   tls_key_file = "/path/to/key.pem"
-   ```
-
-4. **限制监听地址**
-   ```toml
-   listen_addr = "127.0.0.1"  # 只监听本地
-   ```
-
-5. **使用反向代理**
-   - 使用Nginx或Traefik
-   - 在代理层处理TLS
-   - 限制访问IP
-
-## 故障排查
-
-### 问题1：配置文件不存在
-
-```bash
-mkdir -p config
-cp config/server.toml.example config/server.toml
+# 运行时通过环境变量或 ConfigMap 覆盖
+ENV HEADSCALE_URL=http://headscale:8080
+ENV HEADSCALE_API_KEY=your-api-key
 ```
 
-### 问题2：端口被占用
+## Kubernetes 使用示例
 
-修改配置文件中的端口：
-```toml
-listen_port = 8081  # 改为其他端口
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: server-config
+data:
+  # 运行时配置通过 ConfigMap
+  server.toml: |
+    [web]
+    listen_addr = "0.0.0.0"
+    listen_port = 8080
+
+    [tailscale]
+    headscale_url = "http://headscale:8080"
+
+  # 网段配置已在镜像中，无需 ConfigMap
+  # network.toml 在镜像构建时已 COPY 进去
 ```
 
-### 问题3：数据库权限错误
+## 配置文件加载流程
 
-确保data目录可写：
-```bash
-mkdir -p data
-chmod 755 data
-```
+### Server 启动时
 
-### 问题4：Agent无法连接
+1. **加载运行时配置** (`server.toml`)
 
-检查：
-1. Server是否启动
-2. agent_token是否正确
-3. Server地址和端口是否正确
-4. 防火墙是否开放端口
+   - 读取配置文件
+   - 环境变量覆盖
+   - 连接数据库
 
-## 配置文件位置
+2. **加载网段配置** (`network.toml`)
 
-- 开发环境：`config/server.toml`
-- 生产环境：可通过 `-c` 参数指定
+   - 检查数据库是否有配置
+   - 如果没有，读取 `network.toml`
+   - 写入数据库作为默认值
 
-```bash
-./bin/server -c /etc/awecloud/server.toml
-./bin/agent -c /etc/awecloud/agent.toml
-```
+3. **后续使用**
+   - 所有网段配置从数据库读取
+   - Web 界面可动态修改
+   - 修改后立即生效
 
-## 环境变量
+## 配置文件对比
 
-Agent支持以下环境变量（优先级高于配置文件）：
-
-- `AGENT_NAME` - Agent名称
-- `AGENT_TOKEN` - Agent认证Token
-- `AGENT_ADDRESS` - Server地址
-- `AGENT_PUBLIC_URL` - FRP公网地址（覆盖Server返回的地址）
-
-示例：
-```bash
-export AGENT_NAME="agent-prod-001"
-export AGENT_TOKEN="your-token-here"
-export AGENT_ADDRESS="https://signaling.example.com"
-export AGENT_PUBLIC_URL="frp.example.com:7000"
-./bin/agent -c config/agent.toml
-```
-
-## 相关文档
-
-- [开发指南](../DEVELOPMENT.md)
-- [部署文档](../deployments/kubernetes/README.md)
-- [项目README](../README.md)
+| 配置文件       | 类型   | 修改频率 | 存储位置      | 优先级          |
+| -------------- | ------ | -------- | ------------- | --------------- |
+| `server.toml`  | 运行时 | 每次部署 | 文件/环境变量 | 环境变量 > 文件 |
+| `agent.toml`   | 运行时 | 每次部署 | 文件/环境变量 | 环境变量 > 文件 |
+| `network.toml` | 静态   | 很少     | 镜像 + 数据库 | 数据库 > 文件   |

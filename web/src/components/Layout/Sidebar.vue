@@ -22,16 +22,13 @@
           <span>{{ t('menu.serviceManagement') }}</span>
         </template>
         <el-menu-item index="/services">
-          {{ t('menu.services') }}
+          {{ t('menu.serviceList') }}
         </el-menu-item>
-        <el-menu-item index="/services/stcp">
-          {{ t('menu.stcpInstances') }}
+        <el-menu-item index="/services/desktop-auth">
+          {{ t('menu.desktopAuth') }}
         </el-menu-item>
-        <el-menu-item index="/services/stcp-visitors">
-          {{ t('menu.stcpVisitors') }}
-        </el-menu-item>
-        <el-menu-item index="/services/tcp">
-          {{ t('menu.tcpInstances') }}
+        <el-menu-item index="/services/agent-auth">
+          {{ t('menu.agentAuth') }}
         </el-menu-item>
       </el-sub-menu>
       <el-menu-item index="/clients">

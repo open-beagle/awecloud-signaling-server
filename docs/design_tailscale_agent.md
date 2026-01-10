@@ -90,18 +90,28 @@ AgentConfig
 TailscaleManager
 ├── tsServer    *tsnet.Server     // Tailscale 服务实例
 ├── config      *config.AgentConfig
+├── grpcClient  pb.AgentServiceClient  // 用于状态同步
+├── agentID     int64
+├── agentToken  string
 ├── ctx         context.Context
 │
 ├── Start(controlURL, authKey string) error
 │   // 启动 Tailscale 客户端
-│   // 1. 初始化 tsnet.Server
-│   // 2. 设置 ControlURL (Headscale)
-│   // 3. 设置 AuthKey
-│   // 4. 调用 Start()
-│   // 5. 等待获取 Tailscale IP
+│   // 1. 从 Server 加载历史状态
+│   // 2. 创建临时状态目录
+│   // 3. 恢复状态到临时目录（如果存在）
+│   // 4. 初始化 tsnet.Server（使用临时目录）
+│   // 5. 设置 ControlURL (Headscale)
+│   // 6. 设置 AuthKey
+│   // 7. 调用 Start()
+│   // 8. 等待获取 Tailscale IP
+│   // 9. 启动定期状态同步协程
 │
 ├── Stop() error
 │   // 停止 Tailscale 客户端
+│   // 1. 最后一次保存状态到 Server
+│   // 2. 停止 tsnet.Server
+│   // 3. 清理临时目录
 │
 ├── GetIP() string
 │   // 获取 Tailscale IP (100.64.x.x)
@@ -112,8 +122,17 @@ TailscaleManager
 ├── Dial(ctx, network, addr string) (net.Conn, error)
 │   // 通过 Tailscale 网络拨号
 │
-└── IsConnected() bool
-    // 检查连接状态
+├── IsConnected() bool
+│   // 检查连接状态
+│
+├── loadStateFromServer() ([]byte, error)
+│   // 从 Server 加载 Tailscale 状态
+│
+├── saveStateToServer() error
+│   // 保存 Tailscale 状态到 Server
+│
+└── periodicStateSave()
+    // 定期保存状态到 Server（每5分钟）
 ```
 
 ### 3.2 ProxyManager
@@ -226,10 +245,14 @@ Agent 启动
     │           └─► Server 返回预分配的固定 IP (100.64.x.x)
     │
     ├─► 4. 启动 TailscaleManager
-    │       ├─► 初始化 tsnet.Server
+    │       ├─► 从 Server 加载历史状态（如果存在）
+    │       ├─► 创建临时状态目录
+    │       ├─► 恢复状态到临时目录
+    │       ├─► 初始化 tsnet.Server（使用临时目录）
     │       ├─► 连接 Headscale
-    │       └─► 获取 Tailscale IP (100.64.x.x)
-    │           └─► 使用 Server 预分配的固定 IP
+    │       ├─► 获取 Tailscale IP (100.64.x.x)
+    │       │   └─► 使用 Server 预分配的固定 IP
+    │       └─► 启动定期状态同步（每5分钟保存到 Server）
     │
     ├─► 5. 上报 Tailscale IP 给 Server
     │       └─► Server 更新数据库，同步 ACL
@@ -245,10 +268,26 @@ Agent 启动
     └─► 9. 启动命令接收循环
             └─► 处理 START_PROXY / STOP_PROXY 指令
 
+Agent 停止:
+    │
+    ├─► 1. 停止命令接收循环
+    │
+    ├─► 2. 停止心跳循环
+    │
+    ├─► 3. 停止所有代理服务
+    │
+    ├─► 4. 停止 TailscaleManager
+    │       ├─► 最后一次保存状态到 Server
+    │       ├─► 停止 tsnet.Server
+    │       └─► 清理临时目录
+    │
+    └─► 5. 关闭 gRPC 连接
+
 Agent IP 管理:
 - 固定 IP: Agent 创建时分配，断线不回收，删除才释放
 - 网段: 100.64.0.0/16 (65534 个可用 IP)
 - 分组: 同组 Agent 可互访，无分组只能访问授权端口
+- 状态存储: 集中存储在 Server，Agent 无状态化
 ```
 
 ---
@@ -428,7 +467,219 @@ GET /health
 
 ---
 
-**文档版本**: 1.1
+## 10. Tailscale 状态管理
+
+### 10.1 状态集中存储设计
+
+为实现 Agent 无状态化部署，Tailscale 节点状态集中存储在 Server 端。
+
+**设计目标**：
+
+- Agent 可随时销毁重建，状态在 Server 端持久化
+- 支持容器化部署（Docker/K8s），无需挂载持久卷
+- 集中管理便于备份、迁移、监控
+- Agent 重启后自动恢复身份，保持固定 IP
+
+### 10.2 状态存储流程
+
+```txt
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        Tailscale 状态管理流程                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Agent 启动                                                                │
+│        │                                                                    │
+│        ▼                                                                    │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │ 1. 向 Server 请求历史状态                                            │   │
+│   │                                                                     │   │
+│   │    gRPC: GetTailscaleState(agent_id, agent_token)                  │   │
+│   │    返回: state_data (二进制数据), exists (是否存在)                 │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│        │                                                                    │
+│        ▼                                                                    │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │ 2. 创建临时状态目录                                                  │   │
+│   │                                                                     │   │
+│   │    tmpDir = os.MkdirTemp("", "tailscale-*")                        │   │
+│   │    例如: /tmp/tailscale-123456                                      │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│        │                                                                    │
+│        ▼                                                                    │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │ 3. 恢复状态到临时目录（如果存在历史状态）                             │   │
+│   │                                                                     │   │
+│   │    if exists && len(state_data) > 0 {                              │   │
+│   │        解压 state_data 到 tmpDir                                    │   │
+│   │        恢复节点密钥、身份信息等                                      │   │
+│   │    }                                                                │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│        │                                                                    │
+│        ▼                                                                    │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │ 4. 启动 tsnet.Server                                                 │   │
+│   │                                                                     │   │
+│   │    tsServer = &tsnet.Server{                                       │   │
+│   │        Hostname:   agent_name,                                     │   │
+│   │        Dir:        tmpDir,  // 使用临时目录                         │   │
+│   │        ControlURL: headscale_url,                                  │   │
+│   │        AuthKey:    auth_key,                                       │   │
+│   │    }                                                               │   │
+│   │    tsServer.Start()                                                │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│        │                                                                    │
+│        ▼                                                                    │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │ 5. 启动定期状态同步                                                  │   │
+│   │                                                                     │   │
+│   │    每 5 分钟执行一次:                                                │   │
+│   │    - 从 tmpDir 读取状态文件                                          │   │
+│   │    - 压缩为二进制数据                                                │   │
+│   │    - 调用 SaveTailscaleState(agent_id, state_data)                 │   │
+│   │    - Server 保存到数据库                                             │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│        │                                                                    │
+│        ▼                                                                    │
+│   Agent 运行中...                                                           │
+│        │                                                                    │
+│        ▼                                                                    │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │ 6. Agent 停止                                                        │   │
+│   │                                                                     │   │
+│   │    - 最后一次保存状态到 Server                                       │   │
+│   │    - 停止 tsnet.Server                                              │   │
+│   │    - 清理临时目录 (os.RemoveAll(tmpDir))                            │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 10.3 gRPC 接口定义
+
+新增两个 RPC 方法用于状态管理：
+
+```txt
+service AgentService {
+    // 现有方法...
+    rpc Register(RegisterRequest) returns (RegisterResponse);
+    rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+    // 新增：状态管理
+    rpc GetTailscaleState(GetStateRequest) returns (GetStateResponse);
+    rpc SaveTailscaleState(SaveStateRequest) returns (SaveStateResponse);
+}
+
+GetStateRequest:
+├── agent_id    int64   // Agent ID
+└── agent_token string  // Agent 认证令牌
+
+GetStateResponse:
+├── state_data  bytes   // Tailscale 状态序列化数据（压缩后）
+└── exists      bool    // 是否存在历史状态
+
+SaveStateRequest:
+├── agent_id    int64   // Agent ID
+├── agent_token string  // Agent 认证令牌
+└── state_data  bytes   // Tailscale 状态序列化数据
+
+SaveStateResponse:
+└── success     bool    // 是否保存成功
+```
+
+### 10.4 Server 端数据模型
+
+新增数据表存储 Agent 的 Tailscale 状态：
+
+```txt
+AgentTailscaleState 表:
+├── id          BIGINT PRIMARY KEY AUTO_INCREMENT
+├── agent_id    BIGINT UNIQUE NOT NULL  // 外键关联 agents.id
+├── state_data  BLOB                    // Tailscale 状态数据（压缩）
+├── updated_at  TIMESTAMP               // 最后更新时间
+└── created_at  TIMESTAMP               // 创建时间
+
+索引:
+- agent_id (唯一索引)
+
+外键:
+- agent_id REFERENCES agents(id) ON DELETE CASCADE
+```
+
+### 10.5 状态数据内容
+
+Tailscale 状态目录包含以下关键文件：
+
+```txt
+临时状态目录结构:
+/tmp/tailscale-123456/
+├── tailscaled.state        // 节点状态（最重要）
+│   ├── 节点私钥
+│   ├── 节点 ID
+│   ├── 机器密钥
+│   └── 网络配置
+├── tailscaled.log.txt      // 日志（可选，不保存）
+└── *.sock                  // Unix socket（运行时，不保存）
+
+保存到 Server 的数据:
+- 只保存 tailscaled.state 文件
+- 压缩后存储（减少数据库空间）
+- 加密存储（可选，增强安全性）
+```
+
+### 10.6 安全考虑
+
+**状态数据包含敏感信息**（节点私钥），需要保护：
+
+| 安全措施     | 说明                                 | 优先级 |
+| ------------ | ------------------------------------ | ------ |
+| 传输加密     | gRPC 使用 TLS 加密传输               | 必须   |
+| 访问控制     | 验证 agent_token，只能访问自己的状态 | 必须   |
+| 数据库加密   | 对 state_data 字段加密存储           | 推荐   |
+| 定期清理     | 删除 Agent 时同步删除状态数据        | 必须   |
+| 审计日志     | 记录状态访问和修改操作               | 推荐   |
+| 临时目录权限 | 设置 tmpDir 权限为 700               | 必须   |
+
+### 10.7 优势与权衡
+
+**优势**：
+
+- Agent 完全无状态，可随时销毁重建
+- 容器友好，无需挂载持久卷
+- 集中管理，便于备份和迁移
+- 支持 Agent 在不同机器间迁移
+
+**权衡**：
+
+- 首次启动需要从 Server 加载状态（增加启动时间约 1-2 秒）
+- 定期同步增加网络开销（每 5 分钟约 10-50KB）
+- Server 数据库存储增加（每 Agent 约 50-100KB）
+- 状态数据包含私钥，需要额外安全措施
+
+**适用场景**：
+
+- ✅ 容器化部署（Docker/K8s）
+- ✅ 云环境（实例可能随时销毁）
+- ✅ 需要集中管理和备份
+- ⚠️ 对启动速度要求极高的场景（可优化为异步加载）
+
+### 10.8 配置变更
+
+移除 Agent 配置文件中的 state_dir 配置：
+
+```txt
+变更前 (config/agent.toml):
+[tailscale]
+state_dir = "/var/lib/awecloud-agent/tailscale"  # 本地持久化
+
+变更后 (config/agent.toml):
+[tailscale]
+# 状态现在保存在 Server 端，无需本地持久化
+# 移除 state_dir 配置项
+```
+
+---
+
+**文档版本**: 1.2
 **创建日期**: 2025-01-08
 **更新日期**: 2025-01-08
 **关联文档**:

@@ -12,6 +12,10 @@ export interface ProxyService {
   bytes_in: number
   bytes_out: number
   remark: string
+  // 权限控制字段
+  access_type: string
+  owner_id: number
+  group_id: number | null
   created_at: string
   updated_at: string
   // 关联字段

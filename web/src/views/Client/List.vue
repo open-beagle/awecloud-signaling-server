@@ -13,6 +13,12 @@
       <el-table v-loading="loading" :data="clients" stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="client_id" :label="t('client.clientId')" min-width="200" />
+        <el-table-column :label="t('agent.tailscaleIp')" width="150">
+          <template #default="{ row }">
+            <span v-if="row.tailscale_ip">{{ row.tailscale_ip }}</span>
+            <span v-else style="color: var(--el-text-color-secondary)">-</span>
+          </template>
+        </el-table-column>
         <el-table-column :label="t('client.enabled')" width="100">
           <template #default="{ row }">
             <el-tag :type="row.enabled ? 'success' : 'danger'" size="small">

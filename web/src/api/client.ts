@@ -5,6 +5,7 @@ export interface Client {
   client_id: string
   client_secret?: string
   enabled: boolean
+  tailscale_ip?: string
   created_at: string
   updated_at: string
 }

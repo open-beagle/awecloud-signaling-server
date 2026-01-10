@@ -37,9 +37,14 @@ address = "http://localhost:8080"
 # 认证信息（ControlURL、AuthKey）由 Server 在注册时下发
 [tailscale]
 # Tailscale 状态存储目录
-# 用于存储节点密钥和状态信息
-# 默认：~/.awecloud-agent/tailscale
-state_dir = ""
+# - 如果配置：使用本地持久化，Server 作为备份（推荐生产环境）
+# - 如果为空：使用临时目录，完全依赖 Server（适合临时容器）
+# - 支持 ~ 扩展为用户主目录
+# - 容器环境建议挂载此目录为持久卷
+state_dir = "~/.config/awecloud-signaling/"
+
+# 状态同步到 Server 的间隔（分钟）
+state_sync_interval = 5
 
 # 健康检查配置
 [health]

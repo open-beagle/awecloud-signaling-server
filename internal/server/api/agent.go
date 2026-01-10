@@ -35,6 +35,12 @@ type AgentResponse struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
+// AgentListItem 用于列表响应，包含服务数量
+type AgentListItem struct {
+	model.Agent
+	ServiceCount int64 `json:"service_count"` // 端口映射服务数量
+}
+
 func (a *AgentAPI) List(c *gin.Context) {
 	var agents []model.Agent
 	if err := db.DB.Order("created_at DESC").Find(&agents).Error; err != nil {
@@ -45,8 +51,25 @@ func (a *AgentAPI) List(c *gin.Context) {
 		return
 	}
 
+	// 查询每个 Agent 的服务数量
+	var serviceCounts []struct {
+		AgentID int64 `gorm:"column:agent_id"`
+		Count   int64 `gorm:"column:count"`
+	}
+	db.DB.Model(&model.ProxyService{}).
+		Select("agent_id, COUNT(*) as count").
+		Group("agent_id").
+		Find(&serviceCounts)
+
+	// 构建 Agent ID 到服务数量的映射
+	serviceCountMap := make(map[int64]int64)
+	for _, sc := range serviceCounts {
+		serviceCountMap[sc.AgentID] = sc.Count
+	}
+
 	// 实时计算在线状态（基于心跳时间，60秒内有心跳认为在线）
 	now := time.Now()
+	result := make([]AgentListItem, len(agents))
 	for i := range agents {
 		agents[i].AgentToken = "" // 不返回token
 		if agents[i].LastHeartbeat != nil {
@@ -59,11 +82,75 @@ func (a *AgentAPI) List(c *gin.Context) {
 		} else {
 			agents[i].Status = "offline"
 		}
+
+		result[i] = AgentListItem{
+			Agent:        agents[i],
+			ServiceCount: serviceCountMap[agents[i].ID],
+		}
 	}
 
 	c.JSON(http.StatusOK, AgentResponse{
 		Success: true,
-		Data:    agents,
+		Data:    result,
+	})
+}
+
+// AgentDetailItem 用于详情响应，包含服务列表
+type AgentDetailItem struct {
+	model.Agent
+	ServiceCount int64                `json:"service_count"` // 端口映射服务数量
+	Services     []model.ProxyService `json:"services"`      // 端口映射服务列表
+}
+
+// Get 获取单个 Agent 详情
+func (a *AgentAPI) Get(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, AgentResponse{
+			Success: false,
+			Message: "无效的ID",
+		})
+		return
+	}
+
+	var agent model.Agent
+	if err := db.DB.First(&agent, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, AgentResponse{
+			Success: false,
+			Message: "Agent不存在",
+		})
+		return
+	}
+
+	// 不返回 token
+	agent.AgentToken = ""
+
+	// 实时计算在线状态
+	now := time.Now()
+	if agent.LastHeartbeat != nil {
+		heartbeatAge := now.Sub(*agent.LastHeartbeat)
+		if heartbeatAge < 60*time.Second {
+			agent.Status = "online"
+		} else {
+			agent.Status = "offline"
+		}
+	} else {
+		agent.Status = "offline"
+	}
+
+	// 查询该 Agent 的服务列表
+	var services []model.ProxyService
+	db.DB.Where("agent_id = ?", id).Order("created_at DESC").Find(&services)
+
+	result := AgentDetailItem{
+		Agent:        agent,
+		ServiceCount: int64(len(services)),
+		Services:     services,
+	}
+
+	c.JSON(http.StatusOK, AgentResponse{
+		Success: true,
+		Data:    result,
 	})
 }
 

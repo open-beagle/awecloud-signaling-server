@@ -36,8 +36,9 @@ func (h *HealthAPI) Ready(c *gin.Context) {
 	errors := make(map[string]string)
 	allReady := true
 
-	// 检查gRPC连接
-	if h.agent.IsGRPCConnected() {
+	// 检查 gRPC 连接
+	grpcConnected := h.agent.IsGRPCConnected()
+	if grpcConnected {
 		checks["grpc_connection"] = "ok"
 	} else {
 		checks["grpc_connection"] = "error"
@@ -47,7 +48,8 @@ func (h *HealthAPI) Ready(c *gin.Context) {
 	}
 
 	// 检查 Tailscale 连接
-	if h.agent.IsTailscaleConnected() {
+	tailscaleConnected := h.agent.IsTailscaleConnected()
+	if tailscaleConnected {
 		checks["tailscale_connection"] = "ok"
 	} else {
 		checks["tailscale_connection"] = "initializing"
@@ -62,11 +64,13 @@ func (h *HealthAPI) Ready(c *gin.Context) {
 	}
 
 	response := gin.H{
-		"status":       status,
-		"timestamp":    time.Now().Format(time.RFC3339),
-		"checks":       checks,
-		"tailscale_ip": h.agent.GetTailscaleIP(),
-		"proxy_count":  h.agent.GetProxyCount(),
+		"status":              status,
+		"timestamp":           time.Now().Format(time.RFC3339),
+		"checks":              checks,
+		"grpc_connected":      grpcConnected,
+		"tailscale_connected": tailscaleConnected,
+		"tailscale_ip":        h.agent.GetTailscaleIP(),
+		"proxy_count":         h.agent.GetProxyCount(),
 	}
 
 	if len(errors) > 0 {

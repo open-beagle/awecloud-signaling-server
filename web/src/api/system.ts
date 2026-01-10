@@ -4,6 +4,10 @@ export interface SystemConfig {
   id: number
   client_download_url: string
   desktop_min_version: string
+  derp_url?: string
+  stun_port?: number
+  ip_prefix?: string
+  auth_key_expiry_hours?: number
   created_at: string
   updated_at: string
 }
@@ -18,8 +22,12 @@ export function getSystemConfig() {
 
 // 更新系统配置
 export function updateSystemConfig(data: {
-  client_download_url: string
-  desktop_min_version: string
+  client_download_url?: string
+  desktop_min_version?: string
+  derp_url?: string
+  stun_port?: number
+  ip_prefix?: string
+  auth_key_expiry_hours?: number
 }) {
   return request<{ success: boolean; message: string; data: SystemConfig }>({
     url: '/api/v1/admin/system/config',

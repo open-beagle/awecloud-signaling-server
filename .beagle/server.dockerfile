@@ -18,12 +18,17 @@ RUN set -ex && \
     chown -R code:code /home/code
 
 # Copy binary
-COPY --chown=code:code bin/server-${TARGETOS}-${TARGETARCH} /usr/local/bin/server
+COPY --chown=code:code bin/server-${TARGETOS}-${TARGETARCH} /usr/local/bin/awecloud-signaling-server
 
 # Copy frontend dist files
 COPY --chown=code:code web/dist /home/code/web/dist
 
-# Copy example config as default config
+# Copy static config (design-time configuration)
+# network.toml: Tailscale network segment planning, rarely changes
+COPY --chown=code:code config/network.toml /home/code/config/network.toml
+
+# Copy example config as default config (runtime configuration)
+# server.toml: Can be overridden by ConfigMap or environment variables
 COPY --chown=code:code config/server.toml.example /home/code/config/server.toml
 
 # Switch to non-root user
@@ -36,4 +41,4 @@ VOLUME ["/home/code/data", "/home/code/logs"]
 
 EXPOSE 7000 8080
 
-CMD ["server", "-c", "/home/code/config/server.toml"]
+CMD ["awecloud-signaling-server", "-c", "/home/code/config/server.toml"]

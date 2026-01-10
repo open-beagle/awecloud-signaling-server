@@ -49,6 +49,7 @@ type ServicePermissionInfo struct {
 	ServiceName string     `json:"service_name"`
 	ClientID    int64      `json:"client_id"`
 	ClientName  string     `json:"client_name"`
+	ClientIP    string     `json:"client_ip"`
 	GrantedBy   int64      `json:"granted_by"`
 	GrantedAt   time.Time  `json:"granted_at"`
 	ExpiresAt   *time.Time `json:"expires_at"`
@@ -93,6 +94,47 @@ func (a *ServicePermissionAPI) ListServicePermissions(c *gin.Context) {
 		}
 		if p.Client != nil {
 			info.ClientName = p.Client.ClientID
+			info.ClientIP = p.Client.TailscaleIP
+		}
+		result = append(result, info)
+	}
+
+	c.JSON(http.StatusOK, PermissionResponse{
+		Success: true,
+		Data:    result,
+	})
+}
+
+// ListAllServicePermissions 获取所有服务的权限列表
+func (a *ServicePermissionAPI) ListAllServicePermissions(c *gin.Context) {
+	var perms []model.ServicePermission
+	if err := db.DB.Preload("Service").Preload("Client").
+		Order("service_id, granted_at DESC").
+		Find(&perms).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, PermissionResponse{
+			Success: false,
+			Message: "查询失败",
+		})
+		return
+	}
+
+	// 转换为响应格式
+	result := make([]ServicePermissionInfo, 0, len(perms))
+	for _, p := range perms {
+		info := ServicePermissionInfo{
+			ID:        p.ID,
+			ServiceID: p.ServiceID,
+			ClientID:  p.ClientID,
+			GrantedBy: p.GrantedBy,
+			GrantedAt: p.GrantedAt,
+			ExpiresAt: p.ExpiresAt,
+		}
+		if p.Service != nil {
+			info.ServiceName = p.Service.Name
+		}
+		if p.Client != nil {
+			info.ClientName = p.Client.ClientID
+			info.ClientIP = p.Client.TailscaleIP
 		}
 		result = append(result, info)
 	}

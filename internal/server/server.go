@@ -21,6 +21,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/api"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	grpcserver "github.com/open-beagle/awecloud-signaling-server/internal/server/grpc"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
@@ -32,11 +33,21 @@ type Server struct {
 	// gRPC服务
 	agentService  *grpcserver.AgentServiceServer
 	clientService *grpcserver.ClientServiceServer
+
+	// ACL 同步服务
+	aclSyncService *headscale.ACLSyncService
+	aclSyncCtx     context.Context
+	aclSyncCancel  context.CancelFunc
 }
 
 // GetAgentService 获取AgentService（供API使用）
 func (s *Server) GetAgentService() *grpcserver.AgentServiceServer {
 	return s.agentService
+}
+
+// GetACLSyncService 获取ACLSyncService（供API使用）
+func (s *Server) GetACLSyncService() *headscale.ACLSyncService {
+	return s.aclSyncService
 }
 
 func NewServer(cfg *config.ServerConfig) (*Server, error) {
@@ -53,8 +64,28 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 		return nil, fmt.Errorf("创建默认管理员失败: %w", err)
 	}
 
+	// 初始化 ACL 同步服务
+	var aclSyncService *headscale.ACLSyncService
+	var aclSyncCtx context.Context
+	var aclSyncCancel context.CancelFunc
+
+	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
+		logger.Info("初始化 Headscale ACL 同步服务")
+		client := headscale.NewClient(headscale.Config{
+			URL:    cfg.Tailscale.HeadscaleURL,
+			APIKey: cfg.Tailscale.HeadscaleAPIKey,
+		})
+		aclSyncService = headscale.NewACLSyncService(client)
+		aclSyncCtx, aclSyncCancel = context.WithCancel(context.Background())
+	} else {
+		logger.Warn("Headscale 配置未设置，ACL 同步服务未启动")
+	}
+
 	return &Server{
-		config: cfg,
+		config:         cfg,
+		aclSyncService: aclSyncService,
+		aclSyncCtx:     aclSyncCtx,
+		aclSyncCancel:  aclSyncCancel,
 	}, nil
 }
 
@@ -127,12 +158,22 @@ func (s *Server) Run() error {
 		}
 	}()
 
+	// 启动 ACL 定时同步（如果已配置）
+	if s.aclSyncService != nil {
+		go s.aclSyncService.StartPeriodicSync(s.aclSyncCtx)
+	}
+
 	// 等待中断信号
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	logger.Info("正在关闭服务器...")
+
+	// 停止 ACL 同步
+	if s.aclSyncCancel != nil {
+		s.aclSyncCancel()
+	}
 
 	// 优雅关闭
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -233,6 +274,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					// Agent管理
 					agentAPI := api.NewAgentAPI()
 					adminAuthGroup.GET("/agents", agentAPI.List)
+					adminAuthGroup.GET("/agents/:id", agentAPI.Get)
 					adminAuthGroup.POST("/agents", agentAPI.Create)
 					adminAuthGroup.PUT("/agents/:id", agentAPI.Update)
 					adminAuthGroup.DELETE("/agents/:id", agentAPI.Delete)
@@ -257,10 +299,11 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.PUT("/services/:id/start", proxyServiceAPI.Start)
 					adminAuthGroup.PUT("/services/:id/stop", proxyServiceAPI.Stop)
 					adminAuthGroup.GET("/services/:id/stats", proxyServiceAPI.Stats)
-					adminAuthGroup.GET("/agents/:agent_id/services", proxyServiceAPI.ListByAgent)
+					adminAuthGroup.GET("/agents/:id/services", proxyServiceAPI.ListByAgent)
 
 					// 服务权限管理（安全架构）
 					servicePermAPI := api.NewServicePermissionAPI(s.config)
+					adminAuthGroup.GET("/services/permissions", servicePermAPI.ListAllServicePermissions)
 					adminAuthGroup.GET("/services/:id/permissions", servicePermAPI.ListServicePermissions)
 					adminAuthGroup.POST("/services/:id/permissions", servicePermAPI.AddServicePermission)
 					adminAuthGroup.DELETE("/services/:id/permissions/:pid", servicePermAPI.RemoveServicePermission)

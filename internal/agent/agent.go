@@ -205,7 +205,7 @@ func (a *Agent) register() error {
 
 		// 启动 Tailscale
 		if a.tsManager == nil {
-			a.tsManager = NewTailscaleManager(a.config, a.ctx)
+			a.tsManager = NewTailscaleManager(a.config, a.grpcClient, a.agentID, a.config.Agent.AgentToken, a.ctx)
 		}
 
 		if err := a.tsManager.Start(resp.ControlUrl, resp.AuthKey); err != nil {
@@ -490,6 +490,12 @@ func (a *Agent) handleStopProxy(cmd *pb.Command) {
 
 	if a.proxyManager == nil {
 		logger.Errorf("ProxyManager 未初始化")
+		return
+	}
+
+	// 检查代理是否存在
+	if !a.proxyManager.Exists(pc.Name) {
+		logger.Warnf("端口映射不存在，跳过停止: %s", pc.Name)
 		return
 	}
 

@@ -28,33 +28,54 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true }
       },
       {
+        path: 'agents/:id',
+        name: 'AgentDetail',
+        component: () => import('@/views/Agent/Detail.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
         path: 'clients',
         name: 'Clients',
         component: () => import('@/views/Client/List.vue'),
         meta: { requiresAuth: true }
       },
       {
+        path: 'services',
+        name: 'Services',
+        component: () => import('@/views/Service/index.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'services/desktop-auth',
+        name: 'DesktopAuth',
+        component: () => import('@/views/Service/DesktopAuth.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'services/agent-auth',
+        name: 'AgentAuth',
+        component: () => import('@/views/Service/AgentAuth.vue'),
+        meta: { requiresAuth: true }
+      },
+      // 旧路由重定向
+      {
         path: 'services/stcp',
-        name: 'STCPInstances',
-        component: () => import('@/views/STCP/List.vue'),
+        redirect: '/services',
         meta: { requiresAuth: true }
       },
       {
         path: 'services/stcp-visitors',
-        name: 'STCPVisitors',
-        component: () => import('@/views/STCPVisitor/index.vue'),
+        redirect: '/services',
         meta: { requiresAuth: true }
       },
       {
         path: 'services/tcp',
-        name: 'TCPServices',
-        component: () => import('@/views/TCP/List.vue'),
+        redirect: '/services',
         meta: { requiresAuth: true }
       },
       {
-        path: 'services',
-        name: 'Services',
-        component: () => import('@/views/Service/index.vue'),
+        path: 'services/stcp/:id/access',
+        redirect: '/services',
         meta: { requiresAuth: true }
       },
       {
@@ -67,12 +88,6 @@ const routes: RouteRecordRaw[] = [
         path: 'groups/:id/members',
         name: 'GroupMembers',
         component: () => import('@/views/Group/Members.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
-        path: 'services/stcp/:id/access',
-        name: 'STCPAccess',
-        component: () => import('@/views/STCP/Access.vue'),
         meta: { requiresAuth: true }
       },
       {

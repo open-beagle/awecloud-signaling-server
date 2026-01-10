@@ -28,6 +28,7 @@ func NewACLSyncService(client *Client) *ACLSyncService {
 
 // SyncACL 同步 ACL 规则到 Headscale
 // 根据数据库中的权限配置生成 ACL 规则
+// 失败时会自动重试最多 3 次
 func (s *ACLSyncService) SyncACL(ctx context.Context) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -53,13 +54,27 @@ func (s *ACLSyncService) SyncACL(ctx context.Context) error {
 		},
 	}
 
-	// 设置 ACL 策略
-	if err := s.client.SetACLPolicy(ctx, policy); err != nil {
-		return fmt.Errorf("设置 ACL 策略失败: %w", err)
+	// 设置 ACL 策略，带重试机制
+	var lastErr error
+	for i := 0; i < 3; i++ {
+		err := s.client.SetACLPolicy(ctx, policy)
+		if err == nil {
+			logger.Infof("ACL 规则同步完成，共 %d 条规则", len(rules))
+			return nil
+		}
+
+		lastErr = err
+		logger.Warnf("ACL 同步失败 (尝试 %d/3): %v", i+1, err)
+
+		// 等待后重试，使用指数退避
+		if i < 2 {
+			waitTime := time.Duration(i+1) * time.Second
+			time.Sleep(waitTime)
+		}
 	}
 
-	logger.Infof("ACL 规则同步完成，共 %d 条规则", len(rules))
-	return nil
+	logger.Errorf("ACL 同步最终失败: %v", lastErr)
+	return fmt.Errorf("设置 ACL 策略失败（已重试 3 次）: %w", lastErr)
 }
 
 // generateACLRules 根据数据库配置生成 ACL 规则
@@ -323,10 +338,13 @@ func (s *ACLSyncService) AddServicePermission(ctx context.Context, serviceID, cl
 		return fmt.Errorf("创建权限记录失败: %w", err)
 	}
 
-	// 同步 ACL
+	logger.Infof("添加服务权限: service_id=%d, client_id=%d", serviceID, clientID)
+
+	// 同步 ACL（带重试）
 	if err := s.SyncACL(ctx); err != nil {
 		logger.Errorf("同步 ACL 失败: %v", err)
 		// 不回滚权限记录，下次同步会修复
+		return fmt.Errorf("权限已添加但 ACL 同步失败: %w", err)
 	}
 
 	return nil
@@ -339,9 +357,12 @@ func (s *ACLSyncService) RemoveServicePermission(ctx context.Context, permission
 		return fmt.Errorf("删除权限记录失败: %w", err)
 	}
 
-	// 同步 ACL
+	logger.Infof("删除服务权限: permission_id=%d", permissionID)
+
+	// 同步 ACL（带重试）
 	if err := s.SyncACL(ctx); err != nil {
 		logger.Errorf("同步 ACL 失败: %v", err)
+		return fmt.Errorf("权限已删除但 ACL 同步失败: %w", err)
 	}
 
 	return nil
@@ -361,9 +382,12 @@ func (s *ACLSyncService) AddAgentServicePermission(ctx context.Context, agentID,
 		return fmt.Errorf("创建权限记录失败: %w", err)
 	}
 
-	// 同步 ACL
+	logger.Infof("添加 Agent 服务权限: agent_id=%d, service_id=%d", agentID, serviceID)
+
+	// 同步 ACL（带重试）
 	if err := s.SyncACL(ctx); err != nil {
 		logger.Errorf("同步 ACL 失败: %v", err)
+		return fmt.Errorf("权限已添加但 ACL 同步失败: %w", err)
 	}
 
 	return nil
@@ -376,9 +400,12 @@ func (s *ACLSyncService) RemoveAgentServicePermission(ctx context.Context, permi
 		return fmt.Errorf("删除权限记录失败: %w", err)
 	}
 
-	// 同步 ACL
+	logger.Infof("删除 Agent 服务权限: permission_id=%d", permissionID)
+
+	// 同步 ACL（带重试）
 	if err := s.SyncACL(ctx); err != nil {
 		logger.Errorf("同步 ACL 失败: %v", err)
+		return fmt.Errorf("权限已删除但 ACL 同步失败: %w", err)
 	}
 
 	return nil
@@ -396,10 +423,68 @@ func (s *ACLSyncService) UpdateServiceAccessType(ctx context.Context, serviceID 
 		return fmt.Errorf("更新服务失败: %w", err)
 	}
 
-	// 同步 ACL
+	logger.Infof("更新服务访问类型: service_id=%d, access_type=%s", serviceID, accessType)
+
+	// 同步 ACL（带重试）
 	if err := s.SyncACL(ctx); err != nil {
 		logger.Errorf("同步 ACL 失败: %v", err)
+		return fmt.Errorf("服务已更新但 ACL 同步失败: %w", err)
 	}
 
 	return nil
+}
+
+// UpdateAgentGroup 更新 Agent 分组并重新生成 ACL
+// 当 Agent 的分组发生变化时，需要重新生成 ACL 规则
+// 因为同组 Agent 可以互访，分组变更会影响访问权限
+func (s *ACLSyncService) UpdateAgentGroup(ctx context.Context, agentID int64, groupName string) error {
+	// 获取 Agent 当前分组
+	var agent model.Agent
+	if err := db.DB.First(&agent, agentID).Error; err != nil {
+		return fmt.Errorf("查询 Agent 失败: %w", err)
+	}
+
+	oldGroup := agent.GroupName
+
+	// 更新 Agent 分组
+	if err := db.DB.Model(&model.Agent{}).Where("id = ?", agentID).Update("group_name", groupName).Error; err != nil {
+		return fmt.Errorf("更新 Agent 分组失败: %w", err)
+	}
+
+	logger.Infof("更新 Agent 分组: agent_id=%d, old_group=%s, new_group=%s", agentID, oldGroup, groupName)
+
+	// 重新生成并同步 ACL（带重试）
+	if err := s.SyncACL(ctx); err != nil {
+		logger.Errorf("同步 ACL 失败: %v", err)
+		return fmt.Errorf("分组已更新但 ACL 同步失败: %w", err)
+	}
+
+	return nil
+}
+
+// StartPeriodicSync 启动定时全量同步
+// 每 5 分钟全量同步一次 ACL，确保 ACL 规则与数据库状态一致
+func (s *ACLSyncService) StartPeriodicSync(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	logger.Info("启动 ACL 定时同步任务，间隔 5 分钟")
+
+	// 立即执行一次同步
+	if err := s.SyncACL(ctx); err != nil {
+		logger.Errorf("初始 ACL 同步失败: %v", err)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("ACL 定时同步任务已停止")
+			return
+		case <-ticker.C:
+			logger.Debug("执行定时 ACL 全量同步")
+			if err := s.SyncACL(ctx); err != nil {
+				logger.Errorf("定时 ACL 同步失败: %v", err)
+			}
+		}
+	}
 }

@@ -10,34 +10,101 @@
       <el-form
         ref="formRef"
         :model="form"
-        label-width="150px"
+        label-width="200px"
       >
-        <el-form-item label="客户端下载地址">
-          <div class="form-item-content">
-            <el-input
-              v-model="form.client_download_url"
-              placeholder="请输入客户端文件存储的基础URL（如：https://cdn.example.com/downloads）"
-              clearable
-            />
-            <div class="form-item-tip">
-              设置客户端文件存储的基础URL，系统会自动拼接文件名生成完整下载链接
+        <!-- 基础配置 -->
+        <div class="config-section">
+          <div class="section-title">基础配置</div>
+          
+          <el-form-item label="客户端下载地址">
+            <div class="form-item-content">
+              <el-input
+                v-model="form.client_download_url"
+                placeholder="请输入客户端文件存储的基础URL（如：https://cdn.example.com/downloads）"
+                clearable
+              />
+              <div class="form-item-tip">
+                设置客户端文件存储的基础URL，系统会自动拼接文件名生成完整下载链接
+              </div>
             </div>
-          </div>
-        </el-form-item>
+          </el-form-item>
 
-        <el-form-item label="客户端最低版本">
-          <div class="form-item-content">
-            <el-input
-              v-model="form.desktop_min_version"
-              placeholder="请输入最低支持版本（如：1.0.0 或 v1.0.0）"
-              clearable
-              style="width: 300px"
-            />
-            <div class="form-item-tip">
-              低于此版本的客户端将无法登录，强制用户升级到新版本（支持 v 前缀）
+          <el-form-item label="客户端最低版本">
+            <div class="form-item-content">
+              <el-input
+                v-model="form.desktop_min_version"
+                placeholder="请输入最低支持版本（如：1.0.0 或 v1.0.0）"
+                clearable
+                style="width: 300px"
+              />
+              <div class="form-item-tip">
+                低于此版本的客户端将无法登录，强制用户升级到新版本（支持 v 前缀）
+              </div>
             </div>
-          </div>
-        </el-form-item>
+          </el-form-item>
+        </div>
+
+        <!-- Tailscale 配置 -->
+        <div class="config-section">
+          <div class="section-title">{{ $t('tailscale.title') }}</div>
+          
+          <el-form-item :label="$t('tailscale.derpUrl')">
+            <div class="form-item-content">
+              <el-input
+                v-model="form.derp_url"
+                :placeholder="$t('tailscale.derpUrlPlaceholder')"
+                clearable
+              />
+              <div class="form-item-tip">
+                {{ $t('tailscale.derpUrlTip') }}
+              </div>
+            </div>
+          </el-form-item>
+
+          <el-form-item :label="$t('tailscale.stunPort')">
+            <div class="form-item-content">
+              <el-input-number
+                v-model="form.stun_port"
+                :placeholder="$t('tailscale.stunPortPlaceholder')"
+                :min="1"
+                :max="65535"
+                style="width: 300px"
+              />
+              <div class="form-item-tip">
+                {{ $t('tailscale.stunPortTip') }}
+              </div>
+            </div>
+          </el-form-item>
+
+          <el-form-item :label="$t('tailscale.ipPrefix')">
+            <div class="form-item-content">
+              <el-input
+                v-model="form.ip_prefix"
+                :placeholder="$t('tailscale.ipPrefixPlaceholder')"
+                clearable
+                style="width: 300px"
+              />
+              <div class="form-item-tip">
+                {{ $t('tailscale.ipPrefixTip') }}
+              </div>
+            </div>
+          </el-form-item>
+
+          <el-form-item :label="$t('tailscale.authKeyExpiryHours')">
+            <div class="form-item-content">
+              <el-input-number
+                v-model="form.auth_key_expiry_hours"
+                :placeholder="$t('tailscale.authKeyExpiryHoursPlaceholder')"
+                :min="1"
+                :max="8760"
+                style="width: 300px"
+              />
+              <div class="form-item-tip">
+                {{ $t('tailscale.authKeyExpiryHoursTip') }}
+              </div>
+            </div>
+          </el-form-item>
+        </div>
 
         <el-form-item>
           <el-button type="primary" :loading="saving" @click="handleSave">
@@ -61,7 +128,11 @@ const saving = ref(false)
 
 const form = ref({
   client_download_url: '',
-  desktop_min_version: '1.0.0'
+  desktop_min_version: '1.0.0',
+  derp_url: '',
+  stun_port: 3479,
+  ip_prefix: '100.64.0.0/10',
+  auth_key_expiry_hours: 24
 })
 
 const downloadPageUrl = computed(() => {
@@ -78,6 +149,10 @@ const loadConfig = async () => {
     if (res.success && res.data) {
       form.value.client_download_url = res.data.client_download_url || ''
       form.value.desktop_min_version = res.data.desktop_min_version || '1.0.0'
+      form.value.derp_url = res.data.derp_url || ''
+      form.value.stun_port = res.data.stun_port || 3479
+      form.value.ip_prefix = res.data.ip_prefix || '100.64.0.0/10'
+      form.value.auth_key_expiry_hours = res.data.auth_key_expiry_hours || 24
     }
   } catch (error) {
     console.error('加载配置失败:', error)
@@ -88,6 +163,30 @@ onMounted(() => {
   loadConfig()
 })
 
+const validateIPPrefix = (ipPrefix: string): boolean => {
+  if (!ipPrefix) return true // 允许为空
+  // 验证 CIDR 格式
+  const cidrRegex = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/
+  if (!cidrRegex.test(ipPrefix)) {
+    return false
+  }
+  // 验证 IP 地址部分
+  const [ip, mask] = ipPrefix.split('/')
+  const parts = ip.split('.')
+  for (const part of parts) {
+    const num = parseInt(part)
+    if (num < 0 || num > 255) {
+      return false
+    }
+  }
+  // 验证掩码
+  const maskNum = parseInt(mask)
+  if (maskNum < 0 || maskNum > 32) {
+    return false
+  }
+  return true
+}
+
 const handleSave = async () => {
   // 验证版本号格式（支持可选的 v 或 V 前缀）
   const versionRegex = /^[vV]?\d+\.\d+\.\d+$/
@@ -96,11 +195,33 @@ const handleSave = async () => {
     return
   }
 
+  // 验证 IP 地址段格式
+  if (form.value.ip_prefix && !validateIPPrefix(form.value.ip_prefix)) {
+    ElMessage.error('IP 地址段格式不正确，请使用 CIDR 格式（如：100.64.0.0/10）')
+    return
+  }
+
+  // 验证 STUN 端口
+  if (form.value.stun_port && (form.value.stun_port < 1 || form.value.stun_port > 65535)) {
+    ElMessage.error('STUN 端口必须在 1-65535 之间')
+    return
+  }
+
+  // 验证预认证密钥有效期
+  if (form.value.auth_key_expiry_hours && (form.value.auth_key_expiry_hours < 1 || form.value.auth_key_expiry_hours > 8760)) {
+    ElMessage.error('预认证密钥有效期必须在 1-8760 小时之间')
+    return
+  }
+
   saving.value = true
   try {
     const res = await updateSystemConfig({
       client_download_url: form.value.client_download_url,
-      desktop_min_version: form.value.desktop_min_version
+      desktop_min_version: form.value.desktop_min_version,
+      derp_url: form.value.derp_url,
+      stun_port: form.value.stun_port,
+      ip_prefix: form.value.ip_prefix,
+      auth_key_expiry_hours: form.value.auth_key_expiry_hours
     })
     if (res.success) {
       ElMessage.success('保存成功')
@@ -128,6 +249,23 @@ const handleSave = async () => {
   font-size: 18px;
   font-weight: 500;
   color: var(--text-primary);
+}
+
+.config-section {
+  margin-bottom: 32px;
+}
+
+.config-section:last-of-type {
+  margin-bottom: 0;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
 :deep(.el-form-item__content) {

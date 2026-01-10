@@ -13,6 +13,37 @@ export interface Agent {
   tailscale_ip?: string
   ts_connected?: boolean
   ts_conn_type?: string
+  ts_registered_at?: string
+  // 分组管理
+  group_name?: string
+  // 服务数量（列表响应）
+  service_count?: number
+}
+
+// Agent 详情响应（包含服务列表）
+export interface AgentDetail extends Agent {
+  services?: ProxyService[]
+}
+
+// 端口映射服务模型
+export interface ProxyService {
+  id: number
+  name: string
+  agent_id: number
+  listen_port: number
+  target_addr: string
+  status: 'running' | 'stopped' | 'error'
+  connections: number
+  bytes_in: number
+  bytes_out: number
+  remark: string
+  access_type: 'public' | 'private' | 'group'
+  owner_id: number
+  group_id?: number
+  created_at: string
+  updated_at: string
+  // 关联数据
+  agent?: Agent
 }
 
 // STCP实例模型

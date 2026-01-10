@@ -413,7 +413,7 @@ func (a *ProxyServiceAPI) Stats(c *gin.Context) {
 
 // ListByAgent 获取指定 Agent 的端口映射服务列表
 func (a *ProxyServiceAPI) ListByAgent(c *gin.Context) {
-	agentID, err := strconv.ParseInt(c.Param("agent_id"), 10, 64)
+	agentID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, ProxyServiceResponse{
 			Success: false,
