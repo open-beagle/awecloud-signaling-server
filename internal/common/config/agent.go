@@ -11,6 +11,7 @@ type AgentConfig struct {
 	Agent     AgentSection   `toml:"agent"`
 	Server    ServerConnect  `toml:"server"`
 	Tailscale TailscaleAgent `toml:"tailscale"`
+	Visitor   VisitorSection `toml:"visitor"`
 	Health    HealthSection  `toml:"health"`
 	Log       LogConfig      `toml:"log"`
 }
@@ -33,6 +34,11 @@ type ServerConnect struct {
 type TailscaleAgent struct {
 	StateDir          string `toml:"state_dir"`           // Tailscale 状态存储目录，支持 ~ 扩展
 	StateSyncInterval int    `toml:"state_sync_interval"` // 状态同步到 Server 的间隔（分钟），默认 5
+}
+
+// VisitorSection Visitor 配置（服务访问）
+type VisitorSection struct {
+	ListenAddr string `toml:"listen_addr"` // 可选，手动指定监听地址，留空则自动检测局域网 IP
 }
 
 func LoadAgentConfig(path string) (*AgentConfig, error) {

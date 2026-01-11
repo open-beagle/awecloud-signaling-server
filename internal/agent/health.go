@@ -71,6 +71,8 @@ func (h *HealthAPI) Ready(c *gin.Context) {
 		"tailscale_connected": tailscaleConnected,
 		"tailscale_ip":        h.agent.GetTailscaleIP(),
 		"proxy_count":         h.agent.GetProxyCount(),
+		"visitor_count":       h.agent.GetVisitorCount(),
+		"visitor_lan_ip":      h.agent.GetVisitorLANIP(),
 	}
 
 	if len(errors) > 0 {

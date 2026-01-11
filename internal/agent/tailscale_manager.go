@@ -616,5 +616,5 @@ func (m *TailscaleManager) tailscaleLogf(format string, args ...interface{}) {
 	}
 
 	// 使用 logrus 输出，保持格式一致
-	logger.Infof("[tunnel] " + msg)
+	logger.Infof("[tunnel] %s", msg)
 }

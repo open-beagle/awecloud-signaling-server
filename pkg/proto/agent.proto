@@ -89,9 +89,12 @@ message Command {
     DELETE_STCP_VISITOR = 5;
 
     // [Tailscale] 新增命令类型
-    START_PROXY = 10;   // 启动端口映射
+    START_PROXY = 10;   // 启动端口映射（服务暴露）
     STOP_PROXY = 11;    // 停止端口映射
     SYNC_PROXIES = 12;  // 同步所有端口映射
+    START_VISITOR = 13; // 启动 Visitor（服务访问）
+    STOP_VISITOR = 14;  // 停止 Visitor
+    SYNC_VISITORS = 15; // 同步所有 Visitor
   }
   
   string command_id = 1;
@@ -117,13 +120,23 @@ message Command {
 
   // [Tailscale] 端口映射相关字段
   ProxyCommand proxy_command = 13;
+  
+  // [Tailscale] Visitor 相关字段
+  VisitorCommand visitor_command = 14;
 }
 
-// [Tailscale] 端口映射指令
+// [Tailscale] 端口映射指令（服务暴露）
 message ProxyCommand {
   string name = 1;         // 服务名称
   int32 listen_port = 2;   // 监听端口
   string target_addr = 3;  // 目标地址，如 192.168.1.100:3306
+}
+
+// [Tailscale] Visitor 指令（服务访问）
+message VisitorCommand {
+  string name = 1;         // Visitor 名称
+  int32 listen_port = 2;   // 本地监听端口
+  string target_addr = 3;  // VPN 网络目标地址，如 100.64.0.1:3306
 }
 
 // 指令响应
@@ -198,7 +211,7 @@ message TailscaleStatusReport {
   int32 latency_ms = 5;      // 延迟（毫秒）
 }
 
-// [Tailscale] 端口映射状态
+// [Tailscale] 端口映射状态（服务暴露）
 message ProxyStatus {
   string name = 1;           // 服务名称
   int32 listen_port = 2;     // 监听端口
@@ -210,10 +223,29 @@ message ProxyStatus {
   string error_msg = 8;      // 错误信息（status=error 时）
 }
 
-// [Tailscale] 端口映射状态上报
+// [Tailscale] Visitor 状态（服务访问）
+message VisitorStatus {
+  string name = 1;           // Visitor 名称
+  int32 listen_port = 2;     // 本地监听端口
+  string target_addr = 3;    // VPN 目标地址
+  string listen_addr = 4;    // 实际监听地址（局域网 IP）
+  string status = 5;         // 状态: running / stopped / error
+  int32 connections = 6;     // 当前连接数
+  int64 bytes_in = 7;        // 入站流量
+  int64 bytes_out = 8;       // 出站流量
+  string error_msg = 9;      // 错误信息（status=error 时）
+}
+
+// [Tailscale] 端口映射状态上报（服务暴露）
 message ProxyStatusReport {
   int64 agent_id = 1;
   repeated ProxyStatus proxies = 2;
+}
+
+// [Tailscale] Visitor 状态上报（服务访问）
+message VisitorStatusReport {
+  int64 agent_id = 1;
+  repeated VisitorStatus visitors = 2;
 }
 
 // [Tailscale] 获取状态请求

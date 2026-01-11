@@ -41,9 +41,10 @@ type Agent struct {
 	commandChan chan *pb.Command
 
 	// Tailscale 管理
-	tsManager    *TailscaleManager
-	proxyManager *ProxyManager
-	tailscaleIP  string
+	tsManager      *TailscaleManager
+	proxyManager   *ProxyManager
+	visitorManager *VisitorManager
+	tailscaleIP    string
 
 	// 上下文
 	ctx    context.Context
@@ -110,6 +111,11 @@ func (a *Agent) Run() error {
 	// 停止 ProxyManager
 	if a.proxyManager != nil {
 		a.proxyManager.StopAll()
+	}
+
+	// 停止 VisitorManager
+	if a.visitorManager != nil {
+		a.visitorManager.StopAll()
 	}
 
 	a.wg.Wait()
@@ -218,6 +224,11 @@ func (a *Agent) register() error {
 		// 初始化 ProxyManager
 		if a.proxyManager == nil {
 			a.proxyManager = NewProxyManager(a.tsManager, a.ctx)
+		}
+
+		// 初始化 VisitorManager
+		if a.visitorManager == nil {
+			a.visitorManager = NewVisitorManager(a.tsManager, a.config, a.ctx)
 		}
 	} else {
 		return fmt.Errorf("Server 未返回 Tailscale 认证信息")
@@ -445,6 +456,15 @@ func (a *Agent) handleCommand(cmd *pb.Command) {
 	case pb.Command_SYNC_PROXIES:
 		a.handleSyncProxies(cmd)
 
+	case pb.Command_START_VISITOR:
+		a.handleStartVisitor(cmd)
+
+	case pb.Command_STOP_VISITOR:
+		a.handleStopVisitor(cmd)
+
+	case pb.Command_SYNC_VISITORS:
+		a.handleSyncVisitors(cmd)
+
 	default:
 		logger.Infof("未知命令类型: %v", cmd.Type)
 	}
@@ -514,6 +534,70 @@ func (a *Agent) handleSyncProxies(_ *pb.Command) {
 	// 同步逻辑由 Server 通过多个 START_PROXY 命令实现
 }
 
+// handleStartVisitor 处理启动 Visitor 命令（服务访问）
+func (a *Agent) handleStartVisitor(cmd *pb.Command) {
+	if cmd.VisitorCommand == nil {
+		logger.Warnf("START_VISITOR 命令缺少 visitor_command")
+		return
+	}
+
+	vc := cmd.VisitorCommand
+	logger.Infof("启动 Visitor: name=%s, port=%d, target=%s",
+		vc.Name, vc.ListenPort, vc.TargetAddr)
+
+	if a.visitorManager == nil {
+		logger.Errorf("VisitorManager 未初始化")
+		return
+	}
+
+	if a.visitorManager.Exists(vc.Name) {
+		logger.Infof("Visitor 已存在: %s", vc.Name)
+		return
+	}
+
+	if err := a.visitorManager.Start(vc.Name, int(vc.ListenPort), vc.TargetAddr); err != nil {
+		logger.Errorf("启动 Visitor 失败: %v", err)
+		return
+	}
+
+	logger.Infof("Visitor 启动成功: %s", vc.Name)
+}
+
+// handleStopVisitor 处理停止 Visitor 命令
+func (a *Agent) handleStopVisitor(cmd *pb.Command) {
+	if cmd.VisitorCommand == nil {
+		logger.Warnf("STOP_VISITOR 命令缺少 visitor_command")
+		return
+	}
+
+	vc := cmd.VisitorCommand
+	logger.Infof("停止 Visitor: name=%s", vc.Name)
+
+	if a.visitorManager == nil {
+		logger.Errorf("VisitorManager 未初始化")
+		return
+	}
+
+	// 检查 Visitor 是否存在
+	if !a.visitorManager.Exists(vc.Name) {
+		logger.Warnf("Visitor 不存在，跳过停止: %s", vc.Name)
+		return
+	}
+
+	if err := a.visitorManager.Stop(vc.Name); err != nil {
+		logger.Errorf("停止 Visitor 失败: %v", err)
+		return
+	}
+
+	logger.Infof("Visitor 停止成功: %s", vc.Name)
+}
+
+// handleSyncVisitors 处理同步 Visitor 命令
+func (a *Agent) handleSyncVisitors(_ *pb.Command) {
+	logger.Info("收到同步 Visitor 命令")
+	// 同步逻辑由 Server 通过多个 START_VISITOR 命令实现
+}
+
 // IsGRPCConnected 检查gRPC连接是否正常
 func (a *Agent) IsGRPCConnected() bool {
 	a.grpcMutex.RLock()
@@ -543,6 +627,22 @@ func (a *Agent) GetProxyCount() int {
 		return 0
 	}
 	return a.proxyManager.Count()
+}
+
+// GetVisitorCount 获取运行中的 Visitor 数量
+func (a *Agent) GetVisitorCount() int {
+	if a.visitorManager == nil {
+		return 0
+	}
+	return a.visitorManager.Count()
+}
+
+// GetVisitorLANIP 获取 Visitor 监听的局域网 IP
+func (a *Agent) GetVisitorLANIP() string {
+	if a.visitorManager == nil {
+		return ""
+	}
+	return a.visitorManager.GetLANIP()
 }
 
 // startHealthServer 启动健康检查HTTP服务器
