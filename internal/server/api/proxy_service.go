@@ -28,11 +28,39 @@ func (a *ProxyServiceAPI) SetAgentService(service *grpcserver.AgentServiceServer
 	a.agentService = service
 }
 
+// allocatePort 自动分配端口（从 10000 开始，找到第一个未被占用的端口）
+func (a *ProxyServiceAPI) allocatePort(agentID int64) int {
+	const startPort = 10000
+	const maxPort = 65535
+
+	// 查询该 Agent 已使用的所有端口
+	var usedPorts []int
+	db.DB.Model(&model.ProxyService{}).
+		Where("agent_id = ?", agentID).
+		Pluck("listen_port", &usedPorts)
+
+	// 转换为 map 方便查找
+	usedMap := make(map[int]bool)
+	for _, port := range usedPorts {
+		usedMap[port] = true
+	}
+
+	// 从 10000 开始找第一个未使用的端口
+	for port := startPort; port <= maxPort; port++ {
+		if !usedMap[port] {
+			return port
+		}
+	}
+
+	// 如果 10000-65535 都用完了，返回 10000（理论上不会发生）
+	return startPort
+}
+
 // CreateProxyServiceRequest 创建端口映射请求
 type CreateProxyServiceRequest struct {
 	Name       string `json:"name" binding:"required"`
 	AgentID    int64  `json:"agent_id" binding:"required"`
-	ListenPort int    `json:"listen_port" binding:"required"`
+	ListenPort int    `json:"listen_port"` // 可选，0 或不填则自动分配
 	TargetAddr string `json:"target_addr" binding:"required"`
 	Remark     string `json:"remark"`
 	// 权限控制字段
@@ -118,21 +146,28 @@ func (a *ProxyServiceAPI) Create(c *gin.Context) {
 		return
 	}
 
-	// 检查端口是否已被占用
-	var existing model.ProxyService
-	if err := db.DB.Where("agent_id = ? AND listen_port = ?", req.AgentID, req.ListenPort).First(&existing).Error; err == nil {
-		c.JSON(http.StatusConflict, ProxyServiceResponse{
-			Success: false,
-			Message: fmt.Sprintf("端口 %d 已被服务 %s 占用", req.ListenPort, existing.Name),
-		})
-		return
+	// 如果端口为 0，自动分配端口（从 10000 开始）
+	listenPort := req.ListenPort
+	if listenPort == 0 {
+		listenPort = a.allocatePort(req.AgentID)
+		logger.Infof("自动分配端口: agent_id=%d, port=%d", req.AgentID, listenPort)
+	} else {
+		// 检查端口是否已被占用
+		var existing model.ProxyService
+		if err := db.DB.Where("agent_id = ? AND listen_port = ?", req.AgentID, listenPort).First(&existing).Error; err == nil {
+			c.JSON(http.StatusConflict, ProxyServiceResponse{
+				Success: false,
+				Message: fmt.Sprintf("端口 %d 已被服务 %s 占用", listenPort, existing.Name),
+			})
+			return
+		}
 	}
 
 	// 创建服务
 	service := &model.ProxyService{
 		Name:       req.Name,
 		AgentID:    req.AgentID,
-		ListenPort: req.ListenPort,
+		ListenPort: listenPort,
 		TargetAddr: req.TargetAddr,
 		Status:     model.ProxyStatusStopped,
 		Remark:     req.Remark,
@@ -156,6 +191,21 @@ func (a *ProxyServiceAPI) Create(c *gin.Context) {
 	}
 
 	logger.Infof("创建端口映射服务: name=%s, agent_id=%d, port=%d", req.Name, req.AgentID, req.ListenPort)
+
+	// 自动启动服务
+	if a.agentService != nil && a.agentService.IsAgentOnline(req.AgentID) {
+		service.Status = model.ProxyStatusRunning
+		db.DB.Save(service)
+
+		if err := a.agentService.SendProxyCommand(req.AgentID, "start", service); err != nil {
+			logger.Warnf("自动启动服务失败: %v", err)
+			// 启动失败不影响创建结果，只是状态回退
+			service.Status = model.ProxyStatusStopped
+			db.DB.Save(service)
+		} else {
+			logger.Infof("服务已自动启动: name=%s", req.Name)
+		}
+	}
 
 	c.JSON(http.StatusOK, ProxyServiceResponse{
 		Success: true,

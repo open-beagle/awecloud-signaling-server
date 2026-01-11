@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 # 版本信息（日常开发使用默认值，流水线传递完整参数）
 BUILD_VERSION="${BUILD_VERSION:-v0.2.0}"
 BUILD_ADDRESS="${BUILD_ADDRESS:-${SIGNALING_ADDRESS}}"
-PLATFORMS="${PLATFORMS:-$(go env GOOS)/$(go env GOARCH)}"
+PLATFORMS="${PLATFORMS:-windows/amd64}"
 
 # 目录配置
 DESKTOP_DIR="./desktop"

@@ -16,9 +16,12 @@ func GetSystemConfig(c *gin.Context) {
 	if err := db.DB.First(&config, 1).Error; err != nil {
 		// 如果不存在，返回默认配置
 		config = model.SystemConfig{
-			ID:                1,
-			ClientDownloadURL: "",
-			DesktopMinVersion: "1.0.0",
+			ID:                 1,
+			ClientDownloadURL:  "",
+			DesktopMinVersion:  "1.0.0",
+			StunPort:           3479,
+			IPPrefix:           "100.64.0.0/10",
+			AuthKeyExpiryHours: 24,
 		}
 	}
 
@@ -31,8 +34,13 @@ func GetSystemConfig(c *gin.Context) {
 // UpdateSystemConfig 更新系统配置
 func UpdateSystemConfig(c *gin.Context) {
 	var req struct {
-		ClientDownloadURL string `json:"client_download_url"`
-		DesktopMinVersion string `json:"desktop_min_version"`
+		ClientDownloadURL  string `json:"client_download_url"`
+		DesktopMinVersion  string `json:"desktop_min_version"`
+		HeadscalePublicURL string `json:"headscale_public_url"`
+		DerpURL            string `json:"derp_url"`
+		StunPort           int    `json:"stun_port"`
+		IPPrefix           string `json:"ip_prefix"`
+		AuthKeyExpiryHours int    `json:"auth_key_expiry_hours"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -49,12 +57,26 @@ func UpdateSystemConfig(c *gin.Context) {
 	if err := db.DB.First(&config, 1).Error; err != nil {
 		// 不存在则创建
 		config = model.SystemConfig{
-			ID:                1,
-			ClientDownloadURL: req.ClientDownloadURL,
-			DesktopMinVersion: req.DesktopMinVersion,
+			ID:                 1,
+			ClientDownloadURL:  req.ClientDownloadURL,
+			DesktopMinVersion:  req.DesktopMinVersion,
+			HeadscalePublicURL: req.HeadscalePublicURL,
+			DerpURL:            req.DerpURL,
+			StunPort:           req.StunPort,
+			IPPrefix:           req.IPPrefix,
+			AuthKeyExpiryHours: req.AuthKeyExpiryHours,
 		}
 		if config.DesktopMinVersion == "" {
 			config.DesktopMinVersion = "1.0.0"
+		}
+		if config.StunPort == 0 {
+			config.StunPort = 3479
+		}
+		if config.IPPrefix == "" {
+			config.IPPrefix = "100.64.0.0/10"
+		}
+		if config.AuthKeyExpiryHours == 0 {
+			config.AuthKeyExpiryHours = 24
 		}
 		if err := db.DB.Create(&config).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -68,6 +90,17 @@ func UpdateSystemConfig(c *gin.Context) {
 		config.ClientDownloadURL = req.ClientDownloadURL
 		if req.DesktopMinVersion != "" {
 			config.DesktopMinVersion = req.DesktopMinVersion
+		}
+		config.HeadscalePublicURL = req.HeadscalePublicURL
+		config.DerpURL = req.DerpURL
+		if req.StunPort > 0 {
+			config.StunPort = req.StunPort
+		}
+		if req.IPPrefix != "" {
+			config.IPPrefix = req.IPPrefix
+		}
+		if req.AuthKeyExpiryHours > 0 {
+			config.AuthKeyExpiryHours = req.AuthKeyExpiryHours
 		}
 		if err := db.DB.Save(&config).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{

@@ -518,6 +518,7 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 32px;
   padding: 8px 0;
+  min-height: 50px;
 }
 
 .info-row + .info-row {
@@ -529,16 +530,19 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 120px;
 }
 
 .info-label {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+  line-height: 20px;
 }
 
 .info-value {
   font-size: 14px;
   color: var(--el-text-color-primary);
+  line-height: 22px;
 }
 
 .action-buttons {

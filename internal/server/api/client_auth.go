@@ -330,8 +330,9 @@ func (a *ClientAuthAPI) GetTailscaleAuth(c *gin.Context) {
 	}
 
 	// 创建预认证密钥（非临时节点，Desktop 需要固定 IP 以支持服务暴露）
+	// 注意：Headscale API 需要传递用户 ID，而不是用户名
 	authKeyExpiry := 24 * time.Hour
-	authKey, err := a.headscaleClient.CreatePreAuthKey(c.Request.Context(), user.Name, authKeyExpiry, false)
+	authKey, err := a.headscaleClient.CreatePreAuthKey(c.Request.Context(), user.ID, authKeyExpiry, false)
 	if err != nil {
 		logger.Errorf("创建 Tailscale 预认证密钥失败: %v", err)
 		c.JSON(http.StatusInternalServerError, TailscaleAuthResponse{
@@ -343,11 +344,29 @@ func (a *ClientAuthAPI) GetTailscaleAuth(c *gin.Context) {
 
 	logger.Infof("为 Client %d 创建 Tailscale 预认证密钥（User: %s）", clientID, userName)
 
+	// 从数据库获取配置
+	var sysConfig model.SystemConfig
+	if err := db.DB.First(&sysConfig, 1).Error; err != nil {
+		logger.Warnf("获取系统配置失败，使用配置文件默认值: %v", err)
+	}
+
+	// HeadscalePublicURL：优先使用数据库配置，否则使用配置文件
+	controlURL := a.config.Tailscale.HeadscalePublicURL
+	if sysConfig.HeadscalePublicURL != "" {
+		controlURL = sysConfig.HeadscalePublicURL
+	}
+
+	// DERP URL：优先使用数据库配置，否则使用 HeadscaleURL + /derp
+	derpURL := a.config.Tailscale.HeadscaleURL + "/derp"
+	if sysConfig.DerpURL != "" {
+		derpURL = sysConfig.DerpURL
+	}
+
 	c.JSON(http.StatusOK, TailscaleAuthResponse{
 		Success:    true,
-		ControlURL: a.config.Tailscale.HeadscaleURL,
+		ControlURL: controlURL,
 		AuthKey:    authKey.Key,
-		DerpURL:    a.config.Tailscale.HeadscaleURL + "/derp",
+		DerpURL:    derpURL,
 	})
 }
 

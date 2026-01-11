@@ -8,6 +8,13 @@ type SystemConfig struct {
 	ClientDownloadURL string `gorm:"type:text" json:"client_download_url"`                        // 客户端下载地址
 	DesktopMinVersion string `gorm:"type:varchar(20);default:'1.0.0'" json:"desktop_min_version"` // Desktop 最低支持版本
 
+	// Tailscale 配置（可在 Web 界面动态修改）
+	HeadscalePublicURL string `gorm:"type:text" json:"headscale_public_url"`                     // Headscale 公网地址（Agent/Desktop 访问）
+	DerpURL            string `gorm:"type:text" json:"derp_url"`                                 // DERP 服务器地址（留空则使用 HeadscalePublicURL + /derp）
+	StunPort           int    `gorm:"type:int;default:3479" json:"stun_port"`                    // STUN 端口
+	IPPrefix           string `gorm:"type:varchar(20);default:'100.64.0.0/10'" json:"ip_prefix"` // IP 地址段
+	AuthKeyExpiryHours int    `gorm:"type:int;default:24" json:"auth_key_expiry_hours"`          // 预认证密钥有效期（小时）
+
 	// Tailscale 网段配置（可在 Web 界面动态修改，覆盖配置文件默认值）
 	AgentCIDR      string `gorm:"type:varchar(20);default:'100.64.0.0/16'" json:"agent_cidr"`      // Agent 网段
 	AgentIPStart   string `gorm:"type:varchar(20);default:'100.64.0.1'" json:"agent_ip_start"`     // Agent IP 起始

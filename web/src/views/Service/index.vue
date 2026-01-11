@@ -63,14 +63,8 @@
           </template>
         </el-table-column>
         <el-table-column prop="connections" :label="$t('service.connections')" width="100" />
-        <el-table-column :label="$t('common.actions')" width="280" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="180" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="row.status !== 'running'" type="success" size="small" @click="handleStart(row)">
-              {{ $t('service.start') }}
-            </el-button>
-            <el-button v-else type="warning" size="small" @click="handleStop(row)">
-              {{ $t('service.stop') }}
-            </el-button>
             <el-button type="primary" size="small" @click="handleStats(row)">
               {{ $t('service.stats') }}
             </el-button>
@@ -96,7 +90,8 @@
           <el-input v-model="createForm.name" :placeholder="$t('service.namePlaceholder')" />
         </el-form-item>
         <el-form-item :label="$t('service.listenPort')" prop="listen_port">
-          <el-input-number v-model="createForm.listen_port" :min="1" :max="65535" @change="validatePort" />
+          <el-input-number v-model="createForm.listen_port" :min="0" :max="65535" @change="validatePort" :placeholder="$t('service.listenPortPlaceholder')" />
+          <div class="form-item-tip">{{ $t('service.listenPortTip') }}</div>
           <div v-if="portConflictError" class="port-conflict-error">
             <el-icon><Warning /></el-icon>
             {{ portConflictError }}
@@ -145,7 +140,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Warning, Loading } from '@element-plus/icons-vue'
-import { getServices, createService, deleteService, startService, stopService, getServiceStats, type ProxyService, type CreateServiceRequest } from '@/api/service'
+import { getServices, createService, deleteService, getServiceStats, type ProxyService, type CreateServiceRequest } from '@/api/service'
 import { getAgents } from '@/api/agent'
 import type { Agent, ApiResponse } from '@/types/models'
 
@@ -184,7 +179,6 @@ const currentStats = ref<{
 const createRules = {
   name: [{ required: true, message: () => t('service.nameRequired'), trigger: 'blur' }],
   agent_id: [{ required: true, message: () => t('service.agentRequired'), trigger: 'change' }],
-  listen_port: [{ required: true, message: () => t('service.portRequired'), trigger: 'blur' }],
   target_addr: [{ required: true, message: () => t('service.targetAddrRequired'), trigger: 'blur' }]
 }
 
@@ -275,7 +269,7 @@ const showCreateDialog = () => {
   createDialogVisible.value = true
 }
 
-// 验证端口是否冲突
+// 验证端口是否冲突（只在端口不为 0 时验证）
 const validatePort = () => {
   if (!createForm.value.agent_id || !createForm.value.listen_port) {
     portConflictError.value = ''
@@ -324,41 +318,6 @@ const handleCreate = async () => {
   }
 }
 
-const handleStart = async (row: ProxyService) => {
-  // 检查 Agent 是否在线
-  if (row.agent_status === 'offline') {
-    ElMessage.error(t('service.agentOfflineError'))
-    return
-  }
-
-  try {
-    const res = await startService(row.id) as ApiResponse
-    if (res.success) {
-      ElMessage.success(t('service.startSuccess'))
-      loadServices()
-    } else {
-      // 显示具体错误信息
-      ElMessage.error(res.message || t('service.startFailed'))
-    }
-  } catch (error) {
-    ElMessage.error(t('service.startFailed'))
-  }
-}
-
-const handleStop = async (row: ProxyService) => {
-  try {
-    const res = await stopService(row.id) as ApiResponse
-    if (res.success) {
-      ElMessage.success(t('service.stopSuccess'))
-      loadServices()
-    } else {
-      ElMessage.error(res.message || t('service.stopFailed'))
-    }
-  } catch (error) {
-    ElMessage.error(t('service.stopFailed'))
-  }
-}
-
 const handleDelete = async (row: ProxyService) => {
   try {
     // 如果服务正在运行，提示会先停止
@@ -396,7 +355,7 @@ const handleStats = async (row: ProxyService) => {
       bytes_out: number
     }>
     if (res.success) {
-      currentStats.value = res.data
+      currentStats.value = res.data || null
     } else {
       ElMessage.error(res.message || t('service.statsFailed'))
       statsDialogVisible.value = false
@@ -439,6 +398,11 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+.form-item-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 4px;
 }
 .stats-container {
   padding: 10px 0;

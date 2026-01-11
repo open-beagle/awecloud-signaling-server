@@ -52,6 +52,9 @@ config/*.toml
 /.tmp/
 .tmp/
 
+# Kubernetes deployment (local configs)
+deployments/kubernetes/*.local.yaml
+
 # Desktop client (independent git repository)
 /desktop/
 /git/

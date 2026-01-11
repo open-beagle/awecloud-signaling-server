@@ -112,8 +112,17 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.RegisterReque
 
 	// Tailscale 模式：创建预认证密钥
 	if s.headscaleClient != nil && s.config != nil {
-		// 从数据库获取配置（或使用默认值）
-		authKeyExpiry := 24 * time.Hour // 默认 24 小时
+		// 从数据库获取配置
+		var sysConfig model.SystemConfig
+		if err := db.DB.First(&sysConfig, 1).Error; err != nil {
+			logger.Warnf("获取系统配置失败，使用配置文件默认值: %v", err)
+		}
+
+		// 预认证密钥有效期：优先使用数据库配置，否则使用默认值
+		authKeyExpiry := 24 * time.Hour
+		if sysConfig.AuthKeyExpiryHours > 0 {
+			authKeyExpiry = time.Duration(sysConfig.AuthKeyExpiryHours) * time.Hour
+		}
 
 		// 为每个 Agent 创建独立的 Headscale User
 		// User 命名规则：agent-{agent_name}
@@ -132,11 +141,23 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.RegisterReque
 				logger.Errorf("创建 Tailscale 预认证密钥失败: %v", err)
 				// 不影响注册，继续返回成功
 			} else {
-				resp.ControlUrl = s.config.Tailscale.HeadscalePublicURL
+				// HeadscalePublicURL：优先使用数据库配置，否则使用配置文件
+				controlURL := s.config.Tailscale.HeadscalePublicURL
+				if sysConfig.HeadscalePublicURL != "" {
+					controlURL = sysConfig.HeadscalePublicURL
+				}
+				resp.ControlUrl = controlURL
+
 				resp.AuthKey = authKey.Key
-				// DERP URL 从数据库配置获取，这里使用默认值
-				resp.DerpUrl = s.config.Tailscale.HeadscaleURL + "/derp"
-				logger.Infof("已为 Agent %s 创建 Tailscale 预认证密钥（User: %s, ID: %s）", req.AgentName, userName, user.ID)
+
+				// DERP URL：优先使用数据库配置，否则使用 HeadscaleURL + /derp
+				if sysConfig.DerpURL != "" {
+					resp.DerpUrl = sysConfig.DerpURL
+				} else {
+					resp.DerpUrl = s.config.Tailscale.HeadscaleURL + "/derp"
+				}
+
+				logger.Infof("已为 Agent %s 创建 Tailscale 预认证密钥（User: %s, ID: %s, ControlURL: %s）", req.AgentName, userName, user.ID, controlURL)
 			}
 		}
 	} else {
