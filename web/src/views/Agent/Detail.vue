@@ -111,6 +111,44 @@
         </div>
       </el-card>
 
+      <!-- 网络信息卡片 -->
+      <el-card class="info-card">
+        <template #header>
+          <span class="card-title">{{ t('agent.networkInfo') }}</span>
+        </template>
+        
+        <div class="info-row">
+          <div class="info-item">
+            <span class="info-label">{{ t('agent.lanIp') }}</span>
+            <span class="info-value">{{ agent?.network_info?.lan_ip || '-' }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">{{ t('agent.lanGateway') }}</span>
+            <span class="info-value">{{ agent?.network_info?.lan_gateway || '-' }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">{{ t('agent.lanInterface') }}</span>
+            <span class="info-value">{{ agent?.network_info?.lan_interface || '-' }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">{{ t('agent.runtimeEnv') }}</span>
+            <span class="info-value">
+              <span v-if="agent?.network_info?.runtime_env === 'docker'">🐳 {{ t('agent.runtimeDocker') }}</span>
+              <span v-else-if="agent?.network_info?.runtime_env === 'kubernetes'">☸️ {{ t('agent.runtimeKubernetes') }}</span>
+              <span v-else-if="agent?.network_info?.runtime_env === 'native'">🖥️ {{ t('agent.runtimeNative') }}</span>
+              <span v-else>-</span>
+            </span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">{{ t('agent.hostname') }}</span>
+            <span class="info-value">{{ agent?.network_info?.hostname || '-' }}</span>
+          </div>
+        </div>
+        <div v-if="agent?.network_info?.lan_ip" class="info-tip">
+          💡 {{ t('agent.networkTip') }}
+        </div>
+      </el-card>
+
       <!-- 端口映射服务列表 -->
       <el-card class="info-card">
         <template #header>
@@ -175,6 +213,81 @@
         
         <el-empty v-else :description="t('agent.noServices')" />
       </el-card>
+
+      <!-- 端口访问服务列表 (Visitor) -->
+      <el-card class="info-card">
+        <template #header>
+          <div class="card-header">
+            <span class="card-title">
+              {{ t('agent.visitorList') }} ({{ agent?.visitors?.length || 0 }})
+            </span>
+            <el-button type="primary" size="small" :icon="Plus" @click="handleAddVisitor">
+              {{ t('agent.addVisitor') }}
+            </el-button>
+          </div>
+        </template>
+        
+        <el-table v-if="agent?.visitors && agent.visitors.length > 0" :data="agent.visitors" stripe>
+          <el-table-column prop="name" :label="t('service.name')" min-width="120" />
+          <el-table-column :label="t('agent.localListenAddr')" min-width="180">
+            <template #default="{ row }">
+              {{ agent?.network_info?.lan_ip || '-' }}:{{ row.listen_port }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('agent.targetService')" min-width="180">
+            <template #default="{ row }">
+              {{ row.target_agent_name }}/{{ row.target_service_name }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('service.status')" width="100">
+            <template #default="{ row }">
+              <el-tag v-if="row.status === 'running'" type="success" size="small">
+                {{ t('service.running') }}
+              </el-tag>
+              <el-tag v-else type="info" size="small">
+                {{ t('service.stopped') }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="connections" :label="t('service.connections')" width="100" align="center" />
+          <el-table-column :label="t('common.actions')" width="150" fixed="right">
+            <template #default="{ row }">
+              <div class="action-buttons">
+                <el-button
+                  v-if="row.status !== 'running'"
+                  size="small"
+                  type="success"
+                  @click="handleStartVisitor(row)"
+                >
+                  {{ t('service.start') }}
+                </el-button>
+                <el-button
+                  v-else
+                  size="small"
+                  type="warning"
+                  @click="handleStopVisitor(row)"
+                >
+                  {{ t('service.stop') }}
+                </el-button>
+                <el-button
+                  size="small"
+                  type="danger"
+                  :icon="Delete"
+                  @click="handleDeleteVisitor(row)"
+                />
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+        
+        <template v-else>
+          <el-empty :description="t('agent.noVisitors')" />
+        </template>
+        
+        <div v-if="agent?.visitors && agent.visitors.length > 0" class="info-tip">
+          💡 {{ t('agent.visitorTip') }}
+        </div>
+      </el-card>
     </div>
   </div>
 </template>
@@ -187,7 +300,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete, Edit } from '@element-plus/icons-vue'
 import { getAgent, updateAgent } from '@/api/agent'
 import { startService, stopService, deleteService } from '@/api/service'
-import type { AgentDetail, ProxyService } from '@/types/models'
+import { startVisitor, stopVisitor, deleteVisitor } from '@/api/visitor'
+import type { AgentDetail, ProxyService, Visitor } from '@/types/models'
 import StatusTag from '@/components/Common/StatusTag.vue'
 import TimeAgo from '@/components/Common/TimeAgo.vue'
 
@@ -305,6 +419,60 @@ const handleDeleteService = async (service: ProxyService) => {
   }
 }
 
+// Visitor 操作
+const handleAddVisitor = () => {
+  // 跳转到 Agent 授权页面，预选当前 Agent
+  router.push({ path: '/services/agent-auth', query: { agent_id: String(agent.value?.id) } })
+}
+
+const handleStartVisitor = async (visitor: Visitor) => {
+  try {
+    const res = await startVisitor(visitor.id)
+    if (res.success) {
+      ElMessage.success(t('common.success'))
+      loadAgent()
+    } else {
+      ElMessage.error(res.message || t('common.failed'))
+    }
+  } catch (error) {
+    ElMessage.error(t('common.failed'))
+  }
+}
+
+const handleStopVisitor = async (visitor: Visitor) => {
+  try {
+    const res = await stopVisitor(visitor.id)
+    if (res.success) {
+      ElMessage.success(t('common.success'))
+      loadAgent()
+    } else {
+      ElMessage.error(res.message || t('common.failed'))
+    }
+  } catch (error) {
+    ElMessage.error(t('common.failed'))
+  }
+}
+
+const handleDeleteVisitor = async (visitor: Visitor) => {
+  try {
+    await ElMessageBox.confirm(t('common.deleteConfirm'), {
+      type: 'warning'
+    })
+    
+    const res = await deleteVisitor(visitor.id)
+    if (res.success) {
+      ElMessage.success(t('common.deleteSuccess'))
+      loadAgent()
+    } else {
+      ElMessage.error(res.message || t('common.failed'))
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(t('common.failed'))
+    }
+  }
+}
+
 // Watch for route changes
 watch(() => route.params.id, () => {
   if (route.params.id) {
@@ -378,5 +546,14 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   flex-wrap: nowrap;
+}
+
+.info-tip {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background-color: var(--el-fill-color-light);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
 </style>

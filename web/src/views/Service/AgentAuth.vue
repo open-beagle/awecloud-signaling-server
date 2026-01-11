@@ -3,80 +3,72 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>Agent授权管理</span>
+          <span>{{ $t('agentAuth.title') }}</span>
           <el-button type="primary" @click="handleAddAuth">
             <el-icon><Plus /></el-icon>
-            添加授权
+            {{ $t('agentAuth.addAuth') }}
           </el-button>
         </div>
       </template>
 
       <!-- 说明提示 -->
       <el-alert
-        title="说明"
+        :title="$t('common.info')"
         type="info"
         :closable="false"
-        style="margin-bottom: 20px"
+        style="margin-bottom: 16px"
       >
         <template #default>
-          <div>此列表仅显示跨组或无分组 Agent 的显式授权记录。同组 Agent 默认可互访所有端口，无需显式授权。</div>
+          <div>{{ $t('agentAuth.sameGroupTip') }}</div>
         </template>
       </el-alert>
 
       <!-- 筛选区域 -->
-      <el-form :inline="true" class="filter-form">
-        <el-form-item label="目标服务">
-          <el-select v-model="filters.serviceId" placeholder="选择目标服务" clearable style="width: 200px">
-            <el-option label="全部服务" :value="null" />
-            <el-option
-              v-for="service in serviceList"
-              :key="service.id"
-              :label="service.name"
-              :value="service.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="访问Agent">
-          <el-select v-model="filters.agentId" placeholder="选择访问Agent" clearable style="width: 200px">
-            <el-option label="全部Agent" :value="null" />
-            <el-option
-              v-for="agent in agentList"
-              :key="agent.id"
-              :label="agent.agent_name"
-              :value="agent.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="handleSearch">查询</el-button>
-          <el-button @click="handleReset">重置</el-button>
-        </el-form-item>
-      </el-form>
+      <div class="filter-bar">
+        <el-select v-model="filters.serviceId" :placeholder="$t('agentAuth.filterByService')" clearable style="width: 200px">
+          <el-option :label="$t('agentAuth.allServices')" :value="null" />
+          <el-option
+            v-for="service in serviceList"
+            :key="service.id"
+            :label="service.name"
+            :value="service.id"
+          />
+        </el-select>
+        <el-select v-model="filters.agentId" :placeholder="$t('agentAuth.filterByAgent')" clearable style="width: 200px">
+          <el-option :label="$t('agentAuth.allAgents')" :value="null" />
+          <el-option
+            v-for="agent in agentList"
+            :key="agent.id"
+            :label="agent.agent_name"
+            :value="agent.id"
+          />
+        </el-select>
+      </div>
 
       <!-- 授权列表 -->
-      <el-table :data="filteredAuthList" v-loading="loading" border>
+      <el-table :data="filteredAuthList" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column label="访问方Agent" min-width="150">
+        <el-table-column :label="$t('agentAuth.visitorAgent')" min-width="150">
           <template #default="{ row }">
             <div>{{ row.agent_name }}</div>
             <div class="text-secondary">{{ row.agent_ip }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="目标服务" min-width="200">
+        <el-table-column :label="$t('agentAuth.targetService')" min-width="200">
           <template #default="{ row }">
             <div>{{ row.service_name }}</div>
             <div class="text-secondary">{{ row.service_addr }}</div>
           </template>
         </el-table-column>
-        <el-table-column prop="granted_at" label="授权时间" width="180">
+        <el-table-column :label="$t('agentAuth.grantedAt')" width="180">
           <template #default="{ row }">
             {{ formatTime(row.granted_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="120" fixed="right">
           <template #default="{ row }">
             <el-button type="danger" size="small" @click="handleRevoke(row)">
-              撤销
+              {{ $t('agentAuth.revoke') }}
             </el-button>
           </template>
         </el-table-column>
@@ -84,23 +76,22 @@
     </el-card>
 
     <!-- 添加授权对话框 -->
-    <el-dialog v-model="dialogVisible" title="添加Agent授权" width="600px">
+    <el-dialog v-model="dialogVisible" :title="$t('agentAuth.addAuth')" width="600px">
       <el-form :model="form" label-width="120px">
-        <el-form-item label="访问方Agent" required>
-          <el-select v-model="form.agentId" placeholder="选择访问方Agent" style="width: 100%">
+        <el-form-item :label="$t('agentAuth.visitorAgent')" required>
+          <el-select v-model="form.agentId" :placeholder="$t('agentAuth.selectVisitorAgentPlaceholder')" style="width: 100%">
             <el-option
               v-for="agent in agentList"
               :key="agent.id"
-              :label="`${agent.agent_name} (${agent.tailscale_ip || '未连接'}) ${agent.group_name ? '- ' + agent.group_name : '- 无分组'}`"
+              :label="`${agent.agent_name} (${agent.tailscale_ip || '-'}) ${agent.group_name ? '- ' + agent.group_name : '- ' + $t('agent.noGroup')}`"
               :value="agent.id"
             />
           </el-select>
-          <div class="form-tip">选择需要访问目标服务的 Agent</div>
         </el-form-item>
-        <el-form-item label="要访问的服务" required>
+        <el-form-item :label="$t('agentAuth.targetService')" required>
           <el-select
             v-model="form.serviceIds"
-            placeholder="选择要访问的服务（可多选）"
+            :placeholder="$t('agentAuth.selectTargetServicePlaceholder')"
             multiple
             style="width: 100%"
           >
@@ -111,23 +102,21 @@
               :value="service.id"
             />
           </el-select>
-          <div class="form-tip">选择要被访问的服务，可以选择多个</div>
         </el-form-item>
         <el-alert
-          title="提示"
           type="warning"
           :closable="false"
           style="margin-bottom: 20px"
         >
           <template #default>
-            <div>授权后，该 Agent 可以通过隧道网络访问选中的服务</div>
-            <div>权限变更将同步到 ACL，立即生效</div>
+            <div>{{ $t('agentAuth.aclSyncWarning') }}</div>
+            <div>{{ $t('agentAuth.aclSyncTip') }}</div>
           </template>
         </el-alert>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSubmit" :loading="submitting">授权</el-button>
+        <el-button @click="dialogVisible = false">{{ $t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="handleSubmit" :loading="submitting">{{ $t('agentAuth.authorize') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -135,12 +124,15 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { getAgentServicePermissions, addAgentServicePermission, removeAgentServicePermission } from '@/api/agentPermission'
 import { getAgents } from '@/api/agent'
 import { getServices } from '@/api/service'
 import type { AgentServicePermission } from '@/api/agentPermission'
+
+const { t } = useI18n()
 
 // 筛选条件
 const filters = reactive({
@@ -187,11 +179,11 @@ const loadAuthList = async () => {
     if (response.success) {
       authList.value = response.data || []
     } else {
-      ElMessage.error(response.message || '加载授权列表失败')
+      ElMessage.error(response.message || t('agentAuth.loadPermissionsFailed'))
     }
   } catch (error: any) {
-    console.error('加载授权列表失败:', error)
-    ElMessage.error(error.message || '加载授权列表失败')
+    console.error('Load auth list failed:', error)
+    ElMessage.error(error.message || t('agentAuth.loadPermissionsFailed'))
   } finally {
     loading.value = false
   }
@@ -205,7 +197,7 @@ const loadAgentList = async () => {
       agentList.value = response.data || []
     }
   } catch (error) {
-    console.error('加载 Agent 列表失败:', error)
+    console.error('Load agent list failed:', error)
   }
 }
 
@@ -217,19 +209,8 @@ const loadServiceList = async () => {
       serviceList.value = response.data || []
     }
   } catch (error) {
-    console.error('加载服务列表失败:', error)
+    console.error('Load service list failed:', error)
   }
-}
-
-// 查询
-const handleSearch = () => {
-  // 前端过滤，无需重新加载
-}
-
-// 重置
-const handleReset = () => {
-  filters.serviceId = null
-  filters.agentId = null
 }
 
 // 添加授权
@@ -242,7 +223,7 @@ const handleAddAuth = () => {
 // 提交授权
 const handleSubmit = async () => {
   if (!form.agentId || form.serviceIds.length === 0) {
-    ElMessage.warning('请选择访问方Agent和要访问的服务')
+    ElMessage.warning(t('agentAuth.selectAgentAndService'))
     return
   }
 
@@ -254,19 +235,18 @@ const handleSubmit = async () => {
     })
     
     if (response.success) {
-      ElMessage.success('授权成功')
+      ElMessage.success(t('agentAuth.authSuccess'))
       dialogVisible.value = false
       loadAuthList()
     } else {
-      ElMessage.error(response.message || '授权失败')
+      ElMessage.error(response.message || t('agentAuth.authFailed'))
     }
   } catch (error: any) {
-    console.error('授权失败:', error)
-    // 检查是否是 ACL 同步错误
+    console.error('Auth failed:', error)
     if (error.response?.data?.message?.includes('ACL') || error.response?.data?.message?.includes('Headscale')) {
-      ElMessage.error('权限同步失败，请稍后重试')
+      ElMessage.error(t('agentAuth.aclSyncError'))
     } else {
-      ElMessage.error(error.response?.data?.message || error.message || '授权失败')
+      ElMessage.error(error.response?.data?.message || error.message || t('agentAuth.authFailed'))
     }
   } finally {
     submitting.value = false
@@ -277,30 +257,27 @@ const handleSubmit = async () => {
 const handleRevoke = async (row: AgentServicePermission) => {
   try {
     await ElMessageBox.confirm(
-      `确认撤销 ${row.agent_name} 对 ${row.service_name} 的访问权限吗？`,
-      '提示',
+      t('agentAuth.revokeConfirm'),
+      t('common.confirm'),
       {
-        type: 'warning',
-        confirmButtonText: '确定',
-        cancelButtonText: '取消'
+        type: 'warning'
       }
     )
     
     const response = await removeAgentServicePermission(row.id)
     if (response.success) {
-      ElMessage.success('撤销成功')
+      ElMessage.success(t('agentAuth.revokeSuccess'))
       loadAuthList()
     } else {
-      ElMessage.error(response.message || '撤销失败')
+      ElMessage.error(response.message || t('agentAuth.revokeFailed'))
     }
   } catch (error: any) {
     if (error !== 'cancel') {
-      console.error('撤销失败:', error)
-      // 检查是否是 ACL 同步错误
+      console.error('Revoke failed:', error)
       if (error.response?.data?.message?.includes('ACL') || error.response?.data?.message?.includes('Headscale')) {
-        ElMessage.error('权限同步失败，请稍后重试')
+        ElMessage.error(t('agentAuth.aclSyncError'))
       } else {
-        ElMessage.error(error.response?.data?.message || error.message || '撤销失败')
+        ElMessage.error(error.response?.data?.message || error.message || t('agentAuth.revokeFailed'))
       }
     }
   }
@@ -320,33 +297,19 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.agent-auth-container {
-  padding: 20px;
-}
-
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-.filter-form {
-  margin-bottom: 20px;
-}
-
-.pagination {
-  margin-top: 20px;
+.filter-bar {
+  margin-bottom: 16px;
   display: flex;
-  justify-content: flex-end;
+  gap: 12px;
 }
 
 .text-secondary {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 4px;
-}
-
-.form-tip {
   font-size: 12px;
   color: #909399;
   margin-top: 4px;

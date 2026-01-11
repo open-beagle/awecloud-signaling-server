@@ -30,6 +30,7 @@ export default {
     expand: '展开',
     collapse: '收起',
     home: '首页',
+    info: '说明',
     // 网络错误
     networkError: '网络错误',
     networkTimeout: '请求超时，请检查网络连接后重试',
@@ -66,7 +67,6 @@ export default {
     agentAuth: 'Agent授权',
     clients: '客户管理',
     groups: '分组管理',
-    favorites: '收藏管理',
     auditLogs: '审计日志',
     systemConfig: '系统配置'
   },
@@ -136,7 +136,25 @@ export default {
     tsDisconnectedAt: '离线时间',
     serviceList: '端口映射服务',
     createService: '创建服务',
-    noServices: '暂无服务'
+    noServices: '暂无服务',
+    // 网络信息
+    networkInfo: '网络信息',
+    lanIp: '局域网 IP',
+    lanGateway: '网关',
+    lanInterface: '网卡',
+    runtimeEnv: '运行环境',
+    runtimeNative: '物理机',
+    runtimeDocker: 'Docker',
+    runtimeKubernetes: 'Kubernetes',
+    hostname: '主机名',
+    networkTip: 'Visitor 将在此 IP 上监听端口，供局域网内其他设备访问',
+    // 端口访问服务
+    visitorList: '端口访问服务',
+    addVisitor: '添加访问',
+    noVisitors: '暂无访问服务',
+    visitorTip: '局域网客户端通过上述地址访问远程 Agent 暴露的服务',
+    localListenAddr: '本地监听地址',
+    targetService: '目标服务'
   },
   stcp: {
     list: 'STCP实例列表',
@@ -410,17 +428,6 @@ export default {
     selectClientPlaceholder: '请选择要添加的客户端',
     addSuccess: '添加成功',
     removeSuccess: '移除成功'
-  },
-  favorite: {
-    title: '收藏管理',
-    list: '收藏列表',
-    serviceName: '服务名称',
-    serviceAddress: '服务地址',
-    addedAt: '添加时间',
-    remove: '取消收藏',
-    removeConfirm: '确认取消收藏吗？',
-    removeSuccess: '取消收藏成功',
-    noFavorites: '暂无收藏'
   },
   systemConfig: {
     title: '系统配置',

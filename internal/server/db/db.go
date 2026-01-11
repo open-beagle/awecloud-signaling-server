@@ -66,6 +66,7 @@ func autoMigrate() error {
 		&model.DesktopInstance{},        // Desktop 多实例支持（安全架构）
 		&model.DesktopService{},         // Desktop 暴露的服务（安全架构）
 		&model.AgentTailscaleState{},    // Agent Tailscale 状态存储（混合存储）
+		&model.Visitor{},                // Visitor 端口访问服务
 	)
 	if err != nil {
 		return err

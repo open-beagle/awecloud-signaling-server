@@ -20,10 +20,40 @@ export interface Agent {
   service_count?: number
 }
 
+// 网络信息
+export interface NetworkInfo {
+  lan_ip: string           // 局域网 IP
+  lan_gateway: string      // 网关地址
+  lan_interface: string    // 网卡名称
+  runtime_env: 'native' | 'docker' | 'kubernetes'  // 运行环境
+  hostname: string         // 主机名
+}
+
+// Visitor 模型（端口访问服务）
+export interface Visitor {
+  id: number
+  name: string
+  agent_id: number
+  listen_port: number
+  target_service_id: number
+  target_addr: string
+  status: 'running' | 'stopped' | 'error'
+  connections: number
+  bytes_in: number
+  bytes_out: number
+  created_at: string
+  updated_at: string
+  // 关联数据（展示用）
+  target_agent_name?: string
+  target_service_name?: string
+}
+
 // Agent 详情响应（包含服务列表）
 export interface AgentDetail extends Agent {
   services?: ProxyService[]
-  ts_connected_at?: string // 隧道连接时间（内存缓存）
+  visitors?: Visitor[]       // 端口访问服务列表
+  network_info?: NetworkInfo // 网络信息
+  ts_connected_at?: string   // 隧道连接时间（内存缓存）
 }
 
 // 端口映射服务模型

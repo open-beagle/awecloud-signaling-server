@@ -328,6 +328,15 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.POST("/agent-permissions", agentPermAPI.AddAgentServicePermission)
 					adminAuthGroup.DELETE("/agent-permissions/:id", agentPermAPI.RemoveAgentServicePermission)
 
+					// Visitor 管理（端口访问服务）
+					visitorAPI := api.NewVisitorAPI()
+					adminAuthGroup.GET("/visitors", visitorAPI.List)
+					adminAuthGroup.GET("/visitors/:id", visitorAPI.Get)
+					adminAuthGroup.POST("/visitors", visitorAPI.Create)
+					adminAuthGroup.DELETE("/visitors/:id", visitorAPI.Delete)
+					adminAuthGroup.POST("/visitors/:id/start", visitorAPI.Start)
+					adminAuthGroup.POST("/visitors/:id/stop", visitorAPI.Stop)
+
 					// Tailscale 管理
 					tailscaleAPI := api.NewTailscaleAPI(s.config)
 					adminAuthGroup.GET("/tailscale/status", tailscaleAPI.Status)

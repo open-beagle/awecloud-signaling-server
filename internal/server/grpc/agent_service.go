@@ -180,6 +180,23 @@ func (s *AgentServiceServer) Heartbeat(ctx context.Context, req *pb.HeartbeatReq
 		agent.TsRegisteredAt = &now
 	}
 
+	// 更新网络信息
+	if req.LanIp != "" {
+		agent.LanIP = req.LanIp
+	}
+	if req.LanGateway != "" {
+		agent.LanGateway = req.LanGateway
+	}
+	if req.LanInterface != "" {
+		agent.LanInterface = req.LanInterface
+	}
+	if req.RuntimeEnv != "" {
+		agent.RuntimeEnv = req.RuntimeEnv
+	}
+	if req.Hostname != "" {
+		agent.Hostname = req.Hostname
+	}
+
 	// 更新内存缓存中的连接时间
 	if req.TsConnectedAt > 0 {
 		connectedAt := time.Unix(req.TsConnectedAt, 0)

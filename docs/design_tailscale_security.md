@@ -801,11 +801,11 @@ authKey, err := headscaleClient.CreatePreAuthKey(
 
 ### 6.1 完整安全架构图
 
-![Tailscale 多租户安全架构](assets/tailscale_security_architecture.svg)
+![Tailscale 多租户安全架构](../images/architecture_tailscale_security.svg)
 
 ### 6.2 权限控制流程图
 
-![Desktop 访问服务流程](assets/tailscale_access_flow.svg)
+![Desktop 访问服务流程](../images/flow_tailscale_access.svg)
 
 ## 7. 回答你的问题
 

@@ -34,8 +34,7 @@
 Thumbs.db
 
 # Config (keep examples)
-config/server.toml
-config/agent.toml
+config/*.toml
 !config/*.example.toml
 
 # Frontend

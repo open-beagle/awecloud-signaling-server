@@ -46,6 +46,10 @@ type Agent struct {
 	visitorManager *VisitorManager
 	tailscaleIP    string
 
+	// 网络信息
+	networkInfo *NetworkInfo
+	lanDetector *LANDetector
+
 	// 上下文
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -56,10 +60,19 @@ type Agent struct {
 func NewAgent(cfg *config.AgentConfig, version string) (*Agent, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// 初始化网络检测器
+	lanDetector := NewLANDetector()
+	networkInfo := lanDetector.DetectNetworkInfo()
+	logger.Infof("检测到网络信息: IP=%s, 网关=%s, 网卡=%s, 环境=%s, 主机名=%s",
+		networkInfo.LanIP, networkInfo.LanGateway, networkInfo.LanInterface,
+		networkInfo.RuntimeEnv, networkInfo.Hostname)
+
 	return &Agent{
 		config:      cfg,
 		version:     version,
 		commandChan: make(chan *pb.Command, 100),
+		lanDetector: lanDetector,
+		networkInfo: networkInfo,
 		ctx:         ctx,
 		cancel:      cancel,
 	}, nil
@@ -296,6 +309,15 @@ func (a *Agent) sendHeartbeat() error {
 		req.TsConnected = a.tsManager.IsConnected()
 		req.TsConnType = a.tsManager.GetConnType()
 		req.TsConnectedAt = a.tsManager.GetConnectedAt()
+	}
+
+	// 添加网络信息
+	if a.networkInfo != nil {
+		req.LanIp = a.networkInfo.LanIP
+		req.LanGateway = a.networkInfo.LanGateway
+		req.LanInterface = a.networkInfo.LanInterface
+		req.RuntimeEnv = a.networkInfo.RuntimeEnv
+		req.Hostname = a.networkInfo.Hostname
 	}
 
 	resp, err := a.grpcClient.Heartbeat(a.ctx, req)

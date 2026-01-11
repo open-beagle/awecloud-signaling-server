@@ -3,11 +3,21 @@ package agent
 
 import (
 	"net"
+	"os"
 	"sort"
 	"strings"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 )
+
+// NetworkInfo 网络信息
+type NetworkInfo struct {
+	LanIP        string `json:"lan_ip"`        // 局域网 IP
+	LanGateway   string `json:"lan_gateway"`   // 网关地址
+	LanInterface string `json:"lan_interface"` // 网卡名称
+	RuntimeEnv   string `json:"runtime_env"`   // 运行环境: native/docker/kubernetes
+	Hostname     string `json:"hostname"`      // 主机名
+}
 
 // LANDetector 局域网 IP 检测器
 type LANDetector struct {
@@ -45,13 +55,42 @@ func NewLANDetector() *LANDetector {
 	}
 }
 
-// DetectLANIP 检测局域网 IP
+// DetectNetworkInfo 检测完整的网络信息
+func (d *LANDetector) DetectNetworkInfo() *NetworkInfo {
+	info := &NetworkInfo{
+		LanIP:      "127.0.0.1",
+		RuntimeEnv: d.detectRuntimeEnv(),
+		Hostname:   d.detectHostname(),
+	}
+
+	// 检测局域网接口
+	iface, ip := d.detectLANInterface()
+	if ip != "" {
+		info.LanIP = ip
+		info.LanInterface = iface
+		info.LanGateway = d.detectGateway(iface)
+	}
+
+	return info
+}
+
+// DetectLANIP 检测局域网 IP（保持向后兼容）
 // 返回检测到的局域网 IP，如果检测失败则返回 127.0.0.1
 func (d *LANDetector) DetectLANIP() string {
+	_, ip := d.detectLANInterface()
+	if ip == "" {
+		return "127.0.0.1"
+	}
+	return ip
+}
+
+// detectLANInterface 检测局域网接口和 IP
+// 返回接口名称和 IP 地址
+func (d *LANDetector) detectLANInterface() (string, string) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		logger.Warnf("获取网络接口失败: %v，回退到 127.0.0.1", err)
-		return "127.0.0.1"
+		logger.Warnf("获取网络接口失败: %v", err)
+		return "", ""
 	}
 
 	type candidate struct {
@@ -112,8 +151,8 @@ func (d *LANDetector) DetectLANIP() string {
 	}
 
 	if len(candidates) == 0 {
-		logger.Warn("未检测到局域网 IP，回退到 127.0.0.1")
-		return "127.0.0.1"
+		logger.Warn("未检测到局域网 IP")
+		return "", ""
 	}
 
 	// 按优先级排序
@@ -124,7 +163,106 @@ func (d *LANDetector) DetectLANIP() string {
 	selected := candidates[0]
 	logger.Infof("检测到局域网 IP: %s (接口: %s)", selected.ip, selected.iface)
 
-	return selected.ip
+	return selected.iface, selected.ip
+}
+
+// detectGateway 检测网关地址
+// 通过读取 /proc/net/route 获取默认网关
+func (d *LANDetector) detectGateway(ifaceName string) string {
+	// 读取路由表
+	data, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		logger.Debugf("读取路由表失败: %v", err)
+		return ""
+	}
+
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines[1:] { // 跳过标题行
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+
+		// 检查是否是默认路由（目标为 00000000）
+		if fields[1] == "00000000" {
+			// 解析网关地址（小端序十六进制）
+			gateway := d.parseHexIP(fields[2])
+			if gateway != "" {
+				logger.Debugf("检测到网关: %s (接口: %s)", gateway, fields[0])
+				return gateway
+			}
+		}
+	}
+
+	return ""
+}
+
+// parseHexIP 解析十六进制 IP 地址（小端序）
+func (d *LANDetector) parseHexIP(hex string) string {
+	if len(hex) != 8 {
+		return ""
+	}
+
+	// 小端序转换：每两个字符是一个字节，从后往前读
+	var ip [4]byte
+	for i := 0; i < 4; i++ {
+		b := d.hexToByte(hex[i*2 : i*2+2])
+		ip[3-i] = byte(b)
+	}
+
+	return net.IPv4(ip[0], ip[1], ip[2], ip[3]).String()
+}
+
+// hexToByte 十六进制字符串转字节
+func (d *LANDetector) hexToByte(s string) int {
+	var result int
+	for _, c := range s {
+		result *= 16
+		if c >= '0' && c <= '9' {
+			result += int(c - '0')
+		} else if c >= 'A' && c <= 'F' {
+			result += int(c - 'A' + 10)
+		} else if c >= 'a' && c <= 'f' {
+			result += int(c - 'a' + 10)
+		}
+	}
+	return result
+}
+
+// detectRuntimeEnv 检测运行环境
+func (d *LANDetector) detectRuntimeEnv() string {
+	// 检测 Kubernetes
+	if _, err := os.Stat("/var/run/secrets/kubernetes.io"); err == nil {
+		return "kubernetes"
+	}
+
+	// 检测 Docker
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return "docker"
+	}
+
+	// 检查 cgroup（Docker 和 K8s 都会有）
+	if data, err := os.ReadFile("/proc/1/cgroup"); err == nil {
+		content := string(data)
+		if strings.Contains(content, "docker") || strings.Contains(content, "kubepods") {
+			if strings.Contains(content, "kubepods") {
+				return "kubernetes"
+			}
+			return "docker"
+		}
+	}
+
+	return "native"
+}
+
+// detectHostname 检测主机名
+func (d *LANDetector) detectHostname() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		logger.Debugf("获取主机名失败: %v", err)
+		return ""
+	}
+	return hostname
 }
 
 // isBlacklisted 检查接口是否在黑名单中

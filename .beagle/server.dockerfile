@@ -25,7 +25,7 @@ COPY --chown=code:code web/dist /home/code/web/dist
 
 # Copy static config (design-time configuration)
 # network.toml: Tailscale network segment planning, rarely changes
-COPY --chown=code:code config/network.toml /home/code/config/network.toml
+COPY --chown=code:code config/network.toml.example /home/code/config/network.toml
 
 # Copy example config as default config (runtime configuration)
 # server.toml: Can be overridden by ConfigMap or environment variables

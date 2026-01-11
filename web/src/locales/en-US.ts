@@ -30,6 +30,7 @@ export default {
     expand: 'Expand',
     collapse: 'Collapse',
     home: 'Home',
+    info: 'Info',
     // Network errors
     networkError: 'Network Error',
     networkTimeout: 'Request timeout, please check your network connection',
@@ -66,7 +67,6 @@ export default {
     agentAuth: 'Agent Auth',
     clients: 'Clients',
     groups: 'Groups',
-    favorites: 'Favorites',
     auditLogs: 'Audit Logs',
     systemConfig: 'System Config'
   },
@@ -136,7 +136,25 @@ export default {
     tsDisconnectedAt: 'Disconnected At',
     serviceList: 'Port Mapping Services',
     createService: 'Create Service',
-    noServices: 'No Services'
+    noServices: 'No Services',
+    // Network info
+    networkInfo: 'Network Info',
+    lanIp: 'LAN IP',
+    lanGateway: 'Gateway',
+    lanInterface: 'Interface',
+    runtimeEnv: 'Runtime',
+    runtimeNative: 'Native',
+    runtimeDocker: 'Docker',
+    runtimeKubernetes: 'Kubernetes',
+    hostname: 'Hostname',
+    networkTip: 'Visitor will listen on this IP for LAN clients to access',
+    // Visitor services
+    visitorList: 'Port Access Services',
+    addVisitor: 'Add Access',
+    noVisitors: 'No Access Services',
+    visitorTip: 'LAN clients access remote Agent services through these addresses',
+    localListenAddr: 'Local Listen Address',
+    targetService: 'Target Service'
   },
   stcp: {
     list: 'STCP Instance List',
@@ -410,17 +428,6 @@ export default {
     selectClientPlaceholder: 'Select client to add',
     addSuccess: 'Added successfully',
     removeSuccess: 'Removed successfully'
-  },
-  favorite: {
-    title: 'Favorite Management',
-    list: 'Favorite List',
-    serviceName: 'Service Name',
-    serviceAddress: 'Service Address',
-    addedAt: 'Added At',
-    remove: 'Remove Favorite',
-    removeConfirm: 'Are you sure to remove this favorite?',
-    removeSuccess: 'Removed successfully',
-    noFavorites: 'No Favorites'
   },
   systemConfig: {
     title: 'System Configuration',

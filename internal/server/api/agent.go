@@ -99,9 +99,11 @@ func (a *AgentAPI) List(c *gin.Context) {
 // AgentDetailItem 用于详情响应，包含服务列表
 type AgentDetailItem struct {
 	model.Agent
-	ServiceCount  int64                `json:"service_count"`   // 端口映射服务数量
-	Services      []model.ProxyService `json:"services"`        // 端口映射服务列表
-	TsConnectedAt *time.Time           `json:"ts_connected_at"` // 隧道连接时间（内存缓存）
+	ServiceCount  int64                      `json:"service_count"`   // 端口映射服务数量
+	Services      []model.ProxyService       `json:"services"`        // 端口映射服务列表
+	Visitors      []model.VisitorWithDetails `json:"visitors"`        // 端口访问服务列表
+	NetworkInfo   *model.NetworkInfo         `json:"network_info"`    // 网络信息
+	TsConnectedAt *time.Time                 `json:"ts_connected_at"` // 隧道连接时间（内存缓存）
 }
 
 // Get 获取单个 Agent 详情
@@ -140,9 +142,29 @@ func (a *AgentAPI) Get(c *gin.Context) {
 		agent.Status = "offline"
 	}
 
-	// 查询该 Agent 的服务列表
+	// 查询该 Agent 的服务列表（端口映射）
 	var services []model.ProxyService
 	db.DB.Where("agent_id = ?", id).Order("created_at DESC").Find(&services)
+
+	// 查询该 Agent 的 Visitor 列表（端口访问）
+	var visitors []model.Visitor
+	db.DB.Where("agent_id = ?", id).Order("created_at DESC").Find(&visitors)
+
+	// 构建 Visitor 详情列表（包含目标服务信息）
+	visitorDetails := make([]model.VisitorWithDetails, len(visitors))
+	for i, v := range visitors {
+		visitorDetails[i] = model.VisitorWithDetails{
+			Visitor: v,
+		}
+		// 查询目标服务信息
+		var targetService model.ProxyService
+		if err := db.DB.Preload("Agent").First(&targetService, v.TargetServiceID).Error; err == nil {
+			visitorDetails[i].TargetServiceName = targetService.Name
+			if targetService.Agent != nil {
+				visitorDetails[i].TargetAgentName = targetService.Agent.AgentName
+			}
+		}
+	}
 
 	// 获取内存缓存中的连接时间
 	var tsConnectedAt *time.Time
@@ -154,6 +176,8 @@ func (a *AgentAPI) Get(c *gin.Context) {
 		Agent:         agent,
 		ServiceCount:  int64(len(services)),
 		Services:      services,
+		Visitors:      visitorDetails,
+		NetworkInfo:   agent.GetNetworkInfo(),
 		TsConnectedAt: tsConnectedAt,
 	}
 

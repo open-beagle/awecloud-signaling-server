@@ -23,8 +23,38 @@ type Agent struct {
 	// 空字符串表示无分组，该 Agent 只能访问显式授权的服务
 	GroupName string `gorm:"size:100;index" json:"group_name"` // 分组名称
 
+	// 网络信息（Agent 心跳上报）
+	LanIP        string `gorm:"size:50" json:"lan_ip"`        // 局域网 IP
+	LanGateway   string `gorm:"size:50" json:"lan_gateway"`   // 网关地址
+	LanInterface string `gorm:"size:50" json:"lan_interface"` // 网卡名称
+	RuntimeEnv   string `gorm:"size:20" json:"runtime_env"`   // 运行环境: native/docker/kubernetes
+	Hostname     string `gorm:"size:128" json:"hostname"`     // 主机名
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// NetworkInfo 网络信息（用于 API 响应）
+type NetworkInfo struct {
+	LanIP        string `json:"lan_ip"`
+	LanGateway   string `json:"lan_gateway"`
+	LanInterface string `json:"lan_interface"`
+	RuntimeEnv   string `json:"runtime_env"`
+	Hostname     string `json:"hostname"`
+}
+
+// GetNetworkInfo 获取网络信息
+func (a *Agent) GetNetworkInfo() *NetworkInfo {
+	if a.LanIP == "" {
+		return nil
+	}
+	return &NetworkInfo{
+		LanIP:        a.LanIP,
+		LanGateway:   a.LanGateway,
+		LanInterface: a.LanInterface,
+		RuntimeEnv:   a.RuntimeEnv,
+		Hostname:     a.Hostname,
+	}
 }
 
 func (Agent) TableName() string {

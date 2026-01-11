@@ -12,34 +12,26 @@
       </template>
 
       <!-- 筛选区域 -->
-      <el-form :inline="true" class="filter-form">
-        <el-form-item :label="$t('desktopAuth.service')">
-          <el-select v-model="filters.serviceId" :placeholder="$t('desktopAuth.selectService')" clearable style="width: 200px">
-            <el-option :label="$t('desktopAuth.allServices')" :value="null" />
-            <el-option
-              v-for="svc in serviceList"
-              :key="svc.id"
-              :label="svc.name"
-              :value="svc.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="$t('desktopAuth.accessType')">
-          <el-select v-model="filters.accessType" :placeholder="$t('desktopAuth.selectAccessType')" clearable style="width: 150px">
-            <el-option :label="$t('desktopAuth.allTypes')" :value="null" />
-            <el-option :label="$t('desktopAuth.public')" value="public" />
-            <el-option :label="$t('desktopAuth.private')" value="private" />
-            <el-option :label="$t('desktopAuth.group')" value="group" />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="handleSearch">{{ $t('common.search') }}</el-button>
-          <el-button @click="handleReset">{{ $t('common.reset') }}</el-button>
-        </el-form-item>
-      </el-form>
+      <div class="filter-bar">
+        <el-select v-model="filters.serviceId" :placeholder="$t('desktopAuth.selectService')" clearable style="width: 200px">
+          <el-option :label="$t('desktopAuth.allServices')" :value="null" />
+          <el-option
+            v-for="svc in serviceList"
+            :key="svc.id"
+            :label="svc.name"
+            :value="svc.id"
+          />
+        </el-select>
+        <el-select v-model="filters.accessType" :placeholder="$t('desktopAuth.selectAccessType')" clearable style="width: 150px">
+          <el-option :label="$t('desktopAuth.allTypes')" :value="null" />
+          <el-option :label="$t('desktopAuth.public')" value="public" />
+          <el-option :label="$t('desktopAuth.private')" value="private" />
+          <el-option :label="$t('desktopAuth.group')" value="group" />
+        </el-select>
+      </div>
 
       <!-- 服务权限列表 -->
-      <el-table :data="filteredServiceList" v-loading="loading" border>
+      <el-table :data="filteredServiceList" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" :label="$t('desktopAuth.serviceName')" min-width="150" />
         <el-table-column prop="agent_name" :label="$t('desktopAuth.agent')" width="120" />
@@ -325,8 +317,8 @@ const loadServices = async () => {
 const loadClients = async () => {
   try {
     const response = await getClients()
-    if (response.data?.clients) {
-      clientList.value = response.data.clients
+    if (response.clients) {
+      clientList.value = response.clients
     }
   } catch (error) {
     console.error('Failed to load clients:', error)
@@ -367,13 +359,6 @@ const loadAllPermissions = async () => {
 // 查询
 const handleSearch = () => {
   pagination.page = 1
-}
-
-// 重置
-const handleReset = () => {
-  filters.serviceId = null
-  filters.accessType = null
-  handleSearch()
 }
 
 // 获取访问类型标签样式
@@ -565,18 +550,16 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.desktop-auth-container {
-  padding: 20px;
-}
-
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-.filter-form {
-  margin-bottom: 20px;
+.filter-bar {
+  margin-bottom: 16px;
+  display: flex;
+  gap: 12px;
 }
 
 .pagination {

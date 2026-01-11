@@ -10,23 +10,34 @@
 - 连接审计日志
 - Desktop 客户端版本控制
 
-## 核心模块
+## 目录结构
 
 ```
 awecloud-signaling-server/
-├── cmd/
+├── cmd/                 # 应用入口
 │   ├── server/          # Server 入口
 │   └── agent/           # Agent 入口
-├── internal/
+├── internal/            # 内部实现
 │   ├── server/          # Server 实现（API/gRPC/数据库）
 │   ├── agent/           # Agent 实现（Tailscale/代理管理）
 │   └── common/          # 公共代码（配置/日志）
-├── pkg/proto/           # Protocol Buffers 定义
+├── pkg/                 # 公共包
+│   └── proto/           # Protocol Buffers 定义
 ├── web/                 # Web 管理界面（Vue 3）
 ├── desktop/             # Desktop 客户端（独立仓库）
 ├── config/              # 配置文件
-└── docs/                # 文档
+├── docs/                # 设计文档
+├── images/              # 设计图（SVG）
+├── scripts/             # 构建和运行脚本
+├── deployments/         # 部署配置
+│   ├── docker/          # Docker 部署
+│   └── kubernetes/      # Kubernetes 部署
+├── data/                # 数据文件（SQLite）
+├── logs/                # 日志文件
+└── bin/                 # 编译输出
 ```
+
+## 核心模块
 
 **Server**：部署在公有云，作为信令服务器和流量中继，提供 REST API、gRPC 服务和 Web 管理界面。
 

@@ -414,9 +414,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.service-container {
-  padding: 20px;
-}
 .card-header {
   display: flex;
   justify-content: space-between;
