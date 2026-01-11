@@ -20,29 +20,30 @@ path = "data/server.db"
 # 日志配置
 [log]
 level = "info"
-file = ""
 
 # Tailscale/Headscale 配置
 # Server 通过 Headscale API 管理节点和认证
 [tailscale]
-# Headscale API 地址
+# Headscale API 地址（Server 内部访问，用于管理 API）
 # 环境变量：HEADSCALE_URL
 # 
 # 配置说明：
-# 1. 本地开发（本地运行 Headscale）：
-#    headscale_url = "http://localhost:8080"
+# 1. Kubernetes 环境（集群内部访问，推荐）：
+#    headscale_url = "http://headscale.beagle-access.svc.cluster.local:8080"
 # 
 # 2. Kubernetes 环境（通过 Ingress）：
-#    headscale_url = "https://ts.ali.wodcloud.com/headscale"
-#    或 headscale_url = "http://ts.ali.wodcloud.com/headscale"
-# 
-# 3. Kubernetes 环境（通过 port-forward）：
-#    kubectl port-forward -n beagle-access svc/headscale 8080:8080
-#    headscale_url = "http://localhost:8080"
-# 
-# 4. Kubernetes 环境（集群内部访问）：
-#    headscale_url = "http://headscale.beagle-access.svc.cluster.local:8080"
+#    headscale_url = "https://signaling.example.com/headscale"
 headscale_url = "http://headscale:8080"
+
+# Headscale 公网地址（Agent/Desktop 的 Tailscale 客户端访问）
+# 环境变量：HEADSCALE_PUBLIC_URL
+# 
+# 重要：Tailscale 客户端硬编码 /ts2021 路径，不支持自定义路径前缀！
+# 所以这里不能带 /headscale 后缀，必须是纯域名
+# 
+# 正确：headscale_public_url = "https://signaling.example.com"
+# 错误：headscale_public_url = "https://signaling.example.com/headscale"
+headscale_public_url = "https://signaling.example.com"
 
 # Headscale API 密钥（建议通过环境变量配置）
 # 环境变量：HEADSCALE_API_KEY

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/cache"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
@@ -98,8 +99,9 @@ func (a *AgentAPI) List(c *gin.Context) {
 // AgentDetailItem 用于详情响应，包含服务列表
 type AgentDetailItem struct {
 	model.Agent
-	ServiceCount int64                `json:"service_count"` // 端口映射服务数量
-	Services     []model.ProxyService `json:"services"`      // 端口映射服务列表
+	ServiceCount  int64                `json:"service_count"`   // 端口映射服务数量
+	Services      []model.ProxyService `json:"services"`        // 端口映射服务列表
+	TsConnectedAt *time.Time           `json:"ts_connected_at"` // 隧道连接时间（内存缓存）
 }
 
 // Get 获取单个 Agent 详情
@@ -142,10 +144,17 @@ func (a *AgentAPI) Get(c *gin.Context) {
 	var services []model.ProxyService
 	db.DB.Where("agent_id = ?", id).Order("created_at DESC").Find(&services)
 
+	// 获取内存缓存中的连接时间
+	var tsConnectedAt *time.Time
+	if tsStatus := cache.GetAgentTsStatus(id); tsStatus != nil {
+		tsConnectedAt = tsStatus.TsConnectedAt
+	}
+
 	result := AgentDetailItem{
-		Agent:        agent,
-		ServiceCount: int64(len(services)),
-		Services:     services,
+		Agent:         agent,
+		ServiceCount:  int64(len(services)),
+		Services:      services,
+		TsConnectedAt: tsConnectedAt,
 	}
 
 	c.JSON(http.StatusOK, AgentResponse{
@@ -317,6 +326,32 @@ func (a *AgentAPI) RegenerateToken(c *gin.Context) {
 	c.JSON(http.StatusOK, AgentResponse{
 		Success: true,
 		Message: "Token重新生成成功",
+		Data:    map[string]string{"agent_token": agent.AgentToken},
+	})
+}
+
+// GetToken 获取 Agent Token
+func (a *AgentAPI) GetToken(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, AgentResponse{
+			Success: false,
+			Message: "无效的ID",
+		})
+		return
+	}
+
+	var agent model.Agent
+	if err := db.DB.First(&agent, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, AgentResponse{
+			Success: false,
+			Message: "Agent不存在",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, AgentResponse{
+		Success: true,
 		Data:    map[string]string{"agent_token": agent.AgentToken},
 	})
 }

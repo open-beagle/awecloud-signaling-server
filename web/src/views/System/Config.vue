@@ -44,7 +44,7 @@
           </el-form-item>
         </div>
 
-        <!-- Tailscale 配置 -->
+        <!-- 隧道配置 -->
         <div class="config-section">
           <div class="section-title">{{ $t('tailscale.title') }}</div>
           

@@ -20,17 +20,4 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
-echo "=========================================="
-echo "AWECloud Signaling Server"
-echo "=========================================="
-echo "配置文件: $CONFIG_FILE"
-echo ""
-
-# 运行Server
-echo "启动Server..."
-echo ""
-echo "端口说明:"
-echo "  - 8080: HTTP/2统一端口（Web + RESTful API + gRPC）"
-echo "  - 7000: FRP信令服务（WebSocket）"
-echo ""
 ./bin/server -c "$CONFIG_FILE"

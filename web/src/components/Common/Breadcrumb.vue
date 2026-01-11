@@ -14,6 +14,7 @@ import { useI18n } from 'vue-i18n'
 const route = useRoute()
 const { t } = useI18n()
 
+// 一级页面映射
 const breadcrumbMap: Record<string, string> = {
   '/agents': 'menu.agents',
   '/clients': 'menu.clients',
@@ -29,26 +30,31 @@ const items = computed(() => {
     { path: '/', title: t('common.home') }
   ]
   
+  // 处理 Agent 详情页
+  if (path.match(/^\/agents\/\d+$/)) {
+    breadcrumbs.push({ path: '/agents', title: t('menu.agents') })
+    breadcrumbs.push({ path: '', title: t('agent.detail') })
+  }
   // 处理服务管理相关页面
-  if (path.startsWith('/services/stcp/') && path.includes('/access')) {
-    // STCP授权管理页面
+  else if (path === '/services') {
     breadcrumbs.push({ path: '', title: t('menu.serviceManagement') })
-    breadcrumbs.push({ path: '/services/stcp', title: t('menu.stcpInstances') })
-    breadcrumbs.push({ path: '', title: t('stcp.grantAccess') })
-  } else if (path.startsWith('/services/stcp-visitors')) {
+    breadcrumbs.push({ path: '/services', title: t('menu.serviceList') })
+  }
+  else if (path === '/services/desktop-auth') {
     breadcrumbs.push({ path: '', title: t('menu.serviceManagement') })
-    breadcrumbs.push({ path: '/services/stcp-visitors', title: t('menu.stcpVisitors') })
-  } else if (path.startsWith('/services/stcp')) {
+    breadcrumbs.push({ path: '', title: t('menu.desktopAuth') })
+  }
+  else if (path === '/services/agent-auth') {
     breadcrumbs.push({ path: '', title: t('menu.serviceManagement') })
-    breadcrumbs.push({ path: '/services/stcp', title: t('menu.stcpInstances') })
-  } else if (path.startsWith('/services/tcp')) {
-    breadcrumbs.push({ path: '', title: t('menu.serviceManagement') })
-    breadcrumbs.push({ path: '/services/tcp', title: t('menu.tcpInstances') })
-  } else if (path.startsWith('/groups/') && path.includes('/members')) {
-    breadcrumbs.push({ path: '/groups', title: 'Group管理' })
-    breadcrumbs.push({ path: '', title: '成员管理' })
-  } else {
-    // 一级页面
+    breadcrumbs.push({ path: '', title: t('menu.agentAuth') })
+  }
+  // 处理分组成员页面
+  else if (path.match(/^\/groups\/\d+\/members$/)) {
+    breadcrumbs.push({ path: '/groups', title: t('menu.groups') })
+    breadcrumbs.push({ path: '', title: t('group.members') })
+  }
+  // 一级页面
+  else {
     const title = breadcrumbMap[path]
     if (title) {
       breadcrumbs.push({ path, title: t(title) })

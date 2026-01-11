@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/agent"
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/banner"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 )
@@ -33,6 +34,15 @@ func main() {
 		fmt.Printf("Go Version: %s\n", goVersion)
 		os.Exit(0)
 	}
+
+	// 打印启动横幅
+	banner.Print(banner.BuildInfo{
+		AppName:   "AWECloud Signaling Agent",
+		Version:   version,
+		GitCommit: gitCommit,
+		BuildDate: buildDate,
+		GoVersion: goVersion,
+	})
 
 	// 加载配置
 	cfg, err := config.LoadAgentConfig(*configPath)
@@ -61,8 +71,6 @@ func main() {
 		logger.Infof("使用默认 Server 地址: http://localhost:8080")
 	}
 
-	logger.Infof("AWECloud Signaling Agent 启动中...")
-	logger.Infof("版本: %s (commit: %s, built: %s, go: %s)", version, gitCommit, buildDate, goVersion)
 	logger.Infof("Agent Name: %s", cfg.Agent.AgentName)
 	logger.Infof("Server Address: %s", cfg.Server.Address)
 

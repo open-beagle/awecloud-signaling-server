@@ -548,11 +548,6 @@ const handleRevokeAuth = async (row: ServicePermission) => {
     }
   }
 }
-    if (error !== 'cancel') {
-      ElMessage.error(t('desktopAuth.revokeFailed'))
-    }
-  }
-}
 
 // 格式化时间
 const formatTime = (time: string) => {

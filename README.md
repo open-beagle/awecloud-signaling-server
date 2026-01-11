@@ -66,16 +66,13 @@ awecloud-signaling-server/
 ### 构建命令
 
 ```bash
-# Server & Agent（开发构建，仅当前架构）
-BUILD_VERSION=v0.2.0 GOARCHS=$(go env GOARCH) bash scripts/build.sh
+# Server & Agent（日常开发，默认当前架构）
+bash scripts/build.sh
 
 # Web 前端
-BUILD_VERSION=v0.2.0 bash scripts/build_frontend.sh
+bash scripts/build_frontend.sh
 
 # Desktop 客户端
-BUILD_VERSION=v0.2.0 \
-BUILD_ADDRESS=${SIGNALING_ADDRESS} \
-PLATFORMS="windows/amd64" \
 bash scripts/build_desktop.sh
 ```
 
@@ -84,11 +81,9 @@ bash scripts/build_desktop.sh
 ```bash
 # 启动 Server
 ./scripts/run_server.sh
-# 或：./bin/server -c config/server.toml
 
 # 启动 Agent
 ./scripts/run_agent.sh
-# 或：./bin/agent -c config/agent.toml
 ```
 
 ## License

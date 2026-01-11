@@ -1,11 +1,11 @@
 package api
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
@@ -45,7 +45,7 @@ func (a *PortPreferenceAPI) GetPortPreferences(c *gin.Context) {
 	var preferences []model.PortPreference
 	if err := db.DB.Where("client_id = ?", int64(clientID.(float64))).
 		Find(&preferences).Error; err != nil {
-		log.Printf("查询端口偏好失败: %v", err)
+		logger.Warnf("查询端口偏好失败: %v", err)
 		c.JSON(http.StatusInternalServerError, GetPortPreferencesResponse{
 			Success: false,
 			Message: "查询端口偏好失败",
@@ -110,7 +110,7 @@ func (a *PortPreferenceAPI) SavePortPreference(c *gin.Context) {
 			PreferredPort:  req.PreferredPort,
 		}
 		if err := db.DB.Create(&preference).Error; err != nil {
-			log.Printf("创建端口偏好失败: %v", err)
+			logger.Warnf("创建端口偏好失败: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
 				"message": "保存端口偏好失败",
@@ -121,7 +121,7 @@ func (a *PortPreferenceAPI) SavePortPreference(c *gin.Context) {
 		// 记录存在，更新
 		preference.PreferredPort = req.PreferredPort
 		if err := db.DB.Save(&preference).Error; err != nil {
-			log.Printf("更新端口偏好失败: %v", err)
+			logger.Warnf("更新端口偏好失败: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
 				"message": "保存端口偏好失败",

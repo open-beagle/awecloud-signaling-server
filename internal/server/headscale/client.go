@@ -4,6 +4,7 @@ package headscale
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,11 +27,19 @@ type Config struct {
 
 // NewClient 创建 Headscale 客户端
 func NewClient(cfg Config) *Client {
+	// 创建跳过 TLS 验证的 HTTP 客户端（用于自签名证书）
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
+
 	return &Client{
 		baseURL: cfg.URL,
 		apiKey:  cfg.APIKey,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: transport,
 		},
 	}
 }
@@ -39,7 +48,7 @@ func NewClient(cfg Config) *Client {
 type PreAuthKey struct {
 	ID         string    `json:"id"`
 	Key        string    `json:"key"`
-	User       string    `json:"user"`
+	User       User      `json:"user"` // 修改为 User 对象
 	Reusable   bool      `json:"reusable"`
 	Ephemeral  bool      `json:"ephemeral"`
 	Used       bool      `json:"used"`
@@ -157,9 +166,10 @@ func (c *Client) GetOrCreateUser(ctx context.Context, name string) (*User, error
 }
 
 // CreatePreAuthKey 创建预认证密钥
-func (c *Client) CreatePreAuthKey(ctx context.Context, user string, expiry time.Duration, ephemeral bool) (*PreAuthKey, error) {
+// userID: 用户 ID（字符串格式，如 "1", "2"）
+func (c *Client) CreatePreAuthKey(ctx context.Context, userID string, expiry time.Duration, ephemeral bool) (*PreAuthKey, error) {
 	req := CreatePreAuthKeyRequest{
-		User:       user,
+		User:       userID,
 		Reusable:   false,
 		Ephemeral:  ephemeral,
 		Expiration: time.Now().Add(expiry).Format(time.RFC3339),

@@ -26,11 +26,12 @@ func InitLogrus(level string, logFile string) error {
 	}
 	Log.SetLevel(logLevel)
 
-	// 设置日志格式
+	// 设置日志格式（键值对格式：time="..." level=info msg="..."）
+	// 禁用颜色和 TTY 检测，确保输出格式一致
 	Log.SetFormatter(&logrus.TextFormatter{
 		FullTimestamp:   true,
 		TimestampFormat: "2006-01-02 15:04:05",
-		DisableColors:   false,
+		DisableColors:   true,
 		ForceColors:     false,
 	})
 

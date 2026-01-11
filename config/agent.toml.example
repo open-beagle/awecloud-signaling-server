@@ -46,6 +46,15 @@ state_dir = "~/.config/awecloud-signaling/"
 # 状态同步到 Server 的间隔（分钟）
 state_sync_interval = 5
 
+# HTTPS Headscale 证书说明：
+# 如果 Headscale 使用自签名证书，需要将根证书导入系统证书库：
+# - Ubuntu/Debian: 
+#   sudo cp ca.crt /usr/local/share/ca-certificates/
+#   sudo update-ca-certificates
+# - CentOS/RHEL:
+#   sudo cp ca.crt /etc/pki/ca-trust/source/anchors/
+#   sudo update-ca-trust
+
 # 健康检查配置
 [health]
 port = 8090  # 健康检查HTTP端口，用于Kubernetes探测
@@ -53,4 +62,3 @@ port = 8090  # 健康检查HTTP端口，用于Kubernetes探测
 # 日志配置
 [log]
 level = "info"
-file = ""

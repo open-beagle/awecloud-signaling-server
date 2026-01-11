@@ -284,6 +284,7 @@ func (a *Agent) sendHeartbeat() error {
 		req.TailscaleIp = a.tsManager.GetIP()
 		req.TsConnected = a.tsManager.IsConnected()
 		req.TsConnType = a.tsManager.GetConnType()
+		req.TsConnectedAt = a.tsManager.GetConnectedAt()
 	}
 
 	resp, err := a.grpcClient.Heartbeat(a.ctx, req)

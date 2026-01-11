@@ -2,6 +2,69 @@
 
 > 本文档描述 Tailscale 升级后 Agent 端（Golang）的变更，包括模块结构、配置、核心流程等。
 
+## 核心业务
+
+Agent 承担两个核心业务：
+
+| 业务         | 说明                          | 数据流向                                   |
+| ------------ | ----------------------------- | ------------------------------------------ |
+| **服务暴露** | 将局域网服务暴露到 VPN 网络   | VPN 客户端 → VPN 网络 → Agent → 局域网服务 |
+| **服务访问** | 访问 VPN 网络中其他节点的服务 | 局域网客户端 → Agent → VPN 网络 → VPN 服务 |
+
+**服务暴露（Proxy）**：Agent 在 Tailscale IP 上监听端口，接收 VPN 网络流量，转发到局域网内部服务（SSH、MySQL 等）。
+
+**服务访问（Visitor）**：Agent 在局域网 IP 上监听端口，将流量通过 VPN 网络转发到其他节点暴露的服务。此功能与 Server-Web 的 Agent 授权业务整合，管理员在授权服务时可选配置 Visitor，无需单独入口。不启用 Visitor 时，仅授权 ACL，Agent 可通过代码直接访问目标服务。
+
+### 局域网 IP 检测
+
+服务访问需要在局域网 IP 上监听端口，供局域网内其他客户端访问。自动检测局域网 IP 避免管理员手动配置。
+
+**部署场景与网络模式**：
+
+| 部署方式           | 网络模式    | 检测结果    | 适用场景             |
+| ------------------ | ----------- | ----------- | -------------------- |
+| Windows/Linux 主机 | -           | 物理网卡 IP | 局域网客户端访问     |
+| Docker 容器        | host 网络   | 宿主机 IP   | 局域网客户端访问     |
+| Docker 容器        | bridge 网络 | 容器 IP     | 同 Docker 网络内访问 |
+| K8s Pod            | hostNetwork | 节点 IP     | 集群外客户端访问     |
+| K8s Pod            | Pod 网络    | Pod IP      | 集群内其他 Pod 访问  |
+
+**检测流程**：
+
+```txt
+获取所有网络接口
+    │
+    ├─► 1. 过滤黑名单接口
+    │       ├─► docker*, br-*, veth*      (Docker)
+    │       ├─► cni*, flannel*, calico*   (K8s CNI)
+    │       ├─► virbr*                    (libvirt)
+    │       ├─► vmnet*, VMware*           (VMware)
+    │       ├─► vEthernet*                (Hyper-V)
+    │       ├─► lo, lo0                   (回环)
+    │       └─► tailscale*, ts*           (Tailscale)
+    │
+    ├─► 2. 过滤非私有 IP
+    │       └─► 只保留 10.x / 172.16-31.x / 192.168.x
+    │
+    ├─► 3. 按优先级排序
+    │       ├─► 优先: eth*, en*, ens*, eno* (物理以太网)
+    │       ├─► 次选: wlan*, wl*            (无线网卡)
+    │       └─► 兜底: 其他私有 IP 网卡
+    │
+    └─► 4. 返回第一个匹配的 IP
+            └─► 检测失败则回退到 127.0.0.1
+```
+
+**配置覆盖**：支持配置文件手动指定，优先级高于自动检测。
+
+```toml
+[visitor]
+# 可选，手动指定监听地址，留空则自动检测
+listen_addr = ""
+```
+
+---
+
 ## 1. 变更概述
 
 ### 1.1 模块变更总览
@@ -310,15 +373,18 @@ Command.Type
 
 ```txt
 Command.Type
-├── START_PROXY        // 启动端口映射
+├── START_PROXY        // 启动端口映射（服务暴露）
 ├── STOP_PROXY         // 停止端口映射
-└── SYNC_PROXIES       // 同步所有端口映射
+├── SYNC_PROXIES       // 同步所有端口映射
+├── START_VISITOR      // 启动 Visitor（服务访问）
+├── STOP_VISITOR       // 停止 Visitor
+└── SYNC_VISITORS      // 同步所有 Visitor
 ```
 
 ### 5.3 命令处理流程
 
 ```txt
-收到 START_PROXY 命令
+收到 START_PROXY 命令（服务暴露）
     │
     ├─► 1. 解析命令参数
     │       ├─► name: 服务名称
@@ -341,6 +407,32 @@ Command.Type
     ├─► 2. 调用 ProxyManager.Stop()
     │       ├─► 关闭监听器
     │       └─► 关闭所有连接
+    │
+    ├─► 3. 上报状态给 Server
+    │
+    └─► 4. 返回命令响应
+
+收到 START_VISITOR 命令（服务访问）
+    │
+    ├─► 1. 解析命令参数
+    │       ├─► name: Visitor 名称
+    │       ├─► listen_port: 本地监听端口
+    │       └─► target_addr: VPN 网络目标地址（如 100.64.0.1:3306）
+    │
+    ├─► 2. 调用 VisitorManager.Start()
+    │       ├─► 在局域网 IP 上监听端口
+    │       └─► 启动转发协程（通过 Tailscale 拨号到目标）
+    │
+    ├─► 3. 上报状态给 Server
+    │
+    └─► 4. 返回命令响应
+
+收到 STOP_VISITOR 命令
+    │
+    ├─► 1. 解析命令参数
+    │       └─► name: Visitor 名称
+    │
+    ├─► 2. 调用 VisitorManager.Stop()
     │
     ├─► 3. 上报状态给 Server
     │

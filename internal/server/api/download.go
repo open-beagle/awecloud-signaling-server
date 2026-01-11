@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
@@ -121,7 +121,7 @@ func fetchVersionInfo(baseURL string) (*VersionInfo, error) {
 func getVersionInfo(baseURL string) *VersionInfo {
 	versionInfo, err := fetchVersionInfo(baseURL)
 	if err != nil {
-		log.Printf("[Download] 获取版本信息失败，使用默认版本: %v", err)
+		logger.Warnf("[Download] 获取版本信息失败，使用默认版本: %v", err)
 		// 降级：使用默认版本
 		return &VersionInfo{
 			Version:   "v0.1.0",
@@ -251,7 +251,7 @@ func (a *DownloadAPI) GetDesktopDownload(c *gin.Context) {
 	// 获取系统配置中的下载地址
 	baseURL, err := getClientDownloadURL()
 	if err != nil || baseURL == "" {
-		log.Printf("[Download] 获取下载地址失败: %v", err)
+		logger.Warnf("[Download] 获取下载地址失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "下载服务未配置",
@@ -264,7 +264,7 @@ func (a *DownloadAPI) GetDesktopDownload(c *gin.Context) {
 
 	// 检测操作系统和架构
 	osType, arch := detectOS(c)
-	log.Printf("[Download] 检测到操作系统: %s, 架构: %s, User-Agent: %s", osType, arch, c.GetHeader("User-Agent"))
+	logger.Warnf("[Download] 检测到操作系统: %s, 架构: %s, User-Agent: %s", osType, arch, c.GetHeader("User-Agent"))
 
 	// 构建下载信息
 	downloadInfo := buildDownloadInfo(baseURL, osType, arch, versionInfo)

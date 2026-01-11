@@ -120,8 +120,8 @@
           style="margin-bottom: 20px"
         >
           <template #default>
-            <div>授权后，该 Agent 可以通过 Tailscale 网络访问选中的服务</div>
-            <div>权限变更将同步到 Headscale ACL，立即生效</div>
+            <div>授权后，该 Agent 可以通过隧道网络访问选中的服务</div>
+            <div>权限变更将同步到 ACL，立即生效</div>
           </template>
         </el-alert>
       </el-form>

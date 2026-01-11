@@ -20,13 +20,4 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
-echo "=========================================="
-echo "AWECloud Signaling Agent"
-echo "=========================================="
-echo "配置文件: $CONFIG_FILE"
-echo ""
-
-# 运行Agent
-echo "启动Agent..."
-echo ""
 ./bin/agent -c "$CONFIG_FILE"

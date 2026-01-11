@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/banner"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server"
@@ -33,6 +34,15 @@ func main() {
 		os.Exit(0)
 	}
 
+	// 打印启动横幅
+	banner.Print(banner.BuildInfo{
+		AppName:   "AWECloud Signaling Server",
+		Version:   version,
+		GitCommit: gitCommit,
+		BuildDate: buildDate,
+		GoVersion: goVersion,
+	})
+
 	// 加载配置
 	cfg, err := config.LoadServerConfig(*configPath)
 	if err != nil {
@@ -44,8 +54,6 @@ func main() {
 		log.Fatalf("初始化日志失败: %v", err)
 	}
 
-	logger.Infof("AWECloud Signaling Server 启动中...")
-	logger.Infof("版本: %s (commit: %s, built: %s, go: %s)", version, gitCommit, buildDate, goVersion)
 	logger.Infof("配置文件: %s", *configPath)
 
 	// 创建并启动服务器

@@ -22,6 +22,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	grpcserver "github.com/open-beagle/awecloud-signaling-server/internal/server/grpc"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/proxy"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
@@ -202,7 +203,7 @@ func (s *Server) customLogger() gin.HandlerFunc {
 		// health接口只在状态变化时打印
 		if path == "/health" || path == "/health/ready" {
 			if c.Writer.Header().Get("X-Log-Status-Change") == "true" {
-				logger.Infof("[%s] %s %d %v",
+				logger.Infof("[gin] %s %s %d %v",
 					c.Request.Method,
 					path,
 					c.Writer.Status(),
@@ -212,7 +213,7 @@ func (s *Server) customLogger() gin.HandlerFunc {
 		}
 
 		// 其他接口正常打印
-		logger.Infof("[%s] %s %d %v",
+		logger.Infof("[gin] %s %s %d %v",
 			c.Request.Method,
 			path,
 			c.Writer.Status(),
@@ -224,6 +225,17 @@ func (s *Server) setupRouter() *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.Use(s.customLogger())
+
+	// Headscale 反向代理（必须在其他路由之前）
+	if s.config.Tailscale.HeadscaleURL != "" {
+		headscaleProxy, err := proxy.NewHeadscaleProxy(s.config.Tailscale.HeadscaleURL)
+		if err != nil {
+			logger.Errorf("创建 Headscale 代理失败: %v", err)
+		} else {
+			router.Any("/headscale/*proxyPath", headscaleProxy.Handler())
+			logger.Infof("Headscale 反向代理已启用: /headscale/* -> %s", s.config.Tailscale.HeadscaleURL)
+		}
+	}
 
 	// 健康检查接口
 	healthAPI := api.NewHealthAPI(s.agentService)
@@ -278,6 +290,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.POST("/agents", agentAPI.Create)
 					adminAuthGroup.PUT("/agents/:id", agentAPI.Update)
 					adminAuthGroup.DELETE("/agents/:id", agentAPI.Delete)
+					adminAuthGroup.GET("/agents/:id/token", agentAPI.GetToken)
 					adminAuthGroup.POST("/agents/:id/regenerate-token", agentAPI.RegenerateToken)
 
 					// Client管理

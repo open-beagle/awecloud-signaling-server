@@ -1,7 +1,6 @@
 package api
 
 import (
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/auth"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
@@ -116,7 +116,7 @@ func (a *DeviceTokenAPI) LoginWithSecret(c *gin.Context) {
 	// 创建Device Token
 	deviceToken, err := auth.CreateDeviceToken(db.DB, client.ID, req.DeviceInfo)
 	if err != nil {
-		log.Printf("创建Device Token失败: %v", err)
+		logger.Warnf("创建Device Token失败: %v", err)
 		c.JSON(http.StatusInternalServerError, LoginWithSecretResponse{
 			Success: false,
 			Message: "创建Device Token失败",
@@ -190,7 +190,7 @@ func (a *DeviceTokenAPI) LoginWithToken(c *gin.Context) {
 	// 验证Device Token
 	deviceToken, err := auth.ValidateDeviceToken(db.DB, client.ID, req.DeviceToken, deviceInfo)
 	if err != nil {
-		log.Printf("验证Device Token失败: %v", err)
+		logger.Warnf("验证Device Token失败: %v", err)
 		c.JSON(http.StatusUnauthorized, LoginWithTokenResponse{
 			Success: false,
 			Message: err.Error(),
@@ -215,7 +215,7 @@ func (a *DeviceTokenAPI) LoginWithToken(c *gin.Context) {
 		return
 	}
 
-	log.Printf("Device Token验证成功: client_id=%d, device_token=%s", client.ID, deviceToken.DeviceToken)
+	logger.Warnf("Device Token验证成功: client_id=%d, device_token=%s", client.ID, deviceToken.DeviceToken)
 
 	c.JSON(http.StatusOK, LoginWithTokenResponse{
 		Success:      true,
@@ -246,7 +246,7 @@ func (a *DeviceTokenAPI) ListDevices(c *gin.Context) {
 	case int:
 		clientID = int64(v)
 	default:
-		log.Printf("无效的client_id类型: %T", clientIDRaw)
+		logger.Warnf("无效的client_id类型: %T", clientIDRaw)
 		c.JSON(http.StatusInternalServerError, DeviceListResponse{
 			Success: false,
 			Message: "内部错误",
@@ -264,7 +264,7 @@ func (a *DeviceTokenAPI) ListDevices(c *gin.Context) {
 	// 查询设备列表
 	tokens, err := auth.ListDeviceTokens(db.DB, clientID)
 	if err != nil {
-		log.Printf("查询设备列表失败: %v", err)
+		logger.Warnf("查询设备列表失败: %v", err)
 		c.JSON(http.StatusInternalServerError, DeviceListResponse{
 			Success: false,
 			Message: "查询设备列表失败",
@@ -333,7 +333,7 @@ func (a *DeviceTokenAPI) OfflineDevice(c *gin.Context) {
 
 	// 撤销Token
 	if err := auth.RevokeDeviceToken(db.DB, int64(clientID.(float64)), deviceToken); err != nil {
-		log.Printf("撤销Device Token失败: %v", err)
+		logger.Warnf("撤销Device Token失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": err.Error(),
@@ -370,7 +370,7 @@ func (a *DeviceTokenAPI) DeleteDevice(c *gin.Context) {
 
 	// 删除Token
 	if err := auth.DeleteDeviceToken(db.DB, int64(clientID.(float64)), deviceToken); err != nil {
-		log.Printf("删除Device Token失败: %v", err)
+		logger.Warnf("删除Device Token失败: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"message": err.Error(),

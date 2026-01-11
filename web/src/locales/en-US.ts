@@ -4,6 +4,7 @@ export default {
     cancel: 'Cancel',
     save: 'Save',
     delete: 'Delete',
+    edit: 'Edit',
     create: 'Create',
     actions: 'Actions',
     status: 'Status',
@@ -114,8 +115,8 @@ export default {
     tokenTitle: 'Agent Token',
     tokenTip: 'Please save the token carefully, it cannot be viewed again after closing',
     regenerateConfirm: 'Are you sure to regenerate token? The old token will be invalid',
-    // Tailscale related
-    tailscaleIp: 'Tailscale IP',
+    // Tunnel related
+    tailscaleIp: 'IP',
     group: 'Group',
     noGroup: 'No Group',
     services: 'Services',
@@ -124,13 +125,15 @@ export default {
     // Detail page
     detail: 'Agent Detail',
     basicInfo: 'Basic Info',
-    tailscaleInfo: 'Tailscale Info',
+    tailscaleInfo: 'Tunnel Info',
     tsConnected: 'Connected',
     tsDisconnected: 'Disconnected',
     tsConnType: 'Connection Type',
     tsConnTypeP2p: 'P2P Direct',
     tsConnTypeDerp: 'DERP Relay',
     tsRegisteredAt: 'Registered At',
+    tsConnectedAt: 'Connected At',
+    tsDisconnectedAt: 'Disconnected At',
     serviceList: 'Port Mapping Services',
     createService: 'Create Service',
     noServices: 'No Services'
@@ -270,11 +273,11 @@ export default {
     disabledOnly: 'Disabled Only'
   },
   tailscale: {
-    title: 'Tailscale Configuration',
-    status: 'Tailscale Status',
-    headscaleUrl: 'Headscale URL',
-    headscaleOnline: 'Headscale Online',
-    headscaleOffline: 'Headscale Offline',
+    title: 'Tunnel Configuration',
+    status: 'Tunnel Status',
+    headscaleUrl: 'Control Server URL',
+    headscaleOnline: 'Control Server Online',
+    headscaleOffline: 'Control Server Offline',
     totalNodes: 'Total Nodes',
     onlineNodes: 'Online Nodes',
     agentsConnected: 'Connected Agents',
@@ -289,7 +292,7 @@ export default {
     stunPortTip: 'NAT detection port, default 3479 (avoiding Coturn\'s 3478)',
     ipPrefix: 'IP Address Range',
     ipPrefixPlaceholder: 'Default 100.64.0.0/10',
-    ipPrefixTip: 'Tailscale virtual network IP range, default 100.64.0.0/10',
+    ipPrefixTip: 'Tunnel virtual network IP range, default 100.64.0.0/10',
     authKeyExpiryHours: 'Pre-auth Key Expiry (hours)',
     authKeyExpiryHoursPlaceholder: 'Default 24',
     authKeyExpiryHoursTip: 'Expiry time for keys used during Agent/Desktop registration'

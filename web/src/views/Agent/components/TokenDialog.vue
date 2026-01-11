@@ -4,29 +4,23 @@
     :title="t('agent.tokenTitle')"
     width="600px"
   >
-    <el-alert
-      :title="t('agent.tokenTip')"
-      type="warning"
-      :closable="false"
-      style="margin-bottom: 20px"
-    />
-    
-    <el-input
-      :model-value="agent?.agent_token"
-      readonly
-      type="textarea"
-      :rows="4"
-    >
-      <template #append>
-        <CopyButton v-if="agent" :text="agent.agent_token" />
-      </template>
-    </el-input>
+    <div v-loading="loadingToken">
+      <el-input
+        v-model="token"
+        readonly
+        type="textarea"
+        :rows="4"
+      />
+      <div style="margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px;">
+        <CopyButton v-if="token" :text="token" />
+        <el-button type="warning" :icon="Refresh" :loading="regenerating" @click="handleRegenerate">
+          {{ t('agent.regenerateToken') }}
+        </el-button>
+      </div>
+    </div>
 
     <template #footer>
       <el-button @click="visible = false">{{ t('common.confirm') }}</el-button>
-      <el-tooltip content="重新生成Token" placement="top">
-        <el-button type="warning" :icon="Refresh" :loading="loading" @click="handleRegenerate" />
-      </el-tooltip>
     </template>
   </el-dialog>
 </template>
@@ -36,7 +30,7 @@ import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
-import { regenerateToken } from '@/api/agent'
+import { getAgentToken, regenerateToken } from '@/api/agent'
 import type { Agent } from '@/types/models'
 import CopyButton from '@/components/Common/CopyButton.vue'
 
@@ -52,18 +46,42 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const visible = ref(false)
-const loading = ref(false)
+const token = ref('')
+const loadingToken = ref(false)
+const regenerating = ref(false)
 
 watch(
   () => props.modelValue,
   (val) => {
     visible.value = val
+    if (val && props.agent) {
+      loadToken()
+    }
   }
 )
 
 watch(visible, (val) => {
   emit('update:modelValue', val)
+  if (!val) {
+    token.value = ''
+  }
 })
+
+const loadToken = async () => {
+  if (!props.agent) return
+  
+  loadingToken.value = true
+  try {
+    const res = await getAgentToken(props.agent.id)
+    if (res.success && res.data) {
+      token.value = res.data.agent_token
+    }
+  } catch (error) {
+    ElMessage.error(t('common.failed'))
+  } finally {
+    loadingToken.value = false
+  }
+}
 
 const handleRegenerate = async () => {
   if (!props.agent) return
@@ -73,10 +91,10 @@ const handleRegenerate = async () => {
       type: 'warning'
     })
 
-    loading.value = true
+    regenerating.value = true
     const res = await regenerateToken(props.agent.id)
     if (res.success && res.data) {
-      props.agent.agent_token = res.data.agent_token
+      token.value = res.data.agent_token
       ElMessage.success(t('common.success'))
     }
   } catch (error: any) {
@@ -84,7 +102,7 @@ const handleRegenerate = async () => {
       ElMessage.error(t('common.failed'))
     }
   } finally {
-    loading.value = false
+    regenerating.value = false
   }
 }
 </script>

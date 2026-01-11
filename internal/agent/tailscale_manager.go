@@ -40,9 +40,10 @@ type TailscaleManager struct {
 
 	tailscaleIP string
 	connected   bool
-	connType    string // "p2p" or "derp"
-	stateDir    string // 状态目录（本地或临时）
-	isTemp      bool   // 是否使用临时目录
+	connType    string    // "p2p" or "derp"
+	connectedAt time.Time // 连接时间
+	stateDir    string    // 状态目录（本地或临时）
+	isTemp      bool      // 是否使用临时目录
 	mutex       sync.RWMutex
 
 	ctx    context.Context
@@ -77,7 +78,8 @@ func (m *TailscaleManager) Start(controlURL, authKey string) error {
 		Dir:        m.stateDir,
 		ControlURL: controlURL,
 		AuthKey:    authKey,
-		Ephemeral:  false, // Agent 需要持久化节点
+		Ephemeral:  false,           // Agent 需要持久化节点
+		Logf:       m.tailscaleLogf, // 使用自定义日志函数
 	}
 
 	// 启动 Tailscale
@@ -91,7 +93,8 @@ func (m *TailscaleManager) Start(controlURL, authKey string) error {
 		m.mutex.Lock()
 		m.tailscaleIP = status.TailscaleIPs[0].String()
 		m.connected = true
-		m.connType = ConnTypeP2P // 默认 P2P，后续通过状态更新
+		m.connType = ConnTypeP2P   // 默认 P2P，后续通过状态更新
+		m.connectedAt = time.Now() // 记录连接时间
 		m.mutex.Unlock()
 
 		logger.Infof("Tailscale 已连接，IP: %s", m.tailscaleIP)
@@ -179,6 +182,16 @@ func (m *TailscaleManager) GetConnType() string {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	return m.connType
+}
+
+// GetConnectedAt 获取连接时间（Unix 时间戳，秒）
+func (m *TailscaleManager) GetConnectedAt() int64 {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	if m.connectedAt.IsZero() {
+		return 0
+	}
+	return m.connectedAt.Unix()
 }
 
 // Listen 在 Tailscale 网络上监听端口
@@ -487,6 +500,9 @@ func (m *TailscaleManager) WaitForConnection(timeout time.Duration) error {
 
 // monitorConnectionStatus 监控连接状态并更新连接类型
 func (m *TailscaleManager) monitorConnectionStatus() {
+	// 启动时立即更新一次状态
+	m.updateConnectionStatus()
+
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -532,20 +548,30 @@ func (m *TailscaleManager) updateConnectionStatus() {
 		logger.Debugf("Tailscale 后端状态: %s", status.BackendState)
 	}
 
-	// 检查是否有活跃的 DERP 连接
-	// 如果有任何 peer 使用 DERP，则标记为 derp
+	// 检查连接类型
+	// 优先检查是否有 peer 使用 DERP 中继
 	hasDERP := false
+	hasDirectPeer := false
 	for _, peer := range status.Peer {
 		if peer.CurAddr == "" && peer.Relay != "" {
 			hasDERP = true
-			break
+		} else if peer.CurAddr != "" {
+			hasDirectPeer = true
 		}
 	}
 
-	if hasDERP {
+	if hasDERP && !hasDirectPeer {
+		// 所有连接都通过 DERP
 		m.connType = ConnTypeDERP
-	} else if len(status.Peer) > 0 {
+	} else if hasDirectPeer {
+		// 有直连的 peer
 		m.connType = ConnTypeP2P
+	} else if m.connected {
+		// 已连接但没有 peer，保持当前类型或默认 P2P
+		// 这种情况下 Agent 已连接到 Headscale，只是还没有其他节点通信
+		if m.connType == "" || m.connType == ConnTypeUnknown {
+			m.connType = ConnTypeP2P
+		}
 	} else {
 		m.connType = ConnTypeUnknown
 	}
@@ -554,4 +580,41 @@ func (m *TailscaleManager) updateConnectionStatus() {
 // UpdateConnType 手动触发连接类型更新
 func (m *TailscaleManager) UpdateConnType() {
 	m.updateConnectionStatus()
+}
+
+// tailscaleLogf 自定义 Tailscale 日志输出函数，统一格式
+func (m *TailscaleManager) tailscaleLogf(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+
+	// 过滤掉重复的错误信息和调试信息
+	if strings.Contains(msg, "certificate signed by unknown authority") {
+		// 证书错误只记录一次
+		return
+	}
+	if strings.Contains(msg, "authRoutine:") ||
+		strings.Contains(msg, "TryLogin:") ||
+		strings.Contains(msg, "doLogin(") ||
+		strings.Contains(msg, "LoginInteractive") ||
+		strings.Contains(msg, "sendStatus:") ||
+		strings.Contains(msg, "backoff:") {
+		// 过滤认证重试的详细日志
+		return
+	}
+	if strings.Contains(msg, "Received error: fetch control key") {
+		// 过滤重复的连接错误
+		return
+	}
+	if strings.Contains(msg, "[v1]") && (strings.Contains(msg, "using fake") ||
+		strings.Contains(msg, "DNS configurator") ||
+		strings.Contains(msg, "OS network configurator")) {
+		// 过滤初始化的详细信息
+		return
+	}
+	if strings.Contains(msg, "magicsock: [warning] failed to force-set UDP") {
+		// 过滤 UDP buffer 警告（不影响功能）
+		return
+	}
+
+	// 使用 logrus 输出，保持格式一致
+	logger.Infof("[tunnel] " + msg)
 }

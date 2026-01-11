@@ -23,6 +23,7 @@ export interface Agent {
 // Agent 详情响应（包含服务列表）
 export interface AgentDetail extends Agent {
   services?: ProxyService[]
+  ts_connected_at?: string // 隧道连接时间（内存缓存）
 }
 
 // 端口映射服务模型

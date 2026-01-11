@@ -1,76 +1,114 @@
 <template>
   <div class="agent-detail">
-    <!-- 面包屑导航 -->
-    <el-breadcrumb separator="/" class="breadcrumb">
-      <el-breadcrumb-item :to="{ path: '/agents' }">{{ t('agent.list') }}</el-breadcrumb-item>
-      <el-breadcrumb-item>{{ agent?.agent_name || t('agent.detail') }}</el-breadcrumb-item>
-    </el-breadcrumb>
-
     <div v-loading="loading">
       <!-- 基本信息卡片 -->
       <el-card class="info-card">
         <template #header>
           <div class="card-header">
             <span class="card-title">{{ t('agent.basicInfo') }}</span>
-            <StatusTag :status="agent?.status || 'offline'" />
+            <div class="header-actions">
+              <StatusTag :status="agent?.status || 'offline'" />
+              <el-button
+                v-if="!isEditing"
+                type="primary"
+                size="small"
+                :icon="Edit"
+                @click="startEditing"
+              >
+                {{ t('common.edit') }}
+              </el-button>
+              <template v-else>
+                <el-button size="small" @click="cancelEditing">
+                  {{ t('common.cancel') }}
+                </el-button>
+                <el-button type="primary" size="small" @click="saveChanges">
+                  {{ t('common.save') }}
+                </el-button>
+              </template>
+            </div>
           </div>
         </template>
         
-        <el-descriptions :column="2" border>
-          <el-descriptions-item :label="t('agent.name')">
-            {{ agent?.agent_name || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('agent.version')">
-            {{ agent?.version || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('agent.group')">
+        <!-- K8s 风格：单行多字段 -->
+        <div class="info-row">
+          <div class="info-item">
+            <span class="info-label">{{ t('agent.name') }}</span>
+            <span class="info-value">{{ agent?.agent_name || '-' }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">{{ t('agent.group') }}</span>
             <el-input
-              v-model="groupName"
+              v-if="isEditing"
+              v-model="editForm.groupName"
               :placeholder="t('agent.noGroup')"
               size="small"
-              style="width: 200px"
-              @blur="handleUpdateGroup"
-              @keyup.enter="handleUpdateGroup"
+              style="width: 150px"
             />
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('agent.lastHeartbeat')">
-            <TimeAgo :time="agent?.last_heartbeat" />
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('agent.description')" :span="2">
-            {{ agent?.description || '-' }}
-          </el-descriptions-item>
-        </el-descriptions>
+            <span v-else class="info-value">{{ agent?.group_name || '-' }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">{{ t('agent.version') }}</span>
+            <span class="info-value">{{ agent?.version || '-' }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">{{ t('agent.createdAt') }}</span>
+            <span class="info-value">
+              <TimeAgo v-if="agent?.created_at" :time="agent.created_at" />
+              <span v-else>-</span>
+            </span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">{{ t('agent.lastHeartbeat') }}</span>
+            <span class="info-value">
+              <TimeAgo v-if="agent?.last_heartbeat" :time="agent.last_heartbeat" />
+              <span v-else>-</span>
+            </span>
+          </div>
+        </div>
+        <div v-if="agent?.description" class="info-row">
+          <div class="info-item">
+            <span class="info-label">{{ t('agent.description') }}</span>
+            <span class="info-value">{{ agent.description }}</span>
+          </div>
+        </div>
       </el-card>
 
-      <!-- Tailscale 信息卡片 -->
+      <!-- 隧道信息卡片 -->
       <el-card class="info-card">
         <template #header>
           <span class="card-title">{{ t('agent.tailscaleInfo') }}</span>
         </template>
         
-        <el-descriptions :column="2" border>
-          <el-descriptions-item :label="t('agent.tailscaleIp')">
-            <span v-if="agent?.tailscale_ip">{{ agent.tailscale_ip }}</span>
-            <span v-else class="text-muted">-</span>
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('common.status')">
-            <el-tag v-if="agent?.ts_connected" type="success" size="small">
-              {{ t('agent.tsConnected') }}
-            </el-tag>
-            <el-tag v-else type="info" size="small">
-              {{ t('agent.tsDisconnected') }}
-            </el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('agent.tsConnType')">
-            <span v-if="agent?.ts_conn_type === 'p2p'">{{ t('agent.tsConnTypeP2p') }}</span>
-            <span v-else-if="agent?.ts_conn_type === 'derp'">{{ t('agent.tsConnTypeDerp') }}</span>
-            <span v-else class="text-muted">-</span>
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('agent.tsRegisteredAt')">
-            <TimeAgo v-if="agent?.ts_registered_at" :time="agent.ts_registered_at" />
-            <span v-else class="text-muted">-</span>
-          </el-descriptions-item>
-        </el-descriptions>
+        <div class="info-row">
+          <div class="info-item">
+            <span class="info-label">{{ t('agent.tailscaleIp') }}</span>
+            <span class="info-value">{{ agent?.tailscale_ip || '-' }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">{{ t('common.status') }}</span>
+            <span class="info-value">
+              <el-tag v-if="agent?.ts_connected" type="success" size="small">
+                {{ t('agent.tsConnected') }}
+              </el-tag>
+              <el-tag v-else type="info" size="small">
+                {{ t('agent.tsDisconnected') }}
+              </el-tag>
+            </span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">{{ agent?.ts_connected ? t('agent.tsConnectedAt') : t('agent.tsDisconnectedAt') }}</span>
+            <span class="info-value">
+              <template v-if="agent?.ts_connected">
+                <TimeAgo v-if="agent?.ts_connected_at" :time="agent.ts_connected_at" />
+                <span v-else>-</span>
+              </template>
+              <template v-else>
+                <TimeAgo v-if="agent?.last_heartbeat" :time="agent.last_heartbeat" />
+                <span v-else>-</span>
+              </template>
+            </span>
+          </div>
+        </div>
       </el-card>
 
       <!-- 端口映射服务列表 -->
@@ -142,11 +180,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete } from '@element-plus/icons-vue'
+import { Plus, Delete, Edit } from '@element-plus/icons-vue'
 import { getAgent, updateAgent } from '@/api/agent'
 import { startService, stopService, deleteService } from '@/api/service'
 import type { AgentDetail, ProxyService } from '@/types/models'
@@ -159,8 +197,10 @@ const router = useRouter()
 
 const loading = ref(false)
 const agent = ref<AgentDetail | null>(null)
-const groupName = ref('')
-const originalGroupName = ref('')
+const isEditing = ref(false)
+const editForm = reactive({
+  groupName: ''
+})
 
 const loadAgent = async () => {
   const id = Number(route.params.id)
@@ -175,8 +215,6 @@ const loadAgent = async () => {
     const res = await getAgent(id)
     if (res.success && res.data) {
       agent.value = res.data
-      groupName.value = res.data.group_name || ''
-      originalGroupName.value = res.data.group_name || ''
     } else {
       ElMessage.error(res.message || t('common.failed'))
       router.push('/agents')
@@ -189,23 +227,29 @@ const loadAgent = async () => {
   }
 }
 
-const handleUpdateGroup = async () => {
-  if (!agent.value || groupName.value === originalGroupName.value) {
-    return
-  }
+const startEditing = () => {
+  editForm.groupName = agent.value?.group_name || ''
+  isEditing.value = true
+}
+
+const cancelEditing = () => {
+  isEditing.value = false
+}
+
+const saveChanges = async () => {
+  if (!agent.value) return
 
   try {
-    const res = await updateAgent(agent.value.id, { group_name: groupName.value })
+    const res = await updateAgent(agent.value.id, { group_name: editForm.groupName })
     if (res.success) {
-      ElMessage.success(t('agent.groupUpdateSuccess'))
-      originalGroupName.value = groupName.value
+      ElMessage.success(t('common.success'))
+      isEditing.value = false
+      loadAgent()
     } else {
-      ElMessage.error(res.message || t('agent.groupUpdateFailed'))
-      groupName.value = originalGroupName.value
+      ElMessage.error(res.message || t('common.failed'))
     }
   } catch (error) {
-    ElMessage.error(t('agent.groupUpdateFailed'))
-    groupName.value = originalGroupName.value
+    ElMessage.error(t('common.failed'))
   }
 }
 
@@ -278,10 +322,6 @@ onMounted(() => {
   width: 100%;
 }
 
-.breadcrumb {
-  margin-bottom: 16px;
-}
-
 .info-card {
   margin-bottom: 16px;
 }
@@ -292,14 +332,45 @@ onMounted(() => {
   align-items: center;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .card-title {
   font-size: 16px;
   font-weight: 500;
   color: var(--text-primary);
 }
 
-.text-muted {
-  color: #909399;
+/* K8s 风格的单行多字段布局 */
+.info-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  padding: 8px 0;
+}
+
+.info-row + .info-row {
+  border-top: 1px solid var(--el-border-color-lighter);
+  padding-top: 12px;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.info-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.info-value {
+  font-size: 14px;
+  color: var(--el-text-color-primary);
 }
 
 .action-buttons {

@@ -44,14 +44,6 @@ func (s *ACLSyncService) SyncACL(ctx context.Context) error {
 	// 构建 ACL 策略
 	policy := &ACLPolicy{
 		ACLs: rules,
-		Groups: map[string][]string{
-			"group:agents":   {"tag:agent"},
-			"group:desktops": {"tag:desktop"},
-		},
-		TagOwners: map[string][]string{
-			"tag:agent":   {"autogroup:admin"},
-			"tag:desktop": {"autogroup:admin"},
-		},
 	}
 
 	// 设置 ACL 策略，带重试机制

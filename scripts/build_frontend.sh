@@ -2,7 +2,12 @@
 
 set -e
 
+# 版本信息（日常开发使用默认值，流水线传递完整参数）
+BUILD_VERSION="${BUILD_VERSION:-v0.2.0}"
+
 echo "Building frontend..."
+echo "Version: ${BUILD_VERSION}"
+echo "---"
 
 # 进入web目录
 cd web

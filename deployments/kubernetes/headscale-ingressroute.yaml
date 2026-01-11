@@ -1,53 +1,35 @@
-# Traefik IngressRoute for AWECloud Signaling Server (Tailscale 版本)
+# Traefik IngressRoute for Headscale
 #
 # 路由规则：
-# 1. /headscale/* → Headscale 控制平面
-# 2. /ts2021      → Headscale Tailscale 协议
-# 3. /derp        → DERP 中继服务
-# 4. /*           → Server 业务 API（默认）
+#   /ts2021   → Headscale ts2021 协议端点（Noise 协议握手）
+#   /key      → Headscale key 端点（获取 server public key）
+#   /headscale/* → Headscale API 和其他端点（stripPrefix 去掉 /headscale）
+#
+# 关键配置：
+#   - TLSOption: 强制 HTTP/1.1（ALPN 不包含 h2）
+#     原因：Tailscale ts2021 协议需要 HTTP Upgrade，HTTP/2 协议不支持 Upgrade 机制
+#   - Middleware: stripPrefix 去掉 /headscale 前缀（仅用于 API 路由）
+#
+# 重要说明：
+#   Tailscale 客户端硬编码 /ts2021 路径，不支持自定义路径前缀！
+#   所以必须在根路径配置 /ts2021 和 /key 路由。
 #
 # 部署命令：
-#   kubectl apply -f server-ingressroute-tailscale.yaml
+#   kubectl apply -f headscale-ingressroute.yaml
 
 ---
+# TLSOption: 强制 HTTP/1.1（禁用 HTTP/2）
+# Tailscale ts2021 协议需要 HTTP Upgrade header，HTTP/2 协议不支持 Upgrade 机制
 apiVersion: bcc.bd-apaas.com/v1alpha1
-kind: IngressRoute
+kind: TLSOption
 metadata:
-  name: headscale
+  name: headscale-h1only
   namespace: beagle-access
   labels:
     app: headscale
 spec:
-  entryPoints:
-    - websecure
-  routes:
-    # Headscale 控制平面路由
-    # 匹配 /headscale/* 路径，去除前缀后转发到 Headscale
-    - kind: Rule
-      match: Host(`signaling.example.com`) && PathPrefix(`/headscale`)
-      services:
-        - name: headscale
-          port: 8080
-      middlewares:
-        - name: headscale-stripprefix
-
-    # Tailscale 协议路由
-    # 匹配 /ts2021 路径，直接转发到 Headscale
-    - kind: Rule
-      match: Host(`signaling.example.com`) && PathPrefix(`/ts2021`)
-      services:
-        - name: headscale
-          port: 8080
-
-    # DERP 中继路由
-    # 匹配 /derp 路径，转发到 Headscale DERP 端口
-    - kind: Rule
-      match: Host(`signaling.example.com`) && PathPrefix(`/derp`)
-      services:
-        - name: headscale
-          port: 8080
-
-  tls: {}
+  alpnProtocols:
+    - http/1.1
 
 ---
 # Middleware: 去除 /headscale 前缀
@@ -62,3 +44,48 @@ spec:
   stripPrefix:
     prefixes:
       - /headscale
+
+---
+# IngressRoute: Headscale 路由
+apiVersion: bcc.bd-apaas.com/v1alpha1
+kind: IngressRoute
+metadata:
+  name: headscale
+  namespace: beagle-access
+  labels:
+    app: headscale
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    # Tailscale ts2021 协议端点（Noise 协议握手）
+    # 注意：Tailscale 客户端硬编码 /ts2021 路径，不支持自定义前缀
+    - kind: Rule
+      match: Host(`signaling.example.com`) && PathPrefix(`/ts2021`)
+      services:
+        - name: headscale
+          port: 8080
+    # Tailscale key 端点（获取 server public key）
+    - kind: Rule
+      match: Host(`signaling.example.com`) && PathPrefix(`/key`)
+      services:
+        - name: headscale
+          port: 8080
+    # DERP 中继服务端点
+    - kind: Rule
+      match: Host(`signaling.example.com`) && PathPrefix(`/derp`)
+      services:
+        - name: headscale
+          port: 8080
+    # Headscale API 和其他端点（带 /headscale 前缀）
+    - kind: Rule
+      match: Host(`signaling.example.com`) && PathPrefix(`/headscale`)
+      middlewares:
+        - name: headscale-stripprefix
+      services:
+        - name: headscale
+          port: 8080
+  tls:
+    certResolver: default
+    options:
+      name: headscale-h1only

@@ -3,13 +3,13 @@ package api
 import (
 	"encoding/csv"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/auth"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
@@ -89,7 +89,7 @@ func (a *AuditLogAPI) RecordConnection(c *gin.Context) {
 	// 将设备信息转换为JSON
 	deviceInfoJSON, err := auth.DeviceInfoToJSON(req.DeviceInfo)
 	if err != nil {
-		log.Printf("序列化设备信息失败: %v", err)
+		logger.Warnf("序列化设备信息失败: %v", err)
 		deviceInfoJSON = "{}"
 	}
 
@@ -108,7 +108,7 @@ func (a *AuditLogAPI) RecordConnection(c *gin.Context) {
 	}
 
 	if err := db.DB.Create(auditLog).Error; err != nil {
-		log.Printf("创建审计日志失败: %v", err)
+		logger.Warnf("创建审计日志失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": "记录审计日志失败",
@@ -177,7 +177,7 @@ func (a *AuditLogAPI) QueryAuditLogs(c *gin.Context) {
 	// 查询总数
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
-		log.Printf("查询审计日志总数失败: %v", err)
+		logger.Warnf("查询审计日志总数失败: %v", err)
 		c.JSON(http.StatusInternalServerError, QueryAuditLogsResponse{
 			Success: false,
 			Message: "查询审计日志失败",
@@ -193,7 +193,7 @@ func (a *AuditLogAPI) QueryAuditLogs(c *gin.Context) {
 		Limit(pageSize).
 		Offset(offset).
 		Find(&logs).Error; err != nil {
-		log.Printf("查询审计日志失败: %v", err)
+		logger.Warnf("查询审计日志失败: %v", err)
 		c.JSON(http.StatusInternalServerError, QueryAuditLogsResponse{
 			Success: false,
 			Message: "查询审计日志失败",
@@ -210,7 +210,7 @@ func (a *AuditLogAPI) QueryAuditLogs(c *gin.Context) {
 		if auditLog.Client.ClientID != "" {
 			clientName = auditLog.Client.ClientID
 		} else {
-			log.Printf("Warning: Client not loaded for audit log %d, client_pk_id=%d", auditLog.ID, auditLog.ClientPKID)
+			logger.Warnf("Warning: Client not loaded for audit log %d, client_pk_id=%d", auditLog.ID, auditLog.ClientPKID)
 		}
 
 		// 实例名称（废弃 STCPInstance，使用 ID）
@@ -296,7 +296,7 @@ func (a *AuditLogAPI) ExportAuditLogs(c *gin.Context) {
 	if err := query.Preload("Client").
 		Order("created_at DESC").
 		Find(&logs).Error; err != nil {
-		log.Printf("查询审计日志失败: %v", err)
+		logger.Warnf("查询审计日志失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": "查询审计日志失败",

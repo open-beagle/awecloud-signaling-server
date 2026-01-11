@@ -4,6 +4,7 @@ export default {
     cancel: '取消',
     save: '保存',
     delete: '删除',
+    edit: '编辑',
     create: '创建',
     actions: '操作',
     status: '状态',
@@ -114,8 +115,8 @@ export default {
     tokenTitle: 'Agent Token',
     tokenTip: '请妥善保存Token，关闭后无法再次查看',
     regenerateConfirm: '确认重新生成Token吗？旧Token将失效',
-    // Tailscale 相关
-    tailscaleIp: 'Tailscale IP',
+    // Tunnel 相关
+    tailscaleIp: 'IP',
     group: '分组',
     noGroup: '未分组',
     services: '服务数量',
@@ -124,13 +125,15 @@ export default {
     // 详情页
     detail: 'Agent详情',
     basicInfo: '基本信息',
-    tailscaleInfo: 'Tailscale 信息',
+    tailscaleInfo: '隧道信息',
     tsConnected: '已连接',
     tsDisconnected: '未连接',
     tsConnType: '连接方式',
     tsConnTypeP2p: 'P2P 直连',
     tsConnTypeDerp: 'DERP 中继',
     tsRegisteredAt: '注册时间',
+    tsConnectedAt: '连接时间',
+    tsDisconnectedAt: '离线时间',
     serviceList: '端口映射服务',
     createService: '创建服务',
     noServices: '暂无服务'
@@ -270,11 +273,11 @@ export default {
     deleteRunningConfirm: '该服务正在运行，删除前会先停止服务。确定要删除吗？'
   },
   tailscale: {
-    title: 'Tailscale 配置',
-    status: 'Tailscale 状态',
-    headscaleUrl: 'Headscale 地址',
-    headscaleOnline: 'Headscale 在线',
-    headscaleOffline: 'Headscale 离线',
+    title: '隧道配置',
+    status: '隧道状态',
+    headscaleUrl: '控制服务器地址',
+    headscaleOnline: '控制服务器在线',
+    headscaleOffline: '控制服务器离线',
     totalNodes: '总节点数',
     onlineNodes: '在线节点',
     agentsConnected: '已连接Agent',
@@ -289,7 +292,7 @@ export default {
     stunPortTip: 'NAT 探测端口，默认 3479（避开 Coturn 的 3478）',
     ipPrefix: 'IP 地址段',
     ipPrefixPlaceholder: '默认 100.64.0.0/10',
-    ipPrefixTip: 'Tailscale 虚拟网络 IP 段，默认 100.64.0.0/10',
+    ipPrefixTip: '隧道虚拟网络 IP 段，默认 100.64.0.0/10',
     authKeyExpiryHours: '预认证密钥有效期（小时）',
     authKeyExpiryHoursPlaceholder: '默认 24',
     authKeyExpiryHoursTip: 'Agent/Desktop 注册时使用的密钥有效期'

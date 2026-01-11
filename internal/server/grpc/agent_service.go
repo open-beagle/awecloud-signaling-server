@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/cache"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
@@ -125,16 +126,17 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.RegisterReque
 			// 不影响注册，继续返回成功
 		} else {
 			// 创建预认证密钥（非临时节点，Agent 需要持久化）
-			authKey, err := s.headscaleClient.CreatePreAuthKey(ctx, user.Name, authKeyExpiry, false)
+			// 注意：Headscale API 需要传递用户 ID，而不是用户名
+			authKey, err := s.headscaleClient.CreatePreAuthKey(ctx, user.ID, authKeyExpiry, false)
 			if err != nil {
 				logger.Errorf("创建 Tailscale 预认证密钥失败: %v", err)
 				// 不影响注册，继续返回成功
 			} else {
-				resp.ControlUrl = s.config.Tailscale.HeadscaleURL
+				resp.ControlUrl = s.config.Tailscale.HeadscalePublicURL
 				resp.AuthKey = authKey.Key
 				// DERP URL 从数据库配置获取，这里使用默认值
 				resp.DerpUrl = s.config.Tailscale.HeadscaleURL + "/derp"
-				logger.Infof("已为 Agent %s 创建 Tailscale 预认证密钥（User: %s）", req.AgentName, userName)
+				logger.Infof("已为 Agent %s 创建 Tailscale 预认证密钥（User: %s, ID: %s）", req.AgentName, userName, user.ID)
 			}
 		}
 	} else {
@@ -176,6 +178,18 @@ func (s *AgentServiceServer) Heartbeat(ctx context.Context, req *pb.HeartbeatReq
 	// 首次连接时记录注册时间
 	if req.TsConnected && agent.TsRegisteredAt == nil {
 		agent.TsRegisteredAt = &now
+	}
+
+	// 更新内存缓存中的连接时间
+	if req.TsConnectedAt > 0 {
+		connectedAt := time.Unix(req.TsConnectedAt, 0)
+		cache.UpdateAgentTsConnectedAt(req.AgentId, &connectedAt)
+	} else if req.TsConnected {
+		// 如果 Agent 没有上报连接时间但已连接，使用当前时间
+		cache.UpdateAgentTsConnectedAt(req.AgentId, &now)
+	} else {
+		// 离线时清除连接时间
+		cache.UpdateAgentTsConnectedAt(req.AgentId, nil)
 	}
 
 	if err := db.DB.Save(&agent).Error; err != nil {

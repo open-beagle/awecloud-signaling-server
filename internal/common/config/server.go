@@ -37,8 +37,9 @@ type ServerSection struct {
 
 // TailscaleSection Tailscale 配置
 type TailscaleSection struct {
-	HeadscaleURL    string `toml:"headscale_url"`     // Headscale API 地址
-	HeadscaleAPIKey string `toml:"headscale_api_key"` // Headscale API 密钥（从环境变量获取）
+	HeadscaleURL       string `toml:"headscale_url"`        // Headscale API 地址（Server 访问）
+	HeadscaleAPIKey    string `toml:"headscale_api_key"`    // Headscale API 密钥（从环境变量获取）
+	HeadscalePublicURL string `toml:"headscale_public_url"` // Headscale 公网地址（Agent/Desktop 访问）
 	// User 字段已废弃，每个 Agent/Desktop 使用独立的 User
 	// Agent User: agent-{agent_name}
 	// Desktop User: desktop-{client_id}
@@ -133,10 +134,17 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	if cfg.Tailscale.HeadscaleURL == "" {
 		cfg.Tailscale.HeadscaleURL = "http://headscale:8080"
 	}
+	if cfg.Tailscale.HeadscalePublicURL == "" {
+		// 默认使用 Server 地址 + /headscale 路径
+		cfg.Tailscale.HeadscalePublicURL = "http://localhost:8080/headscale"
+	}
 
 	// Tailscale 环境变量覆盖
 	if headscaleURL := os.Getenv("HEADSCALE_URL"); headscaleURL != "" {
 		cfg.Tailscale.HeadscaleURL = headscaleURL
+	}
+	if headscalePublicURL := os.Getenv("HEADSCALE_PUBLIC_URL"); headscalePublicURL != "" {
+		cfg.Tailscale.HeadscalePublicURL = headscalePublicURL
 	}
 	if headscaleAPIKey := os.Getenv("HEADSCALE_API_KEY"); headscaleAPIKey != "" {
 		cfg.Tailscale.HeadscaleAPIKey = headscaleAPIKey

@@ -66,9 +66,10 @@ message HeartbeatRequest {
   string version = 3;  // Agent版本
 
   // [Tailscale] 新增字段
-  string tailscale_ip = 4;  // Tailscale IP
-  bool ts_connected = 5;    // Tailscale 连接状态
-  string ts_conn_type = 6;  // 连接方式: p2p / derp
+  string tailscale_ip = 4;   // Tailscale IP
+  bool ts_connected = 5;     // Tailscale 连接状态
+  string ts_conn_type = 6;   // 连接方式: p2p / derp
+  int64 ts_connected_at = 7; // 连接时间（Unix 时间戳，秒）
 }
 
 // Agent心跳响应

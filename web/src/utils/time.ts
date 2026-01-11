@@ -4,8 +4,18 @@
  * @returns 相对时间字符串 (1y, 1m, 1d, 1h, 1m)
  */
 export function formatRelativeTime(dateString: string): string {
-  const now = new Date()
+  if (!dateString) {
+    return '-'
+  }
+
   const date = new Date(dateString)
+  
+  // 检查是否是 1970 年（Unix 纪元时间，表示未初始化）
+  if (date.getFullYear() === 1970) {
+    return '-'
+  }
+
+  const now = new Date()
   const diffMs = now.getTime() - date.getTime()
   const diffSeconds = Math.floor(diffMs / 1000)
 
@@ -43,7 +53,17 @@ export function formatRelativeTime(dateString: string): string {
  * @returns 格式化的时间字符串
  */
 export function formatFullTime(dateString: string): string {
+  if (!dateString) {
+    return '-'
+  }
+
   const date = new Date(dateString)
+  
+  // 检查是否是 1970 年（Unix 纪元时间，表示未初始化）
+  if (date.getFullYear() === 1970) {
+    return '-'
+  }
+
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')

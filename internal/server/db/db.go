@@ -2,16 +2,16 @@ package db
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
@@ -27,9 +27,9 @@ func InitDB(cfg config.DatabaseSection) error {
 		return fmt.Errorf("创建数据库目录失败: %w", err)
 	}
 
-	// 连接数据库（默认 Warn 级别，不打印 SQL 语句）
+	// 连接数据库（使用自定义 logger，统一日志格式）
 	DB, err = gorm.Open(sqlite.Open(cfg.Path), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+		Logger: NewGormLogger(gormlogger.Warn),
 	})
 	if err != nil {
 		return fmt.Errorf("连接数据库失败: %w", err)
@@ -40,7 +40,7 @@ func InitDB(cfg config.DatabaseSection) error {
 		return fmt.Errorf("数据库迁移失败: %w", err)
 	}
 
-	log.Println("数据库初始化成功")
+	logger.Info("数据库初始化成功")
 	return nil
 }
 
@@ -83,7 +83,7 @@ func CreateDefaultAdmin(username, password string) error {
 	}
 
 	if count > 0 {
-		log.Println("管理员已存在，跳过创建")
+		logger.Info("管理员已存在，跳过创建")
 		return nil
 	}
 
@@ -103,7 +103,7 @@ func CreateDefaultAdmin(username, password string) error {
 		return fmt.Errorf("创建管理员失败: %w", err)
 	}
 
-	log.Printf("默认管理员创建成功: %s", username)
+	logger.Infof("默认管理员创建成功: %s", username)
 	return nil
 }
 
