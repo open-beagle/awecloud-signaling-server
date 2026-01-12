@@ -90,8 +90,8 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.RegisterReque
 		}, nil
 	}
 
-	// 更新状态为在线，同时更新版本
-	agent.Status = "online"
+	// 更新心跳时间，同时更新版本
+	// TODO: Status field removed from Agent model, need to track status differently
 	now := time.Now()
 	agent.LastHeartbeat = &now
 	if req.Version != "" {
@@ -107,7 +107,7 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.RegisterReque
 	resp := &pb.RegisterResponse{
 		Success: true,
 		Message: "注册成功",
-		AgentId: agent.ID,
+		AgentId: int64(agent.ID), // Convert uint64 to int64
 	}
 
 	// Tailscale 模式：创建预认证密钥
@@ -183,40 +183,24 @@ func (s *AgentServiceServer) Heartbeat(ctx context.Context, req *pb.HeartbeatReq
 	// 更新心跳时间和版本
 	now := time.Now()
 	agent.LastHeartbeat = &now
-	agent.Status = "online"
+	// TODO: Status field removed from Agent model, need to track status differently
 	if req.Version != "" {
 		agent.Version = req.Version
 	}
 
 	// 更新 Tailscale 状态
 	if req.TailscaleIp != "" {
-		agent.TailscaleIP = req.TailscaleIp
+		agent.IP = req.TailscaleIp // Updated field name: TailscaleIP -> IP
 	}
-	agent.TsConnected = req.TsConnected
-	if req.TsConnType != "" {
-		agent.TsConnType = req.TsConnType
-	}
-	// 首次连接时记录注册时间
-	if req.TsConnected && agent.TsRegisteredAt == nil {
-		agent.TsRegisteredAt = &now
-	}
-
-	// 更新网络信息
-	if req.LanIp != "" {
-		agent.LanIP = req.LanIp
-	}
-	if req.LanGateway != "" {
-		agent.LanGateway = req.LanGateway
-	}
-	if req.LanInterface != "" {
-		agent.LanInterface = req.LanInterface
-	}
-	if req.RuntimeEnv != "" {
-		agent.RuntimeEnv = req.RuntimeEnv
-	}
-	if req.Hostname != "" {
-		agent.Hostname = req.Hostname
-	}
+	// TODO: The following fields were removed from Agent model, need to store in separate table
+	// agent.TsConnected = req.TsConnected
+	// agent.TsConnType = req.TsConnType
+	// agent.TsRegisteredAt = &now
+	// agent.LanIP = req.LanIp
+	// agent.LanGateway = req.LanGateway
+	// agent.LanInterface = req.LanInterface
+	// agent.RuntimeEnv = req.RuntimeEnv
+	// agent.Hostname = req.Hostname
 
 	// 更新内存缓存中的连接时间
 	if req.TsConnectedAt > 0 {

@@ -161,7 +161,7 @@ Client 表只存储用户信息，不存储设备信息。一个 Client 可以�
 
 ---
 
-## 4. Desktop 表 (desktop) 
+## 4. Desktop 表 (desktop)
 
 ### 4.1 表结构
 

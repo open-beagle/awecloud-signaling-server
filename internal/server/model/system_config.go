@@ -2,35 +2,25 @@ package model
 
 import "time"
 
-// SystemConfig 系统配置
+// SystemConfig 系统配置表
+// 存储系统级别的配置项，可在 Web 界面动态修改
 type SystemConfig struct {
-	ID                uint   `gorm:"primaryKey" json:"id"`
-	ClientDownloadURL string `gorm:"type:text" json:"client_download_url"`                        // 客户端下载地址
-	DesktopMinVersion string `gorm:"type:varchar(20);default:'1.0.0'" json:"desktop_min_version"` // Desktop 最低支持版本
-
-	// Tailscale 配置（可在 Web 界面动态修改）
-	HeadscalePublicURL string `gorm:"type:text" json:"headscale_public_url"`                     // Headscale 公网地址（Agent/Desktop 访问）
-	DerpURL            string `gorm:"type:text" json:"derp_url"`                                 // DERP 服务器地址（留空则使用 HeadscalePublicURL + /derp）
-	StunPort           int    `gorm:"type:int;default:3479" json:"stun_port"`                    // STUN 端口
-	IPPrefix           string `gorm:"type:varchar(20);default:'100.64.0.0/10'" json:"ip_prefix"` // IP 地址段
-	AuthKeyExpiryHours int    `gorm:"type:int;default:24" json:"auth_key_expiry_hours"`          // 预认证密钥有效期（小时）
-
-	// Tailscale 网段配置（可在 Web 界面动态修改，覆盖配置文件默认值）
-	AgentCIDR      string `gorm:"type:varchar(20);default:'100.64.0.0/16'" json:"agent_cidr"`      // Agent 网段
-	AgentIPStart   string `gorm:"type:varchar(20);default:'100.64.0.1'" json:"agent_ip_start"`     // Agent IP 起始
-	AgentIPEnd     string `gorm:"type:varchar(20);default:'100.64.255.254'" json:"agent_ip_end"`   // Agent IP 结束
-	DesktopCIDR    string `gorm:"type:varchar(20);default:'100.65.0.0/16'" json:"desktop_cidr"`    // Desktop 网段
-	DesktopIPStart string `gorm:"type:varchar(20);default:'100.65.0.1'" json:"desktop_ip_start"`   // Desktop IP 起始
-	DesktopIPEnd   string `gorm:"type:varchar(20);default:'100.65.255.254'" json:"desktop_ip_end"` // Desktop IP 结束
-	ServerCIDR     string `gorm:"type:varchar(20);default:'100.66.0.0/16'" json:"server_cidr"`     // Server 网段
-	ServerIPStart  string `gorm:"type:varchar(20);default:'100.66.0.1'" json:"server_ip_start"`    // Server IP 起始
-	ServerIPEnd    string `gorm:"type:varchar(20);default:'100.66.255.254'" json:"server_ip_end"`  // Server IP 结束
-
-	CreatedAt time.Time `json:"created_at"`
+	ID        int64     `gorm:"primaryKey" json:"id"`
+	Key       string    `gorm:"uniqueIndex;size:100;not null" json:"key"` // 配置键，唯一索引
+	Value     string    `gorm:"type:text;not null" json:"value"`          // 配置值
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// TableName 指定表名
 func (SystemConfig) TableName() string {
 	return "system_config"
 }
+
+// 系统配置键常量
+const (
+	ConfigClientDownloadURL  = "client_download_url"   // 客户端下载地址
+	ConfigDesktopMinVersion  = "desktop_min_version"   // 客户端最低版本
+	ConfigHeadscalePublicURL = "headscale_public_url"  // 隧道公网地址
+	ConfigStunPort           = "stun_port"             // STUN 端口
+	ConfigIPPrefix           = "ip_prefix"             // IP 地址段
+	ConfigAuthKeyExpiryHours = "auth_key_expiry_hours" // 预认证密钥有效期（小时）
+)

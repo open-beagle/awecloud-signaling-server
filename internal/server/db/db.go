@@ -47,20 +47,44 @@ func InitDB(cfg config.DatabaseSection) error {
 // autoMigrate 自动迁移数据库表
 func autoMigrate() error {
 	err := DB.AutoMigrate(
+		// 基础模型
 		&model.Admin{},
 		&model.Agent{},
 		&model.Client{},
+		&model.Desktop{}, // 新增：桌面设备模型
+
+		// 分组模型
+		&model.ClientGroup{},       // 新增：用户分组
+		&model.ClientGroupMember{}, // 新增：用户分组成员
+		&model.AgentGroup{},        // 新增：代理分组
+		&model.AgentGroupMember{},  // 新增：代理分组成员
+
+		// 服务模型
+		&model.ProxyService{}, // 端口映射服务
+		&model.PortForward{},  // 新增：端口转发配置
+
+		// 服务授权模型
+		&model.ServiceClientPermission{},      // 新增：服务-用户授权
+		&model.ServiceClientGroupPermission{}, // 新增：服务-用户分组授权
+		&model.ServiceAgentPermission{},       // 新增：服务-代理授权
+		&model.ServiceAgentGroupPermission{},  // 新增：服务-代理分组授权
+
+		// 审计日志
+		&model.AuditLog{}, // 新增：审计日志
+
+		// 系统配置
+		&model.SystemConfig{},
+		&model.SystemSettings{},
+
+		// 兼容性保留（旧模型）
 		&model.Group{},
 		&model.GroupMember{},
 		&model.STCPAccess{}, // 废弃，保留兼容
 		&model.ClientSession{},
 		&model.DeviceToken{},
-		&model.PortPreference{},  // 废弃，保留兼容
-		&model.ServiceFavorite{}, // 废弃，保留兼容
-		&model.ConnectionAuditLog{},
-		&model.SystemConfig{},
-		&model.SystemSettings{},
-		&model.ProxyService{},           // Tailscale 端口映射服务
+		&model.PortPreference{},         // 废弃，保留兼容
+		&model.ServiceFavorite{},        // 废弃，保留兼容
+		&model.ConnectionAuditLog{},     // 旧的审计日志，保留兼容
 		&model.ServicePermission{},      // Desktop 服务访问权限（安全架构）
 		&model.AgentServicePermission{}, // Agent 服务访问权限（安全架构）
 		&model.DesktopInstance{},        // Desktop 多实例支持（安全架构）

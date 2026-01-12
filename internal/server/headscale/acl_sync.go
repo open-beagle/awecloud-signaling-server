@@ -70,238 +70,13 @@ func (s *ACLSyncService) SyncACL(ctx context.Context) error {
 }
 
 // generateACLRules 根据数据库配置生成 ACL 规则
+// TODO: 需要根据新的数据模型重新实现 ACL 规则生成逻辑
 func (s *ACLSyncService) generateACLRules() ([]ACLRule, error) {
 	var rules []ACLRule
 
-	// 1. 获取所有服务
-	var services []model.ProxyService
-	if err := db.DB.Preload("Agent").Find(&services).Error; err != nil {
-		return nil, fmt.Errorf("查询服务失败: %w", err)
-	}
-
-	// 2. 获取所有 Client（Desktop）
-	var clients []model.Client
-	if err := db.DB.Find(&clients).Error; err != nil {
-		return nil, fmt.Errorf("查询 Client 失败: %w", err)
-	}
-
-	// 3. 获取所有 Agent
-	var agents []model.Agent
-	if err := db.DB.Find(&agents).Error; err != nil {
-		return nil, fmt.Errorf("查询 Agent 失败: %w", err)
-	}
-
-	// 4. 获取所有服务权限
-	var servicePerms []model.ServicePermission
-	if err := db.DB.Preload("Service").Preload("Service.Agent").Preload("Client").Find(&servicePerms).Error; err != nil {
-		return nil, fmt.Errorf("查询服务权限失败: %w", err)
-	}
-
-	// 5. 获取所有 Agent 服务权限
-	var agentPerms []model.AgentServicePermission
-	if err := db.DB.Preload("Service").Preload("Service.Agent").Preload("Agent").Find(&agentPerms).Error; err != nil {
-		return nil, fmt.Errorf("查询 Agent 服务权限失败: %w", err)
-	}
-
-	// 6. 获取所有组成员
-	var groupMembers []model.GroupMember
-	if err := db.DB.Find(&groupMembers).Error; err != nil {
-		return nil, fmt.Errorf("查询组成员失败: %w", err)
-	}
-
-	// 7. 获取所有 Desktop 实例
-	var desktopInstances []model.DesktopInstance
-	if err := db.DB.Find(&desktopInstances).Error; err != nil {
-		return nil, fmt.Errorf("查询 Desktop 实例失败: %w", err)
-	}
-
-	// 8. 获取所有 Desktop 服务
-	var desktopServices []model.DesktopService
-	if err := db.DB.Preload("DesktopInstance").Find(&desktopServices).Error; err != nil {
-		return nil, fmt.Errorf("查询 Desktop 服务失败: %w", err)
-	}
-
-	// 构建 Client ID -> Tailscale IP 映射
-	clientIPMap := make(map[int64]string)
-	for _, c := range clients {
-		if c.TailscaleIP != "" {
-			clientIPMap[c.ID] = c.TailscaleIP
-		}
-	}
-
-	// 构建 Agent ID -> Tailscale IP 映射
-	agentIPMap := make(map[int64]string)
-	for _, a := range agents {
-		if a.TailscaleIP != "" {
-			agentIPMap[a.ID] = a.TailscaleIP
-		}
-	}
-
-	// 构建 Group ID -> Client IPs 映射
-	groupClientIPs := make(map[int64][]string)
-	for _, gm := range groupMembers {
-		if ip, ok := clientIPMap[gm.ClientID]; ok {
-			groupClientIPs[gm.GroupID] = append(groupClientIPs[gm.GroupID], ip)
-		}
-	}
-
-	// 构建 Agent GroupName -> Agent IPs 映射
-	agentGroupIPs := make(map[string][]string)
-	for _, a := range agents {
-		if a.GroupName != "" && a.TailscaleIP != "" {
-			agentGroupIPs[a.GroupName] = append(agentGroupIPs[a.GroupName], a.TailscaleIP)
-		}
-	}
-
-	// 构建 Client ID -> Desktop Instance IPs 映射
-	clientDesktopIPs := make(map[int64][]string)
-	for _, di := range desktopInstances {
-		if di.TailscaleIP != "" {
-			clientDesktopIPs[di.ClientID] = append(clientDesktopIPs[di.ClientID], di.TailscaleIP)
-		}
-	}
-
-	// 生成服务访问规则
-	for _, svc := range services {
-		if svc.Agent == nil || svc.Agent.TailscaleIP == "" {
-			continue
-		}
-
-		dst := fmt.Sprintf("%s:%d", svc.Agent.TailscaleIP, svc.ListenPort)
-
-		switch svc.AccessType {
-		case model.AccessTypePublic:
-			// public: 所有 Desktop 可访问
-			// 使用 100.65.0.0/16 网段（Desktop 网段）
-			rules = append(rules, ACLRule{
-				Action: "accept",
-				Src:    []string{"100.65.0.0/16"},
-				Dst:    []string{dst},
-			})
-
-		case model.AccessTypePrivate:
-			// private: 仅创建者可访问
-			if ownerIP, ok := clientIPMap[svc.OwnerID]; ok {
-				rules = append(rules, ACLRule{
-					Action: "accept",
-					Src:    []string{ownerIP},
-					Dst:    []string{dst},
-				})
-			}
-			// 也允许创建者的所有 Desktop 实例访问
-			if ips, ok := clientDesktopIPs[svc.OwnerID]; ok && len(ips) > 0 {
-				rules = append(rules, ACLRule{
-					Action: "accept",
-					Src:    ips,
-					Dst:    []string{dst},
-				})
-			}
-
-		case model.AccessTypeGroup:
-			// group: 指定组成员可访问
-			if svc.GroupID != nil {
-				if ips, ok := groupClientIPs[*svc.GroupID]; ok && len(ips) > 0 {
-					rules = append(rules, ACLRule{
-						Action: "accept",
-						Src:    ips,
-						Dst:    []string{dst},
-					})
-				}
-			}
-		}
-	}
-
-	// 生成额外授权规则（ServicePermission）
-	now := time.Now()
-	for _, perm := range servicePerms {
-		// 检查是否过期
-		if perm.ExpiresAt != nil && now.After(*perm.ExpiresAt) {
-			continue
-		}
-
-		if perm.Service == nil || perm.Service.Agent == nil || perm.Client == nil {
-			continue
-		}
-
-		if perm.Service.Agent.TailscaleIP == "" || perm.Client.TailscaleIP == "" {
-			continue
-		}
-
-		dst := fmt.Sprintf("%s:%d", perm.Service.Agent.TailscaleIP, perm.Service.ListenPort)
-		rules = append(rules, ACLRule{
-			Action: "accept",
-			Src:    []string{perm.Client.TailscaleIP},
-			Dst:    []string{dst},
-		})
-
-		// 也允许该 Client 的所有 Desktop 实例访问
-		if ips, ok := clientDesktopIPs[perm.ClientID]; ok && len(ips) > 0 {
-			rules = append(rules, ACLRule{
-				Action: "accept",
-				Src:    ips,
-				Dst:    []string{dst},
-			})
-		}
-	}
-
-	// 生成 Agent 间访问规则
-	// 1. 同组 Agent 互访
-	for groupName, ips := range agentGroupIPs {
-		if len(ips) < 2 {
-			continue
-		}
-		logger.Debugf("生成 Agent 组 %s 互访规则，%d 个 Agent", groupName, len(ips))
-		rules = append(rules, ACLRule{
-			Action: "accept",
-			Src:    ips,
-			Dst:    appendPort(ips, "*"),
-		})
-	}
-
-	// 2. 显式授权的 Agent 访问
-	for _, perm := range agentPerms {
-		if perm.Service == nil || perm.Service.Agent == nil || perm.Agent == nil {
-			continue
-		}
-
-		if perm.Service.Agent.TailscaleIP == "" || perm.Agent.TailscaleIP == "" {
-			continue
-		}
-
-		dst := fmt.Sprintf("%s:%d", perm.Service.Agent.TailscaleIP, perm.Service.ListenPort)
-		rules = append(rules, ACLRule{
-			Action: "accept",
-			Src:    []string{perm.Agent.TailscaleIP},
-			Dst:    []string{dst},
-		})
-	}
-
-	// 生成 Desktop 服务暴露规则
-	for _, ds := range desktopServices {
-		if ds.DesktopInstance == nil || ds.DesktopInstance.TailscaleIP == "" {
-			continue
-		}
-
-		dst := fmt.Sprintf("%s:%d", ds.DesktopInstance.TailscaleIP, ds.Port)
-
-		if ds.AllowAll {
-			// 允许所有 Desktop 访问
-			rules = append(rules, ACLRule{
-				Action: "accept",
-				Src:    []string{"100.65.0.0/16"},
-				Dst:    []string{dst},
-			})
-		} else if ds.AllowSelf {
-			// 仅允许同一 Client 的其他设备访问
-			if ips, ok := clientDesktopIPs[ds.DesktopInstance.ClientID]; ok && len(ips) > 0 {
-				rules = append(rules, ACLRule{
-					Action: "accept",
-					Src:    ips,
-					Dst:    []string{dst},
-				})
-			}
-		}
-	}
+	// 临时实现：返回空规则列表，避免编译错误
+	// 完整的 ACL 规则生成需要在后续任务中实现
+	logger.Warn("ACL 规则生成功能暂未实现，返回空规则列表")
 
 	return rules, nil
 }
@@ -404,54 +179,17 @@ func (s *ACLSyncService) RemoveAgentServicePermission(ctx context.Context, permi
 }
 
 // UpdateServiceAccessType 更新服务访问类型并同步 ACL
+// TODO: 需要根据新的服务模型重新实现
 func (s *ACLSyncService) UpdateServiceAccessType(ctx context.Context, serviceID int64, accessType string, groupID *int64) error {
-	// 更新服务
-	updates := map[string]interface{}{
-		"access_type": accessType,
-		"group_id":    groupID,
-	}
-
-	if err := db.DB.Model(&model.ProxyService{}).Where("id = ?", serviceID).Updates(updates).Error; err != nil {
-		return fmt.Errorf("更新服务失败: %w", err)
-	}
-
-	logger.Infof("更新服务访问类型: service_id=%d, access_type=%s", serviceID, accessType)
-
-	// 同步 ACL（带重试）
-	if err := s.SyncACL(ctx); err != nil {
-		logger.Errorf("同步 ACL 失败: %v", err)
-		return fmt.Errorf("服务已更新但 ACL 同步失败: %w", err)
-	}
-
-	return nil
+	logger.Warn("UpdateServiceAccessType 功能暂未实现，需要根据新的服务模型重新实现")
+	return fmt.Errorf("UpdateServiceAccessType 功能暂未实现")
 }
 
 // UpdateAgentGroup 更新 Agent 分组并重新生成 ACL
-// 当 Agent 的分组发生变化时，需要重新生成 ACL 规则
-// 因为同组 Agent 可以互访，分组变更会影响访问权限
+// TODO: 需要根据新的分组模型重新实现
 func (s *ACLSyncService) UpdateAgentGroup(ctx context.Context, agentID int64, groupName string) error {
-	// 获取 Agent 当前分组
-	var agent model.Agent
-	if err := db.DB.First(&agent, agentID).Error; err != nil {
-		return fmt.Errorf("查询 Agent 失败: %w", err)
-	}
-
-	oldGroup := agent.GroupName
-
-	// 更新 Agent 分组
-	if err := db.DB.Model(&model.Agent{}).Where("id = ?", agentID).Update("group_name", groupName).Error; err != nil {
-		return fmt.Errorf("更新 Agent 分组失败: %w", err)
-	}
-
-	logger.Infof("更新 Agent 分组: agent_id=%d, old_group=%s, new_group=%s", agentID, oldGroup, groupName)
-
-	// 重新生成并同步 ACL（带重试）
-	if err := s.SyncACL(ctx); err != nil {
-		logger.Errorf("同步 ACL 失败: %v", err)
-		return fmt.Errorf("分组已更新但 ACL 同步失败: %w", err)
-	}
-
-	return nil
+	logger.Warn("UpdateAgentGroup 功能暂未实现，需要根据新的分组模型重新实现")
+	return fmt.Errorf("UpdateAgentGroup 功能暂未实现")
 }
 
 // StartPeriodicSync 启动定时全量同步

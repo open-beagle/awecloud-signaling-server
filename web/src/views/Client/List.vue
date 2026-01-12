@@ -12,7 +12,13 @@
       
       <el-table v-loading="loading" :data="clients" stripe>
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="client_id" :label="t('client.clientId')" min-width="200" />
+        <el-table-column prop="client_id" :label="t('client.clientId')" min-width="200">
+          <template #default="{ row }">
+            <el-link type="primary" :underline="false" @click="handleViewDetail(row)">
+              {{ row.client_id }}
+            </el-link>
+          </template>
+        </el-table-column>
         <el-table-column :label="t('agent.tailscaleIp')" width="150">
           <template #default="{ row }">
             <span v-if="row.tailscale_ip">{{ row.tailscale_ip }}</span>
@@ -84,6 +90,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete, CircleCheck, CircleClose, Refresh } from '@element-plus/icons-vue'
 import { getClients, enableClient, disableClient, deleteClient, regenerateSecret, type Client } from '@/api/client'
@@ -92,6 +99,7 @@ import CreateDialog from './components/CreateDialog.vue'
 import SecretDialog from './components/SecretDialog.vue'
 
 const { t } = useI18n()
+const router = useRouter()
 
 const clients = ref<Client[]>([])
 const loading = ref(false)
@@ -183,6 +191,10 @@ const handleRegenerateSecret = async (row: Client) => {
       ElMessage.error(t('common.failed'))
     }
   }
+}
+
+const handleViewDetail = (row: Client) => {
+  router.push(`/clients/${row.id}`)
 }
 
 onMounted(() => {
