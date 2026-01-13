@@ -1,14 +1,14 @@
 # Traefik IngressRoute for Headscale
 #
 # 路由规则：
-#   /ts2021   → Headscale ts2021 协议端点（Noise 协议握手）
-#   /key      → Headscale key 端点（获取 server public key）
-#   /headscale/* → Headscale API 和其他端点（stripPrefix 去掉 /headscale）
+#   /ts2021      → Headscale ts2021 协议端点（Noise 协议握手，HTTP/1.1）
+#   /key         → Headscale key 端点（获取 server public key）
+#   /derp        → DERP 中继服务端点
+#   /headscale/* → Headscale gRPC API（HTTP/2，端口 50443）
 #
 # 关键配置：
-#   - TLSOption: 强制 HTTP/1.1（ALPN 不包含 h2）
-#     原因：Tailscale ts2021 协议需要 HTTP Upgrade，HTTP/2 协议不支持 Upgrade 机制
-#   - Middleware: stripPrefix 去掉 /headscale 前缀（仅用于 API 路由）
+#   - ts2021/key/derp: 强制 HTTP/1.1（Tailscale 需要 HTTP Upgrade）
+#   - /headscale gRPC: 默认 HTTP/2，后端使用 h2c 连接 50443 端口
 #
 # 重要说明：
 #   Tailscale 客户端硬编码 /ts2021 路径，不支持自定义路径前缀！
@@ -46,7 +46,8 @@ spec:
       - /headscale
 
 ---
-# IngressRoute: Headscale 路由
+# IngressRoute: Headscale Tailscale 协议路由（HTTP/1.1）
+# ts2021/key/derp 需要 HTTP/1.1 因为 Tailscale 使用 HTTP Upgrade
 apiVersion: bcc.bd-apaas.com/v1alpha1
 kind: IngressRoute
 metadata:
@@ -77,15 +78,33 @@ spec:
       services:
         - name: headscale
           port: 8080
-    # Headscale API 和其他端点（带 /headscale 前缀）
+  tls:
+    certResolver: default
+    options:
+      name: headscale-h1only
+
+---
+# IngressRoute: Headscale gRPC 路由（HTTP/2）
+# Server 通过此路由访问 Headscale gRPC API
+apiVersion: bcc.bd-apaas.com/v1alpha1
+kind: IngressRoute
+metadata:
+  name: headscale-grpc
+  namespace: beagle-access
+  labels:
+    app: headscale
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    # gRPC API（默认 HTTP/2）
     - kind: Rule
       match: Host(`signaling.example.com`) && PathPrefix(`/headscale`)
       middlewares:
         - name: headscale-stripprefix
       services:
         - name: headscale
-          port: 8080
+          port: 50443
+          scheme: h2c
   tls:
     certResolver: default
-    options:
-      name: headscale-h1only

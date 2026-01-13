@@ -4,15 +4,31 @@
     :title="t('agent.tokenTitle')"
     width="600px"
   >
-    <div v-loading="loadingToken">
+    <div>
+      <el-alert
+        v-if="!secret"
+        type="info"
+        :closable="false"
+        show-icon
+      >
+        {{ t('agent.tokenTip') }}
+      </el-alert>
+      
       <el-input
-        v-model="token"
+        v-if="secret"
+        v-model="secret"
         readonly
         type="textarea"
         :rows="4"
+        style="margin-top: 12px;"
       />
+      
+      <div v-if="!secret" style="margin-top: 12px; color: #909399; text-align: center;">
+        {{ t('agent.secretHidden') }}
+      </div>
+      
       <div style="margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px;">
-        <CopyButton v-if="token" :text="token" />
+        <CopyButton v-if="secret" :text="secret" />
         <el-button type="warning" :icon="Refresh" :loading="regenerating" @click="handleRegenerate">
           {{ t('agent.regenerateToken') }}
         </el-button>
@@ -30,13 +46,14 @@ import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
-import { getAgentToken, regenerateToken } from '@/api/agent'
+import { regenerateSecret } from '@/api/agent'
 import type { Agent } from '@/types/models'
 import CopyButton from '@/components/Common/CopyButton.vue'
 
 const props = defineProps<{
   modelValue: boolean
   agent: Agent | null
+  initialSecret?: string
 }>()
 
 const emit = defineEmits<{
@@ -46,16 +63,15 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const visible = ref(false)
-const token = ref('')
-const loadingToken = ref(false)
+const secret = ref('')
 const regenerating = ref(false)
 
 watch(
   () => props.modelValue,
   (val) => {
     visible.value = val
-    if (val && props.agent) {
-      loadToken()
+    if (val && props.initialSecret) {
+      secret.value = props.initialSecret
     }
   }
 )
@@ -63,25 +79,9 @@ watch(
 watch(visible, (val) => {
   emit('update:modelValue', val)
   if (!val) {
-    token.value = ''
+    secret.value = ''
   }
 })
-
-const loadToken = async () => {
-  if (!props.agent) return
-  
-  loadingToken.value = true
-  try {
-    const res = await getAgentToken(props.agent.id)
-    if (res.success && res.data) {
-      token.value = res.data.agent_token
-    }
-  } catch (error) {
-    ElMessage.error(t('common.failed'))
-  } finally {
-    loadingToken.value = false
-  }
-}
 
 const handleRegenerate = async () => {
   if (!props.agent) return
@@ -92,9 +92,9 @@ const handleRegenerate = async () => {
     })
 
     regenerating.value = true
-    const res = await regenerateToken(props.agent.id)
+    const res = await regenerateSecret(props.agent.id)
     if (res.success && res.data) {
-      token.value = res.data.agent_token
+      secret.value = res.data.secret
       ElMessage.success(t('common.success'))
     }
   } catch (error: any) {

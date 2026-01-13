@@ -1,11 +1,15 @@
+// Package grpc 提供 gRPC 服务实现
 package grpc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -18,57 +22,53 @@ import (
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
-// AgentServiceServer Agent服务实现
+// AgentConnection Agent 连接信息
+type AgentConnection struct {
+	AgentID   uint64
+	Stream    pb.AgentService_HeartbeatServer
+	TunnelIP  string
+	Connected bool
+	LastSeen  time.Time
+	Cancel    context.CancelFunc
+}
+
+// AgentServiceServer Agent 服务实现
 type AgentServiceServer struct {
 	pb.UnimplementedAgentServiceServer
 
-	// Agent连接管理
-	agentStreams map[int64]pb.AgentService_ReceiveCommandsServer
-	streamsMutex sync.RWMutex
+	// Agent 连接管理
+	connections map[uint64]*AgentConnection
+	connMutex   sync.RWMutex
 
-	// 命令队列
-	commandQueues map[int64]chan *pb.Command
-	queuesMutex   sync.RWMutex
+	// 配置版本号（用于配置同步）
+	configVersion int64
+	versionMutex  sync.RWMutex
 
-	// FRP 配置（废弃，保留兼容）
-	frpToken     string
-	frpPublicURL string
-	frpPort      int
-
-	// Tailscale 配置
+	// Headscale 客户端
 	headscaleClient *headscale.Client
 	config          *config.ServerConfig
 }
 
-// NewAgentServiceServer 创建Agent服务
-func NewAgentServiceServer(frpToken string, frpPublicURL string, frpPort int) *AgentServiceServer {
-	return &AgentServiceServer{
-		agentStreams:  make(map[int64]pb.AgentService_ReceiveCommandsServer),
-		commandQueues: make(map[int64]chan *pb.Command),
-		frpToken:      frpToken,
-		frpPublicURL:  frpPublicURL,
-		frpPort:       frpPort,
-	}
-}
-
-// NewAgentServiceServerWithConfig 创建Agent服务（带配置）
-func NewAgentServiceServerWithConfig(cfg *config.ServerConfig) *AgentServiceServer {
+// NewAgentServiceServer 创建 Agent 服务
+func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
 	s := &AgentServiceServer{
-		agentStreams:  make(map[int64]pb.AgentService_ReceiveCommandsServer),
-		commandQueues: make(map[int64]chan *pb.Command),
-		frpToken:      cfg.Server.Token,
-		frpPublicURL:  cfg.Server.PublicURL,
-		frpPort:       cfg.Server.FRPServerPort,
+		connections:   make(map[uint64]*AgentConnection),
+		configVersion: time.Now().Unix(),
 		config:        cfg,
 	}
 
 	// 初始化 Headscale 客户端
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
-		s.headscaleClient = headscale.NewClient(headscale.Config{
+		client, err := headscale.NewClient(headscale.Config{
 			URL:    cfg.Tailscale.HeadscaleURL,
 			APIKey: cfg.Tailscale.HeadscaleAPIKey,
 		})
-		logger.Infof("Headscale 客户端已初始化: %s", cfg.Tailscale.HeadscaleURL)
+		if err != nil {
+			logger.Errorf("初始化 Headscale 客户端失败: %v", err)
+		} else {
+			s.headscaleClient = client
+			logger.Infof("Headscale 客户端已初始化: %s", cfg.Tailscale.HeadscaleURL)
+		}
 	} else {
 		logger.Warnf("Headscale 配置不完整，Tailscale 功能将不可用")
 	}
@@ -76,515 +76,463 @@ func NewAgentServiceServerWithConfig(cfg *config.ServerConfig) *AgentServiceServ
 	return s
 }
 
-// Register Agent注册
-func (s *AgentServiceServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
-	logger.Infof("Agent注册请求: %s, version=%s", req.AgentName, req.Version)
+// Register Agent 注册
+func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegisterRequest) (*pb.AgentRegisterResponse, error) {
+	logger.Infof("Agent 注册请求: name=%s, version=%s", req.Name, req.Version)
 
-	// 查询Agent
+	// 查询 Agent
 	var agent model.Agent
-	if err := db.DB.Where("agent_name = ? AND agent_token = ?", req.AgentName, req.AgentToken).First(&agent).Error; err != nil {
-		logger.Infof("Agent认证失败: %v", err)
-		return &pb.RegisterResponse{
+	if err := db.DB.Where("name = ?", req.Name).First(&agent).Error; err != nil {
+		logger.Warnf("Agent 不存在: %s", req.Name)
+		return &pb.AgentRegisterResponse{
 			Success: false,
-			Message: "Agent认证失败",
+			Message: "Agent 不存在",
 		}, nil
 	}
 
-	// 更新心跳时间，同时更新版本
-	// TODO: Status field removed from Agent model, need to track status differently
+	// 验证密钥
+	if err := bcrypt.CompareHashAndPassword([]byte(agent.SecretHash), []byte(req.Secret)); err != nil {
+		logger.Warnf("Agent 密钥验证失败: %s", req.Name)
+		return &pb.AgentRegisterResponse{
+			Success: false,
+			Message: "认证失败",
+		}, nil
+	}
+
+	// 更新 Agent 信息
 	now := time.Now()
 	agent.LastHeartbeat = &now
 	if req.Version != "" {
 		agent.Version = req.Version
 	}
-	if err := db.DB.Save(&agent).Error; err != nil {
-		logger.Infof("更新Agent状态失败: %v", err)
+	if req.SystemInfo != nil {
+		systemInfo := model.SystemInfoData{
+			OS:        req.SystemInfo.Os,
+			OSVersion: req.SystemInfo.OsVersion,
+			Arch:      req.SystemInfo.Arch,
+			Hostname:  req.SystemInfo.Hostname,
+			CPU:       req.SystemInfo.Cpu,
+			CPUCores:  int(req.SystemInfo.CpuCores),
+			MemoryGB:  int(req.SystemInfo.MemoryGb),
+		}
+		if data, err := json.Marshal(systemInfo); err == nil {
+			agent.SystemInfo = string(data)
+		}
 	}
 
-	logger.Infof("Agent注册成功: %s (ID: %d, Version: %s)", req.AgentName, agent.ID, agent.Version)
+	if err := db.DB.Save(&agent).Error; err != nil {
+		logger.Errorf("更新 Agent 信息失败: %v", err)
+	}
 
 	// 构建响应
-	resp := &pb.RegisterResponse{
+	resp := &pb.AgentRegisterResponse{
 		Success: true,
 		Message: "注册成功",
-		AgentId: int64(agent.ID), // Convert uint64 to int64
+		AgentId: agent.ID,
 	}
 
-	// Tailscale 模式：创建预认证密钥
+	// 创建 Tailscale 预认证密钥
 	if s.headscaleClient != nil && s.config != nil {
-		// 从数据库获取配置
-		var sysConfig model.SystemConfig
-		if err := db.DB.First(&sysConfig, 1).Error; err != nil {
-			logger.Warnf("获取系统配置失败，使用配置文件默认值: %v", err)
-		}
-
-		// 预认证密钥有效期：优先使用数据库配置，否则使用默认值
-		authKeyExpiry := 24 * time.Hour
-		if sysConfig.AuthKeyExpiryHours > 0 {
-			authKeyExpiry = time.Duration(sysConfig.AuthKeyExpiryHours) * time.Hour
-		}
-
-		// 为每个 Agent 创建独立的 Headscale User
-		// User 命名规则：agent-{agent_name}
-		userName := fmt.Sprintf("agent-%s", req.AgentName)
-
-		// 获取或创建 User
-		user, err := s.headscaleClient.GetOrCreateUser(ctx, userName)
+		authKey, serverURL, err := s.createAgentAuthKey(ctx, req.Name, agent.ID)
 		if err != nil {
-			logger.Errorf("获取或创建 Headscale User 失败: %v", err)
+			logger.Errorf("创建 Tailscale 预认证密钥失败: %v", err)
 			// 不影响注册，继续返回成功
 		} else {
-			// 创建预认证密钥（非临时节点，Agent 需要持久化）
-			// 注意：Headscale API 需要传递用户 ID，而不是用户名
-			authKey, err := s.headscaleClient.CreatePreAuthKey(ctx, user.ID, authKeyExpiry, false)
-			if err != nil {
-				logger.Errorf("创建 Tailscale 预认证密钥失败: %v", err)
-				// 不影响注册，继续返回成功
-			} else {
-				// HeadscalePublicURL：优先使用数据库配置，否则使用配置文件
-				controlURL := s.config.Tailscale.HeadscalePublicURL
-				if sysConfig.HeadscalePublicURL != "" {
-					controlURL = sysConfig.HeadscalePublicURL
-				}
-				resp.ControlUrl = controlURL
-
-				resp.AuthKey = authKey.Key
-
-				// DERP URL：优先使用数据库配置，否则使用 HeadscaleURL + /derp
-				if sysConfig.DerpURL != "" {
-					resp.DerpUrl = sysConfig.DerpURL
-				} else {
-					resp.DerpUrl = s.config.Tailscale.HeadscaleURL + "/derp"
-				}
-
-				logger.Infof("已为 Agent %s 创建 Tailscale 预认证密钥（User: %s, ID: %s, ControlURL: %s）", req.AgentName, userName, user.ID, controlURL)
-			}
+			resp.AuthKey = authKey
+			resp.ServerUrl = serverURL
+			logger.Infof("已为 Agent %s 创建 Tailscale 预认证密钥", req.Name)
 		}
-	} else {
-		// FRP 模式（废弃，保留兼容）
-		if s.frpPublicURL != "" {
-			resp.Server = s.frpPublicURL
-			resp.Port = 0 // 使用完整 URL 时，端口信息已包含在 URL 中
-		}
-		resp.Token = s.frpToken
 	}
 
+	logger.Infof("Agent 注册成功: %s (ID: %d)", req.Name, agent.ID)
 	return resp, nil
 }
 
-// Heartbeat Agent心跳
-func (s *AgentServiceServer) Heartbeat(ctx context.Context, req *pb.HeartbeatRequest) (*pb.HeartbeatResponse, error) {
-	// 验证Agent
+// Authenticate Agent 认证
+func (s *AgentServiceServer) Authenticate(ctx context.Context, req *pb.AgentAuthenticateRequest) (*pb.AgentAuthenticateResponse, error) {
+	logger.Infof("Agent 认证请求: agent_id=%d, version=%s", req.AgentId, req.Version)
+
+	// 查询 Agent
 	var agent model.Agent
-	if err := db.DB.Where("id = ? AND agent_token = ?", req.AgentId, req.AgentToken).First(&agent).Error; err != nil {
-		return nil, status.Error(codes.Unauthenticated, "Agent认证失败")
+	if err := db.DB.First(&agent, req.AgentId).Error; err != nil {
+		logger.Warnf("Agent 不存在: %d", req.AgentId)
+		return &pb.AgentAuthenticateResponse{
+			Success: false,
+			Message: "Agent 不存在",
+		}, nil
 	}
 
-	// 更新心跳时间和版本
+	// 验证密钥
+	if err := bcrypt.CompareHashAndPassword([]byte(agent.SecretHash), []byte(req.Secret)); err != nil {
+		logger.Warnf("Agent 密钥验证失败: %d", req.AgentId)
+		return &pb.AgentAuthenticateResponse{
+			Success: false,
+			Message: "认证失败",
+		}, nil
+	}
+
+	// 更新 Agent 信息
 	now := time.Now()
 	agent.LastHeartbeat = &now
-	// TODO: Status field removed from Agent model, need to track status differently
 	if req.Version != "" {
 		agent.Version = req.Version
 	}
-
-	// 更新 Tailscale 状态
-	if req.TailscaleIp != "" {
-		agent.IP = req.TailscaleIp // Updated field name: TailscaleIP -> IP
-	}
-	// TODO: The following fields were removed from Agent model, need to store in separate table
-	// agent.TsConnected = req.TsConnected
-	// agent.TsConnType = req.TsConnType
-	// agent.TsRegisteredAt = &now
-	// agent.LanIP = req.LanIp
-	// agent.LanGateway = req.LanGateway
-	// agent.LanInterface = req.LanInterface
-	// agent.RuntimeEnv = req.RuntimeEnv
-	// agent.Hostname = req.Hostname
-
-	// 更新内存缓存中的连接时间
-	if req.TsConnectedAt > 0 {
-		connectedAt := time.Unix(req.TsConnectedAt, 0)
-		cache.UpdateAgentTsConnectedAt(req.AgentId, &connectedAt)
-	} else if req.TsConnected {
-		// 如果 Agent 没有上报连接时间但已连接，使用当前时间
-		cache.UpdateAgentTsConnectedAt(req.AgentId, &now)
-	} else {
-		// 离线时清除连接时间
-		cache.UpdateAgentTsConnectedAt(req.AgentId, nil)
+	if req.SystemInfo != nil {
+		systemInfo := model.SystemInfoData{
+			OS:        req.SystemInfo.Os,
+			OSVersion: req.SystemInfo.OsVersion,
+			Arch:      req.SystemInfo.Arch,
+			Hostname:  req.SystemInfo.Hostname,
+			CPU:       req.SystemInfo.Cpu,
+			CPUCores:  int(req.SystemInfo.CpuCores),
+			MemoryGB:  int(req.SystemInfo.MemoryGb),
+		}
+		if data, err := json.Marshal(systemInfo); err == nil {
+			agent.SystemInfo = string(data)
+		}
 	}
 
 	if err := db.DB.Save(&agent).Error; err != nil {
-		logger.Infof("更新心跳失败: %v", err)
+		logger.Errorf("更新 Agent 信息失败: %v", err)
 	}
 
-	return &pb.HeartbeatResponse{
-		Success:   true,
-		Timestamp: now.Unix(),
-	}, nil
+	// 构建响应
+	resp := &pb.AgentAuthenticateResponse{
+		Success: true,
+		Message: "认证成功",
+	}
+
+	// 检查是否需要重新创建预认证密钥
+	if s.headscaleClient != nil && s.config != nil {
+		needAuthKey := false
+
+		// 检查 Node 是否存在
+		if agent.NodeID == 0 {
+			needAuthKey = true
+		} else {
+			// 检查 Headscale Node 状态
+			node, err := s.headscaleClient.GetNode(ctx, agent.NodeID)
+			if err != nil || node == nil {
+				needAuthKey = true
+			}
+		}
+
+		if needAuthKey {
+			authKey, serverURL, err := s.createAgentAuthKey(ctx, agent.Name, agent.ID)
+			if err != nil {
+				logger.Errorf("创建 Tailscale 预认证密钥失败: %v", err)
+			} else {
+				resp.AuthKey = authKey
+				resp.ServerUrl = serverURL
+				logger.Infof("已为 Agent %s 创建新的 Tailscale 预认证密钥", agent.Name)
+			}
+		} else {
+			resp.ServerUrl = s.config.Tailscale.HeadscalePublicURL
+		}
+	}
+
+	logger.Infof("Agent 认证成功: %d", req.AgentId)
+	return resp, nil
 }
 
-// ReceiveCommands 接收Server指令（双向流）
-func (s *AgentServiceServer) ReceiveCommands(stream pb.AgentService_ReceiveCommandsServer) error {
-	// 等待第一个消息（包含agent_id）
-	initResp, err := stream.Recv()
+// Heartbeat Agent 心跳（双向流）
+func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) error {
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
+
+	var agentID uint64
+	var conn *AgentConnection
+
+	// 接收第一个心跳消息获取 Agent ID
+	firstReq, err := stream.Recv()
 	if err != nil {
 		return status.Error(codes.InvalidArgument, "无法接收初始消息")
 	}
 
-	// 从初始响应中获取agent_id
-	// CommandId格式："init-{agent_id}"
-	var agentID int64
-	if _, err := fmt.Sscanf(initResp.CommandId, "init-%d", &agentID); err != nil {
-		logger.Infof("解析Agent ID失败: %v, 使用默认值1", err)
-		agentID = 1
+	agentID = firstReq.AgentId
+	logger.Infof("Agent 心跳流建立: agent_id=%d", agentID)
+
+	// 验证 Agent 存在
+	var agent model.Agent
+	if err := db.DB.First(&agent, agentID).Error; err != nil {
+		return status.Error(codes.NotFound, "Agent 不存在")
 	}
 
-	logger.Infof("Agent连接建立: agent_id=%d, message=%s", agentID, initResp.Message)
-
-	// 注册stream
-	s.streamsMutex.Lock()
-	s.agentStreams[agentID] = stream
-	s.streamsMutex.Unlock()
-
-	// 创建命令队列
-	s.queuesMutex.Lock()
-	if s.commandQueues[agentID] == nil {
-		s.commandQueues[agentID] = make(chan *pb.Command, 100)
+	// 注册连接
+	conn = &AgentConnection{
+		AgentID:   agentID,
+		Stream:    stream,
+		TunnelIP:  firstReq.TunnelIp,
+		Connected: firstReq.TunnelConnected,
+		LastSeen:  time.Now(),
+		Cancel:    cancel,
 	}
-	cmdQueue := s.commandQueues[agentID]
-	s.queuesMutex.Unlock()
 
-	// 同步该Agent的所有STCP实例
-	go s.syncSTCPInstances(agentID)
+	s.connMutex.Lock()
+	// 如果已有连接，先关闭旧连接
+	if oldConn, exists := s.connections[agentID]; exists {
+		oldConn.Cancel()
+	}
+	s.connections[agentID] = conn
+	s.connMutex.Unlock()
 
 	defer func() {
-		// 清理连接
-		s.streamsMutex.Lock()
-		delete(s.agentStreams, agentID)
-		s.streamsMutex.Unlock()
+		s.connMutex.Lock()
+		delete(s.connections, agentID)
+		s.connMutex.Unlock()
+		logger.Infof("Agent 心跳流断开: agent_id=%d", agentID)
 
-		logger.Infof("Agent连接断开: %d", agentID)
+		// 更新 Agent 离线状态
+		cache.UpdateAgentTsConnectedAt(int64(agentID), nil)
 	}()
 
-	// 启动接收响应的goroutine
-	go func() {
-		for {
-			resp, err := stream.Recv()
-			if err != nil {
-				return
-			}
-			logger.Infof("收到Agent响应: command_id=%s, success=%v", resp.CommandId, resp.Success)
-		}
-	}()
+	// 处理第一个心跳
+	s.handleHeartbeat(agentID, firstReq)
 
-	// 发送命令
+	// 发送首次响应（包含配置）
+	if err := s.sendHeartbeatResponse(stream, agentID, true); err != nil {
+		logger.Errorf("发送首次心跳响应失败: %v", err)
+		return err
+	}
+
+	// 持续接收心跳
 	for {
 		select {
-		case cmd := <-cmdQueue:
-			if err := stream.Send(cmd); err != nil {
-				logger.Infof("发送命令失败: %v", err)
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			req, err := stream.Recv()
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
 				return err
 			}
-			logger.Infof("发送命令: %s", cmd.CommandId)
 
-		case <-stream.Context().Done():
-			return stream.Context().Err()
+			// 更新连接信息
+			conn.TunnelIP = req.TunnelIp
+			conn.Connected = req.TunnelConnected
+			conn.LastSeen = time.Now()
+
+			// 处理心跳
+			s.handleHeartbeat(agentID, req)
+
+			// 发送响应
+			if err := s.sendHeartbeatResponse(stream, agentID, false); err != nil {
+				logger.Errorf("发送心跳响应失败: %v", err)
+				return err
+			}
 		}
 	}
 }
 
-// ReportStatus 状态上报
-func (s *AgentServiceServer) ReportStatus(ctx context.Context, req *pb.StatusReport) (*pb.StatusResponse, error) {
-	logger.Infof("收到Agent状态上报: agent_id=%d, stcp_count=%d", req.AgentId, len(req.StcpStatuses))
+// handleHeartbeat 处理心跳请求
+func (s *AgentServiceServer) handleHeartbeat(agentID uint64, req *pb.AgentHeartbeatRequest) {
+	// 更新数据库心跳时间
+	now := time.Now()
+	if err := db.DB.Model(&model.Agent{}).Where("id = ?", agentID).Updates(map[string]interface{}{
+		"last_heartbeat": now,
+		"ip":             req.TunnelIp,
+	}).Error; err != nil {
+		logger.Errorf("更新 Agent 心跳失败: %v", err)
+	}
 
-	// TODO: 保存状态信息到数据库或缓存
+	// 更新内存缓存 - 连接时间
+	if req.TunnelConnected {
+		cache.UpdateAgentTsConnectedAt(int64(agentID), &now)
+	} else {
+		cache.UpdateAgentTsConnectedAt(int64(agentID), nil)
+	}
 
-	return &pb.StatusResponse{
-		Success: true,
-	}, nil
+	// 更新内存缓存 - 网络信息
+	if req.Hostname != "" || len(req.Networks) > 0 {
+		networks := make([]cache.NetworkInterface, len(req.Networks))
+		for i, n := range req.Networks {
+			networks[i] = cache.NetworkInterface{
+				Name:    n.Name,
+				IP:      n.Ip,
+				Mask:    n.Mask,
+				Gateway: n.Gateway,
+			}
+		}
+		cache.UpdateAgentNetworkInfo(int64(agentID), req.Hostname, req.Runtime, networks)
+	}
+
+	// 处理服务状态上报
+	for _, svc := range req.ServiceStatus {
+		logger.Debugf("Agent %d 服务状态: service_id=%s, running=%v, error=%s",
+			agentID, svc.ServiceId, svc.Running, svc.Error)
+	}
+
+	// 处理端口访问状态上报
+	for _, fwd := range req.ForwardStatus {
+		logger.Debugf("Agent %d 端口访问状态: forward_id=%s, running=%v, error=%s",
+			agentID, fwd.ForwardId, fwd.Running, fwd.Error)
+	}
 }
 
-// SendCommand 发送命令给Agent（供内部调用）
-func (s *AgentServiceServer) SendCommand(agentID int64, cmd *pb.Command) error {
-	s.queuesMutex.RLock()
-	cmdQueue, exists := s.commandQueues[agentID]
-	s.queuesMutex.RUnlock()
+// sendHeartbeatResponse 发送心跳响应
+func (s *AgentServiceServer) sendHeartbeatResponse(stream pb.AgentService_HeartbeatServer, agentID uint64, includeConfig bool) error {
+	s.versionMutex.RLock()
+	version := s.configVersion
+	s.versionMutex.RUnlock()
+
+	resp := &pb.AgentHeartbeatResponse{
+		ConfigVersion: version,
+	}
+
+	// 如果需要包含配置（首次连接或配置变更）
+	if includeConfig {
+		// 查询端口映射服务
+		var services []model.ProxyService
+		if err := db.DB.Where("agent_id = ?", agentID).Find(&services).Error; err != nil {
+			logger.Errorf("查询端口映射服务失败: %v", err)
+		} else {
+			for _, svc := range services {
+				resp.Services = append(resp.Services, &pb.ServiceConfig{
+					Id:         svc.ID,
+					Name:       svc.Name,
+					TargetAddr: svc.TargetAddr,
+					ListenAddr: svc.ListenAddr,
+					Enabled:    svc.Enabled,
+				})
+			}
+		}
+
+		// 查询端口访问配置
+		var forwards []model.PortForward
+		if err := db.DB.Where("agent_id = ?", agentID).Find(&forwards).Error; err != nil {
+			logger.Errorf("查询端口访问配置失败: %v", err)
+		} else {
+			for _, fwd := range forwards {
+				resp.Forwards = append(resp.Forwards, &pb.ForwardConfig{
+					Id:         fwd.ID,
+					Name:       fwd.Name,
+					TargetAddr: fwd.TargetAddr,
+					ListenAddr: fwd.ListenAddr,
+					Enabled:    fwd.Enabled,
+				})
+			}
+		}
+	}
+
+	return stream.Send(resp)
+}
+
+// GetRealtimeStatus 获取 Agent 实时状态
+func (s *AgentServiceServer) GetRealtimeStatus(ctx context.Context, req *pb.GetRealtimeStatusRequest) (*pb.GetRealtimeStatusResponse, error) {
+	logger.Infof("获取 Agent 实时状态: agent_id=%d", req.AgentId)
+
+	// 检查 Agent 是否在线
+	s.connMutex.RLock()
+	conn, exists := s.connections[req.AgentId]
+	s.connMutex.RUnlock()
 
 	if !exists {
-		return fmt.Errorf("Agent未连接: %d", agentID)
+		return nil, status.Error(codes.Unavailable, "Agent 不在线")
 	}
 
-	select {
-	case cmdQueue <- cmd:
-		return nil
-	case <-time.After(5 * time.Second):
-		return fmt.Errorf("发送命令超时")
+	// 从数据库获取 Agent 信息
+	var agent model.Agent
+	if err := db.DB.First(&agent, req.AgentId).Error; err != nil {
+		return nil, status.Error(codes.NotFound, "Agent 不存在")
 	}
+
+	// 解析系统信息
+	var systemInfo model.SystemInfoData
+	if agent.SystemInfo != "" {
+		json.Unmarshal([]byte(agent.SystemInfo), &systemInfo)
+	}
+
+	// 获取连接时间
+	var connectedTime int64
+	if connTime := cache.GetAgentTsConnectedAt(int64(req.AgentId)); connTime != nil {
+		connectedTime = connTime.Unix()
+	}
+
+	// 构建响应
+	resp := &pb.GetRealtimeStatusResponse{
+		Hostname:            systemInfo.Hostname,
+		Runtime:             detectRuntime(systemInfo),
+		TunnelIp:            conn.TunnelIP,
+		TunnelConnected:     conn.Connected,
+		TunnelConnectedTime: connectedTime,
+	}
+
+	// 网络接口信息需要从 Agent 实时获取
+	// 这里返回基本信息，详细信息可以通过扩展协议获取
+
+	return resp, nil
 }
 
-// IsAgentOnline 检查Agent是否在线
-// 优先检查 gRPC 流连接，如果流不存在则检查数据库心跳时间
-func (s *AgentServiceServer) IsAgentOnline(agentID int64) bool {
-	// 首先检查是否有活跃的 gRPC 流连接
-	s.streamsMutex.RLock()
-	_, streamExists := s.agentStreams[agentID]
-	s.streamsMutex.RUnlock()
+// createAgentAuthKey 为 Agent 创建 Tailscale 预认证密钥
+func (s *AgentServiceServer) createAgentAuthKey(ctx context.Context, agentName string, agentID uint64) (string, string, error) {
+	// 为每个 Agent 创建独立的 Headscale User
+	userName := fmt.Sprintf("agent-%s", agentName)
 
-	if streamExists {
+	// 获取或创建 User
+	user, err := s.headscaleClient.GetOrCreateUser(ctx, userName)
+	if err != nil {
+		return "", "", fmt.Errorf("获取或创建 Headscale User 失败: %w", err)
+	}
+
+	// 更新 Agent 的 Headscale User ID
+	if err := db.DB.Model(&model.Agent{}).Where("id = ?", agentID).Update("id", user.Id).Error; err != nil {
+		logger.Warnf("更新 Agent Headscale User ID 失败: %v", err)
+	}
+
+	// 创建预认证密钥（24 小时有效，非临时节点）
+	authKey, err := s.headscaleClient.CreatePreAuthKey(ctx, user.Id, 24*time.Hour, false)
+	if err != nil {
+		return "", "", fmt.Errorf("创建预认证密钥失败: %w", err)
+	}
+
+	return authKey.Key, s.config.Tailscale.HeadscalePublicURL, nil
+}
+
+// IsAgentOnline 检查 Agent 是否在线
+func (s *AgentServiceServer) IsAgentOnline(agentID uint64) bool {
+	s.connMutex.RLock()
+	conn, exists := s.connections[agentID]
+	s.connMutex.RUnlock()
+
+	if exists && time.Since(conn.LastSeen) < 60*time.Second {
 		return true
 	}
 
-	// 如果没有流连接，检查数据库中的心跳时间
-	// 如果最近 60 秒内有心跳，认为 Agent 在线
+	// 检查数据库心跳
 	var agent model.Agent
 	if err := db.DB.First(&agent, agentID).Error; err != nil {
-		logger.Debugf("Agent %d 不存在: %v", agentID, err)
 		return false
 	}
 
 	if agent.LastHeartbeat == nil {
-		logger.Debugf("Agent %d 从未发送过心跳", agentID)
 		return false
 	}
 
-	// 检查心跳是否在 60 秒内
-	heartbeatAge := time.Since(*agent.LastHeartbeat)
-	isOnline := heartbeatAge < 60*time.Second
-
-	if !isOnline {
-		logger.Debugf("Agent %d 心跳超时: 最后心跳 %v 前", agentID, heartbeatAge)
-	}
-
-	return isOnline
+	return time.Since(*agent.LastHeartbeat) < 60*time.Second
 }
 
-// syncSTCPInstances 同步Agent的所有STCP实例（废弃，保留兼容）
-func (s *AgentServiceServer) syncSTCPInstances(agentID int64) {
-	// 废弃：STCP 已被 Tailscale 端口映射替代
-	// 改为同步 ProxyService
-	s.SyncProxies(agentID)
+// GetAgentConnection 获取 Agent 连接
+func (s *AgentServiceServer) GetAgentConnection(agentID uint64) *AgentConnection {
+	s.connMutex.RLock()
+	defer s.connMutex.RUnlock()
+	return s.connections[agentID]
 }
 
-// GetEnabledTCPServices 获取Agent的已启用TCP服务列表（废弃，保留兼容）
-func (s *AgentServiceServer) GetEnabledTCPServices(ctx context.Context, req *pb.GetTCPServicesRequest) (*pb.GetTCPServicesResponse, error) {
-	logger.Infof("Agent请求TCP服务列表: agent_id=%d (废弃接口)", req.AgentId)
-
-	// 废弃：TCP 服务已被 Tailscale 端口映射替代
-	return &pb.GetTCPServicesResponse{
-		Success:  true,
-		Services: nil,
-	}, nil
+// NotifyConfigChange 通知配置变更
+func (s *AgentServiceServer) NotifyConfigChange() {
+	s.versionMutex.Lock()
+	s.configVersion = time.Now().Unix()
+	s.versionMutex.Unlock()
 }
 
-// GetEnabledSTCPVisitors 获取Agent的已启用STCP访问列表（废弃，保留兼容）
-func (s *AgentServiceServer) GetEnabledSTCPVisitors(ctx context.Context, req *pb.GetSTCPVisitorsRequest) (*pb.GetSTCPVisitorsResponse, error) {
-	logger.Infof("Agent请求STCP访问列表: agent_name=%s (废弃接口)", req.AgentName)
-
-	// 废弃：STCP 访问已被 Tailscale 端口映射替代
-	return &pb.GetSTCPVisitorsResponse{
-		Success:  true,
-		Visitors: nil,
-	}, nil
-}
-
-// ============================================
-// Tailscale 相关方法
-// ============================================
-
-// ReportTailscaleStatus 上报 Tailscale 状态
-func (s *AgentServiceServer) ReportTailscaleStatus(ctx context.Context, req *pb.TailscaleStatusReport) (*pb.StatusResponse, error) {
-	logger.Infof("收到 Tailscale 状态上报: agent_id=%d, ip=%s, connected=%v, conn_type=%s",
-		req.AgentId, req.TailscaleIp, req.Connected, req.ConnType)
-
-	// 更新 Agent 的 Tailscale 状态
-	var agent model.Agent
-	if err := db.DB.First(&agent, req.AgentId).Error; err != nil {
-		logger.Errorf("Agent 不存在: %d", req.AgentId)
-		return &pb.StatusResponse{Success: false}, nil
+// detectRuntime 检测运行环境
+func detectRuntime(info model.SystemInfoData) string {
+	// 简单检测逻辑，实际应该由 Agent 上报
+	if info.Hostname == "" {
+		return "unknown"
 	}
-
-	agent.TailscaleIP = req.TailscaleIp
-	agent.TsConnected = req.Connected
-	agent.TsConnType = req.ConnType
-
-	if req.Connected && agent.TsRegisteredAt == nil {
-		now := time.Now()
-		agent.TsRegisteredAt = &now
-	}
-
-	if err := db.DB.Save(&agent).Error; err != nil {
-		logger.Errorf("更新 Agent Tailscale 状态失败: %v", err)
-		return &pb.StatusResponse{Success: false}, nil
-	}
-
-	return &pb.StatusResponse{Success: true}, nil
-}
-
-// ReportProxyStatus 上报端口映射状态
-func (s *AgentServiceServer) ReportProxyStatus(ctx context.Context, req *pb.ProxyStatusReport) (*pb.StatusResponse, error) {
-	logger.Infof("收到端口映射状态上报: agent_id=%d, proxy_count=%d", req.AgentId, len(req.Proxies))
-
-	// 更新每个代理服务的状态
-	for _, proxy := range req.Proxies {
-		var service model.ProxyService
-		if err := db.DB.Where("agent_id = ? AND name = ?", req.AgentId, proxy.Name).First(&service).Error; err != nil {
-			logger.Debugf("代理服务不存在: agent_id=%d, name=%s", req.AgentId, proxy.Name)
-			continue
-		}
-
-		service.Status = proxy.Status
-		service.Connections = int(proxy.Connections)
-		service.BytesIn = proxy.BytesIn
-		service.BytesOut = proxy.BytesOut
-
-		if err := db.DB.Save(&service).Error; err != nil {
-			logger.Errorf("更新代理服务状态失败: %v", err)
-		}
-	}
-
-	return &pb.StatusResponse{Success: true}, nil
-}
-
-// SyncProxies 同步 Agent 的所有端口映射服务
-func (s *AgentServiceServer) SyncProxies(agentID int64) {
-	// 等待一小段时间，确保 Agent 完全准备好
-	time.Sleep(1 * time.Second)
-
-	// 查询该 Agent 的所有端口映射服务
-	var services []model.ProxyService
-	if err := db.DB.Where("agent_id = ?", agentID).Find(&services).Error; err != nil {
-		logger.Errorf("查询 Agent 端口映射服务失败: %v", err)
-		return
-	}
-
-	if len(services) == 0 {
-		logger.Infof("Agent %d 没有需要同步的端口映射服务", agentID)
-		return
-	}
-
-	logger.Infof("开始同步 Agent %d 的 %d 个端口映射服务", agentID, len(services))
-
-	// 为每个服务发送启动命令
-	for _, service := range services {
-		// 只同步状态为 running 的服务
-		if service.Status != model.ProxyStatusRunning {
-			continue
-		}
-
-		cmd := &pb.Command{
-			CommandId: fmt.Sprintf("sync-proxy-%d-%d", service.ID, time.Now().Unix()),
-			Type:      pb.Command_START_PROXY,
-			ProxyCommand: &pb.ProxyCommand{
-				Name:       service.Name,
-				ListenPort: int32(service.ListenPort),
-				TargetAddr: service.TargetAddr,
-			},
-		}
-
-		if err := s.SendCommand(agentID, cmd); err != nil {
-			logger.Errorf("同步端口映射服务失败: name=%s, error=%v", service.Name, err)
-		} else {
-			logger.Infof("已同步端口映射服务: name=%s", service.Name)
-		}
-
-		// 避免发送过快
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	logger.Infof("Agent %d 的端口映射服务同步完成", agentID)
-}
-
-// SendProxyCommand 发送端口映射指令
-func (s *AgentServiceServer) SendProxyCommand(agentID int64, action string, service *model.ProxyService) error {
-	var cmdType pb.Command_Type
-	switch action {
-	case "start":
-		cmdType = pb.Command_START_PROXY
-	case "stop":
-		cmdType = pb.Command_STOP_PROXY
-	default:
-		return fmt.Errorf("未知的操作类型: %s", action)
-	}
-
-	cmd := &pb.Command{
-		CommandId: fmt.Sprintf("proxy-%s-%d-%d", action, service.ID, time.Now().Unix()),
-		Type:      cmdType,
-		ProxyCommand: &pb.ProxyCommand{
-			Name:       service.Name,
-			ListenPort: int32(service.ListenPort),
-			TargetAddr: service.TargetAddr,
-		},
-	}
-
-	return s.SendCommand(agentID, cmd)
-}
-
-// GetTailscaleState 获取 Agent 的 Tailscale 状态
-func (s *AgentServiceServer) GetTailscaleState(ctx context.Context, req *pb.GetStateRequest) (*pb.GetStateResponse, error) {
-	logger.Infof("Agent 请求获取 Tailscale 状态: agent_id=%d", req.AgentId)
-
-	// 验证 Agent 认证
-	var agent model.Agent
-	if err := db.DB.Where("id = ? AND agent_token = ?", req.AgentId, req.AgentToken).First(&agent).Error; err != nil {
-		logger.Warnf("Agent 认证失败: agent_id=%d", req.AgentId)
-		return nil, status.Error(codes.Unauthenticated, "Agent 认证失败")
-	}
-
-	// 查询状态数据
-	var state model.AgentTailscaleState
-	err := db.DB.Where("agent_id = ?", req.AgentId).First(&state).Error
-	if err != nil {
-		// 状态不存在，返回空状态
-		logger.Infof("Agent %d 没有历史 Tailscale 状态", req.AgentId)
-		return &pb.GetStateResponse{
-			StateData: nil,
-			Exists:    false,
-		}, nil
-	}
-
-	logger.Infof("Agent %d 获取 Tailscale 状态成功，数据大小: %d bytes", req.AgentId, len(state.StateData))
-	return &pb.GetStateResponse{
-		StateData: state.StateData,
-		Exists:    true,
-	}, nil
-}
-
-// SaveTailscaleState 保存 Agent 的 Tailscale 状态
-func (s *AgentServiceServer) SaveTailscaleState(ctx context.Context, req *pb.SaveStateRequest) (*pb.SaveStateResponse, error) {
-	logger.Infof("Agent 请求保存 Tailscale 状态: agent_id=%d, data_size=%d bytes", req.AgentId, len(req.StateData))
-
-	// 验证 Agent 认证
-	var agent model.Agent
-	if err := db.DB.Where("id = ? AND agent_token = ?", req.AgentId, req.AgentToken).First(&agent).Error; err != nil {
-		logger.Warnf("Agent 认证失败: agent_id=%d", req.AgentId)
-		return nil, status.Error(codes.Unauthenticated, "Agent 认证失败")
-	}
-
-	// 查询是否已存在状态记录
-	var state model.AgentTailscaleState
-	err := db.DB.Where("agent_id = ?", req.AgentId).First(&state).Error
-
-	if err != nil {
-		// 不存在，创建新记录
-		state = model.AgentTailscaleState{
-			AgentID:   req.AgentId,
-			StateData: req.StateData,
-		}
-		if err := db.DB.Create(&state).Error; err != nil {
-			logger.Errorf("创建 Tailscale 状态失败: %v", err)
-			return &pb.SaveStateResponse{Success: false}, nil
-		}
-		logger.Infof("Agent %d 创建 Tailscale 状态成功", req.AgentId)
-	} else {
-		// 已存在，更新记录
-		state.StateData = req.StateData
-		if err := db.DB.Save(&state).Error; err != nil {
-			logger.Errorf("更新 Tailscale 状态失败: %v", err)
-			return &pb.SaveStateResponse{Success: false}, nil
-		}
-		logger.Infof("Agent %d 更新 Tailscale 状态成功", req.AgentId)
-	}
-
-	return &pb.SaveStateResponse{Success: true}, nil
+	// 默认返回 physical
+	return "physical"
 }

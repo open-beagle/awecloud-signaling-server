@@ -9,10 +9,12 @@ export const useAuthStore = defineStore('auth', () => {
 
   const login = async (data: LoginRequest) => {
     const res = await loginApi(data)
-    if (res.success && res.token) {
-      token.value = res.token
+    // 后端返回格式: { success: true, data: { token: "...", admin: {...} } }
+    const tokenValue = res.data?.token || res.token
+    if (res.success && tokenValue) {
+      token.value = tokenValue
       username.value = data.username
-      localStorage.setItem('token', res.token)
+      localStorage.setItem('token', tokenValue)
       localStorage.setItem('username', data.username)
       return true
     }

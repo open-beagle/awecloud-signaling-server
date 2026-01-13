@@ -37,12 +37,33 @@
           <span>{{ t('menu.clients') }}</span>
         </template>
       </el-menu-item>
-      <el-menu-item index="/groups">
-        <el-icon><UserFilled /></el-icon>
+      <el-sub-menu index="groups">
         <template #title>
+          <el-icon><UserFilled /></el-icon>
           <span>{{ t('menu.groups') }}</span>
         </template>
-      </el-menu-item>
+        <el-menu-item index="/groups/clients">
+          {{ t('menu.clientGroups') }}
+        </el-menu-item>
+        <el-menu-item index="/groups/agents">
+          {{ t('menu.agentGroups') }}
+        </el-menu-item>
+      </el-sub-menu>
+      <el-sub-menu index="tunnel">
+        <template #title>
+          <el-icon><Share /></el-icon>
+          <span>{{ t('menu.tunnel') }}</span>
+        </template>
+        <el-menu-item index="/tunnel/users">
+          {{ t('menu.tunnelUsers') }}
+        </el-menu-item>
+        <el-menu-item index="/tunnel/nodes">
+          {{ t('menu.tunnelNodes') }}
+        </el-menu-item>
+        <el-menu-item index="/tunnel/acl">
+          {{ t('menu.tunnelACL') }}
+        </el-menu-item>
+      </el-sub-menu>
       <el-menu-item index="/audit-logs">
         <el-icon><Document /></el-icon>
         <template #title>

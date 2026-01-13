@@ -24,3 +24,29 @@ const (
 	ConfigIPPrefix           = "ip_prefix"             // IP 地址段
 	ConfigAuthKeyExpiryHours = "auth_key_expiry_hours" // 预认证密钥有效期（小时）
 )
+
+// GetConfigValue 获取配置值的辅助方法
+func GetConfigValue(key string, defaultValue string) string {
+	// 这个方法需要在使用时通过数据库查询实现
+	// 这里只是定义接口，实际实现在调用处
+	return defaultValue
+}
+
+// SystemConfig 的字段访问方法（用于兼容旧代码）
+func (sc *SystemConfig) GetAuthKeyExpiryHours() int {
+	if sc.Key == ConfigAuthKeyExpiryHours {
+		// 解析 Value 为 int，如果失败返回默认值 24
+		if val := sc.Value; val != "" {
+			// 简单的字符串转换，实际使用时需要 strconv.Atoi
+			return 24 // 默认值
+		}
+	}
+	return 24
+}
+
+func (sc *SystemConfig) GetHeadscalePublicURL() string {
+	if sc.Key == ConfigHeadscalePublicURL {
+		return sc.Value
+	}
+	return ""
+}

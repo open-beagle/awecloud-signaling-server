@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package awecloud.signaling;
+
+option go_package = "github.com/open-beagle/awecloud-signaling-server/pkg/proto";
+
+// DesktopService Desktop 管理服务
+service DesktopService {
+  // 首次登录 - Desktop 用 Client 凭证登录
+  rpc Login(DesktopLoginRequest) returns (DesktopLoginResponse);
+
+  // 认证 - Desktop 用设备凭证认证
+  rpc Authenticate(DesktopAuthenticateRequest) returns (DesktopAuthenticateResponse);
+
+  // 心跳 - 保持连接状态
+  rpc Heartbeat(stream DesktopHeartbeatRequest) returns (stream DesktopHeartbeatResponse);
+}
+
+// ============================================
+// 公共消息定义
+// ============================================
+
+// DesktopSystemInfo 系统信息（Desktop 专用）
+message DesktopSystemInfo {
+  string os = 1; // 操作系统：linux / windows / darwin
+  string os_version = 2; // 系统版本
+  string arch = 3; // CPU 架构：amd64 / arm64
+  string hostname = 4; // 主机名
+  string cpu = 5; // CPU 型号
+  int32 cpu_cores = 6; // CPU 核心数
+  int32 memory_gb = 7; // 内存大小（GB）
+}
+
+// ============================================
+// Desktop 首次登录
+// ============================================
+
+// DesktopLoginRequest Desktop 首次登录请求
+message DesktopLoginRequest {
+  string client_name = 1; // Client 用户名
+  string client_secret = 2; // Client 认证密钥
+  string device_name = 3; // 设备名称（主机名）
+  string device_fingerprint = 4; // 设备指纹（硬件唯一标识）
+  DesktopSystemInfo system_info = 5; // 系统信息
+}
+
+// DesktopLoginResponse Desktop 首次登录响应
+message DesktopLoginResponse {
+  bool success = 1; // 是否成功
+  string message = 2; // 响应消息
+  uint64 desktop_id = 3; // Desktop ID（Headscale Node ID）
+  string secret = 4; // Desktop 专属密钥（仅首次返回）
+  string auth_key = 5; // Tailscale PreAuthKey，用于隧道连接
+  string server_url = 6; // Headscale 服务器地址
+}
+
+// ============================================
+// Desktop 认证
+// ============================================
+
+// DesktopAuthenticateRequest Desktop 认证请求
+message DesktopAuthenticateRequest {
+  uint64 desktop_id = 1; // Desktop ID
+  string secret = 2; // Desktop 专属密钥
+  string device_fingerprint = 3; // 设备指纹（用于验证）
+  DesktopSystemInfo system_info = 4; // 系统信息
+}
+
+// DesktopAuthenticateResponse Desktop 认证响应
+message DesktopAuthenticateResponse {
+  bool success = 1; // 是否成功
+  string message = 2; // 响应消息
+  string auth_key = 3; // Tailscale PreAuthKey（如需重新连接）
+  string server_url = 4; // Headscale 服务器地址
+}
+
+// ============================================
+// Desktop 心跳（双向流）
+// ============================================
+
+// DesktopHeartbeatRequest Desktop 心跳请求
+message DesktopHeartbeatRequest {
+  uint64 desktop_id = 1; // Desktop ID
+  string tunnel_ip = 2; // 隧道 IP
+  bool tunnel_connected = 3; // 隧道连接状态
+}
+
+// AuthorizedService 已授权服务
+message AuthorizedService {
+  string id = 1; // 服务 ID
+  string name = 2; // 服务名称
+  string agent_name = 3; // 所属 Agent 名称
+  string listen_addr = 4; // 访问地址（如 100.64.0.1:3306）
+}
+
+// DesktopHeartbeatResponse Desktop 心跳响应
+message DesktopHeartbeatResponse {
+  repeated AuthorizedService authorized_services = 1; // 已授权服务列表
+}

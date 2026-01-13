@@ -15,7 +15,7 @@
       <div class="filter-bar">
         <el-select v-model="filterAgentId" :placeholder="$t('service.filterAgent')" clearable @change="handleFilterChange">
           <el-option :label="$t('service.allAgents')" :value="0" />
-          <el-option v-for="agent in agents" :key="agent.id" :label="agent.agent_name" :value="agent.id" />
+          <el-option v-for="agent in agents" :key="agent.id" :label="agent.name" :value="agent.id" />
         </el-select>
         <el-select v-model="filterStatus" :placeholder="$t('service.filterStatus')" clearable @change="handleFilterChange">
           <el-option :label="$t('service.allStatus')" value="" />
@@ -37,7 +37,11 @@
 
       <!-- 服务列表 -->
       <el-table :data="filteredServices" v-loading="loading" stripe>
-        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column label="ID" width="80">
+          <template #default="{ $index }">
+            {{ $index + 1 }}
+          </template>
+        </el-table-column>
         <el-table-column prop="name" :label="$t('service.name')" min-width="120" />
         <el-table-column :label="$t('service.agent')" min-width="150">
           <template #default="{ row }">
@@ -50,15 +54,14 @@
         </el-table-column>
         <el-table-column :label="$t('service.listenAddr')" min-width="180">
           <template #default="{ row }">
-            <span v-if="row.agent_ts_ip" class="listen-addr">{{ row.agent_ts_ip }}:{{ row.listen_port }}</span>
-            <span v-else class="listen-addr">:{{ row.listen_port }}</span>
+            <span class="listen-addr">{{ row.listen_addr || '-' }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="target_addr" :label="$t('service.targetAddr')" min-width="180" />
         <el-table-column :label="$t('service.status')" width="100">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">
-              {{ getStatusText(row.status) }}
+            <el-tag :type="row.enabled ? 'success' : 'info'">
+              {{ row.enabled ? $t('tcp.enabled') : $t('tcp.disabled') }}
             </el-tag>
           </template>
         </el-table-column>
@@ -82,7 +85,7 @@
         <el-form-item :label="$t('service.agent')" prop="agent_id">
           <el-select v-model="createForm.agent_id" :placeholder="$t('service.selectAgent')" @change="handleAgentChange">
             <el-option v-for="agent in onlineAgents" :key="agent.id" 
-              :label="`${agent.agent_name} (${agent.tailscale_ip || 'No IP'})`" 
+              :label="`${agent.name} (${agent.ip || 'No IP'})`" 
               :value="agent.id" />
           </el-select>
         </el-form-item>
@@ -100,8 +103,8 @@
         <el-form-item :label="$t('service.targetAddr')" prop="target_addr">
           <el-input v-model="createForm.target_addr" :placeholder="$t('service.targetAddrPlaceholder')" />
         </el-form-item>
-        <el-form-item :label="$t('service.remark')">
-          <el-input v-model="createForm.remark" type="textarea" />
+        <el-form-item :label="$t('agent.alias')">
+          <el-input v-model="createForm.alias" :placeholder="$t('agent.aliasPlaceholder')" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -156,12 +159,12 @@ const searchKeyword = ref('')
 // 创建对话框
 const createDialogVisible = ref(false)
 const createFormRef = ref()
-const createForm = ref<CreateServiceRequest>({
+const createForm = ref({
   name: '',
   agent_id: 0,
   listen_port: 0,
   target_addr: '',
-  remark: ''
+  alias: ''
 })
 const portConflictError = ref('')
 
@@ -264,7 +267,7 @@ const handleFilterChange = () => {
 }
 
 const showCreateDialog = () => {
-  createForm.value = { name: '', agent_id: 0, listen_port: 0, target_addr: '', remark: '' }
+  createForm.value = { name: '', agent_id: 0, listen_port: 0, target_addr: '', alias: '' }
   portConflictError.value = ''
   createDialogVisible.value = true
 }
@@ -305,7 +308,15 @@ const handleCreate = async () => {
   }
 
   try {
-    const res = await createService(createForm.value) as ApiResponse
+    // 转换为后端期望的格式
+    const requestData: CreateServiceRequest = {
+      name: createForm.value.name,
+      agent_id: createForm.value.agent_id,
+      target_addr: createForm.value.target_addr,
+      listen_addr: createForm.value.listen_port > 0 ? `:${createForm.value.listen_port}` : '',
+      alias: createForm.value.alias
+    }
+    const res = await createService(requestData) as ApiResponse
     if (res.success) {
       ElMessage.success(t('common.createSuccess'))
       createDialogVisible.value = false

@@ -21,107 +21,34 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type Command_Type int32
-
-const (
-	Command_CREATE_STCP         Command_Type = 0
-	Command_DELETE_STCP         Command_Type = 1
-	Command_CREATE_TCP          Command_Type = 2
-	Command_DELETE_TCP          Command_Type = 3
-	Command_CREATE_STCP_VISITOR Command_Type = 4
-	Command_DELETE_STCP_VISITOR Command_Type = 5
-	// [Tailscale] 新增命令类型
-	Command_START_PROXY   Command_Type = 10 // 启动端口映射（服务暴露）
-	Command_STOP_PROXY    Command_Type = 11 // 停止端口映射
-	Command_SYNC_PROXIES  Command_Type = 12 // 同步所有端口映射
-	Command_START_VISITOR Command_Type = 13 // 启动 Visitor（服务访问）
-	Command_STOP_VISITOR  Command_Type = 14 // 停止 Visitor
-	Command_SYNC_VISITORS Command_Type = 15 // 同步所有 Visitor
-)
-
-// Enum value maps for Command_Type.
-var (
-	Command_Type_name = map[int32]string{
-		0:  "CREATE_STCP",
-		1:  "DELETE_STCP",
-		2:  "CREATE_TCP",
-		3:  "DELETE_TCP",
-		4:  "CREATE_STCP_VISITOR",
-		5:  "DELETE_STCP_VISITOR",
-		10: "START_PROXY",
-		11: "STOP_PROXY",
-		12: "SYNC_PROXIES",
-		13: "START_VISITOR",
-		14: "STOP_VISITOR",
-		15: "SYNC_VISITORS",
-	}
-	Command_Type_value = map[string]int32{
-		"CREATE_STCP":         0,
-		"DELETE_STCP":         1,
-		"CREATE_TCP":          2,
-		"DELETE_TCP":          3,
-		"CREATE_STCP_VISITOR": 4,
-		"DELETE_STCP_VISITOR": 5,
-		"START_PROXY":         10,
-		"STOP_PROXY":          11,
-		"SYNC_PROXIES":        12,
-		"START_VISITOR":       13,
-		"STOP_VISITOR":        14,
-		"SYNC_VISITORS":       15,
-	}
-)
-
-func (x Command_Type) Enum() *Command_Type {
-	p := new(Command_Type)
-	*p = x
-	return p
-}
-
-func (x Command_Type) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (Command_Type) Descriptor() protoreflect.EnumDescriptor {
-	return file_pkg_proto_agent_proto_enumTypes[0].Descriptor()
-}
-
-func (Command_Type) Type() protoreflect.EnumType {
-	return &file_pkg_proto_agent_proto_enumTypes[0]
-}
-
-func (x Command_Type) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use Command_Type.Descriptor instead.
-func (Command_Type) EnumDescriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{4, 0}
-}
-
-// Agent注册请求
-type RegisterRequest struct {
+// SystemInfo 系统信息
+type SystemInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentName     string                 `protobuf:"bytes,1,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
-	AgentToken    string                 `protobuf:"bytes,2,opt,name=agent_token,json=agentToken,proto3" json:"agent_token,omitempty"`
-	Version       string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"` // Agent版本
+	Os            string                 `protobuf:"bytes,1,opt,name=os,proto3" json:"os,omitempty"`                                // 操作系统：linux / windows / darwin
+	OsVersion     string                 `protobuf:"bytes,2,opt,name=os_version,json=osVersion,proto3" json:"os_version,omitempty"` // 系统版本
+	Arch          string                 `protobuf:"bytes,3,opt,name=arch,proto3" json:"arch,omitempty"`                            // CPU 架构：amd64 / arm64
+	Hostname      string                 `protobuf:"bytes,4,opt,name=hostname,proto3" json:"hostname,omitempty"`                    // 主机名
+	Cpu           string                 `protobuf:"bytes,5,opt,name=cpu,proto3" json:"cpu,omitempty"`                              // CPU 型号
+	CpuCores      int32                  `protobuf:"varint,6,opt,name=cpu_cores,json=cpuCores,proto3" json:"cpu_cores,omitempty"`   // CPU 核心数
+	MemoryGb      int32                  `protobuf:"varint,7,opt,name=memory_gb,json=memoryGb,proto3" json:"memory_gb,omitempty"`   // 内存大小（GB）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RegisterRequest) Reset() {
-	*x = RegisterRequest{}
+func (x *SystemInfo) Reset() {
+	*x = SystemInfo{}
 	mi := &file_pkg_proto_agent_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RegisterRequest) String() string {
+func (x *SystemInfo) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RegisterRequest) ProtoMessage() {}
+func (*SystemInfo) ProtoMessage() {}
 
-func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
+func (x *SystemInfo) ProtoReflect() protoreflect.Message {
 	mi := &file_pkg_proto_agent_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -133,300 +60,224 @@ func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
-func (*RegisterRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use SystemInfo.ProtoReflect.Descriptor instead.
+func (*SystemInfo) Descriptor() ([]byte, []int) {
 	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *RegisterRequest) GetAgentName() string {
+func (x *SystemInfo) GetOs() string {
 	if x != nil {
-		return x.AgentName
+		return x.Os
 	}
 	return ""
 }
 
-func (x *RegisterRequest) GetAgentToken() string {
+func (x *SystemInfo) GetOsVersion() string {
 	if x != nil {
-		return x.AgentToken
+		return x.OsVersion
 	}
 	return ""
 }
 
-func (x *RegisterRequest) GetVersion() string {
+func (x *SystemInfo) GetArch() string {
 	if x != nil {
-		return x.Version
+		return x.Arch
 	}
 	return ""
 }
 
-// Agent注册响应
-type RegisterResponse struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Success bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Message string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	AgentId int64                  `protobuf:"varint,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	Token   string                 `protobuf:"bytes,4,opt,name=token,proto3" json:"token,omitempty"`   // 隧道认证 Token (FRP, 废弃)
-	Server  string                 `protobuf:"bytes,5,opt,name=server,proto3" json:"server,omitempty"` // 隧道服务器地址 (FRP, 废弃)
-	Port    int32                  `protobuf:"varint,6,opt,name=port,proto3" json:"port,omitempty"`    // 隧道服务器端口 (FRP, 废弃)
-	// [Tailscale] 新增字段
-	ControlUrl    string `protobuf:"bytes,7,opt,name=control_url,json=controlUrl,proto3" json:"control_url,omitempty"` // Headscale 控制平面 URL
-	AuthKey       string `protobuf:"bytes,8,opt,name=auth_key,json=authKey,proto3" json:"auth_key,omitempty"`          // Tailscale 预认证密钥
-	DerpUrl       string `protobuf:"bytes,9,opt,name=derp_url,json=derpUrl,proto3" json:"derp_url,omitempty"`          // DERP 服务器 URL
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RegisterResponse) Reset() {
-	*x = RegisterResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RegisterResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RegisterResponse) ProtoMessage() {}
-
-func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RegisterResponse.ProtoReflect.Descriptor instead.
-func (*RegisterResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *RegisterResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
-func (x *RegisterResponse) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
-func (x *RegisterResponse) GetAgentId() int64 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *RegisterResponse) GetToken() string {
-	if x != nil {
-		return x.Token
-	}
-	return ""
-}
-
-func (x *RegisterResponse) GetServer() string {
-	if x != nil {
-		return x.Server
-	}
-	return ""
-}
-
-func (x *RegisterResponse) GetPort() int32 {
-	if x != nil {
-		return x.Port
-	}
-	return 0
-}
-
-func (x *RegisterResponse) GetControlUrl() string {
-	if x != nil {
-		return x.ControlUrl
-	}
-	return ""
-}
-
-func (x *RegisterResponse) GetAuthKey() string {
-	if x != nil {
-		return x.AuthKey
-	}
-	return ""
-}
-
-func (x *RegisterResponse) GetDerpUrl() string {
-	if x != nil {
-		return x.DerpUrl
-	}
-	return ""
-}
-
-// Agent心跳请求
-type HeartbeatRequest struct {
-	state      protoimpl.MessageState `protogen:"open.v1"`
-	AgentId    int64                  `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	AgentToken string                 `protobuf:"bytes,2,opt,name=agent_token,json=agentToken,proto3" json:"agent_token,omitempty"`
-	Version    string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"` // Agent版本
-	// [Tailscale] 新增字段
-	TailscaleIp   string `protobuf:"bytes,4,opt,name=tailscale_ip,json=tailscaleIp,proto3" json:"tailscale_ip,omitempty"`          // Tailscale IP
-	TsConnected   bool   `protobuf:"varint,5,opt,name=ts_connected,json=tsConnected,proto3" json:"ts_connected,omitempty"`         // Tailscale 连接状态
-	TsConnType    string `protobuf:"bytes,6,opt,name=ts_conn_type,json=tsConnType,proto3" json:"ts_conn_type,omitempty"`           // 连接方式: p2p / derp
-	TsConnectedAt int64  `protobuf:"varint,7,opt,name=ts_connected_at,json=tsConnectedAt,proto3" json:"ts_connected_at,omitempty"` // 连接时间（Unix 时间戳，秒）
-	// 网络信息（Agent 上报）
-	LanIp         string `protobuf:"bytes,8,opt,name=lan_ip,json=lanIp,proto3" json:"lan_ip,omitempty"`                       // 局域网 IP
-	LanGateway    string `protobuf:"bytes,9,opt,name=lan_gateway,json=lanGateway,proto3" json:"lan_gateway,omitempty"`        // 网关地址
-	LanInterface  string `protobuf:"bytes,10,opt,name=lan_interface,json=lanInterface,proto3" json:"lan_interface,omitempty"` // 网卡名称
-	RuntimeEnv    string `protobuf:"bytes,11,opt,name=runtime_env,json=runtimeEnv,proto3" json:"runtime_env,omitempty"`       // 运行环境: native/docker/kubernetes
-	Hostname      string `protobuf:"bytes,12,opt,name=hostname,proto3" json:"hostname,omitempty"`                             // 主机名
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *HeartbeatRequest) Reset() {
-	*x = HeartbeatRequest{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *HeartbeatRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*HeartbeatRequest) ProtoMessage() {}
-
-func (x *HeartbeatRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use HeartbeatRequest.ProtoReflect.Descriptor instead.
-func (*HeartbeatRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *HeartbeatRequest) GetAgentId() int64 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *HeartbeatRequest) GetAgentToken() string {
-	if x != nil {
-		return x.AgentToken
-	}
-	return ""
-}
-
-func (x *HeartbeatRequest) GetVersion() string {
-	if x != nil {
-		return x.Version
-	}
-	return ""
-}
-
-func (x *HeartbeatRequest) GetTailscaleIp() string {
-	if x != nil {
-		return x.TailscaleIp
-	}
-	return ""
-}
-
-func (x *HeartbeatRequest) GetTsConnected() bool {
-	if x != nil {
-		return x.TsConnected
-	}
-	return false
-}
-
-func (x *HeartbeatRequest) GetTsConnType() string {
-	if x != nil {
-		return x.TsConnType
-	}
-	return ""
-}
-
-func (x *HeartbeatRequest) GetTsConnectedAt() int64 {
-	if x != nil {
-		return x.TsConnectedAt
-	}
-	return 0
-}
-
-func (x *HeartbeatRequest) GetLanIp() string {
-	if x != nil {
-		return x.LanIp
-	}
-	return ""
-}
-
-func (x *HeartbeatRequest) GetLanGateway() string {
-	if x != nil {
-		return x.LanGateway
-	}
-	return ""
-}
-
-func (x *HeartbeatRequest) GetLanInterface() string {
-	if x != nil {
-		return x.LanInterface
-	}
-	return ""
-}
-
-func (x *HeartbeatRequest) GetRuntimeEnv() string {
-	if x != nil {
-		return x.RuntimeEnv
-	}
-	return ""
-}
-
-func (x *HeartbeatRequest) GetHostname() string {
+func (x *SystemInfo) GetHostname() string {
 	if x != nil {
 		return x.Hostname
 	}
 	return ""
 }
 
-// Agent心跳响应
-type HeartbeatResponse struct {
+func (x *SystemInfo) GetCpu() string {
+	if x != nil {
+		return x.Cpu
+	}
+	return ""
+}
+
+func (x *SystemInfo) GetCpuCores() int32 {
+	if x != nil {
+		return x.CpuCores
+	}
+	return 0
+}
+
+func (x *SystemInfo) GetMemoryGb() int32 {
+	if x != nil {
+		return x.MemoryGb
+	}
+	return 0
+}
+
+// NetworkInterface 网络接口信息
+type NetworkInterface struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Timestamp     int64                  `protobuf:"varint,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`       // 网卡名称（如 eth0, ens192）
+	Ip            string                 `protobuf:"bytes,2,opt,name=ip,proto3" json:"ip,omitempty"`           // IP 地址
+	Mask          string                 `protobuf:"bytes,3,opt,name=mask,proto3" json:"mask,omitempty"`       // 子网掩码
+	Gateway       string                 `protobuf:"bytes,4,opt,name=gateway,proto3" json:"gateway,omitempty"` // 网关地址
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *HeartbeatResponse) Reset() {
-	*x = HeartbeatResponse{}
+func (x *NetworkInterface) Reset() {
+	*x = NetworkInterface{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkInterface) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkInterface) ProtoMessage() {}
+
+func (x *NetworkInterface) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkInterface.ProtoReflect.Descriptor instead.
+func (*NetworkInterface) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *NetworkInterface) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *NetworkInterface) GetIp() string {
+	if x != nil {
+		return x.Ip
+	}
+	return ""
+}
+
+func (x *NetworkInterface) GetMask() string {
+	if x != nil {
+		return x.Mask
+	}
+	return ""
+}
+
+func (x *NetworkInterface) GetGateway() string {
+	if x != nil {
+		return x.Gateway
+	}
+	return ""
+}
+
+// AgentRegisterRequest Agent 注册请求
+type AgentRegisterRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                               // Agent 名称
+	Secret        string                 `protobuf:"bytes,2,opt,name=secret,proto3" json:"secret,omitempty"`                           // 认证密钥
+	Version       string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`                         // Agent 版本号
+	SystemInfo    *SystemInfo            `protobuf:"bytes,4,opt,name=system_info,json=systemInfo,proto3" json:"system_info,omitempty"` // 系统信息
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentRegisterRequest) Reset() {
+	*x = AgentRegisterRequest{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentRegisterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentRegisterRequest) ProtoMessage() {}
+
+func (x *AgentRegisterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentRegisterRequest.ProtoReflect.Descriptor instead.
+func (*AgentRegisterRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *AgentRegisterRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *AgentRegisterRequest) GetSecret() string {
+	if x != nil {
+		return x.Secret
+	}
+	return ""
+}
+
+func (x *AgentRegisterRequest) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *AgentRegisterRequest) GetSystemInfo() *SystemInfo {
+	if x != nil {
+		return x.SystemInfo
+	}
+	return nil
+}
+
+// AgentRegisterResponse Agent 注册响应
+type AgentRegisterResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`                     // 是否成功
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`                      // 响应消息
+	AgentId       uint64                 `protobuf:"varint,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`      // Agent ID（Headscale User ID）
+	AuthKey       string                 `protobuf:"bytes,4,opt,name=auth_key,json=authKey,proto3" json:"auth_key,omitempty"`       // Tailscale PreAuthKey，用于隧道连接
+	ServerUrl     string                 `protobuf:"bytes,5,opt,name=server_url,json=serverUrl,proto3" json:"server_url,omitempty"` // Headscale 服务器地址
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentRegisterResponse) Reset() {
+	*x = AgentRegisterResponse{}
 	mi := &file_pkg_proto_agent_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *HeartbeatResponse) String() string {
+func (x *AgentRegisterResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*HeartbeatResponse) ProtoMessage() {}
+func (*AgentRegisterResponse) ProtoMessage() {}
 
-func (x *HeartbeatResponse) ProtoReflect() protoreflect.Message {
+func (x *AgentRegisterResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_pkg_proto_agent_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -438,386 +289,336 @@ func (x *HeartbeatResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use HeartbeatResponse.ProtoReflect.Descriptor instead.
-func (*HeartbeatResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use AgentRegisterResponse.ProtoReflect.Descriptor instead.
+func (*AgentRegisterResponse) Descriptor() ([]byte, []int) {
 	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *HeartbeatResponse) GetSuccess() bool {
+func (x *AgentRegisterResponse) GetSuccess() bool {
 	if x != nil {
 		return x.Success
 	}
 	return false
 }
 
-func (x *HeartbeatResponse) GetTimestamp() int64 {
-	if x != nil {
-		return x.Timestamp
-	}
-	return 0
-}
-
-// Server指令
-type Command struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	CommandId string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
-	Type      Command_Type           `protobuf:"varint,2,opt,name=type,proto3,enum=awecloud.signaling.Command_Type" json:"type,omitempty"`
-	// STCP相关字段
-	InstanceName string `protobuf:"bytes,3,opt,name=instance_name,json=instanceName,proto3" json:"instance_name,omitempty"`
-	SecretKey    string `protobuf:"bytes,4,opt,name=secret_key,json=secretKey,proto3" json:"secret_key,omitempty"`
-	// TCP相关字段
-	ServiceName string `protobuf:"bytes,5,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
-	RemotePort  int32  `protobuf:"varint,6,opt,name=remote_port,json=remotePort,proto3" json:"remote_port,omitempty"`
-	// 公共字段
-	LocalIp   string `protobuf:"bytes,7,opt,name=local_ip,json=localIp,proto3" json:"local_ip,omitempty"`
-	LocalPort int32  `protobuf:"varint,8,opt,name=local_port,json=localPort,proto3" json:"local_port,omitempty"`
-	// STCP Visitor相关字段
-	VisitorName string `protobuf:"bytes,9,opt,name=visitor_name,json=visitorName,proto3" json:"visitor_name,omitempty"`
-	ServerName  string `protobuf:"bytes,10,opt,name=server_name,json=serverName,proto3" json:"server_name,omitempty"`
-	BindAddr    string `protobuf:"bytes,11,opt,name=bind_addr,json=bindAddr,proto3" json:"bind_addr,omitempty"`
-	BindPort    int32  `protobuf:"varint,12,opt,name=bind_port,json=bindPort,proto3" json:"bind_port,omitempty"`
-	// [Tailscale] 端口映射相关字段
-	ProxyCommand *ProxyCommand `protobuf:"bytes,13,opt,name=proxy_command,json=proxyCommand,proto3" json:"proxy_command,omitempty"`
-	// [Tailscale] Visitor 相关字段
-	VisitorCommand *VisitorCommand `protobuf:"bytes,14,opt,name=visitor_command,json=visitorCommand,proto3" json:"visitor_command,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *Command) Reset() {
-	*x = Command{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Command) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Command) ProtoMessage() {}
-
-func (x *Command) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Command.ProtoReflect.Descriptor instead.
-func (*Command) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *Command) GetCommandId() string {
-	if x != nil {
-		return x.CommandId
-	}
-	return ""
-}
-
-func (x *Command) GetType() Command_Type {
-	if x != nil {
-		return x.Type
-	}
-	return Command_CREATE_STCP
-}
-
-func (x *Command) GetInstanceName() string {
-	if x != nil {
-		return x.InstanceName
-	}
-	return ""
-}
-
-func (x *Command) GetSecretKey() string {
-	if x != nil {
-		return x.SecretKey
-	}
-	return ""
-}
-
-func (x *Command) GetServiceName() string {
-	if x != nil {
-		return x.ServiceName
-	}
-	return ""
-}
-
-func (x *Command) GetRemotePort() int32 {
-	if x != nil {
-		return x.RemotePort
-	}
-	return 0
-}
-
-func (x *Command) GetLocalIp() string {
-	if x != nil {
-		return x.LocalIp
-	}
-	return ""
-}
-
-func (x *Command) GetLocalPort() int32 {
-	if x != nil {
-		return x.LocalPort
-	}
-	return 0
-}
-
-func (x *Command) GetVisitorName() string {
-	if x != nil {
-		return x.VisitorName
-	}
-	return ""
-}
-
-func (x *Command) GetServerName() string {
-	if x != nil {
-		return x.ServerName
-	}
-	return ""
-}
-
-func (x *Command) GetBindAddr() string {
-	if x != nil {
-		return x.BindAddr
-	}
-	return ""
-}
-
-func (x *Command) GetBindPort() int32 {
-	if x != nil {
-		return x.BindPort
-	}
-	return 0
-}
-
-func (x *Command) GetProxyCommand() *ProxyCommand {
-	if x != nil {
-		return x.ProxyCommand
-	}
-	return nil
-}
-
-func (x *Command) GetVisitorCommand() *VisitorCommand {
-	if x != nil {
-		return x.VisitorCommand
-	}
-	return nil
-}
-
-// [Tailscale] 端口映射指令（服务暴露）
-type ProxyCommand struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                // 服务名称
-	ListenPort    int32                  `protobuf:"varint,2,opt,name=listen_port,json=listenPort,proto3" json:"listen_port,omitempty"` // 监听端口
-	TargetAddr    string                 `protobuf:"bytes,3,opt,name=target_addr,json=targetAddr,proto3" json:"target_addr,omitempty"`  // 目标地址，如 192.168.1.100:3306
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ProxyCommand) Reset() {
-	*x = ProxyCommand{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ProxyCommand) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ProxyCommand) ProtoMessage() {}
-
-func (x *ProxyCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ProxyCommand.ProtoReflect.Descriptor instead.
-func (*ProxyCommand) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *ProxyCommand) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *ProxyCommand) GetListenPort() int32 {
-	if x != nil {
-		return x.ListenPort
-	}
-	return 0
-}
-
-func (x *ProxyCommand) GetTargetAddr() string {
-	if x != nil {
-		return x.TargetAddr
-	}
-	return ""
-}
-
-// [Tailscale] Visitor 指令（服务访问）
-type VisitorCommand struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                // Visitor 名称
-	ListenPort    int32                  `protobuf:"varint,2,opt,name=listen_port,json=listenPort,proto3" json:"listen_port,omitempty"` // 本地监听端口
-	TargetAddr    string                 `protobuf:"bytes,3,opt,name=target_addr,json=targetAddr,proto3" json:"target_addr,omitempty"`  // VPN 网络目标地址，如 100.64.0.1:3306
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *VisitorCommand) Reset() {
-	*x = VisitorCommand{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *VisitorCommand) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*VisitorCommand) ProtoMessage() {}
-
-func (x *VisitorCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use VisitorCommand.ProtoReflect.Descriptor instead.
-func (*VisitorCommand) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *VisitorCommand) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *VisitorCommand) GetListenPort() int32 {
-	if x != nil {
-		return x.ListenPort
-	}
-	return 0
-}
-
-func (x *VisitorCommand) GetTargetAddr() string {
-	if x != nil {
-		return x.TargetAddr
-	}
-	return ""
-}
-
-// 指令响应
-type CommandResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	CommandId     string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
-	Success       bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
-	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *CommandResponse) Reset() {
-	*x = CommandResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CommandResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CommandResponse) ProtoMessage() {}
-
-func (x *CommandResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CommandResponse.ProtoReflect.Descriptor instead.
-func (*CommandResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *CommandResponse) GetCommandId() string {
-	if x != nil {
-		return x.CommandId
-	}
-	return ""
-}
-
-func (x *CommandResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
-func (x *CommandResponse) GetMessage() string {
+func (x *AgentRegisterResponse) GetMessage() string {
 	if x != nil {
 		return x.Message
 	}
 	return ""
 }
 
-// 状态上报
-type StatusReport struct {
+func (x *AgentRegisterResponse) GetAgentId() uint64 {
+	if x != nil {
+		return x.AgentId
+	}
+	return 0
+}
+
+func (x *AgentRegisterResponse) GetAuthKey() string {
+	if x != nil {
+		return x.AuthKey
+	}
+	return ""
+}
+
+func (x *AgentRegisterResponse) GetServerUrl() string {
+	if x != nil {
+		return x.ServerUrl
+	}
+	return ""
+}
+
+// AgentAuthenticateRequest Agent 认证请求
+type AgentAuthenticateRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentId       int64                  `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	StcpStatuses  []*STCPStatus          `protobuf:"bytes,2,rep,name=stcp_statuses,json=stcpStatuses,proto3" json:"stcp_statuses,omitempty"`
+	AgentId       uint64                 `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`         // Agent ID
+	Secret        string                 `protobuf:"bytes,2,opt,name=secret,proto3" json:"secret,omitempty"`                           // 认证密钥
+	Version       string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`                         // Agent 版本号
+	SystemInfo    *SystemInfo            `protobuf:"bytes,4,opt,name=system_info,json=systemInfo,proto3" json:"system_info,omitempty"` // 系统信息
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *StatusReport) Reset() {
-	*x = StatusReport{}
+func (x *AgentAuthenticateRequest) Reset() {
+	*x = AgentAuthenticateRequest{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentAuthenticateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentAuthenticateRequest) ProtoMessage() {}
+
+func (x *AgentAuthenticateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentAuthenticateRequest.ProtoReflect.Descriptor instead.
+func (*AgentAuthenticateRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *AgentAuthenticateRequest) GetAgentId() uint64 {
+	if x != nil {
+		return x.AgentId
+	}
+	return 0
+}
+
+func (x *AgentAuthenticateRequest) GetSecret() string {
+	if x != nil {
+		return x.Secret
+	}
+	return ""
+}
+
+func (x *AgentAuthenticateRequest) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *AgentAuthenticateRequest) GetSystemInfo() *SystemInfo {
+	if x != nil {
+		return x.SystemInfo
+	}
+	return nil
+}
+
+// AgentAuthenticateResponse Agent 认证响应
+type AgentAuthenticateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`                     // 是否成功
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`                      // 响应消息
+	AuthKey       string                 `protobuf:"bytes,3,opt,name=auth_key,json=authKey,proto3" json:"auth_key,omitempty"`       // Tailscale PreAuthKey（如需重新连接）
+	ServerUrl     string                 `protobuf:"bytes,4,opt,name=server_url,json=serverUrl,proto3" json:"server_url,omitempty"` // Headscale 服务器地址
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentAuthenticateResponse) Reset() {
+	*x = AgentAuthenticateResponse{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentAuthenticateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentAuthenticateResponse) ProtoMessage() {}
+
+func (x *AgentAuthenticateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentAuthenticateResponse.ProtoReflect.Descriptor instead.
+func (*AgentAuthenticateResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *AgentAuthenticateResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *AgentAuthenticateResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *AgentAuthenticateResponse) GetAuthKey() string {
+	if x != nil {
+		return x.AuthKey
+	}
+	return ""
+}
+
+func (x *AgentAuthenticateResponse) GetServerUrl() string {
+	if x != nil {
+		return x.ServerUrl
+	}
+	return ""
+}
+
+// ServiceStatus 端口映射服务状态
+type ServiceStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ServiceId     string                 `protobuf:"bytes,1,opt,name=service_id,json=serviceId,proto3" json:"service_id,omitempty"` // 服务 ID
+	Running       bool                   `protobuf:"varint,2,opt,name=running,proto3" json:"running,omitempty"`                     // 是否运行中
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`                          // 错误信息（如有）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServiceStatus) Reset() {
+	*x = ServiceStatus{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServiceStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServiceStatus) ProtoMessage() {}
+
+func (x *ServiceStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServiceStatus.ProtoReflect.Descriptor instead.
+func (*ServiceStatus) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ServiceStatus) GetServiceId() string {
+	if x != nil {
+		return x.ServiceId
+	}
+	return ""
+}
+
+func (x *ServiceStatus) GetRunning() bool {
+	if x != nil {
+		return x.Running
+	}
+	return false
+}
+
+func (x *ServiceStatus) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+// ForwardStatus 端口访问服务状态
+type ForwardStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ForwardId     string                 `protobuf:"bytes,1,opt,name=forward_id,json=forwardId,proto3" json:"forward_id,omitempty"` // 端口访问 ID
+	Running       bool                   `protobuf:"varint,2,opt,name=running,proto3" json:"running,omitempty"`                     // 是否运行中
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`                          // 错误信息（如有）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ForwardStatus) Reset() {
+	*x = ForwardStatus{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForwardStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForwardStatus) ProtoMessage() {}
+
+func (x *ForwardStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForwardStatus.ProtoReflect.Descriptor instead.
+func (*ForwardStatus) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ForwardStatus) GetForwardId() string {
+	if x != nil {
+		return x.ForwardId
+	}
+	return ""
+}
+
+func (x *ForwardStatus) GetRunning() bool {
+	if x != nil {
+		return x.Running
+	}
+	return false
+}
+
+func (x *ForwardStatus) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+// AgentHeartbeatRequest Agent 心跳请求
+type AgentHeartbeatRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	AgentId         uint64                 `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`                         // Agent ID
+	TunnelIp        string                 `protobuf:"bytes,2,opt,name=tunnel_ip,json=tunnelIp,proto3" json:"tunnel_ip,omitempty"`                       // 隧道 IP
+	TunnelConnected bool                   `protobuf:"varint,3,opt,name=tunnel_connected,json=tunnelConnected,proto3" json:"tunnel_connected,omitempty"` // 隧道连接状态
+	ServiceStatus   []*ServiceStatus       `protobuf:"bytes,4,rep,name=service_status,json=serviceStatus,proto3" json:"service_status,omitempty"`        // 端口映射服务状态列表
+	ForwardStatus   []*ForwardStatus       `protobuf:"bytes,5,rep,name=forward_status,json=forwardStatus,proto3" json:"forward_status,omitempty"`        // 端口访问服务状态列表
+	// 网络信息（首次心跳或变更时上报）
+	Hostname      string              `protobuf:"bytes,6,opt,name=hostname,proto3" json:"hostname,omitempty"` // 主机名
+	Runtime       string              `protobuf:"bytes,7,opt,name=runtime,proto3" json:"runtime,omitempty"`   // 运行环境：docker / kubernetes / physical
+	Networks      []*NetworkInterface `protobuf:"bytes,8,rep,name=networks,proto3" json:"networks,omitempty"` // 网络接口列表
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentHeartbeatRequest) Reset() {
+	*x = AgentHeartbeatRequest{}
 	mi := &file_pkg_proto_agent_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *StatusReport) String() string {
+func (x *AgentHeartbeatRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StatusReport) ProtoMessage() {}
+func (*AgentHeartbeatRequest) ProtoMessage() {}
 
-func (x *StatusReport) ProtoReflect() protoreflect.Message {
+func (x *AgentHeartbeatRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_pkg_proto_agent_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -829,48 +630,93 @@ func (x *StatusReport) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StatusReport.ProtoReflect.Descriptor instead.
-func (*StatusReport) Descriptor() ([]byte, []int) {
+// Deprecated: Use AgentHeartbeatRequest.ProtoReflect.Descriptor instead.
+func (*AgentHeartbeatRequest) Descriptor() ([]byte, []int) {
 	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *StatusReport) GetAgentId() int64 {
+func (x *AgentHeartbeatRequest) GetAgentId() uint64 {
 	if x != nil {
 		return x.AgentId
 	}
 	return 0
 }
 
-func (x *StatusReport) GetStcpStatuses() []*STCPStatus {
+func (x *AgentHeartbeatRequest) GetTunnelIp() string {
 	if x != nil {
-		return x.StcpStatuses
+		return x.TunnelIp
+	}
+	return ""
+}
+
+func (x *AgentHeartbeatRequest) GetTunnelConnected() bool {
+	if x != nil {
+		return x.TunnelConnected
+	}
+	return false
+}
+
+func (x *AgentHeartbeatRequest) GetServiceStatus() []*ServiceStatus {
+	if x != nil {
+		return x.ServiceStatus
 	}
 	return nil
 }
 
-type STCPStatus struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	InstanceName      string                 `protobuf:"bytes,1,opt,name=instance_name,json=instanceName,proto3" json:"instance_name,omitempty"`
-	Status            string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"` // "running", "stopped", "error"
-	ActiveConnections int32                  `protobuf:"varint,3,opt,name=active_connections,json=activeConnections,proto3" json:"active_connections,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+func (x *AgentHeartbeatRequest) GetForwardStatus() []*ForwardStatus {
+	if x != nil {
+		return x.ForwardStatus
+	}
+	return nil
 }
 
-func (x *STCPStatus) Reset() {
-	*x = STCPStatus{}
+func (x *AgentHeartbeatRequest) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
+func (x *AgentHeartbeatRequest) GetRuntime() string {
+	if x != nil {
+		return x.Runtime
+	}
+	return ""
+}
+
+func (x *AgentHeartbeatRequest) GetNetworks() []*NetworkInterface {
+	if x != nil {
+		return x.Networks
+	}
+	return nil
+}
+
+// ServiceConfig 端口映射配置
+type ServiceConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                   // 服务 ID
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                               // 服务名称
+	TargetAddr    string                 `protobuf:"bytes,3,opt,name=target_addr,json=targetAddr,proto3" json:"target_addr,omitempty"` // 目标地址（如 192.168.1.10:80）
+	ListenAddr    string                 `protobuf:"bytes,4,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"` // 监听地址（如 :80）
+	Enabled       bool                   `protobuf:"varint,5,opt,name=enabled,proto3" json:"enabled,omitempty"`                        // 是否启用
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServiceConfig) Reset() {
+	*x = ServiceConfig{}
 	mi := &file_pkg_proto_agent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *STCPStatus) String() string {
+func (x *ServiceConfig) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*STCPStatus) ProtoMessage() {}
+func (*ServiceConfig) ProtoMessage() {}
 
-func (x *STCPStatus) ProtoReflect() protoreflect.Message {
+func (x *ServiceConfig) ProtoReflect() protoreflect.Message {
 	mi := &file_pkg_proto_agent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -882,943 +728,73 @@ func (x *STCPStatus) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use STCPStatus.ProtoReflect.Descriptor instead.
-func (*STCPStatus) Descriptor() ([]byte, []int) {
+// Deprecated: Use ServiceConfig.ProtoReflect.Descriptor instead.
+func (*ServiceConfig) Descriptor() ([]byte, []int) {
 	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{9}
 }
 
-func (x *STCPStatus) GetInstanceName() string {
+func (x *ServiceConfig) GetId() string {
 	if x != nil {
-		return x.InstanceName
+		return x.Id
 	}
 	return ""
 }
 
-func (x *STCPStatus) GetStatus() string {
-	if x != nil {
-		return x.Status
-	}
-	return ""
-}
-
-func (x *STCPStatus) GetActiveConnections() int32 {
-	if x != nil {
-		return x.ActiveConnections
-	}
-	return 0
-}
-
-// 状态响应
-type StatusResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *StatusResponse) Reset() {
-	*x = StatusResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[10]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *StatusResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*StatusResponse) ProtoMessage() {}
-
-func (x *StatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[10]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use StatusResponse.ProtoReflect.Descriptor instead.
-func (*StatusResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{10}
-}
-
-func (x *StatusResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
-// 获取TCP服务请求
-type GetTCPServicesRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentId       int64                  `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetTCPServicesRequest) Reset() {
-	*x = GetTCPServicesRequest{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[11]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetTCPServicesRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetTCPServicesRequest) ProtoMessage() {}
-
-func (x *GetTCPServicesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[11]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetTCPServicesRequest.ProtoReflect.Descriptor instead.
-func (*GetTCPServicesRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{11}
-}
-
-func (x *GetTCPServicesRequest) GetAgentId() int64 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-// TCP服务信息
-type TCPServiceInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ServiceName   string                 `protobuf:"bytes,1,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
-	LocalIp       string                 `protobuf:"bytes,2,opt,name=local_ip,json=localIp,proto3" json:"local_ip,omitempty"`
-	LocalPort     int32                  `protobuf:"varint,3,opt,name=local_port,json=localPort,proto3" json:"local_port,omitempty"`
-	RemotePort    int32                  `protobuf:"varint,4,opt,name=remote_port,json=remotePort,proto3" json:"remote_port,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TCPServiceInfo) Reset() {
-	*x = TCPServiceInfo{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[12]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TCPServiceInfo) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TCPServiceInfo) ProtoMessage() {}
-
-func (x *TCPServiceInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[12]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TCPServiceInfo.ProtoReflect.Descriptor instead.
-func (*TCPServiceInfo) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *TCPServiceInfo) GetServiceName() string {
-	if x != nil {
-		return x.ServiceName
-	}
-	return ""
-}
-
-func (x *TCPServiceInfo) GetLocalIp() string {
-	if x != nil {
-		return x.LocalIp
-	}
-	return ""
-}
-
-func (x *TCPServiceInfo) GetLocalPort() int32 {
-	if x != nil {
-		return x.LocalPort
-	}
-	return 0
-}
-
-func (x *TCPServiceInfo) GetRemotePort() int32 {
-	if x != nil {
-		return x.RemotePort
-	}
-	return 0
-}
-
-// 获取TCP服务响应
-type GetTCPServicesResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Services      []*TCPServiceInfo      `protobuf:"bytes,2,rep,name=services,proto3" json:"services,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetTCPServicesResponse) Reset() {
-	*x = GetTCPServicesResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[13]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetTCPServicesResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetTCPServicesResponse) ProtoMessage() {}
-
-func (x *GetTCPServicesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[13]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetTCPServicesResponse.ProtoReflect.Descriptor instead.
-func (*GetTCPServicesResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{13}
-}
-
-func (x *GetTCPServicesResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
-func (x *GetTCPServicesResponse) GetServices() []*TCPServiceInfo {
-	if x != nil {
-		return x.Services
-	}
-	return nil
-}
-
-// 获取STCP访问请求
-type GetSTCPVisitorsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentName     string                 `protobuf:"bytes,1,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetSTCPVisitorsRequest) Reset() {
-	*x = GetSTCPVisitorsRequest{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[14]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetSTCPVisitorsRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetSTCPVisitorsRequest) ProtoMessage() {}
-
-func (x *GetSTCPVisitorsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[14]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetSTCPVisitorsRequest.ProtoReflect.Descriptor instead.
-func (*GetSTCPVisitorsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{14}
-}
-
-func (x *GetSTCPVisitorsRequest) GetAgentName() string {
-	if x != nil {
-		return x.AgentName
-	}
-	return ""
-}
-
-// STCP访问信息
-type STCPVisitorInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	VisitorName   string                 `protobuf:"bytes,1,opt,name=visitor_name,json=visitorName,proto3" json:"visitor_name,omitempty"`
-	ServerName    string                 `protobuf:"bytes,2,opt,name=server_name,json=serverName,proto3" json:"server_name,omitempty"`
-	SecretKey     string                 `protobuf:"bytes,3,opt,name=secret_key,json=secretKey,proto3" json:"secret_key,omitempty"`
-	BindAddr      string                 `protobuf:"bytes,4,opt,name=bind_addr,json=bindAddr,proto3" json:"bind_addr,omitempty"`
-	BindPort      int32                  `protobuf:"varint,5,opt,name=bind_port,json=bindPort,proto3" json:"bind_port,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *STCPVisitorInfo) Reset() {
-	*x = STCPVisitorInfo{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[15]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *STCPVisitorInfo) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*STCPVisitorInfo) ProtoMessage() {}
-
-func (x *STCPVisitorInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[15]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use STCPVisitorInfo.ProtoReflect.Descriptor instead.
-func (*STCPVisitorInfo) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{15}
-}
-
-func (x *STCPVisitorInfo) GetVisitorName() string {
-	if x != nil {
-		return x.VisitorName
-	}
-	return ""
-}
-
-func (x *STCPVisitorInfo) GetServerName() string {
-	if x != nil {
-		return x.ServerName
-	}
-	return ""
-}
-
-func (x *STCPVisitorInfo) GetSecretKey() string {
-	if x != nil {
-		return x.SecretKey
-	}
-	return ""
-}
-
-func (x *STCPVisitorInfo) GetBindAddr() string {
-	if x != nil {
-		return x.BindAddr
-	}
-	return ""
-}
-
-func (x *STCPVisitorInfo) GetBindPort() int32 {
-	if x != nil {
-		return x.BindPort
-	}
-	return 0
-}
-
-// 获取STCP访问响应
-type GetSTCPVisitorsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Visitors      []*STCPVisitorInfo     `protobuf:"bytes,2,rep,name=visitors,proto3" json:"visitors,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetSTCPVisitorsResponse) Reset() {
-	*x = GetSTCPVisitorsResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[16]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetSTCPVisitorsResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetSTCPVisitorsResponse) ProtoMessage() {}
-
-func (x *GetSTCPVisitorsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[16]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetSTCPVisitorsResponse.ProtoReflect.Descriptor instead.
-func (*GetSTCPVisitorsResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{16}
-}
-
-func (x *GetSTCPVisitorsResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
-func (x *GetSTCPVisitorsResponse) GetVisitors() []*STCPVisitorInfo {
-	if x != nil {
-		return x.Visitors
-	}
-	return nil
-}
-
-// [Tailscale] Tailscale 状态上报
-type TailscaleStatusReport struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentId       int64                  `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	TailscaleIp   string                 `protobuf:"bytes,2,opt,name=tailscale_ip,json=tailscaleIp,proto3" json:"tailscale_ip,omitempty"` // Tailscale IP
-	Connected     bool                   `protobuf:"varint,3,opt,name=connected,proto3" json:"connected,omitempty"`                       // 连接状态
-	ConnType      string                 `protobuf:"bytes,4,opt,name=conn_type,json=connType,proto3" json:"conn_type,omitempty"`          // 连接方式: p2p / derp
-	LatencyMs     int32                  `protobuf:"varint,5,opt,name=latency_ms,json=latencyMs,proto3" json:"latency_ms,omitempty"`      // 延迟（毫秒）
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TailscaleStatusReport) Reset() {
-	*x = TailscaleStatusReport{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[17]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TailscaleStatusReport) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TailscaleStatusReport) ProtoMessage() {}
-
-func (x *TailscaleStatusReport) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[17]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TailscaleStatusReport.ProtoReflect.Descriptor instead.
-func (*TailscaleStatusReport) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{17}
-}
-
-func (x *TailscaleStatusReport) GetAgentId() int64 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *TailscaleStatusReport) GetTailscaleIp() string {
-	if x != nil {
-		return x.TailscaleIp
-	}
-	return ""
-}
-
-func (x *TailscaleStatusReport) GetConnected() bool {
-	if x != nil {
-		return x.Connected
-	}
-	return false
-}
-
-func (x *TailscaleStatusReport) GetConnType() string {
-	if x != nil {
-		return x.ConnType
-	}
-	return ""
-}
-
-func (x *TailscaleStatusReport) GetLatencyMs() int32 {
-	if x != nil {
-		return x.LatencyMs
-	}
-	return 0
-}
-
-// [Tailscale] 端口映射状态（服务暴露）
-type ProxyStatus struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                // 服务名称
-	ListenPort    int32                  `protobuf:"varint,2,opt,name=listen_port,json=listenPort,proto3" json:"listen_port,omitempty"` // 监听端口
-	TargetAddr    string                 `protobuf:"bytes,3,opt,name=target_addr,json=targetAddr,proto3" json:"target_addr,omitempty"`  // 目标地址
-	Status        string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`                            // 状态: running / stopped / error
-	Connections   int32                  `protobuf:"varint,5,opt,name=connections,proto3" json:"connections,omitempty"`                 // 当前连接数
-	BytesIn       int64                  `protobuf:"varint,6,opt,name=bytes_in,json=bytesIn,proto3" json:"bytes_in,omitempty"`          // 入站流量
-	BytesOut      int64                  `protobuf:"varint,7,opt,name=bytes_out,json=bytesOut,proto3" json:"bytes_out,omitempty"`       // 出站流量
-	ErrorMsg      string                 `protobuf:"bytes,8,opt,name=error_msg,json=errorMsg,proto3" json:"error_msg,omitempty"`        // 错误信息（status=error 时）
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ProxyStatus) Reset() {
-	*x = ProxyStatus{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[18]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ProxyStatus) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ProxyStatus) ProtoMessage() {}
-
-func (x *ProxyStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[18]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ProxyStatus.ProtoReflect.Descriptor instead.
-func (*ProxyStatus) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{18}
-}
-
-func (x *ProxyStatus) GetName() string {
+func (x *ServiceConfig) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *ProxyStatus) GetListenPort() int32 {
-	if x != nil {
-		return x.ListenPort
-	}
-	return 0
-}
-
-func (x *ProxyStatus) GetTargetAddr() string {
+func (x *ServiceConfig) GetTargetAddr() string {
 	if x != nil {
 		return x.TargetAddr
 	}
 	return ""
 }
 
-func (x *ProxyStatus) GetStatus() string {
-	if x != nil {
-		return x.Status
-	}
-	return ""
-}
-
-func (x *ProxyStatus) GetConnections() int32 {
-	if x != nil {
-		return x.Connections
-	}
-	return 0
-}
-
-func (x *ProxyStatus) GetBytesIn() int64 {
-	if x != nil {
-		return x.BytesIn
-	}
-	return 0
-}
-
-func (x *ProxyStatus) GetBytesOut() int64 {
-	if x != nil {
-		return x.BytesOut
-	}
-	return 0
-}
-
-func (x *ProxyStatus) GetErrorMsg() string {
-	if x != nil {
-		return x.ErrorMsg
-	}
-	return ""
-}
-
-// [Tailscale] Visitor 状态（服务访问）
-type VisitorStatus struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                // Visitor 名称
-	ListenPort    int32                  `protobuf:"varint,2,opt,name=listen_port,json=listenPort,proto3" json:"listen_port,omitempty"` // 本地监听端口
-	TargetAddr    string                 `protobuf:"bytes,3,opt,name=target_addr,json=targetAddr,proto3" json:"target_addr,omitempty"`  // VPN 目标地址
-	ListenAddr    string                 `protobuf:"bytes,4,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"`  // 实际监听地址（局域网 IP）
-	Status        string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`                            // 状态: running / stopped / error
-	Connections   int32                  `protobuf:"varint,6,opt,name=connections,proto3" json:"connections,omitempty"`                 // 当前连接数
-	BytesIn       int64                  `protobuf:"varint,7,opt,name=bytes_in,json=bytesIn,proto3" json:"bytes_in,omitempty"`          // 入站流量
-	BytesOut      int64                  `protobuf:"varint,8,opt,name=bytes_out,json=bytesOut,proto3" json:"bytes_out,omitempty"`       // 出站流量
-	ErrorMsg      string                 `protobuf:"bytes,9,opt,name=error_msg,json=errorMsg,proto3" json:"error_msg,omitempty"`        // 错误信息（status=error 时）
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *VisitorStatus) Reset() {
-	*x = VisitorStatus{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[19]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *VisitorStatus) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*VisitorStatus) ProtoMessage() {}
-
-func (x *VisitorStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[19]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use VisitorStatus.ProtoReflect.Descriptor instead.
-func (*VisitorStatus) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{19}
-}
-
-func (x *VisitorStatus) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *VisitorStatus) GetListenPort() int32 {
-	if x != nil {
-		return x.ListenPort
-	}
-	return 0
-}
-
-func (x *VisitorStatus) GetTargetAddr() string {
-	if x != nil {
-		return x.TargetAddr
-	}
-	return ""
-}
-
-func (x *VisitorStatus) GetListenAddr() string {
+func (x *ServiceConfig) GetListenAddr() string {
 	if x != nil {
 		return x.ListenAddr
 	}
 	return ""
 }
 
-func (x *VisitorStatus) GetStatus() string {
+func (x *ServiceConfig) GetEnabled() bool {
 	if x != nil {
-		return x.Status
-	}
-	return ""
-}
-
-func (x *VisitorStatus) GetConnections() int32 {
-	if x != nil {
-		return x.Connections
-	}
-	return 0
-}
-
-func (x *VisitorStatus) GetBytesIn() int64 {
-	if x != nil {
-		return x.BytesIn
-	}
-	return 0
-}
-
-func (x *VisitorStatus) GetBytesOut() int64 {
-	if x != nil {
-		return x.BytesOut
-	}
-	return 0
-}
-
-func (x *VisitorStatus) GetErrorMsg() string {
-	if x != nil {
-		return x.ErrorMsg
-	}
-	return ""
-}
-
-// [Tailscale] 端口映射状态上报（服务暴露）
-type ProxyStatusReport struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentId       int64                  `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	Proxies       []*ProxyStatus         `protobuf:"bytes,2,rep,name=proxies,proto3" json:"proxies,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ProxyStatusReport) Reset() {
-	*x = ProxyStatusReport{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[20]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ProxyStatusReport) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ProxyStatusReport) ProtoMessage() {}
-
-func (x *ProxyStatusReport) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[20]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ProxyStatusReport.ProtoReflect.Descriptor instead.
-func (*ProxyStatusReport) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{20}
-}
-
-func (x *ProxyStatusReport) GetAgentId() int64 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *ProxyStatusReport) GetProxies() []*ProxyStatus {
-	if x != nil {
-		return x.Proxies
-	}
-	return nil
-}
-
-// [Tailscale] Visitor 状态上报（服务访问）
-type VisitorStatusReport struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentId       int64                  `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	Visitors      []*VisitorStatus       `protobuf:"bytes,2,rep,name=visitors,proto3" json:"visitors,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *VisitorStatusReport) Reset() {
-	*x = VisitorStatusReport{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[21]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *VisitorStatusReport) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*VisitorStatusReport) ProtoMessage() {}
-
-func (x *VisitorStatusReport) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[21]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use VisitorStatusReport.ProtoReflect.Descriptor instead.
-func (*VisitorStatusReport) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{21}
-}
-
-func (x *VisitorStatusReport) GetAgentId() int64 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *VisitorStatusReport) GetVisitors() []*VisitorStatus {
-	if x != nil {
-		return x.Visitors
-	}
-	return nil
-}
-
-// [Tailscale] 获取状态请求
-type GetStateRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentId       int64                  `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`         // Agent ID
-	AgentToken    string                 `protobuf:"bytes,2,opt,name=agent_token,json=agentToken,proto3" json:"agent_token,omitempty"` // Agent 认证令牌
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetStateRequest) Reset() {
-	*x = GetStateRequest{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[22]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetStateRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetStateRequest) ProtoMessage() {}
-
-func (x *GetStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[22]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetStateRequest.ProtoReflect.Descriptor instead.
-func (*GetStateRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{22}
-}
-
-func (x *GetStateRequest) GetAgentId() int64 {
-	if x != nil {
-		return x.AgentId
-	}
-	return 0
-}
-
-func (x *GetStateRequest) GetAgentToken() string {
-	if x != nil {
-		return x.AgentToken
-	}
-	return ""
-}
-
-// [Tailscale] 获取状态响应
-type GetStateResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	StateData     []byte                 `protobuf:"bytes,1,opt,name=state_data,json=stateData,proto3" json:"state_data,omitempty"` // Tailscale 状态序列化数据（压缩后）
-	Exists        bool                   `protobuf:"varint,2,opt,name=exists,proto3" json:"exists,omitempty"`                       // 是否存在历史状态
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *GetStateResponse) Reset() {
-	*x = GetStateResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[23]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *GetStateResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*GetStateResponse) ProtoMessage() {}
-
-func (x *GetStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[23]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use GetStateResponse.ProtoReflect.Descriptor instead.
-func (*GetStateResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{23}
-}
-
-func (x *GetStateResponse) GetStateData() []byte {
-	if x != nil {
-		return x.StateData
-	}
-	return nil
-}
-
-func (x *GetStateResponse) GetExists() bool {
-	if x != nil {
-		return x.Exists
+		return x.Enabled
 	}
 	return false
 }
 
-// [Tailscale] 保存状态请求
-type SaveStateRequest struct {
+// ForwardConfig 端口访问配置
+type ForwardConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentId       int64                  `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`         // Agent ID
-	AgentToken    string                 `protobuf:"bytes,2,opt,name=agent_token,json=agentToken,proto3" json:"agent_token,omitempty"` // Agent 认证令牌
-	StateData     []byte                 `protobuf:"bytes,3,opt,name=state_data,json=stateData,proto3" json:"state_data,omitempty"`    // Tailscale 状态序列化数据（压缩后）
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                   // 端口访问 ID
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                               // 名称
+	TargetAddr    string                 `protobuf:"bytes,3,opt,name=target_addr,json=targetAddr,proto3" json:"target_addr,omitempty"` // 目标地址（如 100.64.0.1:3306）
+	ListenAddr    string                 `protobuf:"bytes,4,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"` // 本地监听地址（如 :13306）
+	Enabled       bool                   `protobuf:"varint,5,opt,name=enabled,proto3" json:"enabled,omitempty"`                        // 是否启用
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SaveStateRequest) Reset() {
-	*x = SaveStateRequest{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[24]
+func (x *ForwardConfig) Reset() {
+	*x = ForwardConfig{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SaveStateRequest) String() string {
+func (x *ForwardConfig) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SaveStateRequest) ProtoMessage() {}
+func (*ForwardConfig) ProtoMessage() {}
 
-func (x *SaveStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[24]
+func (x *ForwardConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1829,55 +805,180 @@ func (x *SaveStateRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SaveStateRequest.ProtoReflect.Descriptor instead.
-func (*SaveStateRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{24}
+// Deprecated: Use ForwardConfig.ProtoReflect.Descriptor instead.
+func (*ForwardConfig) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{10}
 }
 
-func (x *SaveStateRequest) GetAgentId() int64 {
+func (x *ForwardConfig) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *ForwardConfig) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ForwardConfig) GetTargetAddr() string {
+	if x != nil {
+		return x.TargetAddr
+	}
+	return ""
+}
+
+func (x *ForwardConfig) GetListenAddr() string {
+	if x != nil {
+		return x.ListenAddr
+	}
+	return ""
+}
+
+func (x *ForwardConfig) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+// AgentHeartbeatResponse Agent 心跳响应
+type AgentHeartbeatResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ConfigVersion int64                  `protobuf:"varint,1,opt,name=config_version,json=configVersion,proto3" json:"config_version,omitempty"` // 配置版本号
+	Services      []*ServiceConfig       `protobuf:"bytes,2,rep,name=services,proto3" json:"services,omitempty"`                                 // 端口映射配置（如有变更）
+	Forwards      []*ForwardConfig       `protobuf:"bytes,3,rep,name=forwards,proto3" json:"forwards,omitempty"`                                 // 端口访问配置（如有变更）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentHeartbeatResponse) Reset() {
+	*x = AgentHeartbeatResponse{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentHeartbeatResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentHeartbeatResponse) ProtoMessage() {}
+
+func (x *AgentHeartbeatResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentHeartbeatResponse.ProtoReflect.Descriptor instead.
+func (*AgentHeartbeatResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *AgentHeartbeatResponse) GetConfigVersion() int64 {
+	if x != nil {
+		return x.ConfigVersion
+	}
+	return 0
+}
+
+func (x *AgentHeartbeatResponse) GetServices() []*ServiceConfig {
+	if x != nil {
+		return x.Services
+	}
+	return nil
+}
+
+func (x *AgentHeartbeatResponse) GetForwards() []*ForwardConfig {
+	if x != nil {
+		return x.Forwards
+	}
+	return nil
+}
+
+// GetRealtimeStatusRequest 获取实时状态请求
+type GetRealtimeStatusRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AgentId       uint64                 `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"` // Agent ID
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRealtimeStatusRequest) Reset() {
+	*x = GetRealtimeStatusRequest{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRealtimeStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRealtimeStatusRequest) ProtoMessage() {}
+
+func (x *GetRealtimeStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRealtimeStatusRequest.ProtoReflect.Descriptor instead.
+func (*GetRealtimeStatusRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *GetRealtimeStatusRequest) GetAgentId() uint64 {
 	if x != nil {
 		return x.AgentId
 	}
 	return 0
 }
 
-func (x *SaveStateRequest) GetAgentToken() string {
-	if x != nil {
-		return x.AgentToken
-	}
-	return ""
+// GetRealtimeStatusResponse 获取实时状态响应
+type GetRealtimeStatusResponse struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Hostname            string                 `protobuf:"bytes,1,opt,name=hostname,proto3" json:"hostname,omitempty"`                                                     // 主机名
+	Runtime             string                 `protobuf:"bytes,2,opt,name=runtime,proto3" json:"runtime,omitempty"`                                                       // 运行环境：docker / k8s / vm / physical
+	Networks            []*NetworkInterface    `protobuf:"bytes,3,rep,name=networks,proto3" json:"networks,omitempty"`                                                     // 网络接口列表
+	TunnelIp            string                 `protobuf:"bytes,4,opt,name=tunnel_ip,json=tunnelIp,proto3" json:"tunnel_ip,omitempty"`                                     // 隧道 IP
+	TunnelConnected     bool                   `protobuf:"varint,5,opt,name=tunnel_connected,json=tunnelConnected,proto3" json:"tunnel_connected,omitempty"`               // 隧道连接状态
+	TunnelConnectedTime int64                  `protobuf:"varint,6,opt,name=tunnel_connected_time,json=tunnelConnectedTime,proto3" json:"tunnel_connected_time,omitempty"` // 隧道连接时间（Unix 时间戳）
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
-func (x *SaveStateRequest) GetStateData() []byte {
-	if x != nil {
-		return x.StateData
-	}
-	return nil
-}
-
-// [Tailscale] 保存状态响应
-type SaveStateResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"` // 是否保存成功
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SaveStateResponse) Reset() {
-	*x = SaveStateResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[25]
+func (x *GetRealtimeStatusResponse) Reset() {
+	*x = GetRealtimeStatusResponse{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SaveStateResponse) String() string {
+func (x *GetRealtimeStatusResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SaveStateResponse) ProtoMessage() {}
+func (*GetRealtimeStatusResponse) ProtoMessage() {}
 
-func (x *SaveStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[25]
+func (x *GetRealtimeStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1888,216 +989,151 @@ func (x *SaveStateResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SaveStateResponse.ProtoReflect.Descriptor instead.
-func (*SaveStateResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{25}
+// Deprecated: Use GetRealtimeStatusResponse.ProtoReflect.Descriptor instead.
+func (*GetRealtimeStatusResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{13}
 }
 
-func (x *SaveStateResponse) GetSuccess() bool {
+func (x *GetRealtimeStatusResponse) GetHostname() string {
 	if x != nil {
-		return x.Success
+		return x.Hostname
+	}
+	return ""
+}
+
+func (x *GetRealtimeStatusResponse) GetRuntime() string {
+	if x != nil {
+		return x.Runtime
+	}
+	return ""
+}
+
+func (x *GetRealtimeStatusResponse) GetNetworks() []*NetworkInterface {
+	if x != nil {
+		return x.Networks
+	}
+	return nil
+}
+
+func (x *GetRealtimeStatusResponse) GetTunnelIp() string {
+	if x != nil {
+		return x.TunnelIp
+	}
+	return ""
+}
+
+func (x *GetRealtimeStatusResponse) GetTunnelConnected() bool {
+	if x != nil {
+		return x.TunnelConnected
 	}
 	return false
+}
+
+func (x *GetRealtimeStatusResponse) GetTunnelConnectedTime() int64 {
+	if x != nil {
+		return x.TunnelConnectedTime
+	}
+	return 0
 }
 
 var File_pkg_proto_agent_proto protoreflect.FileDescriptor
 
 const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x15pkg/proto/agent.proto\x12\x12awecloud.signaling\"k\n" +
-	"\x0fRegisterRequest\x12\x1d\n" +
+	"\x15pkg/proto/agent.proto\x12\x12awecloud.signaling\"\xb7\x01\n" +
 	"\n" +
-	"agent_name\x18\x01 \x01(\tR\tagentName\x12\x1f\n" +
-	"\vagent_token\x18\x02 \x01(\tR\n" +
-	"agentToken\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\tR\aversion\"\xfa\x01\n" +
-	"\x10RegisterResponse\x12\x18\n" +
+	"SystemInfo\x12\x0e\n" +
+	"\x02os\x18\x01 \x01(\tR\x02os\x12\x1d\n" +
+	"\n" +
+	"os_version\x18\x02 \x01(\tR\tosVersion\x12\x12\n" +
+	"\x04arch\x18\x03 \x01(\tR\x04arch\x12\x1a\n" +
+	"\bhostname\x18\x04 \x01(\tR\bhostname\x12\x10\n" +
+	"\x03cpu\x18\x05 \x01(\tR\x03cpu\x12\x1b\n" +
+	"\tcpu_cores\x18\x06 \x01(\x05R\bcpuCores\x12\x1b\n" +
+	"\tmemory_gb\x18\a \x01(\x05R\bmemoryGb\"d\n" +
+	"\x10NetworkInterface\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
+	"\x02ip\x18\x02 \x01(\tR\x02ip\x12\x12\n" +
+	"\x04mask\x18\x03 \x01(\tR\x04mask\x12\x18\n" +
+	"\agateway\x18\x04 \x01(\tR\agateway\"\x9d\x01\n" +
+	"\x14AgentRegisterRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06secret\x18\x02 \x01(\tR\x06secret\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\tR\aversion\x12?\n" +
+	"\vsystem_info\x18\x04 \x01(\v2\x1e.awecloud.signaling.SystemInfoR\n" +
+	"systemInfo\"\xa0\x01\n" +
+	"\x15AgentRegisterResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x19\n" +
-	"\bagent_id\x18\x03 \x01(\x03R\aagentId\x12\x14\n" +
-	"\x05token\x18\x04 \x01(\tR\x05token\x12\x16\n" +
-	"\x06server\x18\x05 \x01(\tR\x06server\x12\x12\n" +
-	"\x04port\x18\x06 \x01(\x05R\x04port\x12\x1f\n" +
-	"\vcontrol_url\x18\a \x01(\tR\n" +
-	"controlUrl\x12\x19\n" +
-	"\bauth_key\x18\b \x01(\tR\aauthKey\x12\x19\n" +
-	"\bderp_url\x18\t \x01(\tR\aderpUrl\"\x92\x03\n" +
-	"\x10HeartbeatRequest\x12\x19\n" +
-	"\bagent_id\x18\x01 \x01(\x03R\aagentId\x12\x1f\n" +
-	"\vagent_token\x18\x02 \x01(\tR\n" +
-	"agentToken\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\tR\aversion\x12!\n" +
-	"\ftailscale_ip\x18\x04 \x01(\tR\vtailscaleIp\x12!\n" +
-	"\fts_connected\x18\x05 \x01(\bR\vtsConnected\x12 \n" +
-	"\fts_conn_type\x18\x06 \x01(\tR\n" +
-	"tsConnType\x12&\n" +
-	"\x0fts_connected_at\x18\a \x01(\x03R\rtsConnectedAt\x12\x15\n" +
-	"\x06lan_ip\x18\b \x01(\tR\x05lanIp\x12\x1f\n" +
-	"\vlan_gateway\x18\t \x01(\tR\n" +
-	"lanGateway\x12#\n" +
-	"\rlan_interface\x18\n" +
-	" \x01(\tR\flanInterface\x12\x1f\n" +
-	"\vruntime_env\x18\v \x01(\tR\n" +
-	"runtimeEnv\x12\x1a\n" +
-	"\bhostname\x18\f \x01(\tR\bhostname\"K\n" +
-	"\x11HeartbeatResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1c\n" +
-	"\ttimestamp\x18\x02 \x01(\x03R\ttimestamp\"\x9a\x06\n" +
-	"\aCommand\x12\x1d\n" +
+	"\bagent_id\x18\x03 \x01(\x04R\aagentId\x12\x19\n" +
+	"\bauth_key\x18\x04 \x01(\tR\aauthKey\x12\x1d\n" +
 	"\n" +
-	"command_id\x18\x01 \x01(\tR\tcommandId\x124\n" +
-	"\x04type\x18\x02 \x01(\x0e2 .awecloud.signaling.Command.TypeR\x04type\x12#\n" +
-	"\rinstance_name\x18\x03 \x01(\tR\finstanceName\x12\x1d\n" +
+	"server_url\x18\x05 \x01(\tR\tserverUrl\"\xa8\x01\n" +
+	"\x18AgentAuthenticateRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\x04R\aagentId\x12\x16\n" +
+	"\x06secret\x18\x02 \x01(\tR\x06secret\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\tR\aversion\x12?\n" +
+	"\vsystem_info\x18\x04 \x01(\v2\x1e.awecloud.signaling.SystemInfoR\n" +
+	"systemInfo\"\x89\x01\n" +
+	"\x19AgentAuthenticateResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x19\n" +
+	"\bauth_key\x18\x03 \x01(\tR\aauthKey\x12\x1d\n" +
 	"\n" +
-	"secret_key\x18\x04 \x01(\tR\tsecretKey\x12!\n" +
-	"\fservice_name\x18\x05 \x01(\tR\vserviceName\x12\x1f\n" +
-	"\vremote_port\x18\x06 \x01(\x05R\n" +
-	"remotePort\x12\x19\n" +
-	"\blocal_ip\x18\a \x01(\tR\alocalIp\x12\x1d\n" +
+	"server_url\x18\x04 \x01(\tR\tserverUrl\"^\n" +
+	"\rServiceStatus\x12\x1d\n" +
 	"\n" +
-	"local_port\x18\b \x01(\x05R\tlocalPort\x12!\n" +
-	"\fvisitor_name\x18\t \x01(\tR\vvisitorName\x12\x1f\n" +
-	"\vserver_name\x18\n" +
-	" \x01(\tR\n" +
-	"serverName\x12\x1b\n" +
-	"\tbind_addr\x18\v \x01(\tR\bbindAddr\x12\x1b\n" +
-	"\tbind_port\x18\f \x01(\x05R\bbindPort\x12E\n" +
-	"\rproxy_command\x18\r \x01(\v2 .awecloud.signaling.ProxyCommandR\fproxyCommand\x12K\n" +
-	"\x0fvisitor_command\x18\x0e \x01(\v2\".awecloud.signaling.VisitorCommandR\x0evisitorCommand\"\xe5\x01\n" +
-	"\x04Type\x12\x0f\n" +
-	"\vCREATE_STCP\x10\x00\x12\x0f\n" +
-	"\vDELETE_STCP\x10\x01\x12\x0e\n" +
+	"service_id\x18\x01 \x01(\tR\tserviceId\x12\x18\n" +
+	"\arunning\x18\x02 \x01(\bR\arunning\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"^\n" +
+	"\rForwardStatus\x12\x1d\n" +
 	"\n" +
-	"CREATE_TCP\x10\x02\x12\x0e\n" +
-	"\n" +
-	"DELETE_TCP\x10\x03\x12\x17\n" +
-	"\x13CREATE_STCP_VISITOR\x10\x04\x12\x17\n" +
-	"\x13DELETE_STCP_VISITOR\x10\x05\x12\x0f\n" +
-	"\vSTART_PROXY\x10\n" +
-	"\x12\x0e\n" +
-	"\n" +
-	"STOP_PROXY\x10\v\x12\x10\n" +
-	"\fSYNC_PROXIES\x10\f\x12\x11\n" +
-	"\rSTART_VISITOR\x10\r\x12\x10\n" +
-	"\fSTOP_VISITOR\x10\x0e\x12\x11\n" +
-	"\rSYNC_VISITORS\x10\x0f\"d\n" +
-	"\fProxyCommand\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
-	"\vlisten_port\x18\x02 \x01(\x05R\n" +
-	"listenPort\x12\x1f\n" +
-	"\vtarget_addr\x18\x03 \x01(\tR\n" +
-	"targetAddr\"f\n" +
-	"\x0eVisitorCommand\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
-	"\vlisten_port\x18\x02 \x01(\x05R\n" +
-	"listenPort\x12\x1f\n" +
-	"\vtarget_addr\x18\x03 \x01(\tR\n" +
-	"targetAddr\"d\n" +
-	"\x0fCommandResponse\x12\x1d\n" +
-	"\n" +
-	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x18\n" +
-	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage\"n\n" +
-	"\fStatusReport\x12\x19\n" +
-	"\bagent_id\x18\x01 \x01(\x03R\aagentId\x12C\n" +
-	"\rstcp_statuses\x18\x02 \x03(\v2\x1e.awecloud.signaling.STCPStatusR\fstcpStatuses\"x\n" +
-	"\n" +
-	"STCPStatus\x12#\n" +
-	"\rinstance_name\x18\x01 \x01(\tR\finstanceName\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status\x12-\n" +
-	"\x12active_connections\x18\x03 \x01(\x05R\x11activeConnections\"*\n" +
-	"\x0eStatusResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"2\n" +
-	"\x15GetTCPServicesRequest\x12\x19\n" +
-	"\bagent_id\x18\x01 \x01(\x03R\aagentId\"\x8e\x01\n" +
-	"\x0eTCPServiceInfo\x12!\n" +
-	"\fservice_name\x18\x01 \x01(\tR\vserviceName\x12\x19\n" +
-	"\blocal_ip\x18\x02 \x01(\tR\alocalIp\x12\x1d\n" +
-	"\n" +
-	"local_port\x18\x03 \x01(\x05R\tlocalPort\x12\x1f\n" +
-	"\vremote_port\x18\x04 \x01(\x05R\n" +
-	"remotePort\"r\n" +
-	"\x16GetTCPServicesResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12>\n" +
-	"\bservices\x18\x02 \x03(\v2\".awecloud.signaling.TCPServiceInfoR\bservices\"7\n" +
-	"\x16GetSTCPVisitorsRequest\x12\x1d\n" +
-	"\n" +
-	"agent_name\x18\x01 \x01(\tR\tagentName\"\xae\x01\n" +
-	"\x0fSTCPVisitorInfo\x12!\n" +
-	"\fvisitor_name\x18\x01 \x01(\tR\vvisitorName\x12\x1f\n" +
-	"\vserver_name\x18\x02 \x01(\tR\n" +
-	"serverName\x12\x1d\n" +
-	"\n" +
-	"secret_key\x18\x03 \x01(\tR\tsecretKey\x12\x1b\n" +
-	"\tbind_addr\x18\x04 \x01(\tR\bbindAddr\x12\x1b\n" +
-	"\tbind_port\x18\x05 \x01(\x05R\bbindPort\"t\n" +
-	"\x17GetSTCPVisitorsResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12?\n" +
-	"\bvisitors\x18\x02 \x03(\v2#.awecloud.signaling.STCPVisitorInfoR\bvisitors\"\xaf\x01\n" +
-	"\x15TailscaleStatusReport\x12\x19\n" +
-	"\bagent_id\x18\x01 \x01(\x03R\aagentId\x12!\n" +
-	"\ftailscale_ip\x18\x02 \x01(\tR\vtailscaleIp\x12\x1c\n" +
-	"\tconnected\x18\x03 \x01(\bR\tconnected\x12\x1b\n" +
-	"\tconn_type\x18\x04 \x01(\tR\bconnType\x12\x1d\n" +
-	"\n" +
-	"latency_ms\x18\x05 \x01(\x05R\tlatencyMs\"\xf2\x01\n" +
-	"\vProxyStatus\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
-	"\vlisten_port\x18\x02 \x01(\x05R\n" +
-	"listenPort\x12\x1f\n" +
-	"\vtarget_addr\x18\x03 \x01(\tR\n" +
-	"targetAddr\x12\x16\n" +
-	"\x06status\x18\x04 \x01(\tR\x06status\x12 \n" +
-	"\vconnections\x18\x05 \x01(\x05R\vconnections\x12\x19\n" +
-	"\bbytes_in\x18\x06 \x01(\x03R\abytesIn\x12\x1b\n" +
-	"\tbytes_out\x18\a \x01(\x03R\bbytesOut\x12\x1b\n" +
-	"\terror_msg\x18\b \x01(\tR\berrorMsg\"\x95\x02\n" +
-	"\rVisitorStatus\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
-	"\vlisten_port\x18\x02 \x01(\x05R\n" +
-	"listenPort\x12\x1f\n" +
+	"forward_id\x18\x01 \x01(\tR\tforwardId\x12\x18\n" +
+	"\arunning\x18\x02 \x01(\bR\arunning\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\x86\x03\n" +
+	"\x15AgentHeartbeatRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\x04R\aagentId\x12\x1b\n" +
+	"\ttunnel_ip\x18\x02 \x01(\tR\btunnelIp\x12)\n" +
+	"\x10tunnel_connected\x18\x03 \x01(\bR\x0ftunnelConnected\x12H\n" +
+	"\x0eservice_status\x18\x04 \x03(\v2!.awecloud.signaling.ServiceStatusR\rserviceStatus\x12H\n" +
+	"\x0eforward_status\x18\x05 \x03(\v2!.awecloud.signaling.ForwardStatusR\rforwardStatus\x12\x1a\n" +
+	"\bhostname\x18\x06 \x01(\tR\bhostname\x12\x18\n" +
+	"\aruntime\x18\a \x01(\tR\aruntime\x12@\n" +
+	"\bnetworks\x18\b \x03(\v2$.awecloud.signaling.NetworkInterfaceR\bnetworks\"\x8f\x01\n" +
+	"\rServiceConfig\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1f\n" +
 	"\vtarget_addr\x18\x03 \x01(\tR\n" +
 	"targetAddr\x12\x1f\n" +
 	"\vlisten_addr\x18\x04 \x01(\tR\n" +
-	"listenAddr\x12\x16\n" +
-	"\x06status\x18\x05 \x01(\tR\x06status\x12 \n" +
-	"\vconnections\x18\x06 \x01(\x05R\vconnections\x12\x19\n" +
-	"\bbytes_in\x18\a \x01(\x03R\abytesIn\x12\x1b\n" +
-	"\tbytes_out\x18\b \x01(\x03R\bbytesOut\x12\x1b\n" +
-	"\terror_msg\x18\t \x01(\tR\berrorMsg\"i\n" +
-	"\x11ProxyStatusReport\x12\x19\n" +
-	"\bagent_id\x18\x01 \x01(\x03R\aagentId\x129\n" +
-	"\aproxies\x18\x02 \x03(\v2\x1f.awecloud.signaling.ProxyStatusR\aproxies\"o\n" +
-	"\x13VisitorStatusReport\x12\x19\n" +
-	"\bagent_id\x18\x01 \x01(\x03R\aagentId\x12=\n" +
-	"\bvisitors\x18\x02 \x03(\v2!.awecloud.signaling.VisitorStatusR\bvisitors\"M\n" +
-	"\x0fGetStateRequest\x12\x19\n" +
-	"\bagent_id\x18\x01 \x01(\x03R\aagentId\x12\x1f\n" +
-	"\vagent_token\x18\x02 \x01(\tR\n" +
-	"agentToken\"I\n" +
-	"\x10GetStateResponse\x12\x1d\n" +
-	"\n" +
-	"state_data\x18\x01 \x01(\fR\tstateData\x12\x16\n" +
-	"\x06exists\x18\x02 \x01(\bR\x06exists\"m\n" +
-	"\x10SaveStateRequest\x12\x19\n" +
-	"\bagent_id\x18\x01 \x01(\x03R\aagentId\x12\x1f\n" +
-	"\vagent_token\x18\x02 \x01(\tR\n" +
-	"agentToken\x12\x1d\n" +
-	"\n" +
-	"state_data\x18\x03 \x01(\fR\tstateData\"-\n" +
-	"\x11SaveStateResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess2\xdc\a\n" +
-	"\fAgentService\x12U\n" +
-	"\bRegister\x12#.awecloud.signaling.RegisterRequest\x1a$.awecloud.signaling.RegisterResponse\x12X\n" +
-	"\tHeartbeat\x12$.awecloud.signaling.HeartbeatRequest\x1a%.awecloud.signaling.HeartbeatResponse\x12W\n" +
-	"\x0fReceiveCommands\x12#.awecloud.signaling.CommandResponse\x1a\x1b.awecloud.signaling.Command(\x010\x01\x12T\n" +
-	"\fReportStatus\x12 .awecloud.signaling.StatusReport\x1a\".awecloud.signaling.StatusResponse\x12n\n" +
-	"\x15GetEnabledTCPServices\x12).awecloud.signaling.GetTCPServicesRequest\x1a*.awecloud.signaling.GetTCPServicesResponse\x12q\n" +
-	"\x16GetEnabledSTCPVisitors\x12*.awecloud.signaling.GetSTCPVisitorsRequest\x1a+.awecloud.signaling.GetSTCPVisitorsResponse\x12f\n" +
-	"\x15ReportTailscaleStatus\x12).awecloud.signaling.TailscaleStatusReport\x1a\".awecloud.signaling.StatusResponse\x12^\n" +
-	"\x11ReportProxyStatus\x12%.awecloud.signaling.ProxyStatusReport\x1a\".awecloud.signaling.StatusResponse\x12^\n" +
-	"\x11GetTailscaleState\x12#.awecloud.signaling.GetStateRequest\x1a$.awecloud.signaling.GetStateResponse\x12a\n" +
-	"\x12SaveTailscaleState\x12$.awecloud.signaling.SaveStateRequest\x1a%.awecloud.signaling.SaveStateResponseB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
+	"listenAddr\x12\x18\n" +
+	"\aenabled\x18\x05 \x01(\bR\aenabled\"\x8f\x01\n" +
+	"\rForwardConfig\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1f\n" +
+	"\vtarget_addr\x18\x03 \x01(\tR\n" +
+	"targetAddr\x12\x1f\n" +
+	"\vlisten_addr\x18\x04 \x01(\tR\n" +
+	"listenAddr\x12\x18\n" +
+	"\aenabled\x18\x05 \x01(\bR\aenabled\"\xbd\x01\n" +
+	"\x16AgentHeartbeatResponse\x12%\n" +
+	"\x0econfig_version\x18\x01 \x01(\x03R\rconfigVersion\x12=\n" +
+	"\bservices\x18\x02 \x03(\v2!.awecloud.signaling.ServiceConfigR\bservices\x12=\n" +
+	"\bforwards\x18\x03 \x03(\v2!.awecloud.signaling.ForwardConfigR\bforwards\"5\n" +
+	"\x18GetRealtimeStatusRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\x04R\aagentId\"\x8f\x02\n" +
+	"\x19GetRealtimeStatusResponse\x12\x1a\n" +
+	"\bhostname\x18\x01 \x01(\tR\bhostname\x12\x18\n" +
+	"\aruntime\x18\x02 \x01(\tR\aruntime\x12@\n" +
+	"\bnetworks\x18\x03 \x03(\v2$.awecloud.signaling.NetworkInterfaceR\bnetworks\x12\x1b\n" +
+	"\ttunnel_ip\x18\x04 \x01(\tR\btunnelIp\x12)\n" +
+	"\x10tunnel_connected\x18\x05 \x01(\bR\x0ftunnelConnected\x122\n" +
+	"\x15tunnel_connected_time\x18\x06 \x01(\x03R\x13tunnelConnectedTime2\xb6\x03\n" +
+	"\fAgentService\x12_\n" +
+	"\bRegister\x12(.awecloud.signaling.AgentRegisterRequest\x1a).awecloud.signaling.AgentRegisterResponse\x12k\n" +
+	"\fAuthenticate\x12,.awecloud.signaling.AgentAuthenticateRequest\x1a-.awecloud.signaling.AgentAuthenticateResponse\x12f\n" +
+	"\tHeartbeat\x12).awecloud.signaling.AgentHeartbeatRequest\x1a*.awecloud.signaling.AgentHeartbeatResponse(\x010\x01\x12p\n" +
+	"\x11GetRealtimeStatus\x12,.awecloud.signaling.GetRealtimeStatusRequest\x1a-.awecloud.signaling.GetRealtimeStatusResponseB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
 
 var (
 	file_pkg_proto_agent_proto_rawDescOnce sync.Once
@@ -2111,68 +1147,42 @@ func file_pkg_proto_agent_proto_rawDescGZIP() []byte {
 	return file_pkg_proto_agent_proto_rawDescData
 }
 
-var file_pkg_proto_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_pkg_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_pkg_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_pkg_proto_agent_proto_goTypes = []any{
-	(Command_Type)(0),               // 0: awecloud.signaling.Command.Type
-	(*RegisterRequest)(nil),         // 1: awecloud.signaling.RegisterRequest
-	(*RegisterResponse)(nil),        // 2: awecloud.signaling.RegisterResponse
-	(*HeartbeatRequest)(nil),        // 3: awecloud.signaling.HeartbeatRequest
-	(*HeartbeatResponse)(nil),       // 4: awecloud.signaling.HeartbeatResponse
-	(*Command)(nil),                 // 5: awecloud.signaling.Command
-	(*ProxyCommand)(nil),            // 6: awecloud.signaling.ProxyCommand
-	(*VisitorCommand)(nil),          // 7: awecloud.signaling.VisitorCommand
-	(*CommandResponse)(nil),         // 8: awecloud.signaling.CommandResponse
-	(*StatusReport)(nil),            // 9: awecloud.signaling.StatusReport
-	(*STCPStatus)(nil),              // 10: awecloud.signaling.STCPStatus
-	(*StatusResponse)(nil),          // 11: awecloud.signaling.StatusResponse
-	(*GetTCPServicesRequest)(nil),   // 12: awecloud.signaling.GetTCPServicesRequest
-	(*TCPServiceInfo)(nil),          // 13: awecloud.signaling.TCPServiceInfo
-	(*GetTCPServicesResponse)(nil),  // 14: awecloud.signaling.GetTCPServicesResponse
-	(*GetSTCPVisitorsRequest)(nil),  // 15: awecloud.signaling.GetSTCPVisitorsRequest
-	(*STCPVisitorInfo)(nil),         // 16: awecloud.signaling.STCPVisitorInfo
-	(*GetSTCPVisitorsResponse)(nil), // 17: awecloud.signaling.GetSTCPVisitorsResponse
-	(*TailscaleStatusReport)(nil),   // 18: awecloud.signaling.TailscaleStatusReport
-	(*ProxyStatus)(nil),             // 19: awecloud.signaling.ProxyStatus
-	(*VisitorStatus)(nil),           // 20: awecloud.signaling.VisitorStatus
-	(*ProxyStatusReport)(nil),       // 21: awecloud.signaling.ProxyStatusReport
-	(*VisitorStatusReport)(nil),     // 22: awecloud.signaling.VisitorStatusReport
-	(*GetStateRequest)(nil),         // 23: awecloud.signaling.GetStateRequest
-	(*GetStateResponse)(nil),        // 24: awecloud.signaling.GetStateResponse
-	(*SaveStateRequest)(nil),        // 25: awecloud.signaling.SaveStateRequest
-	(*SaveStateResponse)(nil),       // 26: awecloud.signaling.SaveStateResponse
+	(*SystemInfo)(nil),                // 0: awecloud.signaling.SystemInfo
+	(*NetworkInterface)(nil),          // 1: awecloud.signaling.NetworkInterface
+	(*AgentRegisterRequest)(nil),      // 2: awecloud.signaling.AgentRegisterRequest
+	(*AgentRegisterResponse)(nil),     // 3: awecloud.signaling.AgentRegisterResponse
+	(*AgentAuthenticateRequest)(nil),  // 4: awecloud.signaling.AgentAuthenticateRequest
+	(*AgentAuthenticateResponse)(nil), // 5: awecloud.signaling.AgentAuthenticateResponse
+	(*ServiceStatus)(nil),             // 6: awecloud.signaling.ServiceStatus
+	(*ForwardStatus)(nil),             // 7: awecloud.signaling.ForwardStatus
+	(*AgentHeartbeatRequest)(nil),     // 8: awecloud.signaling.AgentHeartbeatRequest
+	(*ServiceConfig)(nil),             // 9: awecloud.signaling.ServiceConfig
+	(*ForwardConfig)(nil),             // 10: awecloud.signaling.ForwardConfig
+	(*AgentHeartbeatResponse)(nil),    // 11: awecloud.signaling.AgentHeartbeatResponse
+	(*GetRealtimeStatusRequest)(nil),  // 12: awecloud.signaling.GetRealtimeStatusRequest
+	(*GetRealtimeStatusResponse)(nil), // 13: awecloud.signaling.GetRealtimeStatusResponse
 }
 var file_pkg_proto_agent_proto_depIdxs = []int32{
-	0,  // 0: awecloud.signaling.Command.type:type_name -> awecloud.signaling.Command.Type
-	6,  // 1: awecloud.signaling.Command.proxy_command:type_name -> awecloud.signaling.ProxyCommand
-	7,  // 2: awecloud.signaling.Command.visitor_command:type_name -> awecloud.signaling.VisitorCommand
-	10, // 3: awecloud.signaling.StatusReport.stcp_statuses:type_name -> awecloud.signaling.STCPStatus
-	13, // 4: awecloud.signaling.GetTCPServicesResponse.services:type_name -> awecloud.signaling.TCPServiceInfo
-	16, // 5: awecloud.signaling.GetSTCPVisitorsResponse.visitors:type_name -> awecloud.signaling.STCPVisitorInfo
-	19, // 6: awecloud.signaling.ProxyStatusReport.proxies:type_name -> awecloud.signaling.ProxyStatus
-	20, // 7: awecloud.signaling.VisitorStatusReport.visitors:type_name -> awecloud.signaling.VisitorStatus
-	1,  // 8: awecloud.signaling.AgentService.Register:input_type -> awecloud.signaling.RegisterRequest
-	3,  // 9: awecloud.signaling.AgentService.Heartbeat:input_type -> awecloud.signaling.HeartbeatRequest
-	8,  // 10: awecloud.signaling.AgentService.ReceiveCommands:input_type -> awecloud.signaling.CommandResponse
-	9,  // 11: awecloud.signaling.AgentService.ReportStatus:input_type -> awecloud.signaling.StatusReport
-	12, // 12: awecloud.signaling.AgentService.GetEnabledTCPServices:input_type -> awecloud.signaling.GetTCPServicesRequest
-	15, // 13: awecloud.signaling.AgentService.GetEnabledSTCPVisitors:input_type -> awecloud.signaling.GetSTCPVisitorsRequest
-	18, // 14: awecloud.signaling.AgentService.ReportTailscaleStatus:input_type -> awecloud.signaling.TailscaleStatusReport
-	21, // 15: awecloud.signaling.AgentService.ReportProxyStatus:input_type -> awecloud.signaling.ProxyStatusReport
-	23, // 16: awecloud.signaling.AgentService.GetTailscaleState:input_type -> awecloud.signaling.GetStateRequest
-	25, // 17: awecloud.signaling.AgentService.SaveTailscaleState:input_type -> awecloud.signaling.SaveStateRequest
-	2,  // 18: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.RegisterResponse
-	4,  // 19: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.HeartbeatResponse
-	5,  // 20: awecloud.signaling.AgentService.ReceiveCommands:output_type -> awecloud.signaling.Command
-	11, // 21: awecloud.signaling.AgentService.ReportStatus:output_type -> awecloud.signaling.StatusResponse
-	14, // 22: awecloud.signaling.AgentService.GetEnabledTCPServices:output_type -> awecloud.signaling.GetTCPServicesResponse
-	17, // 23: awecloud.signaling.AgentService.GetEnabledSTCPVisitors:output_type -> awecloud.signaling.GetSTCPVisitorsResponse
-	11, // 24: awecloud.signaling.AgentService.ReportTailscaleStatus:output_type -> awecloud.signaling.StatusResponse
-	11, // 25: awecloud.signaling.AgentService.ReportProxyStatus:output_type -> awecloud.signaling.StatusResponse
-	24, // 26: awecloud.signaling.AgentService.GetTailscaleState:output_type -> awecloud.signaling.GetStateResponse
-	26, // 27: awecloud.signaling.AgentService.SaveTailscaleState:output_type -> awecloud.signaling.SaveStateResponse
-	18, // [18:28] is the sub-list for method output_type
-	8,  // [8:18] is the sub-list for method input_type
+	0,  // 0: awecloud.signaling.AgentRegisterRequest.system_info:type_name -> awecloud.signaling.SystemInfo
+	0,  // 1: awecloud.signaling.AgentAuthenticateRequest.system_info:type_name -> awecloud.signaling.SystemInfo
+	6,  // 2: awecloud.signaling.AgentHeartbeatRequest.service_status:type_name -> awecloud.signaling.ServiceStatus
+	7,  // 3: awecloud.signaling.AgentHeartbeatRequest.forward_status:type_name -> awecloud.signaling.ForwardStatus
+	1,  // 4: awecloud.signaling.AgentHeartbeatRequest.networks:type_name -> awecloud.signaling.NetworkInterface
+	9,  // 5: awecloud.signaling.AgentHeartbeatResponse.services:type_name -> awecloud.signaling.ServiceConfig
+	10, // 6: awecloud.signaling.AgentHeartbeatResponse.forwards:type_name -> awecloud.signaling.ForwardConfig
+	1,  // 7: awecloud.signaling.GetRealtimeStatusResponse.networks:type_name -> awecloud.signaling.NetworkInterface
+	2,  // 8: awecloud.signaling.AgentService.Register:input_type -> awecloud.signaling.AgentRegisterRequest
+	4,  // 9: awecloud.signaling.AgentService.Authenticate:input_type -> awecloud.signaling.AgentAuthenticateRequest
+	8,  // 10: awecloud.signaling.AgentService.Heartbeat:input_type -> awecloud.signaling.AgentHeartbeatRequest
+	12, // 11: awecloud.signaling.AgentService.GetRealtimeStatus:input_type -> awecloud.signaling.GetRealtimeStatusRequest
+	3,  // 12: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.AgentRegisterResponse
+	5,  // 13: awecloud.signaling.AgentService.Authenticate:output_type -> awecloud.signaling.AgentAuthenticateResponse
+	11, // 14: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.AgentHeartbeatResponse
+	13, // 15: awecloud.signaling.AgentService.GetRealtimeStatus:output_type -> awecloud.signaling.GetRealtimeStatusResponse
+	12, // [12:16] is the sub-list for method output_type
+	8,  // [8:12] is the sub-list for method input_type
 	8,  // [8:8] is the sub-list for extension type_name
 	8,  // [8:8] is the sub-list for extension extendee
 	0,  // [0:8] is the sub-list for field type_name
@@ -2188,14 +1198,13 @@ func file_pkg_proto_agent_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_agent_proto_rawDesc), len(file_pkg_proto_agent_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   26,
+			NumEnums:      0,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_pkg_proto_agent_proto_goTypes,
 		DependencyIndexes: file_pkg_proto_agent_proto_depIdxs,
-		EnumInfos:         file_pkg_proto_agent_proto_enumTypes,
 		MessageInfos:      file_pkg_proto_agent_proto_msgTypes,
 	}.Build()
 	File_pkg_proto_agent_proto = out.File

@@ -73,15 +73,15 @@ Agent 心跳时上报，存储系统硬件信息：
 }
 ```
 
-| 字段       | 说明                              |
-| ---------- | --------------------------------- |
-| os         | 操作系统：linux / windows / darwin|
-| os_version | 系统版本                          |
-| arch       | CPU 架构：amd64 / arm64           |
-| hostname   | 主机名                            |
-| cpu        | CPU 型号                          |
-| cpu_cores  | CPU 核心数                        |
-| memory_gb  | 内存大小（GB）                    |
+| 字段       | 说明                               |
+| ---------- | ---------------------------------- |
+| os         | 操作系统：linux / windows / darwin |
+| os_version | 系统版本                           |
+| arch       | CPU 架构：amd64 / arm64            |
+| hostname   | 主机名                             |
+| cpu        | CPU 型号                           |
+| cpu_cores  | CPU 核心数                         |
+| memory_gb  | 内存大小（GB）                     |
 
 ### 2.2 Secret 设计
 
@@ -184,13 +184,13 @@ Client 表只存储用户信息，不存储设备信息。一个 Client 可以�
 
 Desktop 首次登录成功后生成设备专属 secret：
 
-| 项目     | 说明                                                |
-| -------- | --------------------------------------------------- |
-| 生成时机 | Desktop 首次用 Client 凭证登录成功后自动生成        |
-| 存储方式 | bcrypt 哈希后存储，禁止明文                         |
-| 客户端   | 明文 secret 存储在 Desktop 本地，用于后续认证       |
-| 有效期   | 永久有效，除非 Client 重置                          |
-| 重置方式 | Client 可注销设备或重置 secret，重置后设备需重新登录|
+| 项目     | 说明                                                 |
+| -------- | ---------------------------------------------------- |
+| 生成时机 | Desktop 首次用 Client 凭证登录成功后自动生成         |
+| 存储方式 | bcrypt 哈希后存储，禁止明文                          |
+| 客户端   | 明文 secret 存储在 Desktop 本地，用于后续认证        |
+| 有效期   | 永久有效，除非 Client 重置                           |
+| 重置方式 | Client 可注销设备或重置 secret，重置后设备需重新登录 |
 
 认证流程：
 
@@ -223,15 +223,15 @@ Desktop 连接时上报，存储设备硬件信息：
 }
 ```
 
-| 字段       | 说明                              |
-| ---------- | --------------------------------- |
-| os         | 操作系统：windows / darwin / linux|
-| os_version | 系统版本                          |
-| arch       | CPU 架构：amd64 / arm64           |
-| hostname   | 主机名                            |
-| cpu        | CPU 型号                          |
-| cpu_cores  | CPU 核心数                        |
-| memory_gb  | 内存大小（GB）                    |
+| 字段       | 说明                               |
+| ---------- | ---------------------------------- |
+| os         | 操作系统：windows / darwin / linux |
+| os_version | 系统版本                           |
+| arch       | CPU 架构：amd64 / arm64            |
+| hostname   | 主机名                             |
+| cpu        | CPU 型号                           |
+| cpu_cores  | CPU 核心数                         |
+| memory_gb  | 内存大小（GB）                     |
 
 ### 4.5 索引
 
@@ -384,10 +384,10 @@ Desktop 连接时上报，存储设备硬件信息：
 
 ### 10.2 索引
 
-| 索引名称              | 字段              | 类型 |
-| --------------------- | ----------------- | ---- |
-| uk_agent_group_member | group_id, agent_id| 唯一 |
-| idx_agm_agent         | agent_id          | 普通 |
+| 索引名称              | 字段               | 类型 |
+| --------------------- | ------------------ | ---- |
+| uk_agent_group_member | group_id, agent_id | 唯一 |
+| idx_agm_agent         | agent_id           | 普通 |
 
 ---
 
@@ -404,10 +404,10 @@ Desktop 连接时上报，存储设备硬件信息：
 
 索引：
 
-| 索引名称           | 字段                 | 类型 |
-| ------------------ | -------------------- | ---- |
-| uk_svc_client_perm | service_id, client_id| 唯一 |
-| idx_scp_client     | client_id            | 普通 |
+| 索引名称           | 字段                  | 类型 |
+| ------------------ | --------------------- | ---- |
+| uk_svc_client_perm | service_id, client_id | 唯一 |
+| idx_scp_client     | client_id             | 普通 |
 
 ### 11.2 服务-用户分组授权表 (service_client_group_permission)
 
@@ -440,10 +440,10 @@ Desktop 连接时上报，存储设备硬件信息：
 
 索引：
 
-| 索引名称          | 字段                | 类型 |
-| ----------------- | ------------------- | ---- |
-| uk_svc_agent_perm | service_id, agent_id| 唯一 |
-| idx_sap_agent     | agent_id            | 普通 |
+| 索引名称          | 字段                 | 类型 |
+| ----------------- | -------------------- | ---- |
+| uk_svc_agent_perm | service_id, agent_id | 唯一 |
+| idx_sap_agent     | agent_id             | 普通 |
 
 ### 12.2 服务-代理分组授权表 (service_agent_group_permission)
 
@@ -467,22 +467,23 @@ Desktop 连接时上报，存储设备硬件信息：
 
 ### 13.1 表结构
 
-| 字段        | 类型     | 必填 | 说明                         |
-| ----------- | -------- | ---- | ---------------------------- |
-| id          | int64    | 是   | 主键，自增                   |
-| admin_id    | int64    | 否   | 操作人 ID，外键              |
-| action_type | string   | 是   | 操作类型                     |
-| target_type | string   | 是   | 目标类型（agent/client/...） |
-| target_id   | string   | 是   | 目标 ID                      |
-| target_name | string   | 是   | 目标名称                     |
-| detail      | string   | 否   | 详情（JSON）                 |
-| created_at  | datetime | 是   | 创建时间                     |
+| 字段        | 类型     | 必填 | 说明                                    |
+| ----------- | -------- | ---- | --------------------------------------- |
+| id          | int64    | 是   | 主键，自增                              |
+| user_id     | int64    | 否   | 操作人 ID                               |
+| user_type   | string   | 否   | 操作人类型（admin/desktop），默认 admin |
+| action_type | string   | 是   | 操作类型                                |
+| target_type | string   | 是   | 目标类型（agent/client/...）            |
+| target_id   | string   | 是   | 目标 ID                                 |
+| target_name | string   | 是   | 目标名称                                |
+| detail      | string   | 否   | 详情（JSON）                            |
+| created_at  | datetime | 是   | 创建时间                                |
 
 ### 13.2 索引
 
 | 索引名称         | 字段        | 类型 |
 | ---------------- | ----------- | ---- |
-| idx_audit_admin  | admin_id    | 普通 |
+| idx_audit_user   | user_id     | 普通 |
 | idx_audit_action | action_type | 普通 |
 | idx_audit_time   | created_at  | 普通 |
 
@@ -494,10 +495,10 @@ Desktop 连接时上报，存储设备硬件信息：
 | delete_agent        | 删除 Agent   |
 | create_service      | 创建服务     |
 | delete_service      | 删除服务     |
-| desktop_auth_grant  | 桌面授权     |
-| desktop_auth_revoke | 撤销桌面授权 |
-| agent_auth_grant    | 代理授权     |
-| agent_auth_revoke   | 撤销代理授权 |
+| grant_desktop       | 桌面授权     |
+| revoke_desktop      | 撤销桌面授权 |
+| grant_agent         | 代理授权     |
+| revoke_agent        | 撤销代理授权 |
 | create_port_forward | 创建端口访问 |
 | delete_port_forward | 删除端口访问 |
 | create_client_group | 创建用户分组 |
@@ -541,20 +542,37 @@ Desktop 连接时上报，存储设备硬件信息：
 
 ### 15.1 表结构
 
-| 字段       | 类型     | 必填 | 说明                 |
-| ---------- | -------- | ---- | -------------------- |
-| id         | int64    | 是   | 主键，自增           |
-| username   | string   | 是   | 用户名，唯一索引     |
-| password   | string   | 是   | 密码（加密存储）     |
-| role       | string   | 是   | 角色：admin / viewer |
-| created_at | datetime | 是   | 创建时间             |
-| updated_at | datetime | 是   | 更新时间             |
+| 字段          | 类型     | 必填 | 说明                 |
+| ------------- | -------- | ---- | -------------------- |
+| id            | int64    | 是   | 主键，自增           |
+| username      | string   | 是   | 用户名，唯一索引     |
+| password_hash | string   | 是   | 密码哈希（bcrypt）   |
+| role          | string   | 是   | 角色：admin / viewer |
+| created_at    | datetime | 是   | 创建时间             |
+| updated_at    | datetime | 是   | 更新时间             |
 
 ### 15.2 索引
 
 | 索引名称      | 字段     | 类型 |
 | ------------- | -------- | ---- |
 | uk_admin_name | username | 唯一 |
+
+### 15.3 角色说明
+
+| 角色   | 说明                   |
+| ------ | ---------------------- |
+| admin  | 管理员，拥有所有权限   |
+| viewer | 只读用户，只能查看数据 |
+
+### 15.4 默认管理员
+
+系统启动时自动创建默认管理员：
+
+| 项目   | 值           |
+| ------ | ------------ |
+| 用户名 | 配置文件指定 |
+| 密码   | 配置文件指定 |
+| 角色   | admin        |
 
 ---
 

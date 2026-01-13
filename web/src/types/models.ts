@@ -1,22 +1,20 @@
 // Agent模型
 export interface Agent {
   id: number
-  agent_name: string
-  description: string
-  agent_token: string
+  name: string
+  alias?: string
   version: string
-  last_heartbeat: string
-  created_at: string
-  updated_at: string
+  last_online?: string
+  created_at?: string
+  updated_at?: string
   status?: 'online' | 'offline'
   // Tailscale 相关字段
-  tailscale_ip?: string
+  ip?: string
   ts_connected?: boolean
   ts_conn_type?: string
   ts_registered_at?: string
-  // 分组管理
-  group_name?: string
-  // 服务数量（列表响应）
+  // 分组和服务数量
+  group_count?: number
   service_count?: number
 }
 
@@ -50,29 +48,42 @@ export interface Visitor {
 
 // Agent 详情响应（包含服务列表）
 export interface AgentDetail extends Agent {
+  created_at?: string
+  last_online?: string
   services?: ProxyService[]
-  visitors?: Visitor[]       // 端口访问服务列表
-  network_info?: NetworkInfo // 网络信息
-  ts_connected_at?: string   // 隧道连接时间（内存缓存）
+  forwards?: PortForward[]   // 端口访问服务列表
+}
+
+// 端口转发模型
+export interface PortForward {
+  id: number
+  name: string
+  alias?: string
+  agent_id: number
+  target_addr: string
+  listen_addr: string
+  enabled: boolean
+  target_agent_name?: string
+  target_service_name?: string
 }
 
 // 端口映射服务模型
 export interface ProxyService {
   id: number
   name: string
+  alias?: string
   agent_id: number
-  listen_port: number
+  listen_addr?: string
+  listen_port?: number
   target_addr: string
-  status: 'running' | 'stopped' | 'error'
-  connections: number
-  bytes_in: number
-  bytes_out: number
-  remark: string
-  access_type: 'public' | 'private' | 'group'
-  owner_id: number
-  group_id?: number
-  created_at: string
-  updated_at: string
+  enabled: boolean
+  status?: 'running' | 'stopped' | 'error'
+  connections?: number
+  bytes_in?: number
+  bytes_out?: number
+  remark?: string
+  created_at?: string
+  updated_at?: string
   // 关联数据
   agent?: Agent
 }
@@ -102,13 +113,33 @@ export interface LoginResponse {
   success: boolean
   message: string
   token?: string
+  data?: {
+    token: string
+    expires_at: string
+    admin: {
+      id: number
+      username: string
+      role: string
+      created_at: string
+    }
+  }
 }
 
 // API响应
 export interface ApiResponse<T = any> {
   success: boolean
-  message: string
+  message?: string
   data?: T
+}
+
+// 分页响应
+export interface PagedResponse<T = any> {
+  success: boolean
+  message?: string
+  data?: T
+  total: number
+  page: number
+  size: number
 }
 
 // TCP实例模型

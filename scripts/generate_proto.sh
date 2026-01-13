@@ -36,10 +36,10 @@ protoc --go_out=. --go_opt=paths=source_relative \
     --go-grpc_out=. --go-grpc_opt=paths=source_relative \
     pkg/proto/agent.proto
 
-# 生成client.proto
-echo "生成 client.proto..."
+# 生成desktop.proto
+echo "生成 desktop.proto..."
 protoc --go_out=. --go_opt=paths=source_relative \
     --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-    pkg/proto/client.proto
+    pkg/proto/desktop.proto
 
 echo "✓ Protocol Buffers 代码生成完成"

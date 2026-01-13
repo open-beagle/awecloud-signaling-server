@@ -26,10 +26,15 @@ func NewTailscaleAPI(cfg *config.ServerConfig) *TailscaleAPI {
 
 	// 初始化 Headscale 客户端
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
-		api.headscaleClient = headscale.NewClient(headscale.Config{
+		client, err := headscale.NewClient(headscale.Config{
 			URL:    cfg.Tailscale.HeadscaleURL,
 			APIKey: cfg.Tailscale.HeadscaleAPIKey,
 		})
+		if err != nil {
+			logger.Warnf("初始化 Headscale 客户端失败: %v", err)
+		} else {
+			api.headscaleClient = client
+		}
 	}
 
 	return api
@@ -81,9 +86,9 @@ func (a *TailscaleAPI) Status(c *gin.Context) {
 		}
 	}
 
-	// 统计已连接的 Agent 数量
+	// 统计已连接的 Agent 数量（有 IP 地址的 Agent）
 	var agentCount int64
-	db.DB.Model(&model.Agent{}).Where("ts_connected = ?", true).Count(&agentCount)
+	db.DB.Model(&model.Agent{}).Where("ip != ''").Count(&agentCount)
 	status.AgentsConnected = int(agentCount)
 
 	// 统计已连接的 Client 数量
@@ -120,14 +125,15 @@ func (a *TailscaleAPI) Sync(c *gin.Context) {
 	// 同步 Agent 状态
 	syncedAgents := 0
 	for _, node := range nodes {
-		if len(node.IPAddresses) == 0 {
+		if len(node.IpAddresses) == 0 {
 			continue
 		}
 
-		ip := node.IPAddresses[0]
+		ip := node.IpAddresses[0]
 		var agent model.Agent
-		if err := db.DB.Where("tailscale_ip = ?", ip).First(&agent).Error; err == nil {
-			agent.TsConnected = node.Online
+		if err := db.DB.Where("ip = ?", ip).First(&agent).Error; err == nil {
+			// 更新 Agent 的 NodeID
+			agent.NodeID = node.Id
 			if err := db.DB.Save(&agent).Error; err == nil {
 				syncedAgents++
 			}

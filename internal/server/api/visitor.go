@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -63,7 +64,7 @@ func (v *VisitorAPI) List(c *gin.Context) {
 		if err := db.DB.Preload("Agent").First(&targetService, visitor.TargetServiceID).Error; err == nil {
 			result[i].TargetServiceName = targetService.Name
 			if targetService.Agent != nil {
-				result[i].TargetAgentName = targetService.Agent.AgentName
+				result[i].TargetAgentName = targetService.Agent.Name
 			}
 		}
 	}
@@ -102,7 +103,7 @@ func (v *VisitorAPI) Get(c *gin.Context) {
 	if err := db.DB.Preload("Agent").First(&targetService, visitor.TargetServiceID).Error; err == nil {
 		result.TargetServiceName = targetService.Name
 		if targetService.Agent != nil {
-			result.TargetAgentName = targetService.Agent.AgentName
+			result.TargetAgentName = targetService.Agent.Name
 		}
 	}
 
@@ -156,7 +157,7 @@ func (v *VisitorAPI) Create(c *gin.Context) {
 	// 获取目标服务的 Tailscale 地址
 	var targetAgent model.Agent
 	db.DB.First(&targetAgent, targetService.AgentID)
-	targetAddr := targetAgent.TailscaleIP + ":" + strconv.Itoa(targetService.ListenPort)
+	targetAddr := targetAgent.IP + ":" + strings.Split(targetService.ListenAddr, ":")[1]
 
 	// 创建 Visitor
 	visitor := &model.Visitor{
@@ -252,7 +253,8 @@ func (v *VisitorAPI) Start(c *gin.Context) {
 		return
 	}
 
-	if agent.Status != "online" {
+	// 检查 Agent 是否有 Tailscale IP（表示在线）
+	if agent.IP == "" {
 		c.JSON(http.StatusBadRequest, VisitorResponse{
 			Success: false,
 			Message: "Agent离线，无法启动",

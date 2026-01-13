@@ -35,10 +35,7 @@ type Agent struct {
 	grpcMutex     sync.RWMutex
 
 	// Agent信息
-	agentID int64
-
-	// 命令处理
-	commandChan chan *pb.Command
+	agentID uint64
 
 	// Tailscale 管理
 	tsManager      *TailscaleManager
@@ -49,6 +46,9 @@ type Agent struct {
 	// 网络信息
 	networkInfo *NetworkInfo
 	lanDetector *LANDetector
+
+	// 配置版本（用于增量同步）
+	configVersion int64
 
 	// 上下文
 	ctx    context.Context
@@ -70,7 +70,6 @@ func NewAgent(cfg *config.AgentConfig, version string) (*Agent, error) {
 	return &Agent{
 		config:      cfg,
 		version:     version,
-		commandChan: make(chan *pb.Command, 100),
 		lanDetector: lanDetector,
 		networkInfo: networkInfo,
 		ctx:         ctx,
@@ -96,17 +95,9 @@ func (a *Agent) Run() error {
 		return fmt.Errorf("注册失败: %w", err)
 	}
 
-	// 启动心跳
+	// 启动心跳流（双向流，用于同步配置）
 	a.wg.Add(1)
 	go a.heartbeatLoop()
-
-	// 启动命令接收
-	a.wg.Add(1)
-	go a.receiveCommands()
-
-	// 启动命令处理
-	a.wg.Add(1)
-	go a.processCommands()
 
 	// 等待中断信号
 	quit := make(chan os.Signal, 1)
@@ -202,10 +193,19 @@ func (a *Agent) connectToServer() error {
 func (a *Agent) register() error {
 	logger.Infof("注册Agent: %s (version: %s)", a.config.Agent.AgentName, a.version)
 
-	resp, err := a.grpcClient.Register(a.ctx, &pb.RegisterRequest{
-		AgentName:  a.config.Agent.AgentName,
-		AgentToken: a.config.Agent.AgentToken,
+	// 构建系统信息
+	var systemInfo *pb.SystemInfo
+	if a.networkInfo != nil {
+		systemInfo = &pb.SystemInfo{
+			Hostname: a.networkInfo.Hostname,
+		}
+	}
+
+	resp, err := a.grpcClient.Register(a.ctx, &pb.AgentRegisterRequest{
+		Name:       a.config.Agent.AgentName,
+		Secret:     a.config.Agent.AgentToken,
 		Version:    a.version,
+		SystemInfo: systemInfo,
 	})
 
 	if err != nil {
@@ -219,7 +219,7 @@ func (a *Agent) register() error {
 	a.agentID = resp.AgentId
 
 	// 检查是否返回了 Tailscale 认证信息
-	if resp.ControlUrl != "" && resp.AuthKey != "" {
+	if resp.ServerUrl != "" && resp.AuthKey != "" {
 		logger.Infof("注册成功，Agent ID: %d，使用 Tailscale 模式", a.agentID)
 
 		// 启动 Tailscale
@@ -227,7 +227,7 @@ func (a *Agent) register() error {
 			a.tsManager = NewTailscaleManager(a.config, a.grpcClient, a.agentID, a.config.Agent.AgentToken, a.ctx)
 		}
 
-		if err := a.tsManager.Start(resp.ControlUrl, resp.AuthKey); err != nil {
+		if err := a.tsManager.Start(resp.ServerUrl, resp.AuthKey); err != nil {
 			return fmt.Errorf("启动 Tailscale 失败: %w", err)
 		}
 
@@ -250,91 +250,8 @@ func (a *Agent) register() error {
 	return nil
 }
 
-// heartbeatLoop 心跳循环（支持自动重连）
+// heartbeatLoop 心跳循环（双向流，支持自动重连）
 func (a *Agent) heartbeatLoop() {
-	defer a.wg.Done()
-
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	consecutiveFailures := 0
-	maxFailures := 3
-	lastSuccessLogged := false
-
-	for {
-		select {
-		case <-ticker.C:
-			if err := a.sendHeartbeat(); err != nil {
-				consecutiveFailures++
-				logger.Infof("心跳失败 (%d/%d): %v", consecutiveFailures, maxFailures, err)
-				lastSuccessLogged = false
-
-				if consecutiveFailures >= maxFailures {
-					logger.Infof("心跳连续失败 %d 次，尝试重新注册", consecutiveFailures)
-					if err := a.register(); err != nil {
-						logger.Infof("重新注册失败: %v", err)
-					} else {
-						logger.Info("重新注册成功")
-						consecutiveFailures = 0
-					}
-				}
-			} else {
-				if consecutiveFailures > 0 {
-					logger.Infof("心跳恢复正常")
-					consecutiveFailures = 0
-					lastSuccessLogged = true
-				} else if !lastSuccessLogged {
-					logger.Infof("心跳正常")
-					lastSuccessLogged = true
-				}
-			}
-
-		case <-a.ctx.Done():
-			return
-		}
-	}
-}
-
-// sendHeartbeat 发送心跳
-func (a *Agent) sendHeartbeat() error {
-	req := &pb.HeartbeatRequest{
-		AgentId:    a.agentID,
-		AgentToken: a.config.Agent.AgentToken,
-		Version:    a.version,
-	}
-
-	// 添加 Tailscale 状态
-	if a.tsManager != nil {
-		req.TailscaleIp = a.tsManager.GetIP()
-		req.TsConnected = a.tsManager.IsConnected()
-		req.TsConnType = a.tsManager.GetConnType()
-		req.TsConnectedAt = a.tsManager.GetConnectedAt()
-	}
-
-	// 添加网络信息
-	if a.networkInfo != nil {
-		req.LanIp = a.networkInfo.LanIP
-		req.LanGateway = a.networkInfo.LanGateway
-		req.LanInterface = a.networkInfo.LanInterface
-		req.RuntimeEnv = a.networkInfo.RuntimeEnv
-		req.Hostname = a.networkInfo.Hostname
-	}
-
-	resp, err := a.grpcClient.Heartbeat(a.ctx, req)
-
-	if err != nil {
-		return err
-	}
-
-	if !resp.Success {
-		return fmt.Errorf("心跳失败")
-	}
-
-	return nil
-}
-
-// receiveCommands 接收命令（双向流，支持自动重连）
-func (a *Agent) receiveCommands() {
 	defer a.wg.Done()
 
 	retryDelay := 5 * time.Second
@@ -343,16 +260,16 @@ func (a *Agent) receiveCommands() {
 	for {
 		select {
 		case <-a.ctx.Done():
-			logger.Debug("命令接收线程退出")
+			logger.Debug("心跳线程退出")
 			return
 		default:
 		}
 
-		logger.Debug("建立命令接收流...")
+		logger.Debug("建立心跳流...")
 
-		stream, err := a.grpcClient.ReceiveCommands(a.ctx)
+		stream, err := a.grpcClient.Heartbeat(a.ctx)
 		if err != nil {
-			logger.Debugf("建立命令流失败: %v，%v后重试", err, retryDelay)
+			logger.Debugf("建立心跳流失败: %v，%v后重试", err, retryDelay)
 
 			select {
 			case <-time.After(retryDelay):
@@ -362,101 +279,73 @@ func (a *Agent) receiveCommands() {
 				}
 				continue
 			case <-a.ctx.Done():
-				logger.Info("命令接收线程退出")
+				logger.Info("心跳线程退出")
 				return
 			}
 		}
 
 		retryDelay = 5 * time.Second
+		logger.Debug("心跳流已建立")
 
-		// 发送初始消息
-		if err := stream.Send(&pb.CommandResponse{
-			CommandId: fmt.Sprintf("init-%d", a.agentID),
-			Success:   true,
-			Message:   fmt.Sprintf("Agent已连接: %d", a.agentID),
-		}); err != nil {
-			logger.Infof("发送初始消息失败: %v，%v后重试", err, retryDelay)
-
-			select {
-			case <-time.After(retryDelay):
-				continue
-			case <-a.ctx.Done():
-				logger.Debug("命令接收线程退出")
-				return
-			}
-		}
-
-		logger.Debug("命令接收流已建立")
-
-		// 接收命令
-		streamBroken := false
-		for !streamBroken {
-			cmd, err := stream.Recv()
-			if err != nil {
-				select {
-				case <-a.ctx.Done():
-					logger.Info("命令接收线程退出")
-					return
-				default:
-					logger.Infof("接收命令失败: %v，将重新建立连接", err)
-					streamBroken = true
-					break
-				}
-			}
-
-			logger.Infof("收到命令: %s, type=%v", cmd.CommandId, cmd.Type)
-
-			select {
-			case a.commandChan <- cmd:
-			case <-a.ctx.Done():
-				return
-			}
-
-			// 发送响应
-			resp := &pb.CommandResponse{
-				CommandId: cmd.CommandId,
-				Success:   true,
-				Message:   "命令已接收",
-			}
-
-			if err := stream.Send(resp); err != nil {
-				select {
-				case <-a.ctx.Done():
-					logger.Info("命令接收线程退出")
-					return
-				default:
-					logger.Infof("发送命令响应失败: %v，将重新建立连接", err)
-					streamBroken = true
-					break
-				}
-			}
-		}
+		// 心跳循环
+		a.runHeartbeatStream(stream)
 
 		select {
 		case <-a.ctx.Done():
-			logger.Info("命令接收线程退出")
+			logger.Info("心跳线程退出")
 			return
 		default:
-			logger.Infof("命令流已断开，%v后重新连接", retryDelay)
+			logger.Infof("心跳流已断开，%v后重新连接", retryDelay)
 		}
 
 		select {
 		case <-time.After(retryDelay):
 		case <-a.ctx.Done():
-			logger.Info("命令接收线程退出")
+			logger.Info("心跳线程退出")
 			return
 		}
 	}
 }
 
-// processCommands 处理命令
-func (a *Agent) processCommands() {
-	defer a.wg.Done()
+// runHeartbeatStream 运行心跳流
+func (a *Agent) runHeartbeatStream(stream pb.AgentService_HeartbeatClient) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 
+	// 发送初始心跳
+	if err := a.sendHeartbeat(stream); err != nil {
+		logger.Warnf("发送初始心跳失败: %v", err)
+		return
+	}
+
+	// 启动接收协程
+	recvDone := make(chan struct{})
+	go func() {
+		defer close(recvDone)
+		for {
+			resp, err := stream.Recv()
+			if err != nil {
+				logger.Debugf("接收心跳响应失败: %v", err)
+				return
+			}
+
+			// 处理配置更新
+			a.handleHeartbeatResponse(resp)
+		}
+	}()
+
+	// 定时发送心跳
 	for {
 		select {
-		case cmd := <-a.commandChan:
-			a.handleCommand(cmd)
+		case <-ticker.C:
+			if err := a.sendHeartbeat(stream); err != nil {
+				logger.Warnf("发送心跳失败: %v", err)
+				return
+			}
+
+		case <-recvDone:
+			logger.Debug("心跳接收协程退出")
+			return
 
 		case <-a.ctx.Done():
 			return
@@ -464,160 +353,161 @@ func (a *Agent) processCommands() {
 	}
 }
 
-// handleCommand 处理单个命令
-func (a *Agent) handleCommand(cmd *pb.Command) {
-	logger.Infof("处理命令: %s", cmd.CommandId)
-
-	switch cmd.Type {
-	case pb.Command_START_PROXY:
-		a.handleStartProxy(cmd)
-
-	case pb.Command_STOP_PROXY:
-		a.handleStopProxy(cmd)
-
-	case pb.Command_SYNC_PROXIES:
-		a.handleSyncProxies(cmd)
-
-	case pb.Command_START_VISITOR:
-		a.handleStartVisitor(cmd)
-
-	case pb.Command_STOP_VISITOR:
-		a.handleStopVisitor(cmd)
-
-	case pb.Command_SYNC_VISITORS:
-		a.handleSyncVisitors(cmd)
-
-	default:
-		logger.Infof("未知命令类型: %v", cmd.Type)
+// sendHeartbeat 发送心跳
+func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
+	req := &pb.AgentHeartbeatRequest{
+		AgentId: a.agentID,
 	}
+
+	// 添加 Tailscale 状态
+	if a.tsManager != nil {
+		req.TunnelIp = a.tsManager.GetIP()
+		req.TunnelConnected = a.tsManager.IsConnected()
+	}
+
+	// 添加网络信息
+	if a.networkInfo != nil {
+		req.Hostname = a.networkInfo.Hostname
+		req.Runtime = a.networkInfo.RuntimeEnv
+		// 添加网络接口列表
+		if a.networkInfo.LanIP != "" && a.networkInfo.LanIP != "127.0.0.1" {
+			req.Networks = append(req.Networks, &pb.NetworkInterface{
+				Name:    a.networkInfo.LanInterface,
+				Ip:      a.networkInfo.LanIP,
+				Mask:    a.networkInfo.LanMask,
+				Gateway: a.networkInfo.LanGateway,
+			})
+		}
+	}
+
+	// 添加服务状态
+	if a.proxyManager != nil {
+		for name, running := range a.proxyManager.GetStatus() {
+			req.ServiceStatus = append(req.ServiceStatus, &pb.ServiceStatus{
+				ServiceId: name,
+				Running:   running,
+			})
+		}
+	}
+
+	// 添加端口访问状态
+	if a.visitorManager != nil {
+		for name, running := range a.visitorManager.GetStatus() {
+			req.ForwardStatus = append(req.ForwardStatus, &pb.ForwardStatus{
+				ForwardId: name,
+				Running:   running,
+			})
+		}
+	}
+
+	return stream.Send(req)
 }
 
-// handleStartProxy 处理启动端口映射命令
-func (a *Agent) handleStartProxy(cmd *pb.Command) {
-	if cmd.ProxyCommand == nil {
-		logger.Warnf("START_PROXY 命令缺少 proxy_command")
+// handleHeartbeatResponse 处理心跳响应（配置同步）
+func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
+	// 检查配置版本
+	if resp.ConfigVersion <= a.configVersion {
 		return
 	}
 
-	pc := cmd.ProxyCommand
-	logger.Infof("启动端口映射: name=%s, port=%d, target=%s",
-		pc.Name, pc.ListenPort, pc.TargetAddr)
+	logger.Infof("收到配置更新，版本: %d -> %d", a.configVersion, resp.ConfigVersion)
+	a.configVersion = resp.ConfigVersion
 
+	// 同步端口映射服务
+	if len(resp.Services) > 0 {
+		a.syncServices(resp.Services)
+	}
+
+	// 同步端口访问服务
+	if len(resp.Forwards) > 0 {
+		a.syncForwards(resp.Forwards)
+	}
+}
+
+// syncServices 同步端口映射服务
+func (a *Agent) syncServices(services []*pb.ServiceConfig) {
 	if a.proxyManager == nil {
-		logger.Errorf("ProxyManager 未初始化")
+		logger.Warn("ProxyManager 未初始化，跳过服务同步")
 		return
 	}
 
-	if a.proxyManager.Exists(pc.Name) {
-		logger.Infof("端口映射已存在: %s", pc.Name)
-		return
+	// 构建期望的服务集合
+	expected := make(map[string]*pb.ServiceConfig)
+	for _, svc := range services {
+		if svc.Enabled {
+			expected[svc.Id] = svc
+		}
 	}
 
-	if err := a.proxyManager.Start(pc.Name, int(pc.ListenPort), pc.TargetAddr); err != nil {
-		logger.Errorf("启动端口映射失败: %v", err)
-		return
+	// 停止不需要的服务
+	for name := range a.proxyManager.GetStatus() {
+		if _, ok := expected[name]; !ok {
+			logger.Infof("停止端口映射服务: %s", name)
+			if err := a.proxyManager.Stop(name); err != nil {
+				logger.Warnf("停止端口映射服务失败: %s, %v", name, err)
+			}
+		}
 	}
 
-	logger.Infof("端口映射启动成功: %s", pc.Name)
+	// 启动新服务
+	for id, svc := range expected {
+		if !a.proxyManager.Exists(id) {
+			// 解析监听端口
+			listenPort := 0
+			if _, err := fmt.Sscanf(svc.ListenAddr, ":%d", &listenPort); err != nil {
+				logger.Warnf("解析监听地址失败: %s, %v", svc.ListenAddr, err)
+				continue
+			}
+
+			logger.Infof("启动端口映射服务: %s, port=%d, target=%s", svc.Name, listenPort, svc.TargetAddr)
+			if err := a.proxyManager.Start(id, listenPort, svc.TargetAddr); err != nil {
+				logger.Warnf("启动端口映射服务失败: %s, %v", svc.Name, err)
+			}
+		}
+	}
 }
 
-// handleStopProxy 处理停止端口映射命令
-func (a *Agent) handleStopProxy(cmd *pb.Command) {
-	if cmd.ProxyCommand == nil {
-		logger.Warnf("STOP_PROXY 命令缺少 proxy_command")
-		return
-	}
-
-	pc := cmd.ProxyCommand
-	logger.Infof("停止端口映射: name=%s", pc.Name)
-
-	if a.proxyManager == nil {
-		logger.Errorf("ProxyManager 未初始化")
-		return
-	}
-
-	// 检查代理是否存在
-	if !a.proxyManager.Exists(pc.Name) {
-		logger.Warnf("端口映射不存在，跳过停止: %s", pc.Name)
-		return
-	}
-
-	if err := a.proxyManager.Stop(pc.Name); err != nil {
-		logger.Errorf("停止端口映射失败: %v", err)
-		return
-	}
-
-	logger.Infof("端口映射停止成功: %s", pc.Name)
-}
-
-// handleSyncProxies 处理同步端口映射命令
-func (a *Agent) handleSyncProxies(_ *pb.Command) {
-	logger.Info("收到同步端口映射命令")
-	// 同步逻辑由 Server 通过多个 START_PROXY 命令实现
-}
-
-// handleStartVisitor 处理启动 Visitor 命令（服务访问）
-func (a *Agent) handleStartVisitor(cmd *pb.Command) {
-	if cmd.VisitorCommand == nil {
-		logger.Warnf("START_VISITOR 命令缺少 visitor_command")
-		return
-	}
-
-	vc := cmd.VisitorCommand
-	logger.Infof("启动 Visitor: name=%s, port=%d, target=%s",
-		vc.Name, vc.ListenPort, vc.TargetAddr)
-
+// syncForwards 同步端口访问服务
+func (a *Agent) syncForwards(forwards []*pb.ForwardConfig) {
 	if a.visitorManager == nil {
-		logger.Errorf("VisitorManager 未初始化")
+		logger.Warn("VisitorManager 未初始化，跳过端口访问同步")
 		return
 	}
 
-	if a.visitorManager.Exists(vc.Name) {
-		logger.Infof("Visitor 已存在: %s", vc.Name)
-		return
+	// 构建期望的服务集合
+	expected := make(map[string]*pb.ForwardConfig)
+	for _, fwd := range forwards {
+		if fwd.Enabled {
+			expected[fwd.Id] = fwd
+		}
 	}
 
-	if err := a.visitorManager.Start(vc.Name, int(vc.ListenPort), vc.TargetAddr); err != nil {
-		logger.Errorf("启动 Visitor 失败: %v", err)
-		return
+	// 停止不需要的服务
+	for name := range a.visitorManager.GetStatus() {
+		if _, ok := expected[name]; !ok {
+			logger.Infof("停止端口访问服务: %s", name)
+			if err := a.visitorManager.Stop(name); err != nil {
+				logger.Warnf("停止端口访问服务失败: %s, %v", name, err)
+			}
+		}
 	}
 
-	logger.Infof("Visitor 启动成功: %s", vc.Name)
-}
+	// 启动新服务
+	for id, fwd := range expected {
+		if !a.visitorManager.Exists(id) {
+			// 解析监听端口
+			listenPort := 0
+			if _, err := fmt.Sscanf(fwd.ListenAddr, ":%d", &listenPort); err != nil {
+				logger.Warnf("解析监听地址失败: %s, %v", fwd.ListenAddr, err)
+				continue
+			}
 
-// handleStopVisitor 处理停止 Visitor 命令
-func (a *Agent) handleStopVisitor(cmd *pb.Command) {
-	if cmd.VisitorCommand == nil {
-		logger.Warnf("STOP_VISITOR 命令缺少 visitor_command")
-		return
+			logger.Infof("启动端口访问服务: %s, port=%d, target=%s", fwd.Name, listenPort, fwd.TargetAddr)
+			if err := a.visitorManager.Start(id, listenPort, fwd.TargetAddr); err != nil {
+				logger.Warnf("启动端口访问服务失败: %s, %v", fwd.Name, err)
+			}
+		}
 	}
-
-	vc := cmd.VisitorCommand
-	logger.Infof("停止 Visitor: name=%s", vc.Name)
-
-	if a.visitorManager == nil {
-		logger.Errorf("VisitorManager 未初始化")
-		return
-	}
-
-	// 检查 Visitor 是否存在
-	if !a.visitorManager.Exists(vc.Name) {
-		logger.Warnf("Visitor 不存在，跳过停止: %s", vc.Name)
-		return
-	}
-
-	if err := a.visitorManager.Stop(vc.Name); err != nil {
-		logger.Errorf("停止 Visitor 失败: %v", err)
-		return
-	}
-
-	logger.Infof("Visitor 停止成功: %s", vc.Name)
-}
-
-// handleSyncVisitors 处理同步 Visitor 命令
-func (a *Agent) handleSyncVisitors(_ *pb.Command) {
-	logger.Info("收到同步 Visitor 命令")
-	// 同步逻辑由 Server 通过多个 START_VISITOR 命令实现
 }
 
 // IsGRPCConnected 检查gRPC连接是否正常

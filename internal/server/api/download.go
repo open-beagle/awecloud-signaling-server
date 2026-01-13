@@ -58,10 +58,10 @@ var (
 // getClientDownloadURL 从系统配置获取客户端下载地址
 func getClientDownloadURL() (string, error) {
 	var config model.SystemConfig
-	if err := db.DB.First(&config).Error; err != nil {
+	if err := db.DB.Where("key = ?", model.ConfigClientDownloadURL).First(&config).Error; err != nil {
 		return "", err
 	}
-	return config.ClientDownloadURL, nil
+	return config.Value, nil
 }
 
 // fetchVersionInfo 从远程获取版本信息

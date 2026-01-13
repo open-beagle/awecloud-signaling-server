@@ -3,18 +3,25 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span class="card-title">用户组管理</span>
+          <span class="card-title">代理分组</span>
           <el-button type="primary" :icon="Plus" @click="handleCreate">
-            创建
+            创建分组
           </el-button>
         </div>
       </template>
       
+      <div class="group-tip">
+        <el-alert type="info" :closable="false" show-icon>
+          同组 Agent 默认可以互访所有端口
+        </el-alert>
+      </div>
+      
       <el-table v-loading="loading" :data="groups" stripe>
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="name" label="组名称" min-width="150" />
+        <el-table-column prop="name" label="分组" min-width="120" />
+        <el-table-column prop="alias" label="别名" min-width="120" />
+        <el-table-column prop="member_count" label="成员" width="80" />
         <el-table-column prop="description" label="描述" min-width="200" />
-        <el-table-column prop="member_count" label="成员数" width="100" />
         <el-table-column label="创建时间" width="180">
           <template #default="{ row }">
             {{ formatDate(row.created_at) }}
@@ -23,7 +30,7 @@
         <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <el-tooltip content="成员管理" placement="top">
-              <el-button size="small" :icon="User" @click="handleMembers(row)" />
+              <el-button size="small" :icon="Monitor" @click="handleMembers(row)" />
             </el-tooltip>
             <el-tooltip content="编辑" placement="top">
               <el-button size="small" :icon="Edit" @click="handleEdit(row)" />
@@ -44,19 +51,22 @@
     <!-- 创建/编辑对话框 -->
     <el-dialog
       v-model="dialogVisible"
-      :title="editingGroup ? '编辑' : '创建'"
+      :title="editingGroup ? '编辑分组' : '创建分组'"
       width="500px"
     >
       <el-form :model="form" label-width="80px">
-        <el-form-item label="组名称" required>
-          <el-input v-model="form.name" placeholder="请输入组名称" />
+        <el-form-item label="分组名称" required>
+          <el-input v-model="form.name" placeholder="请输入分组名称" :disabled="!!editingGroup" />
+        </el-form-item>
+        <el-form-item label="别名">
+          <el-input v-model="form.alias" placeholder="请输入别名（可选）" />
         </el-form-item>
         <el-form-item label="描述">
           <el-input
             v-model="form.description"
             type="textarea"
             :rows="3"
-            placeholder="请输入描述"
+            placeholder="请输入描述（可选）"
           />
         </el-form-item>
       </el-form>
@@ -72,8 +82,8 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete, User, Edit } from '@element-plus/icons-vue'
-import { getGroups, createGroup, updateGroup, deleteGroup } from '@/api/group'
+import { Plus, Delete, Monitor, Edit } from '@element-plus/icons-vue'
+import { getAgentGroups, createAgentGroup, updateAgentGroup, deleteAgentGroup } from '@/api/group'
 import type { Group } from '@/api/group'
 
 const router = useRouter()
@@ -85,6 +95,7 @@ const editingGroup = ref<Group | null>(null)
 
 const form = ref({
   name: '',
+  alias: '',
   description: ''
 })
 
@@ -95,7 +106,7 @@ const formatDate = (dateStr: string) => {
 const loadGroups = async () => {
   loading.value = true
   try {
-    const res = await getGroups()
+    const res = await getAgentGroups()
     if (res.success && res.data) {
       groups.value = res.data
     }
@@ -108,7 +119,7 @@ const loadGroups = async () => {
 
 const handleCreate = () => {
   editingGroup.value = null
-  form.value = { name: '', description: '' }
+  form.value = { name: '', alias: '', description: '' }
   dialogVisible.value = true
 }
 
@@ -116,6 +127,7 @@ const handleEdit = (group: Group) => {
   editingGroup.value = group
   form.value = {
     name: group.name,
+    alias: group.alias || '',
     description: group.description
   }
   dialogVisible.value = true
@@ -123,13 +135,16 @@ const handleEdit = (group: Group) => {
 
 const handleSubmit = async () => {
   if (!form.value.name) {
-    ElMessage.warning('请输入组名称')
+    ElMessage.warning('请输入分组名称')
     return
   }
 
   try {
     if (editingGroup.value) {
-      const res = await updateGroup(editingGroup.value.id, form.value)
+      const res = await updateAgentGroup(editingGroup.value.id, {
+        alias: form.value.alias,
+        description: form.value.description
+      })
       if (res.success) {
         ElMessage.success('更新成功')
         dialogVisible.value = false
@@ -138,7 +153,7 @@ const handleSubmit = async () => {
         ElMessage.error(res.message || '更新失败')
       }
     } else {
-      const res = await createGroup(form.value)
+      const res = await createAgentGroup(form.value)
       if (res.success) {
         ElMessage.success('创建成功')
         dialogVisible.value = false
@@ -155,24 +170,23 @@ const handleSubmit = async () => {
 
 const handleMembers = (group: Group) => {
   router.push({
-    name: 'GroupMembers',
-    params: {
-      id: group.id,
-      name: group.name
-    }
+    name: 'AgentGroupMembers',
+    params: { id: group.id }
   })
 }
 
 const handleDelete = async (group: Group) => {
   try {
-    await ElMessageBox.confirm(`确定要删除组 "${group.name}" 吗？`, {
+    await ElMessageBox.confirm(`确定要删除分组 "${group.name}" 吗？`, {
       type: 'warning'
     })
     
-    const res = await deleteGroup(group.id)
+    const res = await deleteAgentGroup(group.id)
     if (res.success) {
       ElMessage.success('删除成功')
       loadGroups()
+    } else {
+      ElMessage.error(res.message || '删除失败')
     }
   } catch (error: any) {
     if (error !== 'cancel') {
@@ -201,5 +215,9 @@ onMounted(() => {
   font-size: 18px;
   font-weight: 500;
   color: var(--text-primary);
+}
+
+.group-tip {
+  margin-bottom: 16px;
 }
 </style>

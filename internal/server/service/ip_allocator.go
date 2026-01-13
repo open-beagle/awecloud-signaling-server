@@ -87,12 +87,12 @@ func (ia *IPAllocator) getUsedIPs(nodeType string) ([]string, error) {
 	switch nodeType {
 	case "agent":
 		var agents []model.Agent
-		if err := ia.db.Select("tailscale_ip").Find(&agents).Error; err != nil {
+		if err := ia.db.Select("ip").Find(&agents).Error; err != nil {
 			return nil, err
 		}
 		for _, agent := range agents {
-			if agent.TailscaleIP != "" {
-				ips = append(ips, agent.TailscaleIP)
+			if agent.IP != "" {
+				ips = append(ips, agent.IP)
 			}
 		}
 

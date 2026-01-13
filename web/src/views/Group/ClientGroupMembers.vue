@@ -3,7 +3,10 @@
     <el-card class="members-card">
       <template #header>
         <div class="card-header">
-          <span class="card-title">成员管理</span>
+          <div class="header-left">
+            <el-button :icon="ArrowLeft" @click="goBack">返回</el-button>
+            <span class="card-title">用户分组成员管理</span>
+          </div>
           <div class="header-actions">
             <el-select
               v-model="selectedClientId"
@@ -14,17 +17,9 @@
               <el-option
                 v-for="client in availableClients"
                 :key="client.id"
-                :label="client.client_id"
+                :label="client.name + (client.alias ? ` (${client.alias})` : '')"
                 :value="client.id"
               />
-            </el-select>
-            <el-select
-              v-model="selectedRole"
-              placeholder="角色"
-              style="width: 120px; margin-right: 10px"
-            >
-              <el-option label="成员" value="member" />
-              <el-option label="管理员" value="admin" />
             </el-select>
             <el-button type="primary" :icon="Plus" @click="handleAddMember">
               添加成员
@@ -34,33 +29,29 @@
       </template>
 
       <el-table v-loading="loading" :data="members" stripe>
-      <el-table-column label="用户" min-width="200">
-        <template #default="{ row }">
-          {{ row.client?.client_id || '-' }}
-        </template>
-      </el-table-column>
-      <el-table-column prop="role" label="角色" width="120">
-        <template #default="{ row }">
-          <el-tag :type="row.role === 'admin' ? 'danger' : 'info'">
-            {{ row.role === 'admin' ? '管理员' : '成员' }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="加入时间" width="180">
-        <template #default="{ row }">
-          {{ formatDate(row.created_at) }}
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="100">
-        <template #default="{ row }">
-          <el-button
-            size="small"
-            type="danger"
-            :icon="Delete"
-            @click="handleRemoveMember(row)"
-          />
-        </template>
-      </el-table-column>
+        <el-table-column label="用户" min-width="200">
+          <template #default="{ row }">
+            {{ row.client?.name || '-' }}
+            <span v-if="row.client?.alias" class="alias-text">({{ row.client.alias }})</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="加入时间" width="180">
+          <template #default="{ row }">
+            {{ formatDate(row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="100">
+          <template #default="{ row }">
+            <el-tooltip content="移除" placement="top">
+              <el-button
+                size="small"
+                type="danger"
+                :icon="Delete"
+                @click="handleRemoveMember(row)"
+              />
+            </el-tooltip>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
   </div>
@@ -69,21 +60,19 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Plus, Delete } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Delete, ArrowLeft } from '@element-plus/icons-vue'
 import { getGroupMembers, addGroupMember, removeGroupMember } from '@/api/group'
 import { getClients } from '@/api/client'
-import type { Group, GroupMember } from '@/api/group'
+import type { GroupMember } from '@/api/group'
 
 const route = useRoute()
 const router = useRouter()
 
 const loading = ref(false)
-const group = ref<Group | null>(null)
 const members = ref<GroupMember[]>([])
 const allClients = ref<any[]>([])
 const selectedClientId = ref<number | null>(null)
-const selectedRole = ref('member')
 
 const availableClients = computed(() => {
   const memberClientIds = new Set(members.value.map(m => m.client_id))
@@ -94,6 +83,10 @@ const formatDate = (dateStr: string) => {
   return new Date(dateStr).toLocaleString('zh-CN')
 }
 
+const goBack = () => {
+  router.push({ name: 'ClientGroups' })
+}
+
 const loadMembers = async () => {
   const groupId = Number(route.params.id)
   if (!groupId) return
@@ -101,9 +94,7 @@ const loadMembers = async () => {
   loading.value = true
   try {
     const res = await getGroupMembers(groupId)
-    console.log('Group members response:', res)
     if (res.success && res.data) {
-      console.log('Members data:', res.data)
       members.value = res.data
     }
   } catch (error) {
@@ -117,7 +108,7 @@ const loadMembers = async () => {
 const loadClients = async () => {
   try {
     const res = await getClients()
-    if (res.success && res.clients) {
+    if (res.clients) {
       allClients.value = res.clients
     }
   } catch (error) {
@@ -133,12 +124,13 @@ const handleAddMember = async () => {
   }
 
   try {
-    const res = await addGroupMember(groupId, selectedClientId.value, selectedRole.value)
+    const res = await addGroupMember(groupId, selectedClientId.value)
     if (res.success) {
       ElMessage.success('添加成功')
       selectedClientId.value = null
-      selectedRole.value = 'member'
       loadMembers()
+    } else {
+      ElMessage.error(res.message || '添加失败')
     }
   } catch (error) {
     ElMessage.error('添加失败')
@@ -150,27 +142,22 @@ const handleRemoveMember = async (member: GroupMember) => {
   if (!groupId) return
 
   try {
+    await ElMessageBox.confirm('确定要将该成员移出分组吗？', { type: 'warning' })
     const res = await removeGroupMember(groupId, member.client_id)
     if (res.success) {
       ElMessage.success('移除成功')
       loadMembers()
+    } else {
+      ElMessage.error(res.message || '移除失败')
     }
-  } catch (error) {
-    ElMessage.error('移除失败')
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error('移除失败')
+    }
   }
 }
 
 onMounted(() => {
-  // 从路由参数获取组信息
-  if (route.params.name) {
-    group.value = {
-      id: Number(route.params.id),
-      name: route.params.name as string,
-      description: '',
-      created_at: '',
-      updated_at: ''
-    }
-  }
   loadMembers()
   loadClients()
 })
@@ -206,6 +193,12 @@ onMounted(() => {
   align-items: center;
 }
 
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .card-title {
   font-size: 18px;
   font-weight: 500;
@@ -214,5 +207,10 @@ onMounted(() => {
 .header-actions {
   display: flex;
   align-items: center;
+}
+
+.alias-text {
+  color: #909399;
+  font-size: 12px;
 }
 </style>

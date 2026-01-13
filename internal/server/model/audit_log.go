@@ -8,10 +8,10 @@ const (
 	ActionDeleteAgent        = "delete_agent"
 	ActionCreateService      = "create_service"
 	ActionDeleteService      = "delete_service"
-	ActionDesktopAuthGrant   = "desktop_auth_grant"
-	ActionDesktopAuthRevoke  = "desktop_auth_revoke"
-	ActionAgentAuthGrant     = "agent_auth_grant"
-	ActionAgentAuthRevoke    = "agent_auth_revoke"
+	ActionGrantDesktop       = "grant_desktop"
+	ActionRevokeDesktop      = "revoke_desktop"
+	ActionGrantAgent         = "grant_agent"
+	ActionRevokeAgent        = "revoke_agent"
 	ActionCreatePortForward  = "create_port_forward"
 	ActionDeletePortForward  = "delete_port_forward"
 	ActionCreateClientGroup  = "create_client_group"
@@ -34,13 +34,23 @@ const (
 	ActionAddGroupMember     = "add_group_member"
 	ActionRemoveGroupMember  = "remove_group_member"
 	ActionUpdateSystemConfig = "update_system_config"
+
+	// 隧道管理操作
+	ActionUpdateTunnelUser = "update_tunnel_user"
+	ActionDeleteTunnelUser = "delete_tunnel_user"
+	ActionUpdateTunnelNode = "update_tunnel_node"
+	ActionUpdateTunnelTags = "update_tunnel_tags"
+	ActionDeleteTunnelNode = "delete_tunnel_node"
+	ActionUpdateTunnelACL  = "update_tunnel_acl"
+	ActionSyncTunnelACL    = "sync_tunnel_acl"
 )
 
 // AuditLog 审计日志模型
 // 记录所有管理操作的审计信息
 type AuditLog struct {
 	ID         int64     `gorm:"primaryKey" json:"id"`
-	AdminID    int64     `gorm:"index" json:"admin_id"`                     // 执行操作的管理员ID
+	UserID     int64     `gorm:"index:idx_audit_user" json:"user_id"`       // 执行操作的用户ID
+	UserType   string    `gorm:"size:20;default:admin" json:"user_type"`    // 用户类型：admin/desktop
 	ActionType string    `gorm:"size:50;index;not null" json:"action_type"` // 操作类型
 	TargetType string    `gorm:"size:50;not null" json:"target_type"`       // 目标类型 (agent, client, service, etc.)
 	TargetID   string    `gorm:"size:100;not null" json:"target_id"`        // 目标ID

@@ -61,19 +61,6 @@
             </div>
           </el-form-item>
 
-          <el-form-item :label="$t('tailscale.derpUrl')">
-            <div class="form-item-content">
-              <el-input
-                v-model="form.derp_url"
-                :placeholder="$t('tailscale.derpUrlPlaceholder')"
-                clearable
-              />
-              <div class="form-item-tip">
-                {{ $t('tailscale.derpUrlTip') }}
-              </div>
-            </div>
-          </el-form-item>
-
           <el-form-item :label="$t('tailscale.stunPort')">
             <div class="form-item-content">
               <el-input-number
@@ -143,7 +130,6 @@ const form = ref({
   client_download_url: '',
   desktop_min_version: '1.0.0',
   headscale_public_url: '',
-  derp_url: '',
   stun_port: 3479,
   ip_prefix: '100.64.0.0/10',
   auth_key_expiry_hours: 24
@@ -164,7 +150,6 @@ const loadConfig = async () => {
       form.value.client_download_url = res.data.client_download_url || ''
       form.value.desktop_min_version = res.data.desktop_min_version || '1.0.0'
       form.value.headscale_public_url = res.data.headscale_public_url || ''
-      form.value.derp_url = res.data.derp_url || ''
       form.value.stun_port = res.data.stun_port || 3479
       form.value.ip_prefix = res.data.ip_prefix || '100.64.0.0/10'
       form.value.auth_key_expiry_hours = res.data.auth_key_expiry_hours || 24
@@ -234,7 +219,6 @@ const handleSave = async () => {
       client_download_url: form.value.client_download_url,
       desktop_min_version: form.value.desktop_min_version,
       headscale_public_url: form.value.headscale_public_url,
-      derp_url: form.value.derp_url,
       stun_port: form.value.stun_port,
       ip_prefix: form.value.ip_prefix,
       auth_key_expiry_hours: form.value.auth_key_expiry_hours

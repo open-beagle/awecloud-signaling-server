@@ -12,16 +12,16 @@
       
       <el-table v-loading="loading" :data="agents" stripe>
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="agent_name" :label="t('agent.name')" min-width="120">
+        <el-table-column prop="name" :label="t('agent.name')" min-width="120">
           <template #default="{ row }">
             <el-link type="primary" :underline="false" @click="handleViewDetail(row)">
-              {{ row.agent_name }}
+              {{ row.name }}
             </el-link>
           </template>
         </el-table-column>
-        <el-table-column :label="t('agent.group')" min-width="150">
+        <el-table-column :label="t('agent.group')" width="100" align="center">
           <template #default="{ row }">
-            <span>{{ row.group_name || t('agent.noGroup') }}</span>
+            <span>{{ row.group_count ?? 0 }}</span>
           </template>
         </el-table-column>
         <el-table-column label="Services" width="100" align="center">
@@ -45,14 +45,14 @@
             <span>{{ row.version || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="tailscale_ip" label="IP" min-width="130">
+        <el-table-column prop="ip" label="IP" min-width="130">
           <template #default="{ row }">
-            <span>{{ row.tailscale_ip || '-' }}</span>
+            <span>{{ row.ip || '-' }}</span>
           </template>
         </el-table-column>
         <el-table-column :label="t('agent.lastHeartbeat')" min-width="120">
           <template #default="{ row }">
-            <TimeAgo :time="row.last_heartbeat" />
+            <TimeAgo :time="row.last_online" />
           </template>
         </el-table-column>
         <el-table-column :label="t('common.actions')" width="150" fixed="right">
@@ -79,19 +79,16 @@
     </el-card>
 
     <CreateDialog v-model="createDialogVisible" @success="handleCreateSuccess" />
-    <TokenDialog v-model="tokenDialogVisible" :agent="currentAgent" />
+    <TokenDialog v-model="tokenDialogVisible" :agent="currentAgent" :initial-secret="initialSecret" />
     
     <!-- 编辑对话框 -->
     <el-dialog v-model="editDialogVisible" :title="t('common.edit')" width="500px">
       <el-form :model="editForm" label-width="100px">
         <el-form-item :label="t('agent.name')">
-          <el-input v-model="editForm.agent_name" :placeholder="t('agent.namePlaceholder')" />
+          <el-input v-model="editForm.name" disabled />
         </el-form-item>
-        <el-form-item :label="t('agent.group')">
-          <el-input v-model="editForm.group_name" :placeholder="t('agent.noGroup')" />
-        </el-form-item>
-        <el-form-item :label="t('agent.description')">
-          <el-input v-model="editForm.description" type="textarea" :rows="3" :placeholder="t('agent.descriptionPlaceholder')" />
+        <el-form-item :label="t('agent.alias')">
+          <el-input v-model="editForm.alias" :placeholder="t('agent.aliasPlaceholder')" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -123,15 +120,16 @@ const agents = ref<Agent[]>([])
 const createDialogVisible = ref(false)
 const tokenDialogVisible = ref(false)
 const currentAgent = ref<Agent | null>(null)
+const initialSecret = ref('')
 
 // 编辑对话框
 const editDialogVisible = ref(false)
 const saving = ref(false)
 const editForm = ref({
   id: 0,
-  agent_name: '',
+  name: '',
   group_name: '',
-  description: ''
+  alias: ''
 })
 
 const loadAgents = async () => {
@@ -152,15 +150,17 @@ const handleCreate = () => {
   createDialogVisible.value = true
 }
 
-const handleCreateSuccess = (agent: Agent) => {
+const handleCreateSuccess = (data: { id: number; name: string; secret: string }) => {
   loadAgents()
-  // 显示新创建的Agent的Token
-  currentAgent.value = agent
+  // 显示新创建的 Agent 的密钥
+  currentAgent.value = { id: data.id, name: data.name } as Agent
+  initialSecret.value = data.secret
   tokenDialogVisible.value = true
 }
 
 const handleViewToken = (agent: Agent) => {
   currentAgent.value = agent
+  initialSecret.value = '' // 查看已有 Agent 时不显示密钥
   tokenDialogVisible.value = true
 }
 
@@ -171,25 +171,18 @@ const handleViewDetail = (agent: Agent) => {
 const handleEdit = (agent: Agent) => {
   editForm.value = {
     id: agent.id,
-    agent_name: agent.agent_name || '',
+    name: agent.name || '',
     group_name: agent.group_name || '',
-    description: agent.description || ''
+    alias: agent.alias || ''
   }
   editDialogVisible.value = true
 }
 
 const handleSaveEdit = async () => {
-  if (!editForm.value.agent_name.trim()) {
-    ElMessage.warning(t('agent.nameRequired'))
-    return
-  }
-  
   saving.value = true
   try {
     const res = await updateAgent(editForm.value.id, {
-      agent_name: editForm.value.agent_name,
-      group_name: editForm.value.group_name,
-      description: editForm.value.description
+      alias: editForm.value.alias
     })
     if (res.success) {
       ElMessage.success(t('common.success'))

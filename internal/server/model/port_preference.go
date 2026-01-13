@@ -1,23 +1,18 @@
 package model
 
-import (
-	"time"
-)
+import "time"
 
-// PortPreference 端口偏好表（废弃，保留兼容）
+// PortPreference 端口偏好模型
+// 存储用户对特定服务的本地端口偏好设置
 type PortPreference struct {
 	ID             int64     `gorm:"primaryKey" json:"id"`
-	ClientID       int64     `gorm:"not null;index:idx_port_preferences_client_id" json:"client_id"`
-	STCPInstanceID int64     `gorm:"not null;index:idx_port_preferences_instance_id" json:"stcp_instance_id"`
-	PreferredPort  int       `gorm:"not null" json:"preferred_port"`
-	CreatedAt      time.Time `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt      time.Time `gorm:"autoUpdateTime" json:"updated_at"`
-
-	// 关联
-	Client Client `gorm:"foreignKey:ClientID;constraint:OnDelete:CASCADE" json:"-"`
+	ClientID       int64     `gorm:"index;not null" json:"client_id"`        // 客户端 ID
+	STCPInstanceID int64     `gorm:"index;not null" json:"stcp_instance_id"` // 端口映射服务 ID
+	PreferredPort  int       `gorm:"not null" json:"preferred_port"`         // 偏好的本地端口
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-// TableName 指定表名
 func (PortPreference) TableName() string {
 	return "port_preferences"
 }

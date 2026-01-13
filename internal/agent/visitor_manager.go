@@ -337,3 +337,15 @@ func (m *VisitorManager) Exists(name string) bool {
 	_, exists := m.visitors[name]
 	return exists
 }
+
+// GetStatus 获取所有 Visitor 的运行状态
+func (m *VisitorManager) GetStatus() map[string]bool {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	result := make(map[string]bool)
+	for name, visitor := range m.visitors {
+		result[name] = visitor.Status == "running"
+	}
+	return result
+}

@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     v-model="visible"
-    :title="t('client.create')"
+    title="创建客户"
     width="500px"
     @close="handleClose"
   >
@@ -9,15 +9,21 @@
       ref="formRef"
       :model="form"
       :rules="rules"
-      label-width="100px"
+      label-width="80px"
     >
-      <el-form-item :label="t('client.clientId')" prop="client_id">
+      <el-form-item label="用户名" prop="name">
         <el-input
-          v-model="form.client_id"
-          :placeholder="t('client.clientIdPlaceholder')"
+          v-model="form.name"
+          placeholder="请输入用户名"
           clearable
         />
-        <div class="form-tip">{{ t('client.clientIdTip') }}</div>
+      </el-form-item>
+      <el-form-item label="别名">
+        <el-input
+          v-model="form.alias"
+          placeholder="请输入别名（可选）"
+          clearable
+        />
       </el-form-item>
     </el-form>
 
@@ -55,13 +61,14 @@ const loading = ref(false)
 const formRef = ref<FormInstance>()
 
 const form = ref({
-  client_id: ''
+  name: '',
+  alias: ''
 })
 
 const rules = computed<FormRules>(() => ({
-  client_id: [
-    { required: true, message: t('client.clientIdRequired'), trigger: 'blur' },
-    { min: 3, message: t('client.clientIdMinLength'), trigger: 'blur' }
+  name: [
+    { required: true, message: '请输入用户名', trigger: 'blur' },
+    { min: 2, message: '用户名至少2个字符', trigger: 'blur' }
   ]
 }))
 
@@ -87,11 +94,15 @@ const handleSubmit = async () => {
     loading.value = true
     try {
       const res = await createClient(form.value)
-      ElMessage.success(t('common.createSuccess'))
-      emit('success', res.client.client_id, res.client_secret)
-      handleClose()
+      if (res.success && res.data) {
+        ElMessage.success(t('common.createSuccess'))
+        emit('success', res.data.name, res.data.secret)
+        handleClose()
+      } else {
+        ElMessage.error(res.message || t('common.failed'))
+      }
     } catch (error: any) {
-      ElMessage.error(t('common.failed'))
+      ElMessage.error(error.message || t('common.failed'))
     } finally {
       loading.value = false
     }

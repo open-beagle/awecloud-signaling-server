@@ -31,9 +31,9 @@ type Server struct {
 	httpServer *http.Server
 	grpcServer *grpc.Server
 
-	// gRPC服务
-	agentService  *grpcserver.AgentServiceServer
-	clientService *grpcserver.ClientServiceServer
+	// gRPC 服务
+	agentService   *grpcserver.AgentServiceServer
+	desktopService *grpcserver.DesktopServiceServer
 
 	// ACL 同步服务
 	aclSyncService *headscale.ACLSyncService
@@ -41,12 +41,12 @@ type Server struct {
 	aclSyncCancel  context.CancelFunc
 }
 
-// GetAgentService 获取AgentService（供API使用）
+// GetAgentService 获取 AgentService（供 API 使用）
 func (s *Server) GetAgentService() *grpcserver.AgentServiceServer {
 	return s.agentService
 }
 
-// GetACLSyncService 获取ACLSyncService（供API使用）
+// GetACLSyncService 获取 ACLSyncService（供 API 使用）
 func (s *Server) GetACLSyncService() *headscale.ACLSyncService {
 	return s.aclSyncService
 }
@@ -72,12 +72,16 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
 		logger.Info("初始化 Headscale ACL 同步服务")
-		client := headscale.NewClient(headscale.Config{
+		client, err := headscale.NewClient(headscale.Config{
 			URL:    cfg.Tailscale.HeadscaleURL,
 			APIKey: cfg.Tailscale.HeadscaleAPIKey,
 		})
-		aclSyncService = headscale.NewACLSyncService(client)
-		aclSyncCtx, aclSyncCancel = context.WithCancel(context.Background())
+		if err != nil {
+			logger.Warnf("初始化 Headscale 客户端失败: %v", err)
+		} else {
+			aclSyncService = headscale.NewACLSyncService(client)
+			aclSyncCtx, aclSyncCancel = context.WithCancel(context.Background())
+		}
 	} else {
 		logger.Warn("Headscale 配置未设置，ACL 同步服务未启动")
 	}
@@ -96,37 +100,33 @@ func (s *Server) Run() error {
 	case "debug":
 		gin.SetMode(gin.DebugMode)
 		logger.Info("Gin 运行在 Debug 模式")
-	case "info", "warn", "error":
-		gin.SetMode(gin.ReleaseMode)
-		logger.Info("Gin 运行在 Release 模式")
 	default:
 		gin.SetMode(gin.ReleaseMode)
-		logger.Info("Gin 运行在 Release 模式（默认）")
+		logger.Info("Gin 运行在 Release 模式")
 	}
 
-	// 创建gRPC服务
-	s.agentService = grpcserver.NewAgentServiceServerWithConfig(s.config)
-	s.clientService = grpcserver.NewClientServiceServer(s.config)
-	s.clientService.SetAgentService(s.agentService)
+	// 创建 gRPC 服务
+	s.agentService = grpcserver.NewAgentServiceServer(s.config)
+	s.desktopService = grpcserver.NewDesktopServiceServer(s.config)
+	s.desktopService.SetAgentService(s.agentService)
 
 	s.grpcServer = grpc.NewServer()
 	pb.RegisterAgentServiceServer(s.grpcServer, s.agentService)
-	pb.RegisterClientServiceServer(s.grpcServer, s.clientService)
+	pb.RegisterDesktopServiceServer(s.grpcServer, s.desktopService)
 
-	// 创建Gin路由
+	// 创建 Gin 路由
 	ginRouter := s.setupRouter()
 
-	// 创建统一处理器（HTTP/2: 同时支持HTTP和gRPC）
+	// 创建统一处理器（HTTP/2: 同时支持 HTTP 和 gRPC）
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.ProtoMajor == 2 && strings.HasPrefix(
-			r.Header.Get("Content-Type"), "application/grpc") {
+		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 			s.grpcServer.ServeHTTP(w, r)
 		} else {
 			ginRouter.ServeHTTP(w, r)
 		}
 	})
 
-	// 创建HTTP/2服务器
+	// 创建 HTTP/2 服务器
 	h2s := &http2.Server{}
 
 	// 构建监听地址
@@ -143,10 +143,10 @@ func (s *Server) Run() error {
 
 	// 启动统一服务器（HTTP + gRPC）
 	go func() {
-		logger.Infof("Server启动在: http://%s", addr)
-		logger.Infof("  - Web管理界面: http://%s/", addr)
+		logger.Infof("Server 启动在: http://%s", addr)
+		logger.Infof("  - Web 管理界面: http://%s/", addr)
 		logger.Infof("  - RESTful API: http://%s/api/...", addr)
-		logger.Infof("  - gRPC服务: %s (HTTP/2)", addr)
+		logger.Infof("  - gRPC 服务: %s (HTTP/2)", addr)
 
 		listener, err := net.Listen("tcp4", addr)
 		if err != nil {
@@ -180,10 +180,10 @@ func (s *Server) Run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// 停止gRPC服务器
+	// 停止 gRPC 服务器
 	s.grpcServer.GracefulStop()
 
-	// 停止HTTP服务器
+	// 停止 HTTP 服务器
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		return fmt.Errorf("服务器关闭失败: %w", err)
 	}
@@ -200,24 +200,16 @@ func (s *Server) customLogger() gin.HandlerFunc {
 
 		c.Next()
 
-		// health接口只在状态变化时打印
+		// health 接口只在状态变化时打印
 		if path == "/health" || path == "/health/ready" {
 			if c.Writer.Header().Get("X-Log-Status-Change") == "true" {
-				logger.Infof("[gin] %s %s %d %v",
-					c.Request.Method,
-					path,
-					c.Writer.Status(),
-					time.Since(start))
+				logger.Infof("[gin] %s %s %d %v", c.Request.Method, path, c.Writer.Status(), time.Since(start))
 			}
 			return
 		}
 
 		// 其他接口正常打印
-		logger.Infof("[gin] %s %s %d %v",
-			c.Request.Method,
-			path,
-			c.Writer.Status(),
-			time.Since(start))
+		logger.Infof("[gin] %s %s %d %v", c.Request.Method, path, c.Writer.Status(), time.Since(start))
 	}
 }
 
@@ -232,8 +224,26 @@ func (s *Server) setupRouter() *gin.Engine {
 		if err != nil {
 			logger.Errorf("创建 Headscale 代理失败: %v", err)
 		} else {
+			// 代理 /headscale/* 路径（管理 API）
 			router.Any("/headscale/*proxyPath", headscaleProxy.Handler())
 			logger.Infof("Headscale 反向代理已启用: /headscale/* -> %s", s.config.Tailscale.HeadscaleURL)
+		}
+
+		// 创建 Tailscale 控制平面代理（根路径）
+		tailscaleProxy, err := proxy.NewTailscaleControlProxy(s.config.Tailscale.HeadscaleURL)
+		if err != nil {
+			logger.Errorf("创建 Tailscale 控制平面代理失败: %v", err)
+		} else {
+			// 代理 Tailscale 客户端需要的路径
+			// 这些路径是 Tailscale 客户端硬编码的，不能修改
+			router.Any("/ts2021", tailscaleProxy.Handler())
+			router.Any("/key", tailscaleProxy.Handler())
+			router.Any("/machine/*path", tailscaleProxy.Handler())
+			router.Any("/noise", tailscaleProxy.Handler())
+			router.Any("/derp", tailscaleProxy.Handler())
+			router.Any("/derp/*path", tailscaleProxy.Handler())
+			router.Any("/bootstrap-dns", tailscaleProxy.Handler())
+			logger.Infof("Tailscale 控制平面代理已启用: /ts2021, /key, /machine/*, /noise, /derp/* -> %s", s.config.Tailscale.HeadscaleURL)
 		}
 	}
 
@@ -249,29 +259,16 @@ func (s *Server) setupRouter() *gin.Engine {
 	// 下载文件服务（客户端下载）
 	router.Static("/downloads", "./bin")
 
-	// API路由组
+	// API 路由组
 	apiGroup := router.Group("/api")
 	{
-		// 保留旧版API用于向后兼容（已废弃）
-		clientAuthAPI := api.NewClientAuthAPI(s.config)
-		apiGroup.POST("/client/auth", clientAuthAPI.Auth)
-
 		// v1 API
 		v1Group := apiGroup.Group("/v1")
 		{
-			// ==================== 公开API ====================
+			// ==================== 公开 API ====================
 			v1Group.GET("/public/system/config", api.GetPublicSystemConfig)
 
-			// 桌面客户端下载API
-			downloadAPI := api.NewDownloadAPI()
-			v1Group.GET("/public/download/desktop", downloadAPI.GetDesktopDownload)
-			v1Group.GET("/public/download/desktop/direct", downloadAPI.GetDesktopDownloadDirect)
-			v1Group.GET("/public/download/desktop/versions", downloadAPI.ListDesktopVersions)
-
-			// 客户端版本检查API
-			v1Group.POST("/client/version/check", api.CheckVersion)
-
-			// ==================== 管理员API ====================
+			// ==================== 管理员 API ====================
 			adminGroup := v1Group.Group("/admin")
 			{
 				// 管理员认证
@@ -283,131 +280,134 @@ func (s *Server) setupRouter() *gin.Engine {
 				adminAuthGroup := adminGroup.Group("")
 				adminAuthGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret))
 				{
-					// Agent管理
-					agentAPI := api.NewAgentAPI()
+					// 管理员信息
+					adminAuthGroup.GET("/auth/me", adminAPI.GetMe)
+					adminAuthGroup.PUT("/auth/password", adminAPI.ChangePassword)
+
+					// Agent 管理
+					agentAPI := api.NewAgentAPI(s.config)
+					agentAPI.SetAgentService(s.agentService)
 					adminAuthGroup.GET("/agents", agentAPI.List)
 					adminAuthGroup.GET("/agents/:id", agentAPI.Get)
+					adminAuthGroup.GET("/agents/:id/realtime", agentAPI.GetRealtime)
+					adminAuthGroup.GET("/agents/:id/services", agentAPI.GetServices)
+					adminAuthGroup.GET("/agents/:id/forwards", agentAPI.GetForwards)
 					adminAuthGroup.POST("/agents", agentAPI.Create)
 					adminAuthGroup.PUT("/agents/:id", agentAPI.Update)
 					adminAuthGroup.DELETE("/agents/:id", agentAPI.Delete)
-					adminAuthGroup.GET("/agents/:id/token", agentAPI.GetToken)
-					adminAuthGroup.POST("/agents/:id/regenerate-token", agentAPI.RegenerateToken)
+					adminAuthGroup.POST("/agents/:id/regenerate-secret", agentAPI.RegenerateSecret)
 
-					// Client管理
-					clientAPI := api.NewClientAPI()
+					// Client 管理
+					clientAPI := api.NewClientAPI(s.config)
 					adminAuthGroup.GET("/clients", clientAPI.List)
+					adminAuthGroup.GET("/clients/:id", clientAPI.Get)
+					adminAuthGroup.GET("/clients/:id/groups", clientAPI.GetGroups)
+					adminAuthGroup.GET("/clients/:id/desktops", clientAPI.GetDesktops)
+					adminAuthGroup.GET("/clients/:id/services", clientAPI.GetServices)
 					adminAuthGroup.POST("/clients", clientAPI.Create)
-					adminAuthGroup.PUT("/clients/:id/disable", clientAPI.Disable)
-					adminAuthGroup.PUT("/clients/:id/enable", clientAPI.Enable)
+					adminAuthGroup.PUT("/clients/:id", clientAPI.Update)
 					adminAuthGroup.DELETE("/clients/:id", clientAPI.Delete)
+					adminAuthGroup.POST("/clients/:id/desktops/:did/logout", clientAPI.LogoutDesktop)
+					adminAuthGroup.DELETE("/clients/:id/desktops/:did", clientAPI.DeleteDesktop)
 					adminAuthGroup.POST("/clients/:id/regenerate-secret", clientAPI.RegenerateSecret)
 
-					// 端口映射服务管理（Tailscale）
-					proxyServiceAPI := api.NewProxyServiceAPI()
-					proxyServiceAPI.SetAgentService(s.agentService)
-					adminAuthGroup.GET("/services", proxyServiceAPI.List)
-					adminAuthGroup.POST("/services", proxyServiceAPI.Create)
-					adminAuthGroup.PUT("/services/:id", proxyServiceAPI.Update)
-					adminAuthGroup.DELETE("/services/:id", proxyServiceAPI.Delete)
-					adminAuthGroup.PUT("/services/:id/start", proxyServiceAPI.Start)
-					adminAuthGroup.PUT("/services/:id/stop", proxyServiceAPI.Stop)
-					adminAuthGroup.GET("/services/:id/stats", proxyServiceAPI.Stats)
-					adminAuthGroup.GET("/agents/:id/services", proxyServiceAPI.ListByAgent)
+					// 端口映射服务管理
+					serviceAPI := api.NewProxyServiceAPI(s.config)
+					adminAuthGroup.GET("/services", serviceAPI.List)
+					adminAuthGroup.POST("/services", serviceAPI.Create)
 
-					// 服务权限管理（安全架构）
-					servicePermAPI := api.NewServicePermissionAPI(s.config)
-					adminAuthGroup.GET("/services/permissions", servicePermAPI.ListAllServicePermissions)
-					adminAuthGroup.GET("/services/:id/permissions", servicePermAPI.ListServicePermissions)
-					adminAuthGroup.POST("/services/:id/permissions", servicePermAPI.AddServicePermission)
-					adminAuthGroup.DELETE("/services/:id/permissions/:pid", servicePermAPI.RemoveServicePermission)
-					adminAuthGroup.PUT("/services/:id/access-type", servicePermAPI.UpdateServiceAccessType)
+					// 服务权限管理（放在 /services/:id 之前，避免路由冲突）
+					permAPI := api.NewServicePermissionAPI(s.config)
+					// 全局权限查询
+					adminAuthGroup.GET("/services/permissions", permAPI.GetAllClientPermissions)
+					adminAuthGroup.GET("/agent-permissions", permAPI.GetAllAgentPermissions)
 
-					// Agent 服务权限管理（安全架构）
-					agentPermAPI := api.NewAgentServicePermissionAPI(s.config)
-					adminAuthGroup.GET("/agent-permissions", agentPermAPI.ListAgentServicePermissions)
-					adminAuthGroup.POST("/agent-permissions", agentPermAPI.AddAgentServicePermission)
-					adminAuthGroup.DELETE("/agent-permissions/:id", agentPermAPI.RemoveAgentServicePermission)
+					// 单个服务操作（放在具体路径之后）
+					adminAuthGroup.GET("/services/:id", serviceAPI.Get)
+					adminAuthGroup.PUT("/services/:id", serviceAPI.Update)
+					adminAuthGroup.DELETE("/services/:id", serviceAPI.Delete)
 
-					// Visitor 管理（端口访问服务）
-					visitorAPI := api.NewVisitorAPI()
-					adminAuthGroup.GET("/visitors", visitorAPI.List)
-					adminAuthGroup.GET("/visitors/:id", visitorAPI.Get)
-					adminAuthGroup.POST("/visitors", visitorAPI.Create)
-					adminAuthGroup.DELETE("/visitors/:id", visitorAPI.Delete)
-					adminAuthGroup.POST("/visitors/:id/start", visitorAPI.Start)
-					adminAuthGroup.POST("/visitors/:id/stop", visitorAPI.Stop)
+					// 桌面授权 - 用户
+					adminAuthGroup.GET("/services/:id/clients", permAPI.GetClients)
+					adminAuthGroup.POST("/services/:id/clients", permAPI.AddClient)
+					adminAuthGroup.DELETE("/services/:id/clients/:cid", permAPI.RemoveClient)
+					// 桌面授权 - 用户分组
+					adminAuthGroup.GET("/services/:id/client-groups", permAPI.GetClientGroups)
+					adminAuthGroup.POST("/services/:id/client-groups", permAPI.AddClientGroup)
+					adminAuthGroup.DELETE("/services/:id/client-groups/:gid", permAPI.RemoveClientGroup)
+					// 代理授权 - Agent
+					adminAuthGroup.GET("/services/:id/agents", permAPI.GetAgents)
+					adminAuthGroup.POST("/services/:id/agents", permAPI.AddAgent)
+					adminAuthGroup.DELETE("/services/:id/agents/:aid", permAPI.RemoveAgent)
+					// 代理授权 - Agent 分组
+					adminAuthGroup.GET("/services/:id/agent-groups", permAPI.GetAgentGroups)
+					adminAuthGroup.POST("/services/:id/agent-groups", permAPI.AddAgentGroup)
+					adminAuthGroup.DELETE("/services/:id/agent-groups/:gid", permAPI.RemoveAgentGroup)
 
-					// Tailscale 管理
-					tailscaleAPI := api.NewTailscaleAPI(s.config)
-					adminAuthGroup.GET("/tailscale/status", tailscaleAPI.Status)
-					adminAuthGroup.POST("/tailscale/sync", tailscaleAPI.Sync)
-					adminAuthGroup.GET("/tailscale/nodes", tailscaleAPI.Nodes)
-
-					// 组管理
-					groupAPI := api.NewGroupAPI()
-					adminAuthGroup.GET("/groups", groupAPI.GetGroups)
-					adminAuthGroup.POST("/groups", groupAPI.CreateGroup)
-					adminAuthGroup.PUT("/groups/:id", groupAPI.UpdateGroup)
-					adminAuthGroup.DELETE("/groups/:id", groupAPI.DeleteGroup)
-					adminAuthGroup.GET("/groups/:id/members", groupAPI.GetGroupMembers)
-					adminAuthGroup.POST("/groups/:id/members", groupAPI.AddGroupMember)
-					adminAuthGroup.DELETE("/groups/:id/members/:client_id", groupAPI.RemoveGroupMember)
+					// 分组管理
+					groupAPI := api.NewGroupAPI(s.config)
+					// 用户分组
+					adminAuthGroup.GET("/client-groups", groupAPI.ListClientGroups)
+					adminAuthGroup.POST("/client-groups", groupAPI.CreateClientGroup)
+					adminAuthGroup.PUT("/client-groups/:id", groupAPI.UpdateClientGroup)
+					adminAuthGroup.DELETE("/client-groups/:id", groupAPI.DeleteClientGroup)
+					adminAuthGroup.GET("/client-groups/:id/members", groupAPI.GetClientGroupMembers)
+					adminAuthGroup.POST("/client-groups/:id/members", groupAPI.AddClientGroupMember)
+					adminAuthGroup.DELETE("/client-groups/:id/members/:cid", groupAPI.RemoveClientGroupMember)
+					// 代理分组
+					adminAuthGroup.GET("/agent-groups", groupAPI.ListAgentGroups)
+					adminAuthGroup.POST("/agent-groups", groupAPI.CreateAgentGroup)
+					adminAuthGroup.PUT("/agent-groups/:id", groupAPI.UpdateAgentGroup)
+					adminAuthGroup.DELETE("/agent-groups/:id", groupAPI.DeleteAgentGroup)
+					adminAuthGroup.GET("/agent-groups/:id/members", groupAPI.GetAgentGroupMembers)
+					adminAuthGroup.POST("/agent-groups/:id/members", groupAPI.AddAgentGroupMember)
+					adminAuthGroup.DELETE("/agent-groups/:id/members/:aid", groupAPI.RemoveAgentGroupMember)
 
 					// 审计日志
-					auditLogAPI := api.NewAuditLogAPI()
-					adminAuthGroup.GET("/audit/connection", auditLogAPI.QueryAuditLogs)
-					adminAuthGroup.GET("/audit/connection/export", auditLogAPI.ExportAuditLogs)
+					auditAPI := api.NewAuditLogAPI()
+					adminAuthGroup.GET("/audit/logs", auditAPI.QueryAuditLogs)
+					adminAuthGroup.GET("/audit/action-types", auditAPI.GetActionTypes)
+					adminAuthGroup.GET("/audit/users", auditAPI.GetUsers)
 
 					// 系统配置
 					adminAuthGroup.GET("/system/config", api.GetSystemConfig)
 					adminAuthGroup.PUT("/system/config", api.UpdateSystemConfig)
 
-					// 收藏管理
-					serviceFavoriteAPI := api.NewServiceFavoriteAPI()
-					adminAuthGroup.GET("/favorites", serviceFavoriteAPI.GetAllFavorites)
+					// 隧道管理
+					tunnelAPI := api.NewTunnelAPI(s.config)
+					// User 管理
+					adminAuthGroup.GET("/tunnel/users", tunnelAPI.ListTunnelUsers)
+					adminAuthGroup.GET("/tunnel/users/:id", tunnelAPI.GetTunnelUser)
+					adminAuthGroup.PUT("/tunnel/users/:id", tunnelAPI.UpdateTunnelUser)
+					adminAuthGroup.DELETE("/tunnel/users/:id", tunnelAPI.DeleteTunnelUser)
+					adminAuthGroup.GET("/tunnel/users/:id/nodes", tunnelAPI.GetTunnelUserNodes)
+					// Node 管理
+					adminAuthGroup.GET("/tunnel/nodes", tunnelAPI.ListTunnelNodes)
+					adminAuthGroup.GET("/tunnel/nodes/:id", tunnelAPI.GetTunnelNode)
+					adminAuthGroup.PUT("/tunnel/nodes/:id", tunnelAPI.UpdateTunnelNode)
+					adminAuthGroup.PUT("/tunnel/nodes/:id/tags", tunnelAPI.UpdateTunnelNodeTags)
+					adminAuthGroup.DELETE("/tunnel/nodes/:id", tunnelAPI.DeleteTunnelNode)
+					adminAuthGroup.GET("/tunnel/tags", tunnelAPI.GetTunnelTags)
+					// ACL 管理
+					adminAuthGroup.GET("/tunnel/acl", tunnelAPI.GetTunnelACL)
+					adminAuthGroup.PUT("/tunnel/acl", tunnelAPI.UpdateTunnelACL)
+					adminAuthGroup.GET("/tunnel/acl/rules", tunnelAPI.GetTunnelACLRules)
+					adminAuthGroup.POST("/tunnel/acl/sync", tunnelAPI.SyncTunnelACL)
 				}
 			}
 
 			// ==================== Client API ====================
 			clientGroup := v1Group.Group("/client")
 			{
-				// Client认证
+				// Client 认证
 				deviceTokenAPI := api.NewDeviceTokenAPI(s.config)
 				clientGroup.POST("/auth/login", deviceTokenAPI.LoginWithSecret)
 				clientGroup.POST("/auth/login/token", deviceTokenAPI.LoginWithToken)
 
-				// 需要Client JWT认证的路由
+				// 需要 Client JWT 认证的路由
 				clientAuthGroup := clientGroup.Group("")
 				clientAuthGroup.Use(api.ClientAuthMiddleware(s.config.Security.JWTSecret))
 				{
-					// 服务列表
-					clientAuthGroup.GET("/services", clientAuthAPI.GetServices)
-					clientAuthGroup.GET("/services/v2", clientAuthAPI.GetServicesV2)
-
-					// Tailscale 认证
-					clientAuthGroup.POST("/tailscale/auth", clientAuthAPI.GetTailscaleAuth)
-					clientAuthGroup.DELETE("/tailscale/disconnect", clientAuthAPI.DisconnectTailscale)
-
-					// Device Token管理
-					clientAuthGroup.GET("/auth/login/devices", deviceTokenAPI.ListDevices)
-					clientAuthGroup.POST("/auth/login/devices/:device_token/offline", deviceTokenAPI.OfflineDevice)
-					clientAuthGroup.DELETE("/auth/login/devices/:device_token", deviceTokenAPI.DeleteDevice)
-
-					// 端口偏好
-					portPrefAPI := api.NewPortPreferenceAPI()
-					clientAuthGroup.GET("/preferences/port", portPrefAPI.GetPortPreferences)
-					clientAuthGroup.POST("/preferences/port", portPrefAPI.SavePortPreference)
-
-					// 服务收藏
-					serviceFavoriteAPI := api.NewServiceFavoriteAPI()
-					clientAuthGroup.GET("/favorites", serviceFavoriteAPI.GetServiceFavorites)
-					clientAuthGroup.POST("/favorites/toggle", serviceFavoriteAPI.ToggleFavorite)
-					clientAuthGroup.PUT("/favorites/port", serviceFavoriteAPI.UpdateFavoritePort)
-
-					// 审计日志
-					auditLogAPI := api.NewAuditLogAPI()
-					clientAuthGroup.POST("/audit/connection", auditLogAPI.RecordConnection)
-
 					// 隧道配置
 					tunnelConfigAPI := api.NewTunnelConfigAPI(s.config)
 					clientAuthGroup.GET("/tunnel/config", tunnelConfigAPI.GetTunnelConfig)
@@ -416,7 +416,7 @@ func (s *Server) setupRouter() *gin.Engine {
 		}
 	}
 
-	// SPA路由支持
+	// SPA 路由支持
 	router.NoRoute(func(c *gin.Context) {
 		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api" {
 			c.JSON(404, gin.H{"error": "Not Found"})

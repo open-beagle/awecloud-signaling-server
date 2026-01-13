@@ -19,44 +19,26 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentService_Register_FullMethodName               = "/awecloud.signaling.AgentService/Register"
-	AgentService_Heartbeat_FullMethodName              = "/awecloud.signaling.AgentService/Heartbeat"
-	AgentService_ReceiveCommands_FullMethodName        = "/awecloud.signaling.AgentService/ReceiveCommands"
-	AgentService_ReportStatus_FullMethodName           = "/awecloud.signaling.AgentService/ReportStatus"
-	AgentService_GetEnabledTCPServices_FullMethodName  = "/awecloud.signaling.AgentService/GetEnabledTCPServices"
-	AgentService_GetEnabledSTCPVisitors_FullMethodName = "/awecloud.signaling.AgentService/GetEnabledSTCPVisitors"
-	AgentService_ReportTailscaleStatus_FullMethodName  = "/awecloud.signaling.AgentService/ReportTailscaleStatus"
-	AgentService_ReportProxyStatus_FullMethodName      = "/awecloud.signaling.AgentService/ReportProxyStatus"
-	AgentService_GetTailscaleState_FullMethodName      = "/awecloud.signaling.AgentService/GetTailscaleState"
-	AgentService_SaveTailscaleState_FullMethodName     = "/awecloud.signaling.AgentService/SaveTailscaleState"
+	AgentService_Register_FullMethodName          = "/awecloud.signaling.AgentService/Register"
+	AgentService_Authenticate_FullMethodName      = "/awecloud.signaling.AgentService/Authenticate"
+	AgentService_Heartbeat_FullMethodName         = "/awecloud.signaling.AgentService/Heartbeat"
+	AgentService_GetRealtimeStatus_FullMethodName = "/awecloud.signaling.AgentService/GetRealtimeStatus"
 )
 
 // AgentServiceClient is the client API for AgentService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// AgentService Agent管理服务
+// AgentService Agent 管理服务
 type AgentServiceClient interface {
-	// Agent注册
-	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
-	// Agent心跳
-	Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error)
-	// 接收Server指令（双向流）
-	ReceiveCommands(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[CommandResponse, Command], error)
-	// 状态上报
-	ReportStatus(ctx context.Context, in *StatusReport, opts ...grpc.CallOption) (*StatusResponse, error)
-	// 获取已启用的TCP服务列表
-	GetEnabledTCPServices(ctx context.Context, in *GetTCPServicesRequest, opts ...grpc.CallOption) (*GetTCPServicesResponse, error)
-	// 获取已启用的STCP访问列表
-	GetEnabledSTCPVisitors(ctx context.Context, in *GetSTCPVisitorsRequest, opts ...grpc.CallOption) (*GetSTCPVisitorsResponse, error)
-	// [Tailscale] 上报 Tailscale 状态
-	ReportTailscaleStatus(ctx context.Context, in *TailscaleStatusReport, opts ...grpc.CallOption) (*StatusResponse, error)
-	// [Tailscale] 上报端口映射状态
-	ReportProxyStatus(ctx context.Context, in *ProxyStatusReport, opts ...grpc.CallOption) (*StatusResponse, error)
-	// [Tailscale] 获取 Tailscale 状态
-	GetTailscaleState(ctx context.Context, in *GetStateRequest, opts ...grpc.CallOption) (*GetStateResponse, error)
-	// [Tailscale] 保存 Tailscale 状态
-	SaveTailscaleState(ctx context.Context, in *SaveStateRequest, opts ...grpc.CallOption) (*SaveStateResponse, error)
+	// 注册 - Agent 首次连接时调用
+	Register(ctx context.Context, in *AgentRegisterRequest, opts ...grpc.CallOption) (*AgentRegisterResponse, error)
+	// 认证 - Agent 重连时调用
+	Authenticate(ctx context.Context, in *AgentAuthenticateRequest, opts ...grpc.CallOption) (*AgentAuthenticateResponse, error)
+	// 心跳 - 双向流，保持连接并同步状态
+	Heartbeat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[AgentHeartbeatRequest, AgentHeartbeatResponse], error)
+	// 获取实时状态 - Server 主动调用（用于 Web 详情页刷新）
+	GetRealtimeStatus(ctx context.Context, in *GetRealtimeStatusRequest, opts ...grpc.CallOption) (*GetRealtimeStatusResponse, error)
 }
 
 type agentServiceClient struct {
@@ -67,9 +49,9 @@ func NewAgentServiceClient(cc grpc.ClientConnInterface) AgentServiceClient {
 	return &agentServiceClient{cc}
 }
 
-func (c *agentServiceClient) Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error) {
+func (c *agentServiceClient) Register(ctx context.Context, in *AgentRegisterRequest, opts ...grpc.CallOption) (*AgentRegisterResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RegisterResponse)
+	out := new(AgentRegisterResponse)
 	err := c.cc.Invoke(ctx, AgentService_Register_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -77,93 +59,33 @@ func (c *agentServiceClient) Register(ctx context.Context, in *RegisterRequest, 
 	return out, nil
 }
 
-func (c *agentServiceClient) Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error) {
+func (c *agentServiceClient) Authenticate(ctx context.Context, in *AgentAuthenticateRequest, opts ...grpc.CallOption) (*AgentAuthenticateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(HeartbeatResponse)
-	err := c.cc.Invoke(ctx, AgentService_Heartbeat_FullMethodName, in, out, cOpts...)
+	out := new(AgentAuthenticateResponse)
+	err := c.cc.Invoke(ctx, AgentService_Authenticate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *agentServiceClient) ReceiveCommands(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[CommandResponse, Command], error) {
+func (c *agentServiceClient) Heartbeat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[AgentHeartbeatRequest, AgentHeartbeatResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[0], AgentService_ReceiveCommands_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[0], AgentService_Heartbeat_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[CommandResponse, Command]{ClientStream: stream}
+	x := &grpc.GenericClientStream[AgentHeartbeatRequest, AgentHeartbeatResponse]{ClientStream: stream}
 	return x, nil
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AgentService_ReceiveCommandsClient = grpc.BidiStreamingClient[CommandResponse, Command]
+type AgentService_HeartbeatClient = grpc.BidiStreamingClient[AgentHeartbeatRequest, AgentHeartbeatResponse]
 
-func (c *agentServiceClient) ReportStatus(ctx context.Context, in *StatusReport, opts ...grpc.CallOption) (*StatusResponse, error) {
+func (c *agentServiceClient) GetRealtimeStatus(ctx context.Context, in *GetRealtimeStatusRequest, opts ...grpc.CallOption) (*GetRealtimeStatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StatusResponse)
-	err := c.cc.Invoke(ctx, AgentService_ReportStatus_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *agentServiceClient) GetEnabledTCPServices(ctx context.Context, in *GetTCPServicesRequest, opts ...grpc.CallOption) (*GetTCPServicesResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetTCPServicesResponse)
-	err := c.cc.Invoke(ctx, AgentService_GetEnabledTCPServices_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *agentServiceClient) GetEnabledSTCPVisitors(ctx context.Context, in *GetSTCPVisitorsRequest, opts ...grpc.CallOption) (*GetSTCPVisitorsResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetSTCPVisitorsResponse)
-	err := c.cc.Invoke(ctx, AgentService_GetEnabledSTCPVisitors_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *agentServiceClient) ReportTailscaleStatus(ctx context.Context, in *TailscaleStatusReport, opts ...grpc.CallOption) (*StatusResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StatusResponse)
-	err := c.cc.Invoke(ctx, AgentService_ReportTailscaleStatus_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *agentServiceClient) ReportProxyStatus(ctx context.Context, in *ProxyStatusReport, opts ...grpc.CallOption) (*StatusResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StatusResponse)
-	err := c.cc.Invoke(ctx, AgentService_ReportProxyStatus_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *agentServiceClient) GetTailscaleState(ctx context.Context, in *GetStateRequest, opts ...grpc.CallOption) (*GetStateResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetStateResponse)
-	err := c.cc.Invoke(ctx, AgentService_GetTailscaleState_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *agentServiceClient) SaveTailscaleState(ctx context.Context, in *SaveStateRequest, opts ...grpc.CallOption) (*SaveStateResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SaveStateResponse)
-	err := c.cc.Invoke(ctx, AgentService_SaveTailscaleState_FullMethodName, in, out, cOpts...)
+	out := new(GetRealtimeStatusResponse)
+	err := c.cc.Invoke(ctx, AgentService_GetRealtimeStatus_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -174,28 +96,16 @@ func (c *agentServiceClient) SaveTailscaleState(ctx context.Context, in *SaveSta
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
 //
-// AgentService Agent管理服务
+// AgentService Agent 管理服务
 type AgentServiceServer interface {
-	// Agent注册
-	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
-	// Agent心跳
-	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error)
-	// 接收Server指令（双向流）
-	ReceiveCommands(grpc.BidiStreamingServer[CommandResponse, Command]) error
-	// 状态上报
-	ReportStatus(context.Context, *StatusReport) (*StatusResponse, error)
-	// 获取已启用的TCP服务列表
-	GetEnabledTCPServices(context.Context, *GetTCPServicesRequest) (*GetTCPServicesResponse, error)
-	// 获取已启用的STCP访问列表
-	GetEnabledSTCPVisitors(context.Context, *GetSTCPVisitorsRequest) (*GetSTCPVisitorsResponse, error)
-	// [Tailscale] 上报 Tailscale 状态
-	ReportTailscaleStatus(context.Context, *TailscaleStatusReport) (*StatusResponse, error)
-	// [Tailscale] 上报端口映射状态
-	ReportProxyStatus(context.Context, *ProxyStatusReport) (*StatusResponse, error)
-	// [Tailscale] 获取 Tailscale 状态
-	GetTailscaleState(context.Context, *GetStateRequest) (*GetStateResponse, error)
-	// [Tailscale] 保存 Tailscale 状态
-	SaveTailscaleState(context.Context, *SaveStateRequest) (*SaveStateResponse, error)
+	// 注册 - Agent 首次连接时调用
+	Register(context.Context, *AgentRegisterRequest) (*AgentRegisterResponse, error)
+	// 认证 - Agent 重连时调用
+	Authenticate(context.Context, *AgentAuthenticateRequest) (*AgentAuthenticateResponse, error)
+	// 心跳 - 双向流，保持连接并同步状态
+	Heartbeat(grpc.BidiStreamingServer[AgentHeartbeatRequest, AgentHeartbeatResponse]) error
+	// 获取实时状态 - Server 主动调用（用于 Web 详情页刷新）
+	GetRealtimeStatus(context.Context, *GetRealtimeStatusRequest) (*GetRealtimeStatusResponse, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -206,35 +116,17 @@ type AgentServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAgentServiceServer struct{}
 
-func (UnimplementedAgentServiceServer) Register(context.Context, *RegisterRequest) (*RegisterResponse, error) {
+func (UnimplementedAgentServiceServer) Register(context.Context, *AgentRegisterRequest) (*AgentRegisterResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Register not implemented")
 }
-func (UnimplementedAgentServiceServer) Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Heartbeat not implemented")
+func (UnimplementedAgentServiceServer) Authenticate(context.Context, *AgentAuthenticateRequest) (*AgentAuthenticateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Authenticate not implemented")
 }
-func (UnimplementedAgentServiceServer) ReceiveCommands(grpc.BidiStreamingServer[CommandResponse, Command]) error {
-	return status.Error(codes.Unimplemented, "method ReceiveCommands not implemented")
+func (UnimplementedAgentServiceServer) Heartbeat(grpc.BidiStreamingServer[AgentHeartbeatRequest, AgentHeartbeatResponse]) error {
+	return status.Error(codes.Unimplemented, "method Heartbeat not implemented")
 }
-func (UnimplementedAgentServiceServer) ReportStatus(context.Context, *StatusReport) (*StatusResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ReportStatus not implemented")
-}
-func (UnimplementedAgentServiceServer) GetEnabledTCPServices(context.Context, *GetTCPServicesRequest) (*GetTCPServicesResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetEnabledTCPServices not implemented")
-}
-func (UnimplementedAgentServiceServer) GetEnabledSTCPVisitors(context.Context, *GetSTCPVisitorsRequest) (*GetSTCPVisitorsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetEnabledSTCPVisitors not implemented")
-}
-func (UnimplementedAgentServiceServer) ReportTailscaleStatus(context.Context, *TailscaleStatusReport) (*StatusResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ReportTailscaleStatus not implemented")
-}
-func (UnimplementedAgentServiceServer) ReportProxyStatus(context.Context, *ProxyStatusReport) (*StatusResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ReportProxyStatus not implemented")
-}
-func (UnimplementedAgentServiceServer) GetTailscaleState(context.Context, *GetStateRequest) (*GetStateResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetTailscaleState not implemented")
-}
-func (UnimplementedAgentServiceServer) SaveTailscaleState(context.Context, *SaveStateRequest) (*SaveStateResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method SaveTailscaleState not implemented")
+func (UnimplementedAgentServiceServer) GetRealtimeStatus(context.Context, *GetRealtimeStatusRequest) (*GetRealtimeStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetRealtimeStatus not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -258,7 +150,7 @@ func RegisterAgentServiceServer(s grpc.ServiceRegistrar, srv AgentServiceServer)
 }
 
 func _AgentService_Register_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RegisterRequest)
+	in := new(AgentRegisterRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -270,158 +162,50 @@ func _AgentService_Register_Handler(srv interface{}, ctx context.Context, dec fu
 		FullMethod: AgentService_Register_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentServiceServer).Register(ctx, req.(*RegisterRequest))
+		return srv.(AgentServiceServer).Register(ctx, req.(*AgentRegisterRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _AgentService_Heartbeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HeartbeatRequest)
+func _AgentService_Authenticate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AgentAuthenticateRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AgentServiceServer).Heartbeat(ctx, in)
+		return srv.(AgentServiceServer).Authenticate(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: AgentService_Heartbeat_FullMethodName,
+		FullMethod: AgentService_Authenticate_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentServiceServer).Heartbeat(ctx, req.(*HeartbeatRequest))
+		return srv.(AgentServiceServer).Authenticate(ctx, req.(*AgentAuthenticateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _AgentService_ReceiveCommands_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(AgentServiceServer).ReceiveCommands(&grpc.GenericServerStream[CommandResponse, Command]{ServerStream: stream})
+func _AgentService_Heartbeat_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AgentServiceServer).Heartbeat(&grpc.GenericServerStream[AgentHeartbeatRequest, AgentHeartbeatResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type AgentService_ReceiveCommandsServer = grpc.BidiStreamingServer[CommandResponse, Command]
+type AgentService_HeartbeatServer = grpc.BidiStreamingServer[AgentHeartbeatRequest, AgentHeartbeatResponse]
 
-func _AgentService_ReportStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StatusReport)
+func _AgentService_GetRealtimeStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRealtimeStatusRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(AgentServiceServer).ReportStatus(ctx, in)
+		return srv.(AgentServiceServer).GetRealtimeStatus(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: AgentService_ReportStatus_FullMethodName,
+		FullMethod: AgentService_GetRealtimeStatus_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentServiceServer).ReportStatus(ctx, req.(*StatusReport))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AgentService_GetEnabledTCPServices_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetTCPServicesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentServiceServer).GetEnabledTCPServices(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentService_GetEnabledTCPServices_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentServiceServer).GetEnabledTCPServices(ctx, req.(*GetTCPServicesRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AgentService_GetEnabledSTCPVisitors_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetSTCPVisitorsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentServiceServer).GetEnabledSTCPVisitors(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentService_GetEnabledSTCPVisitors_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentServiceServer).GetEnabledSTCPVisitors(ctx, req.(*GetSTCPVisitorsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AgentService_ReportTailscaleStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(TailscaleStatusReport)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentServiceServer).ReportTailscaleStatus(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentService_ReportTailscaleStatus_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentServiceServer).ReportTailscaleStatus(ctx, req.(*TailscaleStatusReport))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AgentService_ReportProxyStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ProxyStatusReport)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentServiceServer).ReportProxyStatus(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentService_ReportProxyStatus_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentServiceServer).ReportProxyStatus(ctx, req.(*ProxyStatusReport))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AgentService_GetTailscaleState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetStateRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentServiceServer).GetTailscaleState(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentService_GetTailscaleState_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentServiceServer).GetTailscaleState(ctx, req.(*GetStateRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AgentService_SaveTailscaleState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SaveStateRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentServiceServer).SaveTailscaleState(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentService_SaveTailscaleState_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentServiceServer).SaveTailscaleState(ctx, req.(*SaveStateRequest))
+		return srv.(AgentServiceServer).GetRealtimeStatus(ctx, req.(*GetRealtimeStatusRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -438,42 +222,18 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AgentService_Register_Handler,
 		},
 		{
-			MethodName: "Heartbeat",
-			Handler:    _AgentService_Heartbeat_Handler,
+			MethodName: "Authenticate",
+			Handler:    _AgentService_Authenticate_Handler,
 		},
 		{
-			MethodName: "ReportStatus",
-			Handler:    _AgentService_ReportStatus_Handler,
-		},
-		{
-			MethodName: "GetEnabledTCPServices",
-			Handler:    _AgentService_GetEnabledTCPServices_Handler,
-		},
-		{
-			MethodName: "GetEnabledSTCPVisitors",
-			Handler:    _AgentService_GetEnabledSTCPVisitors_Handler,
-		},
-		{
-			MethodName: "ReportTailscaleStatus",
-			Handler:    _AgentService_ReportTailscaleStatus_Handler,
-		},
-		{
-			MethodName: "ReportProxyStatus",
-			Handler:    _AgentService_ReportProxyStatus_Handler,
-		},
-		{
-			MethodName: "GetTailscaleState",
-			Handler:    _AgentService_GetTailscaleState_Handler,
-		},
-		{
-			MethodName: "SaveTailscaleState",
-			Handler:    _AgentService_SaveTailscaleState_Handler,
+			MethodName: "GetRealtimeStatus",
+			Handler:    _AgentService_GetRealtimeStatus_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "ReceiveCommands",
-			Handler:       _AgentService_ReceiveCommands_Handler,
+			StreamName:    "Heartbeat",
+			Handler:       _AgentService_Heartbeat_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

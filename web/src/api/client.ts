@@ -1,120 +1,112 @@
 import request from '@/utils/request'
+import type { ApiResponse, PagedResponse } from '@/types/models'
 
 export interface Client {
   id: number
-  client_id: string
-  client_secret?: string
-  enabled: boolean
-  tailscale_ip?: string
-  created_at: string
-  updated_at: string
+  name: string
+  alias?: string
+  desktop_count?: number
+  status?: string
+  last_online?: string
+  created_at?: string
+  updated_at?: string
 }
 
 export interface Desktop {
   id: number
   client_id: number
   device_name: string
-  tailscale_ip?: string
-  online: boolean
-  last_seen_at: string
+  tunnel_ip?: string
+  status?: string
+  last_online?: string
   created_at: string
 }
 
-export interface ClientDetail extends Client {
-  desktops?: Desktop[]
-  groups?: string[]
-  permissions?: ServicePermission[]
+export interface ClientDetail {
+  id: number
+  name: string
+  alias?: string
+  created_at: string
+}
+
+export interface ClientGroupItem {
+  id: number
+  name: string
 }
 
 export interface ServicePermission {
-  id: number
-  service_id: number
-  service_name: string
+  id: string
+  name: string
   agent_name: string
-  access_address: string
+  listen_addr: string
+  auth_type: string
   granted_at: string
-  grant_type: 'direct' | 'group'
-  group_name?: string
 }
 
 export interface CreateClientRequest {
-  client_id: string
+  name: string
+  alias?: string
 }
 
 export interface CreateClientResponse {
-  client: Client
-  client_secret: string
+  id: number
+  name: string
+  secret: string
 }
 
-export interface ClientsResponse {
-  clients: Client[]
-}
-
-export interface RegenerateSecretResponse {
-  client_secret: string
-}
-
-// 获取Client列表
-export function getClients() {
-  return request<ClientsResponse>({
-    url: '/api/v1/admin/clients',
-    method: 'get'
+// 获取 Client 列表
+export function getClients(page = 1, size = 20, search = '') {
+  return request.get<any, PagedResponse<Client[]>>('/api/v1/admin/clients', {
+    params: { page, size, search }
   })
 }
 
-// 获取Client详情
+// 获取 Client 详情
 export function getClientDetail(id: number) {
-  return request<ClientDetail>({
-    url: `/api/v1/admin/clients/${id}`,
-    method: 'get'
-  })
+  return request.get<any, ApiResponse<ClientDetail>>(`/api/v1/admin/clients/${id}`)
 }
 
-// 创建Client
+// 获取 Client 所属分组
+export function getClientGroups(id: number) {
+  return request.get<any, ApiResponse<ClientGroupItem[]>>(`/api/v1/admin/clients/${id}/groups`)
+}
+
+// 获取 Client 的 Desktop 列表
+export function getClientDesktops(id: number) {
+  return request.get<any, ApiResponse<Desktop[]>>(`/api/v1/admin/clients/${id}/desktops`)
+}
+
+// 获取 Client 已授权服务列表
+export function getClientServices(id: number) {
+  return request.get<any, ApiResponse<ServicePermission[]>>(`/api/v1/admin/clients/${id}/services`)
+}
+
+// 创建 Client
 export function createClient(data: CreateClientRequest) {
-  return request<CreateClientResponse>({
-    url: '/api/v1/admin/clients',
-    method: 'post',
-    data
-  })
+  return request.post<any, ApiResponse<CreateClientResponse>>('/api/v1/admin/clients', data)
 }
 
-// 启用Client
-export function enableClient(id: number) {
-  return request({
-    url: `/api/v1/admin/clients/${id}/enable`,
-    method: 'put'
-  })
+// 更新 Client
+export function updateClient(id: number, data: { alias?: string }) {
+  return request.put<any, ApiResponse>(`/api/v1/admin/clients/${id}`, data)
 }
 
-// 禁用Client
-export function disableClient(id: number) {
-  return request({
-    url: `/api/v1/admin/clients/${id}/disable`,
-    method: 'put'
-  })
-}
-
-// 删除Client
+// 删除 Client
 export function deleteClient(id: number) {
-  return request({
-    url: `/api/v1/admin/clients/${id}`,
-    method: 'delete'
-  })
+  return request.delete<any, ApiResponse>(`/api/v1/admin/clients/${id}`)
 }
 
-// 重新生成Secret
+// 重新生成 Secret
 export function regenerateSecret(id: number) {
-  return request<RegenerateSecretResponse>({
-    url: `/api/v1/admin/clients/${id}/regenerate-secret`,
-    method: 'post'
-  })
+  return request.post<any, ApiResponse<{ secret: string }>>(`/api/v1/admin/clients/${id}/regenerate-secret`)
 }
 
-// 注销设备
-export function revokeDesktop(desktopId: number) {
-  return request({
-    url: `/api/v1/admin/desktops/${desktopId}`,
-    method: 'delete'
-  })
+// 注销 Desktop
+export function logoutDesktop(clientId: number, desktopId: number) {
+  return request.post<any, ApiResponse>(`/api/v1/admin/clients/${clientId}/desktops/${desktopId}/logout`)
+}
+
+// 删除 Desktop
+export function deleteDesktop(clientId: number, desktopId: number) {
+  return request.delete<any, ApiResponse>(`/api/v1/admin/clients/${clientId}/desktops/${desktopId}`)
 }

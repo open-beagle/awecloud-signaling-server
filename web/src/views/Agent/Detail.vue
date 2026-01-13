@@ -7,7 +7,9 @@
           <div class="card-header">
             <span class="card-title">{{ t('agent.basicInfo') }}</span>
             <div class="header-actions">
-              <StatusTag :status="agent?.status || 'offline'" />
+              <el-button size="small" :icon="Refresh" @click="loadAgent">
+                {{ t('common.refresh') }}
+              </el-button>
               <el-button
                 v-if="!isEditing"
                 type="primary"
@@ -29,22 +31,38 @@
           </div>
         </template>
         
-        <!-- K8s 风格：单行多字段 -->
         <div class="info-row">
           <div class="info-item">
             <span class="info-label">{{ t('agent.name') }}</span>
-            <span class="info-value">{{ agent?.agent_name || '-' }}</span>
+            <span class="info-value">{{ agent?.name || '-' }}</span>
           </div>
           <div class="info-item">
-            <span class="info-label">{{ t('agent.group') }}</span>
+            <span class="info-label">{{ t('agent.alias') }}</span>
             <el-input
               v-if="isEditing"
-              v-model="editForm.groupName"
-              :placeholder="t('agent.noGroup')"
+              v-model="editForm.alias"
+              :placeholder="t('agent.aliasPlaceholder')"
               size="small"
               style="width: 150px"
             />
-            <span v-else class="info-value">{{ agent?.group_name || '-' }}</span>
+            <span v-else class="info-value">{{ agent?.alias || '-' }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">{{ t('common.status') }}</span>
+            <span class="info-value status-value">
+              <template v-if="agent?.status === 'online'">
+                <el-tag type="success" size="small">{{ t('common.online') }}</el-tag>
+                <span class="status-time">
+                  <TimeAgo v-if="realtimeInfo?.tunnel_connected_time" :time="realtimeInfo.tunnel_connected_time * 1000" />
+                </span>
+              </template>
+              <template v-else>
+                <el-tag type="info" size="small">{{ t('common.offline') }}</el-tag>
+                <span class="status-time">
+                  (<TimeAgo v-if="agent?.last_online" :time="agent.last_online" />)
+                </span>
+              </template>
+            </span>
           </div>
           <div class="info-item">
             <span class="info-label">{{ t('agent.version') }}</span>
@@ -53,22 +71,57 @@
           <div class="info-item">
             <span class="info-label">{{ t('agent.createdAt') }}</span>
             <span class="info-value">
-              <TimeAgo v-if="agent?.created_at" :time="agent.created_at" />
-              <span v-else>-</span>
+              {{ agent?.created_at ? formatDate(agent.created_at) : '-' }}
             </span>
           </div>
+        </div>
+      </el-card>
+
+      <!-- 运行环境卡片 -->
+      <el-card class="info-card">
+        <template #header>
+          <span class="card-title">{{ t('agent.runtimeEnv') }}</span>
+        </template>
+        
+        <div class="info-row">
           <div class="info-item">
-            <span class="info-label">{{ t('agent.lastHeartbeat') }}</span>
+            <span class="info-label">{{ t('agent.hostname') }}</span>
+            <span class="info-value">{{ realtimeInfo?.hostname || '-' }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">{{ t('agent.runtimeEnv') }}</span>
             <span class="info-value">
-              <TimeAgo v-if="agent?.last_heartbeat" :time="agent.last_heartbeat" />
+              <span v-if="realtimeInfo?.runtime === 'docker'">🐳 {{ t('agent.runtimeDocker') }}</span>
+              <span v-else-if="realtimeInfo?.runtime === 'kubernetes'">☸️ {{ t('agent.runtimeKubernetes') }}</span>
+              <span v-else-if="realtimeInfo?.runtime === 'physical'">🖥️ {{ t('agent.runtimeNative') }}</span>
               <span v-else>-</span>
             </span>
           </div>
         </div>
-        <div v-if="agent?.description" class="info-row">
+      </el-card>
+
+      <!-- 网络信息卡片 -->
+      <el-card class="info-card">
+        <template #header>
+          <span class="card-title">{{ t('agent.networkInfo') }}</span>
+        </template>
+        
+        <el-table 
+          v-if="realtimeInfo?.networks && realtimeInfo.networks.length > 0" 
+          :data="realtimeInfo.networks" 
+          stripe
+          size="small"
+          :show-header="true"
+          table-layout="fixed"
+        >
+          <el-table-column prop="name" :label="t('agent.lanInterface')" />
+          <el-table-column prop="ip" :label="t('agent.lanIp')" />
+          <el-table-column prop="mask" :label="t('agent.lanMask')" />
+          <el-table-column prop="gateway" :label="t('agent.lanGateway')" />
+        </el-table>
+        <div v-else class="info-row">
           <div class="info-item">
-            <span class="info-label">{{ t('agent.description') }}</span>
-            <span class="info-value">{{ agent.description }}</span>
+            <span class="info-value">-</span>
           </div>
         </div>
       </el-card>
@@ -82,70 +135,22 @@
         <div class="info-row">
           <div class="info-item">
             <span class="info-label">{{ t('agent.tailscaleIp') }}</span>
-            <span class="info-value">{{ agent?.tailscale_ip || '-' }}</span>
+            <span class="info-value">{{ realtimeInfo?.tunnel_ip || agent?.ip || '-' }}</span>
           </div>
           <div class="info-item">
             <span class="info-label">{{ t('common.status') }}</span>
-            <span class="info-value">
-              <el-tag v-if="agent?.ts_connected" type="success" size="small">
-                {{ t('agent.tsConnected') }}
-              </el-tag>
-              <el-tag v-else type="info" size="small">
-                {{ t('agent.tsDisconnected') }}
-              </el-tag>
-            </span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">{{ agent?.ts_connected ? t('agent.tsConnectedAt') : t('agent.tsDisconnectedAt') }}</span>
-            <span class="info-value">
-              <template v-if="agent?.ts_connected">
-                <TimeAgo v-if="agent?.ts_connected_at" :time="agent.ts_connected_at" />
-                <span v-else>-</span>
+            <span class="info-value status-value">
+              <template v-if="realtimeInfo?.tunnel_connected">
+                <el-tag type="success" size="small">{{ t('agent.tsConnected') }}</el-tag>
+                <span class="status-time">
+                  <TimeAgo v-if="realtimeInfo?.tunnel_connected_time" :time="realtimeInfo.tunnel_connected_time * 1000" />
+                </span>
               </template>
               <template v-else>
-                <TimeAgo v-if="agent?.last_heartbeat" :time="agent.last_heartbeat" />
-                <span v-else>-</span>
+                <el-tag type="info" size="small">{{ t('agent.tsDisconnected') }}</el-tag>
               </template>
             </span>
           </div>
-        </div>
-      </el-card>
-
-      <!-- 网络信息卡片 -->
-      <el-card class="info-card">
-        <template #header>
-          <span class="card-title">{{ t('agent.networkInfo') }}</span>
-        </template>
-        
-        <div class="info-row">
-          <div class="info-item">
-            <span class="info-label">{{ t('agent.lanIp') }}</span>
-            <span class="info-value">{{ agent?.network_info?.lan_ip || '-' }}</span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">{{ t('agent.lanGateway') }}</span>
-            <span class="info-value">{{ agent?.network_info?.lan_gateway || '-' }}</span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">{{ t('agent.lanInterface') }}</span>
-            <span class="info-value">{{ agent?.network_info?.lan_interface || '-' }}</span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">{{ t('agent.runtimeEnv') }}</span>
-            <span class="info-value">
-              <span v-if="agent?.network_info?.runtime_env === 'docker'">🐳 {{ t('agent.runtimeDocker') }}</span>
-              <span v-else-if="agent?.network_info?.runtime_env === 'kubernetes'">☸️ {{ t('agent.runtimeKubernetes') }}</span>
-              <span v-else-if="agent?.network_info?.runtime_env === 'native'">🖥️ {{ t('agent.runtimeNative') }}</span>
-              <span v-else>-</span>
-            </span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">{{ t('agent.hostname') }}</span>
-            <span class="info-value">{{ agent?.network_info?.hostname || '-' }}</span>
-          </div>
-        </div>
-        <div v-if="agent?.network_info?.lan_ip" class="info-tip">
-          💡 {{ t('agent.networkTip') }}
         </div>
       </el-card>
 
@@ -154,7 +159,7 @@
         <template #header>
           <div class="card-header">
             <span class="card-title">
-              {{ t('agent.serviceList') }} ({{ agent?.service_count || 0 }})
+              {{ t('agent.serviceList') }} ({{ agent?.services?.length || 0 }})
             </span>
             <el-button type="primary" size="small" :icon="Plus" @click="handleCreateService">
               {{ t('agent.createService') }}
@@ -164,41 +169,36 @@
         
         <el-table v-if="agent?.services && agent.services.length > 0" :data="agent.services" stripe>
           <el-table-column prop="name" :label="t('service.name')" min-width="120" />
-          <el-table-column :label="t('service.listenAddr')" min-width="150">
+          <el-table-column prop="alias" :label="t('agent.alias')" min-width="100">
             <template #default="{ row }">
-              {{ agent?.tailscale_ip || '-' }}:{{ row.listen_port }}
+              {{ row.alias || '-' }}
             </template>
           </el-table-column>
           <el-table-column prop="target_addr" :label="t('service.targetAddr')" min-width="150" />
-          <el-table-column :label="t('service.status')" width="100">
+          <el-table-column :label="t('service.listenAddr')" min-width="150">
             <template #default="{ row }">
-              <el-tag v-if="row.status === 'running'" type="success" size="small">
-                {{ t('service.running') }}
-              </el-tag>
-              <el-tag v-else type="info" size="small">
-                {{ t('service.stopped') }}
-              </el-tag>
+              {{ row.listen_addr || '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="connections" :label="t('service.connections')" width="100" align="center" />
-          <el-table-column :label="t('common.actions')" width="150" fixed="right">
+          <el-table-column :label="t('common.actions')" width="180" fixed="right">
             <template #default="{ row }">
               <div class="action-buttons">
+                <el-button size="small" :icon="Edit" @click="handleEditService(row)" />
                 <el-button
-                  v-if="row.status !== 'running'"
+                  v-if="row.enabled"
                   size="small"
-                  type="success"
-                  @click="handleStartService(row)"
+                  type="warning"
+                  @click="handleDisableService(row)"
                 >
-                  {{ t('service.start') }}
+                  {{ t('tcp.disable') }}
                 </el-button>
                 <el-button
                   v-else
                   size="small"
-                  type="warning"
-                  @click="handleStopService(row)"
+                  type="success"
+                  @click="handleEnableService(row)"
                 >
-                  {{ t('service.stop') }}
+                  {{ t('tcp.enable') }}
                 </el-button>
                 <el-button
                   size="small"
@@ -219,7 +219,7 @@
         <template #header>
           <div class="card-header">
             <span class="card-title">
-              {{ t('agent.visitorList') }} ({{ agent?.visitors?.length || 0 }})
+              {{ t('agent.visitorList') }} ({{ agent?.forwards?.length || 0 }})
             </span>
             <el-button type="primary" size="small" :icon="Plus" @click="handleAddVisitor">
               {{ t('agent.addVisitor') }}
@@ -227,47 +227,39 @@
           </div>
         </template>
         
-        <el-table v-if="agent?.visitors && agent.visitors.length > 0" :data="agent.visitors" stripe>
-          <el-table-column prop="name" :label="t('service.name')" min-width="120" />
-          <el-table-column :label="t('agent.localListenAddr')" min-width="180">
+        <el-table v-if="agent?.forwards && agent.forwards.length > 0" :data="agent.forwards" stripe>
+          <el-table-column prop="name" :label="t('service.name')" min-width="100" />
+          <el-table-column prop="alias" :label="t('agent.alias')" min-width="80">
             <template #default="{ row }">
-              {{ agent?.network_info?.lan_ip || '-' }}:{{ row.listen_port }}
+              {{ row.alias || '-' }}
             </template>
           </el-table-column>
-          <el-table-column :label="t('agent.targetService')" min-width="180">
+          <el-table-column :label="t('agent.targetService')" min-width="150">
             <template #default="{ row }">
-              {{ row.target_agent_name }}/{{ row.target_service_name }}
+              {{ row.target_agent_name || '-' }}/{{ row.target_service_name || '-' }}
             </template>
           </el-table-column>
-          <el-table-column :label="t('service.status')" width="100">
-            <template #default="{ row }">
-              <el-tag v-if="row.status === 'running'" type="success" size="small">
-                {{ t('service.running') }}
-              </el-tag>
-              <el-tag v-else type="info" size="small">
-                {{ t('service.stopped') }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="connections" :label="t('service.connections')" width="100" align="center" />
-          <el-table-column :label="t('common.actions')" width="150" fixed="right">
+          <el-table-column prop="target_addr" :label="t('service.targetAddr')" min-width="150" />
+          <el-table-column prop="listen_addr" :label="t('agent.localListenAddr')" min-width="150" />
+          <el-table-column :label="t('common.actions')" width="180" fixed="right">
             <template #default="{ row }">
               <div class="action-buttons">
+                <el-button size="small" :icon="Edit" @click="handleEditVisitor(row)" />
                 <el-button
-                  v-if="row.status !== 'running'"
+                  v-if="row.enabled"
                   size="small"
-                  type="success"
-                  @click="handleStartVisitor(row)"
+                  type="warning"
+                  @click="handleDisableVisitor(row)"
                 >
-                  {{ t('service.start') }}
+                  {{ t('tcp.disable') }}
                 </el-button>
                 <el-button
                   v-else
                   size="small"
-                  type="warning"
-                  @click="handleStopVisitor(row)"
+                  type="success"
+                  @click="handleEnableVisitor(row)"
                 >
-                  {{ t('service.stop') }}
+                  {{ t('tcp.enable') }}
                 </el-button>
                 <el-button
                   size="small"
@@ -280,13 +272,7 @@
           </el-table-column>
         </el-table>
         
-        <template v-else>
-          <el-empty :description="t('agent.noVisitors')" />
-        </template>
-        
-        <div v-if="agent?.visitors && agent.visitors.length > 0" class="info-tip">
-          💡 {{ t('agent.visitorTip') }}
-        </div>
+        <el-empty v-else :description="t('agent.noVisitors')" />
       </el-card>
     </div>
   </div>
@@ -297,13 +283,25 @@ import { ref, onMounted, watch, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete, Edit } from '@element-plus/icons-vue'
-import { getAgent, updateAgent } from '@/api/agent'
-import { startService, stopService, deleteService } from '@/api/service'
-import { startVisitor, stopVisitor, deleteVisitor } from '@/api/visitor'
-import type { AgentDetail, ProxyService, Visitor } from '@/types/models'
-import StatusTag from '@/components/Common/StatusTag.vue'
+import { Plus, Delete, Edit, Refresh } from '@element-plus/icons-vue'
+import { getAgent, getAgentRealtime, updateAgent } from '@/api/agent'
+import { deleteService } from '@/api/service'
+import type { AgentDetail, ProxyService, PortForward } from '@/types/models'
 import TimeAgo from '@/components/Common/TimeAgo.vue'
+
+// 实时信息接口
+interface RealtimeInfo {
+  hostname: string
+  runtime: string
+  tunnel_ip: string
+  tunnel_connected: boolean
+  tunnel_connected_time: number
+  networks: Array<{
+    name: string
+    ip: string
+    gateway: string
+  }>
+}
 
 const { t } = useI18n()
 const route = useRoute()
@@ -311,10 +309,21 @@ const router = useRouter()
 
 const loading = ref(false)
 const agent = ref<AgentDetail | null>(null)
+const realtimeInfo = ref<RealtimeInfo | null>(null)
 const isEditing = ref(false)
 const editForm = reactive({
-  groupName: ''
+  alias: ''
 })
+
+// 格式化日期
+const formatDate = (dateStr: string) => {
+  const date = new Date(dateStr)
+  return date.toLocaleDateString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  })
+}
 
 const loadAgent = async () => {
   const id = Number(route.params.id)
@@ -329,6 +338,10 @@ const loadAgent = async () => {
     const res = await getAgent(id)
     if (res.success && res.data) {
       agent.value = res.data
+      // 如果 Agent 在线，获取实时信息
+      if (res.data.status === 'online') {
+        loadRealtimeInfo(id)
+      }
     } else {
       ElMessage.error(res.message || t('common.failed'))
       router.push('/agents')
@@ -341,8 +354,19 @@ const loadAgent = async () => {
   }
 }
 
+const loadRealtimeInfo = async (id: number) => {
+  try {
+    const res = await getAgentRealtime(id)
+    if (res.success && res.data) {
+      realtimeInfo.value = res.data
+    }
+  } catch (error) {
+    console.error('Failed to load realtime info:', error)
+  }
+}
+
 const startEditing = () => {
-  editForm.groupName = agent.value?.group_name || ''
+  editForm.alias = agent.value?.alias || ''
   isEditing.value = true
 }
 
@@ -354,7 +378,7 @@ const saveChanges = async () => {
   if (!agent.value) return
 
   try {
-    const res = await updateAgent(agent.value.id, { group_name: editForm.groupName })
+    const res = await updateAgent(agent.value.id, { alias: editForm.alias })
     if (res.success) {
       ElMessage.success(t('common.success'))
       isEditing.value = false
@@ -371,32 +395,16 @@ const handleCreateService = () => {
   router.push({ path: '/services', query: { create: 'true', agent_id: String(agent.value?.id) } })
 }
 
-const handleStartService = async (service: ProxyService) => {
-  try {
-    const res = await startService(service.id)
-    if (res.success) {
-      ElMessage.success(t('common.success'))
-      loadAgent()
-    } else {
-      ElMessage.error(res.message || t('common.failed'))
-    }
-  } catch (error) {
-    ElMessage.error(t('common.failed'))
-  }
+const handleEditService = (service: ProxyService) => {
+  router.push({ path: '/services', query: { edit: String(service.id) } })
 }
 
-const handleStopService = async (service: ProxyService) => {
-  try {
-    const res = await stopService(service.id)
-    if (res.success) {
-      ElMessage.success(t('common.success'))
-      loadAgent()
-    } else {
-      ElMessage.error(res.message || t('common.failed'))
-    }
-  } catch (error) {
-    ElMessage.error(t('common.failed'))
-  }
+const handleEnableService = async (service: ProxyService) => {
+  ElMessage.info('启用服务功能待实现')
+}
+
+const handleDisableService = async (service: ProxyService) => {
+  ElMessage.info('禁用服务功能待实现')
 }
 
 const handleDeleteService = async (service: ProxyService) => {
@@ -421,55 +429,29 @@ const handleDeleteService = async (service: ProxyService) => {
 
 // Visitor 操作
 const handleAddVisitor = () => {
-  // 跳转到 Agent 授权页面，预选当前 Agent
   router.push({ path: '/services/agent-auth', query: { agent_id: String(agent.value?.id) } })
 }
 
-const handleStartVisitor = async (visitor: Visitor) => {
-  try {
-    const res = await startVisitor(visitor.id)
-    if (res.success) {
-      ElMessage.success(t('common.success'))
-      loadAgent()
-    } else {
-      ElMessage.error(res.message || t('common.failed'))
-    }
-  } catch (error) {
-    ElMessage.error(t('common.failed'))
-  }
+const handleEditVisitor = (visitor: PortForward) => {
+  ElMessage.info('编辑端口访问功能待实现')
 }
 
-const handleStopVisitor = async (visitor: Visitor) => {
-  try {
-    const res = await stopVisitor(visitor.id)
-    if (res.success) {
-      ElMessage.success(t('common.success'))
-      loadAgent()
-    } else {
-      ElMessage.error(res.message || t('common.failed'))
-    }
-  } catch (error) {
-    ElMessage.error(t('common.failed'))
-  }
+const handleEnableVisitor = async (visitor: PortForward) => {
+  ElMessage.info('启用端口访问功能待实现')
 }
 
-const handleDeleteVisitor = async (visitor: Visitor) => {
+const handleDisableVisitor = async (visitor: PortForward) => {
+  ElMessage.info('禁用端口访问功能待实现')
+}
+
+const handleDeleteVisitor = async (visitor: PortForward) => {
   try {
     await ElMessageBox.confirm(t('common.deleteConfirm'), {
       type: 'warning'
     })
-    
-    const res = await deleteVisitor(visitor.id)
-    if (res.success) {
-      ElMessage.success(t('common.deleteSuccess'))
-      loadAgent()
-    } else {
-      ElMessage.error(res.message || t('common.failed'))
-    }
+    ElMessage.info('删除端口访问功能待实现')
   } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(t('common.failed'))
-    }
+    // 用户取消
   }
 }
 
@@ -503,7 +485,7 @@ onMounted(() => {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .card-title {
@@ -512,18 +494,12 @@ onMounted(() => {
   color: var(--text-primary);
 }
 
-/* K8s 风格的单行多字段布局 */
 .info-row {
   display: flex;
   flex-wrap: wrap;
   gap: 32px;
   padding: 8px 0;
-  min-height: 50px;
-}
-
-.info-row + .info-row {
-  border-top: 1px solid var(--el-border-color-lighter);
-  padding-top: 12px;
+  min-height: 40px;
 }
 
 .info-item {
@@ -545,19 +521,21 @@ onMounted(() => {
   line-height: 22px;
 }
 
-.action-buttons {
+.status-value {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: nowrap;
 }
 
-.info-tip {
-  margin-top: 12px;
-  padding: 8px 12px;
-  background-color: var(--el-fill-color-light);
-  border-radius: 4px;
-  font-size: 13px;
+.status-time {
+  font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
 }
 </style>

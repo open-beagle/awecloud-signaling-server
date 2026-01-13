@@ -1,488 +1,319 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
-	grpcserver "github.com/open-beagle/awecloud-signaling-server/internal/server/grpc"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
 // ProxyServiceAPI 端口映射服务 API
 type ProxyServiceAPI struct {
-	agentService *grpcserver.AgentServiceServer
+	config  *config.ServerConfig
+	aclSync *headscale.ACLSyncService
 }
 
 // NewProxyServiceAPI 创建 ProxyServiceAPI
-func NewProxyServiceAPI() *ProxyServiceAPI {
-	return &ProxyServiceAPI{}
-}
+func NewProxyServiceAPI(cfg *config.ServerConfig) *ProxyServiceAPI {
+	api := &ProxyServiceAPI{config: cfg}
 
-// SetAgentService 设置 AgentService（用于发送命令）
-func (a *ProxyServiceAPI) SetAgentService(service *grpcserver.AgentServiceServer) {
-	a.agentService = service
-}
-
-// allocatePort 自动分配端口（从 10000 开始，找到第一个未被占用的端口）
-func (a *ProxyServiceAPI) allocatePort(agentID int64) int {
-	const startPort = 10000
-	const maxPort = 65535
-
-	// 查询该 Agent 已使用的所有端口
-	var usedPorts []int
-	db.DB.Model(&model.ProxyService{}).
-		Where("agent_id = ?", agentID).
-		Pluck("listen_port", &usedPorts)
-
-	// 转换为 map 方便查找
-	usedMap := make(map[int]bool)
-	for _, port := range usedPorts {
-		usedMap[port] = true
-	}
-
-	// 从 10000 开始找第一个未使用的端口
-	for port := startPort; port <= maxPort; port++ {
-		if !usedMap[port] {
-			return port
+	// 初始化 ACL 同步服务
+	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
+		client, err := headscale.NewClient(headscale.Config{
+			URL:    cfg.Tailscale.HeadscaleURL,
+			APIKey: cfg.Tailscale.HeadscaleAPIKey,
+		})
+		if err != nil {
+			logger.Warnf("初始化 Headscale 客户端失败: %v", err)
+		} else {
+			api.aclSync = headscale.NewACLSyncService(client)
 		}
 	}
 
-	// 如果 10000-65535 都用完了，返回 10000（理论上不会发生）
-	return startPort
+	return api
 }
 
-// CreateProxyServiceRequest 创建端口映射请求
-type CreateProxyServiceRequest struct {
-	Name       string `json:"name" binding:"required"`
-	AgentID    int64  `json:"agent_id" binding:"required"`
-	ListenPort int    `json:"listen_port"` // 可选，0 或不填则自动分配
-	TargetAddr string `json:"target_addr" binding:"required"`
-	Remark     string `json:"remark"`
-	// 权限控制字段
-	AccessType string `json:"access_type"` // public, private, group（默认 public）
-	OwnerID    int64  `json:"owner_id"`    // 创建者 Client ID（private 时使用）
-	GroupID    *int64 `json:"group_id"`    // 所属组 ID（group 时使用）
+// ServiceListItem 服务列表项
+type ServiceListItem struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	AgentID     uint64 `json:"agent_id"`
+	AgentName   string `json:"agent_name"`
+	TargetAddr  string `json:"target_addr"`
+	ListenAddr  string `json:"listen_addr"`
+	Enabled     bool   `json:"enabled"`
+	ClientCount int64  `json:"client_count"`
+	GroupCount  int64  `json:"group_count"`
 }
 
-// UpdateProxyServiceRequest 更新端口映射请求
-type UpdateProxyServiceRequest struct {
-	Name       string `json:"name"`
-	ListenPort int    `json:"listen_port"`
-	TargetAddr string `json:"target_addr"`
-	Remark     string `json:"remark"`
-}
-
-// ProxyServiceResponse API 响应
-type ProxyServiceResponse struct {
-	Success bool        `json:"success"`
-	Message string      `json:"message,omitempty"`
-	Data    interface{} `json:"data,omitempty"`
-}
-
-// ProxyServiceWithAgent 带 Agent 信息的端口映射服务
-type ProxyServiceWithAgent struct {
-	model.ProxyService
-	AgentName        string `json:"agent_name"`
-	AgentStatus      string `json:"agent_status"`
-	AgentTsIP        string `json:"agent_ts_ip"`
-	AgentTsConnected bool   `json:"agent_ts_connected"`
-}
-
-// List 获取端口映射服务列表
+// List 获取服务列表
 func (a *ProxyServiceAPI) List(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
+	agentIDStr := c.Query("agent_id")
+
+	if page < 1 {
+		page = 1
+	}
+	if size < 1 || size > 100 {
+		size = 20
+	}
+
+	query := db.DB.Model(&model.ProxyService{}).Preload("Agent")
+	if agentIDStr != "" {
+		agentID, _ := strconv.ParseUint(agentIDStr, 10, 64)
+		query = query.Where("agent_id = ?", agentID)
+	}
+
+	var total int64
+	query.Count(&total)
+
 	var services []model.ProxyService
-	if err := db.DB.Preload("Agent").Order("created_at DESC").Find(&services).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, ProxyServiceResponse{
-			Success: false,
-			Message: "查询失败",
-		})
+	offset := (page - 1) * size
+	if err := query.Order("created_at DESC").Offset(offset).Limit(size).Find(&services).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
 		return
 	}
 
-	// 构建带 Agent 信息的响应
-	result := make([]ProxyServiceWithAgent, 0, len(services))
-	for _, svc := range services {
-		item := ProxyServiceWithAgent{
-			ProxyService: svc,
-		}
-		if svc.Agent != nil {
-			item.AgentName = svc.Agent.AgentName
-			item.AgentStatus = svc.Agent.Status
-			item.AgentTsIP = svc.Agent.TailscaleIP
-			item.AgentTsConnected = svc.Agent.TsConnected
-		}
-		result = append(result, item)
+	// 查询每个服务的授权用户数
+	var clientCounts []struct {
+		ServiceID string `gorm:"column:service_id"`
+		Count     int64  `gorm:"column:count"`
+	}
+	db.DB.Model(&model.ServiceClientPermission{}).
+		Select("service_id, COUNT(*) as count").
+		Group("service_id").Find(&clientCounts)
+
+	clientCountMap := make(map[string]int64)
+	for _, cc := range clientCounts {
+		clientCountMap[cc.ServiceID] = cc.Count
 	}
 
-	c.JSON(http.StatusOK, ProxyServiceResponse{
-		Success: true,
-		Data:    result,
-	})
+	// 查询每个服务的授权分组数
+	var groupCounts []struct {
+		ServiceID string `gorm:"column:service_id"`
+		Count     int64  `gorm:"column:count"`
+	}
+	db.DB.Model(&model.ServiceClientGroupPermission{}).
+		Select("service_id, COUNT(*) as count").
+		Group("service_id").Find(&groupCounts)
+
+	groupCountMap := make(map[string]int64)
+	for _, gc := range groupCounts {
+		groupCountMap[gc.ServiceID] = gc.Count
+	}
+
+	result := make([]ServiceListItem, len(services))
+	for i, svc := range services {
+		// 构建完整的监听地址（Agent IP + 端口）
+		listenAddr := svc.ListenAddr
+		if svc.Agent != nil && svc.Agent.IP != "" && listenAddr != "" {
+			// 如果 ListenAddr 是 :port 格式，添加 Agent IP
+			if len(listenAddr) > 0 && listenAddr[0] == ':' {
+				listenAddr = svc.Agent.IP + listenAddr
+			}
+		}
+
+		item := ServiceListItem{
+			ID:          svc.ID,
+			Name:        svc.Name,
+			AgentID:     svc.AgentID,
+			TargetAddr:  svc.TargetAddr,
+			ListenAddr:  listenAddr,
+			Enabled:     svc.Enabled,
+			ClientCount: clientCountMap[svc.ID],
+			GroupCount:  groupCountMap[svc.ID],
+		}
+		if svc.Agent != nil {
+			item.AgentName = svc.Agent.Name
+		}
+		result[i] = item
+	}
+
+	c.JSON(http.StatusOK, NewPagedResponse(result, total, page, size))
 }
 
-// Create 创建端口映射服务
+// ServiceDetail 服务详情
+type ServiceDetail struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	Alias      string    `json:"alias"`
+	AgentID    uint64    `json:"agent_id"`
+	AgentName  string    `json:"agent_name"`
+	TargetAddr string    `json:"target_addr"`
+	ListenAddr string    `json:"listen_addr"`
+	Enabled    bool      `json:"enabled"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// Get 获取服务详情
+func (a *ProxyServiceAPI) Get(c *gin.Context) {
+	id := c.Param("id")
+
+	var service model.ProxyService
+	if err := db.DB.Preload("Agent").First(&service, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("服务不存在"))
+		return
+	}
+
+	result := ServiceDetail{
+		ID:         service.ID,
+		Name:       service.Name,
+		Alias:      service.Alias,
+		AgentID:    service.AgentID,
+		TargetAddr: service.TargetAddr,
+		ListenAddr: service.ListenAddr,
+		Enabled:    service.Enabled,
+		CreatedAt:  service.CreatedAt,
+	}
+	if service.Agent != nil {
+		result.AgentName = service.Agent.Name
+	}
+
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+// CreateServiceRequest 创建服务请求
+type CreateServiceRequest struct {
+	AgentID    uint64 `json:"agent_id" binding:"required"`
+	Name       string `json:"name" binding:"required"`
+	Alias      string `json:"alias"`
+	TargetAddr string `json:"target_addr" binding:"required"`
+	ListenAddr string `json:"listen_addr" binding:"required"`
+}
+
+// Create 创建服务
 func (a *ProxyServiceAPI) Create(c *gin.Context) {
-	var req CreateProxyServiceRequest
+	var req CreateServiceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, ProxyServiceResponse{
-			Success: false,
-			Message: "请求参数错误",
-		})
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
 		return
 	}
 
 	// 验证 Agent 存在
 	var agent model.Agent
 	if err := db.DB.First(&agent, req.AgentID).Error; err != nil {
-		c.JSON(http.StatusNotFound, ProxyServiceResponse{
-			Success: false,
-			Message: "Agent 不存在",
-		})
+		c.JSON(http.StatusNotFound, NewErrorResponse("Agent 不存在"))
 		return
 	}
 
-	// 如果端口为 0，自动分配端口（从 10000 开始）
-	listenPort := req.ListenPort
-	if listenPort == 0 {
-		listenPort = a.allocatePort(req.AgentID)
-		logger.Infof("自动分配端口: agent_id=%d, port=%d", req.AgentID, listenPort)
-	} else {
-		// 检查端口是否已被占用
-		var existing model.ProxyService
-		if err := db.DB.Where("agent_id = ? AND listen_port = ?", req.AgentID, listenPort).First(&existing).Error; err == nil {
-			c.JSON(http.StatusConflict, ProxyServiceResponse{
-				Success: false,
-				Message: fmt.Sprintf("端口 %d 已被服务 %s 占用", listenPort, existing.Name),
-			})
-			return
-		}
+	// 检查名称是否已存在（同一 Agent 下）
+	var existing model.ProxyService
+	if err := db.DB.Where("agent_id = ? AND name = ?", req.AgentID, req.Name).First(&existing).Error; err == nil {
+		c.JSON(http.StatusConflict, NewErrorResponse("服务名称已存在"))
+		return
 	}
 
-	// 创建服务
 	service := &model.ProxyService{
+		ID:         uuid.New().String(),
 		Name:       req.Name,
+		Alias:      req.Alias,
 		AgentID:    req.AgentID,
-		ListenPort: listenPort,
 		TargetAddr: req.TargetAddr,
-		Status:     model.ProxyStatusStopped,
-		Remark:     req.Remark,
-		// 权限控制字段
-		AccessType: req.AccessType,
-		OwnerID:    req.OwnerID,
-		GroupID:    req.GroupID,
-	}
-
-	// 设置默认访问类型
-	if service.AccessType == "" {
-		service.AccessType = model.AccessTypePublic
+		ListenAddr: req.ListenAddr,
+		Enabled:    true,
 	}
 
 	if err := db.DB.Create(service).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, ProxyServiceResponse{
-			Success: false,
-			Message: "创建失败: " + err.Error(),
-		})
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("创建失败: "+err.Error()))
 		return
 	}
 
-	logger.Infof("创建端口映射服务: name=%s, agent_id=%d, port=%d", req.Name, req.AgentID, req.ListenPort)
+	logger.Infof("创建服务: id=%s, name=%s, agent_id=%d", service.ID, service.Name, service.AgentID)
+	recordAuditLog(c, model.ActionCreateService, "service", service.ID, service.Name, nil)
 
-	// 自动启动服务
-	if a.agentService != nil && a.agentService.IsAgentOnline(req.AgentID) {
-		service.Status = model.ProxyStatusRunning
-		db.DB.Save(service)
-
-		if err := a.agentService.SendProxyCommand(req.AgentID, "start", service); err != nil {
-			logger.Warnf("自动启动服务失败: %v", err)
-			// 启动失败不影响创建结果，只是状态回退
-			service.Status = model.ProxyStatusStopped
-			db.DB.Save(service)
-		} else {
-			logger.Infof("服务已自动启动: name=%s", req.Name)
-		}
-	}
-
-	c.JSON(http.StatusOK, ProxyServiceResponse{
-		Success: true,
-		Message: "创建成功",
-		Data:    service,
-	})
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("创建成功", service))
 }
 
-// Update 更新端口映射服务
+// UpdateServiceRequest 更新服务请求
+type UpdateServiceRequest struct {
+	Alias      string `json:"alias"`
+	TargetAddr string `json:"target_addr"`
+	ListenAddr string `json:"listen_addr"`
+	Enabled    *bool  `json:"enabled"`
+}
+
+// Update 更新服务
 func (a *ProxyServiceAPI) Update(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, ProxyServiceResponse{
-			Success: false,
-			Message: "无效的 ID",
-		})
-		return
-	}
+	id := c.Param("id")
 
-	var req UpdateProxyServiceRequest
+	var req UpdateServiceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, ProxyServiceResponse{
-			Success: false,
-			Message: "请求参数错误",
-		})
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
 		return
 	}
 
-	// 查询服务
 	var service model.ProxyService
-	if err := db.DB.First(&service, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, ProxyServiceResponse{
-			Success: false,
-			Message: "服务不存在",
-		})
+	if err := db.DB.First(&service, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("服务不存在"))
 		return
 	}
 
-	// 如果服务正在运行，不允许修改端口
-	if service.Status == model.ProxyStatusRunning && req.ListenPort != 0 && req.ListenPort != service.ListenPort {
-		c.JSON(http.StatusBadRequest, ProxyServiceResponse{
-			Success: false,
-			Message: "服务运行中，请先停止后再修改端口",
-		})
-		return
-	}
-
-	// 更新字段
-	if req.Name != "" {
-		service.Name = req.Name
-	}
-	if req.ListenPort != 0 {
-		service.ListenPort = req.ListenPort
+	if req.Alias != "" {
+		service.Alias = req.Alias
 	}
 	if req.TargetAddr != "" {
 		service.TargetAddr = req.TargetAddr
 	}
-	if req.Remark != "" {
-		service.Remark = req.Remark
+	if req.ListenAddr != "" {
+		service.ListenAddr = req.ListenAddr
+	}
+	if req.Enabled != nil {
+		service.Enabled = *req.Enabled
 	}
 
 	if err := db.DB.Save(&service).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, ProxyServiceResponse{
-			Success: false,
-			Message: "更新失败",
-		})
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新失败"))
 		return
 	}
 
-	c.JSON(http.StatusOK, ProxyServiceResponse{
-		Success: true,
-		Message: "更新成功",
-		Data:    service,
-	})
+	logger.Infof("更新服务: id=%s", id)
+	recordAuditLog(c, model.ActionUpdateService, "service", id, service.Name, nil)
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("更新成功", nil))
 }
 
-// Delete 删除端口映射服务
+// Delete 删除服务
 func (a *ProxyServiceAPI) Delete(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, ProxyServiceResponse{
-			Success: false,
-			Message: "无效的 ID",
-		})
-		return
-	}
+	id := c.Param("id")
 
-	// 查询服务
 	var service model.ProxyService
-	if err := db.DB.First(&service, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, ProxyServiceResponse{
-			Success: false,
-			Message: "服务不存在",
-		})
+	if err := db.DB.First(&service, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("服务不存在"))
 		return
 	}
 
-	// 如果服务正在运行，先停止
-	if service.Status == model.ProxyStatusRunning && a.agentService != nil {
-		if err := a.agentService.SendProxyCommand(service.AgentID, "stop", &service); err != nil {
-			logger.Warnf("停止服务失败: %v", err)
-		}
-	}
+	// 删除相关权限
+	db.DB.Where("service_id = ?", id).Delete(&model.ServiceClientPermission{})
+	db.DB.Where("service_id = ?", id).Delete(&model.ServiceClientGroupPermission{})
+	db.DB.Where("service_id = ?", id).Delete(&model.ServiceAgentPermission{})
+	db.DB.Where("service_id = ?", id).Delete(&model.ServiceAgentGroupPermission{})
 
 	// 删除服务
-	if err := db.DB.Delete(&model.ProxyService{}, id).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, ProxyServiceResponse{
-			Success: false,
-			Message: "删除失败",
-		})
+	if err := db.DB.Delete(&service).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
 		return
 	}
 
-	logger.Infof("删除端口映射服务: id=%d, name=%s", id, service.Name)
-
-	c.JSON(http.StatusOK, ProxyServiceResponse{
-		Success: true,
-		Message: "删除成功",
-	})
-}
-
-// Start 启动端口映射服务
-func (a *ProxyServiceAPI) Start(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, ProxyServiceResponse{
-			Success: false,
-			Message: "无效的 ID",
-		})
-		return
+	// 同步 ACL
+	if a.aclSync != nil {
+		go func() {
+			if err := a.aclSync.SyncACL(nil); err != nil {
+				logger.Warnf("同步 ACL 失败: %v", err)
+			}
+		}()
 	}
 
-	// 查询服务
-	var service model.ProxyService
-	if err := db.DB.Preload("Agent").First(&service, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, ProxyServiceResponse{
-			Success: false,
-			Message: "服务不存在",
-		})
-		return
-	}
+	logger.Infof("删除服务: id=%s, name=%s", id, service.Name)
+	recordAuditLog(c, model.ActionDeleteService, "service", id, service.Name, nil)
 
-	// 检查 Agent 是否在线
-	if a.agentService == nil || !a.agentService.IsAgentOnline(service.AgentID) {
-		c.JSON(http.StatusBadRequest, ProxyServiceResponse{
-			Success: false,
-			Message: "Agent 离线，无法启动服务",
-		})
-		return
-	}
-
-	// 发送启动命令
-	if err := a.agentService.SendProxyCommand(service.AgentID, "start", &service); err != nil {
-		c.JSON(http.StatusInternalServerError, ProxyServiceResponse{
-			Success: false,
-			Message: "发送启动命令失败: " + err.Error(),
-		})
-		return
-	}
-
-	// 更新状态
-	service.Status = model.ProxyStatusRunning
-	if err := db.DB.Save(&service).Error; err != nil {
-		logger.Warnf("更新服务状态失败: %v", err)
-	}
-
-	logger.Infof("启动端口映射服务: id=%d, name=%s", id, service.Name)
-
-	c.JSON(http.StatusOK, ProxyServiceResponse{
-		Success: true,
-		Message: "启动成功",
-		Data:    service,
-	})
-}
-
-// Stop 停止端口映射服务
-func (a *ProxyServiceAPI) Stop(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, ProxyServiceResponse{
-			Success: false,
-			Message: "无效的 ID",
-		})
-		return
-	}
-
-	// 查询服务
-	var service model.ProxyService
-	if err := db.DB.First(&service, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, ProxyServiceResponse{
-			Success: false,
-			Message: "服务不存在",
-		})
-		return
-	}
-
-	// 发送停止命令（即使 Agent 离线也更新状态）
-	if a.agentService != nil && a.agentService.IsAgentOnline(service.AgentID) {
-		if err := a.agentService.SendProxyCommand(service.AgentID, "stop", &service); err != nil {
-			logger.Warnf("发送停止命令失败: %v", err)
-		}
-	}
-
-	// 更新状态
-	service.Status = model.ProxyStatusStopped
-	service.Connections = 0
-	if err := db.DB.Save(&service).Error; err != nil {
-		logger.Warnf("更新服务状态失败: %v", err)
-	}
-
-	logger.Infof("停止端口映射服务: id=%d, name=%s", id, service.Name)
-
-	c.JSON(http.StatusOK, ProxyServiceResponse{
-		Success: true,
-		Message: "停止成功",
-		Data:    service,
-	})
-}
-
-// Stats 获取服务统计信息
-func (a *ProxyServiceAPI) Stats(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, ProxyServiceResponse{
-			Success: false,
-			Message: "无效的 ID",
-		})
-		return
-	}
-
-	// 查询服务
-	var service model.ProxyService
-	if err := db.DB.First(&service, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, ProxyServiceResponse{
-			Success: false,
-			Message: "服务不存在",
-		})
-		return
-	}
-
-	stats := map[string]interface{}{
-		"id":          service.ID,
-		"name":        service.Name,
-		"status":      service.Status,
-		"connections": service.Connections,
-		"bytes_in":    service.BytesIn,
-		"bytes_out":   service.BytesOut,
-	}
-
-	c.JSON(http.StatusOK, ProxyServiceResponse{
-		Success: true,
-		Data:    stats,
-	})
-}
-
-// ListByAgent 获取指定 Agent 的端口映射服务列表
-func (a *ProxyServiceAPI) ListByAgent(c *gin.Context) {
-	agentID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, ProxyServiceResponse{
-			Success: false,
-			Message: "无效的 Agent ID",
-		})
-		return
-	}
-
-	var services []model.ProxyService
-	if err := db.DB.Where("agent_id = ?", agentID).Order("created_at DESC").Find(&services).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, ProxyServiceResponse{
-			Success: false,
-			Message: "查询失败",
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, ProxyServiceResponse{
-		Success: true,
-		Data:    services,
-	})
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
 }

@@ -1,65 +1,59 @@
 import request from '@/utils/request'
 
-export interface DeviceInfo {
-  os: string
-  os_version: string
-  arch: string
-  cpu_model: string
-  machine_id: string
-  hostname: string
-}
-
+// 审计日志项
 export interface AuditLog {
   id: number
-  client_id: number
-  client_name: string
-  stcp_instance_id: number
-  stcp_instance_name: string
-  action: string
-  local_port: number
-  device_info: DeviceInfo
-  device_fingerprint: string
-  ip_address: string
-  success: boolean
-  error_message: string
+  action_type: string
+  actor_name: string
+  target_name: string
+  detail: string
   created_at: string
 }
 
+// 操作类型
+export interface ActionType {
+  value: string
+  label: string
+}
+
+// 查询参数
 export interface QueryAuditLogsParams {
-  client_id?: string
-  stcp_instance_id?: string
-  action?: string
+  action_type?: string
+  user_id?: number
   start_date?: string
   end_date?: string
   page?: number
-  page_size?: number
-}
-
-export interface QueryAuditLogsResponse {
-  success: boolean
-  logs: AuditLog[]
-  total: number
-  page: number
-  page_size: number
-  total_pages: number
-  message?: string
+  size?: number
 }
 
 // 查询审计日志
 export function queryAuditLogs(params: QueryAuditLogsParams) {
-  return request<QueryAuditLogsResponse>({
-    url: '/api/v1/admin/audit/connection',
+  return request({
+    url: '/api/v1/admin/audit/logs',
     method: 'get',
     params
   })
 }
 
-// 导出审计日志
-export function exportAuditLogs(params: QueryAuditLogsParams): Promise<Blob> {
+// 获取操作类型列表
+export function getActionTypes() {
   return request({
-    url: '/api/v1/admin/audit/connection/export',
-    method: 'get',
-    params,
-    responseType: 'blob'
-  }) as Promise<Blob>
+    url: '/api/v1/admin/audit/action-types',
+    method: 'get'
+  })
+}
+
+
+// 管理员选项
+export interface AdminOption {
+  id: number
+  username: string
+}
+
+// 获取管理员列表（用于筛选）
+export function getAdminList() {
+  return request({
+    url: '/api/v1/admin/audit/users',
+    method: 'get'
+  })
 }

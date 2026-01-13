@@ -35,7 +35,7 @@ type TailscaleManager struct {
 	tsServer   *tsnet.Server
 	config     *config.AgentConfig
 	grpcClient pb.AgentServiceClient
-	agentID    int64
+	agentID    uint64
 	agentToken string
 
 	tailscaleIP string
@@ -51,7 +51,7 @@ type TailscaleManager struct {
 }
 
 // NewTailscaleManager 创建 TailscaleManager
-func NewTailscaleManager(cfg *config.AgentConfig, grpcClient pb.AgentServiceClient, agentID int64, agentToken string, parentCtx context.Context) *TailscaleManager {
+func NewTailscaleManager(cfg *config.AgentConfig, grpcClient pb.AgentServiceClient, agentID uint64, agentToken string, parentCtx context.Context) *TailscaleManager {
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &TailscaleManager{
 		config:     cfg,
@@ -327,27 +327,11 @@ func (m *TailscaleManager) loadAndRestoreState() error {
 }
 
 // loadStateFromServer 从 Server 加载状态
+// 注意：当前 proto 设计中未包含状态同步 API，此功能暂时禁用
 func (m *TailscaleManager) loadStateFromServer() ([]byte, error) {
-	ctx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
-	defer cancel()
-
-	req := &pb.GetStateRequest{
-		AgentId:    m.agentID,
-		AgentToken: m.agentToken,
-	}
-
-	resp, err := m.grpcClient.GetTailscaleState(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("gRPC 调用失败: %w", err)
-	}
-
-	// 如果不存在历史状态，返回空
-	if !resp.Exists {
-		return nil, nil
-	}
-
-	logger.Infof("从 Server 加载状态成功，大小: %d 字节", len(resp.StateData))
-	return resp.StateData, nil
+	// TODO: 如需状态同步功能，需要在 proto 中添加相应的 RPC 方法
+	logger.Debug("状态同步功能暂未启用")
+	return nil, nil
 }
 
 // restoreState 恢复状态到本地（解压并写入）
@@ -427,33 +411,10 @@ func (m *TailscaleManager) compressState() ([]byte, error) {
 }
 
 // saveStateToServer 保存状态到 Server
+// 注意：当前 proto 设计中未包含状态同步 API，此功能暂时禁用
 func (m *TailscaleManager) saveStateToServer() error {
-	// 压缩状态
-	compressedData, err := m.compressState()
-	if err != nil {
-		return fmt.Errorf("压缩状态失败: %w", err)
-	}
-
-	// 调用 gRPC
-	ctx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
-	defer cancel()
-
-	req := &pb.SaveStateRequest{
-		AgentId:    m.agentID,
-		AgentToken: m.agentToken,
-		StateData:  compressedData,
-	}
-
-	resp, err := m.grpcClient.SaveTailscaleState(ctx, req)
-	if err != nil {
-		return fmt.Errorf("gRPC 调用失败: %w", err)
-	}
-
-	if !resp.Success {
-		return fmt.Errorf("保存失败")
-	}
-
-	logger.Debugf("状态已保存到 Server，大小: %d 字节", len(compressedData))
+	// TODO: 如需状态同步功能，需要在 proto 中添加相应的 RPC 方法
+	logger.Debug("状态同步功能暂未启用")
 	return nil
 }
 

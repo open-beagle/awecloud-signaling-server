@@ -2,13 +2,13 @@ package api
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -17,30 +17,39 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
+// ClientAuthAPI Client 认证 API
 type ClientAuthAPI struct {
 	config          *config.ServerConfig
 	headscaleClient *headscale.Client
 }
 
+// NewClientAuthAPI 创建 ClientAuthAPI
 func NewClientAuthAPI(cfg *config.ServerConfig) *ClientAuthAPI {
 	api := &ClientAuthAPI{config: cfg}
 
 	// 初始化 Headscale 客户端
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
-		api.headscaleClient = headscale.NewClient(headscale.Config{
+		client, err := headscale.NewClient(headscale.Config{
 			URL:    cfg.Tailscale.HeadscaleURL,
 			APIKey: cfg.Tailscale.HeadscaleAPIKey,
 		})
+		if err != nil {
+			logger.Warnf("初始化 Headscale 客户端失败: %v", err)
+		} else {
+			api.headscaleClient = client
+		}
 	}
 
 	return api
 }
 
+// ClientAuthRequest Client 认证请求
 type ClientAuthRequest struct {
-	ClientID     string `json:"client_id" binding:"required"`
-	ClientSecret string `json:"client_secret" binding:"required"`
+	Name   string `json:"name" binding:"required"`
+	Secret string `json:"secret" binding:"required"`
 }
 
+// ClientAuthResponse Client 认证响应
 type ClientAuthResponse struct {
 	Success   bool   `json:"success"`
 	Token     string `json:"token,omitempty"`
@@ -48,18 +57,7 @@ type ClientAuthResponse struct {
 	Message   string `json:"message,omitempty"`
 }
 
-type ServiceInfo struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	SecretKey string `json:"secret_key"`
-}
-
-type ServicesResponse struct {
-	Success  bool          `json:"success"`
-	Services []ServiceInfo `json:"services,omitempty"`
-	Message  string        `json:"message,omitempty"`
-}
-
+// Auth Client 认证
 func (a *ClientAuthAPI) Auth(c *gin.Context) {
 	var req ClientAuthRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -70,35 +68,26 @@ func (a *ClientAuthAPI) Auth(c *gin.Context) {
 		return
 	}
 
-	// 查询Client
+	// 查询 Client
 	var client model.Client
-	if err := db.DB.Where("client_id = ?", req.ClientID).First(&client).Error; err != nil {
+	if err := db.DB.Where("name = ?", req.Name).First(&client).Error; err != nil {
 		c.JSON(http.StatusUnauthorized, ClientAuthResponse{
 			Success: false,
-			Message: "Client ID或Secret错误",
+			Message: "用户名或密钥错误",
 		})
 		return
 	}
 
-	// 验证Secret
-	if client.ClientSecret != req.ClientSecret {
+	// 验证密钥
+	if err := bcrypt.CompareHashAndPassword([]byte(client.SecretHash), []byte(req.Secret)); err != nil {
 		c.JSON(http.StatusUnauthorized, ClientAuthResponse{
 			Success: false,
-			Message: "Client ID或Secret错误",
+			Message: "用户名或密钥错误",
 		})
 		return
 	}
 
-	// 检查状态
-	if !client.Enabled {
-		c.JSON(http.StatusForbidden, ClientAuthResponse{
-			Success: false,
-			Message: "Client已被禁用",
-		})
-		return
-	}
-
-	// 生成JWT Token
+	// 生成 JWT Token
 	expiresIn := a.config.Security.JWTExpireHours * 3600
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"client_id": client.ID,
@@ -109,20 +98,9 @@ func (a *ClientAuthAPI) Auth(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ClientAuthResponse{
 			Success: false,
-			Message: "生成Token失败",
+			Message: "生成 Token 失败",
 		})
 		return
-	}
-
-	// 创建会话记录
-	session := &model.ClientSession{
-		ClientID:     client.ID,
-		SessionToken: tokenString,
-		ExpiresAt:    time.Now().Add(time.Hour * time.Duration(a.config.Security.JWTExpireHours)),
-	}
-	if err := db.DB.Create(session).Error; err != nil {
-		log.Printf("创建会话记录失败: %v", err)
-		// 不影响登录流程，继续
 	}
 
 	c.JSON(http.StatusOK, ClientAuthResponse{
@@ -134,90 +112,50 @@ func (a *ClientAuthAPI) Auth(c *gin.Context) {
 
 // GetTunnelConfig 获取隧道配置
 func (a *ClientAuthAPI) GetTunnelConfig(c *gin.Context) {
-	// 从Authorization header获取token
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
+	// 验证 Token
+	if _, err := a.validateToken(c); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
-			"message": "未提供认证信息",
+			"message": err.Error(),
 		})
 		return
-	}
-
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || parts[0] != "Bearer" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "认证格式错误",
-		})
-		return
-	}
-
-	// 验证Token
-	token, err := jwt.Parse(parts[1], func(token *jwt.Token) (interface{}, error) {
-		return []byte(a.config.Security.JWTSecret), nil
-	})
-
-	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "Token无效或已过期",
-		})
-		return
-	}
-
-	// 构建 FRP 连接信息
-	frpServer := ""
-	frpPort := a.config.Server.BindPort
-	if a.config.Server.PublicURL != "" {
-		frpServer = a.config.Server.PublicURL
-		frpPort = 0 // 使用完整 URL 时，端口信息已包含在 URL 中
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"token":   a.config.Server.Token,
-		"server":  frpServer,
-		"port":    frpPort,
+		"success":    true,
+		"server_url": a.config.Tailscale.HeadscalePublicURL,
 	})
 }
 
+// ServiceInfo 服务信息
+type ServiceInfo struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	AgentName  string `json:"agent_name"`
+	ListenAddr string `json:"listen_addr"`
+}
+
+// ServicesResponse 服务列表响应
+type ServicesResponse struct {
+	Success  bool          `json:"success"`
+	Services []ServiceInfo `json:"services,omitempty"`
+	Message  string        `json:"message,omitempty"`
+}
+
+// GetServices 获取服务列表
 func (a *ClientAuthAPI) GetServices(c *gin.Context) {
-	// 从Authorization header获取token
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
+	// 验证 Token
+	if _, err := a.validateToken(c); err != nil {
 		c.JSON(http.StatusUnauthorized, ServicesResponse{
 			Success: false,
-			Message: "未提供认证信息",
+			Message: err.Error(),
 		})
 		return
 	}
 
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || parts[0] != "Bearer" {
-		c.JSON(http.StatusUnauthorized, ServicesResponse{
-			Success: false,
-			Message: "认证格式错误",
-		})
-		return
-	}
-
-	// 验证Token
-	token, err := jwt.Parse(parts[1], func(token *jwt.Token) (interface{}, error) {
-		return []byte(a.config.Security.JWTSecret), nil
-	})
-
-	if err != nil || !token.Valid {
-		c.JSON(http.StatusUnauthorized, ServicesResponse{
-			Success: false,
-			Message: "Token无效或已过期",
-		})
-		return
-	}
-
-	// 查询所有端口映射服务（Tailscale 模式）
+	// 查询所有启用的端口映射服务
 	var proxyServices []model.ProxyService
-	if err := db.DB.Find(&proxyServices).Error; err != nil {
+	if err := db.DB.Preload("Agent").Where("enabled = ?", true).Find(&proxyServices).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, ServicesResponse{
 			Success: false,
 			Message: "查询服务失败",
@@ -228,11 +166,15 @@ func (a *ClientAuthAPI) GetServices(c *gin.Context) {
 	// 构建服务列表
 	services := make([]ServiceInfo, 0, len(proxyServices))
 	for _, svc := range proxyServices {
-		services = append(services, ServiceInfo{
-			ID:        svc.ID,
-			Name:      svc.Name,
-			SecretKey: "",
-		})
+		info := ServiceInfo{
+			ID:         svc.ID,
+			Name:       svc.Name,
+			ListenAddr: svc.ListenAddr,
+		}
+		if svc.Agent != nil {
+			info.AgentName = svc.Agent.Name
+		}
+		services = append(services, info)
 	}
 
 	c.JSON(http.StatusOK, ServicesResponse{
@@ -247,53 +189,19 @@ type TailscaleAuthResponse struct {
 	Message    string `json:"message,omitempty"`
 	ControlURL string `json:"control_url,omitempty"`
 	AuthKey    string `json:"auth_key,omitempty"`
-	DerpURL    string `json:"derp_url,omitempty"`
 }
 
-// GetTailscaleAuth 获取 Tailscale 认证信息（Desktop 用）
+// GetTailscaleAuth 获取 Tailscale 认证信息
 func (a *ClientAuthAPI) GetTailscaleAuth(c *gin.Context) {
-	// 从 Authorization header 获取 token
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, TailscaleAuthResponse{
-			Success: false,
-			Message: "未提供认证信息",
-		})
-		return
-	}
-
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || parts[0] != "Bearer" {
-		c.JSON(http.StatusUnauthorized, TailscaleAuthResponse{
-			Success: false,
-			Message: "认证格式错误",
-		})
-		return
-	}
-
 	// 验证 Token
-	token, err := jwt.Parse(parts[1], func(token *jwt.Token) (interface{}, error) {
-		return []byte(a.config.Security.JWTSecret), nil
-	})
-
-	if err != nil || !token.Valid {
+	clientID, err := a.validateToken(c)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, TailscaleAuthResponse{
 			Success: false,
-			Message: "Token 无效或已过期",
+			Message: err.Error(),
 		})
 		return
 	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, TailscaleAuthResponse{
-			Success: false,
-			Message: "Token 格式错误",
-		})
-		return
-	}
-
-	clientID := int64(claims["client_id"].(float64))
 
 	// 获取 Client 信息
 	var client model.Client
@@ -314,9 +222,8 @@ func (a *ClientAuthAPI) GetTailscaleAuth(c *gin.Context) {
 		return
 	}
 
-	// 为每个 Desktop 创建独立的 Headscale User
-	// User 命名规则：desktop-{client_id}
-	userName := fmt.Sprintf("desktop-%s", client.ClientID)
+	// 为每个 Client 创建独立的 Headscale User
+	userName := fmt.Sprintf("client-%d", client.ID)
 
 	// 获取或创建 User
 	user, err := a.headscaleClient.GetOrCreateUser(c.Request.Context(), userName)
@@ -329,10 +236,9 @@ func (a *ClientAuthAPI) GetTailscaleAuth(c *gin.Context) {
 		return
 	}
 
-	// 创建预认证密钥（非临时节点，Desktop 需要固定 IP 以支持服务暴露）
-	// 注意：Headscale API 需要传递用户 ID，而不是用户名
+	// 创建预认证密钥
 	authKeyExpiry := 24 * time.Hour
-	authKey, err := a.headscaleClient.CreatePreAuthKey(c.Request.Context(), user.ID, authKeyExpiry, false)
+	authKey, err := a.headscaleClient.CreatePreAuthKey(c.Request.Context(), user.Id, authKeyExpiry, true)
 	if err != nil {
 		logger.Errorf("创建 Tailscale 预认证密钥失败: %v", err)
 		c.JSON(http.StatusInternalServerError, TailscaleAuthResponse{
@@ -344,92 +250,36 @@ func (a *ClientAuthAPI) GetTailscaleAuth(c *gin.Context) {
 
 	logger.Infof("为 Client %d 创建 Tailscale 预认证密钥（User: %s）", clientID, userName)
 
-	// 从数据库获取配置
-	var sysConfig model.SystemConfig
-	if err := db.DB.First(&sysConfig, 1).Error; err != nil {
-		logger.Warnf("获取系统配置失败，使用配置文件默认值: %v", err)
-	}
-
-	// HeadscalePublicURL：优先使用数据库配置，否则使用配置文件
-	controlURL := a.config.Tailscale.HeadscalePublicURL
-	if sysConfig.HeadscalePublicURL != "" {
-		controlURL = sysConfig.HeadscalePublicURL
-	}
-
-	// DERP URL：优先使用数据库配置，否则使用 HeadscaleURL + /derp
-	derpURL := a.config.Tailscale.HeadscaleURL + "/derp"
-	if sysConfig.DerpURL != "" {
-		derpURL = sysConfig.DerpURL
-	}
-
 	c.JSON(http.StatusOK, TailscaleAuthResponse{
 		Success:    true,
-		ControlURL: controlURL,
+		ControlURL: a.config.Tailscale.HeadscalePublicURL,
 		AuthKey:    authKey.Key,
-		DerpURL:    derpURL,
 	})
 }
 
 // DisconnectTailscale 断开 Tailscale 连接
 func (a *ClientAuthAPI) DisconnectTailscale(c *gin.Context) {
-	// 从 Authorization header 获取 token
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "未提供认证信息",
-		})
-		return
-	}
-
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || parts[0] != "Bearer" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "认证格式错误",
-		})
-		return
-	}
-
 	// 验证 Token
-	token, err := jwt.Parse(parts[1], func(token *jwt.Token) (interface{}, error) {
-		return []byte(a.config.Security.JWTSecret), nil
-	})
-
-	if err != nil || !token.Valid {
+	clientID, err := a.validateToken(c)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
-			"message": "Token 无效或已过期",
+			"message": err.Error(),
 		})
 		return
 	}
 
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "Token 格式错误",
-		})
-		return
-	}
-
-	clientID := int64(claims["client_id"].(float64))
-
-	// 清除 Client 的 Tailscale IP
-	var client model.Client
-	if err := db.DB.First(&client, clientID).Error; err == nil {
-		if client.TailscaleIP != "" && a.headscaleClient != nil {
-			// 尝试从 Headscale 删除节点
-			node, err := a.headscaleClient.GetNodeByIP(c.Request.Context(), client.TailscaleIP)
-			if err == nil && node != nil {
-				if err := a.headscaleClient.DeleteNode(c.Request.Context(), node.ID); err != nil {
-					logger.Warnf("从 Headscale 删除节点失败: %v", err)
+	// 获取 Client 的所有 Desktop
+	var desktops []model.Desktop
+	if err := db.DB.Where("client_id = ?", clientID).Find(&desktops).Error; err == nil {
+		for _, d := range desktops {
+			if d.ID > 0 && a.headscaleClient != nil {
+				// 过期节点而不是删除
+				if err := a.headscaleClient.ExpireNode(c.Request.Context(), d.ID); err != nil {
+					logger.Warnf("过期 Headscale 节点失败: %v", err)
 				}
 			}
 		}
-
-		client.TailscaleIP = ""
-		db.DB.Save(&client)
 	}
 
 	logger.Infof("Client %d 断开 Tailscale 连接", clientID)
@@ -440,43 +290,20 @@ func (a *ClientAuthAPI) DisconnectTailscale(c *gin.Context) {
 	})
 }
 
-// GetServicesV2 获取服务列表（Tailscale 版本）
+// GetServicesV2 获取服务列表（带 Agent IP）
 func (a *ClientAuthAPI) GetServicesV2(c *gin.Context) {
-	// 从 Authorization header 获取 token
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "未提供认证信息",
-		})
-		return
-	}
-
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || parts[0] != "Bearer" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "认证格式错误",
-		})
-		return
-	}
-
 	// 验证 Token
-	token, err := jwt.Parse(parts[1], func(token *jwt.Token) (interface{}, error) {
-		return []byte(a.config.Security.JWTSecret), nil
-	})
-
-	if err != nil || !token.Valid {
+	if _, err := a.validateToken(c); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
-			"message": "Token 无效或已过期",
+			"message": err.Error(),
 		})
 		return
 	}
 
-	// 查询所有运行中的端口映射服务
+	// 查询所有启用的端口映射服务
 	var services []model.ProxyService
-	if err := db.DB.Preload("Agent").Where("status = ?", model.ProxyStatusRunning).Find(&services).Error; err != nil {
+	if err := db.DB.Preload("Agent").Where("enabled = ?", true).Find(&services).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": "查询服务失败",
@@ -486,13 +313,12 @@ func (a *ClientAuthAPI) GetServicesV2(c *gin.Context) {
 
 	// 构建响应
 	type ServiceV2Info struct {
-		ID          int64  `json:"id"`
-		Name        string `json:"name"`
-		AgentName   string `json:"agent_name"`
-		TailscaleIP string `json:"tailscale_ip"`
-		ListenPort  int    `json:"listen_port"`
-		TargetAddr  string `json:"target_addr"`
-		Status      string `json:"status"`
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		AgentName  string `json:"agent_name"`
+		AgentIP    string `json:"agent_ip"`
+		ListenAddr string `json:"listen_addr"`
+		TargetAddr string `json:"target_addr"`
 	}
 
 	result := make([]ServiceV2Info, 0, len(services))
@@ -500,13 +326,12 @@ func (a *ClientAuthAPI) GetServicesV2(c *gin.Context) {
 		info := ServiceV2Info{
 			ID:         svc.ID,
 			Name:       svc.Name,
-			ListenPort: svc.ListenPort,
+			ListenAddr: svc.ListenAddr,
 			TargetAddr: svc.TargetAddr,
-			Status:     svc.Status,
 		}
 		if svc.Agent != nil {
-			info.AgentName = svc.Agent.AgentName
-			info.TailscaleIP = svc.Agent.TailscaleIP
+			info.AgentName = svc.Agent.Name
+			info.AgentIP = svc.Agent.IP
 		}
 		result = append(result, info)
 	}
@@ -515,4 +340,33 @@ func (a *ClientAuthAPI) GetServicesV2(c *gin.Context) {
 		"success":  true,
 		"services": result,
 	})
+}
+
+// validateToken 验证 JWT Token，返回 client_id
+func (a *ClientAuthAPI) validateToken(c *gin.Context) (uint64, error) {
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		return 0, fmt.Errorf("未提供认证信息")
+	}
+
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return 0, fmt.Errorf("认证格式错误")
+	}
+
+	token, err := jwt.Parse(parts[1], func(token *jwt.Token) (interface{}, error) {
+		return []byte(a.config.Security.JWTSecret), nil
+	})
+
+	if err != nil || !token.Valid {
+		return 0, fmt.Errorf("Token 无效或已过期")
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return 0, fmt.Errorf("Token 格式错误")
+	}
+
+	clientID := uint64(claims["client_id"].(float64))
+	return clientID, nil
 }

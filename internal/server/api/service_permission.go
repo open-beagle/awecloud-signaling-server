@@ -16,384 +16,655 @@ import (
 
 // ServicePermissionAPI 服务权限管理 API
 type ServicePermissionAPI struct {
+	config  *config.ServerConfig
 	aclSync *headscale.ACLSyncService
 }
 
 // NewServicePermissionAPI 创建 ServicePermissionAPI
 func NewServicePermissionAPI(cfg *config.ServerConfig) *ServicePermissionAPI {
-	api := &ServicePermissionAPI{}
+	api := &ServicePermissionAPI{config: cfg}
 
-	// 初始化 ACL 同步服务
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
-		client := headscale.NewClient(headscale.Config{
+		client, err := headscale.NewClient(headscale.Config{
 			URL:    cfg.Tailscale.HeadscaleURL,
 			APIKey: cfg.Tailscale.HeadscaleAPIKey,
 		})
-		api.aclSync = headscale.NewACLSyncService(client)
+		if err != nil {
+			logger.Warnf("初始化 Headscale 客户端失败: %v", err)
+		} else {
+			api.aclSync = headscale.NewACLSyncService(client)
+		}
 	}
 
 	return api
 }
 
-// PermissionResponse API 响应
-type PermissionResponse struct {
-	Success bool        `json:"success"`
-	Message string      `json:"message,omitempty"`
-	Data    interface{} `json:"data,omitempty"`
+// ========== 全局权限查询 ==========
+
+// ServicePermissionItem 服务权限项（用于全局列表）
+type ServicePermissionItem struct {
+	ID          int64     `json:"id"`
+	ServiceID   string    `json:"service_id"`
+	ServiceName string    `json:"service_name"`
+	AgentID     uint64    `json:"agent_id"`
+	AgentName   string    `json:"agent_name"`
+	ClientID    uint64    `json:"client_id"`
+	ClientName  string    `json:"client_name"`
+	GrantedAt   time.Time `json:"granted_at"`
 }
 
-// ServicePermissionInfo 服务权限信息
-type ServicePermissionInfo struct {
-	ID          int64      `json:"id"`
-	ServiceID   int64      `json:"service_id"`
-	ServiceName string     `json:"service_name"`
-	ClientID    int64      `json:"client_id"`
-	ClientName  string     `json:"client_name"`
-	ClientIP    string     `json:"client_ip"`
-	GrantedBy   int64      `json:"granted_by"`
-	GrantedAt   time.Time  `json:"granted_at"`
-	ExpiresAt   *time.Time `json:"expires_at"`
-}
-
-// ListServicePermissions 获取服务的权限列表
-func (a *ServicePermissionAPI) ListServicePermissions(c *gin.Context) {
-	serviceID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, PermissionResponse{
-			Success: false,
-			Message: "无效的服务 ID",
-		})
+// GetAllClientPermissions 获取所有服务的用户授权列表
+func (a *ServicePermissionAPI) GetAllClientPermissions(c *gin.Context) {
+	var perms []model.ServiceClientPermission
+	if err := db.DB.Preload("Client").Preload("Service").Preload("Service.Agent").Find(&perms).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
 		return
 	}
 
-	var perms []model.ServicePermission
-	if err := db.DB.Preload("Service").Preload("Client").
-		Where("service_id = ?", serviceID).
-		Order("granted_at DESC").
-		Find(&perms).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, PermissionResponse{
-			Success: false,
-			Message: "查询失败",
-		})
-		return
-	}
-
-	// 转换为响应格式
-	result := make([]ServicePermissionInfo, 0, len(perms))
+	result := make([]ServicePermissionItem, 0, len(perms))
 	for _, p := range perms {
-		info := ServicePermissionInfo{
+		item := ServicePermissionItem{
 			ID:        p.ID,
 			ServiceID: p.ServiceID,
-			ClientID:  p.ClientID,
-			GrantedBy: p.GrantedBy,
 			GrantedAt: p.GrantedAt,
-			ExpiresAt: p.ExpiresAt,
 		}
 		if p.Service != nil {
-			info.ServiceName = p.Service.Name
+			item.ServiceName = p.Service.Name
+			if p.Service.Agent != nil {
+				item.AgentID = p.Service.Agent.ID
+				item.AgentName = p.Service.Agent.Name
+			}
 		}
 		if p.Client != nil {
-			info.ClientName = p.Client.ClientID
-			info.ClientIP = p.Client.TailscaleIP
+			item.ClientID = p.Client.ID
+			item.ClientName = p.Client.Name
 		}
-		result = append(result, info)
+		result = append(result, item)
 	}
 
-	c.JSON(http.StatusOK, PermissionResponse{
-		Success: true,
-		Data:    result,
-	})
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
 }
 
-// ListAllServicePermissions 获取所有服务的权限列表
-func (a *ServicePermissionAPI) ListAllServicePermissions(c *gin.Context) {
-	var perms []model.ServicePermission
-	if err := db.DB.Preload("Service").Preload("Client").
-		Order("service_id, granted_at DESC").
-		Find(&perms).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, PermissionResponse{
-			Success: false,
-			Message: "查询失败",
-		})
+// AgentPermissionItem Agent 授权项（用于全局列表）
+type AgentPermissionItem struct {
+	ID              int64     `json:"id"`
+	ServiceID       string    `json:"service_id"`
+	ServiceName     string    `json:"service_name"`
+	OwnerAgentID    uint64    `json:"owner_agent_id"`
+	OwnerAgentName  string    `json:"owner_agent_name"`
+	AccessAgentID   uint64    `json:"access_agent_id"`
+	AccessAgentName string    `json:"access_agent_name"`
+	GrantedAt       time.Time `json:"granted_at"`
+}
+
+// GetAllAgentPermissions 获取所有服务的 Agent 授权列表
+func (a *ServicePermissionAPI) GetAllAgentPermissions(c *gin.Context) {
+	var perms []model.ServiceAgentPermission
+	if err := db.DB.Preload("Agent").Preload("Service").Preload("Service.Agent").Find(&perms).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
 		return
 	}
 
-	// 转换为响应格式
-	result := make([]ServicePermissionInfo, 0, len(perms))
+	result := make([]AgentPermissionItem, 0, len(perms))
 	for _, p := range perms {
-		info := ServicePermissionInfo{
+		item := AgentPermissionItem{
 			ID:        p.ID,
 			ServiceID: p.ServiceID,
-			ClientID:  p.ClientID,
-			GrantedBy: p.GrantedBy,
 			GrantedAt: p.GrantedAt,
-			ExpiresAt: p.ExpiresAt,
 		}
 		if p.Service != nil {
-			info.ServiceName = p.Service.Name
+			item.ServiceName = p.Service.Name
+			if p.Service.Agent != nil {
+				item.OwnerAgentID = p.Service.Agent.ID
+				item.OwnerAgentName = p.Service.Agent.Name
+			}
 		}
-		if p.Client != nil {
-			info.ClientName = p.Client.ClientID
-			info.ClientIP = p.Client.TailscaleIP
+		if p.Agent != nil {
+			item.AccessAgentID = p.Agent.ID
+			item.AccessAgentName = p.Agent.Name
 		}
-		result = append(result, info)
+		result = append(result, item)
 	}
 
-	c.JSON(http.StatusOK, PermissionResponse{
-		Success: true,
-		Data:    result,
-	})
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
 }
 
-// AddServicePermissionRequest 添加服务权限请求
-type AddServicePermissionRequest struct {
-	ClientID  int64  `json:"client_id" binding:"required"`
-	ExpiresAt string `json:"expires_at"` // RFC3339 格式，可选
+// ========== 桌面授权 - 用户授权 ==========
+
+// AuthorizedClient 已授权用户
+type AuthorizedClient struct {
+	ID        uint64    `json:"id"`
+	Name      string    `json:"name"`
+	Alias     string    `json:"alias"`
+	GrantedAt time.Time `json:"granted_at"`
 }
 
-// AddServicePermission 添加服务权限
-func (a *ServicePermissionAPI) AddServicePermission(c *gin.Context) {
-	serviceID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, PermissionResponse{
-			Success: false,
-			Message: "无效的服务 ID",
-		})
+// GetClients 获取服务的用户授权列表
+func (a *ServicePermissionAPI) GetClients(c *gin.Context) {
+	serviceID := c.Param("id")
+
+	var perms []model.ServiceClientPermission
+	if err := db.DB.Preload("Client").Where("service_id = ?", serviceID).Find(&perms).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
 		return
 	}
 
-	var req AddServicePermissionRequest
+	result := make([]AuthorizedClient, 0, len(perms))
+	for _, p := range perms {
+		if p.Client != nil {
+			result = append(result, AuthorizedClient{
+				ID:        p.Client.ID,
+				Name:      p.Client.Name,
+				Alias:     p.Client.Alias,
+				GrantedAt: p.GrantedAt,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+// AddClientRequest 添加用户授权请求
+type AddClientRequest struct {
+	ClientID uint64 `json:"client_id" binding:"required"`
+}
+
+// AddClient 添加用户授权
+func (a *ServicePermissionAPI) AddClient(c *gin.Context) {
+	serviceID := c.Param("id")
+
+	var req AddClientRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, PermissionResponse{
-			Success: false,
-			Message: "请求参数错误",
-		})
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
 		return
 	}
 
 	// 验证服务存在
 	var service model.ProxyService
-	if err := db.DB.First(&service, serviceID).Error; err != nil {
-		c.JSON(http.StatusNotFound, PermissionResponse{
-			Success: false,
-			Message: "服务不存在",
-		})
+	if err := db.DB.First(&service, "id = ?", serviceID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("服务不存在"))
 		return
 	}
 
 	// 验证 Client 存在
 	var client model.Client
 	if err := db.DB.First(&client, req.ClientID).Error; err != nil {
-		c.JSON(http.StatusNotFound, PermissionResponse{
-			Success: false,
-			Message: "Client 不存在",
-		})
+		c.JSON(http.StatusNotFound, NewErrorResponse("Client 不存在"))
 		return
 	}
 
-	// 检查是否已存在权限
-	var existing model.ServicePermission
+	// 检查是否已存在
+	var existing model.ServiceClientPermission
 	if err := db.DB.Where("service_id = ? AND client_id = ?", serviceID, req.ClientID).First(&existing).Error; err == nil {
-		c.JSON(http.StatusConflict, PermissionResponse{
-			Success: false,
-			Message: "权限已存在",
-		})
+		c.JSON(http.StatusConflict, NewErrorResponse("授权已存在"))
 		return
 	}
 
-	// 解析过期时间
-	var expiresAt *time.Time
-	if req.ExpiresAt != "" {
-		t, err := time.Parse(time.RFC3339, req.ExpiresAt)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, PermissionResponse{
-				Success: false,
-				Message: "过期时间格式错误",
-			})
-			return
-		}
-		expiresAt = &t
+	perm := &model.ServiceClientPermission{
+		ServiceID: serviceID,
+		ClientID:  req.ClientID,
+		GrantedAt: time.Now(),
 	}
 
-	// 获取当前管理员 ID
-	adminID := getAdminIDFromContext(c)
+	if err := db.DB.Create(perm).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("添加失败"))
+		return
+	}
 
-	// 添加权限
+	// 同步 ACL
 	if a.aclSync != nil {
-		if err := a.aclSync.AddServicePermission(c.Request.Context(), serviceID, req.ClientID, adminID, expiresAt); err != nil {
-			c.JSON(http.StatusInternalServerError, PermissionResponse{
-				Success: false,
-				Message: "添加权限失败: " + err.Error(),
-			})
-			return
-		}
-	} else {
-		// 没有 ACL 同步服务，直接创建记录
-		perm := &model.ServicePermission{
-			ServiceID: serviceID,
-			ClientID:  req.ClientID,
-			GrantedBy: adminID,
-			GrantedAt: time.Now(),
-			ExpiresAt: expiresAt,
-		}
-		if err := db.DB.Create(perm).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, PermissionResponse{
-				Success: false,
-				Message: "添加权限失败: " + err.Error(),
-			})
-			return
-		}
+		go func() {
+			if err := a.aclSync.SyncACL(nil); err != nil {
+				logger.Warnf("同步 ACL 失败: %v", err)
+			}
+		}()
 	}
 
-	logger.Infof("添加服务权限: service_id=%d, client_id=%d, granted_by=%d", serviceID, req.ClientID, adminID)
-
-	c.JSON(http.StatusOK, PermissionResponse{
-		Success: true,
-		Message: "添加成功",
+	logger.Infof("添加用户授权: service_id=%s, client_id=%d", serviceID, req.ClientID)
+	recordAuditLog(c, model.ActionGrantDesktop, "service", serviceID, service.Name, map[string]interface{}{
+		"client_id":   req.ClientID,
+		"client_name": client.Name,
 	})
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("添加成功", nil))
 }
 
-// RemoveServicePermission 删除服务权限
-func (a *ServicePermissionAPI) RemoveServicePermission(c *gin.Context) {
-	permID, err := strconv.ParseInt(c.Param("pid"), 10, 64)
+// RemoveClient 移除用户授权
+func (a *ServicePermissionAPI) RemoveClient(c *gin.Context) {
+	serviceID := c.Param("id")
+	clientID, err := strconv.ParseUint(c.Param("cid"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, PermissionResponse{
-			Success: false,
-			Message: "无效的权限 ID",
-		})
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 Client ID"))
 		return
 	}
 
-	// 验证权限存在
-	var perm model.ServicePermission
-	if err := db.DB.First(&perm, permID).Error; err != nil {
-		c.JSON(http.StatusNotFound, PermissionResponse{
-			Success: false,
-			Message: "权限不存在",
-		})
+	result := db.DB.Where("service_id = ? AND client_id = ?", serviceID, clientID).Delete(&model.ServiceClientPermission{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
 		return
 	}
 
-	// 删除权限
+	// 同步 ACL
 	if a.aclSync != nil {
-		if err := a.aclSync.RemoveServicePermission(c.Request.Context(), permID); err != nil {
-			c.JSON(http.StatusInternalServerError, PermissionResponse{
-				Success: false,
-				Message: "删除权限失败: " + err.Error(),
-			})
-			return
-		}
-	} else {
-		if err := db.DB.Delete(&model.ServicePermission{}, permID).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, PermissionResponse{
-				Success: false,
-				Message: "删除权限失败: " + err.Error(),
-			})
-			return
-		}
+		go func() {
+			if err := a.aclSync.SyncACL(nil); err != nil {
+				logger.Warnf("同步 ACL 失败: %v", err)
+			}
+		}()
 	}
 
-	logger.Infof("删除服务权限: id=%d", permID)
-
-	c.JSON(http.StatusOK, PermissionResponse{
-		Success: true,
-		Message: "删除成功",
+	logger.Infof("移除用户授权: service_id=%s, client_id=%d", serviceID, clientID)
+	recordAuditLog(c, model.ActionRevokeDesktop, "service", serviceID, "", map[string]interface{}{
+		"client_id": clientID,
 	})
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("移除成功", nil))
 }
 
-// UpdateAccessTypeRequest 更新访问类型请求
-type UpdateAccessTypeRequest struct {
-	AccessType string `json:"access_type" binding:"required"` // public, private, group
-	GroupID    *int64 `json:"group_id"`                       // group 类型时必填
+// ========== 桌面授权 - 用户分组授权 ==========
+
+// AuthorizedClientGroup 已授权用户分组
+type AuthorizedClientGroup struct {
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	Alias       string    `json:"alias"`
+	MemberCount int64     `json:"member_count"`
+	GrantedAt   time.Time `json:"granted_at"`
 }
 
-// UpdateServiceAccessType 更新服务访问类型
-func (a *ServicePermissionAPI) UpdateServiceAccessType(c *gin.Context) {
-	serviceID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, PermissionResponse{
-			Success: false,
-			Message: "无效的服务 ID",
-		})
+// GetClientGroups 获取服务的用户分组授权列表
+func (a *ServicePermissionAPI) GetClientGroups(c *gin.Context) {
+	serviceID := c.Param("id")
+
+	var perms []model.ServiceClientGroupPermission
+	if err := db.DB.Preload("Group").Where("service_id = ?", serviceID).Find(&perms).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
 		return
 	}
 
-	var req UpdateAccessTypeRequest
+	result := make([]AuthorizedClientGroup, 0, len(perms))
+	for _, p := range perms {
+		if p.Group != nil {
+			var memberCount int64
+			db.DB.Model(&model.ClientGroupMember{}).Where("group_id = ?", p.Group.ID).Count(&memberCount)
+
+			result = append(result, AuthorizedClientGroup{
+				ID:          p.Group.ID,
+				Name:        p.Group.Name,
+				Alias:       p.Group.Alias,
+				MemberCount: memberCount,
+				GrantedAt:   p.GrantedAt,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+// AddClientGroupRequest 添加用户分组授权请求
+type AddClientGroupRequest struct {
+	GroupID int64 `json:"group_id" binding:"required"`
+}
+
+// AddClientGroup 添加用户分组授权
+func (a *ServicePermissionAPI) AddClientGroup(c *gin.Context) {
+	serviceID := c.Param("id")
+
+	var req AddClientGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, PermissionResponse{
-			Success: false,
-			Message: "请求参数错误",
-		})
-		return
-	}
-
-	// 验证访问类型
-	if req.AccessType != model.AccessTypePublic &&
-		req.AccessType != model.AccessTypePrivate &&
-		req.AccessType != model.AccessTypeGroup {
-		c.JSON(http.StatusBadRequest, PermissionResponse{
-			Success: false,
-			Message: "无效的访问类型",
-		})
-		return
-	}
-
-	// group 类型需要指定组
-	if req.AccessType == model.AccessTypeGroup && req.GroupID == nil {
-		c.JSON(http.StatusBadRequest, PermissionResponse{
-			Success: false,
-			Message: "group 类型需要指定组 ID",
-		})
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
 		return
 	}
 
 	// 验证服务存在
 	var service model.ProxyService
-	if err := db.DB.First(&service, serviceID).Error; err != nil {
-		c.JSON(http.StatusNotFound, PermissionResponse{
-			Success: false,
-			Message: "服务不存在",
-		})
+	if err := db.DB.First(&service, "id = ?", serviceID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("服务不存在"))
 		return
 	}
 
-	// 更新访问类型
-	if a.aclSync != nil {
-		if err := a.aclSync.UpdateServiceAccessType(c.Request.Context(), serviceID, req.AccessType, req.GroupID); err != nil {
-			c.JSON(http.StatusInternalServerError, PermissionResponse{
-				Success: false,
-				Message: "更新失败: " + err.Error(),
-			})
-			return
-		}
-	} else {
-		updates := map[string]interface{}{
-			"access_type": req.AccessType,
-			"group_id":    req.GroupID,
-		}
-		if err := db.DB.Model(&model.ProxyService{}).Where("id = ?", serviceID).Updates(updates).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, PermissionResponse{
-				Success: false,
-				Message: "更新失败: " + err.Error(),
-			})
-			return
-		}
+	// 验证分组存在
+	var group model.ClientGroup
+	if err := db.DB.First(&group, req.GroupID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("分组不存在"))
+		return
 	}
 
-	logger.Infof("更新服务访问类型: service_id=%d, access_type=%s", serviceID, req.AccessType)
+	// 检查是否已存在
+	var existing model.ServiceClientGroupPermission
+	if err := db.DB.Where("service_id = ? AND group_id = ?", serviceID, req.GroupID).First(&existing).Error; err == nil {
+		c.JSON(http.StatusConflict, NewErrorResponse("授权已存在"))
+		return
+	}
 
-	c.JSON(http.StatusOK, PermissionResponse{
-		Success: true,
-		Message: "更新成功",
-	})
+	perm := &model.ServiceClientGroupPermission{
+		ServiceID: serviceID,
+		GroupID:   req.GroupID,
+		GrantedAt: time.Now(),
+	}
+
+	if err := db.DB.Create(perm).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("添加失败"))
+		return
+	}
+
+	// 同步 ACL
+	if a.aclSync != nil {
+		go func() {
+			if err := a.aclSync.SyncACL(nil); err != nil {
+				logger.Warnf("同步 ACL 失败: %v", err)
+			}
+		}()
+	}
+
+	logger.Infof("添加用户分组授权: service_id=%s, group_id=%d", serviceID, req.GroupID)
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("添加成功", nil))
 }
 
-// getAdminIDFromContext 从上下文获取管理员 ID
-func getAdminIDFromContext(c *gin.Context) int64 {
-	if adminID, exists := c.Get("admin_id"); exists {
-		if id, ok := adminID.(int64); ok {
-			return id
+// RemoveClientGroup 移除用户分组授权
+func (a *ServicePermissionAPI) RemoveClientGroup(c *gin.Context) {
+	serviceID := c.Param("id")
+	groupID, err := strconv.ParseInt(c.Param("gid"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的分组 ID"))
+		return
+	}
+
+	result := db.DB.Where("service_id = ? AND group_id = ?", serviceID, groupID).Delete(&model.ServiceClientGroupPermission{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
+		return
+	}
+
+	// 同步 ACL
+	if a.aclSync != nil {
+		go func() {
+			if err := a.aclSync.SyncACL(nil); err != nil {
+				logger.Warnf("同步 ACL 失败: %v", err)
+			}
+		}()
+	}
+
+	logger.Infof("移除用户分组授权: service_id=%s, group_id=%d", serviceID, groupID)
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("移除成功", nil))
+}
+
+// ========== 代理授权 - Agent 授权 ==========
+
+// AuthorizedAgent 已授权 Agent
+type AuthorizedAgent struct {
+	ID        uint64    `json:"id"`
+	Name      string    `json:"name"`
+	Alias     string    `json:"alias"`
+	GrantedAt time.Time `json:"granted_at"`
+}
+
+// GetAgents 获取服务的 Agent 授权列表
+func (a *ServicePermissionAPI) GetAgents(c *gin.Context) {
+	serviceID := c.Param("id")
+
+	var perms []model.ServiceAgentPermission
+	if err := db.DB.Preload("Agent").Where("service_id = ?", serviceID).Find(&perms).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
+		return
+	}
+
+	result := make([]AuthorizedAgent, 0, len(perms))
+	for _, p := range perms {
+		if p.Agent != nil {
+			result = append(result, AuthorizedAgent{
+				ID:        p.Agent.ID,
+				Name:      p.Agent.Name,
+				Alias:     p.Agent.Alias,
+				GrantedAt: p.GrantedAt,
+			})
 		}
 	}
-	return 0
+
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+// AddAgentRequest 添加 Agent 授权请求
+type AddAgentRequest struct {
+	AgentID uint64 `json:"agent_id" binding:"required"`
+}
+
+// AddAgent 添加 Agent 授权
+func (a *ServicePermissionAPI) AddAgent(c *gin.Context) {
+	serviceID := c.Param("id")
+
+	var req AddAgentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
+		return
+	}
+
+	// 验证服务存在
+	var service model.ProxyService
+	if err := db.DB.First(&service, "id = ?", serviceID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("服务不存在"))
+		return
+	}
+
+	// 验证 Agent 存在
+	var agent model.Agent
+	if err := db.DB.First(&agent, req.AgentID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("Agent 不存在"))
+		return
+	}
+
+	// 检查是否已存在
+	var existing model.ServiceAgentPermission
+	if err := db.DB.Where("service_id = ? AND agent_id = ?", serviceID, req.AgentID).First(&existing).Error; err == nil {
+		c.JSON(http.StatusConflict, NewErrorResponse("授权已存在"))
+		return
+	}
+
+	perm := &model.ServiceAgentPermission{
+		ServiceID: serviceID,
+		AgentID:   req.AgentID,
+		GrantedAt: time.Now(),
+	}
+
+	if err := db.DB.Create(perm).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("添加失败"))
+		return
+	}
+
+	// 同步 ACL
+	if a.aclSync != nil {
+		go func() {
+			if err := a.aclSync.SyncACL(nil); err != nil {
+				logger.Warnf("同步 ACL 失败: %v", err)
+			}
+		}()
+	}
+
+	logger.Infof("添加 Agent 授权: service_id=%s, agent_id=%d", serviceID, req.AgentID)
+	recordAuditLog(c, model.ActionGrantAgent, "service", serviceID, service.Name, map[string]interface{}{
+		"agent_id":   req.AgentID,
+		"agent_name": agent.Name,
+	})
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("添加成功", nil))
+}
+
+// RemoveAgent 移除 Agent 授权
+func (a *ServicePermissionAPI) RemoveAgent(c *gin.Context) {
+	serviceID := c.Param("id")
+	agentID, err := strconv.ParseUint(c.Param("aid"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 Agent ID"))
+		return
+	}
+
+	result := db.DB.Where("service_id = ? AND agent_id = ?", serviceID, agentID).Delete(&model.ServiceAgentPermission{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
+		return
+	}
+
+	// 同步 ACL
+	if a.aclSync != nil {
+		go func() {
+			if err := a.aclSync.SyncACL(nil); err != nil {
+				logger.Warnf("同步 ACL 失败: %v", err)
+			}
+		}()
+	}
+
+	logger.Infof("移除 Agent 授权: service_id=%s, agent_id=%d", serviceID, agentID)
+	recordAuditLog(c, model.ActionRevokeAgent, "service", serviceID, "", map[string]interface{}{
+		"agent_id": agentID,
+	})
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("移除成功", nil))
+}
+
+// ========== 代理授权 - Agent 分组授权 ==========
+
+// AuthorizedAgentGroup 已授权 Agent 分组
+type AuthorizedAgentGroup struct {
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	Alias       string    `json:"alias"`
+	MemberCount int64     `json:"member_count"`
+	GrantedAt   time.Time `json:"granted_at"`
+}
+
+// GetAgentGroups 获取服务的 Agent 分组授权列表
+func (a *ServicePermissionAPI) GetAgentGroups(c *gin.Context) {
+	serviceID := c.Param("id")
+
+	var perms []model.ServiceAgentGroupPermission
+	if err := db.DB.Preload("Group").Where("service_id = ?", serviceID).Find(&perms).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
+		return
+	}
+
+	result := make([]AuthorizedAgentGroup, 0, len(perms))
+	for _, p := range perms {
+		if p.Group != nil {
+			var memberCount int64
+			db.DB.Model(&model.AgentGroupMember{}).Where("group_id = ?", p.Group.ID).Count(&memberCount)
+
+			result = append(result, AuthorizedAgentGroup{
+				ID:          p.Group.ID,
+				Name:        p.Group.Name,
+				Alias:       p.Group.Alias,
+				MemberCount: memberCount,
+				GrantedAt:   p.GrantedAt,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+// AddAgentGroupRequest 添加 Agent 分组授权请求
+type AddAgentGroupRequest struct {
+	GroupID int64 `json:"group_id" binding:"required"`
+}
+
+// AddAgentGroup 添加 Agent 分组授权
+func (a *ServicePermissionAPI) AddAgentGroup(c *gin.Context) {
+	serviceID := c.Param("id")
+
+	var req AddAgentGroupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
+		return
+	}
+
+	// 验证服务存在
+	var service model.ProxyService
+	if err := db.DB.First(&service, "id = ?", serviceID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("服务不存在"))
+		return
+	}
+
+	// 验证分组存在
+	var group model.AgentGroup
+	if err := db.DB.First(&group, req.GroupID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("分组不存在"))
+		return
+	}
+
+	// 检查是否已存在
+	var existing model.ServiceAgentGroupPermission
+	if err := db.DB.Where("service_id = ? AND group_id = ?", serviceID, req.GroupID).First(&existing).Error; err == nil {
+		c.JSON(http.StatusConflict, NewErrorResponse("授权已存在"))
+		return
+	}
+
+	perm := &model.ServiceAgentGroupPermission{
+		ServiceID: serviceID,
+		GroupID:   req.GroupID,
+		GrantedAt: time.Now(),
+	}
+
+	if err := db.DB.Create(perm).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("添加失败"))
+		return
+	}
+
+	// 同步 ACL
+	if a.aclSync != nil {
+		go func() {
+			if err := a.aclSync.SyncACL(nil); err != nil {
+				logger.Warnf("同步 ACL 失败: %v", err)
+			}
+		}()
+	}
+
+	logger.Infof("添加 Agent 分组授权: service_id=%s, group_id=%d", serviceID, req.GroupID)
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("添加成功", nil))
+}
+
+// RemoveAgentGroup 移除 Agent 分组授权
+func (a *ServicePermissionAPI) RemoveAgentGroup(c *gin.Context) {
+	serviceID := c.Param("id")
+	groupID, err := strconv.ParseInt(c.Param("gid"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的分组 ID"))
+		return
+	}
+
+	result := db.DB.Where("service_id = ? AND group_id = ?", serviceID, groupID).Delete(&model.ServiceAgentGroupPermission{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
+		return
+	}
+
+	// 同步 ACL
+	if a.aclSync != nil {
+		go func() {
+			if err := a.aclSync.SyncACL(nil); err != nil {
+				logger.Warnf("同步 ACL 失败: %v", err)
+			}
+		}()
+	}
+
+	logger.Infof("移除 Agent 分组授权: service_id=%s, group_id=%d", serviceID, groupID)
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("移除成功", nil))
 }

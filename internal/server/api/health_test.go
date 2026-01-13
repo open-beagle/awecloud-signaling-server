@@ -15,7 +15,7 @@ func TestHealthEndpoint(t *testing.T) {
 
 	// 创建测试路由
 	router := gin.New()
-	healthAPI := NewHealthAPI(nil, nil)
+	healthAPI := NewHealthAPI(nil)
 	router.GET("/health", healthAPI.Health)
 
 	// 创建测试请求
@@ -45,7 +45,7 @@ func TestReadyEndpoint_Structure(t *testing.T) {
 	// 这里我们只测试API的基本结构是否正确
 
 	router := gin.New()
-	healthAPI := NewHealthAPI(nil, nil)
+	healthAPI := NewHealthAPI(nil)
 	router.GET("/health/ready", healthAPI.Ready)
 
 	w := httptest.NewRecorder()

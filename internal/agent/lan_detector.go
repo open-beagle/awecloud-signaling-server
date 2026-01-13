@@ -13,6 +13,7 @@ import (
 // NetworkInfo 网络信息
 type NetworkInfo struct {
 	LanIP        string `json:"lan_ip"`        // 局域网 IP
+	LanMask      string `json:"lan_mask"`      // 子网掩码
 	LanGateway   string `json:"lan_gateway"`   // 网关地址
 	LanInterface string `json:"lan_interface"` // 网卡名称
 	RuntimeEnv   string `json:"runtime_env"`   // 运行环境: native/docker/kubernetes
@@ -64,9 +65,10 @@ func (d *LANDetector) DetectNetworkInfo() *NetworkInfo {
 	}
 
 	// 检测局域网接口
-	iface, ip := d.detectLANInterface()
+	iface, ip, mask := d.detectLANInterface()
 	if ip != "" {
 		info.LanIP = ip
+		info.LanMask = mask
 		info.LanInterface = iface
 		info.LanGateway = d.detectGateway(iface)
 	}
@@ -77,7 +79,7 @@ func (d *LANDetector) DetectNetworkInfo() *NetworkInfo {
 // DetectLANIP 检测局域网 IP（保持向后兼容）
 // 返回检测到的局域网 IP，如果检测失败则返回 127.0.0.1
 func (d *LANDetector) DetectLANIP() string {
-	_, ip := d.detectLANInterface()
+	_, ip, _ := d.detectLANInterface()
 	if ip == "" {
 		return "127.0.0.1"
 	}
@@ -85,17 +87,18 @@ func (d *LANDetector) DetectLANIP() string {
 }
 
 // detectLANInterface 检测局域网接口和 IP
-// 返回接口名称和 IP 地址
-func (d *LANDetector) detectLANInterface() (string, string) {
+// 返回接口名称、IP 地址和子网掩码
+func (d *LANDetector) detectLANInterface() (string, string, string) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		logger.Warnf("获取网络接口失败: %v", err)
-		return "", ""
+		return "", "", ""
 	}
 
 	type candidate struct {
 		iface    string
 		ip       string
+		mask     string
 		priority int // 优先级，数字越小优先级越高
 	}
 
@@ -141,10 +144,14 @@ func (d *LANDetector) detectLANInterface() (string, string) {
 				continue
 			}
 
+			// 获取子网掩码
+			mask := net.IP(ipNet.Mask).String()
+
 			priority := d.getPriority(iface.Name)
 			candidates = append(candidates, candidate{
 				iface:    iface.Name,
 				ip:       ip.String(),
+				mask:     mask,
 				priority: priority,
 			})
 		}
@@ -152,7 +159,7 @@ func (d *LANDetector) detectLANInterface() (string, string) {
 
 	if len(candidates) == 0 {
 		logger.Warn("未检测到局域网 IP")
-		return "", ""
+		return "", "", ""
 	}
 
 	// 按优先级排序
@@ -161,9 +168,9 @@ func (d *LANDetector) detectLANInterface() (string, string) {
 	})
 
 	selected := candidates[0]
-	logger.Infof("检测到局域网 IP: %s (接口: %s)", selected.ip, selected.iface)
+	logger.Infof("检测到局域网 IP: %s/%s (接口: %s)", selected.ip, selected.mask, selected.iface)
 
-	return selected.iface, selected.ip
+	return selected.iface, selected.ip, selected.mask
 }
 
 // detectGateway 检测网关地址

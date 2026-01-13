@@ -1,1898 +1,1895 @@
-# AWECloud-Signaling API 设计
+# API 设计文档
+
+## 1. 概述
+
+本文档描述 AWECloud Signaling Server 的 REST API 设计，包括接口定义、返回模型和业务流程。
+
+### 1.1 API 职责
 
-## 1. API 概述
+- 提供 Web 管理界面的数据接口
+- 支持 Agent 管理、Client 管理、服务权限管理
+- 提供审计日志查询和系统配置管理
 
-系统提供三种 API：
-
-1. **RESTful API**：Web 管理界面和 Client 认证
-2. **gRPC API**：Agent 管理和 Client 服务查询
-3. **WebSocket API**：FRP 信令通道
-
-## 2. RESTful API
-
-### 2.1 基础信息
-
-- **Base URL**: `https://your-domain.com/api/v1`
-- **Content-Type**: `application/json`
-- **认证方式**:
-  - 管理员 API：Session Cookie 或 JWT Token
-  - Client API：JWT Bearer Token
-
-### 2.2 健康检查 API（非业务 API）
-
-健康检查 API 使用根路径，不使用 `/api/v1` 前缀，符合 Kubernetes 生态标准。
-
-#### 2.2.1 基础健康检查
-
-```
-GET /health
-```
-
-**用途**: Kubernetes Liveness Probe（存活性探测）
-
-**响应**:
-
-```json
-{
-  "status": "ok",
-  "timestamp": "2025-11-29T10:30:00Z"
-}
-```
-
-**HTTP 状态码**:
-
-- `200 OK`: 服务正常运行
-- `503 Service Unavailable`: 服务不可用
-
-#### 2.2.2 就绪性检查
-
-```
-GET /health/ready
-```
-
-**用途**: Kubernetes Readiness Probe（就绪性探测）
-
-**响应（就绪）**:
-
-```json
-{
-  "status": "ready",
-  "timestamp": "2025-11-29T10:30:00Z",
-  "checks": {
-    "database": "ok",
-    "frp_server": "ok",
-    "grpc_server": "ok"
-  }
-}
-```
-
-**响应（未就绪）**:
-
-```json
-{
-  "status": "not_ready",
-  "timestamp": "2025-11-29T10:30:00Z",
-  "checks": {
-    "database": "error",
-    "frp_server": "ok",
-    "grpc_server": "ok"
-  },
-  "errors": {
-    "database": "connection timeout"
-  }
-}
-```
-
-**HTTP 状态码**:
-
-- `200 OK`: 服务就绪，可以接收流量
-- `503 Service Unavailable`: 服务未就绪
-
-**检查项**:
-
-1. **数据库连接**: 执行简单查询验证连接
-2. **FRP Server 状态**: 检查 FRP 服务线程是否运行
-3. **gRPC Server 状态**: 检查 gRPC 服务是否可用
-
-**详细设计**: 参见 [健康检查接口设计](./design_health.md)
-
-### 2.3 API 版本规范
-
-所有业务 API 统一使用 `/api/v1` 前缀：
-
-- **管理员 API**: `/api/v1/admin/...`
-  - 认证：`/api/v1/admin/auth/...`
-  - 资源管理：`/api/v1/admin/{resource}/...`
-- **Client API**: `/api/v1/client/...`
-  - 认证：`/api/v1/client/auth/...`
-  - 服务：`/api/v1/client/services`
-  - 偏好设置：`/api/v1/client/preferences/...`
-  - 审计：`/api/v1/client/audit/...`
-
-**向后兼容**：
-
-- `/api/client/auth` - 已废弃，保留用于向后兼容，建议使用 `/api/v1/client/auth/login`
-
-### 2.4 管理员认证
-
-#### 2.4.1 登录
-
-```
-POST /api/v1/admin/auth/login
-```
-
-**请求体**:
-
-```json
-{
-  "username": "admin",
-  "password": "admin123"
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "登录成功"
-}
-```
-
-**错误响应**:
-
-```json
-{
-  "success": false,
-  "error": "用户名或密码错误"
-}
-```
-
-#### 2.4.2 登出
-
-```
-POST /api/v1/admin/auth/logout
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "登出成功"
-}
-```
-
-### 2.4 Agent 管理
-
-#### 2.4.1 获取 Agent 列表
-
-```
-GET /api/v1/admin/agents
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": 1,
-      "agent_name": "dev-env-1",
-      "status": "online",
-      "last_heartbeat": "2025-11-25T10:30:00Z",
-      "created_at": "2025-11-20T08:00:00Z"
-    }
-  ]
-}
-```
-
-#### 2.4.2 创建 Agent
-
-```
-POST /api/v1/admin/agents
-```
-
-**请求体**:
-
-```json
-{
-  "agent_name": "dev-env-2"
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": 2,
-    "agent_name": "dev-env-2",
-    "agent_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "created_at": "2025-11-25T10:35:00Z"
-  }
-}
-```
-
-#### 2.4.3 删除 Agent
-
-```
-DELETE /api/v1/admin/agents/:id
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "Agent删除成功"
-}
-```
-
-#### 2.4.4 重新生成 Token
-
-```
-POST /api/v1/admin/agents/:id/regenerate-token
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": {
-    "agent_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-  }
-}
-```
-
-### 2.5 Client 管理
-
-#### 2.5.1 获取 Client 列表
-
-```
-GET /api/v1/admin/clients
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": 1,
-      "client_id": "user@example.com",
-      "enabled": true,
-      "created_at": "2025-11-20T08:00:00Z"
-    }
-  ]
-}
-```
-
-#### 2.5.2 创建 Client
-
-```
-POST /api/v1/admin/clients
-```
-
-**请求体**:
-
-```json
-{
-  "client_id": "user@example.com"
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": 2,
-    "client_id": "user@example.com",
-    "client_secret": "cs_1234567890abcdef",
-    "enabled": true,
-    "created_at": "2025-11-25T10:40:00Z"
-  }
-}
-```
-
-#### 2.5.3 禁用 Client
-
-```
-PUT /api/v1/admin/clients/:id/disable
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "Client已禁用"
-}
-```
-
-#### 2.5.4 启用 Client
-
-```
-PUT /api/v1/admin/clients/:id/enable
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "Client已启用"
-}
-```
-
-#### 2.5.5 删除 Client
-
-```
-DELETE /api/v1/admin/clients/:id
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "Client删除成功"
-}
-```
-
-#### 2.5.6 重新生成 Secret
-
-```
-POST /api/v1/admin/clients/:id/regenerate-secret
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": {
-    "client_secret": "cs_0987654321fedcba"
-  }
-}
-```
-
-### 2.6 STCP 实例管理
-
-#### 2.6.1 获取 STCP 实例列表
-
-```
-GET /api/v1/admin/stcp-instances
-```
-
-**查询参数**:
-
-- `agent_id` (可选): 按 Agent ID 过滤
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": 1,
-      "instance_name": "dev-mysql",
-      "agent_id": 1,
-      "agent_name": "dev-env-1",
-      "local_ip": "127.0.0.1",
-      "local_port": 3306,
-      "description": "开发环境MySQL数据库",
-      "created_at": "2025-11-20T08:00:00Z"
-    }
-  ]
-}
-```
-
-#### 2.6.2 创建 STCP 实例
-
-```
-POST /api/v1/admin/stcp-instances
-```
-
-**请求体**:
-
-```json
-{
-  "instance_name": "dev-redis",
-  "agent_id": 1,
-  "local_ip": "127.0.0.1",
-  "local_port": 6379,
-  "description": "开发环境Redis"
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": 2,
-    "instance_name": "dev-redis",
-    "agent_id": 1,
-    "secret_key": "sk_1234567890abcdef",
-    "local_ip": "127.0.0.1",
-    "local_port": 6379,
-    "description": "开发环境Redis",
-    "created_at": "2025-11-25T10:45:00Z"
-  }
-}
-```
-
-#### 2.6.3 删除 STCP 实例
-
-```
-DELETE /api/v1/admin/stcp-instances/:id
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "STCP实例删除成功"
-}
-```
-
-#### 2.7.4 授权访问
-
-```
-POST /api/v1/admin/stcp-instances/:id/grant
-```
-
-**请求体**:
-
-```json
-{
-  "client_id": 1
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "访问权限已授予"
-}
-```
-
-#### 2.7.5 撤销访问
-
-```
-POST /api/v1/admin/stcp-instances/:id/revoke
-```
-
-**请求体**:
-
-```json
-{
-  "client_id": 1
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "访问权限已撤销"
-}
-```
-
-#### 2.7.6 设置访问权限类型
-
-```
-PUT /api/v1/admin/stcp-instances/:id/access-type
-```
-
-**请求体**:
-
-```json
-{
-  "access_type": "public", // "public" | "private" | "group"
-  "group_id": 1 // 当 access_type = "group" 时必需
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "访问权限已更新"
-}
-```
-
-### 2.7 TCP 服务管理
-
-#### 2.7.1 获取 TCP 服务列表
-
-```
-GET /api/v1/admin/tcp-services
-```
-
-**查询参数**：
-
-- `agent_id` (可选): 按 Agent ID 过滤
-- `enabled` (可选): 按启用状态过滤
-
-#### 2.7.2 创建 TCP 服务
-
-```
-POST /api/v1/admin/tcp-services
-```
-
-**说明**：不需要指定 `remote_port`，由系统自动分配。创建后默认为禁用状态。
-
-#### 2.7.3 更新 TCP 服务
-
-```
-PUT /api/v1/admin/tcp-services/:id
-```
-
-**说明**：可更新描述、访问控制等，但不能修改端口。
-
-#### 2.7.4 删除 TCP 服务
-
-```
-DELETE /api/v1/admin/tcp-services/:id
-```
-
-**说明**：删除服务会释放端口。
-
-#### 2.7.5 启用 TCP 服务
-
-```
-PUT /api/v1/admin/tcp-services/:id/enable
-```
-
-**说明**：启用后 Server 端开始监听端口。
-
-#### 2.7.6 禁用 TCP 服务
-
-```
-PUT /api/v1/admin/tcp-services/:id/disable
-```
-
-**说明**：禁用后 Server 端停止监听端口，但端口仍被占用。
-
-#### 2.7.7 设置 IP 白名单
-
-```
-PUT /api/v1/admin/tcp-services/:id/whitelist
-```
-
-#### 2.7.8 获取 TCP 服务访问日志
-
-```
-GET /api/v1/admin/tcp-services/:id/logs
-```
-
-**查询参数**：
-
-- `start_date` (可选): 开始日期
-- `end_date` (可选): 结束日期
-- `page` (可选): 页码，默认 1
-- `page_size` (可选): 每页数量，默认 50
-
-#### 2.7.9 获取 TCP 服务配置
-
-```
-GET /api/v1/admin/settings/tcp-service
-```
-
-**说明**：返回端口起始值、每 Agent 最大服务数等配置。
-
-#### 2.7.10 更新 TCP 服务配置
-
-```
-PUT /api/v1/admin/settings/tcp-service
-```
-
-**说明**：可更新端口起始值和每 Agent 最大服务数。
-
-### 2.8 用户组管理
-
-#### 2.8.1 获取所有组
-
-```
-GET /api/v1/admin/groups
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": 1,
-      "name": "dev-team",
-      "description": "开发团队",
-      "member_count": 5,
-      "created_at": "2025-11-20T08:00:00Z"
-    }
-  ]
-}
-```
-
-#### 2.8.2 创建组
-
-```
-POST /api/v1/admin/groups
-```
-
-**请求体**:
-
-```json
-{
-  "name": "test-team",
-  "description": "测试团队"
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": 2,
-    "name": "test-team",
-    "description": "测试团队",
-    "created_at": "2025-11-25T10:50:00Z"
-  }
-}
-```
-
-#### 2.8.3 更新组
-
-```
-PUT /api/v1/admin/groups/:id
-```
-
-**请求体**:
-
-```json
-{
-  "name": "test-team-updated",
-  "description": "更新后的测试团队"
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "组信息已更新"
-}
-```
-
-#### 2.8.4 删除组
-
-```
-DELETE /api/v1/admin/groups/:id
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "组已删除"
-}
-```
-
-#### 2.8.5 获取组成员
-
-```
-GET /api/v1/admin/groups/:id/members
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": 1,
-      "client_id": "user@example.com",
-      "role": "admin",
-      "joined_at": "2025-11-20T08:00:00Z"
-    }
-  ]
-}
-```
-
-#### 2.8.6 添加组成员
-
-```
-POST /api/v1/admin/groups/:id/members
-```
-
-**请求体**:
-
-```json
-{
-  "client_id": 2,
-  "role": "member" // "admin" | "member"
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "成员已添加"
-}
-```
-
-#### 2.8.7 移除组成员
-
-```
-DELETE /api/v1/admin/groups/:id/members/:client_id
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "成员已移除"
-}
-```
-
-### 2.9 Client 端 API
-
-**认证流程说明**:
-
-Desktop 客户端的认证分为两个阶段：
-
-**阶段 1：登录（获取 JWT Token）**
-
-支持两种登录方式，最终都返回 JWT Token：
-
-1. **Secret 登录** (`POST /api/v1/client/auth/login`)
-
-   - 用途：首次登录或 Device Token 过期
-   - 输入：`client_id` + `client_secret` + 设备信息
-   - 输出：`device_token` + `jwt_token`
-   - 安全：Secret 不保存到本地，只在登录时使用
-
-2. **Device Token 登录** (`POST /api/v1/client/auth/login/token`)
-   - 用途：自动登录（记住登录）
-   - 输入：`client_id` + `device_token` + 设备指纹
-   - 输出：`jwt_token`
-   - 安全：Device Token 保存到本地，有效期 7 天，可远程撤销
-
-**阶段 2：API 认证（使用 JWT Token）**
-
-所有后续 API 调用统一使用 JWT Token 认证，不关心用户使用哪种方式登录：
-
-```
-Authorization: Bearer <jwt_token>
-```
-
-JWT Token 特点：
-
-- 有效期：24 小时
-- 用途：所有 API 调用（服务列表、隧道配置、设备管理等）
-- 刷新：JWT 过期后需要重新登录（使用 Device Token 自动登录）
-
-**安全设计**:
-
-- ✅ Secret 不保存到本地
-- ✅ Device Token 可远程撤销
-- ✅ JWT 短期有效，降低泄露风险
-- ✅ 设备指纹验证，防止 Token 被盗用
+### 1.2 与其他模块的关系
+
+- 依赖数据模型（`internal/server/model`）
+- 为 Web 界面提供数据（`web/src/api`）
+- 与 gRPC 服务协同工作
+
+## 2. 架构设计
+
+### 2.1 通信架构
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                     Server 通信架构                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   ┌─────────────┐                    ┌─────────────────┐   │
+│   │ Web 管理界面 │                    │ Agent / Desktop │   │
+│   └─────┬───────┘                    └────────┬────────┘   │
+│         │ HTTP/REST                           │ gRPC       │
+│         ▼                                     ▼            │
+│   ┌─────────────────────────────────────────────────────┐   │
+│   │                   Server 进程                        │   │
+│   │  ┌─────────────────────┐  ┌─────────────────────┐   │   │
+│   │  │   HTTP API (Gin)    │  │   gRPC 服务          │   │   │
+│   │  │   端口 8080         │  │   端口 8080 (HTTP/2) │   │   │
+│   │  └──────────┬──────────┘  └──────────┬──────────┘   │   │
+│   │             └──────────┬─────────────┘              │   │
+│   │                        ▼                            │   │
+│   │              ┌─────────────────────┐                │   │
+│   │              │     业务逻辑层       │                │   │
+│   │              └──────────┬──────────┘                │   │
+│   │                         ▼                           │   │
+│   │              ┌─────────────────────┐                │   │
+│   │              │   数据库 (SQLite)   │                │   │
+│   │              └─────────────────────┘                │   │
+│   └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+说明：
+
+- HTTP REST API 仅供 Web 管理界面使用
+- Agent 和 Desktop 通过 gRPC 与 Server 通信
+
+### 2.2 核心组件
+
+| 组件       | 职责                  | 实现位置                |
+| ---------- | --------------------- | ----------------------- |
+| 路由层     | HTTP 请求路由和中间件 | `internal/server/api`   |
+| 业务逻辑层 | API 处理器和业务逻辑  | `internal/server/api`   |
+| 数据访问层 | 数据库操作和模型映射  | `internal/server/model` |
+| 认证中间件 | JWT 认证和权限验证    | `internal/server/api`   |
+
+### 2.3 统一响应格式
+
+| 字段    | 类型   | 说明         |
+| ------- | ------ | ------------ |
+| success | bool   | 操作是否成功 |
+| message | string | 响应消息     |
+| data    | object | 响应数据     |
+| error   | string | 错误信息     |
+
+## 3. 公开 API（无需认证）
+
+### 3.1 健康检查
+
+| 项目 | 内容        |
+| ---- | ----------- |
+| 路径 | GET /health |
+| 认证 | 无需认证    |
+
+响应字段：
+
+| 字段      | 类型   | 说明                      |
+| --------- | ------ | ------------------------- |
+| status    | string | 状态：healthy / unhealthy |
+| timestamp | string | 时间戳                    |
+
+### 3.2 就绪检查
+
+| 项目 | 内容              |
+| ---- | ----------------- |
+| 路径 | GET /health/ready |
+| 认证 | 无需认证          |
+
+响应字段：
+
+| 字段      | 类型   | 说明               |
+| --------- | ------ | ------------------ |
+| ready     | bool   | 是否就绪           |
+| database  | string | 数据库状态         |
+| headscale | string | Headscale 连接状态 |
+
+## 4. 认证 API
+
+### 4.1 业务流程
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                    管理员登录流程                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员输入用户名密码                                      │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 查询 admin  │                                          │
+│   │ 表验证用户  │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐    失败    ┌─────────────┐              │
+│   │ bcrypt 验证 │──────────►│ 返回 401    │              │
+│   │ 密码哈希    │            │ 认证失败    │              │
+│   └─────────────┘            └─────────────┘              │
+│       │ 成功                                               │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 生成 JWT    │                                          │
+│   │ Token       │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 返回 Token  │                                          │
+│   │ 和用户信息  │                                          │
+│   └─────────────┘                                          │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 4.2 管理员登录
+
+| 项目 | 内容                          |
+| ---- | ----------------------------- |
+| 路径 | POST /api/v1/admin/auth/login |
+| 认证 | 无需认证                      |
+
+请求字段：
+
+| 字段     | 类型   | 必填 | 说明   |
+| -------- | ------ | ---- | ------ |
+| username | string | 是   | 用户名 |
+| password | string | 是   | 密码   |
+
+响应字段：
+
+| 字段       | 类型   | 说明       |
+| ---------- | ------ | ---------- |
+| token      | string | JWT Token  |
+| expires_at | string | 过期时间   |
+| admin      | object | 管理员信息 |
+
+### 4.3 管理员登出
+
+| 项目 | 内容                           |
+| ---- | ------------------------------ |
+| 路径 | POST /api/v1/admin/auth/logout |
+| 认证 | 需要管理员 JWT                 |
+
+### 4.4 获取当前管理员信息
+
+| 项目 | 内容                      |
+| ---- | ------------------------- |
+| 路径 | GET /api/v1/admin/auth/me |
+| 认证 | 需要管理员 JWT            |
+
+响应字段：
+
+| 字段       | 类型   | 说明      |
+| ---------- | ------ | --------- |
+| id         | int64  | 管理员 ID |
+| username   | string | 用户名    |
+| role       | string | 角色      |
+| created_at | string | 创建时间  |
+
+### 4.5 修改密码
+
+| 项目 | 内容                            |
+| ---- | ------------------------------- |
+| 路径 | PUT /api/v1/admin/auth/password |
+| 认证 | 需要管理员 JWT                  |
+
+请求字段：
+
+| 字段         | 类型   | 必填 | 说明   |
+| ------------ | ------ | ---- | ------ |
+| old_password | string | 是   | 旧密码 |
+| new_password | string | 是   | 新密码 |
+
+## 5. Agent 管理 API
+
+### 5.1 获取 Agent 列表
+
+> 需求来源：`design_tailscale_server_web.md` 2.1 列表页
+
+| 项目 | 内容                     |
+| ---- | ------------------------ |
+| 路径 | GET /api/v1/admin/agents |
+| 认证 | 需要管理员 JWT           |
+
+查询参数：
+
+| 参数   | 类型   | 必填 | 说明              |
+| ------ | ------ | ---- | ----------------- |
+| page   | int    | 否   | 页码，默认 1      |
+| size   | int    | 否   | 每页数量，默认 20 |
+| search | string | 否   | 搜索关键词        |
+
+响应模型 AgentListItem：
+
+| 字段          | 类型   | 说明         | 数据来源                           |
+| ------------- | ------ | ------------ | ---------------------------------- |
+| id            | uint64 | Agent ID     | agent.id                           |
+| name          | string | Agent 名称   | agent.name                         |
+| alias         | string | Agent 别名   | agent.alias                        |
+| ip            | string | 隧道 IP      | agent.ip                           |
+| service_count | int    | 服务数量     | COUNT(proxy_service.agent_id)      |
+| group_count   | int    | 分组数量     | COUNT(agent_group_member.agent_id) |
+| status        | string | 状态         | 内存计算（Server.Agents 缓存）     |
+| version       | string | 版本         | agent.version                      |
+| last_online   | string | 最后在线时间 | agent.last_heartbeat               |
+
+### 5.2 获取 Agent 详情
+
+> 需求来源：`design_tailscale_server_web.md` 2.2 详情页
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│              Agent 详情页数据获取流程                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   Web 请求 Agent 详情页                                     │
+│       │                                                     │
+│       ├────────────┬────────────┬────────────┐             │
+│       ▼            ▼            ▼            ▼             │
+│   ┌───────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐        │
+│   │ 5.2.1 │  │ 5.2.2   │  │ 5.2.3   │  │ 5.2.4   │        │
+│   │ 静态  │  │ 动态    │  │ 端口映射│  │ 端口访问│        │
+│   │ (DB)  │  │ (gRPC)  │  │ (DB)    │  │ (DB)    │        │
+│   └───┬───┘  └────┬────┘  └────┬────┘  └────┬────┘        │
+│       │           │            │            │              │
+│       │           ▼            │            │              │
+│       │     ┌───────────┐      │            │              │
+│       │     │ Server    │      │            │              │
+│       │     │   │gRPC   │      │            │              │
+│       │     │   ▼       │      │            │              │
+│       │     │ Agent     │      │            │              │
+│       │     └─────┬─────┘      │            │              │
+│       │           │            │            │              │
+│       ▼           ▼            ▼            ▼              │
+│   ┌─────────────────────────────────────────────┐         │
+│   │              页面渲染完成                    │         │
+│   └─────────────────────────────────────────────┘         │
+│                        │                                   │
+│                        ▼ 用户点击 [刷新] 按钮              │
+│                  ┌───────────┐                             │
+│                  │ 重新请求   │                             │
+│                  │ 5.2.2     │                             │
+│                  └───────────┘                             │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### 5.2.1 获取静态信息
+
+> 需求来源：`design_tailscale_server_web.md` 2.2 详情页 - 基本信息模型
+
+| 项目 | 内容                         |
+| ---- | ---------------------------- |
+| 路径 | GET /api/v1/admin/agents/:id |
+| 认证 | 需要管理员 JWT               |
+
+路径参数：
+
+| 参数 | 类型   | 说明     |
+| ---- | ------ | -------- |
+| id   | uint64 | Agent ID |
+
+响应模型 AgentDetail：
+
+| 字段           | 类型   | 说明       | 数据来源                                       |
+| -------------- | ------ | ---------- | ---------------------------------------------- |
+| id             | uint64 | Agent ID   | agent.id                                       |
+| name           | string | Agent 名称 | agent.name                                     |
+| alias          | string | Agent 别名 | agent.alias                                    |
+| version        | string | 版本       | agent.version                                  |
+| created_at     | string | 创建时间   | agent.created_at                               |
+| last_heartbeat | string | 最后心跳   | agent.last_heartbeat                           |
+| status         | string | 状态       | 内存计算（Server.Agents 缓存，online/offline） |
+| connected_at   | string | 连接时间   | 内存计算（Server.Agents 缓存，本次连接时间）   |
+
+#### 5.2.2 获取动态信息
+
+> 需求来源：`design_tailscale_server_web.md` 2.2 详情页 - 运行环境模型、网络信息模型、隧道信息模型
+
+| 项目 | 内容                                   |
+| ---- | -------------------------------------- |
+| 路径 | GET /api/v1/admin/agents/:id/realtime  |
+| 认证 | 需要管理员 JWT                         |
+| 说明 | Server 通过 gRPC 向 Agent 请求实时状态 |
+
+响应模型 AgentRealtimeInfo：
+
+| 字段                  | 类型               | 说明         | 数据来源        |
+| --------------------- | ------------------ | ------------ | --------------- |
+| hostname              | string             | 主机名       | Agent gRPC 响应 |
+| runtime               | string             | 运行环境     | Agent gRPC 响应 |
+| networks              | NetworkInterface[] | 网络接口列表 | Agent gRPC 响应 |
+| tunnel_ip             | string             | 隧道 IP      | Agent gRPC 响应 |
+| tunnel_connected      | bool               | 隧道连接状态 | Agent gRPC 响应 |
+| tunnel_connected_time | string             | 隧道连接时间 | Agent gRPC 响应 |
+
+NetworkInterface 模型：
+
+| 字段    | 类型   | 说明                        |
+| ------- | ------ | --------------------------- |
+| name    | string | 网卡名称（如 eth0, ens192） |
+| ip      | string | IP 地址                     |
+| mask    | string | 子网掩码                    |
+| gateway | string | 网关地址                    |
+
+#### 5.2.3 获取端口映射列表
+
+> 需求来源：`design_tailscale_server_web.md` 2.2 详情页 - 端口映射表格模型
+
+| 项目 | 内容                                  |
+| ---- | ------------------------------------- |
+| 路径 | GET /api/v1/admin/agents/:id/services |
+| 认证 | 需要管理员 JWT                        |
+
+响应模型 ProxyServiceItem[]：
+
+| 字段        | 类型   | 说明     | 数据来源                  |
+| ----------- | ------ | -------- | ------------------------- |
+| id          | uint64 | 服务 ID  | proxy_service.id          |
+| name        | string | 服务名称 | proxy_service.name        |
+| alias       | string | 服务别名 | proxy_service.alias       |
+| target_addr | string | 目标地址 | proxy_service.target_addr |
+| listen_addr | string | 监听地址 | proxy_service.listen_addr |
+| enabled     | bool   | 是否启用 | proxy_service.enabled     |
+
+#### 5.2.4 获取端口访问列表
+
+> 需求来源：`design_tailscale_server_web.md` 2.2 详情页 - 端口访问表格模型
+
+| 项目 | 内容                                  |
+| ---- | ------------------------------------- |
+| 路径 | GET /api/v1/admin/agents/:id/forwards |
+| 认证 | 需要管理员 JWT                        |
+
+响应模型 PortForwardItem[]：
+
+| 字段              | 类型   | 说明       | 数据来源                      |
+| ----------------- | ------ | ---------- | ----------------------------- |
+| id                | uint64 | 转发 ID    | port_forward.id               |
+| name              | string | 名称       | port_forward.name             |
+| alias             | string | 别名       | port_forward.alias            |
+| target_agent_name | string | 目标 Agent | agent.name (关联查询)         |
+| target_service    | string | 目标服务   | proxy_service.name (关联查询) |
+| target_addr       | string | 目标地址   | port_forward.target_addr      |
+| listen_addr       | string | 监听地址   | port_forward.listen_addr      |
+| enabled           | bool   | 是否启用   | port_forward.enabled          |
+
+### 5.3 创建 Agent
+
+> 需求来源：`design_tailscale_server_web.md` 2.1 列表页 - [+ 创建] 按钮
+
+| 项目 | 内容                      |
+| ---- | ------------------------- |
+| 路径 | POST /api/v1/admin/agents |
+| 认证 | 需要管理员 JWT            |
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                    Agent 创建流程                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员创建 Agent                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 生成 Agent  │                                          │
+│   │ 名称和密钥  │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐    成功    ┌─────────────┐              │
+│   │调用Headscale│──────────►│ 保存到数据库 │              │
+│   │创建 User    │            └─────────────┘              │
+│   └─────────────┘                    │                     │
+│       │ 失败                         ▼                     │
+│       ▼                        ┌─────────────┐             │
+│   ┌─────────────┐              │ 返回 Agent  │             │
+│   │ 返回错误     │              │ 信息和密钥  │             │
+│   └─────────────┘              └─────────────┘             │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+请求字段：
+
+| 字段  | 类型   | 必填 | 说明       |
+| ----- | ------ | ---- | ---------- |
+| name  | string | 是   | Agent 名称 |
+| alias | string | 否   | Agent 别名 |
+
+响应字段：
+
+| 字段   | 类型   | 说明                     |
+| ------ | ------ | ------------------------ |
+| id     | uint64 | Agent ID                 |
+| name   | string | Agent 名称               |
+| secret | string | 密钥（仅创建时返回一次） |
+
+### 5.4 更新 Agent
+
+> 需求来源：`design_tailscale_server_web.md` 2.2 详情页 - 基本信息 [编辑] 按钮
+
+| 项目 | 内容                         |
+| ---- | ---------------------------- |
+| 路径 | PUT /api/v1/admin/agents/:id |
+| 认证 | 需要管理员 JWT               |
+
+请求字段：
+
+| 字段  | 类型   | 必填 | 说明       |
+| ----- | ------ | ---- | ---------- |
+| alias | string | 否   | Agent 别名 |
+
+### 5.5 删除 Agent
+
+> 需求来源：`design_tailscale_server_web.md` 2.1 列表页 - [详情] 操作（详情页内删除）
+
+| 项目 | 内容                            |
+| ---- | ------------------------------- |
+| 路径 | DELETE /api/v1/admin/agents/:id |
+| 认证 | 需要管理员 JWT                  |
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                    Agent 删除流程                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员删除 Agent                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 查询 Agent  │                                          │
+│   │ 是否存在    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │调用Headscale│                                          │
+│   │删除 Node    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │调用Headscale│                                          │
+│   │删除 User    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐    成功    ┌─────────────┐              │
+│   │ 删除数据库  │──────────►│ 返回成功     │              │
+│   │ Agent 记录  │            └─────────────┘              │
+│   └─────────────┘                                          │
+│       │ 失败                                               │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 返回错误     │                                          │
+│   └─────────────┘                                          │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## 6. Client 管理 API
+
+### 6.1 获取 Client 列表
+
+> 需求来源：`design_tailscale_server_web.md` 4.1 列表页
+
+| 项目 | 内容                      |
+| ---- | ------------------------- |
+| 路径 | GET /api/v1/admin/clients |
+| 认证 | 需要管理员 JWT            |
+
+查询参数：
+
+| 参数   | 类型   | 必填 | 说明              |
+| ------ | ------ | ---- | ----------------- |
+| page   | int    | 否   | 页码，默认 1      |
+| size   | int    | 否   | 每页数量，默认 20 |
+| search | string | 否   | 搜索关键词        |
+
+响应模型 ClientListItem：
+
+| 字段          | 类型   | 说明       | 数据来源                              |
+| ------------- | ------ | ---------- | ------------------------------------- |
+| id            | uint64 | Client ID  | client.id                             |
+| name          | string | 用户名     | client.name                           |
+| alias         | string | 用户别名   | client.alias                          |
+| desktop_count | int    | 客户端数量 | COUNT(desktop.client_id)              |
+| status        | string | 状态       | 计算字段（任一 Desktop 在线则为在线） |
+| last_online   | string | 最后在线   | MAX(desktop.last_online)              |
+
+### 6.2 获取 Client 详情
+
+> 需求来源：`design_tailscale_server_web.md` 4.2 详情页
+
+| 项目 | 内容                          |
+| ---- | ----------------------------- |
+| 路径 | GET /api/v1/admin/clients/:id |
+| 认证 | 需要管理员 JWT                |
+
+响应模型 ClientDetail：
+
+| 字段       | 类型   | 说明      | 数据来源          |
+| ---------- | ------ | --------- | ----------------- |
+| id         | uint64 | Client ID | client.id         |
+| name       | string | 用户名    | client.name       |
+| alias      | string | 用户别名  | client.alias      |
+| created_at | string | 创建时间  | client.created_at |
+
+#### 6.2.1 获取 Client 所属分组
+
+| 项目 | 内容                                 |
+| ---- | ------------------------------------ |
+| 路径 | GET /api/v1/admin/clients/:id/groups |
+| 认证 | 需要管理员 JWT                       |
+
+响应模型 ClientGroupItem[]：
+
+| 字段 | 类型   | 说明    | 数据来源          |
+| ---- | ------ | ------- | ----------------- |
+| id   | uint64 | 分组 ID | client_group.id   |
+| name | string | 分组名  | client_group.name |
+
+#### 6.2.2 获取 Client 的 Desktop 列表
+
+| 项目 | 内容                                   |
+| ---- | -------------------------------------- |
+| 路径 | GET /api/v1/admin/clients/:id/desktops |
+| 认证 | 需要管理员 JWT                         |
+
+响应模型 DesktopItem[]：
+
+| 字段        | 类型   | 说明       | 数据来源            |
+| ----------- | ------ | ---------- | ------------------- |
+| id          | uint64 | Desktop ID | desktop.id          |
+| device_name | string | 设备名称   | desktop.device_name |
+| tunnel_ip   | string | 隧道 IP    | desktop.tunnel_ip   |
+| status      | string | 状态       | desktop.status      |
+| last_online | string | 最后在线   | desktop.last_online |
+
+#### 6.2.3 获取 Client 已授权服务列表
+
+| 项目 | 内容                                   |
+| ---- | -------------------------------------- |
+| 路径 | GET /api/v1/admin/clients/:id/services |
+| 认证 | 需要管理员 JWT                         |
+
+响应模型 AuthorizedServiceItem[]：
+
+| 字段        | 类型   | 说明       | 数据来源                      |
+| ----------- | ------ | ---------- | ----------------------------- |
+| id          | uint64 | 服务 ID    | proxy_service.id              |
+| name        | string | 服务名称   | proxy_service.name            |
+| agent_name  | string | 所属 Agent | agent.name                    |
+| listen_addr | string | 访问地址   | proxy_service.listen_addr     |
+| auth_type   | string | 授权方式   | 计算字段（分组授权/单独授权） |
+| granted_at  | string | 授权时间   | permission.granted_at         |
+
+### 6.3 创建 Client
+
+> 需求来源：`design_tailscale_server_web.md` 4.1 列表页 - [+ 创建] 按钮
+
+| 项目 | 内容                       |
+| ---- | -------------------------- |
+| 路径 | POST /api/v1/admin/clients |
+| 认证 | 需要管理员 JWT             |
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                    Client 创建流程                           │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员创建 Client                                         │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 生成 Client │                                          │
+│   │ 名称和密钥  │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐    成功    ┌─────────────┐              │
+│   │调用Headscale│──────────►│ 保存到数据库 │              │
+│   │创建 User    │            └─────────────┘              │
+│   └─────────────┘                    │                     │
+│       │ 失败                         ▼                     │
+│       ▼                        ┌─────────────┐             │
+│   ┌─────────────┐              │ 返回 Client │             │
+│   │ 返回错误     │              │ 信息和密钥  │             │
+│   └─────────────┘              └─────────────┘             │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+请求字段：
+
+| 字段  | 类型   | 必填 | 说明     |
+| ----- | ------ | ---- | -------- |
+| name  | string | 是   | 用户名   |
+| alias | string | 否   | 用户别名 |
+
+响应字段：
+
+| 字段   | 类型   | 说明                     |
+| ------ | ------ | ------------------------ |
+| id     | uint64 | Client ID                |
+| name   | string | 用户名                   |
+| secret | string | 密钥（仅创建时返回一次） |
+
+### 6.4 更新 Client
+
+> 需求来源：`design_tailscale_server_web.md` 4.2 详情页 - 基本信息 [编辑] 按钮
+
+| 项目 | 内容                          |
+| ---- | ----------------------------- |
+| 路径 | PUT /api/v1/admin/clients/:id |
+| 认证 | 需要管理员 JWT                |
+
+请求字段：
+
+| 字段  | 类型   | 必填 | 说明     |
+| ----- | ------ | ---- | -------- |
+| alias | string | 否   | 用户别名 |
+
+### 6.5 删除 Client
+
+> 需求来源：`design_tailscale_server_web.md` 4.1 列表页 - [删除] 按钮
+
+| 项目 | 内容                             |
+| ---- | -------------------------------- |
+| 路径 | DELETE /api/v1/admin/clients/:id |
+| 认证 | 需要管理员 JWT                   |
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                    Client 删除流程                           │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员删除 Client                                         │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 查询 Client │                                          │
+│   │ 是否存在    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │调用Headscale│                                          │
+│   │删除所有Node │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │调用Headscale│                                          │
+│   │删除 User    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐    成功    ┌─────────────┐              │
+│   │ 删除数据库  │──────────►│ 返回成功     │              │
+│   │ Client 记录 │            └─────────────┘              │
+│   └─────────────┘                                          │
+│       │ 失败                                               │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 返回错误     │                                          │
+│   └─────────────┘                                          │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 6.6 注销 Desktop
+
+> 需求来源：`design_tailscale_server_web.md` 4.2 详情页 - 客户端表格 [注销] 按钮
+
+| 项目 | 内容                                                |
+| ---- | --------------------------------------------------- |
+| 路径 | POST /api/v1/admin/clients/:id/desktops/:did/logout |
+| 认证 | 需要管理员 JWT                                      |
+
+说明：强制注销指定 Desktop，使其需要重新认证
+
+### 6.7 删除 Desktop
+
+> 需求来源：`design_tailscale_server_web.md` 4.2 详情页 - 客户端表格 [删除] 按钮
+
+| 项目 | 内容                                           |
+| ---- | ---------------------------------------------- |
+| 路径 | DELETE /api/v1/admin/clients/:id/desktops/:did |
+| 认证 | 需要管理员 JWT                                 |
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                    Desktop 删除流程                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员删除 Desktop                                        │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │调用Headscale│                                          │
+│   │删除 Node    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐    成功    ┌─────────────┐              │
+│   │ 删除数据库  │──────────►│ 返回成功     │              │
+│   │Desktop 记录 │            └─────────────┘              │
+│   └─────────────┘                                          │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## 7. 端口映射服务 API
+
+### 7.1 获取服务列表
+
+> 需求来源：`design_tailscale_server_web.md` 3.1 桌面授权、3.2 代理授权
+
+| 项目 | 内容                       |
+| ---- | -------------------------- |
+| 路径 | GET /api/v1/admin/services |
+| 认证 | 需要管理员 JWT             |
+
+查询参数：
+
+| 参数     | 类型   | 必填 | 说明              |
+| -------- | ------ | ---- | ----------------- |
+| agent_id | uint64 | 否   | 按 Agent 筛选     |
+| page     | int    | 否   | 页码，默认 1      |
+| size     | int    | 否   | 每页数量，默认 20 |
+
+响应模型 ServiceListItem[]：
+
+| 字段         | 类型   | 说明       | 数据来源                                                  |
+| ------------ | ------ | ---------- | --------------------------------------------------------- |
+| id           | uint64 | 服务 ID    | proxy_service.id                                          |
+| name         | string | 服务名称   | proxy_service.name                                        |
+| agent_id     | uint64 | Agent ID   | proxy_service.agent_id                                    |
+| agent_name   | string | 所属 Agent | agent.name                                                |
+| target_addr  | string | 目标地址   | proxy_service.target_addr                                 |
+| listen_addr  | string | 监听地址   | proxy_service.listen_addr                                 |
+| enabled      | bool   | 是否启用   | proxy_service.enabled                                     |
+| client_count | int    | 授权用户数 | COUNT(service_client_permission)                          |
+| group_count  | int    | 授权分组数 | COUNT(service_group_permission WHERE group_type='client') |
+
+### 7.2 获取服务详情
+
+> 需求来源：`design_tailscale_server_web.md` 3.1 桌面授权 - 点击服务查看详情
+
+| 项目 | 内容                           |
+| ---- | ------------------------------ |
+| 路径 | GET /api/v1/admin/services/:id |
+| 认证 | 需要管理员 JWT                 |
+
+响应模型 ServiceDetail：
+
+| 字段        | 类型   | 说明       | 数据来源                  |
+| ----------- | ------ | ---------- | ------------------------- |
+| id          | uint64 | 服务 ID    | proxy_service.id          |
+| name        | string | 服务名称   | proxy_service.name        |
+| alias       | string | 服务别名   | proxy_service.alias       |
+| agent_id    | uint64 | Agent ID   | proxy_service.agent_id    |
+| agent_name  | string | 所属 Agent | agent.name                |
+| target_addr | string | 目标地址   | proxy_service.target_addr |
+| listen_addr | string | 监听地址   | proxy_service.listen_addr |
+| enabled     | bool   | 是否启用   | proxy_service.enabled     |
+| created_at  | string | 创建时间   | proxy_service.created_at  |
+
+### 7.3 创建服务
+
+> 需求来源：`design_tailscale_server_web.md` 2.2 详情页 - 端口映射 [+ 创建] 按钮
+
+| 项目 | 内容                        |
+| ---- | --------------------------- |
+| 路径 | POST /api/v1/admin/services |
+| 认证 | 需要管理员 JWT              |
+
+请求字段：
+
+| 字段        | 类型   | 必填 | 说明                        |
+| ----------- | ------ | ---- | --------------------------- |
+| agent_id    | uint64 | 是   | 所属 Agent ID               |
+| name        | string | 是   | 服务名称                    |
+| alias       | string | 否   | 服务别名                    |
+| target_addr | string | 是   | 目标地址（如 127.0.0.1:22） |
+| listen_addr | string | 是   | 监听地址（如 :2222）        |
+
+### 7.4 更新服务
+
+> 需求来源：`design_tailscale_server_web.md` 2.2 详情页 - 端口映射 [编辑] 按钮
+
+| 项目 | 内容                           |
+| ---- | ------------------------------ |
+| 路径 | PUT /api/v1/admin/services/:id |
+| 认证 | 需要管理员 JWT                 |
+
+请求字段：
+
+| 字段        | 类型   | 必填 | 说明     |
+| ----------- | ------ | ---- | -------- |
+| alias       | string | 否   | 服务别名 |
+| target_addr | string | 否   | 目标地址 |
+| listen_addr | string | 否   | 监听地址 |
+| enabled     | bool   | 否   | 是否启用 |
+
+### 7.5 删除服务
+
+> 需求来源：`design_tailscale_server_web.md` 2.2 详情页 - 端口映射 [删除] 按钮
+
+| 项目 | 内容                              |
+| ---- | --------------------------------- |
+| 路径 | DELETE /api/v1/admin/services/:id |
+| 认证 | 需要管理员 JWT                    |
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                    服务删除流程                              │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员删除服务                                            │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 删除相关的  │                                          │
+│   │ 权限记录    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 删除服务记录│                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐    成功    ┌─────────────┐              │
+│   │ 同步 ACL 到 │──────────►│ 返回成功     │              │
+│   │ Headscale   │            └─────────────┘              │
+│   └─────────────┘                                          │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## 8. 服务权限 API
+
+服务权限分为两类：
+
+- 桌面授权：控制哪些 Client/ClientGroup 可以访问服务
+- 代理授权：控制哪些 Agent/AgentGroup 可以代理访问服务
+
+### 8.1 桌面授权 - 用户授权
+
+> 需求来源：`design_tailscale_server_web.md` 3.1 桌面授权 - [+ 用户] 按钮
+
+#### 获取服务的用户授权列表
+
+| 项目 | 内容                                   |
+| ---- | -------------------------------------- |
+| 路径 | GET /api/v1/admin/services/:id/clients |
+| 认证 | 需要管理员 JWT                         |
+
+响应模型 AuthorizedClient[]：
+
+| 字段       | 类型   | 说明      | 数据来源                             |
+| ---------- | ------ | --------- | ------------------------------------ |
+| id         | uint64 | Client ID | client.id                            |
+| name       | string | 用户名    | client.name                          |
+| alias      | string | 用户别名  | client.alias                         |
+| granted_at | string | 授权时间  | service_client_permission.created_at |
+
+#### 添加用户授权
+
+| 项目 | 内容                                    |
+| ---- | --------------------------------------- |
+| 路径 | POST /api/v1/admin/services/:id/clients |
+| 认证 | 需要管理员 JWT                          |
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                  添加用户授权流程                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员添加用户授权                                        │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 保存权限记录 │                                          │
+│   │ 到数据库     │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐    成功    ┌─────────────┐              │
+│   │ 同步 ACL 到 │──────────►│ 权限立即生效 │              │
+│   │ Headscale   │            └─────────────┘              │
+│   └─────────────┘                                          │
+│       │ 失败                                               │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 回滚数据库   │                                          │
+│   │ 返回错误     │                                          │
+│   └─────────────┘                                          │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+请求字段：
+
+| 字段      | 类型   | 必填 | 说明      |
+| --------- | ------ | ---- | --------- |
+| client_id | uint64 | 是   | Client ID |
+
+#### 移除用户授权
+
+| 项目 | 内容                                           |
+| ---- | ---------------------------------------------- |
+| 路径 | DELETE /api/v1/admin/services/:id/clients/:cid |
+| 认证 | 需要管理员 JWT                                 |
+
+说明：移除后同步 ACL 到 Headscale
+
+### 8.2 桌面授权 - 用户分组授权
+
+> 需求来源：`design_tailscale_server_web.md` 3.1 桌面授权 - [+ 分组] 按钮
+
+#### 获取服务的用户分组授权列表
+
+| 项目 | 内容                                         |
+| ---- | -------------------------------------------- |
+| 路径 | GET /api/v1/admin/services/:id/client-groups |
+| 认证 | 需要管理员 JWT                               |
+
+响应模型 AuthorizedClientGroup[]：
+
+| 字段         | 类型   | 说明           | 数据来源                            |
+| ------------ | ------ | -------------- | ----------------------------------- |
+| id           | uint64 | ClientGroup ID | client_group.id                     |
+| name         | string | 分组名称       | client_group.name                   |
+| alias        | string | 分组别名       | client_group.alias                  |
+| member_count | int    | 成员数量       | COUNT(client_group_member)          |
+| granted_at   | string | 授权时间       | service_group_permission.created_at |
+
+#### 添加用户分组授权
+
+| 项目 | 内容                                          |
+| ---- | --------------------------------------------- |
+| 路径 | POST /api/v1/admin/services/:id/client-groups |
+| 认证 | 需要管理员 JWT                                |
+
+请求字段：
+
+| 字段     | 类型   | 必填 | 说明           |
+| -------- | ------ | ---- | -------------- |
+| group_id | uint64 | 是   | ClientGroup ID |
+
+说明：添加后同步 ACL 到 Headscale
+
+#### 移除用户分组授权
+
+| 项目 | 内容                                                 |
+| ---- | ---------------------------------------------------- |
+| 路径 | DELETE /api/v1/admin/services/:id/client-groups/:gid |
+| 认证 | 需要管理员 JWT                                       |
+
+说明：移除后同步 ACL 到 Headscale
+
+### 8.3 代理授权 - Agent 授权
+
+> 需求来源：`design_tailscale_server_web.md` 3.2 代理授权 - [+ 代理] 按钮
+
+#### 获取服务的 Agent 授权列表
+
+| 项目 | 内容                                  |
+| ---- | ------------------------------------- |
+| 路径 | GET /api/v1/admin/services/:id/agents |
+| 认证 | 需要管理员 JWT                        |
+
+响应模型 AuthorizedAgent[]：
+
+| 字段       | 类型   | 说明       | 数据来源                            |
+| ---------- | ------ | ---------- | ----------------------------------- |
+| id         | uint64 | Agent ID   | agent.id                            |
+| name       | string | Agent 名称 | agent.name                          |
+| alias      | string | Agent 别名 | agent.alias                         |
+| granted_at | string | 授权时间   | service_agent_permission.created_at |
+
+#### 添加 Agent 授权
+
+| 项目 | 内容                                   |
+| ---- | -------------------------------------- |
+| 路径 | POST /api/v1/admin/services/:id/agents |
+| 认证 | 需要管理员 JWT                         |
+
+请求字段：
+
+| 字段     | 类型   | 必填 | 说明     |
+| -------- | ------ | ---- | -------- |
+| agent_id | uint64 | 是   | Agent ID |
+
+说明：添加后同步 ACL 到 Headscale
+
+#### 移除 Agent 授权
+
+| 项目 | 内容                                          |
+| ---- | --------------------------------------------- |
+| 路径 | DELETE /api/v1/admin/services/:id/agents/:aid |
+| 认证 | 需要管理员 JWT                                |
+
+说明：移除后同步 ACL 到 Headscale
+
+### 8.4 代理授权 - Agent 分组授权
+
+> 需求来源：`design_tailscale_server_web.md` 3.2 代理授权 - [+ 分组] 按钮
+
+#### 获取服务的 Agent 分组授权列表
+
+| 项目 | 内容                                        |
+| ---- | ------------------------------------------- |
+| 路径 | GET /api/v1/admin/services/:id/agent-groups |
+| 认证 | 需要管理员 JWT                              |
+
+响应模型 AuthorizedAgentGroup[]：
+
+| 字段         | 类型   | 说明          | 数据来源                            |
+| ------------ | ------ | ------------- | ----------------------------------- |
+| id           | uint64 | AgentGroup ID | agent_group.id                      |
+| name         | string | 分组名称      | agent_group.name                    |
+| alias        | string | 分组别名      | agent_group.alias                   |
+| member_count | int    | 成员数量      | COUNT(agent_group_member)           |
+| granted_at   | string | 授权时间      | service_group_permission.created_at |
+
+#### 添加 Agent 分组授权
+
+| 项目 | 内容                                         |
+| ---- | -------------------------------------------- |
+| 路径 | POST /api/v1/admin/services/:id/agent-groups |
+| 认证 | 需要管理员 JWT                               |
+
+请求字段：
+
+| 字段     | 类型   | 必填 | 说明          |
+| -------- | ------ | ---- | ------------- |
+| group_id | uint64 | 是   | AgentGroup ID |
+
+说明：添加后同步 ACL 到 Headscale
+
+#### 移除 Agent 分组授权
+
+| 项目 | 内容                                                |
+| ---- | --------------------------------------------------- |
+| 路径 | DELETE /api/v1/admin/services/:id/agent-groups/:gid |
+| 认证 | 需要管理员 JWT                                      |
+
+说明：移除后同步 ACL 到 Headscale
+
+## 9. 分组管理 API
+
+### 9.1 获取用户分组列表
+
+> 需求来源：`design_tailscale_server_web.md` 5.1 用户分组
+
+| 项目 | 内容                            |
+| ---- | ------------------------------- |
+| 路径 | GET /api/v1/admin/client-groups |
+| 认证 | 需要管理员 JWT                  |
+
+查询参数：
+
+| 参数 | 类型 | 必填 | 说明              |
+| ---- | ---- | ---- | ----------------- |
+| page | int  | 否   | 页码，默认 1      |
+| size | int  | 否   | 每页数量，默认 20 |
+
+响应模型 ClientGroupListItem[]：
+
+| 字段         | 类型   | 说明     | 数据来源                            |
+| ------------ | ------ | -------- | ----------------------------------- |
+| id           | uint64 | 分组 ID  | client_group.id                     |
+| name         | string | 分组名称 | client_group.name                   |
+| alias        | string | 分组别名 | client_group.alias                  |
+| member_count | int    | 成员数量 | COUNT(client_group_member.group_id) |
+| description  | string | 描述     | client_group.description            |
+| created_at   | string | 创建时间 | client_group.created_at             |
+
+### 9.2 创建用户分组
+
+> 需求来源：`design_tailscale_server_web.md` 5.1 用户分组 - [+ 创建分组] 按钮
+
+| 项目 | 内容                             |
+| ---- | -------------------------------- |
+| 路径 | POST /api/v1/admin/client-groups |
+| 认证 | 需要管理员 JWT                   |
+
+请求字段：
+
+| 字段        | 类型   | 必填 | 说明     |
+| ----------- | ------ | ---- | -------- |
+| name        | string | 是   | 分组名称 |
+| alias       | string | 否   | 分组别名 |
+| description | string | 否   | 描述     |
+
+### 9.3 更新用户分组
+
+> 需求来源：`design_tailscale_server_web.md` 5.1 用户分组 - [编辑] 按钮
+
+| 项目 | 内容                                |
+| ---- | ----------------------------------- |
+| 路径 | PUT /api/v1/admin/client-groups/:id |
+| 认证 | 需要管理员 JWT                      |
+
+请求字段：
+
+| 字段        | 类型   | 必填 | 说明     |
+| ----------- | ------ | ---- | -------- |
+| alias       | string | 否   | 分组别名 |
+| description | string | 否   | 描述     |
+
+### 9.4 删除用户分组
+
+> 需求来源：`design_tailscale_server_web.md` 5.1 用户分组 - [删除] 按钮
+
+| 项目 | 内容                                   |
+| ---- | -------------------------------------- |
+| 路径 | DELETE /api/v1/admin/client-groups/:id |
+| 认证 | 需要管理员 JWT                         |
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                  用户分组删除流程                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员删除用户分组                                        │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 查询分组内  │                                          │
+│   │ 所有成员    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 遍历每个成员│                                          │
+│   │ 的所有Node  │                                          │
+│   │ 移除分组Tag │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 删除分组权限│                                          │
+│   │ 关联记录    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 移除该分组  │                                          │
+│   │ 相关的 ACL  │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 删除分组成员│                                          │
+│   │ 关联记录    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐    成功    ┌─────────────┐              │
+│   │ 删除分组记录│──────────►│ 返回成功     │              │
+│   └─────────────┘            └─────────────┘              │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 9.5 获取用户分组成员
+
+> 需求来源：`design_tailscale_server_web.md` 5.1 用户分组 - 成员数字可点击
+
+| 项目 | 内容                                        |
+| ---- | ------------------------------------------- |
+| 路径 | GET /api/v1/admin/client-groups/:id/members |
+| 认证 | 需要管理员 JWT                              |
+
+响应模型 ClientGroupMember[]：
+
+| 字段      | 类型   | 说明      | 数据来源                       |
+| --------- | ------ | --------- | ------------------------------ |
+| id        | uint64 | Client ID | client.id                      |
+| name      | string | 用户名    | client.name                    |
+| alias     | string | 用户别名  | client.alias                   |
+| joined_at | string | 加入时间  | client_group_member.created_at |
+
+### 9.6 添加用户分组成员
+
+| 项目 | 内容                                         |
+| ---- | -------------------------------------------- |
+| 路径 | POST /api/v1/admin/client-groups/:id/members |
+| 认证 | 需要管理员 JWT                               |
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                  添加用户分组成员流程                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员添加成员到分组                                      │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 保存成员关联│                                          │
+│   │ 到数据库    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 查询该用户  │                                          │
+│   │ 所有 Desktop│                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐    成功    ┌─────────────┐              │
+│   │ 给每个Node  │──────────►│ 返回成功     │              │
+│   │ 添加分组Tag │            └─────────────┘              │
+│   └─────────────┘                                          │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+请求字段：
+
+| 字段      | 类型   | 必填 | 说明      |
+| --------- | ------ | ---- | --------- |
+| client_id | uint64 | 是   | Client ID |
+
+### 9.7 移除用户分组成员
+
+| 项目 | 内容                                                |
+| ---- | --------------------------------------------------- |
+| 路径 | DELETE /api/v1/admin/client-groups/:id/members/:cid |
+| 认证 | 需要管理员 JWT                                      |
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                  移除用户分组成员流程                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员从分组移除成员                                      │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 删除成员关联│                                          │
+│   │ 记录        │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 查询该用户  │                                          │
+│   │ 所有 Desktop│                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐    成功    ┌─────────────┐              │
+│   │ 给每个Node  │──────────►│ 返回成功     │              │
+│   │ 移除分组Tag │            └─────────────┘              │
+│   └─────────────┘                                          │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 9.8 获取代理分组列表
+
+> 需求来源：`design_tailscale_server_web.md` 5.2 代理分组
+
+| 项目 | 内容                           |
+| ---- | ------------------------------ |
+| 路径 | GET /api/v1/admin/agent-groups |
+| 认证 | 需要管理员 JWT                 |
+
+查询参数：
+
+| 参数 | 类型 | 必填 | 说明              |
+| ---- | ---- | ---- | ----------------- |
+| page | int  | 否   | 页码，默认 1      |
+| size | int  | 否   | 每页数量，默认 20 |
+
+响应模型 AgentGroupListItem[]：
+
+| 字段         | 类型   | 说明     | 数据来源                           |
+| ------------ | ------ | -------- | ---------------------------------- |
+| id           | uint64 | 分组 ID  | agent_group.id                     |
+| name         | string | 分组名称 | agent_group.name                   |
+| alias        | string | 分组别名 | agent_group.alias                  |
+| member_count | int    | 成员数量 | COUNT(agent_group_member.group_id) |
+| description  | string | 描述     | agent_group.description            |
+| created_at   | string | 创建时间 | agent_group.created_at             |
+
+### 9.9 创建代理分组
+
+> 需求来源：`design_tailscale_server_web.md` 5.2 代理分组 - [+ 创建分组] 按钮
+
+| 项目 | 内容                            |
+| ---- | ------------------------------- |
+| 路径 | POST /api/v1/admin/agent-groups |
+| 认证 | 需要管理员 JWT                  |
+
+请求字段：
+
+| 字段        | 类型   | 必填 | 说明     |
+| ----------- | ------ | ---- | -------- |
+| name        | string | 是   | 分组名称 |
+| alias       | string | 否   | 分组别名 |
+| description | string | 否   | 描述     |
+
+### 9.10 更新代理分组
+
+> 需求来源：`design_tailscale_server_web.md` 5.2 代理分组 - [编辑] 按钮
+
+| 项目 | 内容                               |
+| ---- | ---------------------------------- |
+| 路径 | PUT /api/v1/admin/agent-groups/:id |
+| 认证 | 需要管理员 JWT                     |
+
+请求字段：
+
+| 字段        | 类型   | 必填 | 说明     |
+| ----------- | ------ | ---- | -------- |
+| alias       | string | 否   | 分组别名 |
+| description | string | 否   | 描述     |
+
+### 9.11 删除代理分组
+
+> 需求来源：`design_tailscale_server_web.md` 5.2 代理分组 - [删除] 按钮
+
+| 项目 | 内容                                  |
+| ---- | ------------------------------------- |
+| 路径 | DELETE /api/v1/admin/agent-groups/:id |
+| 认证 | 需要管理员 JWT                        |
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                  代理分组删除流程                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员删除代理分组                                        │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 查询分组内  │                                          │
+│   │ 所有成员    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 遍历每个    │                                          │
+│   │ Agent Node  │                                          │
+│   │ 移除分组Tag │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 删除分组权限│                                          │
+│   │ 关联记录    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 移除该分组  │                                          │
+│   │ 相关的 ACL  │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 删除分组成员│                                          │
+│   │ 关联记录    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐    成功    ┌─────────────┐              │
+│   │ 删除分组记录│──────────►│ 返回成功     │              │
+│   └─────────────┘            └─────────────┘              │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 9.12 获取代理分组成员
+
+> 需求来源：`design_tailscale_server_web.md` 5.2 代理分组 - 成员数字可点击
+
+| 项目 | 内容                                       |
+| ---- | ------------------------------------------ |
+| 路径 | GET /api/v1/admin/agent-groups/:id/members |
+| 认证 | 需要管理员 JWT                             |
+
+响应模型 AgentGroupMember[]：
+
+| 字段      | 类型   | 说明       | 数据来源                      |
+| --------- | ------ | ---------- | ----------------------------- |
+| id        | uint64 | Agent ID   | agent.id                      |
+| name      | string | Agent 名称 | agent.name                    |
+| alias     | string | Agent 别名 | agent.alias                   |
+| joined_at | string | 加入时间   | agent_group_member.created_at |
+
+### 9.13 添加代理分组成员
+
+| 项目 | 内容                                        |
+| ---- | ------------------------------------------- |
+| 路径 | POST /api/v1/admin/agent-groups/:id/members |
+| 认证 | 需要管理员 JWT                              |
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                  添加代理分组成员流程                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员添加 Agent 到分组                                   │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 保存成员关联│                                          │
+│   │ 到数据库    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐    成功    ┌─────────────┐              │
+│   │ 给Agent Node│──────────►│ 返回成功     │              │
+│   │ 添加分组Tag │            └─────────────┘              │
+│   └─────────────┘                                          │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+请求字段：
+
+| 字段     | 类型   | 必填 | 说明     |
+| -------- | ------ | ---- | -------- |
+| agent_id | uint64 | 是   | Agent ID |
+
+### 9.14 移除代理分组成员
+
+| 项目 | 内容                                               |
+| ---- | -------------------------------------------------- |
+| 路径 | DELETE /api/v1/admin/agent-groups/:id/members/:aid |
+| 认证 | 需要管理员 JWT                                     |
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                  移除代理分组成员流程                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员从分组移除 Agent                                    │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 删除成员关联│                                          │
+│   │ 记录        │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐    成功    ┌─────────────┐              │
+│   │ 给Agent Node│──────────►│ 返回成功     │              │
+│   │ 移除分组Tag │            └─────────────┘              │
+│   └─────────────┘                                          │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## 10. 审计日志 API
+
+> 需求来源：`design_tailscale_server_web.md` 6. 审计日志
+
+### 10.1 查询审计日志
+
+| 项目 | 内容                         |
+| ---- | ---------------------------- |
+| 路径 | GET /api/v1/admin/audit/logs |
+| 认证 | 需要管理员 JWT               |
+
+查询参数：
+
+| 参数        | 类型   | 必填 | 说明              |
+| ----------- | ------ | ---- | ----------------- |
+| action_type | string | 否   | 操作类型筛选      |
+| user_id     | int64  | 否   | 操作者 ID 筛选    |
+| start_date  | string | 否   | 开始日期          |
+| end_date    | string | 否   | 结束日期          |
+| page        | int    | 否   | 页码，默认 1      |
+| size        | int    | 否   | 每页数量，默认 20 |
+
+响应模型 AuditLogItem[]：
+
+| 字段        | 类型   | 说明       | 数据来源                |
+| ----------- | ------ | ---------- | ----------------------- |
+| id          | uint64 | 日志 ID    | audit_log.id            |
+| action_type | string | 操作类型   | audit_log.action_type   |
+| actor_name  | string | 操作者名称 | 关联查询 admin.username |
+| target_name | string | 目标名称   | audit_log.target_name   |
+| detail      | string | 详情       | audit_log.detail        |
+| created_at  | string | 创建时间   | audit_log.created_at    |
+
+操作类型枚举（action_type）：
+
+| 值                  | 说明            |
+| ------------------- | --------------- |
+| create_agent        | 创建 Agent      |
+| delete_agent        | 删除 Agent      |
+| create_service      | 创建服务        |
+| delete_service      | 删除服务        |
+| grant_desktop       | 桌面授权        |
+| revoke_desktop      | 撤销桌面授权    |
+| grant_agent         | 代理授权        |
+| revoke_agent        | 撤销代理授权    |
+| create_port_forward | 创建端口访问    |
+| delete_port_forward | 删除端口访问    |
+| create_client_group | 创建用户分组    |
+| delete_client_group | 删除用户分组    |
+| create_agent_group  | 创建代理分组    |
+| delete_agent_group  | 删除代理分组    |
+| update_tunnel_user  | 更新隧道 User   |
+| delete_tunnel_user  | 删除隧道 User   |
+| update_tunnel_node  | 更新隧道 Node   |
+| update_tunnel_tags  | 更新 Node Tags  |
+| delete_tunnel_node  | 删除隧道 Node   |
+| update_tunnel_acl   | 更新 ACL Policy |
+| sync_tunnel_acl     | 强制同步 ACL    |
+
+### 10.2 获取操作用户列表
+
+| 项目 | 内容                          |
+| ---- | ----------------------------- |
+| 路径 | GET /api/v1/admin/audit/users |
+| 认证 | 需要管理员 JWT                |
+
+响应模型 UserOption[]：
+
+| 字段     | 类型   | 说明    | 数据来源       |
+| -------- | ------ | ------- | -------------- |
+| id       | int64  | 用户 ID | admin.id       |
+| username | string | 用户名  | admin.username |
+
+## 11. 隧道管理 API
+
+> 需求来源：`design_tunnel_management.md`
+>
+> 隧道管理 API 用于直接查看和管理 Headscale 中的 User、Node 和 ACL 数据。
+
+### 11.1 User 管理
+
+#### 获取 User 列表
+
+| 项目 | 内容                           |
+| ---- | ------------------------------ |
+| 路径 | GET /api/v1/admin/tunnel/users |
+| 认证 | 需要管理员 JWT                 |
+
+查询参数：
+
+| 参数   | 类型   | 必填 | 说明                                    |
+| ------ | ------ | ---- | --------------------------------------- |
+| type   | string | 否   | 类型筛选：agent/client/orphan/all       |
+| search | string | 否   | 搜索关键词（匹配 name 或 display_name） |
+| page   | int    | 否   | 页码，默认 1                            |
+| size   | int    | 否   | 每页数量，默认 20                       |
+
+响应模型 TunnelUserListItem[]：
+
+| 字段          | 类型   | 说明         | 数据来源                        |
+| ------------- | ------ | ------------ | ------------------------------- |
+| id            | uint64 | User ID      | Headscale user.id               |
+| name          | string | User 名称    | Headscale user.name             |
+| display_name  | string | 显示名称     | Headscale user.display_name     |
+| type          | string | 类型         | 计算字段（agent/client/orphan） |
+| linked_entity | string | 关联实体名称 | 本地 DB 查询                    |
+| linked_id     | uint64 | 关联实体 ID  | 本地 DB 查询                    |
+| node_count    | int    | Node 数量    | Headscale ListNodes 统计        |
+| created_at    | string | 创建时间     | Headscale user.created_at       |
+
+#### 获取 User 详情
+
+| 项目 | 内容                               |
+| ---- | ---------------------------------- |
+| 路径 | GET /api/v1/admin/tunnel/users/:id |
+| 认证 | 需要管理员 JWT                     |
+
+#### 更新 User
+
+| 项目 | 内容                               |
+| ---- | ---------------------------------- |
+| 路径 | PUT /api/v1/admin/tunnel/users/:id |
+| 认证 | 需要管理员 JWT                     |
+
+请求字段：
+
+| 字段         | 类型   | 必填 | 说明     |
+| ------------ | ------ | ---- | -------- |
+| display_name | string | 否   | 显示名称 |
+
+#### 删除 User
+
+| 项目 | 内容                                  |
+| ---- | ------------------------------------- |
+| 路径 | DELETE /api/v1/admin/tunnel/users/:id |
+| 认证 | 需要管理员 JWT                        |
+
+说明：删除 User 会同时删除其下所有 Node，并同步删除本地关联的 Agent/Client 记录
+
+#### 获取 User 的 Node 列表
+
+| 项目 | 内容                                     |
+| ---- | ---------------------------------------- |
+| 路径 | GET /api/v1/admin/tunnel/users/:id/nodes |
+| 认证 | 需要管理员 JWT                           |
+
+### 11.2 Node 管理
+
+#### 获取 Node 列表
+
+| 项目 | 内容                           |
+| ---- | ------------------------------ |
+| 路径 | GET /api/v1/admin/tunnel/nodes |
+| 认证 | 需要管理员 JWT                 |
+
+查询参数：
+
+| 参数    | 类型   | 必填 | 说明                         |
+| ------- | ------ | ---- | ---------------------------- |
+| user_id | uint64 | 否   | 按 User ID 筛选              |
+| status  | string | 否   | 状态筛选：online/offline/all |
+| search  | string | 否   | 搜索关键词（匹配 name）      |
+| page    | int    | 否   | 页码，默认 1                 |
+| size    | int    | 否   | 每页数量，默认 20            |
+
+响应模型 TunnelNodeListItem[]：
+
+| 字段       | 类型     | 说明      | 数据来源                       |
+| ---------- | -------- | --------- | ------------------------------ |
+| id         | uint64   | Node ID   | Headscale node.id              |
+| name       | string   | Node 名称 | Headscale node.given_name      |
+| user_id    | uint64   | User ID   | Headscale node.user.id         |
+| user_name  | string   | User 名称 | Headscale node.user.name       |
+| ip_address | string   | IP 地址   | Headscale node.ip_addresses[0] |
+| online     | bool     | 是否在线  | Headscale node.online          |
+| tags       | []string | Tags 列表 | Headscale node.forced_tags     |
+| last_seen  | string   | 最后在线  | Headscale node.last_seen       |
+| created_at | string   | 创建时间  | Headscale node.created_at      |
+
+#### 获取 Node 详情
+
+| 项目 | 内容                               |
+| ---- | ---------------------------------- |
+| 路径 | GET /api/v1/admin/tunnel/nodes/:id |
+| 认证 | 需要管理员 JWT                     |
+
+#### 更新 Node
+
+| 项目 | 内容                               |
+| ---- | ---------------------------------- |
+| 路径 | PUT /api/v1/admin/tunnel/nodes/:id |
+| 认证 | 需要管理员 JWT                     |
+
+请求字段：
+
+| 字段       | 类型   | 必填 | 说明     |
+| ---------- | ------ | ---- | -------- |
+| given_name | string | 否   | 显示名称 |
+
+#### 更新 Node Tags
+
+| 项目 | 内容                                    |
+| ---- | --------------------------------------- |
+| 路径 | PUT /api/v1/admin/tunnel/nodes/:id/tags |
+| 认证 | 需要管理员 JWT                          |
+
+请求字段：
+
+| 字段 | 类型     | 必填 | 说明      |
+| ---- | -------- | ---- | --------- |
+| tags | []string | 是   | Tags 列表 |
+
+#### 删除 Node
+
+| 项目 | 内容                                  |
+| ---- | ------------------------------------- |
+| 路径 | DELETE /api/v1/admin/tunnel/nodes/:id |
+| 认证 | 需要管理员 JWT                        |
+
+说明：删除 Node 会同步删除本地关联的 Desktop 记录，或清空 Agent 的 node_id
+
+#### 获取常用 Tags 列表
+
+| 项目 | 内容                          |
+| ---- | ----------------------------- |
+| 路径 | GET /api/v1/admin/tunnel/tags |
+| 认证 | 需要管理员 JWT                |
+
+响应模型 TagOption[]：
+
+| 字段  | 类型   | 说明     | 数据来源                      |
+| ----- | ------ | -------- | ----------------------------- |
+| tag   | string | Tag 名称 | 从分组表生成                  |
+| type  | string | 类型     | client-group / agent-group    |
+| count | int    | 使用次数 | 统计 Node 中使用该 Tag 的数量 |
+
+### 11.3 ACL 管理
+
+#### 获取 ACL Policy
+
+| 项目 | 内容                         |
+| ---- | ---------------------------- |
+| 路径 | GET /api/v1/admin/tunnel/acl |
+| 认证 | 需要管理员 JWT               |
+
+响应模型 ACLPolicyResponse：
+
+| 字段           | 类型   | 说明            | 数据来源            |
+| -------------- | ------ | --------------- | ------------------- |
+| policy         | string | ACL Policy JSON | Headscale GetPolicy |
+| last_synced_at | string | 最后同步时间    | 本地记录            |
+
+#### 更新 ACL Policy
+
+| 项目 | 内容                         |
+| ---- | ---------------------------- |
+| 路径 | PUT /api/v1/admin/tunnel/acl |
+| 认证 | 需要管理员 JWT               |
+
+请求字段：
+
+| 字段   | 类型   | 必填 | 说明            |
+| ------ | ------ | ---- | --------------- |
+| policy | string | 是   | ACL Policy JSON |
+
+#### 获取 ACL 规则列表（可视化）
+
+| 项目 | 内容                               |
+| ---- | ---------------------------------- |
+| 路径 | GET /api/v1/admin/tunnel/acl/rules |
+| 认证 | 需要管理员 JWT                     |
+
+响应模型 ACLRulesResponse：
+
+| 字段       | 类型       | 说明         |
+| ---------- | ---------- | ------------ |
+| rules      | ACLRule[]  | ACL 规则列表 |
+| tag_owners | TagOwner[] | Tag 所有者   |
+
+#### 强制同步 ACL
+
+| 项目 | 内容                               |
+| ---- | ---------------------------------- |
+| 路径 | POST /api/v1/admin/tunnel/acl/sync |
+| 认证 | 需要管理员 JWT                     |
+
+说明：根据本地授权数据重新生成 ACL Policy 并同步到 Headscale
 
 ---
 
-#### 2.8.1 Client 认证（旧版，已废弃）
-
-```
-POST /api/client/auth
-```
-
-**状态**: ⚠️ 已废弃，建议使用 `/api/v1/client/auth/login`
-
-**请求体**:
-
-```json
-{
-  "client_id": "user@example.com",
-  "client_secret": "cs_1234567890abcdef"
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": {
-    "session_token": "st_abcdef1234567890",
-    "expires_at": "2025-11-25T18:00:00Z"
-  }
-}
-```
-
-#### 2.8.2 使用 Secret 登录并获取 Device Token
-
-```
-POST /api/v1/client/auth/login
-```
-
-**说明**: 用户首次登录或 Device Token 过期后使用此接口
-
-**请求体**:
-
-```json
-{
-  "client_id": "user@example.com",
-  "client_secret": "cs_1234567890abcdef",
-  "device_fingerprint": "a1b2c3d4e5f6...",
-  "device_info": {
-    "os": "windows",
-    "os_version": "Windows 10",
-    "arch": "amd64",
-    "cpu_model": "Intel Core i7-9700K",
-    "machine_id": "S-1-5-21-...",
-    "hostname": "DESKTOP-ABC123"
-  }
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "device_token": "dt_1234567890abcdef",
-  "expires_at": "2025-12-04T10:00:00Z",
-  "jwt_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "jwt_expires_in": 86400
-}
-```
-
-#### 2.8.3 使用 Device Token 登录
-
-```
-POST /api/v1/client/auth/login/token
-```
-
-**说明**: Desktop 客户端自动登录时使用此接口
-
-**请求体**:
-
-```json
-{
-  "client_id": "user@example.com",
-  "device_token": "dt_1234567890abcdef",
-  "device_fingerprint": "a1b2c3d4e5f6..."
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "jwt_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "jwt_expires_in": 86400
-}
-```
-
-**错误响应**:
-
-```json
-{
-  "success": false,
-  "error": "Device token expired or invalid"
-}
-```
-
-#### 2.8.4 撤销 Device Token
-
-```
-POST /api/v1/client/auth/login/devices/:device_token/offline
-```
-
-**说明**: 用户主动登出或撤销某个设备的访问权限
-
-**请求头**:
-
-```
-Authorization: Bearer <jwt-token>
-```
-
-**请求体**:
-
-```json
-{
-  "device_token": "dt_1234567890abcdef"
-}
-```
-
-**注意**: 如果不提供`device_token`，则撤销当前使用的 token
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "Device token revoked successfully"
-}
-```
-
-#### 2.9.5 列出用户已登录的设备
-
-```
-GET /api/v1/client/auth/login/devices
-```
-
-**说明**: 查看当前用户在哪些设备上登录，用户可以在这里操作让设备下线或删除设备
-
-**请求头**:
-
-```
-Authorization: Bearer <jwt-token>
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "devices": [
-    {
-      "device_token": "dt_1234567890abcdef",
-      "device_info": {
-        "os": "windows",
-        "os_version": "Windows 10",
-        "hostname": "DESKTOP-ABC123",
-        "cpu_model": "Intel Core i7-9700K"
-      },
-      "created_at": "2025-11-20T10:00:00Z",
-      "last_used_at": "2025-11-27T09:30:00Z",
-      "expires_at": "2025-12-04T10:00:00Z",
-      "revoked": false,
-      "is_current": true
-    },
-    {
-      "device_token": "dt_0987654321fedcba",
-      "device_info": {
-        "os": "linux",
-        "os_version": "Ubuntu 22.04",
-        "hostname": "laptop-xyz",
-        "cpu_model": "AMD Ryzen 5 5600X"
-      },
-      "created_at": "2025-11-15T14:00:00Z",
-      "last_used_at": "2025-11-25T16:20:00Z",
-      "expires_at": "2025-11-29T14:00:00Z",
-      "revoked": false,
-      "is_current": false
-    }
-  ]
-}
-```
-
-#### 2.8.6 让设备下线（撤销 Device Token）
-
-```
-POST /api/v1/client/auth/login/devices/:device_token/offline
-```
-
-**说明**: 撤销指定设备的 Device Token，使其无法继续使用该 Token 登录
-
-**请求头**:
-
-```
-Authorization: Bearer <jwt-token>
-```
-
-**路径参数**:
-
-- `device_token`: 要下线的设备 Token
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "Device has been taken offline successfully"
-}
-```
-
-**错误响应**:
-
-```json
-{
-  "success": false,
-  "error": "Device token not found or already revoked"
-}
-```
-
-#### 2.9.7 删除设备记录
-
-```
-DELETE /api/v1/client/auth/login/devices/:device_token
-```
-
-**说明**: 从数据库中删除设备记录（仅限已撤销或过期的设备）
-
-**请求头**:
-
-```
-Authorization: Bearer <jwt-token>
-```
-
-**路径参数**:
-
-- `device_token`: 要删除的设备 Token
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "Device record deleted successfully"
-}
-```
-
-**错误响应**:
-
-```json
-{
-  "success": false,
-  "error": "Cannot delete active device. Please take it offline first."
-}
-```
-
-#### 2.9.8 获取可访问服务列表
-
-```
-GET /api/v1/client/services
-```
-
-**请求头**:
-
-```
-Authorization: Bearer <jwt-token>
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "instance_id": 1,
-      "instance_name": "dev-mysql",
-      "agent_name": "dev-env-1",
-      "description": "开发环境MySQL数据库",
-      "local_port": 3306
-    }
-  ]
-}
-```
-
-#### 2.9.9 获取端口偏好
-
-```
-GET /api/v1/client/preferences/port
-```
-
-**说明**: 获取用户保存的端口偏好设置
-
-**请求头**:
-
-```
-Authorization: Bearer <jwt-token>
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "preferences": {
-    "1": 13306,
-    "2": 16379,
-    "5": 15432
-  }
-}
-```
-
-**说明**: 键为`stcp_instance_id`，值为`preferred_port`
-
-#### 2.9.10 保存端口偏好
-
-```
-POST /api/v1/client/preferences/port
-```
-
-**说明**: 保存用户的端口偏好设置
-
-**请求头**:
-
-```
-Authorization: Bearer <jwt-token>
-```
-
-**请求体**:
-
-```json
-{
-  "stcp_instance_id": 1,
-  "preferred_port": 13306
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "Port preference saved successfully"
-}
-```
-
-#### 2.8.11 获取隧道配置
-
-```
-GET /api/v1/client/tunnel/config
-```
-
-**说明**: Desktop 客户端在连接服务前调用此接口获取隧道配置（FRP 连接信息）
-
-**设计原则**:
-
-- 登录时不返回隧道配置
-- 按需获取：只在连接服务时获取
-- 不在本地保存：每次连接都从 Server 获取最新配置
-- 为未来独立 Token 做准备：支持为每个 Client 分配独立的隧道 Token
-
-**请求头**:
-
-```
-Authorization: Bearer <jwt-token>
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "tunnel_server": "wss://your-domain.com/ws",
-  "tunnel_port": 0,
-  "tunnel_token": "awecloud-frp-secret-token-2024"
-}
-```
-
-**字段说明**:
-
-- `tunnel_server`: 隧道服务器地址
-  - 如果配置了`public_url`，返回完整 URL（如：`wss://your-domain.com/ws`）
-  - 如果未配置，返回空字符串，客户端使用`tunnel_port`构建地址
-- `tunnel_port`: 隧道服务器端口
-  - 如果`tunnel_server`为完整 URL，此字段为 0
-  - 否则返回实际端口号（如：7000）
-- `tunnel_token`: 隧道认证 Token
-  - 当前：所有 Client 共享 Server 配置中的统一 Token
-  - 未来：每个 Client 拥有独立的 Token（待实现）
-
-**使用流程**:
-
-```
-1. Desktop用户点击"连接服务"
-   ↓
-2. Desktop调用此API获取隧道配置
-   ↓
-3. Desktop使用获取的配置初始化FRP客户端
-   ↓
-4. 建立STCP隧道，连接成功
-```
-
-**安全性**:
-
-- ✅ 不在本地保存 Token，避免泄露风险
-- ✅ 使用 JWT 认证，确保只有合法用户能获取
-- ✅ 按需获取，减少 Token 暴露时间
-- ⏳ 未来支持每个 Client 独立 Token（参见 `docs/design_tunnel_token.md`）
-
-**错误响应**:
-
-```json
-{
-  "success": false,
-  "error": "Unauthorized"
-}
-```
-
-**HTTP 状态码**:
-
-- `200 OK`: 成功获取配置
-- `401 Unauthorized`: JWT Token 无效或过期
-- `500 Internal Server Error`: 服务器内部错误
-
-#### 2.9.11 记录连接审计日志
-
-```
-POST /api/v1/client/audit/connection
-```
-
-**说明**: Desktop 客户端在连接/断开服务时调用此接口记录审计日志
-
-**请求头**:
-
-```
-Authorization: Bearer <jwt-token>
-```
-
-**请求体**:
-
-```json
-{
-  "stcp_instance_id": 1,
-  "action": "connect",
-  "local_port": 13306,
-  "device_fingerprint": "a1b2c3d4e5f6...",
-  "device_info": {
-    "os": "windows",
-    "hostname": "DESKTOP-ABC123"
-  },
-  "success": true,
-  "error_message": null
-}
-```
-
-**字段说明**:
-
-- `action`: 操作类型，`connect` 或 `disconnect`
-- `success`: 操作是否成功
-- `error_message`: 失败时的错误信息
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "audit_id": 12345
-}
-```
-
-### 2.10 管理员审计日志 API
-
-#### 2.10.1 查询连接审计日志
-
-```
-GET /api/v1/admin/audit/connection
-```
-
-**说明**: 管理员查询用户的连接审计日志
-
-**请求头**:
-
-```
-Authorization: Bearer <admin-jwt-token>
-```
-
-**查询参数**:
-
-- `client_id` (可选): 按客户端 ID 过滤
-- `stcp_instance_id` (可选): 按 STCP 实例 ID 过滤
-- `action` (可选): 按操作类型过滤 (`connect` 或 `disconnect`)
-- `start_date` (可选): 开始日期，格式 `2025-11-01`
-- `end_date` (可选): 结束日期，格式 `2025-11-30`
-- `page` (可选): 页码，默认 1
-- `page_size` (可选): 每页数量，默认 50
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "logs": [
-    {
-      "id": 12345,
-      "client_id": 5,
-      "client_name": "user@example.com",
-      "stcp_instance_id": 1,
-      "stcp_instance_name": "dev-mysql",
-      "action": "connect",
-      "local_port": 13306,
-      "device_info": {
-        "os": "windows",
-        "hostname": "DESKTOP-ABC123"
-      },
-      "device_fingerprint": "a1b2c3d4e5f6...",
-      "ip_address": "192.168.1.100",
-      "success": true,
-      "error_message": null,
-      "created_at": "2025-11-27T10:30:00Z"
-    }
-  ],
-  "total": 1523,
-  "page": 1,
-  "page_size": 50,
-  "total_pages": 31
-}
-```
-
-#### 2.10.2 导出审计日志
-
-```
-GET /api/v1/admin/audit/connection/export
-```
-
-**说明**: 导出审计日志为 CSV 或 Excel 文件
-
-**请求头**:
-
-```
-Authorization: Bearer <admin-jwt-token>
-```
-
-**查询参数**:
-
-- 与查询接口相同的过滤参数
-- `format` (可选): 导出格式，`csv` 或 `excel`，默认 `csv`
-
-**响应**:
-
-- Content-Type: `text/csv` 或 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
-- 文件下载
-
-### 2.11 Desktop 客户端下载 API
-
-**详细设计**: 参见 [Desktop 客户端下载 API 设计](./design_api_download.md)
-
-#### 2.10.1 获取下载信息（JSON）
-
-```
-GET /api/v1/public/download/desktop
-```
-
-**参数**:
-
-- `os` (可选): 指定操作系统 (`windows`, `linux`, `darwin`, `macos`)
-
-**响应**:
-
-```json
-{
-  "version": "v1.0.x",
-  "download_url": "https://your-cdn.example.com/path/to/files/awecloud-signaling-v1.0.x-windows-amd64.exe",
-  "filename": "awecloud-signaling-v1.0.x-windows-amd64.exe",
-  "os": "windows",
-  "arch": "amd64",
-  "build_date": "2025-12-05T10:30:00Z"
-}
-```
-
-#### 2.10.2 直接下载（重定向）
-
-```
-GET /api/v1/public/download/desktop/direct
-```
-
-**参数**:
-
-- `os` (可选): 指定操作系统
-
-**行为**: 自动重定向到对应平台的下载链接
-
-#### 2.10.3 列出所有版本
-
-```
-GET /api/v1/public/download/desktop/versions
-```
-
-**响应**: 返回所有平台的下载信息
-
-### 2.12 版本管理 API
-
-#### 2.12.1 检查 Desktop 版本（Client 调用）
-
-```
-POST /api/v1/client/version/check
-```
-
-**说明**: Desktop 登录前调用此接口检查版本是否符合要求
-
-**请求体**:
-
-```json
-{
-  "client_version": "1.0.0",
-  "os": "windows",
-  "arch": "amd64"
-}
-```
-
-**响应（版本符合要求）**:
-
-```json
-{
-  "success": true,
-  "version_valid": true,
-  "min_version": "1.0.0",
-  "latest_version": "1.2.0",
-  "message": "Your version is supported"
-}
-```
-
-**响应（版本过低，需要升级）**:
-
-```json
-{
-  "success": true,
-  "version_valid": false,
-  "min_version": "1.1.0",
-  "latest_version": "1.2.0",
-  "current_version": "1.0.0",
-  "download_url": "https://github.com/your-org/awecloud-desktop/releases",
-  "message": "Your version is too old. Please upgrade to version 1.1.0 or later.",
-  "force_upgrade": true
-}
-```
-
-#### 2.11.2 获取版本设置（管理员）
-
-```
-GET /api/v1/admin/settings/version
-```
-
-**请求头**:
-
-```
-Cookie: session=<admin-session>
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": {
-    "desktop_min_version": "1.0.0",
-    "desktop_latest_version": "1.2.0",
-    "desktop_download_url": "https://github.com/your-org/awecloud-desktop/releases",
-    "version_check_enabled": true,
-    "updated_at": "2025-11-27T10:00:00Z",
-    "updated_by": "admin"
-  }
-}
-```
-
-#### 2.11.3 更新最低版本要求（管理员）
-
-```
-PUT /api/v1/admin/settings/version/min
-```
-
-**请求头**:
-
-```
-Cookie: session=<admin-session>
-```
-
-**请求体**:
-
-```json
-{
-  "min_version": "1.1.0"
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "Minimum version updated successfully",
-  "data": {
-    "desktop_min_version": "1.1.0",
-    "updated_at": "2025-11-27T10:30:00Z"
-  }
-}
-```
-
-#### 2.11.4 更新下载地址（管理员）
-
-```
-PUT /api/v1/admin/settings/version/download-url
-```
-
-**请求头**:
-
-```
-Cookie: session=<admin-session>
-```
-
-**请求体**:
-
-```json
-{
-  "download_url": "https://your-domain.com/downloads/desktop"
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "Download URL updated successfully"
-}
-```
-
-#### 2.11.5 启用/禁用版本检查（管理员）
-
-```
-PUT /api/v1/admin/settings/version/check-enabled
-```
-
-**请求头**:
-
-```
-Cookie: session=<admin-session>
-```
-
-**请求体**:
-
-```json
-{
-  "enabled": false
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "message": "Version check disabled successfully"
-}
-```
-
-### 2.13 错误码
-
-| 错误码 | 说明                     |
-| ------ | ------------------------ |
-| 400    | 请求参数错误             |
-| 401    | 未认证或认证失败         |
-| 403    | 无权限访问               |
-| 404    | 资源不存在               |
-| 409    | 资源冲突（如名称重复）   |
-| 410    | Device Token 已过期      |
-| 423    | Device Token 已被撤销    |
-| 426    | 客户端版本过低，需要升级 |
-| 500    | 服务器内部错误           |
-
-## 3. gRPC API
-
-### 3.1 Protocol Buffers 定义
-
-```protobuf
-syntax = "proto3";
-
-package awecloud.signaling;
-
-option go_package = "github.com/your-org/awecloud-signaling/pkg/proto";
-
-// ==================== Agent服务 ====================
-
-service AgentService {
-  // Agent注册
-  rpc Register(RegisterRequest) returns (RegisterResponse);
-
-  // Agent心跳
-  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
-
-  // 接收Server指令（双向流）
-  rpc ReceiveCommands(stream CommandResponse) returns (stream Command);
-
-  // 状态上报
-  rpc ReportStatus(StatusReport) returns (StatusResponse);
-}
-
-// Agent注册请求
-message RegisterRequest {
-  string agent_name = 1;
-  string agent_token = 2;
-}
-
-// Agent注册响应
-message RegisterResponse {
-  bool success = 1;
-  string message = 2;
-  int64 agent_id = 3;
-}
-
-// Agent心跳请求
-message HeartbeatRequest {
-  int64 agent_id = 1;
-  string agent_token = 2;
-}
-
-// Agent心跳响应
-message HeartbeatResponse {
-  bool success = 1;
-  int64 timestamp = 2;
-}
-
-// Server指令
-message Command {
-  enum Type {
-    CREATE_STCP = 0;
-    DELETE_STCP = 1;
-  }
-
-  string command_id = 1;
-  Type type = 2;
-  string instance_name = 3;
-  string secret_key = 4;
-  string local_ip = 5;
-  int32 local_port = 6;
-}
-
-// 指令响应
-message CommandResponse {
-  string command_id = 1;
-  bool success = 2;
-  string message = 3;
-}
-
-// 状态上报
-message StatusReport {
-  int64 agent_id = 1;
-  repeated STCPStatus stcp_statuses = 2;
-}
-
-message STCPStatus {
-  string instance_name = 1;
-  string status = 2;  // "running", "stopped", "error"
-  int32 active_connections = 3;
-}
-
-// 状态响应
-message StatusResponse {
-  bool success = 1;
-}
-
-// ==================== Client服务 ====================
-
-service ClientService {
-  // Client认证
-  rpc Authenticate(AuthRequest) returns (AuthResponse);
-
-  // 获取可访问服务列表
-  rpc GetServices(GetServicesRequest) returns (GetServicesResponse);
-
-  // 连接服务（获取连接信息）
-  rpc ConnectService(ConnectRequest) returns (ConnectResponse);
-}
-
-// Client认证请求
-message AuthRequest {
-  string client_id = 1;
-  string client_secret = 2;
-}
-
-// Client认证响应
-message AuthResponse {
-  bool success = 1;
-  string message = 2;
-  string session_token = 3;
-  int64 expires_at = 4;
-}
-
-// 获取服务列表请求
-message GetServicesRequest {
-  string session_token = 1;
-}
-
-// 获取服务列表响应
-message GetServicesResponse {
-  bool success = 1;
-  repeated ServiceInfo services = 2;
-}
-
-message ServiceInfo {
-  int64 instance_id = 1;
-  string instance_name = 2;
-  string agent_name = 3;
-  string description = 4;
-  int32 local_port = 5;
-}
-
-// 连接服务请求
-message ConnectRequest {
-  string session_token = 1;
-  int64 instance_id = 2;
-}
-
-// 连接服务响应
-message ConnectResponse {
-  bool success = 1;
-  string message = 2;
-  string instance_name = 3;
-  string secret_key = 4;
-  int32 suggested_local_port = 5;  // 建议的本地端口
-}
-```
-
-### 3.2 gRPC 服务端点
-
-- **Agent 服务**: `https://your-domain.com/` (gRPC over HTTP/2)
-- **Client 服务**: `https://your-domain.com/` (gRPC over HTTP/2)
-
-### 3.3 gRPC 认证
-
-- **Agent**: 使用 `agent_token` 进行认证
-- **Client**: 使用 `session_token` 进行认证
-
-## 4. WebSocket API
-
-### 4.1 连接端点
-
-```
-wss://your-domain.com/ws
-```
-
-### 4.2 连接认证
-
-连接时通过查询参数传递认证信息：
-
-**Agent-FRP**:
-
-```
-wss://your-domain.com/ws?type=agent&agent_id=1&token=xxx
-```
-
-**Desktop-FRP**:
-
-```
-wss://your-domain.com/ws?type=client&session_token=xxx
-```
-
-### 4.3 消息格式
-
-所有消息使用 JSON 格式：
-
-```json
-{
-  "type": "message_type",
-  "data": { ... }
-}
-```
-
-### 4.4 消息类型
-
-#### 4.4.1 心跳消息
-
-**Client → Server**:
-
-```json
-{
-  "type": "ping",
-  "data": {
-    "timestamp": 1732531200
-  }
-}
-```
-
-**Server → Client**:
-
-```json
-{
-  "type": "pong",
-  "data": {
-    "timestamp": 1732531200
-  }
-}
-```
-
-#### 4.4.2 STCP 控制消息
-
-**Server → Agent-FRP** (创建 STCP 代理):
-
-```json
-{
-  "type": "create_stcp",
-  "data": {
-    "instance_name": "dev-mysql",
-    "secret_key": "sk_1234567890abcdef",
-    "local_ip": "127.0.0.1",
-    "local_port": 3306
-  }
-}
-```
-
-**Agent-FRP → Server** (响应):
-
-```json
-{
-  "type": "stcp_created",
-  "data": {
-    "instance_name": "dev-mysql",
-    "success": true,
-    "message": "STCP代理创建成功"
-  }
-}
-```
-
-#### 4.4.3 连接请求消息
-
-**Desktop-FRP → Server** (请求连接):
-
-```json
-{
-  "type": "connect_stcp",
-  "data": {
-    "instance_name": "dev-mysql",
-    "secret_key": "sk_1234567890abcdef"
-  }
-}
-```
-
-**Server → Desktop-FRP** (响应):
-
-```json
-{
-  "type": "stcp_ready",
-  "data": {
-    "instance_name": "dev-mysql",
-    "success": true,
-    "local_port": 13306
-  }
-}
-```
-
-### 4.5 错误消息
-
-```json
-{
-  "type": "error",
-  "data": {
-    "code": "AUTH_FAILED",
-    "message": "认证失败"
-  }
-}
-```
-
-**错误码**:
-
-- `AUTH_FAILED`: 认证失败
-- `INVALID_MESSAGE`: 无效消息格式
-- `STCP_NOT_FOUND`: STCP 实例不存在
-- `PERMISSION_DENIED`: 权限不足
-- `INTERNAL_ERROR`: 内部错误
+## 12. 系统配置 API
+
+> 需求来源：`design_tailscale_server_web.md` 7. 系统配置
+
+### 11.1 获取系统配置
+
+| 项目 | 内容                            |
+| ---- | ------------------------------- |
+| 路径 | GET /api/v1/admin/system/config |
+| 认证 | 需要管理员 JWT                  |
+
+响应模型 SystemConfig：
+
+| 字段                  | 类型   | 说明             | 数据来源                                        |
+| --------------------- | ------ | ---------------- | ----------------------------------------------- |
+| client_download_url   | string | 客户端下载地址   | system_config WHERE key='client_download_url'   |
+| desktop_min_version   | string | 客户端最低版本   | system_config WHERE key='desktop_min_version'   |
+| headscale_public_url  | string | 公网地址         | system_config WHERE key='headscale_public_url'  |
+| stun_port             | int    | STUN 端口        | system_config WHERE key='stun_port'             |
+| ip_prefix             | string | IP 地址段        | system_config WHERE key='ip_prefix'             |
+| auth_key_expiry_hours | int    | 预认证密钥有效期 | system_config WHERE key='auth_key_expiry_hours' |
+
+### 11.2 更新系统配置
+
+| 项目 | 内容                            |
+| ---- | ------------------------------- |
+| 路径 | PUT /api/v1/admin/system/config |
+| 认证 | 需要管理员 JWT                  |
+
+请求字段：
+
+| 字段                  | 类型   | 必填 | 说明                     |
+| --------------------- | ------ | ---- | ------------------------ |
+| client_download_url   | string | 否   | 客户端下载地址           |
+| desktop_min_version   | string | 否   | 客户端最低版本           |
+| headscale_public_url  | string | 否   | 公网地址                 |
+| stun_port             | int    | 否   | STUN 端口                |
+| ip_prefix             | string | 否   | IP 地址段                |
+| auth_key_expiry_hours | int    | 否   | 预认证密钥有效期（小时） |
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                  系统配置更新流程                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员更新配置                                            │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 保存配置到  │                                          │
+│   │ 数据库      │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 通知相关组件│                                          │
+│   │ 重载配置    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 返回成功     │                                          │
+│   └─────────────┘                                          │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## 13. 错误码定义
+
+| HTTP 状态码 | 说明           |
+| ----------- | -------------- |
+| 200         | 成功           |
+| 400         | 请求参数错误   |
+| 401         | 未认证         |
+| 403         | 权限不足       |
+| 404         | 资源不存在     |
+| 409         | 资源冲突       |
+| 500         | 服务器内部错误 |
 
 ---
 
-**文档版本**: 1.1  
-**最后更新**: 2025-11-29
-
-**更新日志**:
-
-- 2025-11-29: 新增隧道配置接口 `GET /api/v1/client/tunnel/config`
+**文档版本**: 2.1  
+**更新日期**: 2026-01-13  
+**维护者**: 开发团队

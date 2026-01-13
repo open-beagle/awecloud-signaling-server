@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -15,23 +16,25 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
+// DeviceTokenAPI 设备令牌 API
 type DeviceTokenAPI struct {
 	config *config.ServerConfig
 }
 
+// NewDeviceTokenAPI 创建 DeviceTokenAPI
 func NewDeviceTokenAPI(cfg *config.ServerConfig) *DeviceTokenAPI {
 	return &DeviceTokenAPI{config: cfg}
 }
 
-// LoginWithSecretRequest 使用Secret登录请求
+// LoginWithSecretRequest 使用 Secret 登录请求
 type LoginWithSecretRequest struct {
-	ClientID          string          `json:"client_id" binding:"required"`
-	ClientSecret      string          `json:"client_secret" binding:"required"`
+	Name              string          `json:"name" binding:"required"`
+	Secret            string          `json:"secret" binding:"required"`
 	DeviceFingerprint string          `json:"device_fingerprint" binding:"required"`
 	DeviceInfo        auth.DeviceInfo `json:"device_info" binding:"required"`
 }
 
-// LoginWithSecretResponse 使用Secret登录响应
+// LoginWithSecretResponse 使用 Secret 登录响应
 type LoginWithSecretResponse struct {
 	Success      bool   `json:"success"`
 	DeviceToken  string `json:"device_token,omitempty"`
@@ -41,14 +44,15 @@ type LoginWithSecretResponse struct {
 	Message      string `json:"message,omitempty"`
 }
 
-// LoginWithTokenRequest 使用Device Token登录请求
+// LoginWithTokenRequest 使用 Device Token 登录请求
 type LoginWithTokenRequest struct {
-	ClientID          string `json:"client_id" binding:"required"`
-	DeviceToken       string `json:"device_token" binding:"required"`
-	DeviceFingerprint string `json:"device_fingerprint" binding:"required"`
+	Name              string          `json:"name" binding:"required"`
+	DeviceToken       string          `json:"device_token" binding:"required"`
+	DeviceFingerprint string          `json:"device_fingerprint" binding:"required"`
+	DeviceInfo        auth.DeviceInfo `json:"device_info"`
 }
 
-// LoginWithTokenResponse 使用Device Token登录响应
+// LoginWithTokenResponse 使用 Device Token 登录响应
 type LoginWithTokenResponse struct {
 	Success      bool   `json:"success"`
 	JWTToken     string `json:"jwt_token,omitempty"`
@@ -63,7 +67,7 @@ type DeviceListResponse struct {
 	Message string            `json:"message,omitempty"`
 }
 
-// DeviceTokenInfo 设备Token信息
+// DeviceTokenInfo 设备 Token 信息
 type DeviceTokenInfo struct {
 	DeviceToken string          `json:"device_token"`
 	DeviceInfo  auth.DeviceInfo `json:"device_info"`
@@ -74,7 +78,7 @@ type DeviceTokenInfo struct {
 	IsCurrent   bool            `json:"is_current"`
 }
 
-// LoginWithSecret 使用Secret登录并获取Device Token
+// LoginWithSecret 使用 Secret 登录并获取 Device Token
 func (a *DeviceTokenAPI) LoginWithSecret(c *gin.Context) {
 	var req LoginWithSecretRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -85,46 +89,37 @@ func (a *DeviceTokenAPI) LoginWithSecret(c *gin.Context) {
 		return
 	}
 
-	// 查询Client
+	// 查询 Client
 	var client model.Client
-	if err := db.DB.Where("client_id = ?", req.ClientID).First(&client).Error; err != nil {
+	if err := db.DB.Where("name = ?", req.Name).First(&client).Error; err != nil {
 		c.JSON(http.StatusUnauthorized, LoginWithSecretResponse{
 			Success: false,
-			Message: "Client ID或Secret错误",
+			Message: "用户名或密钥错误",
 		})
 		return
 	}
 
-	// 验证Secret
-	if client.ClientSecret != req.ClientSecret {
+	// 验证密钥
+	if err := bcrypt.CompareHashAndPassword([]byte(client.SecretHash), []byte(req.Secret)); err != nil {
 		c.JSON(http.StatusUnauthorized, LoginWithSecretResponse{
 			Success: false,
-			Message: "Client ID或Secret错误",
+			Message: "用户名或密钥错误",
 		})
 		return
 	}
 
-	// 检查状态
-	if !client.Enabled {
-		c.JSON(http.StatusForbidden, LoginWithSecretResponse{
-			Success: false,
-			Message: "Client已被禁用",
-		})
-		return
-	}
-
-	// 创建Device Token
-	deviceToken, err := auth.CreateDeviceToken(db.DB, client.ID, req.DeviceInfo)
+	// 创建 Device Token
+	deviceToken, err := auth.CreateDeviceToken(db.DB, int64(client.ID), req.DeviceInfo)
 	if err != nil {
-		logger.Warnf("创建Device Token失败: %v", err)
+		logger.Warnf("创建 Device Token 失败: %v", err)
 		c.JSON(http.StatusInternalServerError, LoginWithSecretResponse{
 			Success: false,
-			Message: "创建Device Token失败",
+			Message: "创建 Device Token 失败",
 		})
 		return
 	}
 
-	// 生成JWT Token
+	// 生成 JWT Token
 	jwtExpiresIn := a.config.Security.JWTExpireHours * 3600
 	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"client_id":    client.ID,
@@ -136,7 +131,7 @@ func (a *DeviceTokenAPI) LoginWithSecret(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, LoginWithSecretResponse{
 			Success: false,
-			Message: "生成JWT Token失败",
+			Message: "生成 JWT Token 失败",
 		})
 		return
 	}
@@ -150,7 +145,7 @@ func (a *DeviceTokenAPI) LoginWithSecret(c *gin.Context) {
 	})
 }
 
-// LoginWithToken 使用Device Token登录
+// LoginWithToken 使用 Device Token 登录
 func (a *DeviceTokenAPI) LoginWithToken(c *gin.Context) {
 	var req LoginWithTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -161,36 +156,20 @@ func (a *DeviceTokenAPI) LoginWithToken(c *gin.Context) {
 		return
 	}
 
-	// 查询Client
+	// 查询 Client
 	var client model.Client
-	if err := db.DB.Where("client_id = ?", req.ClientID).First(&client).Error; err != nil {
+	if err := db.DB.Where("name = ?", req.Name).First(&client).Error; err != nil {
 		c.JSON(http.StatusUnauthorized, LoginWithTokenResponse{
 			Success: false,
-			Message: "Client ID错误",
+			Message: "用户名错误",
 		})
 		return
 	}
 
-	// 检查状态
-	if !client.Enabled {
-		c.JSON(http.StatusForbidden, LoginWithTokenResponse{
-			Success: false,
-			Message: "Client已被禁用",
-		})
-		return
-	}
-
-	// 解析设备信息（从fingerprint推导，实际应该从请求中获取完整的DeviceInfo）
-	// 这里简化处理，实际应该要求客户端提供完整的DeviceInfo
-	deviceInfo := auth.DeviceInfo{
-		// 注意：这里需要客户端提供完整的设备信息
-		// 暂时使用空结构，后续需要修改API设计
-	}
-
-	// 验证Device Token
-	deviceToken, err := auth.ValidateDeviceToken(db.DB, client.ID, req.DeviceToken, deviceInfo)
+	// 验证 Device Token
+	deviceToken, err := auth.ValidateDeviceToken(db.DB, int64(client.ID), req.DeviceToken, req.DeviceInfo)
 	if err != nil {
-		logger.Warnf("验证Device Token失败: %v", err)
+		logger.Warnf("验证 Device Token 失败: %v", err)
 		c.JSON(http.StatusUnauthorized, LoginWithTokenResponse{
 			Success: false,
 			Message: err.Error(),
@@ -198,7 +177,7 @@ func (a *DeviceTokenAPI) LoginWithToken(c *gin.Context) {
 		return
 	}
 
-	// 生成JWT Token
+	// 生成 JWT Token
 	jwtExpiresIn := a.config.Security.JWTExpireHours * 3600
 	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"client_id":    client.ID,
@@ -210,12 +189,12 @@ func (a *DeviceTokenAPI) LoginWithToken(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, LoginWithTokenResponse{
 			Success: false,
-			Message: "生成JWT Token失败",
+			Message: "生成 JWT Token 失败",
 		})
 		return
 	}
 
-	logger.Warnf("Device Token验证成功: client_id=%d, device_token=%s", client.ID, deviceToken.DeviceToken)
+	logger.Infof("Device Token 验证成功: client_id=%d", client.ID)
 
 	c.JSON(http.StatusOK, LoginWithTokenResponse{
 		Success:      true,
@@ -226,7 +205,7 @@ func (a *DeviceTokenAPI) LoginWithToken(c *gin.Context) {
 
 // ListDevices 列出用户已登录的设备
 func (a *DeviceTokenAPI) ListDevices(c *gin.Context) {
-	// 从JWT获取client_id
+	// 从 JWT 获取 client_id
 	clientIDRaw, exists := c.Get("client_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, DeviceListResponse{
@@ -236,17 +215,19 @@ func (a *DeviceTokenAPI) ListDevices(c *gin.Context) {
 		return
 	}
 
-	// 转换client_id为int64
+	// 转换 client_id 为 int64
 	var clientID int64
 	switch v := clientIDRaw.(type) {
 	case float64:
 		clientID = int64(v)
 	case int64:
 		clientID = v
+	case uint64:
+		clientID = int64(v)
 	case int:
 		clientID = int64(v)
 	default:
-		logger.Warnf("无效的client_id类型: %T", clientIDRaw)
+		logger.Warnf("无效的 client_id 类型: %T", clientIDRaw)
 		c.JSON(http.StatusInternalServerError, DeviceListResponse{
 			Success: false,
 			Message: "内部错误",
@@ -254,7 +235,7 @@ func (a *DeviceTokenAPI) ListDevices(c *gin.Context) {
 		return
 	}
 
-	// 获取当前使用的JWT token（从Authorization header）
+	// 获取当前使用的 JWT token
 	authHeader := c.GetHeader("Authorization")
 	currentJWT := ""
 	if strings.HasPrefix(authHeader, "Bearer ") {
@@ -277,10 +258,9 @@ func (a *DeviceTokenAPI) ListDevices(c *gin.Context) {
 	for _, token := range tokens {
 		deviceInfo, _ := auth.DeviceInfoFromJSON(token.DeviceInfo)
 
-		// 判断是否是当前设备：比较JWT token
+		// 判断是否是当前设备
 		isCurrent := false
 		if currentJWT != "" {
-			// 解析当前JWT，获取device_token claim
 			jwtToken, err := jwt.Parse(currentJWT, func(t *jwt.Token) (interface{}, error) {
 				return []byte(a.config.Security.JWTSecret), nil
 			})
@@ -310,19 +290,19 @@ func (a *DeviceTokenAPI) ListDevices(c *gin.Context) {
 	})
 }
 
-// OfflineDevice 让设备下线（撤销Token）
+// OfflineDevice 让设备下线（撤销 Token）
 func (a *DeviceTokenAPI) OfflineDevice(c *gin.Context) {
 	deviceToken := c.Param("device_token")
 	if deviceToken == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "缺少device_token参数",
+			"message": "缺少 device_token 参数",
 		})
 		return
 	}
 
-	// 从JWT获取client_id
-	clientID, exists := c.Get("client_id")
+	// 从 JWT 获取 client_id
+	clientIDRaw, exists := c.Get("client_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
@@ -331,9 +311,19 @@ func (a *DeviceTokenAPI) OfflineDevice(c *gin.Context) {
 		return
 	}
 
-	// 撤销Token
-	if err := auth.RevokeDeviceToken(db.DB, int64(clientID.(float64)), deviceToken); err != nil {
-		logger.Warnf("撤销Device Token失败: %v", err)
+	var clientID int64
+	switch v := clientIDRaw.(type) {
+	case float64:
+		clientID = int64(v)
+	case uint64:
+		clientID = int64(v)
+	default:
+		clientID = int64(v.(int))
+	}
+
+	// 撤销 Token
+	if err := auth.RevokeDeviceToken(db.DB, clientID, deviceToken); err != nil {
+		logger.Warnf("撤销 Device Token 失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": err.Error(),
@@ -353,13 +343,13 @@ func (a *DeviceTokenAPI) DeleteDevice(c *gin.Context) {
 	if deviceToken == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "缺少device_token参数",
+			"message": "缺少 device_token 参数",
 		})
 		return
 	}
 
-	// 从JWT获取client_id
-	clientID, exists := c.Get("client_id")
+	// 从 JWT 获取 client_id
+	clientIDRaw, exists := c.Get("client_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
@@ -368,9 +358,19 @@ func (a *DeviceTokenAPI) DeleteDevice(c *gin.Context) {
 		return
 	}
 
-	// 删除Token
-	if err := auth.DeleteDeviceToken(db.DB, int64(clientID.(float64)), deviceToken); err != nil {
-		logger.Warnf("删除Device Token失败: %v", err)
+	var clientID int64
+	switch v := clientIDRaw.(type) {
+	case float64:
+		clientID = int64(v)
+	case uint64:
+		clientID = int64(v)
+	default:
+		clientID = int64(v.(int))
+	}
+
+	// 删除 Token
+	if err := auth.DeleteDeviceToken(db.DB, clientID, deviceToken); err != nil {
+		logger.Warnf("删除 Device Token 失败: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"message": err.Error(),

@@ -37,30 +37,24 @@ func CheckVersion(c *gin.Context) {
 		return
 	}
 
-	// 获取系统配置
-	var config model.SystemConfig
-	if err := db.DB.First(&config, 1).Error; err != nil {
-		// 如果配置不存在，默认允许所有版本
-		c.JSON(http.StatusOK, VersionCheckResponse{
-			Success:      true,
-			VersionValid: true,
-			MinVersion:   "1.0.0",
-			DownloadURL:  "",
-			Message:      "版本检查通过",
-		})
-		return
+	// 获取最低版本配置
+	var minVersionConfig model.SystemConfig
+	minVersion := "1.0.0"
+	if err := db.DB.Where("key = ?", model.ConfigDesktopMinVersion).First(&minVersionConfig).Error; err == nil {
+		if minVersionConfig.Value != "" {
+			minVersion = minVersionConfig.Value
+		}
 	}
 
 	// 比较版本号
-	minVersion := config.DesktopMinVersion
-	if minVersion == "" {
-		minVersion = "1.0.0"
-	}
-
 	versionValid := compareVersion(req.ClientVersion, minVersion) >= 0
 
-	// 构建下载地址
-	downloadURL := config.ClientDownloadURL
+	// 获取下载地址配置
+	var downloadURLConfig model.SystemConfig
+	downloadURL := ""
+	if err := db.DB.Where("key = ?", model.ConfigClientDownloadURL).First(&downloadURLConfig).Error; err == nil {
+		downloadURL = downloadURLConfig.Value
+	}
 	if downloadURL == "" {
 		// 使用当前服务器地址 + /download
 		scheme := "http"

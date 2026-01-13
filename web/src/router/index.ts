@@ -85,15 +85,57 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true }
       },
       {
+        path: 'groups/clients',
+        name: 'ClientGroups',
+        component: () => import('@/views/Group/ClientGroups.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'groups/clients/:id/members',
+        name: 'ClientGroupMembers',
+        component: () => import('@/views/Group/ClientGroupMembers.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'groups/agents',
+        name: 'AgentGroups',
+        component: () => import('@/views/Group/AgentGroups.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'groups/agents/:id/members',
+        name: 'AgentGroupMembers',
+        component: () => import('@/views/Group/AgentGroupMembers.vue'),
+        meta: { requiresAuth: true }
+      },
+      // 隧道管理
+      {
+        path: 'tunnel/users',
+        name: 'TunnelUsers',
+        component: () => import('@/views/Tunnel/Users.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'tunnel/nodes',
+        name: 'TunnelNodes',
+        component: () => import('@/views/Tunnel/Nodes.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'tunnel/acl',
+        name: 'TunnelACL',
+        component: () => import('@/views/Tunnel/ACL.vue'),
+        meta: { requiresAuth: true }
+      },
+      // 旧路由重定向
+      {
         path: 'groups',
-        name: 'Groups',
-        component: () => import('@/views/Group/List.vue'),
+        redirect: '/groups/clients',
         meta: { requiresAuth: true }
       },
       {
         path: 'groups/:id/members',
-        name: 'GroupMembers',
-        component: () => import('@/views/Group/Members.vue'),
+        redirect: to => `/groups/clients/${to.params.id}/members`,
         meta: { requiresAuth: true }
       },
       {

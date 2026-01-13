@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -10,6 +11,11 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+)
+
+// 网段配置的 Key 常量
+const (
+	ConfigNetworkPlan = "network_plan" // 网段规划 JSON
 )
 
 // NetworkConfig 网段配置服务
@@ -52,26 +58,14 @@ type NetworkConfigFile struct {
 func (nc *NetworkConfig) GetNetworkPlan() (*NetworkPlan, error) {
 	// 1. 尝试从数据库加载
 	var sysConfig model.SystemConfig
-	err := nc.db.First(&sysConfig).Error
+	err := nc.db.Where("key = ?", ConfigNetworkPlan).First(&sysConfig).Error
 	if err == nil {
-		// 数据库有配置，使用数据库值
-		return &NetworkPlan{
-			Agent: NetworkSegment{
-				CIDR:    sysConfig.AgentCIDR,
-				IPStart: sysConfig.AgentIPStart,
-				IPEnd:   sysConfig.AgentIPEnd,
-			},
-			Desktop: NetworkSegment{
-				CIDR:    sysConfig.DesktopCIDR,
-				IPStart: sysConfig.DesktopIPStart,
-				IPEnd:   sysConfig.DesktopIPEnd,
-			},
-			Server: NetworkSegment{
-				CIDR:    sysConfig.ServerCIDR,
-				IPStart: sysConfig.ServerIPStart,
-				IPEnd:   sysConfig.ServerIPEnd,
-			},
-		}, nil
+		// 数据库有配置，解析 JSON
+		var plan NetworkPlan
+		if err := json.Unmarshal([]byte(sysConfig.Value), &plan); err != nil {
+			return nil, fmt.Errorf("解析网段配置失败: %w", err)
+		}
+		return &plan, nil
 	}
 
 	// 2. 数据库没有配置，从 network.toml 文件读取
@@ -135,7 +129,7 @@ func (nc *NetworkConfig) getHardcodedDefaults() *NetworkPlan {
 func (nc *NetworkConfig) InitializeDefaultConfig() error {
 	// 检查数据库是否已有配置
 	var count int64
-	if err := nc.db.Model(&model.SystemConfig{}).Count(&count).Error; err != nil {
+	if err := nc.db.Model(&model.SystemConfig{}).Where("key = ?", ConfigNetworkPlan).Count(&count).Error; err != nil {
 		return fmt.Errorf("failed to check system config: %w", err)
 	}
 
@@ -150,17 +144,16 @@ func (nc *NetworkConfig) InitializeDefaultConfig() error {
 		return fmt.Errorf("failed to load default network plan: %w", err)
 	}
 
+	// 序列化为 JSON
+	planJSON, err := json.Marshal(defaultPlan)
+	if err != nil {
+		return fmt.Errorf("failed to serialize network plan: %w", err)
+	}
+
 	// 写入数据库
 	sysConfig := &model.SystemConfig{
-		AgentCIDR:      defaultPlan.Agent.CIDR,
-		AgentIPStart:   defaultPlan.Agent.IPStart,
-		AgentIPEnd:     defaultPlan.Agent.IPEnd,
-		DesktopCIDR:    defaultPlan.Desktop.CIDR,
-		DesktopIPStart: defaultPlan.Desktop.IPStart,
-		DesktopIPEnd:   defaultPlan.Desktop.IPEnd,
-		ServerCIDR:     defaultPlan.Server.CIDR,
-		ServerIPStart:  defaultPlan.Server.IPStart,
-		ServerIPEnd:    defaultPlan.Server.IPEnd,
+		Key:   ConfigNetworkPlan,
+		Value: string(planJSON),
 	}
 
 	if err := nc.db.Create(sysConfig).Error; err != nil {
@@ -177,27 +170,29 @@ func (nc *NetworkConfig) UpdateNetworkPlan(plan *NetworkPlan) error {
 		return fmt.Errorf("invalid network plan: %w", err)
 	}
 
-	// 更新数据库
+	// 序列化为 JSON
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		return fmt.Errorf("failed to serialize network plan: %w", err)
+	}
+
+	// 更新或创建数据库记录
 	var sysConfig model.SystemConfig
-	if err := nc.db.First(&sysConfig).Error; err != nil {
+	err = nc.db.Where("key = ?", ConfigNetworkPlan).First(&sysConfig).Error
+	if err == gorm.ErrRecordNotFound {
+		// 创建新记录
+		sysConfig = model.SystemConfig{
+			Key:   ConfigNetworkPlan,
+			Value: string(planJSON),
+		}
+		return nc.db.Create(&sysConfig).Error
+	} else if err != nil {
 		return fmt.Errorf("failed to load system config: %w", err)
 	}
 
-	sysConfig.AgentCIDR = plan.Agent.CIDR
-	sysConfig.AgentIPStart = plan.Agent.IPStart
-	sysConfig.AgentIPEnd = plan.Agent.IPEnd
-	sysConfig.DesktopCIDR = plan.Desktop.CIDR
-	sysConfig.DesktopIPStart = plan.Desktop.IPStart
-	sysConfig.DesktopIPEnd = plan.Desktop.IPEnd
-	sysConfig.ServerCIDR = plan.Server.CIDR
-	sysConfig.ServerIPStart = plan.Server.IPStart
-	sysConfig.ServerIPEnd = plan.Server.IPEnd
-
-	if err := nc.db.Save(&sysConfig).Error; err != nil {
-		return fmt.Errorf("failed to update network config: %w", err)
-	}
-
-	return nil
+	// 更新现有记录
+	sysConfig.Value = string(planJSON)
+	return nc.db.Save(&sysConfig).Error
 }
 
 // validateNetworkPlan 验证网段配置合法性

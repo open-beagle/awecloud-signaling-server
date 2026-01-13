@@ -1,11 +1,11 @@
 <template>
   <el-dialog
     v-model="visible"
-    :title="t('client.secretTitle')"
+    title="客户密钥"
     width="600px"
   >
     <el-alert
-      :title="t('client.secretTip')"
+      title="请妥善保存此密钥，它只会显示一次！客户需要使用此密钥在 Desktop 应用中登录。"
       type="warning"
       :closable="false"
       style="margin-bottom: 20px"
@@ -13,12 +13,12 @@
 
     <div class="secret-info">
       <div class="info-item">
-        <label>{{ t('client.clientId') }}:</label>
+        <label>用户名:</label>
         <div class="value">{{ clientId }}</div>
       </div>
 
       <div class="info-item">
-        <label>{{ t('client.clientSecret') }}:</label>
+        <label>密钥:</label>
         <div class="secret-value">
           <el-input
             :model-value="clientSecret"

@@ -51,46 +51,36 @@ func autoMigrate() error {
 		&model.Admin{},
 		&model.Agent{},
 		&model.Client{},
-		&model.Desktop{}, // 新增：桌面设备模型
+		&model.Desktop{},
 
 		// 分组模型
-		&model.ClientGroup{},       // 新增：用户分组
-		&model.ClientGroupMember{}, // 新增：用户分组成员
-		&model.AgentGroup{},        // 新增：代理分组
-		&model.AgentGroupMember{},  // 新增：代理分组成员
+		&model.ClientGroup{},
+		&model.ClientGroupMember{},
+		&model.AgentGroup{},
+		&model.AgentGroupMember{},
 
 		// 服务模型
-		&model.ProxyService{}, // 端口映射服务
-		&model.PortForward{},  // 新增：端口转发配置
+		&model.ProxyService{},
+		&model.PortForward{},
 
 		// 服务授权模型
-		&model.ServiceClientPermission{},      // 新增：服务-用户授权
-		&model.ServiceClientGroupPermission{}, // 新增：服务-用户分组授权
-		&model.ServiceAgentPermission{},       // 新增：服务-代理授权
-		&model.ServiceAgentGroupPermission{},  // 新增：服务-代理分组授权
+		&model.ServiceClientPermission{},
+		&model.ServiceClientGroupPermission{},
+		&model.ServiceAgentPermission{},
+		&model.ServiceAgentGroupPermission{},
 
 		// 审计日志
-		&model.AuditLog{}, // 新增：审计日志
+		&model.AuditLog{},
 
 		// 系统配置
 		&model.SystemConfig{},
-		&model.SystemSettings{},
 
-		// 兼容性保留（旧模型）
-		&model.Group{},
-		&model.GroupMember{},
-		&model.STCPAccess{}, // 废弃，保留兼容
-		&model.ClientSession{},
-		&model.DeviceToken{},
-		&model.PortPreference{},         // 废弃，保留兼容
-		&model.ServiceFavorite{},        // 废弃，保留兼容
-		&model.ConnectionAuditLog{},     // 旧的审计日志，保留兼容
-		&model.ServicePermission{},      // Desktop 服务访问权限（安全架构）
-		&model.AgentServicePermission{}, // Agent 服务访问权限（安全架构）
-		&model.DesktopInstance{},        // Desktop 多实例支持（安全架构）
-		&model.DesktopService{},         // Desktop 暴露的服务（安全架构）
-		&model.AgentTailscaleState{},    // Agent Tailscale 状态存储（混合存储）
-		&model.Visitor{},                // Visitor 端口访问服务
+		// 用户偏好
+		&model.PortPreference{},
+		&model.ServiceFavorite{},
+
+		// Visitor
+		&model.Visitor{},
 	)
 	if err != nil {
 		return err

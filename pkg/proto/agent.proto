@@ -4,277 +4,156 @@ package awecloud.signaling;
 
 option go_package = "github.com/open-beagle/awecloud-signaling-server/pkg/proto";
 
-// AgentService Agent管理服务
+// AgentService Agent 管理服务
 service AgentService {
-  // Agent注册
-  rpc Register(RegisterRequest) returns (RegisterResponse);
-  
-  // Agent心跳
-  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
-  
-  // 接收Server指令（双向流）
-  rpc ReceiveCommands(stream CommandResponse) returns (stream Command);
-  
-  // 状态上报
-  rpc ReportStatus(StatusReport) returns (StatusResponse);
-  
-  // 获取已启用的TCP服务列表
-  rpc GetEnabledTCPServices(GetTCPServicesRequest) returns (GetTCPServicesResponse);
-  
-  // 获取已启用的STCP访问列表
-  rpc GetEnabledSTCPVisitors(GetSTCPVisitorsRequest) returns (GetSTCPVisitorsResponse);
+  // 注册 - Agent 首次连接时调用
+  rpc Register(AgentRegisterRequest) returns (AgentRegisterResponse);
 
-  // [Tailscale] 上报 Tailscale 状态
-  rpc ReportTailscaleStatus(TailscaleStatusReport) returns (StatusResponse);
+  // 认证 - Agent 重连时调用
+  rpc Authenticate(AgentAuthenticateRequest) returns (AgentAuthenticateResponse);
 
-  // [Tailscale] 上报端口映射状态
-  rpc ReportProxyStatus(ProxyStatusReport) returns (StatusResponse);
+  // 心跳 - 双向流，保持连接并同步状态
+  rpc Heartbeat(stream AgentHeartbeatRequest) returns (stream AgentHeartbeatResponse);
 
-  // [Tailscale] 获取 Tailscale 状态
-  rpc GetTailscaleState(GetStateRequest) returns (GetStateResponse);
-
-  // [Tailscale] 保存 Tailscale 状态
-  rpc SaveTailscaleState(SaveStateRequest) returns (SaveStateResponse);
+  // 获取实时状态 - Server 主动调用（用于 Web 详情页刷新）
+  rpc GetRealtimeStatus(GetRealtimeStatusRequest) returns (GetRealtimeStatusResponse);
 }
 
-// Agent注册请求
-message RegisterRequest {
-  string agent_name = 1;
-  string agent_token = 2;
-  string version = 3; // Agent版本
+// ============================================
+// 公共消息定义
+// ============================================
+
+// SystemInfo 系统信息
+message SystemInfo {
+  string os = 1; // 操作系统：linux / windows / darwin
+  string os_version = 2; // 系统版本
+  string arch = 3; // CPU 架构：amd64 / arm64
+  string hostname = 4; // 主机名
+  string cpu = 5; // CPU 型号
+  int32 cpu_cores = 6; // CPU 核心数
+  int32 memory_gb = 7; // 内存大小（GB）
 }
 
-// Agent注册响应
-message RegisterResponse {
-  bool success = 1;
-  string message = 2;
-  int64 agent_id = 3;
-  string token = 4; // 隧道认证 Token (FRP, 废弃)
-  string server = 5; // 隧道服务器地址 (FRP, 废弃)
-  int32 port = 6; // 隧道服务器端口 (FRP, 废弃)
-
-  // [Tailscale] 新增字段
-  string control_url = 7; // Headscale 控制平面 URL
-  string auth_key = 8; // Tailscale 预认证密钥
-  string derp_url = 9; // DERP 服务器 URL
+// NetworkInterface 网络接口信息
+message NetworkInterface {
+  string name = 1; // 网卡名称（如 eth0, ens192）
+  string ip = 2; // IP 地址
+  string mask = 3; // 子网掩码
+  string gateway = 4; // 网关地址
 }
 
-// Agent心跳请求
-message HeartbeatRequest {
-  int64 agent_id = 1;
-  string agent_token = 2;
-  string version = 3; // Agent版本
+// ============================================
+// Agent 注册
+// ============================================
 
-  // [Tailscale] 新增字段
-  string tailscale_ip = 4; // Tailscale IP
-  bool ts_connected = 5; // Tailscale 连接状态
-  string ts_conn_type = 6; // 连接方式: p2p / derp
-  int64 ts_connected_at = 7; // 连接时间（Unix 时间戳，秒）
-
-  // 网络信息（Agent 上报）
-  string lan_ip = 8; // 局域网 IP
-  string lan_gateway = 9; // 网关地址
-  string lan_interface = 10; // 网卡名称
-  string runtime_env = 11; // 运行环境: native/docker/kubernetes
-  string hostname = 12; // 主机名
+// AgentRegisterRequest Agent 注册请求
+message AgentRegisterRequest {
+  string name = 1; // Agent 名称
+  string secret = 2; // 认证密钥
+  string version = 3; // Agent 版本号
+  SystemInfo system_info = 4; // 系统信息
 }
 
-// Agent心跳响应
-message HeartbeatResponse {
-  bool success = 1;
-  int64 timestamp = 2;
+// AgentRegisterResponse Agent 注册响应
+message AgentRegisterResponse {
+  bool success = 1; // 是否成功
+  string message = 2; // 响应消息
+  uint64 agent_id = 3; // Agent ID（Headscale User ID）
+  string auth_key = 4; // Tailscale PreAuthKey，用于隧道连接
+  string server_url = 5; // Headscale 服务器地址
 }
 
-// Server指令
-message Command {
-  enum Type {
-    CREATE_STCP = 0;
-    DELETE_STCP = 1;
-    CREATE_TCP = 2;
-    DELETE_TCP = 3;
-    CREATE_STCP_VISITOR = 4;
-    DELETE_STCP_VISITOR = 5;
+// ============================================
+// Agent 认证
+// ============================================
 
-    // [Tailscale] 新增命令类型
-    START_PROXY = 10; // 启动端口映射（服务暴露）
-    STOP_PROXY = 11; // 停止端口映射
-    SYNC_PROXIES = 12; // 同步所有端口映射
-    START_VISITOR = 13; // 启动 Visitor（服务访问）
-    STOP_VISITOR = 14; // 停止 Visitor
-    SYNC_VISITORS = 15; // 同步所有 Visitor
-  }
-  
-  string command_id = 1;
-  Type type = 2;
-  
-  // STCP相关字段
-  string instance_name = 3;
-  string secret_key = 4;
-  
-  // TCP相关字段
-  string service_name = 5;
-  int32 remote_port = 6;
-  
-  // 公共字段
-  string local_ip = 7;
-  int32 local_port = 8;
-  
-  // STCP Visitor相关字段
-  string visitor_name = 9;
-  string server_name = 10;
-  string bind_addr = 11;
-  int32 bind_port = 12;
-
-  // [Tailscale] 端口映射相关字段
-  ProxyCommand proxy_command = 13;
-  
-  // [Tailscale] Visitor 相关字段
-  VisitorCommand visitor_command = 14;
+// AgentAuthenticateRequest Agent 认证请求
+message AgentAuthenticateRequest {
+  uint64 agent_id = 1; // Agent ID
+  string secret = 2; // 认证密钥
+  string version = 3; // Agent 版本号
+  SystemInfo system_info = 4; // 系统信息
 }
 
-// [Tailscale] 端口映射指令（服务暴露）
-message ProxyCommand {
-  string name = 1; // 服务名称
-  int32 listen_port = 2; // 监听端口
-  string target_addr = 3; // 目标地址，如 192.168.1.100:3306
+// AgentAuthenticateResponse Agent 认证响应
+message AgentAuthenticateResponse {
+  bool success = 1; // 是否成功
+  string message = 2; // 响应消息
+  string auth_key = 3; // Tailscale PreAuthKey（如需重新连接）
+  string server_url = 4; // Headscale 服务器地址
 }
 
-// [Tailscale] Visitor 指令（服务访问）
-message VisitorCommand {
-  string name = 1; // Visitor 名称
-  int32 listen_port = 2; // 本地监听端口
-  string target_addr = 3; // VPN 网络目标地址，如 100.64.0.1:3306
+// ============================================
+// Agent 心跳（双向流）
+// ============================================
+
+// ServiceStatus 端口映射服务状态
+message ServiceStatus {
+  string service_id = 1; // 服务 ID
+  bool running = 2; // 是否运行中
+  string error = 3; // 错误信息（如有）
 }
 
-// 指令响应
-message CommandResponse {
-  string command_id = 1;
-  bool success = 2;
-  string message = 3;
+// ForwardStatus 端口访问服务状态
+message ForwardStatus {
+  string forward_id = 1; // 端口访问 ID
+  bool running = 2; // 是否运行中
+  string error = 3; // 错误信息（如有）
 }
 
-// 状态上报
-message StatusReport {
-  int64 agent_id = 1;
-  repeated STCPStatus stcp_statuses = 2;
+// AgentHeartbeatRequest Agent 心跳请求
+message AgentHeartbeatRequest {
+  uint64 agent_id = 1; // Agent ID
+  string tunnel_ip = 2; // 隧道 IP
+  bool tunnel_connected = 3; // 隧道连接状态
+  repeated ServiceStatus service_status = 4; // 端口映射服务状态列表
+  repeated ForwardStatus forward_status = 5; // 端口访问服务状态列表
+  // 网络信息（首次心跳或变更时上报）
+  string hostname = 6; // 主机名
+  string runtime = 7; // 运行环境：docker / kubernetes / physical
+  repeated NetworkInterface networks = 8; // 网络接口列表
 }
 
-message STCPStatus {
-  string instance_name = 1;
-  string status = 2; // "running", "stopped", "error"
-  int32 active_connections = 3;
+// ServiceConfig 端口映射配置
+message ServiceConfig {
+  string id = 1; // 服务 ID
+  string name = 2; // 服务名称
+  string target_addr = 3; // 目标地址（如 192.168.1.10:80）
+  string listen_addr = 4; // 监听地址（如 :80）
+  bool enabled = 5; // 是否启用
 }
 
-// 状态响应
-message StatusResponse {
-  bool success = 1;
+// ForwardConfig 端口访问配置
+message ForwardConfig {
+  string id = 1; // 端口访问 ID
+  string name = 2; // 名称
+  string target_addr = 3; // 目标地址（如 100.64.0.1:3306）
+  string listen_addr = 4; // 本地监听地址（如 :13306）
+  bool enabled = 5; // 是否启用
 }
 
-// 获取TCP服务请求
-message GetTCPServicesRequest {
-  int64 agent_id = 1;
+// AgentHeartbeatResponse Agent 心跳响应
+message AgentHeartbeatResponse {
+  int64 config_version = 1; // 配置版本号
+  repeated ServiceConfig services = 2; // 端口映射配置（如有变更）
+  repeated ForwardConfig forwards = 3; // 端口访问配置（如有变更）
 }
 
-// TCP服务信息
-message TCPServiceInfo {
-  string service_name = 1;
-  string local_ip = 2;
-  int32 local_port = 3;
-  int32 remote_port = 4;
+// ============================================
+// 获取实时状态
+// ============================================
+
+// GetRealtimeStatusRequest 获取实时状态请求
+message GetRealtimeStatusRequest {
+  uint64 agent_id = 1; // Agent ID
 }
 
-// 获取TCP服务响应
-message GetTCPServicesResponse {
-  bool success = 1;
-  repeated TCPServiceInfo services = 2;
-}
-
-// 获取STCP访问请求
-message GetSTCPVisitorsRequest {
-  string agent_name = 1;
-}
-
-// STCP访问信息
-message STCPVisitorInfo {
-  string visitor_name = 1;
-  string server_name = 2;
-  string secret_key = 3;
-  string bind_addr = 4;
-  int32 bind_port = 5;
-}
-
-// 获取STCP访问响应
-message GetSTCPVisitorsResponse {
-  bool success = 1;
-  repeated STCPVisitorInfo visitors = 2;
-}
-
-// [Tailscale] Tailscale 状态上报
-message TailscaleStatusReport {
-  int64 agent_id = 1;
-  string tailscale_ip = 2; // Tailscale IP
-  bool connected = 3; // 连接状态
-  string conn_type = 4; // 连接方式: p2p / derp
-  int32 latency_ms = 5; // 延迟（毫秒）
-}
-
-// [Tailscale] 端口映射状态（服务暴露）
-message ProxyStatus {
-  string name = 1; // 服务名称
-  int32 listen_port = 2; // 监听端口
-  string target_addr = 3; // 目标地址
-  string status = 4; // 状态: running / stopped / error
-  int32 connections = 5; // 当前连接数
-  int64 bytes_in = 6; // 入站流量
-  int64 bytes_out = 7; // 出站流量
-  string error_msg = 8; // 错误信息（status=error 时）
-}
-
-// [Tailscale] Visitor 状态（服务访问）
-message VisitorStatus {
-  string name = 1; // Visitor 名称
-  int32 listen_port = 2; // 本地监听端口
-  string target_addr = 3; // VPN 目标地址
-  string listen_addr = 4; // 实际监听地址（局域网 IP）
-  string status = 5; // 状态: running / stopped / error
-  int32 connections = 6; // 当前连接数
-  int64 bytes_in = 7; // 入站流量
-  int64 bytes_out = 8; // 出站流量
-  string error_msg = 9; // 错误信息（status=error 时）
-}
-
-// [Tailscale] 端口映射状态上报（服务暴露）
-message ProxyStatusReport {
-  int64 agent_id = 1;
-  repeated ProxyStatus proxies = 2;
-}
-
-// [Tailscale] Visitor 状态上报（服务访问）
-message VisitorStatusReport {
-  int64 agent_id = 1;
-  repeated VisitorStatus visitors = 2;
-}
-
-// [Tailscale] 获取状态请求
-message GetStateRequest {
-  int64 agent_id = 1; // Agent ID
-  string agent_token = 2; // Agent 认证令牌
-}
-
-// [Tailscale] 获取状态响应
-message GetStateResponse {
-  bytes state_data = 1; // Tailscale 状态序列化数据（压缩后）
-  bool exists = 2; // 是否存在历史状态
-}
-
-// [Tailscale] 保存状态请求
-message SaveStateRequest {
-  int64 agent_id = 1; // Agent ID
-  string agent_token = 2; // Agent 认证令牌
-  bytes state_data = 3; // Tailscale 状态序列化数据（压缩后）
-}
-
-// [Tailscale] 保存状态响应
-message SaveStateResponse {
-  bool success = 1; // 是否保存成功
+// GetRealtimeStatusResponse 获取实时状态响应
+message GetRealtimeStatusResponse {
+  string hostname = 1; // 主机名
+  string runtime = 2; // 运行环境：docker / k8s / vm / physical
+  repeated NetworkInterface networks = 3; // 网络接口列表
+  string tunnel_ip = 4; // 隧道 IP
+  bool tunnel_connected = 5; // 隧道连接状态
+  int64 tunnel_connected_time = 6; // 隧道连接时间（Unix 时间戳）
 }

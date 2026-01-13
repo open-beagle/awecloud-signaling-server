@@ -29,17 +29,17 @@ export interface ProxyService {
 export interface CreateServiceRequest {
   name: string
   agent_id: number
-  listen_port: number
+  listen_addr: string
   target_addr: string
-  remark?: string
+  alias?: string
 }
 
 // 更新服务请求
 export interface UpdateServiceRequest {
-  name?: string
-  listen_port?: number
+  alias?: string
+  listen_addr?: string
   target_addr?: string
-  remark?: string
+  enabled?: boolean
 }
 
 // 获取服务列表

@@ -298,3 +298,15 @@ func (m *ProxyManager) Exists(name string) bool {
 	_, exists := m.proxies[name]
 	return exists
 }
+
+// GetStatus 获取所有代理的运行状态
+func (m *ProxyManager) GetStatus() map[string]bool {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	result := make(map[string]bool)
+	for name, proxy := range m.proxies {
+		result[name] = proxy.Status == "running"
+	}
+	return result
+}

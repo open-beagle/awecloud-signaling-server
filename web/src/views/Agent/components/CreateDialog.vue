@@ -11,18 +11,16 @@
       :rules="rules"
       label-width="100px"
     >
-      <el-form-item :label="t('agent.name')" prop="agent_name">
+      <el-form-item :label="t('agent.name')" prop="name">
         <el-input
-          v-model="form.agent_name"
+          v-model="form.name"
           :placeholder="t('agent.namePlaceholder')"
         />
       </el-form-item>
-      <el-form-item :label="t('agent.description')">
+      <el-form-item :label="t('agent.alias')">
         <el-input
-          v-model="form.description"
-          type="textarea"
-          :rows="3"
-          :placeholder="t('agent.descriptionPlaceholder')"
+          v-model="form.alias"
+          :placeholder="t('agent.aliasPlaceholder')"
         />
       </el-form-item>
     </el-form>
@@ -58,12 +56,12 @@ const loading = ref(false)
 const formRef = ref<FormInstance>()
 
 const form = reactive({
-  agent_name: '',
-  description: ''
+  name: '',
+  alias: ''
 })
 
 const rules: FormRules = {
-  agent_name: [{ required: true, message: t('agent.nameRequired'), trigger: 'blur' }]
+  name: [{ required: true, message: t('agent.nameRequired'), trigger: 'blur' }]
 }
 
 watch(

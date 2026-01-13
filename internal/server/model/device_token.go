@@ -1,26 +1,22 @@
 package model
 
-import (
-	"time"
-)
+import "time"
 
-// DeviceToken 设备令牌表
+// DeviceToken 设备令牌模型
+// 用于 Desktop 设备的持久化认证，绑定设备指纹
 type DeviceToken struct {
-	ID                int64     `gorm:"primaryKey" json:"id"`
-	ClientID          int64     `gorm:"not null;index:idx_device_tokens_client_id" json:"client_id"`
-	DeviceToken       string    `gorm:"type:text;not null;uniqueIndex:idx_device_tokens_token" json:"device_token"`
-	DeviceFingerprint string    `gorm:"type:text;not null;index:idx_device_tokens_fingerprint" json:"device_fingerprint"`
-	DeviceInfo        string    `gorm:"type:text" json:"device_info"` // JSON格式存储设备信息
-	CreatedAt         time.Time `gorm:"autoCreateTime" json:"created_at"`
-	LastUsedAt        time.Time `json:"last_used_at"`
-	ExpiresAt         time.Time `gorm:"not null;index:idx_device_tokens_expires_at" json:"expires_at"`
-	Revoked           bool      `gorm:"default:false;index:idx_device_tokens_revoked" json:"revoked"`
-
-	// 关联
-	Client Client `gorm:"foreignKey:ClientID;constraint:OnDelete:CASCADE" json:"-"`
+	ID                int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	ClientID          int64     `gorm:"index;not null" json:"client_id"`                   // 所属 Client ID
+	DeviceToken       string    `gorm:"uniqueIndex;size:100;not null" json:"device_token"` // 设备令牌
+	DeviceFingerprint string    `gorm:"index;size:255;not null" json:"device_fingerprint"` // 设备指纹
+	DeviceInfo        string    `gorm:"type:text" json:"device_info"`                      // 设备信息 JSON
+	LastUsedAt        time.Time `json:"last_used_at"`                                      // 最后使用时间
+	ExpiresAt         time.Time `json:"expires_at"`                                        // 过期时间
+	Revoked           bool      `gorm:"default:false" json:"revoked"`                      // 是否已撤销
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
-// TableName 指定表名
 func (DeviceToken) TableName() string {
-	return "device_tokens"
+	return "device_token"
 }
