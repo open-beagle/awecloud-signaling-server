@@ -58,6 +58,4 @@ config/*.toml
 deployments/kubernetes/*.local.yaml
 
 # Desktop client (independent git repository)
-/desktop/
-/git/
 /.kiro/spec
