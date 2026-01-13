@@ -10,7 +10,7 @@ BUILD_TARGETS="${BUILD_TARGETS:-server,agent}"  # 可选: server, agent, 或 ser
 # 版本信息
 BUILD_VERSION="${BUILD_VERSION:-dev}"
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILD_DATE=$(date -u '+%Y-%m-%d_%H:%M:%S')
+BUILD_DATE=$(date '+%Y-%m-%d_%H:%M:%S')
 BUILD_GO=$(go version | awk '{print $3}')
 
 # 输出目录
@@ -176,3 +176,20 @@ echo ""
 echo "All builds completed successfully!"
 echo "Binaries are in: ${BIN_DIR}/"
 ls -lh ${BIN_DIR}/
+
+# 验证 Server 版本信息
+if [ "$BUILD_SERVER" = true ]; then
+    echo ""
+    echo "Verifying Server version..."
+    # 使用当前架构的二进制文件进行验证
+    CURRENT_ARCH=$(go env GOARCH)
+    SERVER_BIN="${BIN_DIR}/server-${GOOS}-${CURRENT_ARCH}"
+    
+    if [ -f "${SERVER_BIN}" ]; then
+        ${SERVER_BIN} --version
+    else
+        echo "Warning: Server binary for current architecture (${CURRENT_ARCH}) not found"
+        echo "Available binaries:"
+        ls -1 ${BIN_DIR}/server-* 2>/dev/null || echo "No server binaries found"
+    fi
+fi

@@ -54,6 +54,36 @@ type ClientGroupListItem struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// GetClientGroup 获取单个用户分组
+func (a *GroupAPI) GetClientGroup(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
+		return
+	}
+
+	var group model.ClientGroup
+	if err := db.DB.First(&group, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("分组不存在"))
+		return
+	}
+
+	// 查询成员数量
+	var memberCount int64
+	db.DB.Model(&model.ClientGroupMember{}).Where("group_id = ?", id).Count(&memberCount)
+
+	result := ClientGroupListItem{
+		ID:          group.ID,
+		Name:        group.Name,
+		Alias:       group.Alias,
+		MemberCount: memberCount,
+		Description: group.Description,
+		CreatedAt:   group.CreatedAt,
+	}
+
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
 // ListClientGroups 获取用户分组列表
 func (a *GroupAPI) ListClientGroups(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -256,11 +286,24 @@ type ClientGroupMemberItem struct {
 	JoinedAt time.Time `json:"joined_at"`
 }
 
+// ClientGroupMembersResponse 用户分组成员响应
+type ClientGroupMembersResponse struct {
+	Group   ClientGroupListItem     `json:"group"`
+	Members []ClientGroupMemberItem `json:"members"`
+}
+
 // GetClientGroupMembers 获取用户分组成员
 func (a *GroupAPI) GetClientGroupMembers(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
+		return
+	}
+
+	// 获取分组信息
+	var group model.ClientGroup
+	if err := db.DB.First(&group, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("分组不存在"))
 		return
 	}
 
@@ -282,7 +325,19 @@ func (a *GroupAPI) GetClientGroupMembers(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, NewSuccessResponse(result))
+	response := ClientGroupMembersResponse{
+		Group: ClientGroupListItem{
+			ID:          group.ID,
+			Name:        group.Name,
+			Alias:       group.Alias,
+			MemberCount: int64(len(result)),
+			Description: group.Description,
+			CreatedAt:   group.CreatedAt,
+		},
+		Members: result,
+	}
+
+	c.JSON(http.StatusOK, NewSuccessResponse(response))
 }
 
 // AddClientGroupMemberRequest 添加用户分组成员请求
@@ -342,11 +397,57 @@ func (a *GroupAPI) AddClientGroupMember(c *gin.Context) {
 
 		var desktops []model.Desktop
 		db.DB.Where("client_id = ?", req.ClientID).Find(&desktops)
+		// 使用分组名称生成 Tag，格式: tag:desktop-group-{group.name}
+		newTag := "tag:desktop-group-" + group.Name
+		// 身份 Tag，格式: tag:desktop-{client.name}
+		identityTag := "tag:desktop-" + client.Name
+
 		for _, d := range desktops {
 			if d.ID > 0 {
-				// 添加分组 Tag
-				tag := "tag:client-group-" + strconv.FormatInt(groupID, 10)
-				_ = a.hsClient.SetTags(ctx, d.ID, []string{tag})
+				// 获取现有 Tag
+				node, err := a.hsClient.GetNode(ctx, d.ID)
+				if err != nil {
+					logger.Warnf("获取节点 %d 失败: %v", d.ID, err)
+					continue
+				}
+
+				tags := node.ForcedTags
+				tagsChanged := false
+
+				// 确保有身份 Tag
+				hasIdentityTag := false
+				for _, t := range tags {
+					if t == identityTag {
+						hasIdentityTag = true
+						break
+					}
+				}
+				if !hasIdentityTag {
+					tags = append(tags, identityTag)
+					tagsChanged = true
+				}
+
+				// 检查是否已有分组 Tag
+				hasGroupTag := false
+				for _, t := range tags {
+					if t == newTag {
+						hasGroupTag = true
+						break
+					}
+				}
+				if !hasGroupTag {
+					tags = append(tags, newTag)
+					tagsChanged = true
+				}
+
+				// 更新 Tag
+				if tagsChanged {
+					if err := a.hsClient.SetTags(ctx, d.ID, tags); err != nil {
+						logger.Warnf("设置节点 %d Tag 失败: %v", d.ID, err)
+					} else {
+						logger.Infof("节点 %d 添加 Tag: %s", d.ID, newTag)
+					}
+				}
 			}
 		}
 	}
@@ -389,11 +490,37 @@ func (a *GroupAPI) RemoveClientGroupMember(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 		defer cancel()
 
-		var desktops []model.Desktop
-		db.DB.Where("client_id = ?", clientID).Find(&desktops)
-		for _, d := range desktops {
-			if d.ID > 0 {
-				_ = a.hsClient.SetTags(ctx, d.ID, []string{})
+		// 获取分组信息
+		var group model.ClientGroup
+		if err := db.DB.First(&group, groupID).Error; err == nil {
+			var desktops []model.Desktop
+			db.DB.Where("client_id = ?", clientID).Find(&desktops)
+			// 使用分组名称生成 Tag，格式: tag:desktop-group-{group.name}
+			tagToRemove := "tag:desktop-group-" + group.Name
+
+			for _, d := range desktops {
+				if d.ID > 0 {
+					// 获取现有 Tag
+					node, err := a.hsClient.GetNode(ctx, d.ID)
+					if err != nil {
+						logger.Warnf("获取节点 %d 失败: %v", d.ID, err)
+						continue
+					}
+
+					// 移除指定 Tag，保留其他 Tag（包括身份 Tag）
+					newTags := []string{}
+					for _, t := range node.ForcedTags {
+						if t != tagToRemove {
+							newTags = append(newTags, t)
+						}
+					}
+
+					if err := a.hsClient.SetTags(ctx, d.ID, newTags); err != nil {
+						logger.Warnf("设置节点 %d Tag 失败: %v", d.ID, err)
+					} else {
+						logger.Infof("节点 %d 移除 Tag: %s", d.ID, tagToRemove)
+					}
+				}
 			}
 		}
 	}
@@ -416,6 +543,36 @@ type AgentGroupListItem struct {
 	MemberCount int64     `json:"member_count"`
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+// GetAgentGroup 获取单个代理分组
+func (a *GroupAPI) GetAgentGroup(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
+		return
+	}
+
+	var group model.AgentGroup
+	if err := db.DB.First(&group, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("分组不存在"))
+		return
+	}
+
+	// 查询成员数量
+	var memberCount int64
+	db.DB.Model(&model.AgentGroupMember{}).Where("group_id = ?", id).Count(&memberCount)
+
+	result := AgentGroupListItem{
+		ID:          group.ID,
+		Name:        group.Name,
+		Alias:       group.Alias,
+		MemberCount: memberCount,
+		Description: group.Description,
+		CreatedAt:   group.CreatedAt,
+	}
+
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
 }
 
 // ListAgentGroups 获取代理分组列表
@@ -610,11 +767,24 @@ type AgentGroupMemberItem struct {
 	JoinedAt time.Time `json:"joined_at"`
 }
 
+// AgentGroupMembersResponse 代理分组成员响应
+type AgentGroupMembersResponse struct {
+	Group   AgentGroupListItem     `json:"group"`
+	Members []AgentGroupMemberItem `json:"members"`
+}
+
 // GetAgentGroupMembers 获取代理分组成员
 func (a *GroupAPI) GetAgentGroupMembers(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
+		return
+	}
+
+	// 获取分组信息
+	var group model.AgentGroup
+	if err := db.DB.First(&group, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("分组不存在"))
 		return
 	}
 
@@ -636,7 +806,19 @@ func (a *GroupAPI) GetAgentGroupMembers(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, NewSuccessResponse(result))
+	response := AgentGroupMembersResponse{
+		Group: AgentGroupListItem{
+			ID:          group.ID,
+			Name:        group.Name,
+			Alias:       group.Alias,
+			MemberCount: int64(len(result)),
+			Description: group.Description,
+			CreatedAt:   group.CreatedAt,
+		},
+		Members: result,
+	}
+
+	c.JSON(http.StatusOK, NewSuccessResponse(response))
 }
 
 // AddAgentGroupMemberRequest 添加代理分组成员请求
@@ -690,8 +872,54 @@ func (a *GroupAPI) AddAgentGroupMember(c *gin.Context) {
 	if a.hsClient != nil && agent.NodeID > 0 {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 		defer cancel()
-		tag := "tag:agent-group-" + strconv.FormatInt(groupID, 10)
-		_ = a.hsClient.SetTags(ctx, agent.NodeID, []string{tag})
+		// 使用分组名称生成 Tag，格式: tag:agent-group-{group.name}
+		newTag := "tag:agent-group-" + group.Name
+		// 身份 Tag，格式: tag:agent-{agent.name}
+		identityTag := "tag:agent-" + agent.Name
+
+		// 获取现有 Tag
+		node, err := a.hsClient.GetNode(ctx, agent.NodeID)
+		if err != nil {
+			logger.Warnf("获取节点 %d 失败: %v", agent.NodeID, err)
+		} else {
+			tags := node.ForcedTags
+			tagsChanged := false
+
+			// 确保有身份 Tag
+			hasIdentityTag := false
+			for _, t := range tags {
+				if t == identityTag {
+					hasIdentityTag = true
+					break
+				}
+			}
+			if !hasIdentityTag {
+				tags = append(tags, identityTag)
+				tagsChanged = true
+			}
+
+			// 检查是否已有分组 Tag
+			hasGroupTag := false
+			for _, t := range tags {
+				if t == newTag {
+					hasGroupTag = true
+					break
+				}
+			}
+			if !hasGroupTag {
+				tags = append(tags, newTag)
+				tagsChanged = true
+			}
+
+			// 更新 Tag
+			if tagsChanged {
+				if err := a.hsClient.SetTags(ctx, agent.NodeID, tags); err != nil {
+					logger.Warnf("设置节点 %d Tag 失败: %v", agent.NodeID, err)
+				} else {
+					logger.Infof("节点 %d 添加 Tag: %v", agent.NodeID, tags)
+				}
+			}
+		}
 	}
 
 	logger.Infof("添加代理分组成员: group_id=%d, agent_id=%d", groupID, req.AgentID)
@@ -727,11 +955,38 @@ func (a *GroupAPI) RemoveAgentGroupMember(c *gin.Context) {
 		return
 	}
 
-	// 移除 Agent Node 的分组 Tag
+	// 移除 Agent Node 的分组 Tag（只移除指定 Tag，保留其他 Tag）
 	if a.hsClient != nil && agent.NodeID > 0 {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 		defer cancel()
-		_ = a.hsClient.SetTags(ctx, agent.NodeID, []string{})
+
+		// 获取分组信息
+		var group model.AgentGroup
+		if err := db.DB.First(&group, groupID).Error; err == nil {
+			// 使用分组名称生成 Tag
+			tagToRemove := "tag:agent-group-" + group.Name
+
+			// 获取现有 Tag
+			node, err := a.hsClient.GetNode(ctx, agent.NodeID)
+			if err != nil {
+				logger.Warnf("获取节点 %d 失败: %v", agent.NodeID, err)
+			} else {
+				// 过滤掉要移除的 Tag，保留其他 Tag（包括身份 Tag）
+				var newTags []string
+				for _, t := range node.ForcedTags {
+					if t != tagToRemove {
+						newTags = append(newTags, t)
+					}
+				}
+
+				// 设置新的 Tag 列表
+				if err := a.hsClient.SetTags(ctx, agent.NodeID, newTags); err != nil {
+					logger.Warnf("设置节点 %d Tag 失败: %v", agent.NodeID, err)
+				} else {
+					logger.Infof("节点 %d 移除 Tag: %s, 剩余 Tag: %v", agent.NodeID, tagToRemove, newTags)
+				}
+			}
+		}
 	}
 
 	logger.Infof("移除代理分组成员: group_id=%d, agent_id=%d", groupID, agentID)

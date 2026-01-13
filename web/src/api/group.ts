@@ -43,6 +43,10 @@ export const getGroups = () => {
   return request.get<any, ApiResponse<Group[]>>('/api/v1/admin/client-groups')
 }
 
+export const getGroup = (id: number) => {
+  return request.get<any, ApiResponse<Group>>(`/api/v1/admin/client-groups/${id}`)
+}
+
 export const createGroup = (data: { name: string; alias?: string; description?: string }) => {
   return request.post<any, ApiResponse<Group>>('/api/v1/admin/client-groups', data)
 }
@@ -73,6 +77,10 @@ export const removeGroupMember = (groupId: number, clientId: number) => {
 // 代理分组 API
 export const getAgentGroups = () => {
   return request.get<any, ApiResponse<Group[]>>('/api/v1/admin/agent-groups')
+}
+
+export const getAgentGroup = (id: number) => {
+  return request.get<any, ApiResponse<Group>>(`/api/v1/admin/agent-groups/${id}`)
 }
 
 export const createAgentGroup = (data: { name: string; alias?: string; description?: string }) => {

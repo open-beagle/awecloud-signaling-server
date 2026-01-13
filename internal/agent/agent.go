@@ -265,11 +265,11 @@ func (a *Agent) heartbeatLoop() {
 		default:
 		}
 
-		logger.Debug("建立心跳流...")
+		logger.Infof("建立心跳流...")
 
 		stream, err := a.grpcClient.Heartbeat(a.ctx)
 		if err != nil {
-			logger.Debugf("建立心跳流失败: %v，%v后重试", err, retryDelay)
+			logger.Infof("建立心跳流失败: %v，%v后重试", err, retryDelay)
 
 			select {
 			case <-time.After(retryDelay):
@@ -285,7 +285,7 @@ func (a *Agent) heartbeatLoop() {
 		}
 
 		retryDelay = 5 * time.Second
-		logger.Debug("心跳流已建立")
+		logger.Infof("心跳流已建立")
 
 		// 心跳循环
 		a.runHeartbeatStream(stream)
@@ -325,7 +325,7 @@ func (a *Agent) runHeartbeatStream(stream pb.AgentService_HeartbeatClient) {
 		for {
 			resp, err := stream.Recv()
 			if err != nil {
-				logger.Debugf("接收心跳响应失败: %v", err)
+				logger.Infof("接收心跳响应失败: %v", err)
 				return
 			}
 

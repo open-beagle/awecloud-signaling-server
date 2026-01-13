@@ -12,7 +12,7 @@
 
 ## 目录结构
 
-```
+```txt
 awecloud-signaling-server/
 ├── cmd/                 # 应用入口
 │   ├── server/          # Server 入口

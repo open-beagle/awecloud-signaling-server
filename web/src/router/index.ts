@@ -47,8 +47,7 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'services',
-        name: 'Services',
-        component: () => import('@/views/Service/index.vue'),
+        redirect: '/services/desktop-auth',
         meta: { requiresAuth: true }
       },
       {

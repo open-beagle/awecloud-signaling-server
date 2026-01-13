@@ -4,8 +4,10 @@
       <template #header>
         <div class="card-header">
           <div class="header-left">
-            <el-button :icon="ArrowLeft" @click="goBack">返回</el-button>
             <span class="card-title">用户分组成员管理</span>
+            <span v-if="groupInfo" class="group-info">
+              分组: {{ groupInfo.alias || groupInfo.name }} ({{ groupInfo.name }})
+            </span>
           </div>
           <div class="header-actions">
             <el-select
@@ -31,13 +33,13 @@
       <el-table v-loading="loading" :data="members" stripe>
         <el-table-column label="用户" min-width="200">
           <template #default="{ row }">
-            {{ row.client?.name || '-' }}
-            <span v-if="row.client?.alias" class="alias-text">({{ row.client.alias }})</span>
+            {{ row.name || '-' }}
+            <span v-if="row.alias" class="alias-text">({{ row.alias }})</span>
           </template>
         </el-table-column>
         <el-table-column label="加入时间" width="180">
           <template #default="{ row }">
-            {{ formatDate(row.created_at) }}
+            {{ formatDate(row.joined_at) }}
           </template>
         </el-table-column>
         <el-table-column label="操作" width="100">
@@ -59,32 +61,27 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete, ArrowLeft } from '@element-plus/icons-vue'
+import { Plus, Delete } from '@element-plus/icons-vue'
 import { getGroupMembers, addGroupMember, removeGroupMember } from '@/api/group'
 import { getClients } from '@/api/client'
-import type { GroupMember } from '@/api/group'
 
 const route = useRoute()
-const router = useRouter()
 
 const loading = ref(false)
-const members = ref<GroupMember[]>([])
+const members = ref<any[]>([])
 const allClients = ref<any[]>([])
 const selectedClientId = ref<number | null>(null)
+const groupInfo = ref<any>(null)
 
 const availableClients = computed(() => {
-  const memberClientIds = new Set(members.value.map(m => m.client_id))
-  return allClients.value.filter(c => !memberClientIds.has(c.id))
+  const memberIds = new Set(members.value.map(m => m.id))
+  return allClients.value.filter(c => !memberIds.has(c.id))
 })
 
 const formatDate = (dateStr: string) => {
   return new Date(dateStr).toLocaleString('zh-CN')
-}
-
-const goBack = () => {
-  router.push({ name: 'ClientGroups' })
 }
 
 const loadMembers = async () => {
@@ -95,7 +92,15 @@ const loadMembers = async () => {
   try {
     const res = await getGroupMembers(groupId)
     if (res.success && res.data) {
-      members.value = res.data
+      // 兼容新旧两种 API 响应格式
+      if (res.data.group && res.data.members) {
+        // 新格式: { group: {...}, members: [...] }
+        groupInfo.value = res.data.group
+        members.value = res.data.members
+      } else if (Array.isArray(res.data)) {
+        // 旧格式: 直接返回数组
+        members.value = res.data
+      }
     }
   } catch (error) {
     console.error('Load members error:', error)
@@ -107,9 +112,9 @@ const loadMembers = async () => {
 
 const loadClients = async () => {
   try {
-    const res = await getClients()
-    if (res.clients) {
-      allClients.value = res.clients
+    const res = await getClients(1, 1000)
+    if (res.success && res.data) {
+      allClients.value = res.data
     }
   } catch (error) {
     ElMessage.error('加载用户列表失败')
@@ -137,13 +142,13 @@ const handleAddMember = async () => {
   }
 }
 
-const handleRemoveMember = async (member: GroupMember) => {
+const handleRemoveMember = async (member: any) => {
   const groupId = Number(route.params.id)
   if (!groupId) return
 
   try {
     await ElMessageBox.confirm('确定要将该成员移出分组吗？', { type: 'warning' })
-    const res = await removeGroupMember(groupId, member.client_id)
+    const res = await removeGroupMember(groupId, member.id)
     if (res.success) {
       ElMessage.success('移除成功')
       loadMembers()
@@ -196,12 +201,17 @@ onMounted(() => {
 .header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
 }
 
 .card-title {
   font-size: 18px;
   font-weight: 500;
+}
+
+.group-info {
+  font-size: 14px;
+  color: #606266;
 }
 
 .header-actions {

@@ -49,6 +49,26 @@ const items = computed(() => {
     breadcrumbs.push({ path: '', title: t('menu.agentAuth') })
   }
   // 处理分组成员页面
+  else if (path.match(/^\/groups\/clients\/\d+\/members$/)) {
+    breadcrumbs.push({ path: '', title: t('menu.groups') })
+    breadcrumbs.push({ path: '/groups/clients', title: t('menu.clientGroups') })
+    breadcrumbs.push({ path: '', title: t('group.members') })
+  }
+  else if (path.match(/^\/groups\/agents\/\d+\/members$/)) {
+    breadcrumbs.push({ path: '', title: t('menu.groups') })
+    breadcrumbs.push({ path: '/groups/agents', title: t('menu.agentGroups') })
+    breadcrumbs.push({ path: '', title: t('group.members') })
+  }
+  else if (path.match(/^\/groups\/client-groups\/\d+\/members$/)) {
+    breadcrumbs.push({ path: '', title: t('menu.groups') })
+    breadcrumbs.push({ path: '/groups/clients', title: t('menu.clientGroups') })
+    breadcrumbs.push({ path: '', title: t('group.members') })
+  }
+  else if (path.match(/^\/groups\/agent-groups\/\d+\/members$/)) {
+    breadcrumbs.push({ path: '', title: t('menu.groups') })
+    breadcrumbs.push({ path: '/groups/agents', title: t('menu.agentGroups') })
+    breadcrumbs.push({ path: '', title: t('group.members') })
+  }
   else if (path.match(/^\/groups\/\d+\/members$/)) {
     breadcrumbs.push({ path: '/groups', title: t('menu.groups') })
     breadcrumbs.push({ path: '', title: t('group.members') })

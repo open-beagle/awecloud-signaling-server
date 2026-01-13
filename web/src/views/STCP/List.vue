@@ -24,10 +24,16 @@
           </template>
         </el-table-column>
         <el-table-column prop="description" :label="t('agent.description')" min-width="200" />
-        <el-table-column label="状态" width="100">
+        <el-table-column :label="t('common.status')" width="100" align="center">
           <template #default="{ row }">
-            <el-tag v-if="row.status === 'online'" type="success" size="small">在线</el-tag>
-            <el-tag v-else type="info" size="small">离线</el-tag>
+            <span :style="{ color: row.status === 'online' ? '#67C23A' : '#909399' }">
+              {{ row.status === 'online' ? t('common.online') : t('common.offline') }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('stcp.connections')" width="100" align="center">
+          <template #default="{ row }">
+            <span>{{ row.connections || 0 }}</span>
           </template>
         </el-table-column>
         <el-table-column label="访问权限" width="120">

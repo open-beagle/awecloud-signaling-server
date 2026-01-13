@@ -59,8 +59,10 @@ type AgentListItem struct {
 	Name         string     `json:"name"`
 	Alias        string     `json:"alias"`
 	IP           string     `json:"ip"`
-	ServiceCount int64      `json:"service_count"`
+	ServiceCount int64      `json:"service_count"` // 本地服务数量
+	ForwardCount int64      `json:"forward_count"` // 远程服务数量
 	GroupCount   int64      `json:"group_count"`
+	Connections  int        `json:"connections"`
 	Status       string     `json:"status"`
 	Version      string     `json:"version"`
 	LastOnline   *time.Time `json:"last_online"`
@@ -113,6 +115,21 @@ func (a *AgentAPI) List(c *gin.Context) {
 		serviceCountMap[sc.AgentID] = sc.Count
 	}
 
+	// 查询每个 Agent 的远程服务数量
+	var forwardCounts []struct {
+		AgentID uint64 `gorm:"column:agent_id"`
+		Count   int64  `gorm:"column:count"`
+	}
+	db.DB.Model(&model.PortForward{}).
+		Select("agent_id, COUNT(*) as count").
+		Group("agent_id").
+		Find(&forwardCounts)
+
+	forwardCountMap := make(map[uint64]int64)
+	for _, fc := range forwardCounts {
+		forwardCountMap[fc.AgentID] = fc.Count
+	}
+
 	// 查询每个 Agent 的分组数量
 	var groupCounts []struct {
 		AgentID uint64 `gorm:"column:agent_id"`
@@ -134,9 +151,18 @@ func (a *AgentAPI) List(c *gin.Context) {
 	for i, agent := range agents {
 		// 计算在线状态（60秒内有心跳认为在线）
 		status := "offline"
+		connections := 0
 		if agent.LastHeartbeat != nil {
 			if now.Sub(*agent.LastHeartbeat) < 60*time.Second {
 				status = "online"
+			}
+		}
+
+		// 获取连接数（从 gRPC 服务获取实时连接数）
+		if a.agentService != nil && a.agentService.IsAgentOnline(agent.ID) {
+			conn := a.agentService.GetAgentConnection(agent.ID)
+			if conn != nil && conn.Connected {
+				connections = 1 // Agent 本身的连接
 			}
 		}
 
@@ -146,7 +172,9 @@ func (a *AgentAPI) List(c *gin.Context) {
 			Alias:        agent.Alias,
 			IP:           agent.IP,
 			ServiceCount: serviceCountMap[agent.ID],
+			ForwardCount: forwardCountMap[agent.ID],
 			GroupCount:   groupCountMap[agent.ID],
+			Connections:  connections,
 			Status:       status,
 			Version:      agent.Version,
 			LastOnline:   agent.LastHeartbeat,
@@ -158,14 +186,39 @@ func (a *AgentAPI) List(c *gin.Context) {
 
 // AgentDetail Agent 详情
 type AgentDetail struct {
-	ID            uint64     `json:"id"`
-	Name          string     `json:"name"`
-	Alias         string     `json:"alias"`
-	Version       string     `json:"version"`
-	CreatedAt     time.Time  `json:"created_at"`
-	LastHeartbeat *time.Time `json:"last_heartbeat"`
-	Status        string     `json:"status"`
-	ConnectedAt   *time.Time `json:"connected_at"`
+	ID            uint64             `json:"id"`
+	Name          string             `json:"name"`
+	Alias         string             `json:"alias"`
+	IP            string             `json:"ip"`
+	Version       string             `json:"version"`
+	CreatedAt     time.Time          `json:"created_at"`
+	LastHeartbeat *time.Time         `json:"last_heartbeat"`
+	Status        string             `json:"status"`
+	ConnectedAt   *time.Time         `json:"connected_at"`
+	Services      []AgentServiceItem `json:"services"` // 端口映射服务列表
+	Forwards      []AgentForwardItem `json:"forwards"` // 端口访问服务列表
+}
+
+// AgentServiceItem Agent 服务项
+type AgentServiceItem struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Alias      string `json:"alias"`
+	TargetAddr string `json:"target_addr"`
+	ListenAddr string `json:"listen_addr"`
+	Enabled    bool   `json:"enabled"`
+}
+
+// AgentForwardItem Agent 端口访问项
+type AgentForwardItem struct {
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Alias             string `json:"alias"`
+	TargetAddr        string `json:"target_addr"`
+	ListenAddr        string `json:"listen_addr"`
+	Enabled           bool   `json:"enabled"`
+	TargetAgentName   string `json:"target_agent_name"`
+	TargetServiceName string `json:"target_service_name"`
 }
 
 // Get 获取 Agent 详情（静态信息）
@@ -197,15 +250,59 @@ func (a *AgentAPI) Get(c *gin.Context) {
 		connectedAt = tsStatus.TsConnectedAt
 	}
 
+	// 查询端口映射服务列表
+	var services []model.ProxyService
+	db.DB.Where("agent_id = ?", id).Find(&services)
+	serviceItems := make([]AgentServiceItem, len(services))
+	for i, svc := range services {
+		serviceItems[i] = AgentServiceItem{
+			ID:         svc.ID,
+			Name:       svc.Name,
+			Alias:      svc.Alias,
+			TargetAddr: svc.TargetAddr,
+			ListenAddr: svc.ListenAddr,
+			Enabled:    svc.Enabled,
+		}
+	}
+
+	// 查询端口访问服务列表（PortForward）
+	var forwards []model.PortForward
+	db.DB.Preload("TargetService").Preload("TargetService.Agent").Where("agent_id = ?", id).Find(&forwards)
+
+	forwardItems := make([]AgentForwardItem, len(forwards))
+	for i, fwd := range forwards {
+		targetAgentName := ""
+		targetServiceName := ""
+		if fwd.TargetService != nil {
+			targetServiceName = fwd.TargetService.Name
+			if fwd.TargetService.Agent != nil {
+				targetAgentName = fwd.TargetService.Agent.Name
+			}
+		}
+		forwardItems[i] = AgentForwardItem{
+			ID:                fwd.ID,
+			Name:              fwd.Name,
+			Alias:             fwd.Alias,
+			TargetAddr:        fwd.TargetAddr,
+			ListenAddr:        fwd.ListenAddr,
+			Enabled:           fwd.Enabled,
+			TargetAgentName:   targetAgentName,
+			TargetServiceName: targetServiceName,
+		}
+	}
+
 	result := AgentDetail{
 		ID:            agent.ID,
 		Name:          agent.Name,
 		Alias:         agent.Alias,
+		IP:            agent.IP,
 		Version:       agent.Version,
 		CreatedAt:     agent.CreatedAt,
 		LastHeartbeat: agent.LastHeartbeat,
 		Status:        status,
 		ConnectedAt:   connectedAt,
+		Services:      serviceItems,
+		Forwards:      forwardItems,
 	}
 
 	c.JSON(http.StatusOK, NewSuccessResponse(result))

@@ -23,10 +23,11 @@ var (
 func main() {
 	configPath := flag.String("c", "config/agent.toml", "配置文件路径")
 	showVersion := flag.Bool("v", false, "显示版本信息")
+	showVersionLong := flag.Bool("version", false, "显示版本信息")
 	flag.Parse()
 
 	// 显示版本信息
-	if *showVersion {
+	if *showVersion || *showVersionLong {
 		fmt.Printf("AWECloud Signaling Agent\n")
 		fmt.Printf("Version:    %s\n", version)
 		fmt.Printf("Git Commit: %s\n", gitCommit)
@@ -58,6 +59,10 @@ func main() {
 	if err := logger.InitLogrus(cfg.Log.Level, logFile); err != nil {
 		log.Fatalf("初始化日志失败: %v", err)
 	}
+
+	// 重定向标准库 log 到 logrus（用于 tsnet 等第三方库）
+	log.SetOutput(logger.NewLogrusWriter())
+	log.SetFlags(0) // 不需要时间戳，logrus 会添加
 
 	// 应用配置优先级：环境变量 > 配置文件 > BUILD_URL > 默认值
 	if addr := os.Getenv("AGENT_ADDRESS"); addr != "" {

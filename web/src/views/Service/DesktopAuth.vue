@@ -4,71 +4,75 @@
       <template #header>
         <div class="card-header">
           <span>{{ $t('desktopAuth.title') }}</span>
-          <el-button type="primary" @click="handleAddAuth">
-            <el-icon><Plus /></el-icon>
-            {{ $t('desktopAuth.addAuth') }}
-          </el-button>
         </div>
       </template>
 
       <!-- 筛选区域 -->
       <div class="filter-bar">
-        <el-select v-model="filters.serviceId" :placeholder="$t('desktopAuth.selectService')" clearable style="width: 200px">
-          <el-option :label="$t('desktopAuth.allServices')" :value="null" />
+        <el-select v-model="filters.agentId" :placeholder="$t('desktopAuth.filterByAgent')" clearable style="width: 200px" @change="loadServices">
+          <el-option :label="$t('desktopAuth.allAgents')" :value="null" />
           <el-option
-            v-for="svc in serviceList"
-            :key="svc.id"
-            :label="svc.name"
-            :value="svc.id"
+            v-for="agent in agentList"
+            :key="agent.id"
+            :label="agent.name"
+            :value="agent.id"
           />
         </el-select>
-        <el-select v-model="filters.accessType" :placeholder="$t('desktopAuth.selectAccessType')" clearable style="width: 150px">
-          <el-option :label="$t('desktopAuth.allTypes')" :value="null" />
-          <el-option :label="$t('desktopAuth.public')" value="public" />
-          <el-option :label="$t('desktopAuth.private')" value="private" />
-          <el-option :label="$t('desktopAuth.group')" value="group" />
-        </el-select>
+        <el-input
+          v-model="filters.search"
+          :placeholder="$t('desktopAuth.searchPlaceholder')"
+          clearable
+          style="width: 300px"
+          @input="handleSearch"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
       </div>
 
-      <!-- 服务权限列表 -->
+      <!-- 服务列表 -->
       <el-table :data="filteredServiceList" v-loading="loading" stripe>
-        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column type="index" label="序号" width="80" :index="indexMethod" />
         <el-table-column prop="name" :label="$t('desktopAuth.serviceName')" min-width="150" />
         <el-table-column prop="agent_name" :label="$t('desktopAuth.agent')" width="120" />
         <el-table-column :label="$t('desktopAuth.serviceAddress')" min-width="180">
           <template #default="{ row }">
-            <span v-if="row.agent_ts_ip">{{ row.agent_ts_ip }}:{{ row.listen_port }}</span>
+            <span v-if="row.listen_addr">{{ row.listen_addr }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('desktopAuth.accessType')" width="120">
+        <el-table-column :label="$t('desktopAuth.groupCount')" width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="getAccessTypeTag(row.access_type)">
-              {{ getAccessTypeLabel(row.access_type) }}
-            </el-tag>
+            <el-button
+              type="text"
+              :class="row.group_count > 0 ? 'count-link' : 'count-zero'"
+              @click="handleViewGroups(row)"
+            >
+              {{ row.group_count }}
+            </el-button>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('desktopAuth.authTarget')" min-width="150">
+        <el-table-column :label="$t('desktopAuth.userCount')" width="100" align="center">
           <template #default="{ row }">
-            <span v-if="row.access_type === 'public'">{{ $t('desktopAuth.allDesktops') }}</span>
-            <span v-else-if="row.access_type === 'private'">{{ getOwnerName(row.owner_id) }}</span>
-            <span v-else-if="row.access_type === 'group'">{{ getGroupName(row.group_id) }}</span>
-            <span v-else>-</span>
+            <el-button
+              type="text"
+              :class="row.client_count > 0 ? 'count-link' : 'count-zero'"
+              @click="handleViewUsers(row)"
+            >
+              {{ row.client_count }}
+            </el-button>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('desktopAuth.extraAuth')" width="100">
+        <el-table-column :label="$t('common.actions')" width="200" fixed="right">
           <template #default="{ row }">
-            <el-badge :value="getExtraAuthCount(row.id)" :hidden="getExtraAuthCount(row.id) === 0" class="extra-auth-badge">
-              <el-button size="small" @click="handleViewExtraAuth(row)">
-                {{ $t('desktopAuth.view') }}
-              </el-button>
-            </el-badge>
-          </template>
-        </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="150" fixed="right">
-          <template #default="{ row }">
-            <el-button type="primary" size="small" @click="handleEditPermission(row)">
-              {{ $t('desktopAuth.edit') }}
+            <el-button type="primary" size="small" @click="handleAddGroup(row)">
+              <el-icon><Plus /></el-icon>
+              {{ $t('desktopAuth.addGroup') }}
+            </el-button>
+            <el-button type="success" size="small" @click="handleAddUser(row)">
+              <el-icon><Plus /></el-icon>
+              {{ $t('desktopAuth.addUser') }}
             </el-button>
           </template>
         </el-table-column>
@@ -81,73 +85,63 @@
         :total="pagination.total"
         :page-sizes="[10, 20, 50, 100]"
         layout="total, sizes, prev, pager, next, jumper"
-        @size-change="handleSearch"
-        @current-change="handleSearch"
+        @size-change="loadServices"
+        @current-change="loadServices"
         class="pagination"
       />
     </el-card>
 
-    <!-- 编辑权限对话框 -->
-    <el-dialog v-model="editDialogVisible" :title="$t('desktopAuth.editPermission')" width="600px">
-      <el-form :model="editForm" label-width="120px">
-        <el-form-item :label="$t('desktopAuth.serviceInfo')">
-          <div class="service-info">
-            <p><strong>{{ $t('desktopAuth.serviceName') }}:</strong> {{ editForm.serviceName }}</p>
-            <p><strong>{{ $t('desktopAuth.serviceAddress') }}:</strong> {{ editForm.serviceAddress }}</p>
-            <p><strong>{{ $t('desktopAuth.agent') }}:</strong> {{ editForm.agentName }}</p>
-          </div>
-        </el-form-item>
-        <el-form-item :label="$t('desktopAuth.accessType')" required>
-          <el-radio-group v-model="editForm.accessType">
-            <el-radio value="public">
-              <span>🌐 {{ $t('desktopAuth.public') }}</span>
-              <span class="radio-desc">{{ $t('desktopAuth.publicDesc') }}</span>
-            </el-radio>
-            <el-radio value="private">
-              <span>🔒 {{ $t('desktopAuth.private') }}</span>
-              <span class="radio-desc">{{ $t('desktopAuth.privateDesc') }}</span>
-            </el-radio>
-            <el-radio value="group">
-              <span>👥 {{ $t('desktopAuth.group') }}</span>
-              <span class="radio-desc">{{ $t('desktopAuth.groupDesc') }}</span>
-            </el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item v-if="editForm.accessType === 'group'" :label="$t('desktopAuth.selectGroup')" required>
-          <el-select v-model="editForm.groupId" :placeholder="$t('desktopAuth.selectGroupPlaceholder')" style="width: 100%">
+    <!-- 添加分组授权对话框 -->
+    <el-dialog v-model="addGroupDialogVisible" :title="$t('desktopAuth.addGroupAuth')" width="600px">
+      <div class="service-info-box">
+        <p><strong>{{ $t('desktopAuth.service') }}:</strong> {{ currentService?.name }}</p>
+        <p><strong>{{ $t('desktopAuth.agent') }}:</strong> {{ currentService?.agent_name }}</p>
+        <p><strong>{{ $t('desktopAuth.serviceAddress') }}:</strong> {{ currentService?.listen_addr }}</p>
+      </div>
+      <el-form :model="addGroupForm" label-width="120px" style="margin-top: 20px">
+        <el-form-item :label="$t('desktopAuth.selectGroup')" required>
+          <el-select
+            v-model="addGroupForm.groupIds"
+            :placeholder="$t('desktopAuth.selectGroupPlaceholder')"
+            multiple
+            style="width: 100%"
+          >
             <el-option
-              v-for="group in groupList"
+              v-for="group in clientGroupList"
               :key="group.id"
-              :label="group.name"
+              :label="`${group.name} (${group.member_count || 0} ${$t('desktopAuth.members')})`"
               :value="group.id"
             />
           </el-select>
         </el-form-item>
-        <el-alert type="warning" :closable="false" style="margin-top: 10px">
+        <el-alert type="warning" :closable="false">
           {{ $t('desktopAuth.aclSyncWarning') }}
         </el-alert>
       </el-form>
       <template #footer>
-        <el-button @click="editDialogVisible = false">{{ $t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="handleSavePermission" :loading="saving">{{ $t('common.save') }}</el-button>
+        <el-button @click="addGroupDialogVisible = false">{{ $t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="handleSubmitGroupAuth" :loading="submitting">
+          {{ $t('desktopAuth.authorize') }}
+        </el-button>
       </template>
     </el-dialog>
 
-    <!-- 添加额外授权对话框 -->
-    <el-dialog v-model="addAuthDialogVisible" :title="$t('desktopAuth.addExtraAuth')" width="600px">
-      <el-form :model="addAuthForm" label-width="120px">
-        <el-form-item :label="$t('desktopAuth.selectService')" required>
-          <el-select v-model="addAuthForm.serviceId" :placeholder="$t('desktopAuth.selectServicePlaceholder')" style="width: 100%">
-            <el-option
-              v-for="svc in serviceList"
-              :key="svc.id"
-              :label="`${svc.name} (${svc.agent_ts_ip || '-'}:${svc.listen_port})`"
-              :value="svc.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="$t('desktopAuth.selectClient')" required>
-          <el-select v-model="addAuthForm.clientId" :placeholder="$t('desktopAuth.selectClientPlaceholder')" style="width: 100%">
+    <!-- 添加用户授权对话框 -->
+    <el-dialog v-model="addUserDialogVisible" :title="$t('desktopAuth.addUserAuth')" width="600px">
+      <div class="service-info-box">
+        <p><strong>{{ $t('desktopAuth.service') }}:</strong> {{ currentService?.name }}</p>
+        <p><strong>{{ $t('desktopAuth.agent') }}:</strong> {{ currentService?.agent_name }}</p>
+        <p><strong>{{ $t('desktopAuth.serviceAddress') }}:</strong> {{ currentService?.listen_addr }}</p>
+      </div>
+      <el-form :model="addUserForm" label-width="120px" style="margin-top: 20px">
+        <el-form-item :label="$t('desktopAuth.selectUser')" required>
+          <el-select
+            v-model="addUserForm.clientIds"
+            :placeholder="$t('desktopAuth.selectUserPlaceholder')"
+            multiple
+            filterable
+            style="width: 100%"
+          >
             <el-option
               v-for="client in clientList"
               :key="client.id"
@@ -156,53 +150,75 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item :label="$t('desktopAuth.expiresAt')">
-          <el-radio-group v-model="addAuthForm.expireType" style="margin-bottom: 10px">
-            <el-radio value="permanent">{{ $t('desktopAuth.permanent') }}</el-radio>
-            <el-radio value="custom">{{ $t('desktopAuth.customExpire') }}</el-radio>
-          </el-radio-group>
-          <el-date-picker
-            v-if="addAuthForm.expireType === 'custom'"
-            v-model="addAuthForm.expiresAt"
-            type="datetime"
-            :placeholder="$t('desktopAuth.selectExpireTime')"
-            style="width: 100%"
-          />
-        </el-form-item>
+        <el-alert type="warning" :closable="false">
+          {{ $t('desktopAuth.aclSyncWarning') }}
+        </el-alert>
       </el-form>
       <template #footer>
-        <el-button @click="addAuthDialogVisible = false">{{ $t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="handleSubmitAuth" :loading="submitting">{{ $t('desktopAuth.authorize') }}</el-button>
+        <el-button @click="addUserDialogVisible = false">{{ $t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="handleSubmitUserAuth" :loading="submitting">
+          {{ $t('desktopAuth.authorize') }}
+        </el-button>
       </template>
     </el-dialog>
 
-    <!-- 查看额外授权对话框 -->
-    <el-dialog v-model="extraAuthDialogVisible" :title="$t('desktopAuth.extraAuthList')" width="800px">
-      <div class="extra-auth-header">
+    <!-- 查看分组授权对话框 -->
+    <el-dialog v-model="viewGroupsDialogVisible" :title="$t('desktopAuth.groupAuthList')" width="800px">
+      <div class="dialog-header">
         <span>{{ $t('desktopAuth.service') }}: {{ currentService?.name }}</span>
-        <el-button type="primary" size="small" @click="handleAddExtraAuth">
+        <el-button type="primary" size="small" @click="handleAddGroupFromView">
           <el-icon><Plus /></el-icon>
-          {{ $t('desktopAuth.addAuth') }}
+          {{ $t('desktopAuth.addGroup') }}
         </el-button>
       </div>
-      <el-table :data="extraAuthList" v-loading="loadingExtraAuth" border>
+      <el-table :data="groupAuthList" v-loading="loadingGroupAuth" border>
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="client_name" :label="$t('desktopAuth.clientName')" min-width="120" />
-        <el-table-column prop="client_ip" :label="$t('desktopAuth.clientIp')" width="140" />
+        <el-table-column prop="name" :label="$t('desktopAuth.groupName')" min-width="150">
+          <template #default="{ row }">
+            {{ row.alias ? `${row.alias} (${row.name})` : row.name }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('desktopAuth.memberCount')" width="120">
+          <template #default="{ row }">
+            {{ row.member_count || 0 }} {{ $t('desktopAuth.members') }}
+          </template>
+        </el-table-column>
         <el-table-column :label="$t('desktopAuth.grantedAt')" width="180">
           <template #default="{ row }">
             {{ formatTime(row.granted_at) }}
           </template>
         </el-table-column>
-        <el-table-column :label="$t('desktopAuth.expiresAt')" width="180">
+        <el-table-column :label="$t('common.actions')" width="100" fixed="right">
           <template #default="{ row }">
-            <span v-if="row.expires_at">{{ formatTime(row.expires_at) }}</span>
-            <el-tag v-else type="success" size="small">{{ $t('desktopAuth.permanent') }}</el-tag>
+            <el-button type="danger" size="small" @click="handleRevokeGroupAuth(row)">
+              {{ $t('desktopAuth.revoke') }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+
+    <!-- 查看用户授权对话框 -->
+    <el-dialog v-model="viewUsersDialogVisible" :title="$t('desktopAuth.userAuthList')" width="800px">
+      <div class="dialog-header">
+        <span>{{ $t('desktopAuth.service') }}: {{ currentService?.name }}</span>
+        <el-button type="primary" size="small" @click="handleAddUserFromView">
+          <el-icon><Plus /></el-icon>
+          {{ $t('desktopAuth.addUser') }}
+        </el-button>
+      </div>
+      <el-table :data="userAuthList" v-loading="loadingUserAuth" border>
+        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column prop="client_name" :label="$t('desktopAuth.userName')" min-width="150" />
+        <el-table-column prop="client_ip" :label="$t('desktopAuth.userIp')" width="140" />
+        <el-table-column :label="$t('desktopAuth.grantedAt')" width="180">
+          <template #default="{ row }">
+            {{ formatTime(row.granted_at) }}
           </template>
         </el-table-column>
         <el-table-column :label="$t('common.actions')" width="100" fixed="right">
           <template #default="{ row }">
-            <el-button type="danger" size="small" @click="handleRevokeAuth(row)">
+            <el-button type="danger" size="small" @click="handleRevokeUserAuth(row)">
               {{ $t('desktopAuth.revoke') }}
             </el-button>
           </template>
@@ -215,26 +231,18 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Search } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
-import { getServices, type ProxyService } from '@/api/service'
-import { getClients, type Client } from '@/api/client'
-import { getGroups, type Group } from '@/api/group'
-import {
-  getServicePermissions,
-  addServicePermission,
-  removeServicePermission,
-  updateServiceAccessType,
-  getAllServicePermissions,
-  type ServicePermission
-} from '@/api/servicePermission'
+import request from '@/utils/request'
+import { getAgents } from '@/api/agent'
+import { getClients } from '@/api/client'
 
 const { t } = useI18n()
 
 // 筛选条件
 const filters = reactive({
-  serviceId: null as number | null,
-  accessType: null as string | null
+  agentId: null as number | null,
+  search: ''
 })
 
 // 分页
@@ -245,66 +253,76 @@ const pagination = reactive({
 })
 
 // 数据列表
-const serviceList = ref<ProxyService[]>([])
-const clientList = ref<Client[]>([])
-const groupList = ref<Group[]>([])
-const permissionMap = ref<Map<number, ServicePermission[]>>(new Map())
+const serviceList = ref<any[]>([])
+const agentList = ref<any[]>([])
+const clientList = ref<any[]>([])
+const clientGroupList = ref<any[]>([])
 const loading = ref(false)
 
-// 编辑权限对话框
-const editDialogVisible = ref(false)
-const editForm = reactive({
-  serviceId: 0,
-  serviceName: '',
-  serviceAddress: '',
-  agentName: '',
-  accessType: 'public',
-  groupId: null as number | null
-})
-const saving = ref(false)
+// 当前操作的服务
+const currentService = ref<any>(null)
 
-// 添加授权对话框
-const addAuthDialogVisible = ref(false)
-const addAuthForm = reactive({
-  serviceId: null as number | null,
-  clientId: null as number | null,
-  expireType: 'permanent',
-  expiresAt: null as Date | null
+// 添加分组授权对话框
+const addGroupDialogVisible = ref(false)
+const addGroupForm = reactive({
+  groupIds: [] as number[]
 })
+
+// 添加用户授权对话框
+const addUserDialogVisible = ref(false)
+const addUserForm = reactive({
+  clientIds: [] as number[]
+})
+
 const submitting = ref(false)
 
-// 额外授权对话框
-const extraAuthDialogVisible = ref(false)
-const currentService = ref<ProxyService | null>(null)
-const extraAuthList = ref<ServicePermission[]>([])
-const loadingExtraAuth = ref(false)
+// 查看分组授权对话框
+const viewGroupsDialogVisible = ref(false)
+const groupAuthList = ref<any[]>([])
+const loadingGroupAuth = ref(false)
 
-// 计算过滤后的服务列表
+// 查看用户授权对话框
+const viewUsersDialogVisible = ref(false)
+const userAuthList = ref<any[]>([])
+const loadingUserAuth = ref(false)
+
+// 过滤后的服务列表
 const filteredServiceList = computed(() => {
   let list = serviceList.value
 
-  if (filters.serviceId) {
-    list = list.filter(s => s.id === filters.serviceId)
+  if (filters.search) {
+    const search = filters.search.toLowerCase()
+    list = list.filter(s =>
+      s.name.toLowerCase().includes(search) ||
+      s.agent_name?.toLowerCase().includes(search) ||
+      s.listen_addr?.toLowerCase().includes(search)
+    )
   }
 
-  if (filters.accessType) {
-    list = list.filter(s => s.access_type === filters.accessType)
-  }
-
-  pagination.total = list.length
-
-  const start = (pagination.page - 1) * pagination.pageSize
-  const end = start + pagination.pageSize
-  return list.slice(start, end)
+  return list
 })
 
 // 加载服务列表
 const loadServices = async () => {
   loading.value = true
   try {
-    const response = await getServices()
-    if (response.data?.success) {
-      serviceList.value = response.data.data || []
+    const params: any = {
+      page: pagination.page,
+      size: pagination.pageSize
+    }
+    if (filters.agentId) {
+      params.agent_id = filters.agentId
+    }
+
+    const response = await request({
+      url: '/api/v1/admin/services',
+      method: 'get',
+      params
+    })
+
+    if (response.success) {
+      serviceList.value = response.data || []
+      pagination.total = response.total || 0
     }
   } catch (error) {
     ElMessage.error(t('desktopAuth.loadServicesFailed'))
@@ -313,163 +331,90 @@ const loadServices = async () => {
   }
 }
 
+// 加载 Agent 列表
+const loadAgents = async () => {
+  try {
+    const response = await getAgents()
+    if (response.success) {
+      agentList.value = response.data || []
+    }
+  } catch (error) {
+    console.error('Failed to load agents:', error)
+  }
+}
+
 // 加载客户端列表
 const loadClients = async () => {
   try {
     const response = await getClients()
-    if (response.clients) {
-      clientList.value = response.clients
+    if (response.data) {
+      clientList.value = response.data
     }
   } catch (error) {
     console.error('Failed to load clients:', error)
   }
 }
 
-// 加载分组列表
-const loadGroups = async () => {
+// 加载客户端分组列表
+const loadClientGroups = async () => {
   try {
-    const response = await getGroups()
-    if (response.data) {
-      groupList.value = response.data
-    }
-  } catch (error) {
-    console.error('Failed to load groups:', error)
-  }
-}
-
-// 加载所有服务权限
-const loadAllPermissions = async () => {
-  try {
-    const response = await getAllServicePermissions()
-    if (response.data?.success) {
-      const perms = response.data.data || []
-      const map = new Map<number, ServicePermission[]>()
-      for (const perm of perms) {
-        const list = map.get(perm.service_id) || []
-        list.push(perm)
-        map.set(perm.service_id, list)
-      }
-      permissionMap.value = map
-    }
-  } catch (error) {
-    console.error('Failed to load permissions:', error)
-  }
-}
-
-// 查询
-const handleSearch = () => {
-  pagination.page = 1
-}
-
-// 获取访问类型标签样式
-const getAccessTypeTag = (type: string) => {
-  switch (type) {
-    case 'public': return 'success'
-    case 'private': return 'danger'
-    case 'group': return 'warning'
-    default: return 'info'
-  }
-}
-
-// 获取访问类型标签文本
-const getAccessTypeLabel = (type: string) => {
-  switch (type) {
-    case 'public': return t('desktopAuth.public')
-    case 'private': return t('desktopAuth.private')
-    case 'group': return t('desktopAuth.group')
-    default: return type
-  }
-}
-
-// 获取所有者名称
-const getOwnerName = (ownerId: number) => {
-  if (!ownerId) return t('desktopAuth.creator')
-  const client = clientList.value.find(c => c.id === ownerId)
-  return client ? client.client_id : `Client #${ownerId}`
-}
-
-// 获取分组名称
-const getGroupName = (groupId: number | null) => {
-  if (!groupId) return '-'
-  const group = groupList.value.find(g => g.id === groupId)
-  return group ? group.name : `Group #${groupId}`
-}
-
-// 获取额外授权数量
-const getExtraAuthCount = (serviceId: number) => {
-  return permissionMap.value.get(serviceId)?.length || 0
-}
-
-// 编辑权限
-const handleEditPermission = (row: ProxyService) => {
-  editForm.serviceId = row.id
-  editForm.serviceName = row.name
-  editForm.serviceAddress = `${row.agent_ts_ip || '-'}:${row.listen_port}`
-  editForm.agentName = row.agent_name || '-'
-  editForm.accessType = row.access_type || 'public'
-  editForm.groupId = row.group_id || null
-  editDialogVisible.value = true
-}
-
-// 保存权限
-const handleSavePermission = async () => {
-  if (editForm.accessType === 'group' && !editForm.groupId) {
-    ElMessage.warning(t('desktopAuth.selectGroupRequired'))
-    return
-  }
-
-  saving.value = true
-  try {
-    await updateServiceAccessType(editForm.serviceId, {
-      access_type: editForm.accessType,
-      group_id: editForm.accessType === 'group' ? editForm.groupId : null
+    const response = await request({
+      url: '/api/v1/admin/client-groups',
+      method: 'get'
     })
-    ElMessage.success(t('desktopAuth.updateSuccess'))
-    editDialogVisible.value = false
-    await loadServices()
-  } catch (error: any) {
-    // 检查是否是 ACL 同步错误
-    if (error.response?.data?.message?.includes('ACL') || error.response?.data?.message?.includes('Headscale')) {
-      ElMessage.error(t('desktopAuth.aclSyncError'))
-    } else {
-      ElMessage.error(error.response?.data?.message || t('desktopAuth.updateFailed'))
+    if (response.success) {
+      clientGroupList.value = response.data || []
     }
-  } finally {
-    saving.value = false
+  } catch (error) {
+    console.error('Failed to load client groups:', error)
   }
 }
 
-// 添加授权
-const handleAddAuth = () => {
-  addAuthForm.serviceId = null
-  addAuthForm.clientId = null
-  addAuthForm.expireType = 'permanent'
-  addAuthForm.expiresAt = null
-  addAuthDialogVisible.value = true
+// 搜索
+const handleSearch = () => {
+  // 搜索是实时的，通过 computed 实现
 }
 
-// 提交授权
-const handleSubmitAuth = async () => {
-  if (!addAuthForm.serviceId || !addAuthForm.clientId) {
-    ElMessage.warning(t('desktopAuth.selectServiceAndClient'))
+// 添加分组授权
+const handleAddGroup = (row: any) => {
+  currentService.value = row
+  addGroupForm.groupIds = []
+  addGroupDialogVisible.value = true
+}
+
+// 添加用户授权
+const handleAddUser = (row: any) => {
+  currentService.value = row
+  addUserForm.clientIds = []
+  addUserDialogVisible.value = true
+}
+
+// 提交分组授权
+const handleSubmitGroupAuth = async () => {
+  if (addGroupForm.groupIds.length === 0) {
+    ElMessage.warning(t('desktopAuth.selectGroupRequired'))
     return
   }
 
   submitting.value = true
   try {
-    const expiresAt = addAuthForm.expireType === 'custom' && addAuthForm.expiresAt
-      ? addAuthForm.expiresAt.toISOString()
-      : undefined
+    // 批量添加分组授权
+    const promises = addGroupForm.groupIds.map(groupId =>
+      request({
+        url: `/api/v1/admin/services/${currentService.value.id}/client-groups`,
+        method: 'post',
+        data: {
+          group_id: groupId
+        }
+      })
+    )
 
-    await addServicePermission(addAuthForm.serviceId, {
-      client_id: addAuthForm.clientId,
-      expires_at: expiresAt
-    })
+    await Promise.all(promises)
+
     ElMessage.success(t('desktopAuth.authSuccess'))
-    addAuthDialogVisible.value = false
-    await loadAllPermissions()
+    addGroupDialogVisible.value = false
+    await loadServices()
   } catch (error: any) {
-    // 检查是否是 ACL 同步错误
     if (error.response?.data?.message?.includes('ACL') || error.response?.data?.message?.includes('Headscale')) {
       ElMessage.error(t('desktopAuth.aclSyncError'))
     } else {
@@ -480,51 +425,141 @@ const handleSubmitAuth = async () => {
   }
 }
 
-// 查看额外授权
-const handleViewExtraAuth = async (row: ProxyService) => {
+// 提交用户授权
+const handleSubmitUserAuth = async () => {
+  if (addUserForm.clientIds.length === 0) {
+    ElMessage.warning(t('desktopAuth.selectUserRequired'))
+    return
+  }
+
+  submitting.value = true
+  try {
+    // 批量添加用户授权
+    const promises = addUserForm.clientIds.map(clientId =>
+      request({
+        url: `/api/v1/admin/services/${currentService.value.id}/clients`,
+        method: 'post',
+        data: {
+          client_id: clientId
+        }
+      })
+    )
+
+    await Promise.all(promises)
+
+    ElMessage.success(t('desktopAuth.authSuccess'))
+    addUserDialogVisible.value = false
+    await loadServices()
+  } catch (error: any) {
+    if (error.response?.data?.message?.includes('ACL') || error.response?.data?.message?.includes('Headscale')) {
+      ElMessage.error(t('desktopAuth.aclSyncError'))
+    } else {
+      ElMessage.error(error.response?.data?.message || t('desktopAuth.authFailed'))
+    }
+  } finally {
+    submitting.value = false
+  }
+}
+
+// 查看分组授权
+const handleViewGroups = async (row: any) => {
   currentService.value = row
-  extraAuthDialogVisible.value = true
-  loadingExtraAuth.value = true
+  viewGroupsDialogVisible.value = true
+  loadingGroupAuth.value = true
 
   try {
-    const response = await getServicePermissions(row.id)
-    if (response.data?.success) {
-      extraAuthList.value = response.data.data || []
+    const response = await request({
+      url: `/api/v1/admin/services/${row.id}/client-groups`,
+      method: 'get'
+    })
+    if (response.success) {
+      groupAuthList.value = response.data || []
     }
   } catch (error) {
     ElMessage.error(t('desktopAuth.loadPermissionsFailed'))
   } finally {
-    loadingExtraAuth.value = false
+    loadingGroupAuth.value = false
   }
 }
 
-// 从额外授权对话框添加授权
-const handleAddExtraAuth = () => {
-  if (currentService.value) {
-    addAuthForm.serviceId = currentService.value.id
-    addAuthForm.clientId = null
-    addAuthForm.expireType = 'permanent'
-    addAuthForm.expiresAt = null
-    addAuthDialogVisible.value = true
+// 查看用户授权
+const handleViewUsers = async (row: any) => {
+  currentService.value = row
+  viewUsersDialogVisible.value = true
+  loadingUserAuth.value = true
+
+  try {
+    const response = await request({
+      url: `/api/v1/admin/services/${row.id}/clients`,
+      method: 'get'
+    })
+    if (response.success) {
+      userAuthList.value = response.data || []
+    }
+  } catch (error) {
+    ElMessage.error(t('desktopAuth.loadPermissionsFailed'))
+  } finally {
+    loadingUserAuth.value = false
   }
 }
 
-// 撤销授权
-const handleRevokeAuth = async (row: ServicePermission) => {
+// 从查看对话框添加分组
+const handleAddGroupFromView = () => {
+  viewGroupsDialogVisible.value = false
+  addGroupForm.groupIds = []
+  addGroupDialogVisible.value = true
+}
+
+// 从查看对话框添加用户
+const handleAddUserFromView = () => {
+  viewUsersDialogVisible.value = false
+  addUserForm.clientIds = []
+  addUserDialogVisible.value = true
+}
+
+// 撤销分组授权
+const handleRevokeGroupAuth = async (row: any) => {
   try {
     await ElMessageBox.confirm(t('desktopAuth.revokeConfirm'), t('common.confirm'), {
       type: 'warning'
     })
 
-    await removeServicePermission(currentService.value!.id, row.id)
-    ElMessage.success(t('desktopAuth.revokeSuccess'))
+    await request({
+      url: `/api/v1/admin/services/${currentService.value.id}/client-groups/${row.id}`,
+      method: 'delete'
+    })
 
-    // 刷新列表
-    await handleViewExtraAuth(currentService.value!)
-    await loadAllPermissions()
+    ElMessage.success(t('desktopAuth.revokeSuccess'))
+    await handleViewGroups(currentService.value)
+    await loadServices()
   } catch (error: any) {
     if (error !== 'cancel') {
-      // 检查是否是 ACL 同步错误
+      if (error.response?.data?.message?.includes('ACL') || error.response?.data?.message?.includes('Headscale')) {
+        ElMessage.error(t('desktopAuth.aclSyncError'))
+      } else {
+        ElMessage.error(error.response?.data?.message || t('desktopAuth.revokeFailed'))
+      }
+    }
+  }
+}
+
+// 撤销用户授权
+const handleRevokeUserAuth = async (row: any) => {
+  try {
+    await ElMessageBox.confirm(t('desktopAuth.revokeConfirm'), t('common.confirm'), {
+      type: 'warning'
+    })
+
+    await request({
+      url: `/api/v1/admin/services/${currentService.value.id}/clients/${row.id}`,
+      method: 'delete'
+    })
+
+    ElMessage.success(t('desktopAuth.revokeSuccess'))
+    await handleViewUsers(currentService.value)
+    await loadServices()
+  } catch (error: any) {
+    if (error !== 'cancel') {
       if (error.response?.data?.message?.includes('ACL') || error.response?.data?.message?.includes('Headscale')) {
         ElMessage.error(t('desktopAuth.aclSyncError'))
       } else {
@@ -536,15 +571,21 @@ const handleRevokeAuth = async (row: ServicePermission) => {
 
 // 格式化时间
 const formatTime = (time: string) => {
+  if (!time) return '-'
   return new Date(time).toLocaleString('zh-CN')
+}
+
+// 计算序号
+const indexMethod = (index: number) => {
+  return (pagination.page - 1) * pagination.pageSize + index + 1
 }
 
 onMounted(async () => {
   await Promise.all([
     loadServices(),
+    loadAgents(),
     loadClients(),
-    loadGroups(),
-    loadAllPermissions()
+    loadClientGroups()
   ])
 })
 </script>
@@ -572,37 +613,37 @@ onMounted(async () => {
   color: #909399;
 }
 
-.service-info {
+.count-link {
+  color: #409eff;
+  font-weight: 500;
+  padding: 0;
+}
+
+.count-link:hover {
+  color: #66b1ff;
+}
+
+.count-zero {
+  color: #909399;
+  padding: 0;
+  cursor: default;
+}
+
+.service-info-box {
   background: #f5f7fa;
   padding: 12px;
   border-radius: 4px;
+  margin-bottom: 16px;
 }
 
-.service-info p {
+.service-info-box p {
   margin: 4px 0;
 }
 
-.el-radio-group {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.radio-desc {
-  color: #909399;
-  font-size: 12px;
-  margin-left: 8px;
-}
-
-.extra-auth-header {
+.dialog-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
-}
-
-.extra-auth-badge :deep(.el-badge__content) {
-  top: 0;
-  right: 10px;
 }
 </style>

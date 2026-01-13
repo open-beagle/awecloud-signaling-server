@@ -24,20 +24,38 @@
             <span>{{ row.group_count ?? 0 }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="Services" width="100" align="center">
+        <el-table-column :label="t('agent.localServices')" width="100" align="center">
           <template #default="{ row }">
             <el-link
               type="primary"
               :underline="false"
-              @click="handleViewServices(row)"
+              @click="handleViewDetail(row)"
             >
               {{ row.service_count || 0 }}
             </el-link>
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.status')" width="100">
+        <el-table-column :label="t('agent.remoteServices')" width="100" align="center">
           <template #default="{ row }">
-            <StatusTag :status="row.status || 'offline'" />
+            <el-link
+              type="primary"
+              :underline="false"
+              @click="handleViewDetail(row)"
+            >
+              {{ row.forward_count || 0 }}
+            </el-link>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('common.status')" width="100" align="center">
+          <template #default="{ row }">
+            <span :style="{ color: row.status === 'online' ? '#67C23A' : '#909399' }">
+              {{ row.status === 'online' ? t('common.online') : t('common.offline') }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('agent.connections')" width="100" align="center">
+          <template #default="{ row }">
+            <span>{{ row.connections || 0 }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="version" :label="t('agent.version')" width="100">

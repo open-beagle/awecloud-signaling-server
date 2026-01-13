@@ -8,6 +8,7 @@ export interface Agent {
   created_at?: string
   updated_at?: string
   status?: 'online' | 'offline'
+  connections?: number
   // Tailscale 相关字段
   ip?: string
   ts_connected?: boolean
@@ -15,7 +16,8 @@ export interface Agent {
   ts_registered_at?: string
   // 分组和服务数量
   group_count?: number
-  service_count?: number
+  service_count?: number    // 本地服务数量
+  forward_count?: number    // 远程服务数量
 }
 
 // 网络信息
@@ -56,10 +58,11 @@ export interface AgentDetail extends Agent {
 
 // 端口转发模型
 export interface PortForward {
-  id: number
+  id: string
   name: string
   alias?: string
   agent_id: number
+  target_service_id?: string
   target_addr: string
   listen_addr: string
   enabled: boolean
@@ -69,7 +72,7 @@ export interface PortForward {
 
 // 端口映射服务模型
 export interface ProxyService {
-  id: number
+  id: string
   name: string
   alias?: string
   agent_id: number

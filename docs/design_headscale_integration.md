@@ -751,7 +751,7 @@ Tag 属于 Node（不是 User），用于 ACL 分组控制。
 
 | Tag 类型 | 格式                           | 说明            |
 | -------- | ------------------------------ | --------------- |
-| 身份 Tag | `tag:agent-id-{agent.name}`    | 每个 Agent 唯一 |
+| 身份 Tag | `tag:agent-{agent.name}`       | 每个 Agent 唯一 |
 | 分组 Tag | `tag:agent-group-{group.name}` | 可属于多个分组  |
 
 **示例：**
@@ -759,7 +759,7 @@ Tag 属于 Node（不是 User），用于 ACL 分组控制。
 ```txt
 Agent: k8s-prod
 Tags: [
-  "tag:agent-id-k8s-prod",         ← 身份 Tag（唯一）
+  "tag:agent-k8s-prod",            ← 身份 Tag（唯一）
   "tag:agent-group-internal",      ← 分组 Tag
   "tag:agent-group-production"     ← 分组 Tag（可多个）
 ]
@@ -769,15 +769,15 @@ Tags: [
 
 | Tag 类型 | 格式                             | 说明              |
 | -------- | -------------------------------- | ----------------- |
-| 身份 Tag | `tag:desktop-id-{client.id}`     | 每个 Desktop 唯一 |
+| 身份 Tag | `tag:desktop-{client.name}`      | 每个 Desktop 唯一 |
 | 分组 Tag | `tag:desktop-group-{group.name}` | 可属于多个分组    |
 
 **示例：**
 
 ```txt
-Desktop: zhangsan@company.com
+Desktop: zhangsan
 Tags: [
-  "tag:desktop-id-zhangsan",       ← 身份 Tag（唯一）
+  "tag:desktop-zhangsan",          ← 身份 Tag（唯一）
   "tag:desktop-group-dev",         ← 分组 Tag
   "tag:desktop-group-ops"          ← 分组 Tag（可多个）
 ]
@@ -887,19 +887,19 @@ Tags: [
 {
   "action": "accept",
   "src": ["tag:desktop-group-{desktop_group.name}"],
-  "dst": ["tag:agent-id-{agent.name}:{port}"]
+  "dst": ["tag:agent-{agent.name}:{port}"]
 }
 ```
 
 **示例：**
 
 ```txt
-授权: desktop-group-dev → agent-id-k8s-prod:3306
+授权: desktop-group-dev → agent-k8s-prod:3306
 生成 ACL:
 {
   "action": "accept",
   "src": ["tag:desktop-group-dev"],
-  "dst": ["tag:agent-id-k8s-prod:3306"]
+  "dst": ["tag:agent-k8s-prod:3306"]
 }
 
 效果: dev 组的所有 Desktop 可以访问 k8s-prod 这个 Agent 的 3306 端口
@@ -907,12 +907,12 @@ Tags: [
 
 ### 10.5 ACL 规则汇总
 
-| 业务                          | src                        | dst                                | 触发时机        |
-| ----------------------------- | -------------------------- | ---------------------------------- | --------------- |
-| Agent 同组互访                | `tag:agent-group-{name}`   | `tag:agent-group-{name}:*`         | 创建 Agent 分组 |
-| Agent 组全开放给 Desktop 组   | `tag:desktop-group-{name}` | `tag:agent-group-{name}:*`         | 授权时          |
-| Agent 组特定端口给 Desktop 组 | `tag:desktop-group-{name}` | `tag:agent-group-{name}:{port}`    | 授权时          |
-| 单个 Agent 端口给 Desktop 组  | `tag:desktop-group-{name}` | `tag:agent-id-{agent.name}:{port}` | 授权时          |
+| 业务                          | src                        | dst                             | 触发时机        |
+| ----------------------------- | -------------------------- | ------------------------------- | --------------- |
+| Agent 同组互访                | `tag:agent-group-{name}`   | `tag:agent-group-{name}:*`      | 创建 Agent 分组 |
+| Agent 组全开放给 Desktop 组   | `tag:desktop-group-{name}` | `tag:agent-group-{name}:*`      | 授权时          |
+| Agent 组特定端口给 Desktop 组 | `tag:desktop-group-{name}` | `tag:agent-group-{name}:{port}` | 授权时          |
+| 单个 Agent 端口给 Desktop 组  | `tag:desktop-group-{name}` | `tag:agent-{agent.name}:{port}` | 授权时          |
 
 ### 10.6 Server 维护 ACL 的时机
 

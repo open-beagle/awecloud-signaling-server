@@ -204,3 +204,22 @@ func WithFields(fields logrus.Fields) *logrus.Entry {
 	}
 	return logrus.NewEntry(logrus.StandardLogger()).WithFields(fields)
 }
+
+// LogrusWriter 实现 io.Writer 接口，将标准库 log 重定向到 logrus
+type LogrusWriter struct{}
+
+// NewLogrusWriter 创建一个新的 LogrusWriter
+func NewLogrusWriter() *LogrusWriter {
+	return &LogrusWriter{}
+}
+
+// Write 实现 io.Writer 接口
+func (w *LogrusWriter) Write(p []byte) (n int, err error) {
+	// 去掉末尾的换行符
+	msg := strings.TrimSuffix(string(p), "\n")
+	if msg != "" {
+		// 使用 Info 级别输出
+		Infof("[tsnet] %s", msg)
+	}
+	return len(p), nil
+}

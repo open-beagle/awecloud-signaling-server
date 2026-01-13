@@ -9,7 +9,7 @@ import { computed } from 'vue'
 import { formatRelativeTime, formatFullTime } from '@/utils/time'
 
 const props = defineProps<{
-  time: string
+  time: string | number
 }>()
 
 const relativeTime = computed(() => formatRelativeTime(props.time))

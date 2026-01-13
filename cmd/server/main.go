@@ -22,10 +22,11 @@ var (
 func main() {
 	configPath := flag.String("c", "config/server.toml", "配置文件路径")
 	showVersion := flag.Bool("v", false, "显示版本信息")
+	showVersionLong := flag.Bool("version", false, "显示版本信息")
 	flag.Parse()
 
 	// 显示版本信息
-	if *showVersion {
+	if *showVersion || *showVersionLong {
 		fmt.Printf("AWECloud Signaling Server\n")
 		fmt.Printf("Version:    %s\n", version)
 		fmt.Printf("Git Commit: %s\n", gitCommit)

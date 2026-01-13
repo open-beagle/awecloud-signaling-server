@@ -17,21 +17,23 @@
       </div>
       
       <el-table v-loading="loading" :data="groups" stripe>
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="name" label="分组" min-width="120" />
-        <el-table-column prop="alias" label="别名" min-width="120" />
-        <el-table-column prop="member_count" label="成员" width="80" />
-        <el-table-column prop="description" label="描述" min-width="200" />
+        <el-table-column prop="name" label="分组" width="150" />
+        <el-table-column prop="alias" label="别名" width="120" />
+        <el-table-column label="成员" width="100">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="handleMembers(row)">
+              {{ row.member_count || 0 }}
+            </el-button>
+          </template>
+        </el-table-column>
+        <el-table-column prop="description" label="描述" min-width="150" />
         <el-table-column label="创建时间" width="180">
           <template #default="{ row }">
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
-            <el-tooltip content="成员管理" placement="top">
-              <el-button size="small" :icon="Monitor" @click="handleMembers(row)" />
-            </el-tooltip>
             <el-tooltip content="编辑" placement="top">
               <el-button size="small" :icon="Edit" @click="handleEdit(row)" />
             </el-tooltip>
@@ -82,7 +84,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete, Monitor, Edit } from '@element-plus/icons-vue'
+import { Plus, Delete, Edit } from '@element-plus/icons-vue'
 import { getAgentGroups, createAgentGroup, updateAgentGroup, deleteAgentGroup } from '@/api/group'
 import type { Group } from '@/api/group'
 

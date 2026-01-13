@@ -60,7 +60,7 @@ export function createService(data: CreateServiceRequest) {
 }
 
 // 更新服务
-export function updateService(id: number, data: UpdateServiceRequest) {
+export function updateService(id: string | number, data: UpdateServiceRequest) {
   return request({
     url: `/api/v1/admin/services/${id}`,
     method: 'put',
@@ -69,7 +69,7 @@ export function updateService(id: number, data: UpdateServiceRequest) {
 }
 
 // 删除服务
-export function deleteService(id: number) {
+export function deleteService(id: string | number) {
   return request({
     url: `/api/v1/admin/services/${id}`,
     method: 'delete'
@@ -77,7 +77,7 @@ export function deleteService(id: number) {
 }
 
 // 启动服务
-export function startService(id: number) {
+export function startService(id: string | number) {
   return request({
     url: `/api/v1/admin/services/${id}/start`,
     method: 'put'
@@ -85,7 +85,7 @@ export function startService(id: number) {
 }
 
 // 停止服务
-export function stopService(id: number) {
+export function stopService(id: string | number) {
   return request({
     url: `/api/v1/admin/services/${id}/stop`,
     method: 'put'
@@ -93,7 +93,7 @@ export function stopService(id: number) {
 }
 
 // 获取服务统计
-export function getServiceStats(id: number) {
+export function getServiceStats(id: string | number) {
   return request({
     url: `/api/v1/admin/services/${id}/stats`,
     method: 'get'

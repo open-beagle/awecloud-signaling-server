@@ -8,9 +8,11 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-const props = defineProps<{
-  status: 'online' | 'offline'
-}>()
+const props = withDefaults(defineProps<{
+  status?: 'online' | 'offline' | string
+}>(), {
+  status: 'offline'
+})
 
 const { t } = useI18n()
 

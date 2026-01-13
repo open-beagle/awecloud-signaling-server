@@ -348,6 +348,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					groupAPI := api.NewGroupAPI(s.config)
 					// 用户分组
 					adminAuthGroup.GET("/client-groups", groupAPI.ListClientGroups)
+					adminAuthGroup.GET("/client-groups/:id", groupAPI.GetClientGroup)
 					adminAuthGroup.POST("/client-groups", groupAPI.CreateClientGroup)
 					adminAuthGroup.PUT("/client-groups/:id", groupAPI.UpdateClientGroup)
 					adminAuthGroup.DELETE("/client-groups/:id", groupAPI.DeleteClientGroup)
@@ -356,6 +357,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.DELETE("/client-groups/:id/members/:cid", groupAPI.RemoveClientGroupMember)
 					// 代理分组
 					adminAuthGroup.GET("/agent-groups", groupAPI.ListAgentGroups)
+					adminAuthGroup.GET("/agent-groups/:id", groupAPI.GetAgentGroup)
 					adminAuthGroup.POST("/agent-groups", groupAPI.CreateAgentGroup)
 					adminAuthGroup.PUT("/agent-groups/:id", groupAPI.UpdateAgentGroup)
 					adminAuthGroup.DELETE("/agent-groups/:id", groupAPI.DeleteAgentGroup)

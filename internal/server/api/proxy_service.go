@@ -43,15 +43,17 @@ func NewProxyServiceAPI(cfg *config.ServerConfig) *ProxyServiceAPI {
 
 // ServiceListItem 服务列表项
 type ServiceListItem struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	AgentID     uint64 `json:"agent_id"`
-	AgentName   string `json:"agent_name"`
-	TargetAddr  string `json:"target_addr"`
-	ListenAddr  string `json:"listen_addr"`
-	Enabled     bool   `json:"enabled"`
-	ClientCount int64  `json:"client_count"`
-	GroupCount  int64  `json:"group_count"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	AgentID         uint64 `json:"agent_id"`
+	AgentName       string `json:"agent_name"`
+	TargetAddr      string `json:"target_addr"`
+	ListenAddr      string `json:"listen_addr"`
+	Enabled         bool   `json:"enabled"`
+	ClientCount     int64  `json:"client_count"`
+	GroupCount      int64  `json:"group_count"`
+	AgentCount      int64  `json:"agent_count"`
+	AgentGroupCount int64  `json:"agent_group_count"`
 }
 
 // List 获取服务列表
@@ -111,6 +113,34 @@ func (a *ProxyServiceAPI) List(c *gin.Context) {
 		groupCountMap[gc.ServiceID] = gc.Count
 	}
 
+	// 查询每个服务的授权 Agent 数
+	var agentCounts []struct {
+		ServiceID string `gorm:"column:service_id"`
+		Count     int64  `gorm:"column:count"`
+	}
+	db.DB.Model(&model.ServiceAgentPermission{}).
+		Select("service_id, COUNT(*) as count").
+		Group("service_id").Find(&agentCounts)
+
+	agentCountMap := make(map[string]int64)
+	for _, ac := range agentCounts {
+		agentCountMap[ac.ServiceID] = ac.Count
+	}
+
+	// 查询每个服务的授权 Agent 分组数
+	var agentGroupCounts []struct {
+		ServiceID string `gorm:"column:service_id"`
+		Count     int64  `gorm:"column:count"`
+	}
+	db.DB.Model(&model.ServiceAgentGroupPermission{}).
+		Select("service_id, COUNT(*) as count").
+		Group("service_id").Find(&agentGroupCounts)
+
+	agentGroupCountMap := make(map[string]int64)
+	for _, agc := range agentGroupCounts {
+		agentGroupCountMap[agc.ServiceID] = agc.Count
+	}
+
 	result := make([]ServiceListItem, len(services))
 	for i, svc := range services {
 		// 构建完整的监听地址（Agent IP + 端口）
@@ -123,14 +153,16 @@ func (a *ProxyServiceAPI) List(c *gin.Context) {
 		}
 
 		item := ServiceListItem{
-			ID:          svc.ID,
-			Name:        svc.Name,
-			AgentID:     svc.AgentID,
-			TargetAddr:  svc.TargetAddr,
-			ListenAddr:  listenAddr,
-			Enabled:     svc.Enabled,
-			ClientCount: clientCountMap[svc.ID],
-			GroupCount:  groupCountMap[svc.ID],
+			ID:              svc.ID,
+			Name:            svc.Name,
+			AgentID:         svc.AgentID,
+			TargetAddr:      svc.TargetAddr,
+			ListenAddr:      listenAddr,
+			Enabled:         svc.Enabled,
+			ClientCount:     clientCountMap[svc.ID],
+			GroupCount:      groupCountMap[svc.ID],
+			AgentCount:      agentCountMap[svc.ID],
+			AgentGroupCount: agentGroupCountMap[svc.ID],
 		}
 		if svc.Agent != nil {
 			item.AgentName = svc.Agent.Name
@@ -257,20 +289,27 @@ func (a *ProxyServiceAPI) Update(c *gin.Context) {
 		return
 	}
 
+	// 只更新提供的字段
+	updates := make(map[string]interface{})
 	if req.Alias != "" {
-		service.Alias = req.Alias
+		updates["alias"] = req.Alias
 	}
 	if req.TargetAddr != "" {
-		service.TargetAddr = req.TargetAddr
+		updates["target_addr"] = req.TargetAddr
 	}
 	if req.ListenAddr != "" {
-		service.ListenAddr = req.ListenAddr
+		updates["listen_addr"] = req.ListenAddr
 	}
 	if req.Enabled != nil {
-		service.Enabled = *req.Enabled
+		updates["enabled"] = *req.Enabled
 	}
 
-	if err := db.DB.Save(&service).Error; err != nil {
+	if len(updates) == 0 {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("没有需要更新的字段"))
+		return
+	}
+
+	if err := db.DB.Model(&service).Updates(updates).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新失败"))
 		return
 	}

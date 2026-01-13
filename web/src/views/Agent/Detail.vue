@@ -180,32 +180,28 @@
               {{ row.listen_addr || '-' }}
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.actions')" width="180" fixed="right">
+          <el-table-column :label="t('common.actions')" width="150" fixed="right">
             <template #default="{ row }">
               <div class="action-buttons">
-                <el-button size="small" :icon="Edit" @click="handleEditService(row)" />
-                <el-button
-                  v-if="row.enabled"
-                  size="small"
-                  type="warning"
-                  @click="handleDisableService(row)"
-                >
-                  {{ t('tcp.disable') }}
-                </el-button>
-                <el-button
-                  v-else
-                  size="small"
-                  type="success"
-                  @click="handleEnableService(row)"
-                >
-                  {{ t('tcp.enable') }}
-                </el-button>
-                <el-button
-                  size="small"
-                  type="danger"
-                  :icon="Delete"
-                  @click="handleDeleteService(row)"
-                />
+                <el-tooltip content="编辑" placement="top">
+                  <el-button size="small" :icon="Edit" @click="handleEditService(row)" />
+                </el-tooltip>
+                <el-tooltip :content="row.enabled ? '禁用' : '启用'" placement="top">
+                  <el-button
+                    size="small"
+                    :icon="row.enabled ? 'VideoPause' : 'VideoPlay'"
+                    :type="row.enabled ? 'warning' : 'success'"
+                    @click="row.enabled ? handleDisableService(row) : handleEnableService(row)"
+                  />
+                </el-tooltip>
+                <el-tooltip content="删除" placement="top">
+                  <el-button
+                    size="small"
+                    type="danger"
+                    :icon="Delete"
+                    @click="handleDeleteService(row)"
+                  />
+                </el-tooltip>
               </div>
             </template>
           </el-table-column>
@@ -241,32 +237,28 @@
           </el-table-column>
           <el-table-column prop="target_addr" :label="t('service.targetAddr')" min-width="150" />
           <el-table-column prop="listen_addr" :label="t('agent.localListenAddr')" min-width="150" />
-          <el-table-column :label="t('common.actions')" width="180" fixed="right">
+          <el-table-column :label="t('common.actions')" width="150" fixed="right">
             <template #default="{ row }">
               <div class="action-buttons">
-                <el-button size="small" :icon="Edit" @click="handleEditVisitor(row)" />
-                <el-button
-                  v-if="row.enabled"
-                  size="small"
-                  type="warning"
-                  @click="handleDisableVisitor(row)"
-                >
-                  {{ t('tcp.disable') }}
-                </el-button>
-                <el-button
-                  v-else
-                  size="small"
-                  type="success"
-                  @click="handleEnableVisitor(row)"
-                >
-                  {{ t('tcp.enable') }}
-                </el-button>
-                <el-button
-                  size="small"
-                  type="danger"
-                  :icon="Delete"
-                  @click="handleDeleteVisitor(row)"
-                />
+                <el-tooltip content="编辑" placement="top">
+                  <el-button size="small" :icon="Edit" @click="handleEditVisitor(row)" />
+                </el-tooltip>
+                <el-tooltip :content="row.enabled ? '禁用' : '启用'" placement="top">
+                  <el-button
+                    size="small"
+                    :icon="row.enabled ? 'VideoPause' : 'VideoPlay'"
+                    :type="row.enabled ? 'warning' : 'success'"
+                    @click="row.enabled ? handleDisableVisitor(row) : handleEnableVisitor(row)"
+                  />
+                </el-tooltip>
+                <el-tooltip content="删除" placement="top">
+                  <el-button
+                    size="small"
+                    type="danger"
+                    :icon="Delete"
+                    @click="handleDeleteVisitor(row)"
+                  />
+                </el-tooltip>
               </div>
             </template>
           </el-table-column>
@@ -275,6 +267,124 @@
         <el-empty v-else :description="t('agent.noVisitors')" />
       </el-card>
     </div>
+
+    <!-- 创建本地服务对话框 -->
+    <el-dialog v-model="createServiceDialogVisible" title="创建本地服务" width="600px">
+      <el-form :model="createServiceForm" label-width="100px">
+        <el-form-item label="服务名称" required>
+          <el-input v-model="createServiceForm.name" placeholder="例如: web-server" />
+        </el-form-item>
+        <el-form-item label="别名">
+          <el-input v-model="createServiceForm.alias" placeholder="例如: Web服务" />
+        </el-form-item>
+        <el-form-item label="目标地址" required>
+          <el-input v-model="createServiceForm.target_addr" placeholder="例如: 192.168.1.10:80" />
+          <div class="form-tip">Agent 内网中的服务地址</div>
+        </el-form-item>
+        <el-form-item label="监听地址" required>
+          <el-input v-model="createServiceForm.listen_addr" placeholder="例如: :8080 或 100.64.0.1:8080" />
+          <div class="form-tip">在隧道网络中监听的地址，供其他 Agent 或 Desktop 访问</div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createServiceDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleSubmitCreateService" :loading="creatingService">
+          创建
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 创建远程服务对话框 -->
+    <el-dialog v-model="createVisitorDialogVisible" title="创建远程服务" width="600px">
+      <el-form :model="createVisitorForm" label-width="100px">
+        <el-form-item label="服务名称" required>
+          <el-input v-model="createVisitorForm.name" placeholder="例如: mysql" />
+        </el-form-item>
+        <el-form-item label="别名">
+          <el-input v-model="createVisitorForm.alias" placeholder="例如: MySQL数据库" />
+        </el-form-item>
+        <el-form-item label="目标服务" required>
+          <el-select v-model="createVisitorForm.target_service_id" placeholder="选择要访问的服务" style="width: 100%">
+            <el-option
+              v-for="svc in availableServices"
+              :key="svc.id"
+              :label="`${svc.agent_name}/${svc.name} (${svc.listen_addr})`"
+              :value="svc.id"
+            />
+          </el-select>
+          <div class="form-tip">选择其他 Agent 提供的服务</div>
+        </el-form-item>
+        <el-form-item label="本地监听" required>
+          <el-input v-model="createVisitorForm.listen_addr" placeholder="例如: 192.168.1.100:13306" />
+          <div class="form-tip">在当前 Agent 的内网中监听的地址，供局域网设备访问</div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createVisitorDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleSubmitCreateVisitor" :loading="creatingVisitor">
+          创建
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑本地服务对话框 -->
+    <el-dialog v-model="editServiceDialogVisible" title="编辑本地服务" width="600px">
+      <el-form :model="editServiceForm" label-width="100px">
+        <el-form-item label="别名">
+          <el-input v-model="editServiceForm.alias" placeholder="例如: Web服务" />
+        </el-form-item>
+        <el-form-item label="目标地址" required>
+          <el-input v-model="editServiceForm.target_addr" placeholder="例如: 192.168.1.10:80" />
+          <div class="form-tip">Agent 内网中的服务地址</div>
+        </el-form-item>
+        <el-form-item label="监听地址" required>
+          <el-input v-model="editServiceForm.listen_addr" placeholder="例如: :8080 或 100.64.0.1:8080" />
+          <div class="form-tip">在隧道网络中监听的地址</div>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-switch v-model="editServiceForm.enabled" active-text="启用" inactive-text="禁用" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editServiceDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleSubmitEditService" :loading="editingService">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑远程服务对话框 -->
+    <el-dialog v-model="editVisitorDialogVisible" title="编辑远程服务" width="600px">
+      <el-form :model="editVisitorForm" label-width="100px">
+        <el-form-item label="别名">
+          <el-input v-model="editVisitorForm.alias" placeholder="例如: MySQL数据库" />
+        </el-form-item>
+        <el-form-item label="目标服务" required>
+          <el-select v-model="editVisitorForm.target_service_id" placeholder="选择要访问的服务" style="width: 100%">
+            <el-option
+              v-for="svc in availableServices"
+              :key="svc.id"
+              :label="`${svc.agent_name}/${svc.name} (${svc.listen_addr})`"
+              :value="svc.id"
+            />
+          </el-select>
+          <div class="form-tip">选择其他 Agent 提供的服务</div>
+        </el-form-item>
+        <el-form-item label="本地监听" required>
+          <el-input v-model="editVisitorForm.listen_addr" placeholder="例如: 192.168.1.100:13306" />
+          <div class="form-tip">在当前 Agent 的内网中监听的地址</div>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-switch v-model="editVisitorForm.enabled" active-text="启用" inactive-text="禁用" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editVisitorDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleSubmitEditVisitor" :loading="editingVisitor">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -286,6 +396,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete, Edit, Refresh } from '@element-plus/icons-vue'
 import { getAgent, getAgentRealtime, updateAgent } from '@/api/agent'
 import { deleteService } from '@/api/service'
+import request from '@/utils/request'
 import type { AgentDetail, ProxyService, PortForward } from '@/types/models'
 import TimeAgo from '@/components/Common/TimeAgo.vue'
 
@@ -314,6 +425,50 @@ const isEditing = ref(false)
 const editForm = reactive({
   alias: ''
 })
+
+// 创建本地服务对话框
+const createServiceDialogVisible = ref(false)
+const createServiceForm = reactive({
+  name: '',
+  alias: '',
+  target_addr: '',
+  listen_addr: ''
+})
+const creatingService = ref(false)
+
+// 编辑本地服务对话框
+const editServiceDialogVisible = ref(false)
+const editServiceForm = reactive({
+  id: '',
+  alias: '',
+  target_addr: '',
+  listen_addr: '',
+  enabled: true
+})
+const editingService = ref(false)
+
+// 创建远程服务对话框
+const createVisitorDialogVisible = ref(false)
+const createVisitorForm = reactive({
+  name: '',
+  alias: '',
+  target_service_id: '',
+  listen_addr: ''
+})
+const creatingVisitor = ref(false)
+
+// 编辑远程服务对话框
+const editVisitorDialogVisible = ref(false)
+const editVisitorForm = reactive({
+  id: '',
+  alias: '',
+  target_service_id: '',
+  listen_addr: '',
+  enabled: true
+})
+const editingVisitor = ref(false)
+
+const availableServices = ref<any[]>([]) // 可选的目标服务列表
 
 // 格式化日期
 const formatDate = (dateStr: string) => {
@@ -392,19 +547,56 @@ const saveChanges = async () => {
 }
 
 const handleCreateService = () => {
-  router.push({ path: '/services', query: { create: 'true', agent_id: String(agent.value?.id) } })
+  createServiceDialogVisible.value = true
+  createServiceForm.name = ''
+  createServiceForm.alias = ''
+  createServiceForm.target_addr = ''
+  createServiceForm.listen_addr = ''
 }
 
 const handleEditService = (service: ProxyService) => {
-  router.push({ path: '/services', query: { edit: String(service.id) } })
+  editServiceForm.id = service.id
+  editServiceForm.alias = service.alias || ''
+  editServiceForm.target_addr = service.target_addr
+  editServiceForm.listen_addr = service.listen_addr
+  editServiceForm.enabled = service.enabled
+  editServiceDialogVisible.value = true
 }
 
 const handleEnableService = async (service: ProxyService) => {
-  ElMessage.info('启用服务功能待实现')
+  try {
+    const res = await request({
+      url: `/api/v1/admin/services/${service.id}`,
+      method: 'put',
+      data: { enabled: true }
+    })
+    if (res.success) {
+      ElMessage.success('启用成功')
+      loadAgent()
+    } else {
+      ElMessage.error(res.message || '启用失败')
+    }
+  } catch (error) {
+    ElMessage.error('启用失败')
+  }
 }
 
 const handleDisableService = async (service: ProxyService) => {
-  ElMessage.info('禁用服务功能待实现')
+  try {
+    const res = await request({
+      url: `/api/v1/admin/services/${service.id}`,
+      method: 'put',
+      data: { enabled: false }
+    })
+    if (res.success) {
+      ElMessage.success('禁用成功')
+      loadAgent()
+    } else {
+      ElMessage.error(res.message || '禁用失败')
+    }
+  } catch (error) {
+    ElMessage.error('禁用失败')
+  }
 }
 
 const handleDeleteService = async (service: ProxyService) => {
@@ -429,19 +621,56 @@ const handleDeleteService = async (service: ProxyService) => {
 
 // Visitor 操作
 const handleAddVisitor = () => {
-  router.push({ path: '/services/agent-auth', query: { agent_id: String(agent.value?.id) } })
+  createVisitorDialogVisible.value = true
+  createVisitorForm.name = ''
+  createVisitorForm.alias = ''
+  createVisitorForm.target_service_id = ''
+  createVisitorForm.listen_addr = ''
 }
 
 const handleEditVisitor = (visitor: PortForward) => {
-  ElMessage.info('编辑端口访问功能待实现')
+  editVisitorForm.id = visitor.id
+  editVisitorForm.alias = visitor.alias || ''
+  editVisitorForm.target_service_id = visitor.target_service_id || ''
+  editVisitorForm.listen_addr = visitor.listen_addr
+  editVisitorForm.enabled = visitor.enabled
+  editVisitorDialogVisible.value = true
 }
 
 const handleEnableVisitor = async (visitor: PortForward) => {
-  ElMessage.info('启用端口访问功能待实现')
+  try {
+    const res = await request({
+      url: `/api/v1/admin/port-forwards/${visitor.id}`,
+      method: 'put',
+      data: { enabled: true }
+    })
+    if (res.success) {
+      ElMessage.success('启用成功')
+      loadAgent()
+    } else {
+      ElMessage.error(res.message || '启用失败')
+    }
+  } catch (error) {
+    ElMessage.error('启用失败')
+  }
 }
 
 const handleDisableVisitor = async (visitor: PortForward) => {
-  ElMessage.info('禁用端口访问功能待实现')
+  try {
+    const res = await request({
+      url: `/api/v1/admin/port-forwards/${visitor.id}`,
+      method: 'put',
+      data: { enabled: false }
+    })
+    if (res.success) {
+      ElMessage.success('禁用成功')
+      loadAgent()
+    } else {
+      ElMessage.error(res.message || '禁用失败')
+    }
+  } catch (error) {
+    ElMessage.error('禁用失败')
+  }
 }
 
 const handleDeleteVisitor = async (visitor: PortForward) => {
@@ -449,9 +678,21 @@ const handleDeleteVisitor = async (visitor: PortForward) => {
     await ElMessageBox.confirm(t('common.deleteConfirm'), {
       type: 'warning'
     })
-    ElMessage.info('删除端口访问功能待实现')
+    
+    const res = await request({
+      url: `/api/v1/admin/port-forwards/${visitor.id}`,
+      method: 'delete'
+    })
+    if (res.success) {
+      ElMessage.success(t('common.deleteSuccess'))
+      loadAgent()
+    } else {
+      ElMessage.error(res.message || t('common.failed'))
+    }
   } catch (error: any) {
-    // 用户取消
+    if (error !== 'cancel') {
+      ElMessage.error(t('common.failed'))
+    }
   }
 }
 
@@ -462,8 +703,163 @@ watch(() => route.params.id, () => {
   }
 })
 
+// 提交创建本地服务
+const handleSubmitCreateService = async () => {
+  if (!agent.value || !createServiceForm.name || !createServiceForm.target_addr || !createServiceForm.listen_addr) {
+    ElMessage.warning('请填写完整信息')
+    return
+  }
+
+  creatingService.value = true
+  try {
+    const res = await request({
+      url: '/api/v1/admin/services',
+      method: 'post',
+      data: {
+        agent_id: agent.value.id,
+        name: createServiceForm.name,
+        alias: createServiceForm.alias,
+        target_addr: createServiceForm.target_addr,
+        listen_addr: createServiceForm.listen_addr
+      }
+    })
+
+    if (res.success) {
+      ElMessage.success('创建成功')
+      createServiceDialogVisible.value = false
+      loadAgent()
+    } else {
+      ElMessage.error(res.message || '创建失败')
+    }
+  } catch (error) {
+    ElMessage.error('创建失败')
+  } finally {
+    creatingService.value = false
+  }
+}
+
+// 加载可用的目标服务列表
+const loadAvailableServices = async () => {
+  try {
+    const res = await request({
+      url: '/api/v1/admin/services',
+      method: 'get',
+      params: { page: 1, size: 1000 }
+    })
+    if (res.success) {
+      availableServices.value = res.data || []
+    }
+  } catch (error) {
+    console.error('Failed to load services:', error)
+  }
+}
+
+// 提交创建远程服务
+const handleSubmitCreateVisitor = async () => {
+  if (!agent.value || !createVisitorForm.name || !createVisitorForm.target_service_id || !createVisitorForm.listen_addr) {
+    ElMessage.warning('请填写完整信息')
+    return
+  }
+
+  creatingVisitor.value = true
+  try {
+    const res = await request({
+      url: '/api/v1/admin/port-forwards',
+      method: 'post',
+      data: {
+        agent_id: agent.value.id,
+        name: createVisitorForm.name,
+        alias: createVisitorForm.alias,
+        target_service_id: createVisitorForm.target_service_id,
+        listen_addr: createVisitorForm.listen_addr
+      }
+    })
+
+    if (res.success) {
+      ElMessage.success('创建成功')
+      createVisitorDialogVisible.value = false
+      loadAgent()
+    } else {
+      ElMessage.error(res.message || '创建失败')
+    }
+  } catch (error) {
+    ElMessage.error('创建失败')
+  } finally {
+    creatingVisitor.value = false
+  }
+}
+
+// 提交编辑本地服务
+const handleSubmitEditService = async () => {
+  if (!editServiceForm.target_addr || !editServiceForm.listen_addr) {
+    ElMessage.warning('请填写完整信息')
+    return
+  }
+
+  editingService.value = true
+  try {
+    const res = await request({
+      url: `/api/v1/admin/services/${editServiceForm.id}`,
+      method: 'put',
+      data: {
+        alias: editServiceForm.alias,
+        target_addr: editServiceForm.target_addr,
+        listen_addr: editServiceForm.listen_addr,
+        enabled: editServiceForm.enabled
+      }
+    })
+
+    if (res.success) {
+      ElMessage.success('更新成功')
+      editServiceDialogVisible.value = false
+      loadAgent()
+    } else {
+      ElMessage.error(res.message || '更新失败')
+    }
+  } catch (error) {
+    ElMessage.error('更新失败')
+  } finally {
+    editingService.value = false
+  }
+}
+
+// 提交编辑远程服务
+const handleSubmitEditVisitor = async () => {
+  if (!editVisitorForm.target_service_id || !editVisitorForm.listen_addr) {
+    ElMessage.warning('请填写完整信息')
+    return
+  }
+
+  editingVisitor.value = true
+  try {
+    const res = await request({
+      url: `/api/v1/admin/port-forwards/${editVisitorForm.id}`,
+      method: 'put',
+      data: {
+        alias: editVisitorForm.alias,
+        target_service_id: editVisitorForm.target_service_id,
+        listen_addr: editVisitorForm.listen_addr,
+        enabled: editVisitorForm.enabled
+      }
+    })
+
+    if (res.success) {
+      ElMessage.success('更新成功')
+      editVisitorDialogVisible.value = false
+      loadAgent()
+    } else {
+      ElMessage.error(res.message || '更新失败')
+    }
+  } catch (error) {
+    ElMessage.error('更新失败')
+  } finally {
+    editingVisitor.value = false
+  }
+}
+
 onMounted(() => {
   loadAgent()
+  loadAvailableServices()
 })
 </script>
 
@@ -537,5 +933,11 @@ onMounted(() => {
   align-items: center;
   gap: 4px;
   flex-wrap: nowrap;
+}
+
+.form-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 4px;
 }
 </style>

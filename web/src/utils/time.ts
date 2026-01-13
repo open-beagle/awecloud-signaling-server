@@ -1,9 +1,9 @@
 /**
  * 格式化相对时间
- * @param dateString ISO时间字符串
+ * @param dateString ISO时间字符串或时间戳（毫秒）
  * @returns 相对时间字符串 (1y, 1m, 1d, 1h, 1m)
  */
-export function formatRelativeTime(dateString: string): string {
+export function formatRelativeTime(dateString: string | number): string {
   if (!dateString) {
     return '-'
   }
@@ -49,10 +49,10 @@ export function formatRelativeTime(dateString: string): string {
 
 /**
  * 格式化完整时间
- * @param dateString ISO时间字符串
+ * @param dateString ISO时间字符串或时间戳（毫秒）
  * @returns 格式化的时间字符串
  */
-export function formatFullTime(dateString: string): string {
+export function formatFullTime(dateString: string | number): string {
   if (!dateString) {
     return '-'
   }

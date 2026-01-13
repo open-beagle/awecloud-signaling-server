@@ -15,16 +15,33 @@ scripts/
 
 ## 本地构建
 
-### 1. 构建二进制文件
+### 方式一：直接编译（推荐用于本地开发）
 
-**本地开发构建**（使用 `scripts/build.sh`）：
+适用于 Ubuntu/Debian 等 glibc 系统的本地开发：
+
+```bash
+# 1. 构建前端
+bash scripts/build_frontend.sh
+
+# 2. 构建后端（当前架构）
+bash scripts/build.sh
+
+# 输出在 bin/ 目录
+# bin/server-linux-amd64
+# bin/agent-linux-amd64
+# bin/server -> server-linux-amd64 (符号链接)
+# bin/agent -> agent-linux-amd64 (符号链接)
+```
+
+### 方式二：Docker 容器编译（用于生产部署）
+
+使用 Alpine 容器编译，生成 musl libc 版本（适合 Docker 部署）：
 
 ```bash
 # 构建前端代码
 BUILD_VERSION=v0.2.0 bash scripts/build_frontend.sh
 
-# 构建后端代码
-# 在 golang:1.25-alpine 容器中构建
+# 构建后端代码（在 Alpine 容器中）
 docker pull registry.cn-qingdao.aliyuncs.com/wod/golang:1.25-alpine && \
 docker run --rm \
    -v $(pwd):/go/src/github.com/open-beagle/awecloud-signaling-server \
@@ -35,13 +52,8 @@ docker run --rm \
    registry.cn-qingdao.aliyuncs.com/wod/golang:1.25-alpine \
    bash ./.beagle/build.sh
 
-# 输出在 bin/ 目录
-# bin/server-linux-amd64
-# bin/server-linux-arm64
-# bin/agent-linux-amd64
-# bin/agent-linux-arm64
-# bin/server -> server-linux-amd64 (符号链接)
-# bin/agent -> agent-linux-amd64 (符号链接)
+# 注意：此方式编译的二进制需要 musl libc，不能直接在 Ubuntu 上运行
+# 仅用于构建 Docker 镜像
 ```
 
 ### 查看版本信息
@@ -62,7 +74,10 @@ docker run --rm \
 
 ### 2. 构建 Docker 镜像
 
-前提：已完成二进制文件构建（步骤 1）和前端构建（`cd web && npm run build`）
+**前提**：
+
+- 已使用**方式二（Docker 容器编译）**完成二进制文件构建
+- 已完成前端构建（`bash scripts/build_frontend.sh`）
 
 ```bash
 # 设置版本和镜像仓库
@@ -71,7 +86,7 @@ export REGISTRY=registry.cn-qingdao.aliyuncs.com/wod
 export AUTHOR=open-beagle
 
 # 构建 Server 镜像
-docker build -f .beagle/server.dockerfile \
+docker build --no-cache -f .beagle/server.dockerfile \
   --build-arg BASE=${REGISTRY}/alpine:3 \
   --build-arg AUTHOR=${AUTHOR} \
   --build-arg VERSION=${BUILD_VERSION} \

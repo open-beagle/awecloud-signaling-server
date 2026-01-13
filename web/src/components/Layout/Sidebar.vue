@@ -21,9 +21,6 @@
           <el-icon><Connection /></el-icon>
           <span>{{ t('menu.serviceManagement') }}</span>
         </template>
-        <el-menu-item index="/services">
-          {{ t('menu.serviceList') }}
-        </el-menu-item>
         <el-menu-item index="/services/desktop-auth">
           {{ t('menu.desktopAuth') }}
         </el-menu-item>
