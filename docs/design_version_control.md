@@ -155,9 +155,9 @@ GIT_COMMIT=$(git rev-parse --short HEAD)
 BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
 
 go build -ldflags "\
-  -X 'github.com/your-org/awecloud-desktop/internal/version.Version=${VERSION}' \
-  -X 'github.com/your-org/awecloud-desktop/internal/version.GitCommit=${GIT_COMMIT}' \
-  -X 'github.com/your-org/awecloud-desktop/internal/version.BuildTime=${BUILD_TIME}'" \
+  -X 'github.com/your-org/signal-desktop/internal/version.Version=${VERSION}' \
+  -X 'github.com/your-org/signal-desktop/internal/version.GitCommit=${GIT_COMMIT}' \
+  -X 'github.com/your-org/signal-desktop/internal/version.BuildTime=${BUILD_TIME}'" \
   -o bin/desktop cmd/desktop/main.go
 ```
 
@@ -165,7 +165,7 @@ go build -ldflags "\
 
 ```
 ┌─────────────────────────────────────────────┐
-│  AWECloud Desktop - 需要升级                │
+│  Signal Desktop - 需要升级                │
 ├─────────────────────────────────────────────┤
 │                                             │
 │  ⚠️ 您的版本过低，需要升级                   │

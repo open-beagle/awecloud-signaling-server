@@ -424,7 +424,7 @@ INSERT INTO system_settings (setting_key, setting_value, description, updated_by
 VALUES
     ('desktop_min_version', '1.0.0', 'Desktop客户端最低支持版本', 'system'),
     ('desktop_latest_version', '1.0.0', 'Desktop客户端最新版本', 'system'),
-    ('desktop_download_url', 'https://github.com/your-org/awecloud-desktop/releases', 'Desktop客户端下载地址', 'system'),
+    ('desktop_download_url', 'https://github.com/your-org/signal-desktop/releases', 'Desktop客户端下载地址', 'system'),
     ('version_check_enabled', 'true', '是否启用版本检查', 'system');
 ```
 

@@ -220,7 +220,7 @@ wails build -platform windows/amd64
 wails build -platform windows/amd64 -clean
 
 # 输出位置
-build/bin/awecloud-desktop.exe
+build/bin/signal-desktop.exe
 ```
 
 **打包为安装程序**（后续版本）:
@@ -231,9 +231,9 @@ build/bin/awecloud-desktop.exe
 
 Desktop 应用的配置文件存储在用户目录：
 
-- **Windows**: `%APPDATA%\awecloud-desktop\config.json`
-- **macOS**: `~/Library/Application Support/awecloud-desktop/config.json`
-- **Linux**: `~/.config/awecloud-desktop/config.json`
+- **Windows**: `%APPDATA%\signal-desktop\config.json`
+- **macOS**: `~/Library/Application Support/signal-desktop/config.json`
+- **Linux**: `~/.config/signal-desktop/config.json`
 
 ## 4. Desktop-Web 线程设计
 
@@ -729,7 +729,7 @@ Desktop 使用本地配置文件存储用户设置：
 wails build -platform windows/amd64
 
 # 输出
-desktop/build/bin/awecloud-desktop.exe
+desktop/build/bin/signal-desktop.exe
 ```
 
 ### 15.2 安装程序
