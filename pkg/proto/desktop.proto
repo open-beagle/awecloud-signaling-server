@@ -90,7 +90,8 @@ message AuthorizedService {
   string id = 1; // 服务 ID
   string name = 2; // 服务名称
   string agent_name = 3; // 所属 Agent 名称
-  string listen_addr = 4; // 访问地址（如 100.64.0.1:3306）
+  string listen_addr = 4; // 源地址（VPN 地址，如 100.64.0.1:3306）
+  string target_addr = 5; // 目标地址（内网地址，如 192.168.1.10:3306）
 }
 
 // DesktopHeartbeatResponse Desktop 心跳响应

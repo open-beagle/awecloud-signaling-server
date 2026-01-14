@@ -426,6 +426,7 @@ func (s *DesktopServiceServer) sendDesktopHeartbeatResponse(stream pb.DesktopSer
 				Name:       svc.Name,
 				AgentName:  agentName,
 				ListenAddr: svc.SourceAddr,
+				TargetAddr: svc.TargetAddr,
 			})
 		}
 	}
