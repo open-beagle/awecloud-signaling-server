@@ -12,7 +12,7 @@
         <el-select v-model="filters.type" placeholder="所有类型" clearable @change="loadUsers">
           <el-option label="所有类型" value="" />
           <el-option label="Agent" value="agent" />
-          <el-option label="Client" value="client" />
+          <el-option label="Desktop" value="desktop" />
           <el-option label="孤立" value="orphan" />
         </el-select>
         <el-input
@@ -31,7 +31,6 @@
       <el-table v-loading="loading" :data="users" stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="名称" min-width="150" />
-        <el-table-column prop="display_name" label="显示名称" min-width="120" />
         <el-table-column label="类型" width="100">
           <template #default="{ row }">
             <el-tag :type="getTypeTagType(row.type)" size="small">
@@ -50,7 +49,7 @@
                 {{ row.linked_entity }}
               </router-link>
               <router-link
-                v-else-if="row.type === 'client'"
+                v-else-if="row.type === 'desktop'"
                 :to="{ path: `/clients/${row.linked_id}`, query: { name: row.linked_entity } }"
                 class="link"
               >
@@ -222,7 +221,7 @@ const formatRelativeTime = (dateStr: string) => {
 const getTypeTagType = (type: string) => {
   switch (type) {
     case 'agent': return 'primary'
-    case 'client': return 'success'
+    case 'desktop': return 'success'
     case 'orphan': return 'warning'
     default: return 'info'
   }
@@ -231,7 +230,7 @@ const getTypeTagType = (type: string) => {
 const getTypeLabel = (type: string) => {
   switch (type) {
     case 'agent': return 'Agent'
-    case 'client': return 'Client'
+    case 'desktop': return 'Desktop'
     case 'orphan': return '孤立'
     default: return '未知'
   }

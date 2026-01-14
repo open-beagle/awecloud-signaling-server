@@ -111,3 +111,8 @@ export function logoutDesktop(clientId: number, desktopId: number) {
 export function deleteDesktop(clientId: number, desktopId: number) {
   return request.delete<any, ApiResponse>(`/api/v1/admin/clients/${clientId}/desktops/${desktopId}`)
 }
+
+// 重置密码
+export function resetPassword(id: number, password: string) {
+  return request.post<any, ApiResponse<{ secret: string }>>(`/api/v1/admin/clients/${id}/reset-password`, { password })
+}

@@ -420,7 +420,9 @@ func (a *ClientAPI) Delete(c *gin.Context) {
 				_ = a.hsClient.DeleteNode(ctx, d.ID)
 			}
 		}
-		_ = a.hsClient.DeleteUser(ctx, client.Name)
+		// User 命名规则: desktop-{client_name}，参见 docs/design_headscale_integration.md
+		userName := fmt.Sprintf("desktop-%s", client.Name)
+		_ = a.hsClient.DeleteUser(ctx, userName)
 	}
 
 	db.DB.Where("client_id = ?", id).Delete(&model.Desktop{})
@@ -515,3 +517,58 @@ func (a *ClientAPI) RegenerateSecret(c *gin.Context) {
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("密钥重置成功", map[string]string{"secret": secret}))
 }
+
+// ResetPasswordRequest 重置密码请求
+type ResetPasswordRequest struct {
+	Password string `json:"password" binding:"required,len=64"`
+}
+
+// ResetPassword 重置 Client 密码
+func (a *ClientAPI) ResetPassword(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
+		return
+	}
+
+	var req ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("密码格式错误：需要64位十六进制字符串"))
+		return
+	}
+
+	// 验证是否为有效的十六进制字符串
+	for _, ch := range req.Password {
+		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')) {
+			c.JSON(http.StatusBadRequest, NewErrorResponse("密码只能包含十六进制字符(0-9, a-f)"))
+			return
+		}
+	}
+
+	var client model.Client
+	if err := db.DB.First(&client, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("Client 不存在"))
+		return
+	}
+
+	// 直接使用用户提供的密码作为密钥
+	secret := req.Password
+	secretHash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("加密密钥失败"))
+		return
+	}
+
+	client.SecretHash = string(secretHash)
+	if err := db.DB.Save(&client).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新失败"))
+		return
+	}
+
+	logger.Infof("重置 Client 密码: id=%d", id)
+	recordAuditLog(c, model.ActionResetClientSecret, "client", strconv.FormatUint(id, 10), client.Name, nil)
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("密码重置成功", map[string]string{"secret": secret}))
+}
+
+// generateSecretFromPassword 已废弃，保留兼容

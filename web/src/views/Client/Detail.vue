@@ -3,10 +3,7 @@
     <el-card v-loading="loading">
       <template #header>
         <div class="card-header">
-          <div class="header-left">
-            <el-button :icon="ArrowLeft" @click="goBack">返回</el-button>
-            <span class="page-title">客户详情: {{ clientDetail?.name }}</span>
-          </div>
+          <span class="page-title">客户详情</span>
           <el-button type="primary" :icon="Refresh" @click="loadAllData">
             刷新
           </el-button>
@@ -152,7 +149,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Refresh, Edit, Delete, SwitchButton } from '@element-plus/icons-vue'
+import { Refresh, Edit, Delete, SwitchButton } from '@element-plus/icons-vue'
 import { 
   getClientDetail,
   getClientGroups,
@@ -241,10 +238,6 @@ const loadAllData = async () => {
   }
 }
 
-const goBack = () => {
-  router.push('/clients')
-}
-
 const showEditDialog = () => {
   if (clientDetail.value) {
     editForm.value = { alias: clientDetail.value.alias || '' }
@@ -327,12 +320,6 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
 }
 
 .page-title {

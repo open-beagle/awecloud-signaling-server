@@ -508,10 +508,13 @@ func (s *AgentServiceServer) createAgentAuthKey(ctx context.Context, agentName s
 	// User 命名规则: agent-{agent_name}，参见 docs/design_headscale_integration.md
 	userName := fmt.Sprintf("agent-%s", agentName)
 
-	// 获取或创建 User
-	user, err := s.headscaleClient.GetOrCreateUser(ctx, userName)
+	// 获取 User（不自动创建，User 应该在 Web 创建 Agent 时已创建）
+	user, err := s.headscaleClient.GetUserByName(ctx, userName)
 	if err != nil {
-		return "", "", fmt.Errorf("获取或创建 Headscale User 失败: %w", err)
+		return "", "", fmt.Errorf("查询 Headscale User 失败: %w", err)
+	}
+	if user == nil {
+		return "", "", fmt.Errorf("Headscale User %s 不存在，请先在 Web 管理界面创建 Agent", userName)
 	}
 
 	// 更新 Agent 的 Headscale User ID

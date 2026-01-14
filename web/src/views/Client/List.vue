@@ -50,13 +50,13 @@
             <span v-else style="color: var(--el-text-color-secondary)">-</span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" width="120" fixed="right">
+        <el-table-column :label="t('common.actions')" width="160" fixed="right">
           <template #default="{ row }">
-            <el-tooltip content="详情" placement="top">
+            <el-tooltip content="重置密码" placement="top">
               <el-button
                 size="small"
-                :icon="View"
-                @click="handleViewDetail(row)"
+                :icon="Key"
+                @click="handleResetPassword(row)"
               />
             </el-tooltip>
             <el-tooltip content="删除" placement="top">
@@ -81,6 +81,12 @@
       :client-id="currentClientId"
       :client-secret="currentSecret"
     />
+    <ResetPasswordDialog
+      v-model="resetPasswordDialogVisible"
+      :client-id="currentClientNumId"
+      :client-name="currentClientId"
+      @success="handleResetPasswordSuccess"
+    />
   </div>
 </template>
 
@@ -89,11 +95,12 @@ import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete, View } from '@element-plus/icons-vue'
+import { Plus, Delete, Key } from '@element-plus/icons-vue'
 import { getClients, deleteClient, type Client } from '@/api/client'
 import TimeAgo from '@/components/Common/TimeAgo.vue'
 import CreateDialog from './components/CreateDialog.vue'
 import SecretDialog from './components/SecretDialog.vue'
+import ResetPasswordDialog from './components/ResetPasswordDialog.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -102,7 +109,9 @@ const clients = ref<Client[]>([])
 const loading = ref(false)
 const createDialogVisible = ref(false)
 const secretDialogVisible = ref(false)
+const resetPasswordDialogVisible = ref(false)
 const currentClientId = ref('')
+const currentClientNumId = ref(0)
 const currentSecret = ref('')
 
 const loadClients = async () => {
@@ -141,6 +150,17 @@ const handleDelete = async (row: Client) => {
       ElMessage.error(t('common.failed'))
     }
   }
+}
+
+const handleResetPassword = (client: Client) => {
+  currentClientNumId.value = client.id
+  currentClientId.value = client.name
+  resetPasswordDialogVisible.value = true
+}
+
+const handleResetPasswordSuccess = (secret: string) => {
+  currentSecret.value = secret
+  secretDialogVisible.value = true
 }
 
 const handleViewDetail = (row: Client) => {

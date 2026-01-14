@@ -126,9 +126,10 @@ func (a *TunnelAPI) ListTunnelUsers(c *gin.Context) {
 	for i := range agents {
 		agentMap["agent-"+agents[i].Name] = &agents[i]
 	}
+	// Client 的 User 命名规则是 desktop-{client.name}
 	clientMap := make(map[string]*model.Client)
 	for i := range clients {
-		clientMap["client-"+clients[i].Name] = &clients[i]
+		clientMap["desktop-"+clients[i].Name] = &clients[i]
 	}
 
 	// 构建结果
@@ -143,14 +144,15 @@ func (a *TunnelAPI) ListTunnelUsers(c *gin.Context) {
 		}
 
 		// 判断类型和关联实体
+		// User 命名规则: agent-{agent.name} 或 desktop-{client.name}
 		if strings.HasPrefix(user.Name, "agent-") {
 			item.Type = "agent"
 			if agent, ok := agentMap[user.Name]; ok {
 				item.LinkedEntity = agent.Name
 				item.LinkedID = agent.ID
 			}
-		} else if strings.HasPrefix(user.Name, "client-") {
-			item.Type = "client"
+		} else if strings.HasPrefix(user.Name, "desktop-") {
+			item.Type = "desktop"
 			if client, ok := clientMap[user.Name]; ok {
 				item.LinkedEntity = client.Name
 				item.LinkedID = client.ID
@@ -160,7 +162,7 @@ func (a *TunnelAPI) ListTunnelUsers(c *gin.Context) {
 		}
 
 		// 如果有前缀但没找到关联实体，标记为孤立
-		if (item.Type == "agent" || item.Type == "client") && item.LinkedID == 0 {
+		if (item.Type == "agent" || item.Type == "desktop") && item.LinkedID == 0 {
 			item.Type = "orphan"
 		}
 
@@ -239,6 +241,7 @@ func (a *TunnelAPI) GetTunnelUser(c *gin.Context) {
 	}
 
 	// 判断类型和关联实体
+	// User 命名规则: agent-{agent.name} 或 desktop-{client.name}
 	if strings.HasPrefix(targetUser.Name, "agent-") {
 		targetUser.Type = "agent"
 		agentName := strings.TrimPrefix(targetUser.Name, "agent-")
@@ -247,9 +250,9 @@ func (a *TunnelAPI) GetTunnelUser(c *gin.Context) {
 			targetUser.LinkedEntity = agent.Name
 			targetUser.LinkedID = agent.ID
 		}
-	} else if strings.HasPrefix(targetUser.Name, "client-") {
-		targetUser.Type = "client"
-		clientName := strings.TrimPrefix(targetUser.Name, "client-")
+	} else if strings.HasPrefix(targetUser.Name, "desktop-") {
+		targetUser.Type = "desktop"
+		clientName := strings.TrimPrefix(targetUser.Name, "desktop-")
 		var client model.Client
 		if err := db.DB.Where("name = ?", clientName).First(&client).Error; err == nil {
 			targetUser.LinkedEntity = client.Name
@@ -259,7 +262,7 @@ func (a *TunnelAPI) GetTunnelUser(c *gin.Context) {
 		targetUser.Type = "orphan"
 	}
 
-	if (targetUser.Type == "agent" || targetUser.Type == "client") && targetUser.LinkedID == 0 {
+	if (targetUser.Type == "agent" || targetUser.Type == "desktop") && targetUser.LinkedID == 0 {
 		targetUser.Type = "orphan"
 	}
 

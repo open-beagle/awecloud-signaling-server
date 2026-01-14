@@ -1,4 +1,19 @@
 /**
+ * 检查是否是零值时间
+ * @param date Date 对象
+ * @returns 是否是零值时间
+ */
+function isZeroTime(date: Date): boolean {
+  // 检查无效日期
+  if (isNaN(date.getTime())) {
+    return true
+  }
+  // 检查 Go 零值时间（0001年）、Unix 纪元（1970年）或其他明显无效的年份
+  const year = date.getFullYear()
+  return year < 2000
+}
+
+/**
  * 格式化相对时间
  * @param dateString ISO时间字符串或时间戳（毫秒）
  * @returns 相对时间字符串 (1y, 1m, 1d, 1h, 1m)
@@ -10,8 +25,8 @@ export function formatRelativeTime(dateString: string | number): string {
 
   const date = new Date(dateString)
   
-  // 检查是否是 1970 年（Unix 纪元时间，表示未初始化）
-  if (date.getFullYear() === 1970) {
+  // 检查是否是零值时间（Go 零值 0001 年、Unix 纪元 1970 年等）
+  if (isZeroTime(date)) {
     return '-'
   }
 
@@ -59,8 +74,8 @@ export function formatFullTime(dateString: string | number): string {
 
   const date = new Date(dateString)
   
-  // 检查是否是 1970 年（Unix 纪元时间，表示未初始化）
-  if (date.getFullYear() === 1970) {
+  // 检查是否是零值时间（Go 零值 0001 年、Unix 纪元 1970 年等）
+  if (isZeroTime(date)) {
     return '-'
   }
 

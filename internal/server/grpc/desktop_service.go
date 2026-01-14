@@ -445,10 +445,13 @@ func (s *DesktopServiceServer) createDesktopNode(ctx context.Context, clientID u
 	// User 命名规则: desktop-{client.name}，参见 docs/design_headscale_integration.md
 	userName := fmt.Sprintf("desktop-%s", client.Name)
 
-	// 获取或创建 User
-	user, err := s.headscaleClient.GetOrCreateUser(ctx, userName)
+	// 获取 User（不自动创建，User 应该在 Web 创建 Client 时已创建）
+	user, err := s.headscaleClient.GetUserByName(ctx, userName)
 	if err != nil {
-		return 0, "", fmt.Errorf("获取或创建 Headscale User 失败: %w", err)
+		return 0, "", fmt.Errorf("查询 Headscale User 失败: %w", err)
+	}
+	if user == nil {
+		return 0, "", fmt.Errorf("Headscale User %s 不存在，请先在 Web 管理界面创建 Client", userName)
 	}
 
 	// 构建 Tags 列表
@@ -489,10 +492,13 @@ func (s *DesktopServiceServer) getOrCreateAuthKey(ctx context.Context, clientID 
 	// User 命名规则: desktop-{client.name}，参见 docs/design_headscale_integration.md
 	userName := fmt.Sprintf("desktop-%s", client.Name)
 
-	// 获取或创建 User
-	user, err := s.headscaleClient.GetOrCreateUser(ctx, userName)
+	// 获取 User（不自动创建，User 应该在 Web 创建 Client 时已创建）
+	user, err := s.headscaleClient.GetUserByName(ctx, userName)
 	if err != nil {
-		return "", "", fmt.Errorf("获取或创建 Headscale User 失败: %w", err)
+		return "", "", fmt.Errorf("查询 Headscale User 失败: %w", err)
+	}
+	if user == nil {
+		return "", "", fmt.Errorf("Headscale User %s 不存在，请先在 Web 管理界面创建 Client", userName)
 	}
 
 	// 构建 Tags 列表

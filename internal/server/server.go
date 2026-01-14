@@ -310,6 +310,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.POST("/clients/:id/desktops/:did/logout", clientAPI.LogoutDesktop)
 					adminAuthGroup.DELETE("/clients/:id/desktops/:did", clientAPI.DeleteDesktop)
 					adminAuthGroup.POST("/clients/:id/regenerate-secret", clientAPI.RegenerateSecret)
+					adminAuthGroup.POST("/clients/:id/reset-password", clientAPI.ResetPassword)
 
 					// 端口映射服务管理
 					serviceAPI := api.NewProxyServiceAPI(s.config)

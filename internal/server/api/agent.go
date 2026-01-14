@@ -709,7 +709,9 @@ func (a *AgentAPI) Delete(c *gin.Context) {
 		}
 
 		// 删除 User
-		if err := a.hsClient.DeleteUser(ctx, agent.Name); err != nil {
+		// User 命名规则: agent-{agent_name}，参见 docs/design_headscale_integration.md
+		userName := fmt.Sprintf("agent-%s", agent.Name)
+		if err := a.hsClient.DeleteUser(ctx, userName); err != nil {
 			logger.Warnf("Headscale 删除用户失败: %v", err)
 		}
 	}
