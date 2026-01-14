@@ -481,7 +481,8 @@ type AuthorizedService struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                   // 服务 ID
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                               // 服务名称
 	AgentName     string                 `protobuf:"bytes,3,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`    // 所属 Agent 名称
-	ListenAddr    string                 `protobuf:"bytes,4,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"` // 访问地址（如 100.64.0.1:3306）
+	ListenAddr    string                 `protobuf:"bytes,4,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"` // 源地址（VPN 地址，如 100.64.0.1:3306）
+	TargetAddr    string                 `protobuf:"bytes,5,opt,name=target_addr,json=targetAddr,proto3" json:"target_addr,omitempty"` // 目标地址（内网地址，如 192.168.1.10:3306）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -540,6 +541,13 @@ func (x *AuthorizedService) GetAgentName() string {
 func (x *AuthorizedService) GetListenAddr() string {
 	if x != nil {
 		return x.ListenAddr
+	}
+	return ""
+}
+
+func (x *AuthorizedService) GetTargetAddr() string {
+	if x != nil {
+		return x.TargetAddr
 	}
 	return ""
 }
@@ -638,14 +646,16 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12\x1b\n" +
 	"\ttunnel_ip\x18\x02 \x01(\tR\btunnelIp\x12)\n" +
-	"\x10tunnel_connected\x18\x03 \x01(\bR\x0ftunnelConnected\"w\n" +
+	"\x10tunnel_connected\x18\x03 \x01(\bR\x0ftunnelConnected\"\x98\x01\n" +
 	"\x11AuthorizedService\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
 	"agent_name\x18\x03 \x01(\tR\tagentName\x12\x1f\n" +
 	"\vlisten_addr\x18\x04 \x01(\tR\n" +
-	"listenAddr\"r\n" +
+	"listenAddr\x12\x1f\n" +
+	"\vtarget_addr\x18\x05 \x01(\tR\n" +
+	"targetAddr\"r\n" +
 	"\x18DesktopHeartbeatResponse\x12V\n" +
 	"\x13authorized_services\x18\x01 \x03(\v2%.awecloud.signaling.AuthorizedServiceR\x12authorizedServices2\xc9\x02\n" +
 	"\x0eDesktopService\x12Z\n" +
