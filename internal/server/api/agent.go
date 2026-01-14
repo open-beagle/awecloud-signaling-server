@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -201,22 +202,26 @@ type AgentDetail struct {
 
 // AgentServiceItem Agent 服务项
 type AgentServiceItem struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Alias      string `json:"alias"`
-	TargetAddr string `json:"target_addr"`
-	ListenAddr string `json:"listen_addr"`
-	Enabled    bool   `json:"enabled"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Alias         string `json:"alias"`
+	SourceAddr    string `json:"source_addr"`
+	TargetAddr    string `json:"target_addr"`
+	Enabled       bool   `json:"enabled"`
+	DisplayStatus string `json:"display_status"` // 合并后的显示状态
+	ErrorMsg      string `json:"error_msg,omitempty"`
 }
 
 // AgentForwardItem Agent 端口访问项
 type AgentForwardItem struct {
 	ID                string `json:"id"`
-	Name              string `json:"name"`
-	Alias             string `json:"alias"`
+	Name              string `json:"name"`  // 从关联服务获取
+	Alias             string `json:"alias"` // 从关联服务获取
+	SourceAddr        string `json:"source_addr"`
 	TargetAddr        string `json:"target_addr"`
-	ListenAddr        string `json:"listen_addr"`
 	Enabled           bool   `json:"enabled"`
+	DisplayStatus     string `json:"display_status"` // 合并后的显示状态
+	ErrorMsg          string `json:"error_msg,omitempty"`
 	TargetAgentName   string `json:"target_agent_name"`
 	TargetServiceName string `json:"target_service_name"`
 }
@@ -254,14 +259,24 @@ func (a *AgentAPI) Get(c *gin.Context) {
 	var services []model.ProxyService
 	db.DB.Where("agent_id = ?", id).Find(&services)
 	serviceItems := make([]AgentServiceItem, len(services))
+
+	// 计算 Agent 在线状态
+	agentOnline := status == "online"
+
 	for i, svc := range services {
+		// 获取运行时状态并计算显示状态
+		runtimeStatus := cache.GetProxyServiceStatus(svc.ID)
+		displayStatus, errorMsg := cache.GetDisplayStatus(svc.Enabled, agentOnline, runtimeStatus)
+
 		serviceItems[i] = AgentServiceItem{
-			ID:         svc.ID,
-			Name:       svc.Name,
-			Alias:      svc.Alias,
-			TargetAddr: svc.TargetAddr,
-			ListenAddr: svc.ListenAddr,
-			Enabled:    svc.Enabled,
+			ID:            svc.ID,
+			Name:          svc.Name,
+			Alias:         svc.Alias,
+			SourceAddr:    svc.SourceAddr,
+			TargetAddr:    svc.TargetAddr,
+			Enabled:       svc.Enabled,
+			DisplayStatus: displayStatus,
+			ErrorMsg:      errorMsg,
 		}
 	}
 
@@ -273,19 +288,30 @@ func (a *AgentAPI) Get(c *gin.Context) {
 	for i, fwd := range forwards {
 		targetAgentName := ""
 		targetServiceName := ""
+		name := ""
+		alias := ""
 		if fwd.TargetService != nil {
+			name = fwd.TargetService.Name
+			alias = fwd.TargetService.Alias
 			targetServiceName = fwd.TargetService.Name
 			if fwd.TargetService.Agent != nil {
 				targetAgentName = fwd.TargetService.Agent.Name
 			}
 		}
+
+		// 获取运行时状态并计算显示状态
+		runtimeStatus := cache.GetPortForwardStatus(fwd.ID)
+		displayStatus, errorMsg := cache.GetDisplayStatus(fwd.Enabled, agentOnline, runtimeStatus)
+
 		forwardItems[i] = AgentForwardItem{
 			ID:                fwd.ID,
-			Name:              fwd.Name,
-			Alias:             fwd.Alias,
+			Name:              name,
+			Alias:             alias,
+			SourceAddr:        fwd.SourceAddr,
 			TargetAddr:        fwd.TargetAddr,
-			ListenAddr:        fwd.ListenAddr,
 			Enabled:           fwd.Enabled,
+			DisplayStatus:     displayStatus,
+			ErrorMsg:          errorMsg,
 			TargetAgentName:   targetAgentName,
 			TargetServiceName: targetServiceName,
 		}
@@ -404,12 +430,14 @@ func (a *AgentAPI) GetRealtime(c *gin.Context) {
 
 // ProxyServiceItem 端口映射服务项
 type ProxyServiceItem struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Alias      string `json:"alias"`
-	TargetAddr string `json:"target_addr"`
-	ListenAddr string `json:"listen_addr"`
-	Enabled    bool   `json:"enabled"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Alias         string `json:"alias"`
+	SourceAddr    string `json:"source_addr"`
+	TargetAddr    string `json:"target_addr"`
+	Enabled       bool   `json:"enabled"`
+	DisplayStatus string `json:"display_status"` // 合并后的显示状态
+	ErrorMsg      string `json:"error_msg,omitempty"`
 }
 
 // GetServices 获取 Agent 的端口映射列表
@@ -420,6 +448,14 @@ func (a *AgentAPI) GetServices(c *gin.Context) {
 		return
 	}
 
+	// 获取 Agent 在线状态
+	var agent model.Agent
+	if err := db.DB.First(&agent, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("Agent 不存在"))
+		return
+	}
+	agentOnline := agent.LastHeartbeat != nil && time.Since(*agent.LastHeartbeat) < 60*time.Second
+
 	var services []model.ProxyService
 	if err := db.DB.Where("agent_id = ?", id).Order("created_at DESC").Find(&services).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
@@ -428,13 +464,19 @@ func (a *AgentAPI) GetServices(c *gin.Context) {
 
 	result := make([]ProxyServiceItem, len(services))
 	for i, svc := range services {
+		// 获取运行时状态并计算显示状态
+		runtimeStatus := cache.GetProxyServiceStatus(svc.ID)
+		displayStatus, errorMsg := cache.GetDisplayStatus(svc.Enabled, agentOnline, runtimeStatus)
+
 		result[i] = ProxyServiceItem{
-			ID:         svc.ID,
-			Name:       svc.Name,
-			Alias:      svc.Alias,
-			TargetAddr: svc.TargetAddr,
-			ListenAddr: svc.ListenAddr,
-			Enabled:    svc.Enabled,
+			ID:            svc.ID,
+			Name:          svc.Name,
+			Alias:         svc.Alias,
+			SourceAddr:    svc.SourceAddr,
+			TargetAddr:    svc.TargetAddr,
+			Enabled:       svc.Enabled,
+			DisplayStatus: displayStatus,
+			ErrorMsg:      errorMsg,
 		}
 	}
 
@@ -444,13 +486,15 @@ func (a *AgentAPI) GetServices(c *gin.Context) {
 // PortForwardItem 端口访问项
 type PortForwardItem struct {
 	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Alias           string `json:"alias"`
+	Name            string `json:"name"`  // 从关联服务获取
+	Alias           string `json:"alias"` // 从关联服务获取
 	TargetAgentName string `json:"target_agent_name"`
 	TargetService   string `json:"target_service"`
+	SourceAddr      string `json:"source_addr"`
 	TargetAddr      string `json:"target_addr"`
-	ListenAddr      string `json:"listen_addr"`
 	Enabled         bool   `json:"enabled"`
+	DisplayStatus   string `json:"display_status"` // 合并后的显示状态
+	ErrorMsg        string `json:"error_msg,omitempty"`
 }
 
 // GetForwards 获取 Agent 的端口访问列表
@@ -461,6 +505,14 @@ func (a *AgentAPI) GetForwards(c *gin.Context) {
 		return
 	}
 
+	// 获取 Agent 在线状态
+	var agent model.Agent
+	if err := db.DB.First(&agent, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("Agent 不存在"))
+		return
+	}
+	agentOnline := agent.LastHeartbeat != nil && time.Since(*agent.LastHeartbeat) < 60*time.Second
+
 	var forwards []model.PortForward
 	if err := db.DB.Preload("TargetService").Preload("TargetService.Agent").
 		Where("agent_id = ?", id).Order("created_at DESC").Find(&forwards).Error; err != nil {
@@ -470,13 +522,26 @@ func (a *AgentAPI) GetForwards(c *gin.Context) {
 
 	result := make([]PortForwardItem, len(forwards))
 	for i, fwd := range forwards {
+		name := ""
+		alias := ""
+		if fwd.TargetService != nil {
+			name = fwd.TargetService.Name
+			alias = fwd.TargetService.Alias
+		}
+
+		// 获取运行时状态并计算显示状态
+		runtimeStatus := cache.GetPortForwardStatus(fwd.ID)
+		displayStatus, errorMsg := cache.GetDisplayStatus(fwd.Enabled, agentOnline, runtimeStatus)
+
 		item := PortForwardItem{
-			ID:         fwd.ID,
-			Name:       fwd.Name,
-			Alias:      fwd.Alias,
-			TargetAddr: fwd.TargetAddr,
-			ListenAddr: fwd.ListenAddr,
-			Enabled:    fwd.Enabled,
+			ID:            fwd.ID,
+			Name:          name,
+			Alias:         alias,
+			SourceAddr:    fwd.SourceAddr,
+			TargetAddr:    fwd.TargetAddr,
+			Enabled:       fwd.Enabled,
+			DisplayStatus: displayStatus,
+			ErrorMsg:      errorMsg,
 		}
 		if fwd.TargetService != nil {
 			item.TargetService = fwd.TargetService.Name
@@ -533,12 +598,14 @@ func (a *AgentAPI) Create(c *gin.Context) {
 	}
 
 	// 在 Headscale 创建 User
+	// User 命名规则: agent-{agent_name}，参见 docs/design_headscale_integration.md
 	var userID uint64
 	if a.hsClient != nil {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 		defer cancel()
 
-		user, err := a.hsClient.CreateUser(ctx, req.Name)
+		userName := fmt.Sprintf("agent-%s", req.Name)
+		user, err := a.hsClient.CreateUser(ctx, userName)
 		if err != nil {
 			logger.Warnf("Headscale 创建用户失败: %v", err)
 			// 继续创建，使用自增 ID

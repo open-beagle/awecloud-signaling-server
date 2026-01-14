@@ -174,25 +174,34 @@
               {{ row.alias || '-' }}
             </template>
           </el-table-column>
+          <el-table-column prop="source_addr" label="源地址" min-width="150" />
           <el-table-column prop="target_addr" :label="t('service.targetAddr')" min-width="150" />
-          <el-table-column :label="t('service.listenAddr')" min-width="150">
+          <el-table-column label="状态" width="120">
             <template #default="{ row }">
-              {{ row.listen_addr || '-' }}
+              <el-tooltip v-if="row.display_status === 'error'" :content="row.error_msg || '未知错误'" placement="top">
+                <el-tag type="danger" size="small">🔴 错误</el-tag>
+              </el-tooltip>
+              <el-tag v-else-if="row.display_status === 'running'" type="success" size="small">🟢 运行</el-tag>
+              <el-tag v-else-if="row.display_status === 'disabled'" type="info" size="small">⚫ 禁用</el-tag>
+              <el-tag v-else-if="row.display_status === 'offline'" size="small">🔵 离线</el-tag>
+              <el-tag v-else-if="row.display_status === 'pending'" type="warning" size="small">🟡 等待</el-tag>
+              <el-tag v-else type="info" size="small">-</el-tag>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.actions')" width="150" fixed="right">
+          <el-table-column :label="t('common.actions')" width="200" fixed="right">
             <template #default="{ row }">
               <div class="action-buttons">
+                <el-tooltip v-if="row.display_status === 'error'" content="重试" placement="top">
+                  <el-button size="small" type="warning" @click="handleRetryService(row)" />
+                </el-tooltip>
+                <el-tooltip v-else-if="row.display_status === 'running'" content="禁用" placement="top">
+                  <el-button size="small" type="warning" @click="handleToggleService(row, false)" />
+                </el-tooltip>
+                <el-tooltip v-else content="启用" placement="top">
+                  <el-button size="small" type="success" @click="handleToggleService(row, true)" />
+                </el-tooltip>
                 <el-tooltip content="编辑" placement="top">
                   <el-button size="small" :icon="Edit" @click="handleEditService(row)" />
-                </el-tooltip>
-                <el-tooltip :content="row.enabled ? '禁用' : '启用'" placement="top">
-                  <el-button
-                    size="small"
-                    :icon="row.enabled ? 'VideoPause' : 'VideoPlay'"
-                    :type="row.enabled ? 'warning' : 'success'"
-                    @click="row.enabled ? handleDisableService(row) : handleEnableService(row)"
-                  />
                 </el-tooltip>
                 <el-tooltip content="删除" placement="top">
                   <el-button
@@ -235,21 +244,34 @@
               {{ row.target_agent_name || '-' }}/{{ row.target_service_name || '-' }}
             </template>
           </el-table-column>
+          <el-table-column prop="source_addr" label="源地址" min-width="150" />
           <el-table-column prop="target_addr" :label="t('service.targetAddr')" min-width="150" />
-          <el-table-column prop="listen_addr" :label="t('agent.localListenAddr')" min-width="150" />
-          <el-table-column :label="t('common.actions')" width="150" fixed="right">
+          <el-table-column label="状态" width="120">
+            <template #default="{ row }">
+              <el-tooltip v-if="row.display_status === 'error'" :content="row.error_msg || '未知错误'" placement="top">
+                <el-tag type="danger" size="small">🔴 错误</el-tag>
+              </el-tooltip>
+              <el-tag v-else-if="row.display_status === 'running'" type="success" size="small">🟢 运行</el-tag>
+              <el-tag v-else-if="row.display_status === 'disabled'" type="info" size="small">⚫ 禁用</el-tag>
+              <el-tag v-else-if="row.display_status === 'offline'" size="small">🔵 离线</el-tag>
+              <el-tag v-else-if="row.display_status === 'pending'" type="warning" size="small">🟡 等待</el-tag>
+              <el-tag v-else type="info" size="small">-</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.actions')" width="200" fixed="right">
             <template #default="{ row }">
               <div class="action-buttons">
+                <el-tooltip v-if="row.display_status === 'error'" content="重试" placement="top">
+                  <el-button size="small" type="warning" @click="handleRetryVisitor(row)" />
+                </el-tooltip>
+                <el-tooltip v-else-if="row.display_status === 'running'" content="禁用" placement="top">
+                  <el-button size="small" type="warning" @click="handleToggleVisitor(row, false)" />
+                </el-tooltip>
+                <el-tooltip v-else content="启用" placement="top">
+                  <el-button size="small" type="success" @click="handleToggleVisitor(row, true)" />
+                </el-tooltip>
                 <el-tooltip content="编辑" placement="top">
                   <el-button size="small" :icon="Edit" @click="handleEditVisitor(row)" />
-                </el-tooltip>
-                <el-tooltip :content="row.enabled ? '禁用' : '启用'" placement="top">
-                  <el-button
-                    size="small"
-                    :icon="row.enabled ? 'VideoPause' : 'VideoPlay'"
-                    :type="row.enabled ? 'warning' : 'success'"
-                    @click="row.enabled ? handleDisableVisitor(row) : handleEnableVisitor(row)"
-                  />
                 </el-tooltip>
                 <el-tooltip content="删除" placement="top">
                   <el-button
@@ -277,13 +299,13 @@
         <el-form-item label="别名">
           <el-input v-model="createServiceForm.alias" placeholder="例如: Web服务" />
         </el-form-item>
+        <el-form-item label="源地址" required>
+          <el-input v-model="createServiceForm.source_addr" placeholder="例如: 100.64.0.7:8080" />
+          <div class="form-tip">VPN IP:端口，在隧道网络中监听的地址</div>
+        </el-form-item>
         <el-form-item label="目标地址" required>
           <el-input v-model="createServiceForm.target_addr" placeholder="例如: 192.168.1.10:80" />
           <div class="form-tip">Agent 内网中的服务地址</div>
-        </el-form-item>
-        <el-form-item label="监听地址" required>
-          <el-input v-model="createServiceForm.listen_addr" placeholder="例如: :8080 或 100.64.0.1:8080" />
-          <div class="form-tip">在隧道网络中监听的地址，供其他 Agent 或 Desktop 访问</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -333,13 +355,13 @@
         <el-form-item label="别名">
           <el-input v-model="editServiceForm.alias" placeholder="例如: Web服务" />
         </el-form-item>
+        <el-form-item label="源地址" required>
+          <el-input v-model="editServiceForm.source_addr" placeholder="例如: 100.64.0.7:8080" />
+          <div class="form-tip">VPN IP:端口</div>
+        </el-form-item>
         <el-form-item label="目标地址" required>
           <el-input v-model="editServiceForm.target_addr" placeholder="例如: 192.168.1.10:80" />
           <div class="form-tip">Agent 内网中的服务地址</div>
-        </el-form-item>
-        <el-form-item label="监听地址" required>
-          <el-input v-model="editServiceForm.listen_addr" placeholder="例如: :8080 或 100.64.0.1:8080" />
-          <div class="form-tip">在隧道网络中监听的地址</div>
         </el-form-item>
         <el-form-item label="状态">
           <el-switch v-model="editServiceForm.enabled" active-text="启用" inactive-text="禁用" />
@@ -431,8 +453,8 @@ const createServiceDialogVisible = ref(false)
 const createServiceForm = reactive({
   name: '',
   alias: '',
-  target_addr: '',
-  listen_addr: ''
+  source_addr: '',
+  target_addr: ''
 })
 const creatingService = ref(false)
 
@@ -441,8 +463,8 @@ const editServiceDialogVisible = ref(false)
 const editServiceForm = reactive({
   id: '',
   alias: '',
+  source_addr: '',
   target_addr: '',
-  listen_addr: '',
   enabled: true
 })
 const editingService = ref(false)
@@ -557,46 +579,58 @@ const handleCreateService = () => {
 const handleEditService = (service: ProxyService) => {
   editServiceForm.id = service.id
   editServiceForm.alias = service.alias || ''
+  editServiceForm.source_addr = service.source_addr
   editServiceForm.target_addr = service.target_addr
-  editServiceForm.listen_addr = service.listen_addr
   editServiceForm.enabled = service.enabled
   editServiceDialogVisible.value = true
 }
 
-const handleEnableService = async (service: ProxyService) => {
+// 启用/禁用服务
+const handleToggleService = async (service: ProxyService, enabled: boolean) => {
   try {
     const res = await request({
-      url: `/api/v1/admin/services/${service.id}`,
+      url: `/api/v1/admin/services/${service.id}/toggle`,
       method: 'put',
-      data: { enabled: true }
+      data: { enabled }
     })
+
     if (res.success) {
-      ElMessage.success('启用成功')
+      ElMessage.success(enabled ? '服务已启用' : '服务已禁用')
       loadAgent()
     } else {
-      ElMessage.error(res.message || '启用失败')
+      ElMessage.error(res.message || '操作失败')
     }
   } catch (error) {
-    ElMessage.error('启用失败')
+    ElMessage.error('操作失败')
   }
 }
 
-const handleDisableService = async (service: ProxyService) => {
+// 重试错误状态的服务
+const handleRetryService = async (service: ProxyService) => {
   try {
     const res = await request({
-      url: `/api/v1/admin/services/${service.id}`,
-      method: 'put',
-      data: { enabled: false }
+      url: `/api/v1/admin/services/${service.id}/retry`,
+      method: 'post'
     })
+
     if (res.success) {
-      ElMessage.success('禁用成功')
+      ElMessage.success('重试成功')
       loadAgent()
     } else {
-      ElMessage.error(res.message || '禁用失败')
+      ElMessage.error(res.message || '重试失败')
     }
   } catch (error) {
-    ElMessage.error('禁用失败')
+    ElMessage.error('重试失败')
   }
+}
+
+// 旧的启用/禁用方法（保留兼容性，但建议使用 handleToggleService）
+const handleEnableService = async (service: ProxyService) => {
+  await handleToggleService(service, true)
+}
+
+const handleDisableService = async (service: ProxyService) => {
+  await handleToggleService(service, false)
 }
 
 const handleDeleteService = async (service: ProxyService) => {
@@ -637,40 +671,50 @@ const handleEditVisitor = (visitor: PortForward) => {
   editVisitorDialogVisible.value = true
 }
 
-const handleEnableVisitor = async (visitor: PortForward) => {
+// 启用/禁用远程服务
+const handleToggleVisitor = async (visitor: PortForward, enabled: boolean) => {
   try {
     const res = await request({
-      url: `/api/v1/admin/port-forwards/${visitor.id}`,
+      url: `/api/v1/admin/port-forwards/${visitor.id}/toggle`,
       method: 'put',
-      data: { enabled: true }
+      data: { enabled }
     })
     if (res.success) {
-      ElMessage.success('启用成功')
+      ElMessage.success(enabled ? '远程服务已启用' : '远程服务已禁用')
       loadAgent()
     } else {
-      ElMessage.error(res.message || '启用失败')
+      ElMessage.error(res.message || '操作失败')
     }
   } catch (error) {
-    ElMessage.error('启用失败')
+    ElMessage.error('操作失败')
   }
 }
 
-const handleDisableVisitor = async (visitor: PortForward) => {
+// 重试错误状态的远程服务
+const handleRetryVisitor = async (visitor: PortForward) => {
   try {
     const res = await request({
-      url: `/api/v1/admin/port-forwards/${visitor.id}`,
-      method: 'put',
-      data: { enabled: false }
+      url: `/api/v1/admin/port-forwards/${visitor.id}/retry`,
+      method: 'post'
     })
     if (res.success) {
-      ElMessage.success('禁用成功')
+      ElMessage.success('重试成功')
       loadAgent()
     } else {
-      ElMessage.error(res.message || '禁用失败')
+      ElMessage.error(res.message || '重试失败')
     }
   } catch (error) {
-    ElMessage.error('禁用失败')
+    ElMessage.error('重试失败')
   }
+}
+
+// 旧的启用/禁用方法（保留兼容性）
+const handleEnableVisitor = async (visitor: PortForward) => {
+  await handleToggleVisitor(visitor, true)
+}
+
+const handleDisableVisitor = async (visitor: PortForward) => {
+  await handleToggleVisitor(visitor, false)
 }
 
 const handleDeleteVisitor = async (visitor: PortForward) => {
@@ -705,7 +749,7 @@ watch(() => route.params.id, () => {
 
 // 提交创建本地服务
 const handleSubmitCreateService = async () => {
-  if (!agent.value || !createServiceForm.name || !createServiceForm.target_addr || !createServiceForm.listen_addr) {
+  if (!agent.value || !createServiceForm.name || !createServiceForm.target_addr || !createServiceForm.source_addr) {
     ElMessage.warning('请填写完整信息')
     return
   }
@@ -719,14 +763,19 @@ const handleSubmitCreateService = async () => {
         agent_id: agent.value.id,
         name: createServiceForm.name,
         alias: createServiceForm.alias,
-        target_addr: createServiceForm.target_addr,
-        listen_addr: createServiceForm.listen_addr
+        source_addr: createServiceForm.source_addr,
+        target_addr: createServiceForm.target_addr
       }
     })
 
     if (res.success) {
       ElMessage.success('创建成功')
       createServiceDialogVisible.value = false
+      // 重置表单
+      createServiceForm.name = ''
+      createServiceForm.alias = ''
+      createServiceForm.source_addr = ''
+      createServiceForm.target_addr = ''
       loadAgent()
     } else {
       ElMessage.error(res.message || '创建失败')
@@ -791,7 +840,7 @@ const handleSubmitCreateVisitor = async () => {
 
 // 提交编辑本地服务
 const handleSubmitEditService = async () => {
-  if (!editServiceForm.target_addr || !editServiceForm.listen_addr) {
+  if (!editServiceForm.target_addr || !editServiceForm.source_addr) {
     ElMessage.warning('请填写完整信息')
     return
   }
@@ -803,8 +852,8 @@ const handleSubmitEditService = async () => {
       method: 'put',
       data: {
         alias: editServiceForm.alias,
+        source_addr: editServiceForm.source_addr,
         target_addr: editServiceForm.target_addr,
-        listen_addr: editServiceForm.listen_addr,
         enabled: editServiceForm.enabled
       }
     })

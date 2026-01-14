@@ -76,7 +76,7 @@ func (a *AgentServicePermissionAPI) ListAgentServicePermissions(c *gin.Context) 
 		}
 		if p.Service != nil {
 			info.ServiceName = p.Service.Name
-			info.ServiceAddr = p.Service.ListenAddr
+			info.ServiceAddr = p.Service.SourceAddr
 		}
 		result = append(result, info)
 	}

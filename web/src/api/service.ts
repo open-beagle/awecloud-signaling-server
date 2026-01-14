@@ -29,7 +29,7 @@ export interface ProxyService {
 export interface CreateServiceRequest {
   name: string
   agent_id: number
-  listen_addr: string
+  source_addr: string
   target_addr: string
   alias?: string
 }
@@ -37,7 +37,7 @@ export interface CreateServiceRequest {
 // 更新服务请求
 export interface UpdateServiceRequest {
   alias?: string
-  listen_addr?: string
+  source_addr?: string
   target_addr?: string
   enabled?: boolean
 }
@@ -76,19 +76,20 @@ export function deleteService(id: string | number) {
   })
 }
 
-// 启动服务
-export function startService(id: string | number) {
+// 启用/禁用服务
+export function toggleService(id: string | number, enabled: boolean) {
   return request({
-    url: `/api/v1/admin/services/${id}/start`,
-    method: 'put'
+    url: `/api/v1/admin/services/${id}/toggle`,
+    method: 'put',
+    data: { enabled }
   })
 }
 
-// 停止服务
-export function stopService(id: string | number) {
+// 重试错误状态的服务
+export function retryService(id: string | number) {
   return request({
-    url: `/api/v1/admin/services/${id}/stop`,
-    method: 'put'
+    url: `/api/v1/admin/services/${id}/retry`,
+    method: 'post'
   })
 }
 

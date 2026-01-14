@@ -696,8 +696,8 @@ type ServiceConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                   // 服务 ID
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                               // 服务名称
-	TargetAddr    string                 `protobuf:"bytes,3,opt,name=target_addr,json=targetAddr,proto3" json:"target_addr,omitempty"` // 目标地址（如 192.168.1.10:80）
-	ListenAddr    string                 `protobuf:"bytes,4,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"` // 监听地址（如 :80）
+	SourceAddr    string                 `protobuf:"bytes,3,opt,name=source_addr,json=sourceAddr,proto3" json:"source_addr,omitempty"` // 源地址（VPN IP:端口，如 100.64.0.1:80）
+	TargetAddr    string                 `protobuf:"bytes,4,opt,name=target_addr,json=targetAddr,proto3" json:"target_addr,omitempty"` // 目标地址（局域网地址，如 192.168.1.10:80）
 	Enabled       bool                   `protobuf:"varint,5,opt,name=enabled,proto3" json:"enabled,omitempty"`                        // 是否启用
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -747,16 +747,16 @@ func (x *ServiceConfig) GetName() string {
 	return ""
 }
 
-func (x *ServiceConfig) GetTargetAddr() string {
+func (x *ServiceConfig) GetSourceAddr() string {
 	if x != nil {
-		return x.TargetAddr
+		return x.SourceAddr
 	}
 	return ""
 }
 
-func (x *ServiceConfig) GetListenAddr() string {
+func (x *ServiceConfig) GetTargetAddr() string {
 	if x != nil {
-		return x.ListenAddr
+		return x.TargetAddr
 	}
 	return ""
 }
@@ -771,11 +771,12 @@ func (x *ServiceConfig) GetEnabled() bool {
 // ForwardConfig 端口访问配置
 type ForwardConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                   // 端口访问 ID
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                               // 名称
-	TargetAddr    string                 `protobuf:"bytes,3,opt,name=target_addr,json=targetAddr,proto3" json:"target_addr,omitempty"` // 目标地址（如 100.64.0.1:3306）
-	ListenAddr    string                 `protobuf:"bytes,4,opt,name=listen_addr,json=listenAddr,proto3" json:"listen_addr,omitempty"` // 本地监听地址（如 :13306）
-	Enabled       bool                   `protobuf:"varint,5,opt,name=enabled,proto3" json:"enabled,omitempty"`                        // 是否启用
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                      // 端口访问 ID
+	ServiceId     string                 `protobuf:"bytes,2,opt,name=service_id,json=serviceId,proto3" json:"service_id,omitempty"`       // 关联的目标服务 ID
+	ServiceName   string                 `protobuf:"bytes,3,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"` // 关联的目标服务名称
+	SourceAddr    string                 `protobuf:"bytes,4,opt,name=source_addr,json=sourceAddr,proto3" json:"source_addr,omitempty"`    // 源地址（局域网 IP:端口，如 192.168.1.100:13306）
+	TargetAddr    string                 `protobuf:"bytes,5,opt,name=target_addr,json=targetAddr,proto3" json:"target_addr,omitempty"`    // 目标地址（VPN 地址，如 100.64.0.1:3306）
+	Enabled       bool                   `protobuf:"varint,6,opt,name=enabled,proto3" json:"enabled,omitempty"`                           // 是否启用
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -817,9 +818,23 @@ func (x *ForwardConfig) GetId() string {
 	return ""
 }
 
-func (x *ForwardConfig) GetName() string {
+func (x *ForwardConfig) GetServiceId() string {
 	if x != nil {
-		return x.Name
+		return x.ServiceId
+	}
+	return ""
+}
+
+func (x *ForwardConfig) GetServiceName() string {
+	if x != nil {
+		return x.ServiceName
+	}
+	return ""
+}
+
+func (x *ForwardConfig) GetSourceAddr() string {
+	if x != nil {
+		return x.SourceAddr
 	}
 	return ""
 }
@@ -827,13 +842,6 @@ func (x *ForwardConfig) GetName() string {
 func (x *ForwardConfig) GetTargetAddr() string {
 	if x != nil {
 		return x.TargetAddr
-	}
-	return ""
-}
-
-func (x *ForwardConfig) GetListenAddr() string {
-	if x != nil {
-		return x.ListenAddr
 	}
 	return ""
 }
@@ -1036,6 +1044,494 @@ func (x *GetRealtimeStatusResponse) GetTunnelConnectedTime() int64 {
 	return 0
 }
 
+// ProxyStatus 本地服务状态
+type ProxyStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ServiceId     string                 `protobuf:"bytes,1,opt,name=service_id,json=serviceId,proto3" json:"service_id,omitempty"` // 服务 ID
+	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`                        // 状态：running/disabled/error/pending
+	ErrorCode     string                 `protobuf:"bytes,3,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"` // 错误代码
+	ErrorMsg      string                 `protobuf:"bytes,4,opt,name=error_msg,json=errorMsg,proto3" json:"error_msg,omitempty"`    // 错误信息
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProxyStatus) Reset() {
+	*x = ProxyStatus{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProxyStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProxyStatus) ProtoMessage() {}
+
+func (x *ProxyStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProxyStatus.ProtoReflect.Descriptor instead.
+func (*ProxyStatus) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ProxyStatus) GetServiceId() string {
+	if x != nil {
+		return x.ServiceId
+	}
+	return ""
+}
+
+func (x *ProxyStatus) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ProxyStatus) GetErrorCode() string {
+	if x != nil {
+		return x.ErrorCode
+	}
+	return ""
+}
+
+func (x *ProxyStatus) GetErrorMsg() string {
+	if x != nil {
+		return x.ErrorMsg
+	}
+	return ""
+}
+
+// ReportProxyStatusRequest 上报本地服务状态请求
+type ReportProxyStatusRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AgentId       uint64                 `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"` // Agent ID
+	Statuses      []*ProxyStatus         `protobuf:"bytes,2,rep,name=statuses,proto3" json:"statuses,omitempty"`               // 状态列表
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportProxyStatusRequest) Reset() {
+	*x = ReportProxyStatusRequest{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportProxyStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportProxyStatusRequest) ProtoMessage() {}
+
+func (x *ReportProxyStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportProxyStatusRequest.ProtoReflect.Descriptor instead.
+func (*ReportProxyStatusRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *ReportProxyStatusRequest) GetAgentId() uint64 {
+	if x != nil {
+		return x.AgentId
+	}
+	return 0
+}
+
+func (x *ReportProxyStatusRequest) GetStatuses() []*ProxyStatus {
+	if x != nil {
+		return x.Statuses
+	}
+	return nil
+}
+
+// ReportProxyStatusResponse 上报本地服务状态响应
+type ReportProxyStatusResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"` // 是否成功
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`  // 响应消息
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportProxyStatusResponse) Reset() {
+	*x = ReportProxyStatusResponse{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportProxyStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportProxyStatusResponse) ProtoMessage() {}
+
+func (x *ReportProxyStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportProxyStatusResponse.ProtoReflect.Descriptor instead.
+func (*ReportProxyStatusResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ReportProxyStatusResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ReportProxyStatusResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+// VisitorStatus 远程服务状态
+type VisitorStatus struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ForwardId      string                 `protobuf:"bytes,1,opt,name=forward_id,json=forwardId,proto3" json:"forward_id,omitempty"`                // 远程服务 ID
+	Status         string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`                                       // 状态：running/disabled/error/pending
+	ConfiguredAddr string                 `protobuf:"bytes,3,opt,name=configured_addr,json=configuredAddr,proto3" json:"configured_addr,omitempty"` // 配置的源地址
+	ActualAddr     string                 `protobuf:"bytes,4,opt,name=actual_addr,json=actualAddr,proto3" json:"actual_addr,omitempty"`             // 实际使用的源地址
+	IpChanged      bool                   `protobuf:"varint,5,opt,name=ip_changed,json=ipChanged,proto3" json:"ip_changed,omitempty"`               // IP 是否变化
+	ChangeReason   string                 `protobuf:"bytes,6,opt,name=change_reason,json=changeReason,proto3" json:"change_reason,omitempty"`       // 变化原因：DHCP_IP_CHANGE / NETWORK_INTERFACE_LOST
+	ErrorCode      string                 `protobuf:"bytes,7,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`                // 错误代码
+	ErrorMsg       string                 `protobuf:"bytes,8,opt,name=error_msg,json=errorMsg,proto3" json:"error_msg,omitempty"`                   // 错误信息
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *VisitorStatus) Reset() {
+	*x = VisitorStatus{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VisitorStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VisitorStatus) ProtoMessage() {}
+
+func (x *VisitorStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VisitorStatus.ProtoReflect.Descriptor instead.
+func (*VisitorStatus) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *VisitorStatus) GetForwardId() string {
+	if x != nil {
+		return x.ForwardId
+	}
+	return ""
+}
+
+func (x *VisitorStatus) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *VisitorStatus) GetConfiguredAddr() string {
+	if x != nil {
+		return x.ConfiguredAddr
+	}
+	return ""
+}
+
+func (x *VisitorStatus) GetActualAddr() string {
+	if x != nil {
+		return x.ActualAddr
+	}
+	return ""
+}
+
+func (x *VisitorStatus) GetIpChanged() bool {
+	if x != nil {
+		return x.IpChanged
+	}
+	return false
+}
+
+func (x *VisitorStatus) GetChangeReason() string {
+	if x != nil {
+		return x.ChangeReason
+	}
+	return ""
+}
+
+func (x *VisitorStatus) GetErrorCode() string {
+	if x != nil {
+		return x.ErrorCode
+	}
+	return ""
+}
+
+func (x *VisitorStatus) GetErrorMsg() string {
+	if x != nil {
+		return x.ErrorMsg
+	}
+	return ""
+}
+
+// ReportVisitorStatusRequest 上报远程服务状态请求
+type ReportVisitorStatusRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AgentId       uint64                 `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"` // Agent ID
+	Statuses      []*VisitorStatus       `protobuf:"bytes,2,rep,name=statuses,proto3" json:"statuses,omitempty"`               // 状态列表
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportVisitorStatusRequest) Reset() {
+	*x = ReportVisitorStatusRequest{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportVisitorStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportVisitorStatusRequest) ProtoMessage() {}
+
+func (x *ReportVisitorStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportVisitorStatusRequest.ProtoReflect.Descriptor instead.
+func (*ReportVisitorStatusRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ReportVisitorStatusRequest) GetAgentId() uint64 {
+	if x != nil {
+		return x.AgentId
+	}
+	return 0
+}
+
+func (x *ReportVisitorStatusRequest) GetStatuses() []*VisitorStatus {
+	if x != nil {
+		return x.Statuses
+	}
+	return nil
+}
+
+// ReportVisitorStatusResponse 上报远程服务状态响应
+type ReportVisitorStatusResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"` // 是否成功
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`  // 响应消息
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportVisitorStatusResponse) Reset() {
+	*x = ReportVisitorStatusResponse{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportVisitorStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportVisitorStatusResponse) ProtoMessage() {}
+
+func (x *ReportVisitorStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportVisitorStatusResponse.ProtoReflect.Descriptor instead.
+func (*ReportVisitorStatusResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ReportVisitorStatusResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ReportVisitorStatusResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+// ReportNetworkChangeRequest 上报网络变化请求
+type ReportNetworkChangeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AgentId       uint64                 `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"` // Agent ID
+	Networks      []*NetworkInterface    `protobuf:"bytes,2,rep,name=networks,proto3" json:"networks,omitempty"`               // 新的网络接口列表
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportNetworkChangeRequest) Reset() {
+	*x = ReportNetworkChangeRequest{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportNetworkChangeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportNetworkChangeRequest) ProtoMessage() {}
+
+func (x *ReportNetworkChangeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportNetworkChangeRequest.ProtoReflect.Descriptor instead.
+func (*ReportNetworkChangeRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ReportNetworkChangeRequest) GetAgentId() uint64 {
+	if x != nil {
+		return x.AgentId
+	}
+	return 0
+}
+
+func (x *ReportNetworkChangeRequest) GetNetworks() []*NetworkInterface {
+	if x != nil {
+		return x.Networks
+	}
+	return nil
+}
+
+// ReportNetworkChangeResponse 上报网络变化响应
+type ReportNetworkChangeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"` // 是否成功
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`  // 响应消息
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportNetworkChangeResponse) Reset() {
+	*x = ReportNetworkChangeResponse{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportNetworkChangeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportNetworkChangeResponse) ProtoMessage() {}
+
+func (x *ReportNetworkChangeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportNetworkChangeResponse.ProtoReflect.Descriptor instead.
+func (*ReportNetworkChangeResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *ReportNetworkChangeResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ReportNetworkChangeResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_pkg_proto_agent_proto protoreflect.FileDescriptor
 
 const file_pkg_proto_agent_proto_rawDesc = "" +
@@ -1103,19 +1599,21 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\rServiceConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1f\n" +
-	"\vtarget_addr\x18\x03 \x01(\tR\n" +
-	"targetAddr\x12\x1f\n" +
-	"\vlisten_addr\x18\x04 \x01(\tR\n" +
-	"listenAddr\x12\x18\n" +
-	"\aenabled\x18\x05 \x01(\bR\aenabled\"\x8f\x01\n" +
-	"\rForwardConfig\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1f\n" +
-	"\vtarget_addr\x18\x03 \x01(\tR\n" +
-	"targetAddr\x12\x1f\n" +
-	"\vlisten_addr\x18\x04 \x01(\tR\n" +
-	"listenAddr\x12\x18\n" +
+	"\vsource_addr\x18\x03 \x01(\tR\n" +
+	"sourceAddr\x12\x1f\n" +
+	"\vtarget_addr\x18\x04 \x01(\tR\n" +
+	"targetAddr\x12\x18\n" +
 	"\aenabled\x18\x05 \x01(\bR\aenabled\"\xbd\x01\n" +
+	"\rForwardConfig\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
+	"\n" +
+	"service_id\x18\x02 \x01(\tR\tserviceId\x12!\n" +
+	"\fservice_name\x18\x03 \x01(\tR\vserviceName\x12\x1f\n" +
+	"\vsource_addr\x18\x04 \x01(\tR\n" +
+	"sourceAddr\x12\x1f\n" +
+	"\vtarget_addr\x18\x05 \x01(\tR\n" +
+	"targetAddr\x12\x18\n" +
+	"\aenabled\x18\x06 \x01(\bR\aenabled\"\xbd\x01\n" +
 	"\x16AgentHeartbeatResponse\x12%\n" +
 	"\x0econfig_version\x18\x01 \x01(\x03R\rconfigVersion\x12=\n" +
 	"\bservices\x18\x02 \x03(\v2!.awecloud.signaling.ServiceConfigR\bservices\x12=\n" +
@@ -1128,12 +1626,53 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\bnetworks\x18\x03 \x03(\v2$.awecloud.signaling.NetworkInterfaceR\bnetworks\x12\x1b\n" +
 	"\ttunnel_ip\x18\x04 \x01(\tR\btunnelIp\x12)\n" +
 	"\x10tunnel_connected\x18\x05 \x01(\bR\x0ftunnelConnected\x122\n" +
-	"\x15tunnel_connected_time\x18\x06 \x01(\x03R\x13tunnelConnectedTime2\xb6\x03\n" +
+	"\x15tunnel_connected_time\x18\x06 \x01(\x03R\x13tunnelConnectedTime\"\x80\x01\n" +
+	"\vProxyStatus\x12\x1d\n" +
+	"\n" +
+	"service_id\x18\x01 \x01(\tR\tserviceId\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1d\n" +
+	"\n" +
+	"error_code\x18\x03 \x01(\tR\terrorCode\x12\x1b\n" +
+	"\terror_msg\x18\x04 \x01(\tR\berrorMsg\"r\n" +
+	"\x18ReportProxyStatusRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\x04R\aagentId\x12;\n" +
+	"\bstatuses\x18\x02 \x03(\v2\x1f.awecloud.signaling.ProxyStatusR\bstatuses\"O\n" +
+	"\x19ReportProxyStatusResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x90\x02\n" +
+	"\rVisitorStatus\x12\x1d\n" +
+	"\n" +
+	"forward_id\x18\x01 \x01(\tR\tforwardId\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12'\n" +
+	"\x0fconfigured_addr\x18\x03 \x01(\tR\x0econfiguredAddr\x12\x1f\n" +
+	"\vactual_addr\x18\x04 \x01(\tR\n" +
+	"actualAddr\x12\x1d\n" +
+	"\n" +
+	"ip_changed\x18\x05 \x01(\bR\tipChanged\x12#\n" +
+	"\rchange_reason\x18\x06 \x01(\tR\fchangeReason\x12\x1d\n" +
+	"\n" +
+	"error_code\x18\a \x01(\tR\terrorCode\x12\x1b\n" +
+	"\terror_msg\x18\b \x01(\tR\berrorMsg\"v\n" +
+	"\x1aReportVisitorStatusRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\x04R\aagentId\x12=\n" +
+	"\bstatuses\x18\x02 \x03(\v2!.awecloud.signaling.VisitorStatusR\bstatuses\"Q\n" +
+	"\x1bReportVisitorStatusResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"y\n" +
+	"\x1aReportNetworkChangeRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\x04R\aagentId\x12@\n" +
+	"\bnetworks\x18\x02 \x03(\v2$.awecloud.signaling.NetworkInterfaceR\bnetworks\"Q\n" +
+	"\x1bReportNetworkChangeResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage2\x98\x06\n" +
 	"\fAgentService\x12_\n" +
 	"\bRegister\x12(.awecloud.signaling.AgentRegisterRequest\x1a).awecloud.signaling.AgentRegisterResponse\x12k\n" +
 	"\fAuthenticate\x12,.awecloud.signaling.AgentAuthenticateRequest\x1a-.awecloud.signaling.AgentAuthenticateResponse\x12f\n" +
 	"\tHeartbeat\x12).awecloud.signaling.AgentHeartbeatRequest\x1a*.awecloud.signaling.AgentHeartbeatResponse(\x010\x01\x12p\n" +
-	"\x11GetRealtimeStatus\x12,.awecloud.signaling.GetRealtimeStatusRequest\x1a-.awecloud.signaling.GetRealtimeStatusResponseB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
+	"\x11GetRealtimeStatus\x12,.awecloud.signaling.GetRealtimeStatusRequest\x1a-.awecloud.signaling.GetRealtimeStatusResponse\x12p\n" +
+	"\x11ReportProxyStatus\x12,.awecloud.signaling.ReportProxyStatusRequest\x1a-.awecloud.signaling.ReportProxyStatusResponse\x12v\n" +
+	"\x13ReportVisitorStatus\x12..awecloud.signaling.ReportVisitorStatusRequest\x1a/.awecloud.signaling.ReportVisitorStatusResponse\x12v\n" +
+	"\x13ReportNetworkChange\x12..awecloud.signaling.ReportNetworkChangeRequest\x1a/.awecloud.signaling.ReportNetworkChangeResponseB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
 
 var (
 	file_pkg_proto_agent_proto_rawDescOnce sync.Once
@@ -1147,22 +1686,30 @@ func file_pkg_proto_agent_proto_rawDescGZIP() []byte {
 	return file_pkg_proto_agent_proto_rawDescData
 }
 
-var file_pkg_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_pkg_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_pkg_proto_agent_proto_goTypes = []any{
-	(*SystemInfo)(nil),                // 0: awecloud.signaling.SystemInfo
-	(*NetworkInterface)(nil),          // 1: awecloud.signaling.NetworkInterface
-	(*AgentRegisterRequest)(nil),      // 2: awecloud.signaling.AgentRegisterRequest
-	(*AgentRegisterResponse)(nil),     // 3: awecloud.signaling.AgentRegisterResponse
-	(*AgentAuthenticateRequest)(nil),  // 4: awecloud.signaling.AgentAuthenticateRequest
-	(*AgentAuthenticateResponse)(nil), // 5: awecloud.signaling.AgentAuthenticateResponse
-	(*ServiceStatus)(nil),             // 6: awecloud.signaling.ServiceStatus
-	(*ForwardStatus)(nil),             // 7: awecloud.signaling.ForwardStatus
-	(*AgentHeartbeatRequest)(nil),     // 8: awecloud.signaling.AgentHeartbeatRequest
-	(*ServiceConfig)(nil),             // 9: awecloud.signaling.ServiceConfig
-	(*ForwardConfig)(nil),             // 10: awecloud.signaling.ForwardConfig
-	(*AgentHeartbeatResponse)(nil),    // 11: awecloud.signaling.AgentHeartbeatResponse
-	(*GetRealtimeStatusRequest)(nil),  // 12: awecloud.signaling.GetRealtimeStatusRequest
-	(*GetRealtimeStatusResponse)(nil), // 13: awecloud.signaling.GetRealtimeStatusResponse
+	(*SystemInfo)(nil),                  // 0: awecloud.signaling.SystemInfo
+	(*NetworkInterface)(nil),            // 1: awecloud.signaling.NetworkInterface
+	(*AgentRegisterRequest)(nil),        // 2: awecloud.signaling.AgentRegisterRequest
+	(*AgentRegisterResponse)(nil),       // 3: awecloud.signaling.AgentRegisterResponse
+	(*AgentAuthenticateRequest)(nil),    // 4: awecloud.signaling.AgentAuthenticateRequest
+	(*AgentAuthenticateResponse)(nil),   // 5: awecloud.signaling.AgentAuthenticateResponse
+	(*ServiceStatus)(nil),               // 6: awecloud.signaling.ServiceStatus
+	(*ForwardStatus)(nil),               // 7: awecloud.signaling.ForwardStatus
+	(*AgentHeartbeatRequest)(nil),       // 8: awecloud.signaling.AgentHeartbeatRequest
+	(*ServiceConfig)(nil),               // 9: awecloud.signaling.ServiceConfig
+	(*ForwardConfig)(nil),               // 10: awecloud.signaling.ForwardConfig
+	(*AgentHeartbeatResponse)(nil),      // 11: awecloud.signaling.AgentHeartbeatResponse
+	(*GetRealtimeStatusRequest)(nil),    // 12: awecloud.signaling.GetRealtimeStatusRequest
+	(*GetRealtimeStatusResponse)(nil),   // 13: awecloud.signaling.GetRealtimeStatusResponse
+	(*ProxyStatus)(nil),                 // 14: awecloud.signaling.ProxyStatus
+	(*ReportProxyStatusRequest)(nil),    // 15: awecloud.signaling.ReportProxyStatusRequest
+	(*ReportProxyStatusResponse)(nil),   // 16: awecloud.signaling.ReportProxyStatusResponse
+	(*VisitorStatus)(nil),               // 17: awecloud.signaling.VisitorStatus
+	(*ReportVisitorStatusRequest)(nil),  // 18: awecloud.signaling.ReportVisitorStatusRequest
+	(*ReportVisitorStatusResponse)(nil), // 19: awecloud.signaling.ReportVisitorStatusResponse
+	(*ReportNetworkChangeRequest)(nil),  // 20: awecloud.signaling.ReportNetworkChangeRequest
+	(*ReportNetworkChangeResponse)(nil), // 21: awecloud.signaling.ReportNetworkChangeResponse
 }
 var file_pkg_proto_agent_proto_depIdxs = []int32{
 	0,  // 0: awecloud.signaling.AgentRegisterRequest.system_info:type_name -> awecloud.signaling.SystemInfo
@@ -1173,19 +1720,28 @@ var file_pkg_proto_agent_proto_depIdxs = []int32{
 	9,  // 5: awecloud.signaling.AgentHeartbeatResponse.services:type_name -> awecloud.signaling.ServiceConfig
 	10, // 6: awecloud.signaling.AgentHeartbeatResponse.forwards:type_name -> awecloud.signaling.ForwardConfig
 	1,  // 7: awecloud.signaling.GetRealtimeStatusResponse.networks:type_name -> awecloud.signaling.NetworkInterface
-	2,  // 8: awecloud.signaling.AgentService.Register:input_type -> awecloud.signaling.AgentRegisterRequest
-	4,  // 9: awecloud.signaling.AgentService.Authenticate:input_type -> awecloud.signaling.AgentAuthenticateRequest
-	8,  // 10: awecloud.signaling.AgentService.Heartbeat:input_type -> awecloud.signaling.AgentHeartbeatRequest
-	12, // 11: awecloud.signaling.AgentService.GetRealtimeStatus:input_type -> awecloud.signaling.GetRealtimeStatusRequest
-	3,  // 12: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.AgentRegisterResponse
-	5,  // 13: awecloud.signaling.AgentService.Authenticate:output_type -> awecloud.signaling.AgentAuthenticateResponse
-	11, // 14: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.AgentHeartbeatResponse
-	13, // 15: awecloud.signaling.AgentService.GetRealtimeStatus:output_type -> awecloud.signaling.GetRealtimeStatusResponse
-	12, // [12:16] is the sub-list for method output_type
-	8,  // [8:12] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	14, // 8: awecloud.signaling.ReportProxyStatusRequest.statuses:type_name -> awecloud.signaling.ProxyStatus
+	17, // 9: awecloud.signaling.ReportVisitorStatusRequest.statuses:type_name -> awecloud.signaling.VisitorStatus
+	1,  // 10: awecloud.signaling.ReportNetworkChangeRequest.networks:type_name -> awecloud.signaling.NetworkInterface
+	2,  // 11: awecloud.signaling.AgentService.Register:input_type -> awecloud.signaling.AgentRegisterRequest
+	4,  // 12: awecloud.signaling.AgentService.Authenticate:input_type -> awecloud.signaling.AgentAuthenticateRequest
+	8,  // 13: awecloud.signaling.AgentService.Heartbeat:input_type -> awecloud.signaling.AgentHeartbeatRequest
+	12, // 14: awecloud.signaling.AgentService.GetRealtimeStatus:input_type -> awecloud.signaling.GetRealtimeStatusRequest
+	15, // 15: awecloud.signaling.AgentService.ReportProxyStatus:input_type -> awecloud.signaling.ReportProxyStatusRequest
+	18, // 16: awecloud.signaling.AgentService.ReportVisitorStatus:input_type -> awecloud.signaling.ReportVisitorStatusRequest
+	20, // 17: awecloud.signaling.AgentService.ReportNetworkChange:input_type -> awecloud.signaling.ReportNetworkChangeRequest
+	3,  // 18: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.AgentRegisterResponse
+	5,  // 19: awecloud.signaling.AgentService.Authenticate:output_type -> awecloud.signaling.AgentAuthenticateResponse
+	11, // 20: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.AgentHeartbeatResponse
+	13, // 21: awecloud.signaling.AgentService.GetRealtimeStatus:output_type -> awecloud.signaling.GetRealtimeStatusResponse
+	16, // 22: awecloud.signaling.AgentService.ReportProxyStatus:output_type -> awecloud.signaling.ReportProxyStatusResponse
+	19, // 23: awecloud.signaling.AgentService.ReportVisitorStatus:output_type -> awecloud.signaling.ReportVisitorStatusResponse
+	21, // 24: awecloud.signaling.AgentService.ReportNetworkChange:output_type -> awecloud.signaling.ReportNetworkChangeResponse
+	18, // [18:25] is the sub-list for method output_type
+	11, // [11:18] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_pkg_proto_agent_proto_init() }
@@ -1199,7 +1755,7 @@ func file_pkg_proto_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_agent_proto_rawDesc), len(file_pkg_proto_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -249,21 +249,26 @@ Desktop 连接时上报，存储设备硬件信息：
 
 ---
 
-## 5. 端口映射表 (proxy_service)
+## 5. 本地服务表 (proxy_service)
 
 ### 5.1 表结构
 
-| 字段        | 类型     | 必填 | 说明                           |
-| ----------- | -------- | ---- | ------------------------------ |
-| id          | string   | 是   | 主键，UUID                     |
-| name        | string   | 是   | 服务名称                       |
-| alias       | string   | 否   | 别名                           |
-| agent_id    | uint64   | 是   | 所属 Agent，外键               |
-| target_addr | string   | 是   | 目标地址（如 192.168.1.10:80） |
-| listen_addr | string   | 是   | 监听地址（如 100.64.0.1:80）   |
-| enabled     | bool     | 是   | 是否启用                       |
-| created_at  | datetime | 是   | 创建时间                       |
-| updated_at  | datetime | 是   | 更新时间                       |
+| 字段        | 类型     | 必填 | 说明                                    |
+| ----------- | -------- | ---- | --------------------------------------- |
+| id          | string   | 是   | 主键，UUID                              |
+| name        | string   | 是   | 服务名称                                |
+| alias       | string   | 否   | 别名                                    |
+| agent_id    | uint64   | 是   | 所属 Agent，外键                        |
+| source_addr | string   | 是   | 源地址（VPN IP:端口，如 100.64.0.1:80） |
+| target_addr | string   | 是   | 目标地址（如 192.168.1.10:80）          |
+| enabled     | bool     | 是   | 是否启用（管理员控制）                  |
+| created_at  | datetime | 是   | 创建时间                                |
+| updated_at  | datetime | 是   | 更新时间                                |
+
+说明：
+
+- `status` 和 `error_msg` 不存储在数据库，由 Server 内存缓存维护（见第 18 节）
+- `enabled` 是管理员的控制意图，持久化存储
 
 ### 5.2 索引
 
@@ -278,34 +283,48 @@ Desktop 连接时上报，存储设备硬件信息：
 
 ---
 
-## 6. 端口访问表 (port_forward)
+## 6. 远程服务表 (port_forward)
 
 ### 6.1 表结构
 
-| 字段              | 类型     | 必填 | 说明                         |
-| ----------------- | -------- | ---- | ---------------------------- |
-| id                | string   | 是   | 主键，UUID                   |
-| name              | string   | 是   | 服务名称                     |
-| alias             | string   | 否   | 别名                         |
-| agent_id          | uint64   | 是   | 所属 Agent（访问方），外键   |
-| target_service_id | string   | 是   | 目标服务，外键 proxy_service |
-| target_addr       | string   | 是   | 目标地址（冗余，便于显示）   |
-| listen_addr       | string   | 是   | 本地监听地址                 |
-| enabled           | bool     | 是   | 是否启用                     |
-| created_at        | datetime | 是   | 创建时间                     |
-| updated_at        | datetime | 是   | 更新时间                     |
+| 字段              | 类型     | 必填 | 说明                                             |
+| ----------------- | -------- | ---- | ------------------------------------------------ |
+| id                | string   | 是   | 主键，UUID                                       |
+| agent_id          | uint64   | 是   | 所属 Agent（访问方），外键                       |
+| target_service_id | string   | 是   | 目标服务，外键 proxy_service                     |
+| source_addr       | string   | 是   | 源地址（局域网 IP:端口，如 192.168.1.100:13306） |
+| target_addr       | string   | 是   | 目标地址（VPN 地址，如 100.64.0.1:3306）         |
+| enabled           | bool     | 是   | 是否启用（管理员控制）                           |
+| created_at        | datetime | 是   | 创建时间                                         |
+| updated_at        | datetime | 是   | 更新时间                                         |
 
-### 6.2 索引
+说明：
 
-| 索引名称              | 字段              | 类型 |
-| --------------------- | ----------------- | ---- |
-| idx_forward_agent     | agent_id          | 普通 |
-| idx_forward_target    | target_service_id | 普通 |
-| uk_forward_name_agent | name, agent_id    | 唯一 |
+- 名称、别名从关联的 proxy_service 获取，不在本表维护
+- source_addr 的 IP 部分可以是具体 IP 或 0.0.0.0（监听所有接口）
+- `status` 和 `error_msg` 不存储在数据库，由 Server 内存缓存维护（见第 18 节）
+- `enabled` 是管理员的控制意图，持久化存储
 
-### 6.3 约束
+### 6.2 错误码说明
 
-- 名称 + Agent 不可重复
+| 错误码                 | 说明                    |
+| ---------------------- | ----------------------- |
+| PORT_IN_USE            | 端口被占用              |
+| NETWORK_INTERFACE_LOST | 配置的网段未找到可用 IP |
+| TARGET_UNREACHABLE     | 目标服务不可达          |
+| ACL_DENIED             | 权限不足                |
+| VPN_NOT_READY          | VPN 未就绪              |
+
+### 6.3 索引
+
+| 索引名称           | 字段              | 类型 |
+| ------------------ | ----------------- | ---- |
+| idx_forward_agent  | agent_id          | 普通 |
+| idx_forward_target | target_service_id | 普通 |
+
+### 6.4 约束
+
+- 同一 Agent 下 source_addr 不可重复
 
 ---
 
@@ -644,6 +663,77 @@ Desktop 连接时上报，存储设备硬件信息：
 
 ---
 
-**文档版本**: 1.0
+## 18. 运行时状态缓存（Server 内存）
+
+本地服务和远程服务的运行状态（`status`、`error_msg`）不存储在数据库，而是由 Server 在内存中维护。
+
+### 18.1 设计原则
+
+| 数据类型  | 存储位置 | 说明                         |
+| --------- | -------- | ---------------------------- |
+| enabled   | 数据库   | 管理员的控制意图，需要持久化 |
+| status    | 内存     | 运行时状态，Agent 心跳上报   |
+| error_msg | 内存     | 错误信息，Agent 心跳上报     |
+
+### 18.2 缓存结构
+
+```go
+// ServiceRuntimeStatus 服务运行时状态
+type ServiceRuntimeStatus struct {
+    ServiceID  string    // 服务 ID
+    Status     string    // 运行状态：running/stopped/error/pending
+    ErrorCode  string    // 错误码
+    ErrorMsg   string    // 错误信息
+    UpdatedAt  time.Time // 最后更新时间
+}
+```
+
+### 18.3 运行状态枚举
+
+| 状态值  | 说明                        |
+| ------- | --------------------------- |
+| running | 服务正常运行中              |
+| stopped | 服务已停止                  |
+| error   | 服务启动失败或运行异常      |
+| pending | 等待启动（如等待 VPN 就绪） |
+
+### 18.4 状态更新来源
+
+| 来源           | 说明                                          |
+| -------------- | --------------------------------------------- |
+| Agent 心跳上报 | 通过 `service_status[]` 和 `forward_status[]` |
+| Agent 离线     | 该 Agent 下所有服务状态自动变为 `stopped`     |
+| 服务创建       | 初始状态为 `pending`                          |
+
+### 18.5 前端显示状态合并
+
+前端显示时，将 `enabled`（数据库）和 `status`（内存）合并为 `display_status`：
+
+```
+if enabled == false:
+    display_status = "disabled"
+else if agent_offline:
+    display_status = "offline"
+else:
+    display_status = status  // running/stopped/error/pending
+```
+
+### 18.6 显示状态说明
+
+| display_status | 显示文本 | 图标颜色 | 说明                     | 可用操作         |
+| -------------- | -------- | -------- | ------------------------ | ---------------- |
+| disabled       | 禁用     | ⚫ 灰色  | 管理员已禁用             | 启用、编辑、删除 |
+| offline        | 离线     | ⚪ 白色  | Agent 离线，无法获取状态 | 禁用、编辑、删除 |
+| running        | 运行     | 🟢 绿色  | 服务正常运行中           | 禁用、编辑、删除 |
+| stopped        | 停止     | 🔵 蓝色  | 服务已停止               | 启用、编辑、删除 |
+| error          | 错误     | 🔴 红色  | 服务启动失败或运行异常   | 重试、编辑、删除 |
+| pending        | 等待     | 🟡 黄色  | 等待 VPN 就绪后启动      | 禁用、编辑、删除 |
+
+错误状态时，鼠标悬停显示 `error_msg`。
+
+---
+
+**文档版本**: 1.1
 **创建日期**: 2026-01-12
+**更新日期**: 2026-01-14
 **维护者**: 开发团队

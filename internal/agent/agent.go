@@ -236,13 +236,16 @@ func (a *Agent) register() error {
 
 		// 初始化 ProxyManager
 		if a.proxyManager == nil {
-			a.proxyManager = NewProxyManager(a.tsManager, a.ctx)
+			a.proxyManager = NewProxyManager(a.tsManager, a.grpcClient, a.agentID, a.ctx)
 		}
 
 		// 初始化 VisitorManager
 		if a.visitorManager == nil {
-			a.visitorManager = NewVisitorManager(a.tsManager, a.config, a.ctx)
+			a.visitorManager = NewVisitorManager(a.tsManager, a.config, a.grpcClient, a.agentID, a.ctx)
 		}
+
+		// VPN 就绪，通知 ProxyManager 启动等待中的服务
+		a.proxyManager.OnVPNReady()
 	} else {
 		return fmt.Errorf("Server 未返回 Tailscale 认证信息")
 	}
@@ -431,40 +434,20 @@ func (a *Agent) syncServices(services []*pb.ServiceConfig) {
 		return
 	}
 
-	// 构建期望的服务集合
-	expected := make(map[string]*pb.ServiceConfig)
+	// 构建配置列表
+	configs := make([]ServiceConfig, 0, len(services))
 	for _, svc := range services {
-		if svc.Enabled {
-			expected[svc.Id] = svc
-		}
+		configs = append(configs, ServiceConfig{
+			ID:         svc.Id,
+			Name:       svc.Name,
+			SourceAddr: svc.SourceAddr,
+			TargetAddr: svc.TargetAddr,
+			Enabled:    svc.Enabled,
+		})
 	}
 
-	// 停止不需要的服务
-	for name := range a.proxyManager.GetStatus() {
-		if _, ok := expected[name]; !ok {
-			logger.Infof("停止端口映射服务: %s", name)
-			if err := a.proxyManager.Stop(name); err != nil {
-				logger.Warnf("停止端口映射服务失败: %s, %v", name, err)
-			}
-		}
-	}
-
-	// 启动新服务
-	for id, svc := range expected {
-		if !a.proxyManager.Exists(id) {
-			// 解析监听端口
-			listenPort := 0
-			if _, err := fmt.Sscanf(svc.ListenAddr, ":%d", &listenPort); err != nil {
-				logger.Warnf("解析监听地址失败: %s, %v", svc.ListenAddr, err)
-				continue
-			}
-
-			logger.Infof("启动端口映射服务: %s, port=%d, target=%s", svc.Name, listenPort, svc.TargetAddr)
-			if err := a.proxyManager.Start(id, listenPort, svc.TargetAddr); err != nil {
-				logger.Warnf("启动端口映射服务失败: %s, %v", svc.Name, err)
-			}
-		}
-	}
+	// 使用 UpdateConfig 批量更新
+	a.proxyManager.UpdateConfig(configs)
 }
 
 // syncForwards 同步端口访问服务
@@ -474,40 +457,21 @@ func (a *Agent) syncForwards(forwards []*pb.ForwardConfig) {
 		return
 	}
 
-	// 构建期望的服务集合
-	expected := make(map[string]*pb.ForwardConfig)
+	// 构建配置列表
+	configs := make([]VisitorConfig, 0, len(forwards))
 	for _, fwd := range forwards {
-		if fwd.Enabled {
-			expected[fwd.Id] = fwd
-		}
+		configs = append(configs, VisitorConfig{
+			ID:          fwd.Id,
+			ServiceID:   fwd.ServiceId,
+			ServiceName: fwd.ServiceName,
+			SourceAddr:  fwd.SourceAddr,
+			TargetAddr:  fwd.TargetAddr,
+			Enabled:     fwd.Enabled,
+		})
 	}
 
-	// 停止不需要的服务
-	for name := range a.visitorManager.GetStatus() {
-		if _, ok := expected[name]; !ok {
-			logger.Infof("停止端口访问服务: %s", name)
-			if err := a.visitorManager.Stop(name); err != nil {
-				logger.Warnf("停止端口访问服务失败: %s, %v", name, err)
-			}
-		}
-	}
-
-	// 启动新服务
-	for id, fwd := range expected {
-		if !a.visitorManager.Exists(id) {
-			// 解析监听端口
-			listenPort := 0
-			if _, err := fmt.Sscanf(fwd.ListenAddr, ":%d", &listenPort); err != nil {
-				logger.Warnf("解析监听地址失败: %s, %v", fwd.ListenAddr, err)
-				continue
-			}
-
-			logger.Infof("启动端口访问服务: %s, port=%d, target=%s", fwd.Name, listenPort, fwd.TargetAddr)
-			if err := a.visitorManager.Start(id, listenPort, fwd.TargetAddr); err != nil {
-				logger.Warnf("启动端口访问服务失败: %s, %v", fwd.Name, err)
-			}
-		}
-	}
+	// 使用 UpdateConfig 批量更新
+	a.visitorManager.UpdateConfig(configs)
 }
 
 // IsGRPCConnected 检查gRPC连接是否正常

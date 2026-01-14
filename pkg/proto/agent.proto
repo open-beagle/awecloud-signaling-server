@@ -17,6 +17,15 @@ service AgentService {
 
   // 获取实时状态 - Server 主动调用（用于 Web 详情页刷新）
   rpc GetRealtimeStatus(GetRealtimeStatusRequest) returns (GetRealtimeStatusResponse);
+
+  // 上报本地服务状态
+  rpc ReportProxyStatus(ReportProxyStatusRequest) returns (ReportProxyStatusResponse);
+
+  // 上报远程服务状态
+  rpc ReportVisitorStatus(ReportVisitorStatusRequest) returns (ReportVisitorStatusResponse);
+
+  // 上报网络变化
+  rpc ReportNetworkChange(ReportNetworkChangeRequest) returns (ReportNetworkChangeResponse);
 }
 
 // ============================================
@@ -118,18 +127,19 @@ message AgentHeartbeatRequest {
 message ServiceConfig {
   string id = 1; // 服务 ID
   string name = 2; // 服务名称
-  string target_addr = 3; // 目标地址（如 192.168.1.10:80）
-  string listen_addr = 4; // 监听地址（如 :80）
+  string source_addr = 3; // 源地址（VPN IP:端口，如 100.64.0.1:80）
+  string target_addr = 4; // 目标地址（局域网地址，如 192.168.1.10:80）
   bool enabled = 5; // 是否启用
 }
 
 // ForwardConfig 端口访问配置
 message ForwardConfig {
   string id = 1; // 端口访问 ID
-  string name = 2; // 名称
-  string target_addr = 3; // 目标地址（如 100.64.0.1:3306）
-  string listen_addr = 4; // 本地监听地址（如 :13306）
-  bool enabled = 5; // 是否启用
+  string service_id = 2; // 关联的目标服务 ID
+  string service_name = 3; // 关联的目标服务名称
+  string source_addr = 4; // 源地址（局域网 IP:端口，如 192.168.1.100:13306）
+  string target_addr = 5; // 目标地址（VPN 地址，如 100.64.0.1:3306）
+  bool enabled = 6; // 是否启用
 }
 
 // AgentHeartbeatResponse Agent 心跳响应
@@ -156,4 +166,64 @@ message GetRealtimeStatusResponse {
   string tunnel_ip = 4; // 隧道 IP
   bool tunnel_connected = 5; // 隧道连接状态
   int64 tunnel_connected_time = 6; // 隧道连接时间（Unix 时间戳）
+}
+
+// ============================================
+// 状态上报
+// ============================================
+
+// ProxyStatus 本地服务状态
+message ProxyStatus {
+  string service_id = 1; // 服务 ID
+  string status = 2; // 状态：running/disabled/error/pending
+  string error_code = 3; // 错误代码
+  string error_msg = 4; // 错误信息
+}
+
+// ReportProxyStatusRequest 上报本地服务状态请求
+message ReportProxyStatusRequest {
+  uint64 agent_id = 1; // Agent ID
+  repeated ProxyStatus statuses = 2; // 状态列表
+}
+
+// ReportProxyStatusResponse 上报本地服务状态响应
+message ReportProxyStatusResponse {
+  bool success = 1; // 是否成功
+  string message = 2; // 响应消息
+}
+
+// VisitorStatus 远程服务状态
+message VisitorStatus {
+  string forward_id = 1; // 远程服务 ID
+  string status = 2; // 状态：running/disabled/error/pending
+  string configured_addr = 3; // 配置的源地址
+  string actual_addr = 4; // 实际使用的源地址
+  bool ip_changed = 5; // IP 是否变化
+  string change_reason = 6; // 变化原因：DHCP_IP_CHANGE / NETWORK_INTERFACE_LOST
+  string error_code = 7; // 错误代码
+  string error_msg = 8; // 错误信息
+}
+
+// ReportVisitorStatusRequest 上报远程服务状态请求
+message ReportVisitorStatusRequest {
+  uint64 agent_id = 1; // Agent ID
+  repeated VisitorStatus statuses = 2; // 状态列表
+}
+
+// ReportVisitorStatusResponse 上报远程服务状态响应
+message ReportVisitorStatusResponse {
+  bool success = 1; // 是否成功
+  string message = 2; // 响应消息
+}
+
+// ReportNetworkChangeRequest 上报网络变化请求
+message ReportNetworkChangeRequest {
+  uint64 agent_id = 1; // Agent ID
+  repeated NetworkInterface networks = 2; // 新的网络接口列表
+}
+
+// ReportNetworkChangeResponse 上报网络变化响应
+message ReportNetworkChangeResponse {
+  bool success = 1; // 是否成功
+  string message = 2; // 响应消息
 }

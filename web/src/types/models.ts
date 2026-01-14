@@ -59,13 +59,15 @@ export interface AgentDetail extends Agent {
 // 端口转发模型
 export interface PortForward {
   id: string
-  name: string
-  alias?: string
   agent_id: number
   target_service_id?: string
-  target_addr: string
-  listen_addr: string
+  name: string              // 从关联服务获取
+  alias?: string            // 从关联服务获取
+  source_addr: string       // 源地址（局域网 IP:端口）
+  target_addr: string       // 目标地址（VPN 地址）
   enabled: boolean
+  display_status: 'disabled' | 'offline' | 'running' | 'stopped' | 'error' | 'pending'  // 合并后的显示状态
+  error_msg?: string
   target_agent_name?: string
   target_service_name?: string
 }
@@ -76,11 +78,11 @@ export interface ProxyService {
   name: string
   alias?: string
   agent_id: number
-  listen_addr?: string
-  listen_port?: number
-  target_addr: string
+  source_addr: string       // 源地址（VPN IP:端口）
+  target_addr: string       // 目标地址（局域网地址）
   enabled: boolean
-  status?: 'running' | 'stopped' | 'error'
+  display_status: 'disabled' | 'offline' | 'running' | 'stopped' | 'error' | 'pending'  // 合并后的显示状态
+  error_msg?: string
   connections?: number
   bytes_in?: number
   bytes_out?: number

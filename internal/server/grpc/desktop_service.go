@@ -425,7 +425,7 @@ func (s *DesktopServiceServer) sendDesktopHeartbeatResponse(stream pb.DesktopSer
 				Id:         svc.ID,
 				Name:       svc.Name,
 				AgentName:  agentName,
-				ListenAddr: svc.ListenAddr,
+				ListenAddr: svc.SourceAddr,
 			})
 		}
 	}
@@ -435,8 +435,15 @@ func (s *DesktopServiceServer) sendDesktopHeartbeatResponse(stream pb.DesktopSer
 
 // createDesktopNode 为 Desktop 创建 Headscale Node
 func (s *DesktopServiceServer) createDesktopNode(ctx context.Context, clientID uint64, deviceName string) (uint64, string, error) {
+	// 查询 Client 信息获取 name
+	var client model.Client
+	if err := db.DB.First(&client, clientID).Error; err != nil {
+		return 0, "", fmt.Errorf("查询 Client 失败: %w", err)
+	}
+
 	// 为每个 Client 创建独立的 Headscale User
-	userName := fmt.Sprintf("client-%d", clientID)
+	// User 命名规则: desktop-{client.name}，参见 docs/design_headscale_integration.md
+	userName := fmt.Sprintf("desktop-%s", client.Name)
 
 	// 获取或创建 User
 	user, err := s.headscaleClient.GetOrCreateUser(ctx, userName)
@@ -444,8 +451,23 @@ func (s *DesktopServiceServer) createDesktopNode(ctx context.Context, clientID u
 		return 0, "", fmt.Errorf("获取或创建 Headscale User 失败: %w", err)
 	}
 
-	// 创建预认证密钥（24 小时有效，临时节点）
-	authKey, err := s.headscaleClient.CreatePreAuthKey(ctx, user.Id, 24*time.Hour, true)
+	// 构建 Tags 列表
+	// 身份 Tag: tag:desktop-{client.name}，参见 docs/design_headscale_integration.md 第 10 节
+	tags := []string{fmt.Sprintf("tag:desktop-%s", client.Name)}
+
+	// 查询 Client 所属的分组，添加分组 Tag
+	var groupMembers []model.ClientGroupMember
+	if err := db.DB.Preload("Group").Where("client_id = ?", clientID).Find(&groupMembers).Error; err == nil {
+		for _, gm := range groupMembers {
+			if gm.Group != nil {
+				// 分组 Tag: tag:desktop-group-{group.name}
+				tags = append(tags, fmt.Sprintf("tag:desktop-group-%s", gm.Group.Name))
+			}
+		}
+	}
+
+	// 创建预认证密钥（24 小时有效，临时节点，带 Tags）
+	authKey, err := s.headscaleClient.CreatePreAuthKeyWithTags(ctx, user.Id, 24*time.Hour, true, tags)
 	if err != nil {
 		return 0, "", fmt.Errorf("创建预认证密钥失败: %w", err)
 	}
@@ -457,8 +479,15 @@ func (s *DesktopServiceServer) createDesktopNode(ctx context.Context, clientID u
 
 // getOrCreateAuthKey 获取或创建预认证密钥
 func (s *DesktopServiceServer) getOrCreateAuthKey(ctx context.Context, clientID uint64, desktopID uint64) (string, string, error) {
+	// 查询 Client 信息获取 name
+	var client model.Client
+	if err := db.DB.First(&client, clientID).Error; err != nil {
+		return "", "", fmt.Errorf("查询 Client 失败: %w", err)
+	}
+
 	// 为每个 Client 创建独立的 Headscale User
-	userName := fmt.Sprintf("client-%d", clientID)
+	// User 命名规则: desktop-{client.name}，参见 docs/design_headscale_integration.md
+	userName := fmt.Sprintf("desktop-%s", client.Name)
 
 	// 获取或创建 User
 	user, err := s.headscaleClient.GetOrCreateUser(ctx, userName)
@@ -466,8 +495,23 @@ func (s *DesktopServiceServer) getOrCreateAuthKey(ctx context.Context, clientID 
 		return "", "", fmt.Errorf("获取或创建 Headscale User 失败: %w", err)
 	}
 
-	// 创建预认证密钥（24 小时有效，临时节点）
-	authKey, err := s.headscaleClient.CreatePreAuthKey(ctx, user.Id, 24*time.Hour, true)
+	// 构建 Tags 列表
+	// 身份 Tag: tag:desktop-{client.name}
+	tags := []string{fmt.Sprintf("tag:desktop-%s", client.Name)}
+
+	// 查询 Client 所属的分组，添加分组 Tag
+	var groupMembers []model.ClientGroupMember
+	if err := db.DB.Preload("Group").Where("client_id = ?", clientID).Find(&groupMembers).Error; err == nil {
+		for _, gm := range groupMembers {
+			if gm.Group != nil {
+				// 分组 Tag: tag:desktop-group-{group.name}
+				tags = append(tags, fmt.Sprintf("tag:desktop-group-%s", gm.Group.Name))
+			}
+		}
+	}
+
+	// 创建预认证密钥（24 小时有效，临时节点，带 Tags）
+	authKey, err := s.headscaleClient.CreatePreAuthKeyWithTags(ctx, user.Id, 24*time.Hour, true, tags)
 	if err != nil {
 		return "", "", fmt.Errorf("创建预认证密钥失败: %w", err)
 	}

@@ -316,6 +316,14 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.GET("/services", serviceAPI.List)
 					adminAuthGroup.POST("/services", serviceAPI.Create)
 
+					// 端口转发管理
+					forwardAPI := api.NewPortForwardAPI(s.config)
+					adminAuthGroup.POST("/port-forwards", forwardAPI.Create)
+					adminAuthGroup.PUT("/port-forwards/:id", forwardAPI.Update)
+					adminAuthGroup.PUT("/port-forwards/:id/toggle", forwardAPI.Toggle)
+					adminAuthGroup.POST("/port-forwards/:id/retry", forwardAPI.Retry)
+					adminAuthGroup.DELETE("/port-forwards/:id", forwardAPI.Delete)
+
 					// 服务权限管理（放在 /services/:id 之前，避免路由冲突）
 					permAPI := api.NewServicePermissionAPI(s.config)
 					// 全局权限查询
@@ -325,6 +333,8 @@ func (s *Server) setupRouter() *gin.Engine {
 					// 单个服务操作（放在具体路径之后）
 					adminAuthGroup.GET("/services/:id", serviceAPI.Get)
 					adminAuthGroup.PUT("/services/:id", serviceAPI.Update)
+					adminAuthGroup.PUT("/services/:id/toggle", serviceAPI.Toggle)
+					adminAuthGroup.POST("/services/:id/retry", serviceAPI.Retry)
 					adminAuthGroup.DELETE("/services/:id", serviceAPI.Delete)
 
 					// 桌面授权 - 用户

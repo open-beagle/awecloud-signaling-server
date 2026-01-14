@@ -126,7 +126,7 @@ func (s *ACLSyncService) generateACLPolicy() (*ACLPolicy, error) {
 		usedTags[tagName] = true
 	}
 
-	// 生成所有 Agent 的身份 Tag
+	// 生成所有 Agent 的身份 Tag（即使没有授权，也需要定义 tagOwners）
 	var agents []model.Agent
 	db.DB.Find(&agents)
 	for _, agent := range agents {
@@ -178,7 +178,7 @@ func (s *ACLSyncService) generateACLPolicy() (*ACLPolicy, error) {
 		} else {
 			// Agent 不在任何分组，使用身份 Tag
 			// 业务 4: 单个 Agent 端口给 Desktop 组 - dst: tag:agent-{agent.name}:{port}
-			port := extractPort(perm.Service.ListenAddr)
+			port := extractPort(perm.Service.SourceAddr)
 			if port != "" {
 				agentTag := fmt.Sprintf("tag:agent-%s", perm.Service.Agent.Name)
 				usedTags[agentTag] = true
@@ -237,7 +237,7 @@ func (s *ACLSyncService) generateACLPolicy() (*ACLPolicy, error) {
 			}
 		} else {
 			// 目标 Agent 不在任何分组，使用身份 Tag
-			port := extractPort(perm.Service.ListenAddr)
+			port := extractPort(perm.Service.SourceAddr)
 			if port != "" {
 				agentTag := fmt.Sprintf("tag:agent-%s", perm.Service.Agent.Name)
 				usedTags[agentTag] = true

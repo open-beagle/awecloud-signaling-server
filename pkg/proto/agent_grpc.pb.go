@@ -19,10 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentService_Register_FullMethodName          = "/awecloud.signaling.AgentService/Register"
-	AgentService_Authenticate_FullMethodName      = "/awecloud.signaling.AgentService/Authenticate"
-	AgentService_Heartbeat_FullMethodName         = "/awecloud.signaling.AgentService/Heartbeat"
-	AgentService_GetRealtimeStatus_FullMethodName = "/awecloud.signaling.AgentService/GetRealtimeStatus"
+	AgentService_Register_FullMethodName            = "/awecloud.signaling.AgentService/Register"
+	AgentService_Authenticate_FullMethodName        = "/awecloud.signaling.AgentService/Authenticate"
+	AgentService_Heartbeat_FullMethodName           = "/awecloud.signaling.AgentService/Heartbeat"
+	AgentService_GetRealtimeStatus_FullMethodName   = "/awecloud.signaling.AgentService/GetRealtimeStatus"
+	AgentService_ReportProxyStatus_FullMethodName   = "/awecloud.signaling.AgentService/ReportProxyStatus"
+	AgentService_ReportVisitorStatus_FullMethodName = "/awecloud.signaling.AgentService/ReportVisitorStatus"
+	AgentService_ReportNetworkChange_FullMethodName = "/awecloud.signaling.AgentService/ReportNetworkChange"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -39,6 +42,12 @@ type AgentServiceClient interface {
 	Heartbeat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[AgentHeartbeatRequest, AgentHeartbeatResponse], error)
 	// 获取实时状态 - Server 主动调用（用于 Web 详情页刷新）
 	GetRealtimeStatus(ctx context.Context, in *GetRealtimeStatusRequest, opts ...grpc.CallOption) (*GetRealtimeStatusResponse, error)
+	// 上报本地服务状态
+	ReportProxyStatus(ctx context.Context, in *ReportProxyStatusRequest, opts ...grpc.CallOption) (*ReportProxyStatusResponse, error)
+	// 上报远程服务状态
+	ReportVisitorStatus(ctx context.Context, in *ReportVisitorStatusRequest, opts ...grpc.CallOption) (*ReportVisitorStatusResponse, error)
+	// 上报网络变化
+	ReportNetworkChange(ctx context.Context, in *ReportNetworkChangeRequest, opts ...grpc.CallOption) (*ReportNetworkChangeResponse, error)
 }
 
 type agentServiceClient struct {
@@ -92,6 +101,36 @@ func (c *agentServiceClient) GetRealtimeStatus(ctx context.Context, in *GetRealt
 	return out, nil
 }
 
+func (c *agentServiceClient) ReportProxyStatus(ctx context.Context, in *ReportProxyStatusRequest, opts ...grpc.CallOption) (*ReportProxyStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportProxyStatusResponse)
+	err := c.cc.Invoke(ctx, AgentService_ReportProxyStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentServiceClient) ReportVisitorStatus(ctx context.Context, in *ReportVisitorStatusRequest, opts ...grpc.CallOption) (*ReportVisitorStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportVisitorStatusResponse)
+	err := c.cc.Invoke(ctx, AgentService_ReportVisitorStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentServiceClient) ReportNetworkChange(ctx context.Context, in *ReportNetworkChangeRequest, opts ...grpc.CallOption) (*ReportNetworkChangeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportNetworkChangeResponse)
+	err := c.cc.Invoke(ctx, AgentService_ReportNetworkChange_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -106,6 +145,12 @@ type AgentServiceServer interface {
 	Heartbeat(grpc.BidiStreamingServer[AgentHeartbeatRequest, AgentHeartbeatResponse]) error
 	// 获取实时状态 - Server 主动调用（用于 Web 详情页刷新）
 	GetRealtimeStatus(context.Context, *GetRealtimeStatusRequest) (*GetRealtimeStatusResponse, error)
+	// 上报本地服务状态
+	ReportProxyStatus(context.Context, *ReportProxyStatusRequest) (*ReportProxyStatusResponse, error)
+	// 上报远程服务状态
+	ReportVisitorStatus(context.Context, *ReportVisitorStatusRequest) (*ReportVisitorStatusResponse, error)
+	// 上报网络变化
+	ReportNetworkChange(context.Context, *ReportNetworkChangeRequest) (*ReportNetworkChangeResponse, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -127,6 +172,15 @@ func (UnimplementedAgentServiceServer) Heartbeat(grpc.BidiStreamingServer[AgentH
 }
 func (UnimplementedAgentServiceServer) GetRealtimeStatus(context.Context, *GetRealtimeStatusRequest) (*GetRealtimeStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetRealtimeStatus not implemented")
+}
+func (UnimplementedAgentServiceServer) ReportProxyStatus(context.Context, *ReportProxyStatusRequest) (*ReportProxyStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportProxyStatus not implemented")
+}
+func (UnimplementedAgentServiceServer) ReportVisitorStatus(context.Context, *ReportVisitorStatusRequest) (*ReportVisitorStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportVisitorStatus not implemented")
+}
+func (UnimplementedAgentServiceServer) ReportNetworkChange(context.Context, *ReportNetworkChangeRequest) (*ReportNetworkChangeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportNetworkChange not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -210,6 +264,60 @@ func _AgentService_GetRealtimeStatus_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_ReportProxyStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportProxyStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).ReportProxyStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_ReportProxyStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).ReportProxyStatus(ctx, req.(*ReportProxyStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentService_ReportVisitorStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportVisitorStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).ReportVisitorStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_ReportVisitorStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).ReportVisitorStatus(ctx, req.(*ReportVisitorStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentService_ReportNetworkChange_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportNetworkChangeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).ReportNetworkChange(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_ReportNetworkChange_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).ReportNetworkChange(ctx, req.(*ReportNetworkChangeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -228,6 +336,18 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetRealtimeStatus",
 			Handler:    _AgentService_GetRealtimeStatus_Handler,
+		},
+		{
+			MethodName: "ReportProxyStatus",
+			Handler:    _AgentService_ReportProxyStatus_Handler,
+		},
+		{
+			MethodName: "ReportVisitorStatus",
+			Handler:    _AgentService_ReportVisitorStatus_Handler,
+		},
+		{
+			MethodName: "ReportNetworkChange",
+			Handler:    _AgentService_ReportNetworkChange_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

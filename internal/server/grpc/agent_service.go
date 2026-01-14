@@ -392,8 +392,8 @@ func (s *AgentServiceServer) sendHeartbeatResponse(stream pb.AgentService_Heartb
 				resp.Services = append(resp.Services, &pb.ServiceConfig{
 					Id:         svc.ID,
 					Name:       svc.Name,
+					SourceAddr: svc.SourceAddr,
 					TargetAddr: svc.TargetAddr,
-					ListenAddr: svc.ListenAddr,
 					Enabled:    svc.Enabled,
 				})
 			}
@@ -401,16 +401,21 @@ func (s *AgentServiceServer) sendHeartbeatResponse(stream pb.AgentService_Heartb
 
 		// 查询端口访问配置
 		var forwards []model.PortForward
-		if err := db.DB.Where("agent_id = ?", agentID).Find(&forwards).Error; err != nil {
+		if err := db.DB.Preload("TargetService").Where("agent_id = ?", agentID).Find(&forwards).Error; err != nil {
 			logger.Errorf("查询端口访问配置失败: %v", err)
 		} else {
 			for _, fwd := range forwards {
+				serviceName := ""
+				if fwd.TargetService != nil {
+					serviceName = fwd.TargetService.Name
+				}
 				resp.Forwards = append(resp.Forwards, &pb.ForwardConfig{
-					Id:         fwd.ID,
-					Name:       fwd.Name,
-					TargetAddr: fwd.TargetAddr,
-					ListenAddr: fwd.ListenAddr,
-					Enabled:    fwd.Enabled,
+					Id:          fwd.ID,
+					ServiceId:   fwd.TargetServiceID,
+					ServiceName: serviceName,
+					SourceAddr:  fwd.SourceAddr,
+					TargetAddr:  fwd.TargetAddr,
+					Enabled:     fwd.Enabled,
 				})
 			}
 		}
@@ -468,6 +473,7 @@ func (s *AgentServiceServer) GetRealtimeStatus(ctx context.Context, req *pb.GetR
 // createAgentAuthKey 为 Agent 创建 Tailscale 预认证密钥
 func (s *AgentServiceServer) createAgentAuthKey(ctx context.Context, agentName string, agentID uint64) (string, string, error) {
 	// 为每个 Agent 创建独立的 Headscale User
+	// User 命名规则: agent-{agent_name}，参见 docs/design_headscale_integration.md
 	userName := fmt.Sprintf("agent-%s", agentName)
 
 	// 获取或创建 User
@@ -481,8 +487,23 @@ func (s *AgentServiceServer) createAgentAuthKey(ctx context.Context, agentName s
 		logger.Warnf("更新 Agent Headscale User ID 失败: %v", err)
 	}
 
-	// 创建预认证密钥（24 小时有效，非临时节点）
-	authKey, err := s.headscaleClient.CreatePreAuthKey(ctx, user.Id, 24*time.Hour, false)
+	// 构建 Tags 列表
+	// 身份 Tag: tag:agent-{agent.name}，参见 docs/design_headscale_integration.md 第 10 节
+	tags := []string{fmt.Sprintf("tag:agent-%s", agentName)}
+
+	// 查询 Agent 所属的分组，添加分组 Tag
+	var groupMembers []model.AgentGroupMember
+	if err := db.DB.Preload("Group").Where("agent_id = ?", agentID).Find(&groupMembers).Error; err == nil {
+		for _, gm := range groupMembers {
+			if gm.Group != nil {
+				// 分组 Tag: tag:agent-group-{group.name}
+				tags = append(tags, fmt.Sprintf("tag:agent-group-%s", gm.Group.Name))
+			}
+		}
+	}
+
+	// 创建预认证密钥（24 小时有效，非临时节点，带 Tags）
+	authKey, err := s.headscaleClient.CreatePreAuthKeyWithTags(ctx, user.Id, 24*time.Hour, false, tags)
 	if err != nil {
 		return "", "", fmt.Errorf("创建预认证密钥失败: %w", err)
 	}
@@ -535,4 +556,100 @@ func detectRuntime(info model.SystemInfoData) string {
 	}
 	// 默认返回 physical
 	return "physical"
+}
+
+// ReportProxyStatus 上报本地服务状态
+func (s *AgentServiceServer) ReportProxyStatus(ctx context.Context, req *pb.ReportProxyStatusRequest) (*pb.ReportProxyStatusResponse, error) {
+	logger.Infof("Agent %d 上报本地服务状态，共 %d 个服务", req.AgentId, len(req.Statuses))
+
+	// 验证 Agent 是否在线
+	if !s.IsAgentOnline(req.AgentId) {
+		return &pb.ReportProxyStatusResponse{
+			Success: false,
+			Message: "Agent 不在线",
+		}, nil
+	}
+
+	// 更新内存缓存中的服务状态
+	for _, status := range req.Statuses {
+		cache.UpdateProxyServiceStatus(status.ServiceId, status.Status, status.ErrorCode, status.ErrorMsg)
+	}
+
+	return &pb.ReportProxyStatusResponse{
+		Success: true,
+		Message: "状态已更新",
+	}, nil
+}
+
+// ReportVisitorStatus 上报远程服务状态
+func (s *AgentServiceServer) ReportVisitorStatus(ctx context.Context, req *pb.ReportVisitorStatusRequest) (*pb.ReportVisitorStatusResponse, error) {
+	logger.Infof("Agent %d 上报远程服务状态，共 %d 个服务", req.AgentId, len(req.Statuses))
+
+	// 验证 Agent 是否在线
+	if !s.IsAgentOnline(req.AgentId) {
+		return &pb.ReportVisitorStatusResponse{
+			Success: false,
+			Message: "Agent 不在线",
+		}, nil
+	}
+
+	// 更新内存缓存中的远程服务状态
+	for _, status := range req.Statuses {
+		cache.UpdatePortForwardStatus(status.ForwardId, status.Status, status.ErrorCode, status.ErrorMsg)
+
+		// 如果 IP 变化，更新数据库中的 source_addr
+		if status.IpChanged && status.ActualAddr != "" {
+			if err := db.DB.Model(&model.PortForward{}).
+				Where("id = ? AND agent_id = ?", status.ForwardId, req.AgentId).
+				Update("source_addr", status.ActualAddr).Error; err != nil {
+				logger.Warnf("更新远程服务源地址失败: forward_id=%s, error=%v", status.ForwardId, err)
+			}
+			logger.Infof("远程服务 IP 变化: forward_id=%s, configured=%s, actual=%s, reason=%s",
+				status.ForwardId, status.ConfiguredAddr, status.ActualAddr, status.ChangeReason)
+		}
+	}
+
+	return &pb.ReportVisitorStatusResponse{
+		Success: true,
+		Message: "状态已更新",
+	}, nil
+}
+
+// ReportNetworkChange 上报网络变化
+func (s *AgentServiceServer) ReportNetworkChange(ctx context.Context, req *pb.ReportNetworkChangeRequest) (*pb.ReportNetworkChangeResponse, error) {
+	logger.Infof("Agent %d 上报网络变化，共 %d 个网络接口", req.AgentId, len(req.Networks))
+
+	// 验证 Agent 是否在线
+	if !s.IsAgentOnline(req.AgentId) {
+		return &pb.ReportNetworkChangeResponse{
+			Success: false,
+			Message: "Agent 不在线",
+		}, nil
+	}
+
+	// 转换网络接口信息
+	networks := make([]cache.NetworkInterface, len(req.Networks))
+	for i, n := range req.Networks {
+		networks[i] = cache.NetworkInterface{
+			Name:    n.Name,
+			IP:      n.Ip,
+			Mask:    n.Mask,
+			Gateway: n.Gateway,
+		}
+	}
+
+	// 更新缓存中的网络信息
+	tsStatus := cache.GetAgentTsStatus(int64(req.AgentId))
+	if tsStatus != nil {
+		tsStatus.Networks = networks
+		// 注意：这里直接修改了指针指向的对象，不需要 SetAgentTsStatus
+	} else {
+		// 如果缓存不存在，创建新的
+		cache.UpdateAgentNetworkInfo(int64(req.AgentId), "", "", networks)
+	}
+
+	return &pb.ReportNetworkChangeResponse{
+		Success: true,
+		Message: "网络信息已更新",
+	}, nil
 }

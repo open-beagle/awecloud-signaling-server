@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -222,7 +223,7 @@ type AuthorizedServiceItem struct {
 	ID         string    `json:"id"`
 	Name       string    `json:"name"`
 	AgentName  string    `json:"agent_name"`
-	ListenAddr string    `json:"listen_addr"`
+	SourceAddr string    `json:"source_addr"`
 	AuthType   string    `json:"auth_type"`
 	GrantedAt  time.Time `json:"granted_at"`
 }
@@ -250,7 +251,7 @@ func (a *ClientAPI) GetServices(c *gin.Context) {
 	for _, p := range directPerms {
 		if p.Service != nil {
 			item := AuthorizedServiceItem{
-				ID: p.Service.ID, Name: p.Service.Name, ListenAddr: p.Service.ListenAddr,
+				ID: p.Service.ID, Name: p.Service.Name, SourceAddr: p.Service.SourceAddr,
 				AuthType: "单独授权", GrantedAt: p.GrantedAt,
 			}
 			if p.Service.Agent != nil {
@@ -263,7 +264,7 @@ func (a *ClientAPI) GetServices(c *gin.Context) {
 		if p.Service != nil {
 			if _, exists := serviceMap[p.Service.ID]; !exists {
 				item := AuthorizedServiceItem{
-					ID: p.Service.ID, Name: p.Service.Name, ListenAddr: p.Service.ListenAddr,
+					ID: p.Service.ID, Name: p.Service.Name, SourceAddr: p.Service.SourceAddr,
 					AuthType: "分组授权", GrantedAt: p.GrantedAt,
 				}
 				if p.Service.Agent != nil {
@@ -325,7 +326,9 @@ func (a *ClientAPI) Create(c *gin.Context) {
 	if a.hsClient != nil {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 		defer cancel()
-		user, err := a.hsClient.CreateUser(ctx, req.Name)
+		// User 命名规则: desktop-{client_name}，参见 docs/design_headscale_integration.md
+		userName := fmt.Sprintf("desktop-%s", req.Name)
+		user, err := a.hsClient.CreateUser(ctx, userName)
 		if err != nil {
 			logger.Warnf("Headscale 创建用户失败: %v", err)
 		} else {

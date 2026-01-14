@@ -867,15 +867,19 @@ func (a *TunnelAPI) GetTunnelACL(c *gin.Context) {
 	}
 
 	// 获取最后同步时间（从系统配置）
-	var lastSyncedAt time.Time
+	// 注意：这里返回字符串而不是 time.Time，避免零值时间显示问题
+	var lastSyncedAt string
 	var config model.SystemConfig
-	if err := db.DB.Where("key = ?", "acl_last_synced_at").First(&config).Error; err == nil {
-		lastSyncedAt, _ = time.Parse(time.RFC3339, config.Value)
+	if err := db.DB.Where("key = ?", "acl_last_synced_at").First(&config).Error; err == nil && config.Value != "" {
+		// 验证时间格式有效
+		if t, err := time.Parse(time.RFC3339, config.Value); err == nil && !t.IsZero() {
+			lastSyncedAt = config.Value
+		}
 	}
 
-	c.JSON(http.StatusOK, NewSuccessResponse(ACLPolicyResponse{
-		Policy:       policy,
-		LastSyncedAt: lastSyncedAt,
+	c.JSON(http.StatusOK, NewSuccessResponse(gin.H{
+		"policy":         policy,
+		"last_synced_at": lastSyncedAt,
 	}))
 }
 

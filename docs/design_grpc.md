@@ -307,19 +307,23 @@ SystemInfo 消息：
 
 ServiceStatus 消息：
 
-| 字段       | 类型   | 说明             |
-| ---------- | ------ | ---------------- |
-| service_id | string | 服务 ID          |
-| running    | bool   | 是否运行中       |
-| error      | string | 错误信息（如有） |
+| 字段       | 类型   | 说明                                     |
+| ---------- | ------ | ---------------------------------------- |
+| service_id | string | 服务 ID                                  |
+| status     | string | 运行状态：running/disabled/error/pending |
+| error_code | string | 错误码（如有）                           |
+| error_msg  | string | 错误信息（如有）                         |
 
 ForwardStatus 消息：
 
-| 字段       | 类型   | 说明             |
-| ---------- | ------ | ---------------- |
-| forward_id | string | 端口访问 ID      |
-| running    | bool   | 是否运行中       |
-| error      | string | 错误信息（如有） |
+| 字段            | 类型   | 说明                                     |
+| --------------- | ------ | ---------------------------------------- |
+| forward_id      | string | 端口访问 ID                              |
+| status          | string | 运行状态：running/disabled/error/pending |
+| configured_addr | string | 配置的源地址                             |
+| actual_addr     | string | 实际使用的源地址（IP 变化时不同）        |
+| error_code      | string | 错误码（如有）                           |
+| error_msg       | string | 错误信息（如有）                         |
 
 #### 响应消息 HeartbeatResponse
 
@@ -331,23 +335,24 @@ ForwardStatus 消息：
 
 ServiceConfig 消息：
 
-| 字段        | 类型   | 说明                           |
-| ----------- | ------ | ------------------------------ |
-| id          | string | 服务 ID                        |
-| name        | string | 服务名称                       |
-| target_addr | string | 目标地址（如 192.168.1.10:80） |
-| listen_addr | string | 监听地址（如 :80）             |
-| enabled     | bool   | 是否启用                       |
+| 字段        | 类型   | 说明                                    |
+| ----------- | ------ | --------------------------------------- |
+| id          | string | 服务 ID                                 |
+| name        | string | 服务名称                                |
+| source_addr | string | 源地址（VPN IP:端口，如 100.64.0.1:80） |
+| target_addr | string | 目标地址（如 192.168.1.10:80）          |
+| enabled     | bool   | 是否启用                                |
 
 ForwardConfig 消息：
 
-| 字段        | 类型   | 说明                           |
-| ----------- | ------ | ------------------------------ |
-| id          | string | 端口访问 ID                    |
-| name        | string | 名称                           |
-| target_addr | string | 目标地址（如 100.64.0.1:3306） |
-| listen_addr | string | 本地监听地址（如 :13306）      |
-| enabled     | bool   | 是否启用                       |
+| 字段         | 类型   | 说明                                             |
+| ------------ | ------ | ------------------------------------------------ |
+| id           | string | 端口访问 ID                                      |
+| service_id   | string | 关联的远程服务 ID                                |
+| service_name | string | 关联的远程服务名称（agent/service 格式）         |
+| source_addr  | string | 源地址（局域网 IP:端口，如 192.168.1.100:13306） |
+| target_addr  | string | 目标地址（VPN 地址，如 100.64.0.1:3306）         |
+| enabled      | bool   | 是否启用                                         |
 
 ### 3.5 GetRealtimeStatus - 获取实时状态
 
@@ -675,7 +680,121 @@ AuthorizedService 消息：
 
 ---
 
-## 5. 相关文档
+## 5. 服务状态上报接口
+
+### 5.1 服务概览
+
+Agent 需要主动上报本地服务和远程服务的状态变化，包括启动成功、启动失败、IP 变化等。
+
+```protobuf
+service AgentService {
+  // ... 现有方法 ...
+
+  // 上报本地服务状态
+  rpc ReportProxyStatus(ReportProxyStatusRequest) returns (ReportProxyStatusResponse);
+
+  // 上报远程服务状态
+  rpc ReportVisitorStatus(ReportVisitorStatusRequest) returns (ReportVisitorStatusResponse);
+
+  // 上报网络变化（局域网 IP 变化）
+  rpc ReportNetworkChange(ReportNetworkChangeRequest) returns (ReportNetworkChangeResponse);
+}
+```
+
+### 5.2 ReportProxyStatus - 上报本地服务状态
+
+> 需求来源：`design_tailscale_agent_services.md` 本地服务生命周期
+
+#### 请求消息 ReportProxyStatusRequest
+
+| 字段        | 类型          | 必填 | 说明             |
+| ----------- | ------------- | ---- | ---------------- |
+| agent_id    | uint64        | 是   | Agent ID         |
+| agent_token | string        | 是   | Agent 认证令牌   |
+| statuses    | ProxyStatus[] | 是   | 本地服务状态列表 |
+
+ProxyStatus 消息：
+
+| 字段       | 类型   | 说明                                     |
+| ---------- | ------ | ---------------------------------------- |
+| service_id | string | 服务 ID                                  |
+| status     | string | 运行状态：running/disabled/error/pending |
+| error_code | string | 错误码（如有）                           |
+| error_msg  | string | 错误信息（如有）                         |
+
+#### 响应消息 ReportProxyStatusResponse
+
+| 字段    | 类型   | 说明     |
+| ------- | ------ | -------- |
+| success | bool   | 是否成功 |
+| message | string | 响应消息 |
+
+### 5.3 ReportVisitorStatus - 上报远程服务状态
+
+> 需求来源：`design_tailscale_agent_services.md` 远程服务生命周期、IP 变化处理
+
+#### 请求消息 ReportVisitorStatusRequest
+
+| 字段        | 类型            | 必填 | 说明             |
+| ----------- | --------------- | ---- | ---------------- |
+| agent_id    | uint64          | 是   | Agent ID         |
+| agent_token | string          | 是   | Agent 认证令牌   |
+| statuses    | VisitorStatus[] | 是   | 远程服务状态列表 |
+
+VisitorStatus 消息：
+
+| 字段            | 类型   | 说明                                     |
+| --------------- | ------ | ---------------------------------------- |
+| forward_id      | string | 端口转发 ID                              |
+| status          | string | 运行状态：running/disabled/error/pending |
+| configured_addr | string | 配置的源地址                             |
+| actual_addr     | string | 实际使用的源地址（IP 变化时不同）        |
+| ip_changed      | bool   | IP 是否发生变化                          |
+| change_reason   | string | 变化原因：DHCP_IP_CHANGE 等              |
+| error_code      | string | 错误码（如有）                           |
+| error_msg       | string | 错误信息（如有）                         |
+
+#### 响应消息 ReportVisitorStatusResponse
+
+| 字段    | 类型   | 说明     |
+| ------- | ------ | -------- |
+| success | bool   | 是否成功 |
+| message | string | 响应消息 |
+
+### 5.4 ReportNetworkChange - 上报网络变化
+
+> 需求来源：`design_tailscale_agent_services.md` 局域网 IP 变化处理
+
+#### 请求消息 ReportNetworkChangeRequest
+
+| 字段        | 类型   | 必填 | 说明           |
+| ----------- | ------ | ---- | -------------- |
+| agent_id    | uint64 | 是   | Agent ID       |
+| agent_token | string | 是   | Agent 认证令牌 |
+| old_lan_ip  | string | 是   | 旧的局域网 IP  |
+| new_lan_ip  | string | 是   | 新的局域网 IP  |
+
+#### 响应消息 ReportNetworkChangeResponse
+
+| 字段    | 类型   | 说明     |
+| ------- | ------ | -------- |
+| success | bool   | 是否成功 |
+| message | string | 响应消息 |
+
+### 5.5 错误码定义
+
+| 错误码                 | 说明                    |
+| ---------------------- | ----------------------- |
+| PORT_IN_USE            | 端口被占用              |
+| NETWORK_INTERFACE_LOST | 配置的网段未找到可用 IP |
+| TARGET_UNREACHABLE     | 目标服务不可达          |
+| ACL_DENIED             | 权限不足                |
+| VPN_NOT_READY          | VPN 未就绪              |
+| TIMEOUT                | 连接超时                |
+
+---
+
+## 6. 相关文档
 
 - [Headscale 集成设计](design_headscale_integration.md) - 对象映射、认证流程、ACL 同步
 - [Headscale 客户端设计](design_headscale_client.md) - Server 连接 Headscale 的客户端实现

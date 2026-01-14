@@ -211,11 +211,18 @@ func (c *Client) DeleteUser(ctx context.Context, name string) error {
 
 // CreatePreAuthKey 创建预认证密钥
 func (c *Client) CreatePreAuthKey(ctx context.Context, userID uint64, expiry time.Duration, ephemeral bool) (*v1.PreAuthKey, error) {
+	return c.CreatePreAuthKeyWithTags(ctx, userID, expiry, ephemeral, nil)
+}
+
+// CreatePreAuthKeyWithTags 创建带 Tags 的预认证密钥
+// tags 格式: ["tag:agent-xxx", "tag:agent-group-yyy"]
+func (c *Client) CreatePreAuthKeyWithTags(ctx context.Context, userID uint64, expiry time.Duration, ephemeral bool, tags []string) (*v1.PreAuthKey, error) {
 	resp, err := c.client.CreatePreAuthKey(ctx, &v1.CreatePreAuthKeyRequest{
 		User:       userID,
 		Reusable:   false,
 		Ephemeral:  ephemeral,
 		Expiration: timestamppb.New(time.Now().Add(expiry)),
+		AclTags:    tags,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("创建预认证密钥失败: %w", err)

@@ -333,7 +333,7 @@ const handleDelete = async (row: ProxyService) => {
   try {
     // 如果服务正在运行，提示会先停止
     let confirmMessage = t('service.deleteConfirm')
-    if (row.status === 'running') {
+    if (row.display_status === 'running') {
       confirmMessage = t('service.deleteRunningConfirm')
     }
     

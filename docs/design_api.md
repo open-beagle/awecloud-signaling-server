@@ -350,9 +350,11 @@ NetworkInterface 模型：
 | id          | uint64 | 服务 ID  | proxy_service.id          |
 | name        | string | 服务名称 | proxy_service.name        |
 | alias       | string | 服务别名 | proxy_service.alias       |
+| source_addr | string | 源地址   | proxy_service.source_addr |
 | target_addr | string | 目标地址 | proxy_service.target_addr |
-| listen_addr | string | 监听地址 | proxy_service.listen_addr |
 | enabled     | bool   | 是否启用 | proxy_service.enabled     |
+| status      | string | 运行状态 | proxy_service.status      |
+| error_msg   | string | 错误信息 | proxy_service.error_msg   |
 
 #### 5.2.4 获取端口访问列表
 
@@ -365,16 +367,17 @@ NetworkInterface 模型：
 
 响应模型 PortForwardItem[]：
 
-| 字段              | 类型   | 说明       | 数据来源                      |
-| ----------------- | ------ | ---------- | ----------------------------- |
-| id                | uint64 | 转发 ID    | port_forward.id               |
-| name              | string | 名称       | port_forward.name             |
-| alias             | string | 别名       | port_forward.alias            |
-| target_agent_name | string | 目标 Agent | agent.name (关联查询)         |
-| target_service    | string | 目标服务   | proxy_service.name (关联查询) |
-| target_addr       | string | 目标地址   | port_forward.target_addr      |
-| listen_addr       | string | 监听地址   | port_forward.listen_addr      |
-| enabled           | bool   | 是否启用   | port_forward.enabled          |
+| 字段              | 类型   | 说明       | 数据来源                       |
+| ----------------- | ------ | ---------- | ------------------------------ |
+| id                | uint64 | 转发 ID    | port_forward.id                |
+| name              | string | 名称       | proxy_service.name (关联查询)  |
+| alias             | string | 别名       | proxy_service.alias (关联查询) |
+| target_agent_name | string | 目标 Agent | agent.name (关联查询)          |
+| source_addr       | string | 源地址     | port_forward.source_addr       |
+| target_addr       | string | 目标地址   | port_forward.target_addr       |
+| enabled           | bool   | 是否启用   | port_forward.enabled           |
+| status            | string | 运行状态   | port_forward.status            |
+| error_msg         | string | 错误信息   | port_forward.error_msg         |
 
 ### 5.3 创建 Agent
 
@@ -780,9 +783,10 @@ NetworkInterface 模型：
 | name         | string | 服务名称   | proxy_service.name                                        |
 | agent_id     | uint64 | Agent ID   | proxy_service.agent_id                                    |
 | agent_name   | string | 所属 Agent | agent.name                                                |
+| source_addr  | string | 源地址     | proxy_service.source_addr                                 |
 | target_addr  | string | 目标地址   | proxy_service.target_addr                                 |
-| listen_addr  | string | 监听地址   | proxy_service.listen_addr                                 |
 | enabled      | bool   | 是否启用   | proxy_service.enabled                                     |
+| status       | string | 运行状态   | proxy_service.status                                      |
 | client_count | int    | 授权用户数 | COUNT(service_client_permission)                          |
 | group_count  | int    | 授权分组数 | COUNT(service_group_permission WHERE group_type='client') |
 
@@ -804,9 +808,11 @@ NetworkInterface 模型：
 | alias       | string | 服务别名   | proxy_service.alias       |
 | agent_id    | uint64 | Agent ID   | proxy_service.agent_id    |
 | agent_name  | string | 所属 Agent | agent.name                |
+| source_addr | string | 源地址     | proxy_service.source_addr |
 | target_addr | string | 目标地址   | proxy_service.target_addr |
-| listen_addr | string | 监听地址   | proxy_service.listen_addr |
 | enabled     | bool   | 是否启用   | proxy_service.enabled     |
+| status      | string | 运行状态   | proxy_service.status      |
+| error_msg   | string | 错误信息   | proxy_service.error_msg   |
 | created_at  | string | 创建时间   | proxy_service.created_at  |
 
 ### 7.3 创建服务
@@ -820,17 +826,17 @@ NetworkInterface 模型：
 
 请求字段：
 
-| 字段        | 类型   | 必填 | 说明                        |
-| ----------- | ------ | ---- | --------------------------- |
-| agent_id    | uint64 | 是   | 所属 Agent ID               |
-| name        | string | 是   | 服务名称                    |
-| alias       | string | 否   | 服务别名                    |
-| target_addr | string | 是   | 目标地址（如 127.0.0.1:22） |
-| listen_addr | string | 是   | 监听地址（如 :2222）        |
+| 字段        | 类型   | 必填 | 说明                                      |
+| ----------- | ------ | ---- | ----------------------------------------- |
+| agent_id    | uint64 | 是   | 所属 Agent ID                             |
+| name        | string | 是   | 服务名称                                  |
+| alias       | string | 否   | 服务别名                                  |
+| source_addr | string | 是   | 源地址（VPN IP:端口，如 100.64.0.1:2222） |
+| target_addr | string | 是   | 目标地址（如 127.0.0.1:22）               |
 
 ### 7.4 更新服务
 
-> 需求来源：`design_tailscale_server_web.md` 2.2 详情页 - 端口映射 [编辑] 按钮
+> 需求来源：`design_tailscale_server_web.md` 2.2 详情页 - 本地服务 [编辑] 按钮
 
 | 项目 | 内容                           |
 | ---- | ------------------------------ |
@@ -842,13 +848,68 @@ NetworkInterface 模型：
 | 字段        | 类型   | 必填 | 说明     |
 | ----------- | ------ | ---- | -------- |
 | alias       | string | 否   | 服务别名 |
+| source_addr | string | 否   | 源地址   |
 | target_addr | string | 否   | 目标地址 |
-| listen_addr | string | 否   | 监听地址 |
 | enabled     | bool   | 否   | 是否启用 |
 
-### 7.5 删除服务
+### 7.5 启用/禁用服务
 
-> 需求来源：`design_tailscale_server_web.md` 2.2 详情页 - 端口映射 [删除] 按钮
+> 需求来源：`design_tailscale_server_web.md` 2.2 详情页 - 本地服务 [启用]/[禁用] 按钮
+
+| 项目 | 内容                                  |
+| ---- | ------------------------------------- |
+| 路径 | PUT /api/v1/admin/services/:id/toggle |
+| 认证 | 需要管理员 JWT                        |
+
+请求字段：
+
+| 字段    | 类型 | 必填 | 说明     |
+| ------- | ---- | ---- | -------- |
+| enabled | bool | 是   | 是否启用 |
+
+业务流程：
+
+```txt
+┌─────────────────────────────────────────────────────────────┐
+│                  服务启用/禁用流程                           │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   管理员点击启用/禁用                                       │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 更新数据库  │                                          │
+│   │ enabled 字段│                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ▼                                                     │
+│   ┌─────────────┐                                          │
+│   │ 通过 gRPC   │                                          │
+│   │ 下发命令    │                                          │
+│   │ 给 Agent    │                                          │
+│   └─────────────┘                                          │
+│       │                                                     │
+│       ├─── 启用 ──► START_PROXY 命令                       │
+│       │                                                     │
+│       └─── 禁用 ──► STOP_PROXY 命令                        │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 7.6 重试服务
+
+> 需求来源：`design_tailscale_server_web.md` 2.2 详情页 - 本地服务 [重试] 按钮（错误状态时显示）
+
+| 项目 | 内容                                  |
+| ---- | ------------------------------------- |
+| 路径 | POST /api/v1/admin/services/:id/retry |
+| 认证 | 需要管理员 JWT                        |
+
+说明：重新尝试启动处于错误状态的服务
+
+### 7.7 删除服务
+
+> 需求来源：`design_tailscale_server_web.md` 2.2 详情页 - 本地服务 [删除] 按钮
 
 | 项目 | 内容                              |
 | ---- | --------------------------------- |

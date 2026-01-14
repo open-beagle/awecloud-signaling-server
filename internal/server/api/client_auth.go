@@ -132,7 +132,7 @@ type ServiceInfo struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	AgentName  string `json:"agent_name"`
-	ListenAddr string `json:"listen_addr"`
+	SourceAddr string `json:"source_addr"`
 }
 
 // ServicesResponse 服务列表响应
@@ -169,7 +169,7 @@ func (a *ClientAuthAPI) GetServices(c *gin.Context) {
 		info := ServiceInfo{
 			ID:         svc.ID,
 			Name:       svc.Name,
-			ListenAddr: svc.ListenAddr,
+			SourceAddr: svc.SourceAddr,
 		}
 		if svc.Agent != nil {
 			info.AgentName = svc.Agent.Name
@@ -223,7 +223,8 @@ func (a *ClientAuthAPI) GetTailscaleAuth(c *gin.Context) {
 	}
 
 	// 为每个 Client 创建独立的 Headscale User
-	userName := fmt.Sprintf("client-%d", client.ID)
+	// User 命名规则: desktop-{client.name}，参见 docs/design_headscale_integration.md
+	userName := fmt.Sprintf("desktop-%s", client.Name)
 
 	// 获取或创建 User
 	user, err := a.headscaleClient.GetOrCreateUser(c.Request.Context(), userName)
@@ -236,9 +237,24 @@ func (a *ClientAuthAPI) GetTailscaleAuth(c *gin.Context) {
 		return
 	}
 
-	// 创建预认证密钥
+	// 构建 Tags 列表
+	// 身份 Tag: tag:desktop-{client.name}，参见 docs/design_headscale_integration.md 第 10 节
+	tags := []string{fmt.Sprintf("tag:desktop-%s", client.Name)}
+
+	// 查询 Client 所属的分组，添加分组 Tag
+	var groupMembers []model.ClientGroupMember
+	if err := db.DB.Preload("Group").Where("client_id = ?", clientID).Find(&groupMembers).Error; err == nil {
+		for _, gm := range groupMembers {
+			if gm.Group != nil {
+				// 分组 Tag: tag:desktop-group-{group.name}
+				tags = append(tags, fmt.Sprintf("tag:desktop-group-%s", gm.Group.Name))
+			}
+		}
+	}
+
+	// 创建预认证密钥（带 Tags）
 	authKeyExpiry := 24 * time.Hour
-	authKey, err := a.headscaleClient.CreatePreAuthKey(c.Request.Context(), user.Id, authKeyExpiry, true)
+	authKey, err := a.headscaleClient.CreatePreAuthKeyWithTags(c.Request.Context(), user.Id, authKeyExpiry, true, tags)
 	if err != nil {
 		logger.Errorf("创建 Tailscale 预认证密钥失败: %v", err)
 		c.JSON(http.StatusInternalServerError, TailscaleAuthResponse{
@@ -317,7 +333,7 @@ func (a *ClientAuthAPI) GetServicesV2(c *gin.Context) {
 		Name       string `json:"name"`
 		AgentName  string `json:"agent_name"`
 		AgentIP    string `json:"agent_ip"`
-		ListenAddr string `json:"listen_addr"`
+		SourceAddr string `json:"source_addr"`
 		TargetAddr string `json:"target_addr"`
 	}
 
@@ -326,7 +342,7 @@ func (a *ClientAuthAPI) GetServicesV2(c *gin.Context) {
 		info := ServiceV2Info{
 			ID:         svc.ID,
 			Name:       svc.Name,
-			ListenAddr: svc.ListenAddr,
+			SourceAddr: svc.SourceAddr,
 			TargetAddr: svc.TargetAddr,
 		}
 		if svc.Agent != nil {

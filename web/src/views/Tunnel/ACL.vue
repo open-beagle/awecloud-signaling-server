@@ -107,8 +107,13 @@ const aclRules = ref<ACLRule[]>([])
 const tagOwners = ref<TagOwner[]>([])
 
 const formatDate = (dateStr: string) => {
-  if (!dateStr) return '-'
-  return new Date(dateStr).toLocaleString('zh-CN')
+  if (!dateStr) return '从未同步'
+  const date = new Date(dateStr)
+  // 检查是否为有效日期且不是零值
+  if (isNaN(date.getTime()) || date.getFullYear() < 2000) {
+    return '从未同步'
+  }
+  return date.toLocaleString('zh-CN')
 }
 
 const loadACL = async () => {

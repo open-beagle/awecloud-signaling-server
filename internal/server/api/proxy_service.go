@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/cache"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
@@ -47,9 +48,11 @@ type ServiceListItem struct {
 	Name            string `json:"name"`
 	AgentID         uint64 `json:"agent_id"`
 	AgentName       string `json:"agent_name"`
+	SourceAddr      string `json:"source_addr"`
 	TargetAddr      string `json:"target_addr"`
-	ListenAddr      string `json:"listen_addr"`
 	Enabled         bool   `json:"enabled"`
+	DisplayStatus   string `json:"display_status"` // 合并后的显示状态
+	ErrorMsg        string `json:"error_msg,omitempty"`
 	ClientCount     int64  `json:"client_count"`
 	GroupCount      int64  `json:"group_count"`
 	AgentCount      int64  `json:"agent_count"`
@@ -143,22 +146,25 @@ func (a *ProxyServiceAPI) List(c *gin.Context) {
 
 	result := make([]ServiceListItem, len(services))
 	for i, svc := range services {
-		// 构建完整的监听地址（Agent IP + 端口）
-		listenAddr := svc.ListenAddr
-		if svc.Agent != nil && svc.Agent.IP != "" && listenAddr != "" {
-			// 如果 ListenAddr 是 :port 格式，添加 Agent IP
-			if len(listenAddr) > 0 && listenAddr[0] == ':' {
-				listenAddr = svc.Agent.IP + listenAddr
-			}
+		// 计算 Agent 在线状态
+		agentOnline := false
+		if svc.Agent != nil && svc.Agent.LastHeartbeat != nil {
+			agentOnline = time.Since(*svc.Agent.LastHeartbeat) < 60*time.Second
 		}
+
+		// 获取运行时状态并计算显示状态
+		runtimeStatus := cache.GetProxyServiceStatus(svc.ID)
+		displayStatus, errorMsg := cache.GetDisplayStatus(svc.Enabled, agentOnline, runtimeStatus)
 
 		item := ServiceListItem{
 			ID:              svc.ID,
 			Name:            svc.Name,
 			AgentID:         svc.AgentID,
+			SourceAddr:      svc.SourceAddr,
 			TargetAddr:      svc.TargetAddr,
-			ListenAddr:      listenAddr,
 			Enabled:         svc.Enabled,
+			DisplayStatus:   displayStatus,
+			ErrorMsg:        errorMsg,
 			ClientCount:     clientCountMap[svc.ID],
 			GroupCount:      groupCountMap[svc.ID],
 			AgentCount:      agentCountMap[svc.ID],
@@ -175,15 +181,17 @@ func (a *ProxyServiceAPI) List(c *gin.Context) {
 
 // ServiceDetail 服务详情
 type ServiceDetail struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Alias      string    `json:"alias"`
-	AgentID    uint64    `json:"agent_id"`
-	AgentName  string    `json:"agent_name"`
-	TargetAddr string    `json:"target_addr"`
-	ListenAddr string    `json:"listen_addr"`
-	Enabled    bool      `json:"enabled"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Alias         string    `json:"alias"`
+	AgentID       uint64    `json:"agent_id"`
+	AgentName     string    `json:"agent_name"`
+	SourceAddr    string    `json:"source_addr"`
+	TargetAddr    string    `json:"target_addr"`
+	Enabled       bool      `json:"enabled"`
+	DisplayStatus string    `json:"display_status"` // 合并后的显示状态
+	ErrorMsg      string    `json:"error_msg,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // Get 获取服务详情
@@ -196,15 +204,27 @@ func (a *ProxyServiceAPI) Get(c *gin.Context) {
 		return
 	}
 
+	// 计算 Agent 在线状态
+	agentOnline := false
+	if service.Agent != nil && service.Agent.LastHeartbeat != nil {
+		agentOnline = time.Since(*service.Agent.LastHeartbeat) < 60*time.Second
+	}
+
+	// 获取运行时状态并计算显示状态
+	runtimeStatus := cache.GetProxyServiceStatus(service.ID)
+	displayStatus, errorMsg := cache.GetDisplayStatus(service.Enabled, agentOnline, runtimeStatus)
+
 	result := ServiceDetail{
-		ID:         service.ID,
-		Name:       service.Name,
-		Alias:      service.Alias,
-		AgentID:    service.AgentID,
-		TargetAddr: service.TargetAddr,
-		ListenAddr: service.ListenAddr,
-		Enabled:    service.Enabled,
-		CreatedAt:  service.CreatedAt,
+		ID:            service.ID,
+		Name:          service.Name,
+		Alias:         service.Alias,
+		AgentID:       service.AgentID,
+		SourceAddr:    service.SourceAddr,
+		TargetAddr:    service.TargetAddr,
+		Enabled:       service.Enabled,
+		DisplayStatus: displayStatus,
+		ErrorMsg:      errorMsg,
+		CreatedAt:     service.CreatedAt,
 	}
 	if service.Agent != nil {
 		result.AgentName = service.Agent.Name
@@ -218,8 +238,8 @@ type CreateServiceRequest struct {
 	AgentID    uint64 `json:"agent_id" binding:"required"`
 	Name       string `json:"name" binding:"required"`
 	Alias      string `json:"alias"`
+	SourceAddr string `json:"source_addr" binding:"required"`
 	TargetAddr string `json:"target_addr" binding:"required"`
-	ListenAddr string `json:"listen_addr" binding:"required"`
 }
 
 // Create 创建服务
@@ -249,8 +269,8 @@ func (a *ProxyServiceAPI) Create(c *gin.Context) {
 		Name:       req.Name,
 		Alias:      req.Alias,
 		AgentID:    req.AgentID,
+		SourceAddr: req.SourceAddr,
 		TargetAddr: req.TargetAddr,
-		ListenAddr: req.ListenAddr,
 		Enabled:    true,
 	}
 
@@ -258,6 +278,9 @@ func (a *ProxyServiceAPI) Create(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("创建失败: "+err.Error()))
 		return
 	}
+
+	// 初始化运行时状态为 pending
+	cache.UpdateProxyServiceStatus(service.ID, cache.ServiceStatusPending, "", "")
 
 	logger.Infof("创建服务: id=%s, name=%s, agent_id=%d", service.ID, service.Name, service.AgentID)
 	recordAuditLog(c, model.ActionCreateService, "service", service.ID, service.Name, nil)
@@ -268,8 +291,8 @@ func (a *ProxyServiceAPI) Create(c *gin.Context) {
 // UpdateServiceRequest 更新服务请求
 type UpdateServiceRequest struct {
 	Alias      string `json:"alias"`
+	SourceAddr string `json:"source_addr"`
 	TargetAddr string `json:"target_addr"`
-	ListenAddr string `json:"listen_addr"`
 	Enabled    *bool  `json:"enabled"`
 }
 
@@ -294,11 +317,11 @@ func (a *ProxyServiceAPI) Update(c *gin.Context) {
 	if req.Alias != "" {
 		updates["alias"] = req.Alias
 	}
+	if req.SourceAddr != "" {
+		updates["source_addr"] = req.SourceAddr
+	}
 	if req.TargetAddr != "" {
 		updates["target_addr"] = req.TargetAddr
-	}
-	if req.ListenAddr != "" {
-		updates["listen_addr"] = req.ListenAddr
 	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
@@ -342,6 +365,9 @@ func (a *ProxyServiceAPI) Delete(c *gin.Context) {
 		return
 	}
 
+	// 清理运行时状态缓存
+	cache.DeleteProxyServiceStatus(id)
+
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
@@ -355,4 +381,65 @@ func (a *ProxyServiceAPI) Delete(c *gin.Context) {
 	recordAuditLog(c, model.ActionDeleteService, "service", id, service.Name, nil)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
+}
+
+// Toggle 启用/禁用服务
+func (a *ProxyServiceAPI) Toggle(c *gin.Context) {
+	id := c.Param("id")
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
+		return
+	}
+
+	var service model.ProxyService
+	if err := db.DB.First(&service, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("服务不存在"))
+		return
+	}
+
+	// 更新启用状态
+	if err := db.DB.Model(&service).Update("enabled", req.Enabled).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新失败"))
+		return
+	}
+
+	// 如果是启用操作，将运行时状态设置为 pending
+	if req.Enabled {
+		cache.UpdateProxyServiceStatus(id, cache.ServiceStatusPending, "", "")
+	}
+
+	logger.Infof("切换服务状态: id=%s, enabled=%v", id, req.Enabled)
+	recordAuditLog(c, model.ActionUpdateService, "service", id, service.Name, nil)
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("操作成功", nil))
+}
+
+// Retry 重试错误状态的服务
+func (a *ProxyServiceAPI) Retry(c *gin.Context) {
+	id := c.Param("id")
+
+	var service model.ProxyService
+	if err := db.DB.First(&service, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("服务不存在"))
+		return
+	}
+
+	// 检查运行时状态是否为错误
+	runtimeStatus := cache.GetProxyServiceStatus(id)
+	if runtimeStatus == nil || runtimeStatus.Status != cache.ServiceStatusError {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("只有错误状态的服务才能重试"))
+		return
+	}
+
+	// 重置运行时状态为 pending
+	cache.UpdateProxyServiceStatus(id, cache.ServiceStatusPending, "", "")
+
+	logger.Infof("重试服务: id=%s", id)
+	recordAuditLog(c, model.ActionUpdateService, "service", id, service.Name, nil)
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("重试成功", nil))
 }

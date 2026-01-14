@@ -157,7 +157,7 @@ func (v *VisitorAPI) Create(c *gin.Context) {
 	// 获取目标服务的 Tailscale 地址
 	var targetAgent model.Agent
 	db.DB.First(&targetAgent, targetService.AgentID)
-	targetAddr := targetAgent.IP + ":" + strings.Split(targetService.ListenAddr, ":")[1]
+	targetAddr := targetAgent.IP + ":" + strings.Split(targetService.SourceAddr, ":")[1]
 
 	// 创建 Visitor
 	visitor := &model.Visitor{

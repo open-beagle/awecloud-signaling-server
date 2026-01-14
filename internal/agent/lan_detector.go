@@ -86,6 +86,63 @@ func (d *LANDetector) DetectLANIP() string {
 	return ip
 }
 
+// GetAllLANIPs 获取所有局域网 IP 地址
+// 返回所有非黑名单接口上的私有 IP 地址列表
+func (d *LANDetector) GetAllLANIPs() []string {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		logger.Warnf("获取网络接口失败: %v", err)
+		return []string{}
+	}
+
+	var ips []string
+
+	for _, iface := range interfaces {
+		// 跳过 down 的接口
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+
+		// 跳过回环接口
+		if iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		// 检查黑名单
+		if d.isBlacklisted(iface.Name) {
+			continue
+		}
+
+		// 获取接口地址
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+
+			ip := ipNet.IP
+			// 只处理 IPv4
+			if ip.To4() == nil {
+				continue
+			}
+
+			// 只保留私有 IP
+			if !d.isPrivateIP(ip) {
+				continue
+			}
+
+			ips = append(ips, ip.String())
+		}
+	}
+
+	return ips
+}
+
 // detectLANInterface 检测局域网接口和 IP
 // 返回接口名称、IP 地址和子网掩码
 func (d *LANDetector) detectLANInterface() (string, string, string) {
