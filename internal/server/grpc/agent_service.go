@@ -24,12 +24,13 @@ import (
 
 // AgentConnection Agent 连接信息
 type AgentConnection struct {
-	AgentID   uint64
-	Stream    pb.AgentService_HeartbeatServer
-	TunnelIP  string
-	Connected bool
-	LastSeen  time.Time
-	Cancel    context.CancelFunc
+	AgentID           uint64
+	Stream            pb.AgentService_HeartbeatServer
+	TunnelIP          string
+	Connected         bool
+	LastSeen          time.Time
+	LastConfigVersion int64 // 最后发送的配置版本号
+	Cancel            context.CancelFunc
 }
 
 // AgentServiceServer Agent 服务实现
@@ -259,13 +260,18 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 	}
 
 	// 注册连接
+	s.versionMutex.RLock()
+	currentVersion := s.configVersion
+	s.versionMutex.RUnlock()
+
 	conn = &AgentConnection{
-		AgentID:   agentID,
-		Stream:    stream,
-		TunnelIP:  firstReq.TunnelIp,
-		Connected: firstReq.TunnelConnected,
-		LastSeen:  time.Now(),
-		Cancel:    cancel,
+		AgentID:           agentID,
+		Stream:            stream,
+		TunnelIP:          firstReq.TunnelIp,
+		Connected:         firstReq.TunnelConnected,
+		LastSeen:          time.Now(),
+		LastConfigVersion: currentVersion, // 初始化为当前版本
+		Cancel:            cancel,
 	}
 
 	s.connMutex.Lock()
@@ -317,8 +323,20 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 			// 处理心跳
 			s.handleHeartbeat(agentID, req)
 
+			// 检查配置版本是否变化
+			s.versionMutex.RLock()
+			currentVersion := s.configVersion
+			s.versionMutex.RUnlock()
+
+			// 如果配置版本变化，发送新配置
+			includeConfig := false
+			if conn.LastConfigVersion != currentVersion {
+				includeConfig = true
+				conn.LastConfigVersion = currentVersion
+			}
+
 			// 发送响应
-			if err := s.sendHeartbeatResponse(stream, agentID, false); err != nil {
+			if err := s.sendHeartbeatResponse(stream, agentID, includeConfig); err != nil {
 				logger.Errorf("发送心跳响应失败: %v", err)
 				return err
 			}
@@ -360,14 +378,28 @@ func (s *AgentServiceServer) handleHeartbeat(agentID uint64, req *pb.AgentHeartb
 
 	// 处理服务状态上报
 	for _, svc := range req.ServiceStatus {
-		logger.Debugf("Agent %d 服务状态: service_id=%s, running=%v, error=%s",
-			agentID, svc.ServiceId, svc.Running, svc.Error)
+		status := cache.ServiceStatusStopped
+		if svc.Running {
+			status = cache.ServiceStatusRunning
+		} else if svc.Error != "" {
+			status = cache.ServiceStatusError
+		}
+		cache.UpdateProxyServiceStatus(svc.ServiceId, status, "", svc.Error)
+		logger.Debugf("Agent %d 服务状态: service_id=%s, status=%s, error=%s",
+			agentID, svc.ServiceId, status, svc.Error)
 	}
 
 	// 处理端口访问状态上报
 	for _, fwd := range req.ForwardStatus {
-		logger.Debugf("Agent %d 端口访问状态: forward_id=%s, running=%v, error=%s",
-			agentID, fwd.ForwardId, fwd.Running, fwd.Error)
+		status := cache.ServiceStatusStopped
+		if fwd.Running {
+			status = cache.ServiceStatusRunning
+		} else if fwd.Error != "" {
+			status = cache.ServiceStatusError
+		}
+		cache.UpdatePortForwardStatus(fwd.ForwardId, status, "", fwd.Error)
+		logger.Debugf("Agent %d 端口访问状态: forward_id=%s, status=%s, error=%s",
+			agentID, fwd.ForwardId, status, fwd.Error)
 	}
 }
 

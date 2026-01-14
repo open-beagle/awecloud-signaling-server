@@ -18,8 +18,14 @@ import (
 
 // ProxyServiceAPI 端口映射服务 API
 type ProxyServiceAPI struct {
-	config  *config.ServerConfig
-	aclSync *headscale.ACLSyncService
+	config       *config.ServerConfig
+	aclSync      *headscale.ACLSyncService
+	configNotify ConfigNotifier // 配置变更通知接口
+}
+
+// ConfigNotifier 配置变更通知接口
+type ConfigNotifier interface {
+	NotifyConfigChange()
 }
 
 // NewProxyServiceAPI 创建 ProxyServiceAPI
@@ -40,6 +46,11 @@ func NewProxyServiceAPI(cfg *config.ServerConfig) *ProxyServiceAPI {
 	}
 
 	return api
+}
+
+// SetConfigNotifier 设置配置变更通知器
+func (a *ProxyServiceAPI) SetConfigNotifier(notifier ConfigNotifier) {
+	a.configNotify = notifier
 }
 
 // ServiceListItem 服务列表项
@@ -285,6 +296,11 @@ func (a *ProxyServiceAPI) Create(c *gin.Context) {
 	logger.Infof("创建服务: id=%s, name=%s, agent_id=%d", service.ID, service.Name, service.AgentID)
 	recordAuditLog(c, model.ActionCreateService, "service", service.ID, service.Name, nil)
 
+	// 通知配置变更
+	if a.configNotify != nil {
+		a.configNotify.NotifyConfigChange()
+	}
+
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("创建成功", service))
 }
 
@@ -340,6 +356,11 @@ func (a *ProxyServiceAPI) Update(c *gin.Context) {
 	logger.Infof("更新服务: id=%s", id)
 	recordAuditLog(c, model.ActionUpdateService, "service", id, service.Name, nil)
 
+	// 通知配置变更
+	if a.configNotify != nil {
+		a.configNotify.NotifyConfigChange()
+	}
+
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("更新成功", nil))
 }
 
@@ -380,6 +401,11 @@ func (a *ProxyServiceAPI) Delete(c *gin.Context) {
 	logger.Infof("删除服务: id=%s, name=%s", id, service.Name)
 	recordAuditLog(c, model.ActionDeleteService, "service", id, service.Name, nil)
 
+	// 通知配置变更
+	if a.configNotify != nil {
+		a.configNotify.NotifyConfigChange()
+	}
+
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
 }
 
@@ -414,6 +440,11 @@ func (a *ProxyServiceAPI) Toggle(c *gin.Context) {
 
 	logger.Infof("切换服务状态: id=%s, enabled=%v", id, req.Enabled)
 	recordAuditLog(c, model.ActionUpdateService, "service", id, service.Name, nil)
+
+	// 通知配置变更
+	if a.configNotify != nil {
+		a.configNotify.NotifyConfigChange()
+	}
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("操作成功", nil))
 }

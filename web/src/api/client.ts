@@ -6,6 +6,7 @@ export interface Client {
   name: string
   alias?: string
   desktop_count?: number
+  online_count?: number
   status?: string
   last_online?: string
   created_at?: string

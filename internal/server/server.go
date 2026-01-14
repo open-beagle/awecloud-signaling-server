@@ -313,11 +313,13 @@ func (s *Server) setupRouter() *gin.Engine {
 
 					// 端口映射服务管理
 					serviceAPI := api.NewProxyServiceAPI(s.config)
+					serviceAPI.SetConfigNotifier(s.agentService) // 设置配置变更通知器
 					adminAuthGroup.GET("/services", serviceAPI.List)
 					adminAuthGroup.POST("/services", serviceAPI.Create)
 
 					// 端口转发管理
 					forwardAPI := api.NewPortForwardAPI(s.config)
+					forwardAPI.SetConfigNotifier(s.agentService) // 设置配置变更通知器
 					adminAuthGroup.POST("/port-forwards", forwardAPI.Create)
 					adminAuthGroup.PUT("/port-forwards/:id", forwardAPI.Update)
 					adminAuthGroup.PUT("/port-forwards/:id/toggle", forwardAPI.Toggle)

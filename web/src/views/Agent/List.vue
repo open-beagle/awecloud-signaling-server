@@ -183,7 +183,10 @@ const handleViewToken = (agent: Agent) => {
 }
 
 const handleViewDetail = (agent: Agent) => {
-  router.push(`/agents/${agent.id}`)
+  router.push({
+    path: `/agents/${agent.id}`,
+    query: { name: agent.name }
+  })
 }
 
 const handleEdit = (agent: Agent) => {

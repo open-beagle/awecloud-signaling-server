@@ -44,14 +44,14 @@
             <template v-if="row.linked_id">
               <router-link
                 v-if="row.type === 'agent'"
-                :to="`/agents/${row.linked_id}`"
+                :to="{ path: `/agents/${row.linked_id}`, query: { name: row.linked_entity } }"
                 class="link"
               >
                 {{ row.linked_entity }}
               </router-link>
               <router-link
                 v-else-if="row.type === 'client'"
-                :to="`/clients/${row.linked_id}`"
+                :to="{ path: `/clients/${row.linked_id}`, query: { name: row.linked_entity } }"
                 class="link"
               >
                 {{ row.linked_entity }}

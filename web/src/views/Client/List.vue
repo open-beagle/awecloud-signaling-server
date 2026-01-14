@@ -12,19 +12,29 @@
       
       <el-table v-loading="loading" :data="clients" stripe>
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="name" label="用户名" min-width="150">
+        <el-table-column prop="name" label="账号" min-width="120">
           <template #default="{ row }">
             <el-link type="primary" :underline="false" @click="handleViewDetail(row)">
               {{ row.name }}
-              <span v-if="row.alias" class="alias-text">({{ row.alias }})</span>
             </el-link>
           </template>
         </el-table-column>
-        <el-table-column label="客户端" width="100">
+        <el-table-column prop="alias" label="别名" min-width="100">
           <template #default="{ row }">
-            <el-link type="primary" :underline="false" @click="handleViewDetail(row)">
-              {{ row.desktop_count || 0 }}
+            {{ row.alias || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="设备" width="80">
+          <template #default="{ row }">
+            <el-link 
+              v-if="row.desktop_count > 0" 
+              type="primary" 
+              :underline="false" 
+              @click="handleViewDetail(row)"
+            >
+              {{ row.online_count || 0 }}/{{ row.desktop_count }}
             </el-link>
+            <span v-else style="color: var(--el-text-color-secondary)">0</span>
           </template>
         </el-table-column>
         <el-table-column :label="t('common.status')" width="100">
@@ -134,7 +144,10 @@ const handleDelete = async (row: Client) => {
 }
 
 const handleViewDetail = (row: Client) => {
-  router.push(`/clients/${row.id}`)
+  router.push({
+    path: `/clients/${row.id}`,
+    query: { name: row.name }
+  })
 }
 
 onMounted(() => {

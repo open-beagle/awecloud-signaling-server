@@ -176,38 +176,39 @@
           </el-table-column>
           <el-table-column prop="source_addr" label="源地址" min-width="150" />
           <el-table-column prop="target_addr" :label="t('service.targetAddr')" min-width="150" />
-          <el-table-column label="状态" width="120">
+          <el-table-column label="状态" width="100">
             <template #default="{ row }">
               <el-tooltip v-if="row.display_status === 'error'" :content="row.error_msg || '未知错误'" placement="top">
-                <el-tag type="danger" size="small">🔴 错误</el-tag>
+                <span class="status-text status-error">🔴 错误</span>
               </el-tooltip>
-              <el-tag v-else-if="row.display_status === 'running'" type="success" size="small">🟢 运行</el-tag>
-              <el-tag v-else-if="row.display_status === 'disabled'" type="info" size="small">⚫ 禁用</el-tag>
-              <el-tag v-else-if="row.display_status === 'offline'" size="small">🔵 离线</el-tag>
-              <el-tag v-else-if="row.display_status === 'pending'" type="warning" size="small">🟡 等待</el-tag>
-              <el-tag v-else type="info" size="small">-</el-tag>
+              <span v-else-if="row.display_status === 'running'" class="status-text status-running">🟢 运行</span>
+              <span v-else-if="row.display_status === 'disabled'" class="status-text status-disabled">⚫ 禁用</span>
+              <span v-else-if="row.display_status === 'offline'" class="status-text status-offline">🔵 离线</span>
+              <span v-else-if="row.display_status === 'pending'" class="status-text status-pending">🟡 等待</span>
+              <span v-else class="status-text">-</span>
             </template>
           </el-table-column>
           <el-table-column :label="t('common.actions')" width="200" fixed="right">
             <template #default="{ row }">
               <div class="action-buttons">
                 <el-tooltip v-if="row.display_status === 'error'" content="重试" placement="top">
-                  <el-button size="small" type="warning" @click="handleRetryService(row)" />
+                  <el-button size="small" :icon="RefreshRight" circle @click="handleRetryService(row)" />
                 </el-tooltip>
                 <el-tooltip v-else-if="row.display_status === 'running'" content="禁用" placement="top">
-                  <el-button size="small" type="warning" @click="handleToggleService(row, false)" />
+                  <el-button size="small" :icon="VideoPause" circle @click="handleToggleService(row, false)" />
                 </el-tooltip>
                 <el-tooltip v-else content="启用" placement="top">
-                  <el-button size="small" type="success" @click="handleToggleService(row, true)" />
+                  <el-button size="small" :icon="VideoPlay" circle @click="handleToggleService(row, true)" />
                 </el-tooltip>
                 <el-tooltip content="编辑" placement="top">
-                  <el-button size="small" :icon="Edit" @click="handleEditService(row)" />
+                  <el-button size="small" :icon="Edit" circle @click="handleEditService(row)" />
                 </el-tooltip>
                 <el-tooltip content="删除" placement="top">
                   <el-button
                     size="small"
                     type="danger"
                     :icon="Delete"
+                    circle
                     @click="handleDeleteService(row)"
                   />
                 </el-tooltip>
@@ -246,38 +247,39 @@
           </el-table-column>
           <el-table-column prop="source_addr" label="源地址" min-width="150" />
           <el-table-column prop="target_addr" :label="t('service.targetAddr')" min-width="150" />
-          <el-table-column label="状态" width="120">
+          <el-table-column label="状态" width="100">
             <template #default="{ row }">
               <el-tooltip v-if="row.display_status === 'error'" :content="row.error_msg || '未知错误'" placement="top">
-                <el-tag type="danger" size="small">🔴 错误</el-tag>
+                <span class="status-text status-error">🔴 错误</span>
               </el-tooltip>
-              <el-tag v-else-if="row.display_status === 'running'" type="success" size="small">🟢 运行</el-tag>
-              <el-tag v-else-if="row.display_status === 'disabled'" type="info" size="small">⚫ 禁用</el-tag>
-              <el-tag v-else-if="row.display_status === 'offline'" size="small">🔵 离线</el-tag>
-              <el-tag v-else-if="row.display_status === 'pending'" type="warning" size="small">🟡 等待</el-tag>
-              <el-tag v-else type="info" size="small">-</el-tag>
+              <span v-else-if="row.display_status === 'running'" class="status-text status-running">🟢 运行</span>
+              <span v-else-if="row.display_status === 'disabled'" class="status-text status-disabled">⚫ 禁用</span>
+              <span v-else-if="row.display_status === 'offline'" class="status-text status-offline">🔵 离线</span>
+              <span v-else-if="row.display_status === 'pending'" class="status-text status-pending">🟡 等待</span>
+              <span v-else class="status-text">-</span>
             </template>
           </el-table-column>
           <el-table-column :label="t('common.actions')" width="200" fixed="right">
             <template #default="{ row }">
               <div class="action-buttons">
                 <el-tooltip v-if="row.display_status === 'error'" content="重试" placement="top">
-                  <el-button size="small" type="warning" @click="handleRetryVisitor(row)" />
+                  <el-button size="small" :icon="RefreshRight" circle @click="handleRetryVisitor(row)" />
                 </el-tooltip>
                 <el-tooltip v-else-if="row.display_status === 'running'" content="禁用" placement="top">
-                  <el-button size="small" type="warning" @click="handleToggleVisitor(row, false)" />
+                  <el-button size="small" :icon="VideoPause" circle @click="handleToggleVisitor(row, false)" />
                 </el-tooltip>
                 <el-tooltip v-else content="启用" placement="top">
-                  <el-button size="small" type="success" @click="handleToggleVisitor(row, true)" />
+                  <el-button size="small" :icon="VideoPlay" circle @click="handleToggleVisitor(row, true)" />
                 </el-tooltip>
                 <el-tooltip content="编辑" placement="top">
-                  <el-button size="small" :icon="Edit" @click="handleEditVisitor(row)" />
+                  <el-button size="small" :icon="Edit" circle @click="handleEditVisitor(row)" />
                 </el-tooltip>
                 <el-tooltip content="删除" placement="top">
                   <el-button
                     size="small"
                     type="danger"
                     :icon="Delete"
+                    circle
                     @click="handleDeleteVisitor(row)"
                   />
                 </el-tooltip>
@@ -294,18 +296,23 @@
     <el-dialog v-model="createServiceDialogVisible" title="创建本地服务" width="600px">
       <el-form :model="createServiceForm" label-width="100px">
         <el-form-item label="服务名称" required>
-          <el-input v-model="createServiceForm.name" placeholder="例如: web-server" />
+          <el-input v-model="createServiceForm.name" placeholder="例如: ssh" />
         </el-form-item>
         <el-form-item label="别名">
-          <el-input v-model="createServiceForm.alias" placeholder="例如: Web服务" />
+          <el-input v-model="createServiceForm.alias" placeholder="例如: 内网 Web服务" />
         </el-form-item>
         <el-form-item label="源地址" required>
-          <el-input v-model="createServiceForm.source_addr" placeholder="例如: 100.64.0.7:8080" />
-          <div class="form-tip">VPN IP:端口，在隧道网络中监听的地址</div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <el-input v-model="vpnIp" readonly style="flex: 1;" placeholder="VPN IP" />
+            <span>:</span>
+            <el-input v-model="createServiceForm.source_port" placeholder="2222" style="flex: 1;" />
+          </div>
+          <div class="form-tip">VPN IP（自动填充） : 源端口</div>
+          <div class="form-tip">ⓘ 内网中，在保证端口不冲突的情况下，可以使用相同的源端口</div>
         </el-form-item>
         <el-form-item label="目标地址" required>
-          <el-input v-model="createServiceForm.target_addr" placeholder="例如: 192.168.1.10:80" />
-          <div class="form-tip">Agent 内网中的服务地址</div>
+          <el-input v-model="createServiceForm.target_addr" placeholder="例如: 127.0.0.1:22" />
+          <div class="form-tip">ⓘ 本机内网IP地址和端口</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -319,26 +326,54 @@
     <!-- 创建远程服务对话框 -->
     <el-dialog v-model="createVisitorDialogVisible" title="创建远程服务" width="600px">
       <el-form :model="createVisitorForm" label-width="100px">
-        <el-form-item label="服务名称" required>
-          <el-input v-model="createVisitorForm.name" placeholder="例如: mysql" />
-        </el-form-item>
-        <el-form-item label="别名">
-          <el-input v-model="createVisitorForm.alias" placeholder="例如: MySQL数据库" />
-        </el-form-item>
-        <el-form-item label="目标服务" required>
-          <el-select v-model="createVisitorForm.target_service_id" placeholder="选择要访问的服务" style="width: 100%">
+        <el-form-item label="远程 Agent" required>
+          <el-select 
+            v-model="createVisitorForm.target_agent_id" 
+            placeholder="选择远程 Agent" 
+            style="width: 100%"
+            @change="handleRemoteAgentChange"
+          >
             <el-option
-              v-for="svc in availableServices"
+              v-for="ag in availableRemoteAgents"
+              :key="ag.id"
+              :label="ag.alias ? `${ag.name} (${ag.alias})` : ag.name"
+              :value="ag.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="远程服务" required>
+          <el-select 
+            v-model="createVisitorForm.target_service_id" 
+            placeholder="选择要访问的服务" 
+            style="width: 100%"
+            @change="handleRemoteServiceChange"
+          >
+            <el-option
+              v-for="svc in remoteAgentServices"
               :key="svc.id"
-              :label="`${svc.agent_name}/${svc.name} (${svc.listen_addr})`"
+              :label="svc.alias ? `${svc.name} (${svc.alias})` : svc.name"
               :value="svc.id"
             />
           </el-select>
-          <div class="form-tip">选择其他 Agent 提供的服务</div>
+          <div v-if="selectedRemoteService" class="form-tip">
+            目标地址: {{ selectedRemoteService.listen_addr }}
+          </div>
         </el-form-item>
-        <el-form-item label="本地监听" required>
-          <el-input v-model="createVisitorForm.listen_addr" placeholder="例如: 192.168.1.100:13306" />
-          <div class="form-tip">在当前 Agent 的内网中监听的地址，供局域网设备访问</div>
+        <el-form-item label="源地址" required>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <el-select v-model="createVisitorForm.network_interface" placeholder="选择网卡" style="flex: 1;">
+              <el-option
+                v-for="net in realtimeInfo?.networks"
+                :key="net.name"
+                :label="`${net.name}: ${net.ip}`"
+                :value="net.name"
+              />
+            </el-select>
+            <span>:</span>
+            <el-input v-model="createVisitorForm.source_port" placeholder="13306" style="flex: 1;" />
+          </div>
+          <div class="form-tip">本地网卡 : 源端口</div>
+          <div class="form-tip">ⓘ 选择本地网卡和端口，用于访问远程服务</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -415,7 +450,7 @@ import { ref, onMounted, watch, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete, Edit, Refresh } from '@element-plus/icons-vue'
+import { Plus, Delete, Edit, Refresh, VideoPlay, VideoPause, RefreshRight } from '@element-plus/icons-vue'
 import { getAgent, getAgentRealtime, updateAgent } from '@/api/agent'
 import { deleteService } from '@/api/service'
 import request from '@/utils/request'
@@ -453,10 +488,11 @@ const createServiceDialogVisible = ref(false)
 const createServiceForm = reactive({
   name: '',
   alias: '',
-  source_addr: '',
+  source_port: '',
   target_addr: ''
 })
 const creatingService = ref(false)
+const vpnIp = ref('') // VPN IP，自动填充
 
 // 编辑本地服务对话框
 const editServiceDialogVisible = ref(false)
@@ -472,12 +508,15 @@ const editingService = ref(false)
 // 创建远程服务对话框
 const createVisitorDialogVisible = ref(false)
 const createVisitorForm = reactive({
-  name: '',
-  alias: '',
+  target_agent_id: '',
   target_service_id: '',
-  listen_addr: ''
+  network_interface: '',
+  source_port: ''
 })
 const creatingVisitor = ref(false)
+const availableRemoteAgents = ref<any[]>([]) // 可选的远程 Agent 列表（排除当前 Agent）
+const remoteAgentServices = ref<any[]>([]) // 选中的远程 Agent 的服务列表
+const selectedRemoteService = ref<any>(null) // 选中的远程服务
 
 // 编辑远程服务对话框
 const editVisitorDialogVisible = ref(false)
@@ -515,6 +554,8 @@ const loadAgent = async () => {
     const res = await getAgent(id)
     if (res.success && res.data) {
       agent.value = res.data
+      // 自动填充 VPN IP
+      vpnIp.value = res.data.ip || ''
       // 如果 Agent 在线，获取实时信息
       if (res.data.status === 'online') {
         loadRealtimeInfo(id)
@@ -536,6 +577,10 @@ const loadRealtimeInfo = async (id: number) => {
     const res = await getAgentRealtime(id)
     if (res.success && res.data) {
       realtimeInfo.value = res.data
+      // 更新 VPN IP（优先使用实时信息）
+      if (res.data.tunnel_ip) {
+        vpnIp.value = res.data.tunnel_ip
+      }
     }
   } catch (error) {
     console.error('Failed to load realtime info:', error)
@@ -572,8 +617,8 @@ const handleCreateService = () => {
   createServiceDialogVisible.value = true
   createServiceForm.name = ''
   createServiceForm.alias = ''
+  createServiceForm.source_port = ''
   createServiceForm.target_addr = ''
-  createServiceForm.listen_addr = ''
 }
 
 const handleEditService = (service: ProxyService) => {
@@ -654,12 +699,16 @@ const handleDeleteService = async (service: ProxyService) => {
 }
 
 // Visitor 操作
-const handleAddVisitor = () => {
+const handleAddVisitor = async () => {
+  // 加载可用的远程 Agent 列表（排除当前 Agent）
+  await loadAvailableRemoteAgents()
   createVisitorDialogVisible.value = true
-  createVisitorForm.name = ''
-  createVisitorForm.alias = ''
+  createVisitorForm.target_agent_id = ''
   createVisitorForm.target_service_id = ''
-  createVisitorForm.listen_addr = ''
+  createVisitorForm.network_interface = ''
+  createVisitorForm.source_port = ''
+  remoteAgentServices.value = []
+  selectedRemoteService.value = null
 }
 
 const handleEditVisitor = (visitor: PortForward) => {
@@ -749,10 +798,13 @@ watch(() => route.params.id, () => {
 
 // 提交创建本地服务
 const handleSubmitCreateService = async () => {
-  if (!agent.value || !createServiceForm.name || !createServiceForm.target_addr || !createServiceForm.source_addr) {
+  if (!agent.value || !createServiceForm.name || !createServiceForm.source_port || !createServiceForm.target_addr) {
     ElMessage.warning('请填写完整信息')
     return
   }
+
+  // 组合源地址：VPN IP + 端口
+  const source_addr = `${vpnIp.value}:${createServiceForm.source_port}`
 
   creatingService.value = true
   try {
@@ -763,7 +815,7 @@ const handleSubmitCreateService = async () => {
         agent_id: agent.value.id,
         name: createServiceForm.name,
         alias: createServiceForm.alias,
-        source_addr: createServiceForm.source_addr,
+        source_addr: source_addr,
         target_addr: createServiceForm.target_addr
       }
     })
@@ -774,7 +826,7 @@ const handleSubmitCreateService = async () => {
       // 重置表单
       createServiceForm.name = ''
       createServiceForm.alias = ''
-      createServiceForm.source_addr = ''
+      createServiceForm.source_port = ''
       createServiceForm.target_addr = ''
       loadAgent()
     } else {
@@ -787,28 +839,81 @@ const handleSubmitCreateService = async () => {
   }
 }
 
-// 加载可用的目标服务列表
-const loadAvailableServices = async () => {
+// 加载可用的远程 Agent 列表（排除当前 Agent）
+const loadAvailableRemoteAgents = async () => {
+  if (!agent.value) return
+  
+  try {
+    const res = await request({
+      url: '/api/v1/admin/agents',
+      method: 'get',
+      params: { page: 1, size: 1000, status: 'online' }
+    })
+    if (res.success && res.data) {
+      // 排除当前 Agent
+      availableRemoteAgents.value = (res.data || []).filter((ag: any) => ag.id !== agent.value?.id)
+    }
+  } catch (error) {
+    console.error('Failed to load remote agents:', error)
+  }
+}
+
+// 当选择远程 Agent 时，加载该 Agent 的服务列表
+const handleRemoteAgentChange = async (agentId: string) => {
+  createVisitorForm.target_service_id = ''
+  selectedRemoteService.value = null
+  
+  if (!agentId) {
+    remoteAgentServices.value = []
+    return
+  }
+  
   try {
     const res = await request({
       url: '/api/v1/admin/services',
       method: 'get',
-      params: { page: 1, size: 1000 }
+      params: { agent_id: agentId, status: 'running' }
     })
-    if (res.success) {
-      availableServices.value = res.data || []
+    if (res.success && res.data) {
+      remoteAgentServices.value = res.data || []
     }
   } catch (error) {
-    console.error('Failed to load services:', error)
+    console.error('Failed to load remote agent services:', error)
+    ElMessage.error('加载远程服务失败')
   }
+}
+
+// 当选择远程服务时，更新选中的服务信息
+const handleRemoteServiceChange = (serviceId: string) => {
+  selectedRemoteService.value = remoteAgentServices.value.find(svc => svc.id === serviceId)
 }
 
 // 提交创建远程服务
 const handleSubmitCreateVisitor = async () => {
-  if (!agent.value || !createVisitorForm.name || !createVisitorForm.target_service_id || !createVisitorForm.listen_addr) {
+  if (!agent.value || !createVisitorForm.target_service_id || !createVisitorForm.network_interface || !createVisitorForm.source_port) {
     ElMessage.warning('请填写完整信息')
     return
   }
+
+  // 获取选中网卡的 IP
+  const selectedNetwork = realtimeInfo.value?.networks?.find(net => net.name === createVisitorForm.network_interface)
+  if (!selectedNetwork) {
+    ElMessage.error('未找到选中的网卡信息')
+    return
+  }
+
+  // 组合监听地址：网卡IP + 端口
+  const listen_addr = `${selectedNetwork.ip}:${createVisitorForm.source_port}`
+
+  // 自动生成服务名称：remote_agent_name/service_name
+  const targetService = selectedRemoteService.value
+  if (!targetService) {
+    ElMessage.error('未找到目标服务信息')
+    return
+  }
+
+  const targetAgent = availableRemoteAgents.value.find(ag => ag.id === createVisitorForm.target_agent_id)
+  const name = `${targetAgent?.name || 'unknown'}/${targetService.name}`
 
   creatingVisitor.value = true
   try {
@@ -817,10 +922,9 @@ const handleSubmitCreateVisitor = async () => {
       method: 'post',
       data: {
         agent_id: agent.value.id,
-        name: createVisitorForm.name,
-        alias: createVisitorForm.alias,
+        name: name,
         target_service_id: createVisitorForm.target_service_id,
-        listen_addr: createVisitorForm.listen_addr
+        listen_addr: listen_addr
       }
     })
 
@@ -908,7 +1012,6 @@ const handleSubmitEditVisitor = async () => {
 
 onMounted(() => {
   loadAgent()
-  loadAvailableServices()
 })
 </script>
 
@@ -982,6 +1085,33 @@ onMounted(() => {
   align-items: center;
   gap: 4px;
   flex-wrap: nowrap;
+}
+
+.status-text {
+  font-size: 14px;
+  line-height: 22px;
+  white-space: nowrap;
+}
+
+.status-running {
+  color: var(--el-color-success);
+}
+
+.status-error {
+  color: var(--el-color-danger);
+  cursor: pointer;
+}
+
+.status-disabled {
+  color: var(--el-text-color-secondary);
+}
+
+.status-offline {
+  color: var(--el-color-info);
+}
+
+.status-pending {
+  color: var(--el-color-warning);
 }
 
 .form-tip {

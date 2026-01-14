@@ -290,44 +290,99 @@ func (m *ProxyManager) UpdateConfig(configs []ServiceConfig) {
 		newConfigs[config.ID] = config
 	}
 
+	// 第一阶段：收集需要停止的服务
+	toStop := make([]string, 0)
+	toRestart := make(map[string]ServiceConfig) // 需要重启的服务
+
 	// 停止不在新配置中的服务
-	for id, proxy := range m.proxies {
+	for id := range m.proxies {
 		if _, exists := newConfigs[id]; !exists {
-			go func(p *TCPProxyService) {
-				m.Stop(p.ID)
-			}(proxy)
+			toStop = append(toStop, id)
 		}
 	}
 
-	// 启动或更新服务
+	// 检查需要禁用或重启的服务
 	for id, config := range newConfigs {
 		if !config.Enabled {
 			// 如果服务被禁用，停止它
 			if _, exists := m.proxies[id]; exists {
-				go func(serviceID string) {
-					m.Stop(serviceID)
-				}(id)
+				toStop = append(toStop, id)
 			}
 			continue
 		}
 
-		// 检查服务是否已存在
+		// 检查服务是否已存在且需要重启
 		if proxy, exists := m.proxies[id]; exists {
-			// 如果配置有变化，重启服务
 			if proxy.SourceAddr != config.SourceAddr || proxy.TargetAddr != config.TargetAddr {
-				go func(serviceID string, cfg ServiceConfig) {
-					m.Stop(serviceID)
-					time.Sleep(100 * time.Millisecond)
-					m.Start(cfg)
-				}(id, config)
+				toStop = append(toStop, id)
+				toRestart[id] = config
 			}
-		} else {
-			// 启动新服务
+		}
+	}
+
+	// 第二阶段：同步停止所有需要停止的服务
+	for _, id := range toStop {
+		m.stopServiceLocked(id)
+	}
+
+	// 第三阶段：启动新服务和重启的服务
+	for id, config := range newConfigs {
+		if !config.Enabled {
+			continue
+		}
+
+		// 如果是重启的服务
+		if _, isRestart := toRestart[id]; isRestart {
+			go func(cfg ServiceConfig) {
+				m.Start(cfg)
+			}(config)
+			continue
+		}
+
+		// 如果是新服务（不存在于当前代理列表）
+		if _, exists := m.proxies[id]; !exists {
 			go func(cfg ServiceConfig) {
 				m.Start(cfg)
 			}(config)
 		}
 	}
+}
+
+// stopServiceLocked 停止服务（调用前需持有锁，内部会临时释放锁）
+func (m *ProxyManager) stopServiceLocked(id string) {
+	proxy, exists := m.proxies[id]
+	if !exists {
+		return
+	}
+	delete(m.proxies, id)
+
+	// 释放锁，执行停止操作
+	m.mutex.Unlock()
+
+	// 取消上下文
+	proxy.cancel()
+
+	// 关闭监听器
+	if proxy.Listener != nil {
+		proxy.Listener.Close()
+	}
+
+	// 关闭所有活跃连接
+	proxy.mutex.Lock()
+	for _, conn := range proxy.conns {
+		conn.Close()
+	}
+	proxy.conns = nil
+	proxy.mutex.Unlock()
+
+	proxy.Status = "stopped"
+	logger.Infof("端口代理已停止: %s", proxy.Name)
+
+	// 上报 stopped 状态
+	m.reportStatus(id, "stopped", "", "")
+
+	// 重新获取锁
+	m.mutex.Lock()
 }
 
 // List 列出所有代理状态

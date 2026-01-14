@@ -173,7 +173,8 @@ const handleSubmit = async () => {
 const handleMembers = (group: Group) => {
   router.push({
     name: 'AgentGroupMembers',
-    params: { id: group.id }
+    params: { id: group.id },
+    query: { name: group.alias || group.name }
   })
 }
 

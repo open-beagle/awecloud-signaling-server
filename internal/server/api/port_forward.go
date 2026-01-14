@@ -15,12 +15,18 @@ import (
 
 // PortForwardAPI 端口转发 API
 type PortForwardAPI struct {
-	config *config.ServerConfig
+	config       *config.ServerConfig
+	configNotify ConfigNotifier // 配置变更通知接口
 }
 
 // NewPortForwardAPI 创建 PortForwardAPI
 func NewPortForwardAPI(cfg *config.ServerConfig) *PortForwardAPI {
 	return &PortForwardAPI{config: cfg}
+}
+
+// SetConfigNotifier 设置配置变更通知器
+func (a *PortForwardAPI) SetConfigNotifier(notifier ConfigNotifier) {
+	a.configNotify = notifier
 }
 
 // CreateForwardRequest 创建端口转发请求
@@ -82,6 +88,11 @@ func (a *PortForwardAPI) Create(c *gin.Context) {
 	logger.Infof("创建端口转发: id=%s, agent_id=%d, target_service_id=%s", forward.ID, forward.AgentID, forward.TargetServiceID)
 	recordAuditLog(c, model.ActionCreateService, "port_forward", forward.ID, "", nil)
 
+	// 通知配置变更
+	if a.configNotify != nil {
+		a.configNotify.NotifyConfigChange()
+	}
+
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("创建成功", forward))
 }
 
@@ -129,6 +140,11 @@ func (a *PortForwardAPI) Update(c *gin.Context) {
 	logger.Infof("更新端口转发: id=%s", id)
 	recordAuditLog(c, model.ActionUpdateService, "port_forward", id, "", nil)
 
+	// 通知配置变更
+	if a.configNotify != nil {
+		a.configNotify.NotifyConfigChange()
+	}
+
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("更新成功", nil))
 }
 
@@ -163,6 +179,11 @@ func (a *PortForwardAPI) Toggle(c *gin.Context) {
 
 	logger.Infof("切换端口转发状态: id=%s, enabled=%v", id, req.Enabled)
 	recordAuditLog(c, model.ActionUpdateService, "port_forward", id, "", nil)
+
+	// 通知配置变更
+	if a.configNotify != nil {
+		a.configNotify.NotifyConfigChange()
+	}
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("操作成功", nil))
 }
@@ -213,6 +234,11 @@ func (a *PortForwardAPI) Delete(c *gin.Context) {
 
 	logger.Infof("删除端口转发: id=%s", id)
 	recordAuditLog(c, model.ActionDeleteService, "port_forward", id, "", nil)
+
+	// 通知配置变更
+	if a.configNotify != nil {
+		a.configNotify.NotifyConfigChange()
+	}
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
 }

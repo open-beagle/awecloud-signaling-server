@@ -46,6 +46,7 @@ type ClientListItem struct {
 	Name         string     `json:"name"`
 	Alias        string     `json:"alias"`
 	DesktopCount int64      `json:"desktop_count"`
+	OnlineCount  int64      `json:"online_count"`
 	Status       string     `json:"status"`
 	LastOnline   *time.Time `json:"last_online"`
 }
@@ -79,13 +80,16 @@ func (a *ClientAPI) List(c *gin.Context) {
 	}
 
 	type DesktopStats struct {
-		ClientID   uint64     `gorm:"column:client_id"`
-		Count      int64      `gorm:"column:count"`
-		LastOnline *time.Time `gorm:"column:last_online"`
+		ClientID    uint64     `gorm:"column:client_id"`
+		Count       int64      `gorm:"column:count"`
+		OnlineCount int64      `gorm:"column:online_count"`
+		LastOnline  *time.Time `gorm:"column:last_online"`
 	}
 	var desktopStats []DesktopStats
+	// 统计每个 Client 的设备总数、在线数和最后在线时间
+	// 在线判断：last_online 在 60 秒内
 	db.DB.Model(&model.Desktop{}).
-		Select("client_id, COUNT(*) as count, MAX(last_online) as last_online").
+		Select("client_id, COUNT(*) as count, SUM(CASE WHEN last_online > datetime('now', '-60 seconds') THEN 1 ELSE 0 END) as online_count, MAX(last_online) as last_online").
 		Group("client_id").Find(&desktopStats)
 
 	statsMap := make(map[uint64]DesktopStats)
@@ -93,12 +97,11 @@ func (a *ClientAPI) List(c *gin.Context) {
 		statsMap[ds.ClientID] = ds
 	}
 
-	now := time.Now()
 	result := make([]ClientListItem, len(clients))
 	for i, client := range clients {
 		stats := statsMap[client.ID]
 		status := "offline"
-		if stats.LastOnline != nil && now.Sub(*stats.LastOnline) < 60*time.Second {
+		if stats.OnlineCount > 0 {
 			status = "online"
 		}
 		result[i] = ClientListItem{
@@ -106,6 +109,7 @@ func (a *ClientAPI) List(c *gin.Context) {
 			Name:         client.Name,
 			Alias:        client.Alias,
 			DesktopCount: stats.Count,
+			OnlineCount:  stats.OnlineCount,
 			Status:       status,
 			LastOnline:   stats.LastOnline,
 		}

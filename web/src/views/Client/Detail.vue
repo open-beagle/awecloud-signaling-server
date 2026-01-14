@@ -55,10 +55,10 @@
         <div v-else class="empty-text">暂无分组</div>
       </div>
 
-      <!-- 客户端设备 -->
+      <!-- 设备 -->
       <div class="info-section">
         <div class="section-header">
-          <h3>客户端 ({{ desktops.length }})</h3>
+          <h3>设备 ({{ desktops.length }})</h3>
         </div>
         <el-table :data="desktops" stripe v-if="desktops.length > 0">
           <el-table-column prop="device_name" label="设备名称" min-width="150" />
@@ -101,7 +101,7 @@
             </template>
           </el-table-column>
         </el-table>
-        <div v-else class="empty-text">暂无客户端设备</div>
+        <div v-else class="empty-text">暂无设备</div>
       </div>
 
       <!-- 已授权服务 -->
