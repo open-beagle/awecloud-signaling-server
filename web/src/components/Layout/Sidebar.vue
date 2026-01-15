@@ -270,6 +270,7 @@ const toggleSidebar = () => {
   background-color: #ffffff;
   cursor: pointer;
   transition: all 0.3s;
+  flex-shrink: 0; /* 防止被压缩 */
 }
 
 .sidebar-footer:hover {
@@ -284,5 +285,15 @@ const toggleSidebar = () => {
 
 .collapse-icon:hover {
   color: #409eff;
+}
+
+/* 确保侧边栏底部不会显示其他内容 */
+.sidebar-footer * {
+  pointer-events: auto;
+}
+
+.sidebar-footer::before,
+.sidebar-footer::after {
+  display: none;
 }
 </style>
