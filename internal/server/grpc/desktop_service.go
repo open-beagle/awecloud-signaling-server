@@ -176,8 +176,21 @@ func (s *DesktopServiceServer) Login(ctx context.Context, req *pb.DesktopLoginRe
 
 		logger.Infof("新 Desktop 创建成功: id=%d, client_id=%d, name=%s", desktop.ID, client.ID, req.DeviceName)
 	} else {
-		// 已存在的设备，更新信息
+		// 已存在的设备，重新生成 secret（用户用密码登录时总是刷新 token）
+		desktopSecret = generateSecret()
+		secretHash, err := bcrypt.GenerateFromPassword([]byte(desktopSecret), bcrypt.DefaultCost)
+		if err != nil {
+			logger.Errorf("生成密钥哈希失败: %v", err)
+			return &pb.DesktopLoginResponse{
+				Success: false,
+				Message: "内部错误",
+			}, nil
+		}
+		desktop.SecretHash = string(secretHash)
+
+		// 更新信息
 		now := time.Now()
+		desktop.LastOnline = &now
 		desktop.LastOnline = &now
 
 		if req.SystemInfo != nil {
@@ -207,11 +220,7 @@ func (s *DesktopServiceServer) Login(ctx context.Context, req *pb.DesktopLoginRe
 		Success:   true,
 		Message:   "登录成功",
 		DesktopId: desktop.ID,
-	}
-
-	// 仅首次登录返回 secret
-	if isNewDevice {
-		resp.Secret = desktopSecret
+		Secret:    desktopSecret, // 密码登录时总是返回 secret（新设备或刷新 token）
 	}
 
 	// 创建或获取 Tailscale 预认证密钥
