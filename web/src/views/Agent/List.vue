@@ -53,6 +53,16 @@
             </span>
           </template>
         </el-table-column>
+        <el-table-column label="SSH" width="80" align="center">
+          <template #default="{ row }">
+            <el-switch
+              v-model="row.ssh_enabled"
+              :disabled="row.status !== 'online'"
+              :loading="sshSwitchLoading[row.id]"
+              @change="handleSSHToggle(row)"
+            />
+          </template>
+        </el-table-column>
         <el-table-column :label="t('agent.connections')" width="100" align="center">
           <template #default="{ row }">
             <span>{{ row.connections || 0 }}</span>
@@ -123,7 +133,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete, View, Edit } from '@element-plus/icons-vue'
-import { getAgents, deleteAgent, updateAgent } from '@/api/agent'
+import { getAgents, deleteAgent, updateAgent, updateAgentSSHConfig } from '@/api/agent'
 import type { Agent } from '@/types/models'
 import StatusTag from '@/components/Common/StatusTag.vue'
 import TimeAgo from '@/components/Common/TimeAgo.vue'
@@ -139,6 +149,7 @@ const createDialogVisible = ref(false)
 const tokenDialogVisible = ref(false)
 const currentAgent = ref<Agent | null>(null)
 const initialSecret = ref('')
+const sshSwitchLoading = ref<Record<number, boolean>>({}) // SSH 开关加载状态
 
 // 编辑对话框
 const editDialogVisible = ref(false)
@@ -239,6 +250,28 @@ const handleDelete = async (agent: Agent) => {
 
 const handleViewServices = (agent: Agent) => {
   router.push({ path: '/services', query: { agent_id: String(agent.id) } })
+}
+
+const handleSSHToggle = async (agent: Agent) => {
+  const enabled = agent.ssh_enabled
+  sshSwitchLoading.value[agent.id] = true
+  
+  try {
+    const res = await updateAgentSSHConfig(agent.id, enabled)
+    if (res.success) {
+      ElMessage.success(res.message || (enabled ? 'SSH 已启用' : 'SSH 已禁用'))
+    } else {
+      // 失败时恢复开关状态
+      agent.ssh_enabled = !enabled
+      ElMessage.error(res.message || '操作失败')
+    }
+  } catch (error) {
+    // 失败时恢复开关状态
+    agent.ssh_enabled = !enabled
+    ElMessage.error('操作失败')
+  } finally {
+    sshSwitchLoading.value[agent.id] = false
+  }
 }
 
 onMounted(() => {

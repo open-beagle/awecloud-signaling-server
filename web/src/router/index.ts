@@ -141,6 +141,25 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Group/AgentGroupMembers.vue'),
         meta: { requiresAuth: true }
       },
+      // SSH 管理
+      {
+        path: 'ssh',
+        name: 'SSHList',
+        component: () => import('@/views/SSH/List.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'ssh/:id',
+        name: 'SSHDetail',
+        component: () => import('@/views/SSH/Detail.vue'),
+        meta: { requiresAuth: true }
+      },
+      // 旧路由重定向
+      {
+        path: 'ssh/permissions',
+        redirect: '/ssh',
+        meta: { requiresAuth: true }
+      },
       // 隧道管理
       {
         path: 'tunnel/users',
@@ -158,6 +177,12 @@ const routes: RouteRecordRaw[] = [
         path: 'tunnel/acl',
         name: 'TunnelACL',
         component: () => import('@/views/Tunnel/ACL.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'tunnel/ssh',
+        name: 'TunnelSSH',
+        component: () => import('@/views/Tunnel/SSHPolicy.vue'),
         meta: { requiresAuth: true }
       },
       // 旧路由重定向

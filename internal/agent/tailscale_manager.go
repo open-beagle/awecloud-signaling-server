@@ -14,7 +14,11 @@ import (
 	"sync"
 	"time"
 
+	"tailscale.com/ipn"
 	"tailscale.com/tsnet"
+
+	// 导入 tailssh 模块，触发 init 注册 SSH 功能
+	_ "tailscale.com/ssh/tailssh"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -98,6 +102,15 @@ func (m *TailscaleManager) Start(controlURL, authKey string) error {
 		m.mutex.Unlock()
 
 		logger.Infof("Tailscale 已连接，IP: %s", m.tailscaleIP)
+
+		// 如果配置启用 SSH，设置 RunSSH = true
+		if m.config.Tailscale.EnableSSH {
+			if err := m.enableSSH(); err != nil {
+				logger.Warnf("启用 Tailscale SSH 失败: %v", err)
+			} else {
+				logger.Info("Tailscale SSH 已启用")
+			}
+		}
 
 		// 启动状态监控协程
 		go m.monitorConnectionStatus()
@@ -578,4 +591,30 @@ func (m *TailscaleManager) tailscaleLogf(format string, args ...interface{}) {
 
 	// 使用 logrus 输出，保持格式一致
 	logger.Infof("[tunnel] %s", msg)
+}
+
+// enableSSH 启用 Tailscale SSH 功能
+func (m *TailscaleManager) enableSSH() error {
+	if m.tsServer == nil {
+		return fmt.Errorf("Tailscale 未启动")
+	}
+
+	// 获取本地客户端
+	lc, err := m.tsServer.LocalClient()
+	if err != nil {
+		return fmt.Errorf("获取 LocalClient 失败: %w", err)
+	}
+
+	// 通过 EditPrefs 设置 RunSSH = true
+	_, err = lc.EditPrefs(m.ctx, &ipn.MaskedPrefs{
+		Prefs: ipn.Prefs{
+			RunSSH: true,
+		},
+		RunSSHSet: true,
+	})
+	if err != nil {
+		return fmt.Errorf("设置 RunSSH 失败: %w", err)
+	}
+
+	return nil
 }

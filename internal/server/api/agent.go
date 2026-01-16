@@ -67,6 +67,7 @@ type AgentListItem struct {
 	Status       string     `json:"status"`
 	Version      string     `json:"version"`
 	LastOnline   *time.Time `json:"last_online"`
+	SSHEnabled   bool       `json:"ssh_enabled"` // SSH 是否启用
 }
 
 // List 获取 Agent 列表
@@ -179,6 +180,7 @@ func (a *AgentAPI) List(c *gin.Context) {
 			Status:       status,
 			Version:      agent.Version,
 			LastOnline:   agent.LastHeartbeat,
+			SSHEnabled:   agent.SSHEnabled,
 		}
 	}
 
@@ -680,6 +682,66 @@ func (a *AgentAPI) Update(c *gin.Context) {
 	recordAuditLog(c, model.ActionUpdateAgent, "agent", strconv.FormatUint(id, 10), agent.Name, nil)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("更新成功", nil))
+}
+
+// UpdateSSHConfigRequest 更新 SSH 配置请求
+type UpdateSSHConfigRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// UpdateSSHConfig 更新 Agent SSH 配置
+func (a *AgentAPI) UpdateSSHConfig(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
+		return
+	}
+
+	var req UpdateSSHConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
+		return
+	}
+
+	var agent model.Agent
+	if err := db.DB.First(&agent, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("Agent 不存在"))
+		return
+	}
+
+	// 更新 SSH 启用状态
+	oldEnabled := agent.SSHEnabled
+	agent.SSHEnabled = req.Enabled
+
+	if err := db.DB.Save(&agent).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新失败"))
+		return
+	}
+
+	logger.Infof("更新 Agent SSH 配置: id=%d, enabled=%v", id, req.Enabled)
+
+	// 通知 Agent 更新 SSH 配置（通过 gRPC）
+	if a.agentService != nil && a.agentService.IsAgentOnline(id) {
+		// 注意：通知机制将在心跳响应中实现，这里只记录日志
+		logger.Infof("Agent %d 在线，SSH 配置将在下次心跳时同步", id)
+	} else {
+		logger.Infof("Agent %d 离线，SSH 配置将在下次上线时同步", id)
+	}
+
+	// 记录审计日志
+	detail := map[string]interface{}{
+		"old_enabled": oldEnabled,
+		"new_enabled": req.Enabled,
+	}
+	recordAuditLog(c, model.ActionUpdateAgent, "agent", strconv.FormatUint(id, 10), agent.Name, detail)
+
+	// 根据 Agent 在线状态返回不同提示
+	message := "SSH 配置更新成功"
+	if a.agentService == nil || !a.agentService.IsAgentOnline(id) {
+		message = "SSH 配置更新成功，Agent 离线，配置将在下次上线时生效"
+	}
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse(message, nil))
 }
 
 // Delete 删除 Agent

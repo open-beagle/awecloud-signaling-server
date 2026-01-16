@@ -14,6 +14,7 @@ type Agent struct {
 	LastHeartbeat *time.Time `json:"last_heartbeat"`                            // 最后心跳时间
 	NodeID        uint64     `json:"node_id"`                                   // Headscale Node ID
 	IP            string     `gorm:"size:50" json:"ip"`                         // 隧道 IP
+	SSHEnabled    bool       `gorm:"default:false" json:"ssh_enabled"`          // 是否启用 SSH
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

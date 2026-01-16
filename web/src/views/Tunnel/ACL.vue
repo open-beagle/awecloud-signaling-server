@@ -42,7 +42,7 @@
 
       <!-- 可视化视图 -->
       <div v-else class="visual-view">
-        <h4>规则列表</h4>
+        <h4>ACL 规则列表</h4>
         <el-table :data="aclRules" stripe border>
           <el-table-column prop="index" label="#" width="60" />
           <el-table-column label="来源" min-width="200">
@@ -68,6 +68,7 @@
           </el-table-column>
           <el-table-column prop="description" label="说明" min-width="150" />
         </el-table>
+        <div v-if="aclRules.length === 0" class="empty-tip">暂无 ACL 规则</div>
 
         <h4 style="margin-top: 24px">Tag Owners</h4>
         <el-table :data="tagOwners" stripe border>
@@ -80,6 +81,7 @@
             </template>
           </el-table-column>
         </el-table>
+        <div v-if="tagOwners.length === 0" class="empty-tip">暂无 Tag Owners</div>
       </div>
     </el-card>
   </div>
@@ -266,5 +268,12 @@ onMounted(() => {
   margin: 0 0 12px 0;
   font-size: 15px;
   font-weight: 500;
+}
+
+.empty-tip {
+  text-align: center;
+  color: var(--el-text-color-secondary);
+  padding: 20px;
+  font-size: 14px;
 }
 </style>

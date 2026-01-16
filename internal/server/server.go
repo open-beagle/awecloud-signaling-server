@@ -294,6 +294,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.GET("/agents/:id/forwards", agentAPI.GetForwards)
 					adminAuthGroup.POST("/agents", agentAPI.Create)
 					adminAuthGroup.PUT("/agents/:id", agentAPI.Update)
+					adminAuthGroup.PUT("/agents/:id/ssh-config", agentAPI.UpdateSSHConfig)
 					adminAuthGroup.DELETE("/agents/:id", agentAPI.Delete)
 					adminAuthGroup.POST("/agents/:id/regenerate-secret", agentAPI.RegenerateSecret)
 
@@ -377,6 +378,22 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.GET("/agents/:id/agent-group-permissions", agentPermAPI.GetAgentGroupPermissions)
 					adminAuthGroup.POST("/agents/:id/agent-group-permissions", agentPermAPI.AddAgentGroupPermission)
 					adminAuthGroup.DELETE("/agents/:id/agent-group-permissions/:pid", agentPermAPI.RemoveAgentGroupPermission)
+
+					// SSH 授权管理
+					sshPermAPI := api.NewSSHPermissionAPI(s.config)
+					// Agent SSH 统计和详情
+					adminAuthGroup.GET("/agents/ssh-stats", sshPermAPI.GetAgentSSHStats)
+					adminAuthGroup.GET("/agents/:id/ssh-permissions", sshPermAPI.GetAgentSSHPermissions)
+					// Desktop -> Agent SSH 授权
+					adminAuthGroup.GET("/ssh/client-permissions", sshPermAPI.ListClientPermissions)
+					adminAuthGroup.POST("/ssh/client-permissions", sshPermAPI.CreateClientPermission)
+					adminAuthGroup.PUT("/ssh/client-permissions/:id", sshPermAPI.UpdateClientPermission)
+					adminAuthGroup.DELETE("/ssh/client-permissions/:id", sshPermAPI.DeleteClientPermission)
+					// Desktop 分组 -> Agent SSH 授权
+					adminAuthGroup.GET("/ssh/client-group-permissions", sshPermAPI.ListClientGroupPermissions)
+					adminAuthGroup.POST("/ssh/client-group-permissions", sshPermAPI.CreateClientGroupPermission)
+					adminAuthGroup.PUT("/ssh/client-group-permissions/:id", sshPermAPI.UpdateClientGroupPermission)
+					adminAuthGroup.DELETE("/ssh/client-group-permissions/:id", sshPermAPI.DeleteClientGroupPermission)
 
 					// 分组管理
 					groupAPI := api.NewGroupAPI(s.config)

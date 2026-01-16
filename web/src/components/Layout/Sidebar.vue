@@ -58,6 +58,12 @@
           {{ t('menu.agentGroups') }}
         </el-menu-item>
       </el-sub-menu>
+      <el-menu-item index="/ssh">
+        <el-icon><Platform /></el-icon>
+        <template #title>
+          <span>{{ t('menu.ssh') }}</span>
+        </template>
+      </el-menu-item>
       <el-sub-menu index="tunnel">
         <template #title>
           <el-icon><Share /></el-icon>
@@ -71,6 +77,9 @@
         </el-menu-item>
         <el-menu-item index="/tunnel/acl">
           {{ t('menu.tunnelACL') }}
+        </el-menu-item>
+        <el-menu-item index="/tunnel/ssh">
+          {{ t('menu.tunnelSSH') }}
         </el-menu-item>
       </el-sub-menu>
       <el-menu-item index="/audit-logs">

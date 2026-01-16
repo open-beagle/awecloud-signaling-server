@@ -18,6 +18,7 @@ type ACLPolicy struct {
 	Groups    map[string][]string `json:"groups,omitempty"`
 	TagOwners map[string][]string `json:"tagOwners,omitempty"`
 	ACLs      []ACLRule           `json:"acls,omitempty"`
+	SSH       []SSHRule           `json:"ssh,omitempty"`
 }
 
 // ACLRule ACL 规则
@@ -25,6 +26,14 @@ type ACLRule struct {
 	Action string   `json:"action"`
 	Src    []string `json:"src"`
 	Dst    []string `json:"dst"`
+}
+
+// SSHRule SSH 访问规则
+type SSHRule struct {
+	Action string   `json:"action"`          // accept
+	Src    []string `json:"src"`             // 来源 Tag
+	Dst    []string `json:"dst"`             // 目标 Tag
+	Users  []string `json:"users,omitempty"` // 允许的 Linux 用户名
 }
 
 // ACLSyncService ACL 同步服务
@@ -358,6 +367,14 @@ func (s *ACLSyncService) generateACLPolicy() (*ACLPolicy, error) {
 		policy.TagOwners[tag] = []string{}
 	}
 
+	// 生成 SSH 规则
+	sshRules, err := s.generateSSHRules(usedTags)
+	if err != nil {
+		logger.Warnf("生成 SSH 规则失败: %v", err)
+	} else {
+		policy.SSH = sshRules
+	}
+
 	return policy, nil
 }
 
@@ -585,4 +602,93 @@ func tagsEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// generateSSHRules 根据数据库配置生成 SSH 规则
+// SSHUsers 控制 Desktop 用户能以 Agent 机器上的哪些 Linux 账号登录
+// 支持的值:
+//   - 普通用户名（如 root、code）：Agent 机器上必须已存在该 Linux 用户
+//   - autogroup:nonroot：Tailscale SSH 会自动创建一个非 root 用户
+func (s *ACLSyncService) generateSSHRules(usedTags map[string]bool) ([]SSHRule, error) {
+	var rules []SSHRule
+
+	// 1. 处理 Desktop -> Agent 的 SSH 授权
+	var clientPerms []model.SSHClientPermission
+	if err := db.DB.Preload("Client").Preload("Agent").Where("enabled = ?", true).Find(&clientPerms).Error; err != nil {
+		return nil, fmt.Errorf("查询 SSH Client 授权失败: %w", err)
+	}
+
+	for _, perm := range clientPerms {
+		if perm.Client == nil || perm.Agent == nil {
+			continue
+		}
+
+		srcTag := fmt.Sprintf("tag:desktop-%s", perm.Client.Name)
+		dstTag := fmt.Sprintf("tag:agent-%s", perm.Agent.Name)
+		usedTags[srcTag] = true
+		usedTags[dstTag] = true
+
+		// 解析 SSHUsers JSON 数组
+		users := parseSSHUsers(perm.SSHUsers)
+		if len(users) == 0 {
+			continue
+		}
+
+		rule := SSHRule{
+			Action: "accept",
+			Src:    []string{srcTag},
+			Dst:    []string{dstTag},
+			Users:  users,
+		}
+		rules = append(rules, rule)
+	}
+
+	// 2. 处理 Desktop 分组 -> Agent 的 SSH 授权
+	var groupPerms []model.SSHClientGroupPermission
+	if err := db.DB.Preload("Group").Preload("Agent").Where("enabled = ?", true).Find(&groupPerms).Error; err != nil {
+		return nil, fmt.Errorf("查询 SSH ClientGroup 授权失败: %w", err)
+	}
+
+	for _, perm := range groupPerms {
+		if perm.Group == nil || perm.Agent == nil {
+			continue
+		}
+
+		srcTag := fmt.Sprintf("tag:desktop-group-%s", perm.Group.Name)
+		dstTag := fmt.Sprintf("tag:agent-%s", perm.Agent.Name)
+		usedTags[srcTag] = true
+		usedTags[dstTag] = true
+
+		// 解析 SSHUsers JSON 数组
+		users := parseSSHUsers(perm.SSHUsers)
+		if len(users) == 0 {
+			continue
+		}
+
+		rule := SSHRule{
+			Action: "accept",
+			Src:    []string{srcTag},
+			Dst:    []string{dstTag},
+			Users:  users,
+		}
+		rules = append(rules, rule)
+	}
+
+	logger.Infof("生成 %d 条 SSH 规则", len(rules))
+	return rules, nil
+}
+
+// parseSSHUsers 解析 SSHUsers JSON 数组
+func parseSSHUsers(jsonStr string) []string {
+	if jsonStr == "" {
+		return nil
+	}
+
+	var users []string
+	if err := json.Unmarshal([]byte(jsonStr), &users); err != nil {
+		logger.Warnf("解析 SSHUsers 失败: %v, 原始值: %s", err, jsonStr)
+		return nil
+	}
+
+	return users
 }

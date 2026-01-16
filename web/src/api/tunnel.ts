@@ -129,6 +129,14 @@ export interface ACLRule {
   description: string
 }
 
+export interface SSHRule {
+  index: number
+  action: string
+  src: string[]
+  dst: string[]
+  users: string[]
+}
+
 export interface TagOwner {
   tag: string
   owners: string[]
@@ -136,6 +144,7 @@ export interface TagOwner {
 
 export interface ACLRules {
   rules: ACLRule[]
+  ssh_rules: SSHRule[]
   tag_owners: TagOwner[]
 }
 

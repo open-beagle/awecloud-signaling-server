@@ -71,10 +71,13 @@ export default {
     groups: 'Groups',
     clientGroups: 'Client Groups',
     agentGroups: 'Agent Groups',
+    ssh: 'SSH',
+    sshPermissions: 'SSH Permissions',
     tunnel: 'Tunnel',
     tunnelUsers: 'User Management',
     tunnelNodes: 'Node Management',
     tunnelACL: 'ACL Management',
+    tunnelSSH: 'SSH Policy',
     auditLogs: 'Audit Logs',
     systemConfig: 'System Config'
   },
@@ -507,5 +510,102 @@ export default {
     saveSuccess: 'Saved successfully',
     saveFailed: 'Save failed',
     loadFailed: 'Failed to load configuration'
+  },
+  sshAuth: {
+    title: 'SSH Authorization',
+    // Tabs
+    clientPermissions: 'User Permissions',
+    groupPermissions: 'Group Permissions',
+    // Filters
+    filterByAgent: 'Filter by Agent',
+    allAgents: 'All Agents',
+    searchPlaceholder: 'Search user or agent name',
+    // Table columns
+    clientName: 'User Name',
+    groupName: 'Group Name',
+    agentName: 'Agent Name',
+    sshUsers: 'SSH Users',
+    enabled: 'Enabled',
+    disabled: 'Disabled',
+    createdAt: 'Created At',
+    // Add authorization
+    addClientAuth: 'Add User Permission',
+    addGroupAuth: 'Add Group Permission',
+    editClientAuth: 'Edit User Permission',
+    editGroupAuth: 'Edit Group Permission',
+    // Form
+    selectClient: 'Select User',
+    selectClientPlaceholder: 'Select user to authorize',
+    selectGroup: 'Select Group',
+    selectGroupPlaceholder: 'Select group to authorize',
+    selectAgent: 'Select Agent',
+    selectAgentPlaceholder: 'Select target agent',
+    sshUsersPlaceholder: 'Select or enter SSH username',
+    sshUsersTip: 'Controls which Linux accounts on the Agent machine the user can login as. Supports regular usernames (e.g., root, code) and autogroup:nonroot (auto-create non-root user)',
+    members: 'members',
+    // Validation
+    selectClientAndAgent: 'Please select user and agent',
+    selectGroupAndAgent: 'Please select group and agent',
+    sshUsersRequired: 'Please select at least one SSH user',
+    // Actions
+    deleteConfirm: 'Are you sure to delete this permission?',
+    // Tips
+    aclSyncWarning: '⚠️ Permission changes will sync to Headscale ACL immediately',
+    loadPermissionsFailed: 'Failed to load permissions'
+  },
+  ssh: {
+    title: 'SSH Management',
+    // List page
+    searchPlaceholder: 'Search agent name or IP',
+    agentName: 'Agent Name',
+    agentIp: 'Agent IP',
+    groupCount: 'Groups',
+    userCount: 'Users',
+    addGroup: 'Group',
+    addUser: 'User',
+    // Detail page
+    basicInfo: 'Basic Info',
+    userAuth: 'User Authorization',
+    groupAuth: 'Group Authorization',
+    userName: 'User Name',
+    userIp: 'User IP',
+    groupName: 'Group Name',
+    memberCount: 'Members',
+    sshUsers: 'SSH Users',
+    grantedAt: 'Granted At',
+    // Dialog
+    agent: 'Agent',
+    addUserAuth: 'Add User Authorization',
+    addGroupAuth: 'Add Group Authorization',
+    selectUser: 'Select User',
+    selectGroup: 'Select Group',
+    searchUserPlaceholder: 'Search username or IP...',
+    searchGroupPlaceholder: 'Search group name...',
+    selected: 'Selected',
+    users: 'users',
+    groups: 'groups',
+    members: 'members',
+    sshUserInputPlaceholder: 'Enter username and press Enter...',
+    quickOptions: 'Quick options',
+    sshUsersTip: 'Controls which Linux accounts on the Agent machine the user can login as',
+    // Actions
+    authorize: 'Authorize',
+    revoke: 'Revoke',
+    revokeConfirm: 'Are you sure to revoke this authorization?',
+    revokeSuccess: 'Revoked successfully',
+    revokeFailed: 'Revoke failed',
+    authSuccess: 'Authorization successful',
+    authFailed: 'Authorization failed',
+    // Validation
+    selectUserRequired: 'Please select a user',
+    selectGroupRequired: 'Please select a group',
+    sshUsersRequired: 'Please add at least one SSH user',
+    // Tips
+    aclSyncWarning: '⚠️ Permission changes will sync to Headscale ACL immediately',
+    loadAgentsFailed: 'Failed to load agents',
+    loadPermissionsFailed: 'Failed to load permissions',
+    // View auth
+    groupAuthList: 'Group Authorization List',
+    userAuthList: 'User Authorization List'
   }
 }

@@ -941,6 +941,15 @@ type ACLRule struct {
 	Description string   `json:"description"`
 }
 
+// SSHRule SSH 规则
+type SSHRule struct {
+	Index  int      `json:"index"`
+	Action string   `json:"action"`
+	Src    []string `json:"src"`
+	Dst    []string `json:"dst"`
+	Users  []string `json:"users"`
+}
+
 // TagOwner Tag 所有者
 type TagOwner struct {
 	Tag    string   `json:"tag"`
@@ -950,6 +959,7 @@ type TagOwner struct {
 // ACLRulesResponse ACL 规则响应
 type ACLRulesResponse struct {
 	Rules     []ACLRule  `json:"rules"`
+	SSHRules  []SSHRule  `json:"ssh_rules"`
 	TagOwners []TagOwner `json:"tag_owners"`
 }
 
@@ -972,12 +982,14 @@ func (a *TunnelAPI) GetTunnelACLRules(c *gin.Context) {
 	// 解析 Policy JSON
 	var policyData struct {
 		ACLs      []map[string]interface{} `json:"acls"`
+		SSH       []map[string]interface{} `json:"ssh"`
 		TagOwners map[string][]string      `json:"tagOwners"`
 	}
 
 	if err := json.Unmarshal([]byte(policy), &policyData); err != nil {
 		c.JSON(http.StatusOK, NewSuccessResponse(ACLRulesResponse{
 			Rules:     []ACLRule{},
+			SSHRules:  []SSHRule{},
 			TagOwners: []TagOwner{},
 		}))
 		return
@@ -1017,6 +1029,44 @@ func (a *TunnelAPI) GetTunnelACLRules(c *gin.Context) {
 		rules = append(rules, rule)
 	}
 
+	// 转换 SSH 规则
+	var sshRules []SSHRule
+	for i, ssh := range policyData.SSH {
+		sshRule := SSHRule{
+			Index: i + 1,
+		}
+
+		if action, ok := ssh["action"].(string); ok {
+			sshRule.Action = action
+		}
+
+		if src, ok := ssh["src"].([]interface{}); ok {
+			for _, s := range src {
+				if str, ok := s.(string); ok {
+					sshRule.Src = append(sshRule.Src, str)
+				}
+			}
+		}
+
+		if dst, ok := ssh["dst"].([]interface{}); ok {
+			for _, d := range dst {
+				if str, ok := d.(string); ok {
+					sshRule.Dst = append(sshRule.Dst, str)
+				}
+			}
+		}
+
+		if users, ok := ssh["users"].([]interface{}); ok {
+			for _, u := range users {
+				if str, ok := u.(string); ok {
+					sshRule.Users = append(sshRule.Users, str)
+				}
+			}
+		}
+
+		sshRules = append(sshRules, sshRule)
+	}
+
 	// 转换 Tag Owners
 	var tagOwners []TagOwner
 	for tag, owners := range policyData.TagOwners {
@@ -1028,6 +1078,7 @@ func (a *TunnelAPI) GetTunnelACLRules(c *gin.Context) {
 
 	c.JSON(http.StatusOK, NewSuccessResponse(ACLRulesResponse{
 		Rules:     rules,
+		SSHRules:  sshRules,
 		TagOwners: tagOwners,
 	}))
 }

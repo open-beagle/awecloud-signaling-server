@@ -18,6 +18,8 @@ export interface Agent {
   group_count?: number
   service_count?: number    // 本地服务数量
   forward_count?: number    // 远程服务数量
+  // SSH 配置
+  ssh_enabled?: boolean     // SSH 是否启用
 }
 
 // 网络信息

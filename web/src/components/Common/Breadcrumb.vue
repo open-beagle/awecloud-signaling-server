@@ -33,7 +33,25 @@ const items = computed(() => {
     breadcrumbs.push({ title: `Agent 详情: ${agentName}` })
   }
   
-  // 2. 服务管理
+  // 2. 服务授权
+  else if (path === '/service-auth/desktop') {
+    breadcrumbs.push({ title: '服务授权' })
+    breadcrumbs.push({ path: '/service-auth/desktop', title: '桌面授权' })
+  } else if (path === '/service-auth/agent') {
+    breadcrumbs.push({ title: '服务授权' })
+    breadcrumbs.push({ path: '/service-auth/agent', title: '代理授权' })
+  }
+  
+  // 3. 代理授权
+  else if (path === '/agent-auth/desktop') {
+    breadcrumbs.push({ title: '代理授权' })
+    breadcrumbs.push({ path: '/agent-auth/desktop', title: '桌面授权' })
+  } else if (path === '/agent-auth/agent') {
+    breadcrumbs.push({ title: '代理授权' })
+    breadcrumbs.push({ path: '/agent-auth/agent', title: '代理授权' })
+  }
+  
+  // 旧路由兼容：服务管理
   else if (path === '/services') {
     breadcrumbs.push({ path: '/services', title: '服务管理' })
   } else if (path === '/services/desktop-auth') {
@@ -44,7 +62,7 @@ const items = computed(() => {
     breadcrumbs.push({ path: '/services/agent-auth', title: '代理授权' })
   }
   
-  // 3. 客户管理
+  // 4. 客户管理
   else if (path === '/clients') {
     breadcrumbs.push({ path: '/clients', title: '客户管理' })
   } else if (path.match(/^\/clients\/\d+$/)) {
@@ -53,7 +71,7 @@ const items = computed(() => {
     breadcrumbs.push({ title: `客户详情: ${clientName}` })
   }
   
-  // 4. 分组管理
+  // 5. 分组管理
   else if (path === '/groups/clients') {
     breadcrumbs.push({ title: '分组管理' })
     breadcrumbs.push({ path: '/groups/clients', title: '用户分组' })
@@ -74,7 +92,16 @@ const items = computed(() => {
     breadcrumbs.push({ path: '/groups/clients', title: '分组管理' })
   }
   
-  // 5. 隧道管理
+  // 6. SSH 管理
+  else if (path === '/ssh') {
+    breadcrumbs.push({ path: '/ssh', title: 'SSH 管理' })
+  } else if (path.match(/^\/ssh\/\d+$/)) {
+    const agentName = (route.meta.breadcrumbName as string) || (route.query.name as string) || `#${route.params.id}`
+    breadcrumbs.push({ path: '/ssh', title: 'SSH 管理' })
+    breadcrumbs.push({ title: `Agent 详情: ${agentName}` })
+  }
+  
+  // 7. 隧道管理
   else if (path === '/tunnel/users') {
     breadcrumbs.push({ title: '隧道管理' })
     breadcrumbs.push({ path: '/tunnel/users', title: 'User 管理' })
@@ -84,19 +111,22 @@ const items = computed(() => {
   } else if (path === '/tunnel/acl') {
     breadcrumbs.push({ title: '隧道管理' })
     breadcrumbs.push({ path: '/tunnel/acl', title: 'ACL 管理' })
+  } else if (path === '/tunnel/ssh') {
+    breadcrumbs.push({ title: '隧道管理' })
+    breadcrumbs.push({ path: '/tunnel/ssh', title: 'SSH 策略' })
   }
   
-  // 6. 审计日志
+  // 8. 审计日志
   else if (path === '/audit-logs') {
     breadcrumbs.push({ path: '/audit-logs', title: '审计日志' })
   }
   
-  // 7. 系统配置
+  // 9. 系统配置
   else if (path === '/system/config') {
     breadcrumbs.push({ path: '/system/config', title: '系统配置' })
   }
   
-  // 8. 下载页面
+  // 10. 下载页面
   else if (path === '/download') {
     breadcrumbs.push({ path: '/download', title: '客户端下载' })
   }

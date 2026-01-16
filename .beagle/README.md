@@ -39,15 +39,14 @@ bash scripts/build.sh
 
 ```bash
 # 构建前端代码
-BUILD_VERSION=v0.2.1 bash scripts/build_frontend.sh
+BUILD_VERSION=v0.2.2 bash scripts/build_frontend.sh
 
 # 构建后端代码（在 Alpine 容器中）
-docker pull registry.cn-qingdao.aliyuncs.com/wod/golang:1.25-alpine && \
 docker run --rm \
    -v $(pwd):/go/src/github.com/open-beagle/awecloud-signaling-server \
    -v $HOME/go/pkg:/go/pkg \
    -w /go/src/github.com/open-beagle/awecloud-signaling-server \
-   -e BUILD_VERSION=v0.2.1 \
+   -e BUILD_VERSION=v0.2.2 \
    -e GOARCHS=amd64 \
    registry.cn-qingdao.aliyuncs.com/wod/golang:1.25-alpine \
    bash ./.beagle/build.sh
@@ -81,7 +80,7 @@ docker run --rm \
 
 ```bash
 # 设置版本和镜像仓库
-export BUILD_VERSION=v0.2.1
+export BUILD_VERSION=v0.2.2
 export REGISTRY=registry.cn-qingdao.aliyuncs.com/wod
 export AUTHOR=open-beagle
 

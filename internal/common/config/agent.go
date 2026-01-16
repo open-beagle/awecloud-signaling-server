@@ -34,6 +34,7 @@ type ServerConnect struct {
 type TailscaleAgent struct {
 	StateDir          string `toml:"state_dir"`           // Tailscale 状态存储目录，支持 ~ 扩展
 	StateSyncInterval int    `toml:"state_sync_interval"` // 状态同步到 Server 的间隔（分钟），默认 5
+	EnableSSH         bool   `toml:"enable_ssh"`          // 是否启用 Tailscale SSH，默认 false
 }
 
 // VisitorSection Visitor 配置（服务访问）
@@ -92,6 +93,9 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 		if interval, err := strconv.Atoi(syncInterval); err == nil {
 			cfg.Tailscale.StateSyncInterval = interval
 		}
+	}
+	if enableSSH := os.Getenv("TAILSCALE_ENABLE_SSH"); enableSSH != "" {
+		cfg.Tailscale.EnableSSH = enableSSH == "true" || enableSSH == "1"
 	}
 
 	// 设置默认值

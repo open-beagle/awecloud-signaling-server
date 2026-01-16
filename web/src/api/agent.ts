@@ -49,3 +49,8 @@ export const deleteAgent = (id: number) => {
 export const regenerateSecret = (id: number) => {
   return request.post<any, ApiResponse<{ secret: string }>>(`/api/v1/admin/agents/${id}/regenerate-secret`)
 }
+
+// 更新 Agent SSH 配置
+export const updateAgentSSHConfig = (id: number, enabled: boolean) => {
+  return request.put<any, ApiResponse>(`/api/v1/admin/agents/${id}/ssh-config`, { enabled })
+}

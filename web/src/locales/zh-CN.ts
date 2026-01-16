@@ -71,10 +71,13 @@ export default {
     groups: '分组管理',
     clientGroups: '用户分组',
     agentGroups: '代理分组',
+    ssh: 'SSH 管理',
+    sshPermissions: 'SSH 授权',
     tunnel: '隧道管理',
     tunnelUsers: 'User 管理',
     tunnelNodes: 'Node 管理',
     tunnelACL: 'ACL 管理',
+    tunnelSSH: 'SSH 策略',
     auditLogs: '审计日志',
     systemConfig: '系统配置'
   },
@@ -514,5 +517,102 @@ export default {
     saveSuccess: '保存成功',
     saveFailed: '保存失败',
     loadFailed: '加载配置失败'
+  },
+  sshAuth: {
+    title: 'SSH 授权管理',
+    // 标签页
+    clientPermissions: '用户授权',
+    groupPermissions: '分组授权',
+    // 筛选
+    filterByAgent: '按代理筛选',
+    allAgents: '全部代理',
+    searchPlaceholder: '搜索用户或代理名称',
+    // 表格列
+    clientName: '用户名',
+    groupName: '分组名',
+    agentName: '代理名',
+    sshUsers: 'SSH 用户',
+    enabled: '启用',
+    disabled: '禁用',
+    createdAt: '创建时间',
+    // 添加授权
+    addClientAuth: '添加用户授权',
+    addGroupAuth: '添加分组授权',
+    editClientAuth: '编辑用户授权',
+    editGroupAuth: '编辑分组授权',
+    // 表单
+    selectClient: '选择用户',
+    selectClientPlaceholder: '请选择要授权的用户',
+    selectGroup: '选择分组',
+    selectGroupPlaceholder: '请选择要授权的分组',
+    selectAgent: '选择代理',
+    selectAgentPlaceholder: '请选择目标代理',
+    sshUsersPlaceholder: '选择或输入 SSH 用户名',
+    sshUsersTip: '控制用户能以 Agent 机器上的哪些 Linux 账号登录。支持普通用户名（如 root、code）和 autogroup:nonroot（自动创建非 root 用户）',
+    members: '成员',
+    // 验证
+    selectClientAndAgent: '请选择用户和代理',
+    selectGroupAndAgent: '请选择分组和代理',
+    sshUsersRequired: '请至少选择一个 SSH 用户',
+    // 操作
+    deleteConfirm: '确认删除此授权吗？',
+    // 提示
+    aclSyncWarning: '⚠️ 权限变更将同步到 Headscale ACL，立即生效',
+    loadPermissionsFailed: '加载授权列表失败'
+  },
+  ssh: {
+    title: 'SSH 管理',
+    // 列表页
+    searchPlaceholder: '搜索代理名称或 IP',
+    agentName: '代理名称',
+    agentIp: '代理 IP',
+    groupCount: '分组',
+    userCount: '用户',
+    addGroup: '分组',
+    addUser: '用户',
+    // 详情页
+    basicInfo: '基本信息',
+    userAuth: '用户授权',
+    groupAuth: '分组授权',
+    userName: '用户名',
+    userIp: '用户 IP',
+    groupName: '分组名',
+    memberCount: '成员数',
+    sshUsers: 'SSH 用户',
+    grantedAt: '授权时间',
+    // 对话框
+    agent: '代理',
+    addUserAuth: '添加用户授权',
+    addGroupAuth: '添加分组授权',
+    selectUser: '选择用户',
+    selectGroup: '选择分组',
+    searchUserPlaceholder: '搜索用户名或 IP...',
+    searchGroupPlaceholder: '搜索分组名称...',
+    selected: '已选',
+    users: '个用户',
+    groups: '个分组',
+    members: '成员',
+    sshUserInputPlaceholder: '输入用户名后回车...',
+    quickOptions: '快捷选项',
+    sshUsersTip: '控制用户能以 Agent 机器上的哪些 Linux 账号登录',
+    // 操作
+    authorize: '授权',
+    revoke: '撤销',
+    revokeConfirm: '确认撤销此授权吗？',
+    revokeSuccess: '撤销成功',
+    revokeFailed: '撤销失败',
+    authSuccess: '授权成功',
+    authFailed: '授权失败',
+    // 验证
+    selectUserRequired: '请选择用户',
+    selectGroupRequired: '请选择分组',
+    sshUsersRequired: '请至少添加一个 SSH 用户',
+    // 提示
+    aclSyncWarning: '⚠️ 权限变更将同步到 Headscale ACL，立即生效',
+    loadAgentsFailed: '加载代理列表失败',
+    loadPermissionsFailed: '加载授权列表失败',
+    // 查看授权
+    groupAuthList: '分组授权列表',
+    userAuthList: '用户授权列表'
   }
 }

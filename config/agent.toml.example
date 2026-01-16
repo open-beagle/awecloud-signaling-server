@@ -46,6 +46,12 @@ state_dir = "~/.config/awecloud-signaling/"
 # 状态同步到 Server 的间隔（分钟）
 state_sync_interval = 5
 
+# 是否启用 Tailscale SSH
+# 启用后，Desktop 用户可以通过 Tailscale 网络直接 SSH 到此 Agent
+# 需要配合 Server 端的 SSH 授权策略使用
+# 注意：启用 SSH 需要 Agent 以 root 权限运行，或具有 CAP_NET_ADMIN 能力
+enable_ssh = false
+
 # Visitor 配置（服务访问）
 # Visitor 在局域网 IP 上监听端口，将流量通过 Tailscale VPN 转发到其他节点暴露的服务
 [visitor]

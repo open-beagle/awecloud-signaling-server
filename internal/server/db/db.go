@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/sqlite"
@@ -75,6 +76,10 @@ func autoMigrate() error {
 		&model.AgentAgentPermission{},
 		&model.AgentAgentGroupPermission{},
 
+		// SSH 授权模型
+		&model.SSHClientPermission{},
+		&model.SSHClientGroupPermission{},
+
 		// 审计日志
 		&model.AuditLog{},
 
@@ -89,6 +94,11 @@ func autoMigrate() error {
 		&model.Visitor{},
 	)
 	if err != nil {
+		// 忽略"索引已存在"的错误（SQLite 在某些情况下会报这个错误）
+		if strings.Contains(err.Error(), "already exists") {
+			logger.Warnf("数据库迁移警告（已忽略）: %v", err)
+			return nil
+		}
 		return err
 	}
 
