@@ -61,10 +61,12 @@ export default {
   },
   menu: {
     agents: 'Agents',
-    serviceManagement: 'Services',
-    serviceList: 'Service List',
-    desktopAuth: 'Desktop Auth',
+    serviceAuth: 'Service Auth',
+    serviceAuthDesktop: 'Desktop',
+    serviceAuthAgent: 'Agent',
     agentAuth: 'Agent Auth',
+    agentAuthDesktop: 'Desktop',
+    agentAuthAgent: 'Agent',
     clients: 'Clients',
     groups: 'Groups',
     clientGroups: 'Client Groups',
@@ -405,6 +407,69 @@ export default {
     filterByService: 'Filter by Service',
     allAgents: 'All Agents',
     allServices: 'All Services'
+  },
+  agentLevelAuth: {
+    // Desktop auth page
+    desktopTitle: 'Agent Auth - Desktop',
+    // Agent auth page
+    agentTitle: 'Agent Auth - Agent',
+    // Common
+    agentName: 'Agent Name',
+    agentIp: 'Agent IP',
+    serviceCount: 'Services',
+    groupCount: 'Groups',
+    userCount: 'Users',
+    agentCount: 'Agents',
+    searchPlaceholder: 'Search agent name',
+    // Add auth
+    addGroup: 'Group',
+    addUser: 'User',
+    addAgent: 'Agent',
+    agent: 'Agent',
+    targetAgent: 'Target Agent',
+    sourceAgentName: 'Source Agent',
+    sourceAgentIp: 'Source Agent IP',
+    // Group auth
+    addGroupAuth: 'Add Group Authorization',
+    selectGroup: 'Select Group',
+    selectGroupPlaceholder: 'Select client groups to authorize',
+    selectAgentGroupPlaceholder: 'Select agent groups to authorize',
+    selectGroupRequired: 'Please select a group',
+    members: 'members',
+    // User auth
+    addUserAuth: 'Add User Authorization',
+    selectUser: 'Select User',
+    selectUserPlaceholder: 'Select users to authorize',
+    selectUserRequired: 'Please select a user',
+    // Agent auth
+    addAgentAuth: 'Add Agent Authorization',
+    selectSourceAgent: 'Select Source Agent',
+    selectSourceAgentPlaceholder: 'Select source agents that can access this agent',
+    selectAgentRequired: 'Please select an agent',
+    // View auth
+    groupAuthList: 'Group Authorization List',
+    userAuthList: 'User Authorization List',
+    agentAuthList: 'Agent Authorization List',
+    groupName: 'Group Name',
+    memberCount: 'Members',
+    userName: 'User Name',
+    userIp: 'User IP',
+    grantedAt: 'Granted At',
+    // Actions
+    authorize: 'Authorize',
+    revoke: 'Revoke',
+    revokeConfirm: 'Are you sure to revoke this authorization?',
+    revokeSuccess: 'Revoked successfully',
+    revokeFailed: 'Revoke failed',
+    authSuccess: 'Authorization successful',
+    authFailed: 'Authorization failed',
+    // Tips
+    agentAuthTip: 'After authorization, users can access all services under this agent',
+    agentToAgentTip: 'After authorization, source agent can access all services under target agent',
+    aclSyncWarning: '⚠️ Permission changes will sync to Headscale ACL immediately',
+    aclSyncError: 'ACL sync failed, please try again later',
+    loadAgentsFailed: 'Failed to load agents',
+    loadPermissionsFailed: 'Failed to load permissions'
   },
   group: {
     title: 'Group Management',

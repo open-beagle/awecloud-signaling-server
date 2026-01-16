@@ -45,24 +45,58 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Client/Detail.vue'),
         meta: { requiresAuth: true }
       },
+      // 服务授权
       {
-        path: 'services',
-        redirect: '/services/desktop-auth',
+        path: 'service-auth',
+        redirect: '/service-auth/desktop',
         meta: { requiresAuth: true }
       },
       {
-        path: 'services/desktop-auth',
-        name: 'DesktopAuth',
+        path: 'service-auth/desktop',
+        name: 'ServiceAuthDesktop',
         component: () => import('@/views/Service/DesktopAuth.vue'),
         meta: { requiresAuth: true }
       },
       {
-        path: 'services/agent-auth',
-        name: 'AgentAuth',
+        path: 'service-auth/agent',
+        name: 'ServiceAuthAgent',
         component: () => import('@/views/Service/AgentAuth.vue'),
         meta: { requiresAuth: true }
       },
+      // 代理授权
+      {
+        path: 'agent-auth',
+        redirect: '/agent-auth/desktop',
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'agent-auth/desktop',
+        name: 'AgentAuthDesktop',
+        component: () => import('@/views/AgentAuth/DesktopAuth.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'agent-auth/agent',
+        name: 'AgentAuthAgent',
+        component: () => import('@/views/AgentAuth/AgentAuth.vue'),
+        meta: { requiresAuth: true }
+      },
       // 旧路由重定向
+      {
+        path: 'services',
+        redirect: '/service-auth/desktop',
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'services/desktop-auth',
+        redirect: '/service-auth/desktop',
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'services/agent-auth',
+        redirect: '/service-auth/agent',
+        meta: { requiresAuth: true }
+      },
       {
         path: 'services/stcp',
         redirect: '/services',

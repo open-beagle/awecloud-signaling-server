@@ -69,6 +69,12 @@ func autoMigrate() error {
 		&model.ServiceAgentPermission{},
 		&model.ServiceAgentGroupPermission{},
 
+		// Agent 级别授权模型
+		&model.AgentClientPermission{},
+		&model.AgentClientGroupPermission{},
+		&model.AgentAgentPermission{},
+		&model.AgentAgentGroupPermission{},
+
 		// 审计日志
 		&model.AuditLog{},
 

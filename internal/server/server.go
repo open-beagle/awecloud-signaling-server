@@ -357,6 +357,27 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.POST("/services/:id/agent-groups", permAPI.AddAgentGroup)
 					adminAuthGroup.DELETE("/services/:id/agent-groups/:gid", permAPI.RemoveAgentGroup)
 
+					// Agent 级别授权管理
+					agentPermAPI := api.NewAgentPermissionAPI(s.config)
+					// Agent 授权统计
+					adminAuthGroup.GET("/agents/auth-stats", agentPermAPI.GetAgentAuthStats)
+					// Agent-Client 授权
+					adminAuthGroup.GET("/agents/:id/client-permissions", agentPermAPI.GetClientPermissions)
+					adminAuthGroup.POST("/agents/:id/client-permissions", agentPermAPI.AddClientPermission)
+					adminAuthGroup.DELETE("/agents/:id/client-permissions/:pid", agentPermAPI.RemoveClientPermission)
+					// Agent-ClientGroup 授权
+					adminAuthGroup.GET("/agents/:id/client-group-permissions", agentPermAPI.GetClientGroupPermissions)
+					adminAuthGroup.POST("/agents/:id/client-group-permissions", agentPermAPI.AddClientGroupPermission)
+					adminAuthGroup.DELETE("/agents/:id/client-group-permissions/:pid", agentPermAPI.RemoveClientGroupPermission)
+					// Agent-Agent 授权
+					adminAuthGroup.GET("/agents/:id/agent-permissions", agentPermAPI.GetAgentPermissions)
+					adminAuthGroup.POST("/agents/:id/agent-permissions", agentPermAPI.AddAgentPermission)
+					adminAuthGroup.DELETE("/agents/:id/agent-permissions/:pid", agentPermAPI.RemoveAgentPermission)
+					// Agent-AgentGroup 授权
+					adminAuthGroup.GET("/agents/:id/agent-group-permissions", agentPermAPI.GetAgentGroupPermissions)
+					adminAuthGroup.POST("/agents/:id/agent-group-permissions", agentPermAPI.AddAgentGroupPermission)
+					adminAuthGroup.DELETE("/agents/:id/agent-group-permissions/:pid", agentPermAPI.RemoveAgentGroupPermission)
+
 					// 分组管理
 					groupAPI := api.NewGroupAPI(s.config)
 					// 用户分组

@@ -61,10 +61,12 @@ export default {
   },
   menu: {
     agents: '代理管理',
-    serviceManagement: '服务管理',
-    serviceList: '服务列表',
-    desktopAuth: '桌面授权',
+    serviceAuth: '服务授权',
+    serviceAuthDesktop: '桌面',
+    serviceAuthAgent: '代理',
     agentAuth: '代理授权',
+    agentAuthDesktop: '桌面',
+    agentAuthAgent: '代理',
     clients: '客户管理',
     groups: '分组管理',
     clientGroups: '用户分组',
@@ -411,6 +413,69 @@ export default {
     aclSyncWarning: '⚠️ 权限变更将同步到 Headscale ACL，立即生效',
     aclSyncError: 'ACL 同步失败，请稍后重试',
     loadServicesFailed: '加载服务列表失败',
+    loadPermissionsFailed: '加载权限列表失败'
+  },
+  agentLevelAuth: {
+    // 桌面授权页面
+    desktopTitle: '代理授权 - 桌面',
+    // 代理授权页面
+    agentTitle: '代理授权 - 代理',
+    // 通用
+    agentName: '代理名称',
+    agentIp: '代理 IP',
+    serviceCount: '服务数',
+    groupCount: '分组',
+    userCount: '用户',
+    agentCount: '代理',
+    searchPlaceholder: '搜索代理名称',
+    // 添加授权
+    addGroup: '分组',
+    addUser: '用户',
+    addAgent: '代理',
+    agent: '代理',
+    targetAgent: '目标代理',
+    sourceAgentName: '源代理',
+    sourceAgentIp: '源代理 IP',
+    // 分组授权
+    addGroupAuth: '添加分组授权',
+    selectGroup: '选择分组',
+    selectGroupPlaceholder: '请选择要授权的用户分组',
+    selectAgentGroupPlaceholder: '请选择要授权的代理分组',
+    selectGroupRequired: '请选择分组',
+    members: '成员',
+    // 用户授权
+    addUserAuth: '添加用户授权',
+    selectUser: '选择用户',
+    selectUserPlaceholder: '请选择要授权的用户',
+    selectUserRequired: '请选择用户',
+    // 代理授权
+    addAgentAuth: '添加代理授权',
+    selectSourceAgent: '选择源代理',
+    selectSourceAgentPlaceholder: '请选择可访问此代理的源代理',
+    selectAgentRequired: '请选择代理',
+    // 查看授权
+    groupAuthList: '分组授权列表',
+    userAuthList: '用户授权列表',
+    agentAuthList: '代理授权列表',
+    groupName: '分组名称',
+    memberCount: '成员数',
+    userName: '用户名',
+    userIp: '用户 IP',
+    grantedAt: '授权时间',
+    // 操作
+    authorize: '授权',
+    revoke: '撤销',
+    revokeConfirm: '确认撤销此授权吗？',
+    revokeSuccess: '撤销成功',
+    revokeFailed: '撤销失败',
+    authSuccess: '授权成功',
+    authFailed: '授权失败',
+    // 提示
+    agentAuthTip: '授权后，用户可访问此代理下的所有服务',
+    agentToAgentTip: '授权后，源代理可访问目标代理下的所有服务',
+    aclSyncWarning: '⚠️ 权限变更将同步到 Headscale ACL，立即生效',
+    aclSyncError: 'ACL 同步失败，请稍后重试',
+    loadAgentsFailed: '加载代理列表失败',
     loadPermissionsFailed: '加载权限列表失败'
   },
   group: {

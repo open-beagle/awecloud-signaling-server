@@ -263,6 +263,95 @@ func (s *ACLSyncService) generateACLPolicy() (*ACLPolicy, error) {
 		}
 	}
 
+	// ========== Agent 级别授权规则 ==========
+	// 3. Agent-Client 授权（Agent 级别）
+	var agentClientPerms []model.AgentClientPermission
+	db.DB.Preload("Agent").Preload("Client").Find(&agentClientPerms)
+
+	for _, perm := range agentClientPerms {
+		if perm.Agent == nil || perm.Client == nil {
+			continue
+		}
+
+		srcTag := fmt.Sprintf("tag:desktop-%s", perm.Client.Name)
+		dstTag := fmt.Sprintf("tag:agent-%s", perm.Agent.Name)
+		usedTags[srcTag] = true
+		usedTags[dstTag] = true
+
+		rule := ACLRule{
+			Action: "accept",
+			Src:    []string{srcTag},
+			Dst:    []string{fmt.Sprintf("%s:*", dstTag)},
+		}
+		policy.ACLs = append(policy.ACLs, rule)
+	}
+
+	// 4. Agent-ClientGroup 授权（Agent 级别）
+	var agentClientGroupPerms []model.AgentClientGroupPermission
+	db.DB.Preload("Agent").Preload("Group").Find(&agentClientGroupPerms)
+
+	for _, perm := range agentClientGroupPerms {
+		if perm.Agent == nil || perm.Group == nil {
+			continue
+		}
+
+		srcTag := fmt.Sprintf("tag:desktop-group-%s", perm.Group.Name)
+		dstTag := fmt.Sprintf("tag:agent-%s", perm.Agent.Name)
+		usedTags[srcTag] = true
+		usedTags[dstTag] = true
+
+		rule := ACLRule{
+			Action: "accept",
+			Src:    []string{srcTag},
+			Dst:    []string{fmt.Sprintf("%s:*", dstTag)},
+		}
+		policy.ACLs = append(policy.ACLs, rule)
+	}
+
+	// 5. Agent-Agent 授权（Agent 级别）
+	var agentAgentPerms []model.AgentAgentPermission
+	db.DB.Preload("TargetAgent").Preload("SourceAgent").Find(&agentAgentPerms)
+
+	for _, perm := range agentAgentPerms {
+		if perm.TargetAgent == nil || perm.SourceAgent == nil {
+			continue
+		}
+
+		srcTag := fmt.Sprintf("tag:agent-%s", perm.SourceAgent.Name)
+		dstTag := fmt.Sprintf("tag:agent-%s", perm.TargetAgent.Name)
+		usedTags[srcTag] = true
+		usedTags[dstTag] = true
+
+		rule := ACLRule{
+			Action: "accept",
+			Src:    []string{srcTag},
+			Dst:    []string{fmt.Sprintf("%s:*", dstTag)},
+		}
+		policy.ACLs = append(policy.ACLs, rule)
+	}
+
+	// 6. Agent-AgentGroup 授权（Agent 级别）
+	var agentAgentGroupPerms []model.AgentAgentGroupPermission
+	db.DB.Preload("TargetAgent").Preload("Group").Find(&agentAgentGroupPerms)
+
+	for _, perm := range agentAgentGroupPerms {
+		if perm.TargetAgent == nil || perm.Group == nil {
+			continue
+		}
+
+		srcTag := fmt.Sprintf("tag:agent-group-%s", perm.Group.Name)
+		dstTag := fmt.Sprintf("tag:agent-%s", perm.TargetAgent.Name)
+		usedTags[srcTag] = true
+		usedTags[dstTag] = true
+
+		rule := ACLRule{
+			Action: "accept",
+			Src:    []string{srcTag},
+			Dst:    []string{fmt.Sprintf("%s:*", dstTag)},
+		}
+		policy.ACLs = append(policy.ACLs, rule)
+	}
+
 	// 生成 tagOwners - Headscale 要求 ACL 中使用的 Tag 必须在 tagOwners 中定义
 	// 使用空数组表示由 Headscale 管理员管理
 	for tag := range usedTags {

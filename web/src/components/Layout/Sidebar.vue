@@ -16,16 +16,28 @@
           <span>{{ t('menu.agents') }}</span>
         </template>
       </el-menu-item>
-      <el-sub-menu index="services">
+      <el-sub-menu index="service-auth">
         <template #title>
           <el-icon><Connection /></el-icon>
-          <span>{{ t('menu.serviceManagement') }}</span>
+          <span>{{ t('menu.serviceAuth') }}</span>
         </template>
-        <el-menu-item index="/services/desktop-auth">
-          {{ t('menu.desktopAuth') }}
+        <el-menu-item index="/service-auth/desktop">
+          {{ t('menu.serviceAuthDesktop') }}
         </el-menu-item>
-        <el-menu-item index="/services/agent-auth">
-          {{ t('menu.agentAuth') }}
+        <el-menu-item index="/service-auth/agent">
+          {{ t('menu.serviceAuthAgent') }}
+        </el-menu-item>
+      </el-sub-menu>
+      <el-sub-menu index="agent-auth">
+        <template #title>
+          <el-icon><Key /></el-icon>
+          <span>{{ t('menu.agentAuth') }}</span>
+        </template>
+        <el-menu-item index="/agent-auth/desktop">
+          {{ t('menu.agentAuthDesktop') }}
+        </el-menu-item>
+        <el-menu-item index="/agent-auth/agent">
+          {{ t('menu.agentAuthAgent') }}
         </el-menu-item>
       </el-sub-menu>
       <el-menu-item index="/clients">
@@ -107,6 +119,18 @@ const toggleSidebar = () => {
   flex-direction: column;
   background-color: #ffffff;
   border-right: 1px solid #e4e7ed;
+  overflow: hidden;
+}
+
+.el-menu {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 隐藏滚动条但保持滚动功能 */
+.el-menu::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .el-menu {
