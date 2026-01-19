@@ -190,9 +190,25 @@ func (f *FRPManager) runFRPClient() error {
 	} else if serverPort > 0 {
 		// 使用Server注册响应中的端口
 		port = serverPort
-		serverAddr = f.config.Server.Address
+		// 从配置地址中提取主机名（去掉协议前缀）
+		configAddr := f.config.Server.Address
+		if strings.Contains(configAddr, "://") {
+			parsedConfigURL, err := url.Parse(configAddr)
+			if err != nil {
+				return fmt.Errorf("解析配置地址失败: %w", err)
+			}
+			serverAddr = parsedConfigURL.Hostname()
+			// 根据协议设置 FRP 协议
+			if parsedConfigURL.Scheme == "https" {
+				protocol = "wss"
+			} else {
+				protocol = "websocket"
+			}
+		} else {
+			serverAddr = configAddr
+			protocol = "websocket"
+		}
 		websocketPath = constants.DefaultWebSocketPath
-		protocol = "websocket"
 	} else {
 		return fmt.Errorf("未获取到隧道服务器连接信息")
 	}
