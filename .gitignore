@@ -59,3 +59,4 @@ deployments/kubernetes/*.local.yaml
 
 # Desktop client (independent git repository)
 /.kiro/spec
+/desktop
