@@ -29,20 +29,21 @@ type VisitorResponse struct {
 // CreateVisitorRequest 创建 Visitor 请求
 type CreateVisitorRequest struct {
 	Name            string `json:"name" binding:"required"`
-	AgentID         int64  `json:"agent_id" binding:"required"`
+	UserID          int64  `json:"user_id" binding:"required"`
 	ListenPort      int    `json:"listen_port" binding:"required"`
 	TargetServiceID int64  `json:"target_service_id" binding:"required"`
 }
 
 // List 获取 Visitor 列表
 func (v *VisitorAPI) List(c *gin.Context) {
+	ctx := c.Request.Context()
 	var visitors []model.Visitor
 
-	query := db.DB.Order("created_at DESC")
+	query := db.DB.WithContext(ctx).Order("created_at DESC")
 
-	// 支持按 Agent 筛选
-	if agentID := c.Query("agent_id"); agentID != "" {
-		query = query.Where("agent_id = ?", agentID)
+	// 支持按 User 筛选
+	if userID := c.Query("user_id"); userID != "" {
+		query = query.Where("user_id = ?", userID)
 	}
 
 	if err := query.Find(&visitors).Error; err != nil {
@@ -61,10 +62,10 @@ func (v *VisitorAPI) List(c *gin.Context) {
 		}
 		// 查询目标服务信息
 		var targetService model.ProxyService
-		if err := db.DB.Preload("Agent").First(&targetService, visitor.TargetServiceID).Error; err == nil {
+		if err := db.DB.WithContext(ctx).Preload("User").First(&targetService, visitor.TargetServiceID).Error; err == nil {
 			result[i].TargetServiceName = targetService.Name
-			if targetService.Agent != nil {
-				result[i].TargetAgentName = targetService.Agent.Name
+			if targetService.User != nil {
+				result[i].TargetUserName = targetService.User.Name
 			}
 		}
 	}
@@ -77,6 +78,7 @@ func (v *VisitorAPI) List(c *gin.Context) {
 
 // Get 获取单个 Visitor
 func (v *VisitorAPI) Get(c *gin.Context) {
+	ctx := c.Request.Context()
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, VisitorResponse{
@@ -87,7 +89,7 @@ func (v *VisitorAPI) Get(c *gin.Context) {
 	}
 
 	var visitor model.Visitor
-	if err := db.DB.First(&visitor, id).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&visitor, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, VisitorResponse{
 			Success: false,
 			Message: "Visitor不存在",
@@ -100,10 +102,10 @@ func (v *VisitorAPI) Get(c *gin.Context) {
 		Visitor: visitor,
 	}
 	var targetService model.ProxyService
-	if err := db.DB.Preload("Agent").First(&targetService, visitor.TargetServiceID).Error; err == nil {
+	if err := db.DB.WithContext(ctx).Preload("User").First(&targetService, visitor.TargetServiceID).Error; err == nil {
 		result.TargetServiceName = targetService.Name
-		if targetService.Agent != nil {
-			result.TargetAgentName = targetService.Agent.Name
+		if targetService.User != nil {
+			result.TargetUserName = targetService.User.Name
 		}
 	}
 
@@ -115,6 +117,7 @@ func (v *VisitorAPI) Get(c *gin.Context) {
 
 // Create 创建 Visitor
 func (v *VisitorAPI) Create(c *gin.Context) {
+	ctx := c.Request.Context()
 	var req CreateVisitorRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, VisitorResponse{
@@ -124,19 +127,19 @@ func (v *VisitorAPI) Create(c *gin.Context) {
 		return
 	}
 
-	// 验证 Agent 存在
-	var agent model.Agent
-	if err := db.DB.First(&agent, req.AgentID).Error; err != nil {
+	// 验证 User 存在且为 Agent 角色
+	var user model.User
+	if err := db.DB.WithContext(ctx).Where("id = ? AND role = ?", req.UserID, model.UserRoleAgent).First(&user).Error; err != nil {
 		c.JSON(http.StatusBadRequest, VisitorResponse{
 			Success: false,
-			Message: "Agent不存在",
+			Message: "Agent 用户不存在",
 		})
 		return
 	}
 
 	// 验证目标服务存在
 	var targetService model.ProxyService
-	if err := db.DB.First(&targetService, req.TargetServiceID).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&targetService, req.TargetServiceID).Error; err != nil {
 		c.JSON(http.StatusBadRequest, VisitorResponse{
 			Success: false,
 			Message: "目标服务不存在",
@@ -146,7 +149,7 @@ func (v *VisitorAPI) Create(c *gin.Context) {
 
 	// 检查端口是否已被占用
 	var existingVisitor model.Visitor
-	if err := db.DB.Where("agent_id = ? AND listen_port = ?", req.AgentID, req.ListenPort).First(&existingVisitor).Error; err == nil {
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND listen_port = ?", req.UserID, req.ListenPort).First(&existingVisitor).Error; err == nil {
 		c.JSON(http.StatusBadRequest, VisitorResponse{
 			Success: false,
 			Message: "端口已被占用",
@@ -154,22 +157,22 @@ func (v *VisitorAPI) Create(c *gin.Context) {
 		return
 	}
 
-	// 获取目标服务的 Tailscale 地址
-	var targetAgent model.Agent
-	db.DB.First(&targetAgent, targetService.AgentID)
-	targetAddr := targetAgent.IP + ":" + strings.Split(targetService.SourceAddr, ":")[1]
+	// 获取目标服务所属 Agent 的 Node IP
+	var targetNode model.Node
+	db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", targetService.UserID, model.NodeTypeAgent).First(&targetNode)
+	targetAddr := targetNode.IP + ":" + strings.Split(targetService.SourceAddr, ":")[1]
 
 	// 创建 Visitor
 	visitor := &model.Visitor{
 		Name:            req.Name,
-		AgentID:         req.AgentID,
+		UserID:          req.UserID,
 		ListenPort:      req.ListenPort,
 		TargetServiceID: req.TargetServiceID,
 		TargetAddr:      targetAddr,
 		Status:          model.VisitorStatusStopped,
 	}
 
-	if err := db.DB.Create(visitor).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Create(visitor).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, VisitorResponse{
 			Success: false,
 			Message: "创建失败: " + err.Error(),
@@ -186,6 +189,7 @@ func (v *VisitorAPI) Create(c *gin.Context) {
 
 // Delete 删除 Visitor
 func (v *VisitorAPI) Delete(c *gin.Context) {
+	ctx := c.Request.Context()
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, VisitorResponse{
@@ -197,7 +201,7 @@ func (v *VisitorAPI) Delete(c *gin.Context) {
 
 	// 查询 Visitor
 	var visitor model.Visitor
-	if err := db.DB.First(&visitor, id).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&visitor, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, VisitorResponse{
 			Success: false,
 			Message: "Visitor不存在",
@@ -208,7 +212,7 @@ func (v *VisitorAPI) Delete(c *gin.Context) {
 	// TODO: 如果正在运行，先发送停止命令给 Agent
 
 	// 删除 Visitor
-	if err := db.DB.Delete(&visitor).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Delete(&visitor).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, VisitorResponse{
 			Success: false,
 			Message: "删除失败",
@@ -224,6 +228,7 @@ func (v *VisitorAPI) Delete(c *gin.Context) {
 
 // Start 启动 Visitor
 func (v *VisitorAPI) Start(c *gin.Context) {
+	ctx := c.Request.Context()
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, VisitorResponse{
@@ -235,7 +240,7 @@ func (v *VisitorAPI) Start(c *gin.Context) {
 
 	// 查询 Visitor
 	var visitor model.Visitor
-	if err := db.DB.First(&visitor, id).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&visitor, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, VisitorResponse{
 			Success: false,
 			Message: "Visitor不存在",
@@ -243,18 +248,18 @@ func (v *VisitorAPI) Start(c *gin.Context) {
 		return
 	}
 
-	// 检查 Agent 是否在线
-	var agent model.Agent
-	if err := db.DB.First(&agent, visitor.AgentID).Error; err != nil {
+	// 检查 User 的 Agent Node 是否在线
+	var node model.Node
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", visitor.UserID, model.NodeTypeAgent).First(&node).Error; err != nil {
 		c.JSON(http.StatusBadRequest, VisitorResponse{
 			Success: false,
-			Message: "Agent不存在",
+			Message: "Agent 设备不存在",
 		})
 		return
 	}
 
-	// 检查 Agent 是否有 Tailscale IP（表示在线）
-	if agent.IP == "" {
+	// 检查 Node 是否有 Tailscale IP（表示在线）
+	if node.IP == "" {
 		c.JSON(http.StatusBadRequest, VisitorResponse{
 			Success: false,
 			Message: "Agent离线，无法启动",
@@ -266,7 +271,7 @@ func (v *VisitorAPI) Start(c *gin.Context) {
 
 	// 更新状态
 	visitor.Status = model.VisitorStatusRunning
-	db.DB.Save(&visitor)
+	db.DB.WithContext(ctx).Save(&visitor)
 
 	c.JSON(http.StatusOK, VisitorResponse{
 		Success: true,
@@ -276,6 +281,7 @@ func (v *VisitorAPI) Start(c *gin.Context) {
 
 // Stop 停止 Visitor
 func (v *VisitorAPI) Stop(c *gin.Context) {
+	ctx := c.Request.Context()
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, VisitorResponse{
@@ -287,7 +293,7 @@ func (v *VisitorAPI) Stop(c *gin.Context) {
 
 	// 查询 Visitor
 	var visitor model.Visitor
-	if err := db.DB.First(&visitor, id).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&visitor, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, VisitorResponse{
 			Success: false,
 			Message: "Visitor不存在",
@@ -299,7 +305,7 @@ func (v *VisitorAPI) Stop(c *gin.Context) {
 
 	// 更新状态
 	visitor.Status = model.VisitorStatusStopped
-	db.DB.Save(&visitor)
+	db.DB.WithContext(ctx).Save(&visitor)
 
 	c.JSON(http.StatusOK, VisitorResponse{
 		Success: true,

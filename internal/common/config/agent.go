@@ -8,12 +8,13 @@ import (
 )
 
 type AgentConfig struct {
-	Agent     AgentSection   `toml:"agent"`
-	Server    ServerConnect  `toml:"server"`
-	Tailscale TailscaleAgent `toml:"tailscale"`
-	Visitor   VisitorSection `toml:"visitor"`
-	Health    HealthSection  `toml:"health"`
-	Log       LogConfig      `toml:"log"`
+	Agent     AgentSection     `toml:"agent"`
+	Server    ServerConnect    `toml:"server"`
+	Tunnel    TunnelSection    `toml:"tunnel"`
+	Visitor   VisitorSection   `toml:"visitor"`
+	Health    HealthSection    `toml:"health"`
+	Log       LogConfig        `toml:"log"`
+	Telemetry TelemetrySection `toml:"telemetry"`
 }
 
 type HealthSection struct {
@@ -30,11 +31,11 @@ type ServerConnect struct {
 	PublicURL string `toml:"public_url"` // FRP公网地址（可选），如果配置则忽略Server返回的地址
 }
 
-// TailscaleAgent Agent 端 Tailscale 配置
-type TailscaleAgent struct {
-	StateDir          string `toml:"state_dir"`           // Tailscale 状态存储目录，支持 ~ 扩展
+// TunnelSection Agent 端隧道配置
+type TunnelSection struct {
+	StateDir          string `toml:"state_dir"`           // 隧道状态存储目录，支持 ~ 扩展
 	StateSyncInterval int    `toml:"state_sync_interval"` // 状态同步到 Server 的间隔（分钟），默认 5
-	EnableSSH         bool   `toml:"enable_ssh"`          // 是否启用 Tailscale SSH，默认 false
+	EnableSSH         bool   `toml:"enable_ssh"`          // 是否启用 SSH，默认 false
 }
 
 // VisitorSection Visitor 配置（服务访问）
@@ -85,17 +86,17 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	if publicURL := os.Getenv("AGENT_PUBLIC_URL"); publicURL != "" {
 		cfg.Server.PublicURL = publicURL
 	}
-	if stateDir := os.Getenv("TAILSCALE_STATE_DIR"); stateDir != "" {
-		cfg.Tailscale.StateDir = stateDir
+	if stateDir := os.Getenv("TUNNEL_STATE_DIR"); stateDir != "" {
+		cfg.Tunnel.StateDir = stateDir
 	}
-	if syncInterval := os.Getenv("TAILSCALE_STATE_SYNC_INTERVAL"); syncInterval != "" {
+	if syncInterval := os.Getenv("TUNNEL_STATE_SYNC_INTERVAL"); syncInterval != "" {
 		// 尝试解析为整数
 		if interval, err := strconv.Atoi(syncInterval); err == nil {
-			cfg.Tailscale.StateSyncInterval = interval
+			cfg.Tunnel.StateSyncInterval = interval
 		}
 	}
-	if enableSSH := os.Getenv("TAILSCALE_ENABLE_SSH"); enableSSH != "" {
-		cfg.Tailscale.EnableSSH = enableSSH == "true" || enableSSH == "1"
+	if enableSSH := os.Getenv("TUNNEL_ENABLE_SSH"); enableSSH != "" {
+		cfg.Tunnel.EnableSSH = enableSSH == "true" || enableSSH == "1"
 	}
 
 	// 设置默认值
@@ -108,11 +109,30 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	if cfg.Server.Address == "" {
 		cfg.Server.Address = "http://localhost:8080"
 	}
-	if cfg.Tailscale.StateDir == "" {
-		cfg.Tailscale.StateDir = "~/.config/awecloud-signaling/"
+	if cfg.Tunnel.StateDir == "" {
+		cfg.Tunnel.StateDir = "~/.config/awecloud-signaling/"
 	}
-	if cfg.Tailscale.StateSyncInterval == 0 {
-		cfg.Tailscale.StateSyncInterval = 5
+	if cfg.Tunnel.StateSyncInterval == 0 {
+		cfg.Tunnel.StateSyncInterval = 5
+	}
+
+	// Telemetry 默认值
+	if cfg.Telemetry.ServiceName == "" {
+		cfg.Telemetry.ServiceName = "signaling-agent"
+	}
+	if cfg.Telemetry.Namespace == "" {
+		cfg.Telemetry.Namespace = "default"
+	}
+
+	// Telemetry 环境变量覆盖
+	if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
+		cfg.Telemetry.Endpoint = endpoint
+	}
+	if serviceName := os.Getenv("OTEL_SERVICE_NAME"); serviceName != "" {
+		cfg.Telemetry.ServiceName = serviceName
+	}
+	if namespace := os.Getenv("OTEL_SERVICE_NAMESPACE"); namespace != "" {
+		cfg.Telemetry.Namespace = namespace
 	}
 
 	return &cfg, nil

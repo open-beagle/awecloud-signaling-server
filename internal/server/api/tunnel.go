@@ -116,20 +116,21 @@ func (a *TunnelAPI) ListTunnelUsers(c *gin.Context) {
 		}
 	}
 
-	// 查询本地 Agent 和 Client
-	var agents []model.Agent
-	var clients []model.Client
-	db.DB.Find(&agents)
-	db.DB.Find(&clients)
+	// 查询本地 User（Agent 和 Client 角色）
+	var agentUsers []model.User
+	var clientUsers []model.User
+	db.DB.WithContext(ctx).Where("role = ?", model.UserRoleAgent).Find(&agentUsers)
+	db.DB.WithContext(ctx).Where("role = ?", model.UserRoleClient).Find(&clientUsers)
 
-	agentMap := make(map[string]*model.Agent)
-	for i := range agents {
-		agentMap["agent-"+agents[i].Name] = &agents[i]
+	// Agent User 的 Headscale User 命名规则是 agent-{user.name}
+	agentMap := make(map[string]*model.User)
+	for i := range agentUsers {
+		agentMap["agent-"+agentUsers[i].Name] = &agentUsers[i]
 	}
-	// Client 的 User 命名规则是 desktop-{client.name}
-	clientMap := make(map[string]*model.Client)
-	for i := range clients {
-		clientMap["desktop-"+clients[i].Name] = &clients[i]
+	// Client User 的 Headscale User 命名规则是 desktop-{user.name}
+	clientMap := make(map[string]*model.User)
+	for i := range clientUsers {
+		clientMap["desktop-"+clientUsers[i].Name] = &clientUsers[i]
 	}
 
 	// 构建结果
@@ -144,18 +145,17 @@ func (a *TunnelAPI) ListTunnelUsers(c *gin.Context) {
 		}
 
 		// 判断类型和关联实体
-		// User 命名规则: agent-{agent.name} 或 desktop-{client.name}
 		if strings.HasPrefix(user.Name, "agent-") {
 			item.Type = "agent"
-			if agent, ok := agentMap[user.Name]; ok {
-				item.LinkedEntity = agent.Name
-				item.LinkedID = agent.ID
+			if u, ok := agentMap[user.Name]; ok {
+				item.LinkedEntity = u.Name
+				item.LinkedID = u.ID
 			}
 		} else if strings.HasPrefix(user.Name, "desktop-") {
 			item.Type = "desktop"
-			if client, ok := clientMap[user.Name]; ok {
-				item.LinkedEntity = client.Name
-				item.LinkedID = client.ID
+			if u, ok := clientMap[user.Name]; ok {
+				item.LinkedEntity = u.Name
+				item.LinkedID = u.ID
 			}
 		} else {
 			item.Type = "orphan"
@@ -241,22 +241,21 @@ func (a *TunnelAPI) GetTunnelUser(c *gin.Context) {
 	}
 
 	// 判断类型和关联实体
-	// User 命名规则: agent-{agent.name} 或 desktop-{client.name}
 	if strings.HasPrefix(targetUser.Name, "agent-") {
 		targetUser.Type = "agent"
-		agentName := strings.TrimPrefix(targetUser.Name, "agent-")
-		var agent model.Agent
-		if err := db.DB.Where("name = ?", agentName).First(&agent).Error; err == nil {
-			targetUser.LinkedEntity = agent.Name
-			targetUser.LinkedID = agent.ID
+		userName := strings.TrimPrefix(targetUser.Name, "agent-")
+		var user model.User
+		if err := db.DB.WithContext(ctx).Where("name = ? AND role = ?", userName, model.UserRoleAgent).First(&user).Error; err == nil {
+			targetUser.LinkedEntity = user.Name
+			targetUser.LinkedID = user.ID
 		}
 	} else if strings.HasPrefix(targetUser.Name, "desktop-") {
 		targetUser.Type = "desktop"
-		clientName := strings.TrimPrefix(targetUser.Name, "desktop-")
-		var client model.Client
-		if err := db.DB.Where("name = ?", clientName).First(&client).Error; err == nil {
-			targetUser.LinkedEntity = client.Name
-			targetUser.LinkedID = client.ID
+		userName := strings.TrimPrefix(targetUser.Name, "desktop-")
+		var user model.User
+		if err := db.DB.WithContext(ctx).Where("name = ? AND role = ?", userName, model.UserRoleClient).First(&user).Error; err == nil {
+			targetUser.LinkedEntity = user.Name
+			targetUser.LinkedID = user.ID
 		}
 	} else {
 		targetUser.Type = "orphan"
@@ -316,11 +315,8 @@ func (a *TunnelAPI) UpdateTunnelUser(c *gin.Context) {
 		return
 	}
 
-	// Headscale 的 RenameUser 实际上是修改 display_name
-	// 注意：当前 Headscale 客户端可能不支持直接修改 display_name
-	// 这里记录审计日志
 	logger.Infof("更新隧道 User: id=%d, display_name=%s", id, req.DisplayName)
-	recordAuditLog(c, model.ActionUpdateTunnelUser, "tunnel_user", strconv.FormatUint(id, 10), userName, map[string]interface{}{
+	recordAuditLog(ctx, c, model.ActionUpdateTunnelUser, "tunnel_user", strconv.FormatUint(id, 10), userName, map[string]interface{}{
 		"display_name": req.DisplayName,
 	})
 
@@ -386,29 +382,30 @@ func (a *TunnelAPI) DeleteTunnelUser(c *gin.Context) {
 
 	// 同步删除本地关联实体
 	if strings.HasPrefix(userName, "agent-") {
-		agentName := strings.TrimPrefix(userName, "agent-")
-		var agent model.Agent
-		if err := db.DB.Where("name = ?", agentName).First(&agent).Error; err == nil {
+		localUserName := strings.TrimPrefix(userName, "agent-")
+		var user model.User
+		if err := db.DB.WithContext(ctx).Where("name = ? AND role = ?", localUserName, model.UserRoleAgent).First(&user).Error; err == nil {
 			// 删除相关服务和权限
-			db.DB.Where("agent_id = ?", agent.ID).Delete(&model.ProxyService{})
-			db.DB.Where("agent_id = ?", agent.ID).Delete(&model.AgentGroupMember{})
-			db.DB.Delete(&agent)
-			logger.Infof("同步删除本地 Agent: %s", agentName)
+			db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.ProxyService{})
+			db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.GroupMember{})
+			db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.Node{})
+			db.DB.WithContext(ctx).Delete(&user)
+			logger.Infof("同步删除本地 Agent User: %s", localUserName)
 		}
-	} else if strings.HasPrefix(userName, "client-") {
-		clientName := strings.TrimPrefix(userName, "client-")
-		var client model.Client
-		if err := db.DB.Where("name = ?", clientName).First(&client).Error; err == nil {
-			// 删除相关 Desktop 和权限
-			db.DB.Where("client_id = ?", client.ID).Delete(&model.Desktop{})
-			db.DB.Where("client_id = ?", client.ID).Delete(&model.ClientGroupMember{})
-			db.DB.Delete(&client)
-			logger.Infof("同步删除本地 Client: %s", clientName)
+	} else if strings.HasPrefix(userName, "desktop-") {
+		localUserName := strings.TrimPrefix(userName, "desktop-")
+		var user model.User
+		if err := db.DB.WithContext(ctx).Where("name = ? AND role = ?", localUserName, model.UserRoleClient).First(&user).Error; err == nil {
+			// 删除相关 Node 和权限
+			db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.Node{})
+			db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.GroupMember{})
+			db.DB.WithContext(ctx).Delete(&user)
+			logger.Infof("同步删除本地 Client User: %s", localUserName)
 		}
 	}
 
 	logger.Infof("删除隧道 User: id=%d, name=%s", id, userName)
-	recordAuditLog(c, model.ActionDeleteTunnelUser, "tunnel_user", strconv.FormatUint(id, 10), userName, nil)
+	recordAuditLog(ctx, c, model.ActionDeleteTunnelUser, "tunnel_user", strconv.FormatUint(id, 10), userName, nil)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
 }
@@ -625,17 +622,19 @@ func (a *TunnelAPI) GetTunnelNode(c *gin.Context) {
 
 		// 判断关联类型
 		if strings.HasPrefix(node.User.Name, "agent-") {
-			agentName := strings.TrimPrefix(node.User.Name, "agent-")
-			var agent model.Agent
-			if err := db.DB.Where("name = ? AND node_id = ?", agentName, id).First(&agent).Error; err == nil {
+			localUserName := strings.TrimPrefix(node.User.Name, "agent-")
+			var localNode model.Node
+			if err := db.DB.WithContext(ctx).Joins("JOIN user ON user.id = node.user_id").
+				Where("user.name = ? AND user.role = ? AND node.id = ?", localUserName, model.UserRoleAgent, id).
+				First(&localNode).Error; err == nil {
 				detail.LinkedType = "agent"
-				detail.LinkedID = agent.ID
+				detail.LinkedID = localNode.ID
 			}
-		} else if strings.HasPrefix(node.User.Name, "client-") {
-			var desktop model.Desktop
-			if err := db.DB.Where("id = ?", id).First(&desktop).Error; err == nil {
+		} else if strings.HasPrefix(node.User.Name, "desktop-") {
+			var localNode model.Node
+			if err := db.DB.WithContext(ctx).Where("id = ? AND type = ?", id, model.NodeTypeDesktop).First(&localNode).Error; err == nil {
 				detail.LinkedType = "desktop"
-				detail.LinkedID = desktop.ID
+				detail.LinkedID = localNode.ID
 			}
 		}
 	}
@@ -677,7 +676,7 @@ func (a *TunnelAPI) UpdateTunnelNode(c *gin.Context) {
 	}
 
 	logger.Infof("更新隧道 Node: id=%d, given_name=%s", id, req.GivenName)
-	recordAuditLog(c, model.ActionUpdateTunnelNode, "tunnel_node", strconv.FormatUint(id, 10), req.GivenName, nil)
+	recordAuditLog(ctx, c, model.ActionUpdateTunnelNode, "tunnel_node", strconv.FormatUint(id, 10), req.GivenName, nil)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("更新成功", nil))
 }
@@ -723,7 +722,7 @@ func (a *TunnelAPI) UpdateTunnelNodeTags(c *gin.Context) {
 	}
 
 	logger.Infof("更新隧道 Node Tags: id=%d, tags=%v", id, req.Tags)
-	recordAuditLog(c, model.ActionUpdateTunnelTags, "tunnel_node", strconv.FormatUint(id, 10), "", map[string]interface{}{
+	recordAuditLog(ctx, c, model.ActionUpdateTunnelTags, "tunnel_node", strconv.FormatUint(id, 10), "", map[string]interface{}{
 		"tags": req.Tags,
 	})
 
@@ -762,15 +761,17 @@ func (a *TunnelAPI) DeleteTunnelNode(c *gin.Context) {
 	// 同步删除本地关联实体
 	if node.User != nil {
 		if strings.HasPrefix(node.User.Name, "agent-") {
-			// 清空 Agent 的 node_id 和 ip
-			agentName := strings.TrimPrefix(node.User.Name, "agent-")
-			db.DB.Model(&model.Agent{}).Where("name = ? AND node_id = ?", agentName, id).
-				Updates(map[string]interface{}{"node_id": 0, "ip": ""})
-			logger.Infof("清空 Agent node_id: %s", agentName)
-		} else if strings.HasPrefix(node.User.Name, "client-") {
-			// 删除 Desktop 记录
-			db.DB.Where("id = ?", id).Delete(&model.Desktop{})
-			logger.Infof("删除 Desktop: node_id=%d", id)
+			// 清空 Agent Node 的 ip
+			localUserName := strings.TrimPrefix(node.User.Name, "agent-")
+			db.DB.WithContext(ctx).Model(&model.Node{}).
+				Joins("JOIN user ON user.id = node.user_id").
+				Where("user.name = ? AND user.role = ? AND node.id = ?", localUserName, model.UserRoleAgent, id).
+				Updates(map[string]interface{}{"ip": ""})
+			logger.Infof("清空 Agent Node IP: user=%s, node_id=%d", localUserName, id)
+		} else if strings.HasPrefix(node.User.Name, "desktop-") {
+			// 删除 Desktop Node 记录
+			db.DB.WithContext(ctx).Where("id = ? AND type = ?", id, model.NodeTypeDesktop).Delete(&model.Node{})
+			logger.Infof("删除 Desktop Node: node_id=%d", id)
 		}
 	}
 
@@ -780,7 +781,7 @@ func (a *TunnelAPI) DeleteTunnelNode(c *gin.Context) {
 	}
 
 	logger.Infof("删除隧道 Node: id=%d, name=%s", id, nodeName)
-	recordAuditLog(c, model.ActionDeleteTunnelNode, "tunnel_node", strconv.FormatUint(id, 10), nodeName, nil)
+	recordAuditLog(ctx, c, model.ActionDeleteTunnelNode, "tunnel_node", strconv.FormatUint(id, 10), nodeName, nil)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
 }
@@ -788,7 +789,7 @@ func (a *TunnelAPI) DeleteTunnelNode(c *gin.Context) {
 // TagOption Tag 选项
 type TagOption struct {
 	Tag   string `json:"tag"`
-	Type  string `json:"type"`  // client-group / agent-group
+	Type  string `json:"type"`  // group
 	Count int    `json:"count"` // 使用次数
 }
 
@@ -802,11 +803,9 @@ func (a *TunnelAPI) GetTunnelTags(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	// 从分组表生成 Tags
-	var clientGroups []model.ClientGroup
-	var agentGroups []model.AgentGroup
-	db.DB.Find(&clientGroups)
-	db.DB.Find(&agentGroups)
+	// 从统一分组表生成 Tags
+	var groups []model.Group
+	db.DB.WithContext(ctx).Find(&groups)
 
 	// 获取所有 Node 统计 Tag 使用次数
 	nodes, err := a.hsClient.ListNodes(ctx)
@@ -823,21 +822,11 @@ func (a *TunnelAPI) GetTunnelTags(c *gin.Context) {
 	}
 
 	var result []TagOption
-
-	for _, g := range clientGroups {
-		tag := "tag:client-group-" + strconv.FormatInt(g.ID, 10)
+	for _, g := range groups {
+		tag := "tag:group-" + g.Name
 		result = append(result, TagOption{
 			Tag:   tag,
-			Type:  "client-group",
-			Count: tagCountMap[tag],
-		})
-	}
-
-	for _, g := range agentGroups {
-		tag := "tag:agent-group-" + strconv.FormatInt(g.ID, 10)
-		result = append(result, TagOption{
-			Tag:   tag,
-			Type:  "agent-group",
+			Type:  "group",
 			Count: tagCountMap[tag],
 		})
 	}
@@ -869,12 +858,9 @@ func (a *TunnelAPI) GetTunnelACL(c *gin.Context) {
 		return
 	}
 
-	// 获取最后同步时间（从系统配置）
-	// 注意：这里返回字符串而不是 time.Time，避免零值时间显示问题
 	var lastSyncedAt string
 	var config model.SystemConfig
-	if err := db.DB.Where("key = ?", "acl_last_synced_at").First(&config).Error; err == nil && config.Value != "" {
-		// 验证时间格式有效
+	if err := db.DB.WithContext(ctx).Where("key = ?", "acl_last_synced_at").First(&config).Error; err == nil && config.Value != "" {
 		if t, err := time.Parse(time.RFC3339, config.Value); err == nil && !t.IsZero() {
 			lastSyncedAt = config.Value
 		}
@@ -921,13 +907,13 @@ func (a *TunnelAPI) UpdateTunnelACL(c *gin.Context) {
 
 	// 记录同步时间
 	now := time.Now()
-	db.DB.Where("key = ?", "acl_last_synced_at").Assign(model.SystemConfig{
+	db.DB.WithContext(ctx).Where("key = ?", "acl_last_synced_at").Assign(model.SystemConfig{
 		Key:   "acl_last_synced_at",
 		Value: now.Format(time.RFC3339),
 	}).FirstOrCreate(&model.SystemConfig{})
 
 	logger.Infof("更新隧道 ACL Policy")
-	recordAuditLog(c, model.ActionUpdateTunnelACL, "tunnel_acl", "", "", nil)
+	recordAuditLog(ctx, c, model.ActionUpdateTunnelACL, "tunnel_acl", "", "", nil)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("更新成功", nil))
 }
@@ -998,14 +984,10 @@ func (a *TunnelAPI) GetTunnelACLRules(c *gin.Context) {
 	// 转换 ACL 规则
 	var rules []ACLRule
 	for i, acl := range policyData.ACLs {
-		rule := ACLRule{
-			Index: i + 1,
-		}
-
+		rule := ACLRule{Index: i + 1}
 		if action, ok := acl["action"].(string); ok {
 			rule.Action = action
 		}
-
 		if src, ok := acl["src"].([]interface{}); ok {
 			for _, s := range src {
 				if str, ok := s.(string); ok {
@@ -1013,7 +995,6 @@ func (a *TunnelAPI) GetTunnelACLRules(c *gin.Context) {
 				}
 			}
 		}
-
 		if dst, ok := acl["dst"].([]interface{}); ok {
 			for _, d := range dst {
 				if str, ok := d.(string); ok {
@@ -1021,25 +1002,19 @@ func (a *TunnelAPI) GetTunnelACLRules(c *gin.Context) {
 				}
 			}
 		}
-
 		if desc, ok := acl["description"].(string); ok {
 			rule.Description = desc
 		}
-
 		rules = append(rules, rule)
 	}
 
 	// 转换 SSH 规则
 	var sshRules []SSHRule
 	for i, ssh := range policyData.SSH {
-		sshRule := SSHRule{
-			Index: i + 1,
-		}
-
+		sshRule := SSHRule{Index: i + 1}
 		if action, ok := ssh["action"].(string); ok {
 			sshRule.Action = action
 		}
-
 		if src, ok := ssh["src"].([]interface{}); ok {
 			for _, s := range src {
 				if str, ok := s.(string); ok {
@@ -1047,7 +1022,6 @@ func (a *TunnelAPI) GetTunnelACLRules(c *gin.Context) {
 				}
 			}
 		}
-
 		if dst, ok := ssh["dst"].([]interface{}); ok {
 			for _, d := range dst {
 				if str, ok := d.(string); ok {
@@ -1055,7 +1029,6 @@ func (a *TunnelAPI) GetTunnelACLRules(c *gin.Context) {
 				}
 			}
 		}
-
 		if users, ok := ssh["users"].([]interface{}); ok {
 			for _, u := range users {
 				if str, ok := u.(string); ok {
@@ -1063,17 +1036,13 @@ func (a *TunnelAPI) GetTunnelACLRules(c *gin.Context) {
 				}
 			}
 		}
-
 		sshRules = append(sshRules, sshRule)
 	}
 
 	// 转换 Tag Owners
 	var tagOwners []TagOwner
 	for tag, owners := range policyData.TagOwners {
-		tagOwners = append(tagOwners, TagOwner{
-			Tag:    tag,
-			Owners: owners,
-		})
+		tagOwners = append(tagOwners, TagOwner{Tag: tag, Owners: owners})
 	}
 
 	c.JSON(http.StatusOK, NewSuccessResponse(ACLRulesResponse{
@@ -1085,25 +1054,26 @@ func (a *TunnelAPI) GetTunnelACLRules(c *gin.Context) {
 
 // SyncTunnelACL 强制同步 ACL
 func (a *TunnelAPI) SyncTunnelACL(c *gin.Context) {
+	ctx := c.Request.Context()
 	if a.aclSync == nil {
 		c.JSON(http.StatusServiceUnavailable, NewErrorResponse("ACL 同步服务未配置"))
 		return
 	}
 
-	if err := a.aclSync.SyncACL(nil); err != nil {
+	if err := a.aclSync.SyncACL(ctx); err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("同步 ACL 失败: "+err.Error()))
 		return
 	}
 
 	// 记录同步时间
 	now := time.Now()
-	db.DB.Where("key = ?", "acl_last_synced_at").Assign(model.SystemConfig{
+	db.DB.WithContext(ctx).Where("key = ?", "acl_last_synced_at").Assign(model.SystemConfig{
 		Key:   "acl_last_synced_at",
 		Value: now.Format(time.RFC3339),
 	}).FirstOrCreate(&model.SystemConfig{})
 
 	logger.Infof("强制同步隧道 ACL")
-	recordAuditLog(c, model.ActionSyncTunnelACL, "tunnel_acl", "", "", nil)
+	recordAuditLog(ctx, c, model.ActionSyncTunnelACL, "tunnel_acl", "", "", nil)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("同步成功", nil))
 }

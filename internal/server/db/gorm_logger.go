@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	gormlogger "gorm.io/gorm/logger"
+
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 )
 
 // GormLogger 自定义 GORM 日志适配器

@@ -13,6 +13,14 @@ type ServerConfig struct {
 	Security  SecuritySection  `toml:"security"`
 	Log       LogConfig        `toml:"log"`
 	Tailscale TailscaleSection `toml:"tailscale"`
+	Telemetry TelemetrySection `toml:"telemetry"`
+}
+
+// TelemetrySection OpenTelemetry 配置
+type TelemetrySection struct {
+	Endpoint    string `toml:"endpoint"`     // OTLP Endpoint，设置后自动启用
+	ServiceName string `toml:"service_name"` // 服务名称
+	Namespace   string `toml:"namespace"`    // 服务命名空间
 }
 
 // ServerSection FRP 配置（废弃，保留兼容）
@@ -148,6 +156,25 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 	if headscaleAPIKey := os.Getenv("HEADSCALE_API_KEY"); headscaleAPIKey != "" {
 		cfg.Tailscale.HeadscaleAPIKey = headscaleAPIKey
+	}
+
+	// Telemetry 默认值
+	if cfg.Telemetry.ServiceName == "" {
+		cfg.Telemetry.ServiceName = "signaling-server"
+	}
+	if cfg.Telemetry.Namespace == "" {
+		cfg.Telemetry.Namespace = "default"
+	}
+
+	// Telemetry 环境变量覆盖
+	if endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); endpoint != "" {
+		cfg.Telemetry.Endpoint = endpoint
+	}
+	if serviceName := os.Getenv("OTEL_SERVICE_NAME"); serviceName != "" {
+		cfg.Telemetry.ServiceName = serviceName
+	}
+	if namespace := os.Getenv("OTEL_SERVICE_NAMESPACE"); namespace != "" {
+		cfg.Telemetry.Namespace = namespace
 	}
 
 	return &cfg, nil

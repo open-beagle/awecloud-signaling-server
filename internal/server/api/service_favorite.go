@@ -44,6 +44,7 @@ type ToggleFavoriteResponse struct {
 
 // GetServiceFavorites 获取用户的服务收藏列表
 func (a *ServiceFavoriteAPI) GetServiceFavorites(c *gin.Context) {
+	ctx := c.Request.Context()
 	// 从JWT获取client_id
 	clientID, exists := c.Get("client_id")
 	if !exists {
@@ -56,7 +57,7 @@ func (a *ServiceFavoriteAPI) GetServiceFavorites(c *gin.Context) {
 
 	// 查询用户的所有收藏
 	var favorites []model.ServiceFavorite
-	if err := db.DB.Where("client_id = ?", int64(clientID.(float64))).
+	if err := db.DB.WithContext(ctx).Where("client_id = ?", int64(clientID.(float64))).
 		Find(&favorites).Error; err != nil {
 		logger.Infof("查询服务收藏失败: %v", err)
 		c.JSON(http.StatusInternalServerError, GetServiceFavoritesResponse{
@@ -83,6 +84,7 @@ func (a *ServiceFavoriteAPI) GetServiceFavorites(c *gin.Context) {
 
 // ToggleFavorite 切换服务收藏状态（收藏/取消收藏）
 func (a *ServiceFavoriteAPI) ToggleFavorite(c *gin.Context) {
+	ctx := c.Request.Context()
 	var req ToggleFavoriteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, ToggleFavoriteResponse{
@@ -106,7 +108,7 @@ func (a *ServiceFavoriteAPI) ToggleFavorite(c *gin.Context) {
 
 	// 检查端口映射服务是否存在
 	var service model.ProxyService
-	if err := db.DB.First(&service, req.STCPInstanceID).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&service, req.STCPInstanceID).Error; err != nil {
 		c.JSON(http.StatusNotFound, ToggleFavoriteResponse{
 			Success: false,
 			Message: "服务不存在",
@@ -116,7 +118,7 @@ func (a *ServiceFavoriteAPI) ToggleFavorite(c *gin.Context) {
 
 	// 查找收藏记录
 	var favorite model.ServiceFavorite
-	result := db.DB.Where("client_id = ? AND stcp_instance_id = ?",
+	result := db.DB.WithContext(ctx).Where("client_id = ? AND stcp_instance_id = ?",
 		int64(clientID.(float64)), req.STCPInstanceID).
 		First(&favorite)
 
@@ -131,7 +133,7 @@ func (a *ServiceFavoriteAPI) ToggleFavorite(c *gin.Context) {
 		}
 		logger.Infof("[ServiceFavorite] Creating favorite: client_id=%d, instance_id=%d, local_port=%d",
 			favorite.ClientID, favorite.STCPInstanceID, favorite.LocalPort)
-		if err := db.DB.Create(&favorite).Error; err != nil {
+		if err := db.DB.WithContext(ctx).Create(&favorite).Error; err != nil {
 			logger.Infof("创建服务收藏失败: %v", err)
 			c.JSON(http.StatusInternalServerError, ToggleFavoriteResponse{
 				Success: false,
@@ -142,7 +144,7 @@ func (a *ServiceFavoriteAPI) ToggleFavorite(c *gin.Context) {
 		isFavorite = true
 	} else {
 		// 记录存在，删除收藏
-		if err := db.DB.Delete(&favorite).Error; err != nil {
+		if err := db.DB.WithContext(ctx).Delete(&favorite).Error; err != nil {
 			logger.Infof("删除服务收藏失败: %v", err)
 			c.JSON(http.StatusInternalServerError, ToggleFavoriteResponse{
 				Success: false,
@@ -168,6 +170,7 @@ type UpdateFavoritePortRequest struct {
 
 // UpdateFavoritePort 更新收藏服务的端口
 func (a *ServiceFavoriteAPI) UpdateFavoritePort(c *gin.Context) {
+	ctx := c.Request.Context()
 	var req UpdateFavoritePortRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -189,7 +192,7 @@ func (a *ServiceFavoriteAPI) UpdateFavoritePort(c *gin.Context) {
 
 	// 查找收藏记录
 	var favorite model.ServiceFavorite
-	result := db.DB.Where("client_id = ? AND stcp_instance_id = ?",
+	result := db.DB.WithContext(ctx).Where("client_id = ? AND stcp_instance_id = ?",
 		int64(clientID.(float64)), req.STCPInstanceID).
 		First(&favorite)
 
@@ -203,7 +206,7 @@ func (a *ServiceFavoriteAPI) UpdateFavoritePort(c *gin.Context) {
 
 	// 更新端口
 	favorite.LocalPort = req.LocalPort
-	if err := db.DB.Save(&favorite).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Save(&favorite).Error; err != nil {
 		logger.Infof("更新收藏端口失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -241,6 +244,7 @@ type GetAllFavoritesResponse struct {
 
 // GetAllFavorites 获取所有用户的收藏列表（管理员）
 func (a *ServiceFavoriteAPI) GetAllFavorites(c *gin.Context) {
+	ctx := c.Request.Context()
 	logger.Infof("[ServiceFavorite] GetAllFavorites called")
 
 	// 使用 JOIN 查询，避免 Preload 的字段名冲突问题
@@ -252,7 +256,7 @@ func (a *ServiceFavoriteAPI) GetAllFavorites(c *gin.Context) {
 	}
 
 	var results []FavoriteWithRelations
-	err := db.DB.Table("service_favorites").
+	err := db.DB.WithContext(ctx).Table("service_favorites").
 		Select(`
 			service_favorites.*,
 			clients.client_id as client_name,

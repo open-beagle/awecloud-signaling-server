@@ -23,6 +23,7 @@ type SystemConfigResponse struct {
 
 // GetSystemConfig 获取系统配置
 func GetSystemConfig(c *gin.Context) {
+	ctx := c.Request.Context()
 	config := SystemConfigResponse{
 		StunPort:           3478,
 		AuthKeyExpiryHours: 24,
@@ -30,7 +31,7 @@ func GetSystemConfig(c *gin.Context) {
 
 	// 从数据库读取配置
 	var configs []model.SystemConfig
-	db.DB.Find(&configs)
+	db.DB.WithContext(ctx).Find(&configs)
 
 	for _, cfg := range configs {
 		switch cfg.Key {
@@ -68,6 +69,7 @@ type UpdateSystemConfigRequest struct {
 
 // UpdateSystemConfig 更新系统配置
 func UpdateSystemConfig(c *gin.Context) {
+	ctx := c.Request.Context()
 	var req UpdateSystemConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
@@ -99,26 +101,27 @@ func UpdateSystemConfig(c *gin.Context) {
 	// 保存到数据库
 	for key, value := range updates {
 		var config model.SystemConfig
-		result := db.DB.Where("key = ?", key).First(&config)
+		result := db.DB.WithContext(ctx).Where("key = ?", key).First(&config)
 		if result.Error != nil {
 			// 不存在则创建
 			config = model.SystemConfig{Key: key, Value: value}
-			db.DB.Create(&config)
+			db.DB.WithContext(ctx).Create(&config)
 		} else {
 			// 存在则更新
 			config.Value = value
-			db.DB.Save(&config)
+			db.DB.WithContext(ctx).Save(&config)
 		}
 	}
 
 	logger.Infof("更新系统配置: %v", updates)
-	recordAuditLog(c, model.ActionUpdateSystemConfig, "system", "config", "系统配置", updates)
+	recordAuditLog(ctx, c, model.ActionUpdateSystemConfig, "system", "config", "系统配置", updates)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("更新成功", nil))
 }
 
 // GetPublicSystemConfig 获取公开的系统配置（无需认证）
 func GetPublicSystemConfig(c *gin.Context) {
+	ctx := c.Request.Context()
 	config := struct {
 		HeadscalePublicURL string `json:"headscale_public_url"`
 		DesktopMinVersion  string `json:"desktop_min_version"`
@@ -126,7 +129,7 @@ func GetPublicSystemConfig(c *gin.Context) {
 	}{}
 
 	var configs []model.SystemConfig
-	db.DB.Where("key IN ?", []string{
+	db.DB.WithContext(ctx).Where("key IN ?", []string{
 		model.ConfigHeadscalePublicURL,
 		model.ConfigDesktopMinVersion,
 		model.ConfigClientDownloadURL,

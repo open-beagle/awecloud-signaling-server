@@ -47,6 +47,7 @@ type AdminInfo struct {
 
 // Login 管理员登录
 func (a *AdminAPI) Login(c *gin.Context) {
+	ctx := c.Request.Context()
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
@@ -55,7 +56,7 @@ func (a *AdminAPI) Login(c *gin.Context) {
 
 	// 查询管理员
 	var admin model.Admin
-	if err := db.DB.Where("username = ?", req.Username).First(&admin).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Where("username = ?", req.Username).First(&admin).Error; err != nil {
 		c.JSON(http.StatusUnauthorized, NewErrorResponse("用户名或密码错误"))
 		return
 	}
@@ -102,6 +103,7 @@ func (a *AdminAPI) Logout(c *gin.Context) {
 
 // GetMe 获取当前管理员信息
 func (a *AdminAPI) GetMe(c *gin.Context) {
+	ctx := c.Request.Context()
 	adminID := getAdminIDFromContext(c)
 	if adminID == 0 {
 		c.JSON(http.StatusUnauthorized, NewErrorResponse("未认证"))
@@ -109,7 +111,7 @@ func (a *AdminAPI) GetMe(c *gin.Context) {
 	}
 
 	var admin model.Admin
-	if err := db.DB.First(&admin, adminID).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&admin, adminID).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("管理员不存在"))
 		return
 	}
@@ -130,6 +132,7 @@ type ChangePasswordRequest struct {
 
 // ChangePassword 修改密码
 func (a *AdminAPI) ChangePassword(c *gin.Context) {
+	ctx := c.Request.Context()
 	adminID := getAdminIDFromContext(c)
 	if adminID == 0 {
 		c.JSON(http.StatusUnauthorized, NewErrorResponse("未认证"))
@@ -143,7 +146,7 @@ func (a *AdminAPI) ChangePassword(c *gin.Context) {
 	}
 
 	var admin model.Admin
-	if err := db.DB.First(&admin, adminID).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&admin, adminID).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("管理员不存在"))
 		return
 	}
@@ -162,7 +165,7 @@ func (a *AdminAPI) ChangePassword(c *gin.Context) {
 	}
 
 	admin.PasswordHash = string(newHash)
-	if err := db.DB.Save(&admin).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Save(&admin).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新失败"))
 		return
 	}

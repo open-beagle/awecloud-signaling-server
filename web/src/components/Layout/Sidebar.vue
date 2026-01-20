@@ -10,60 +10,47 @@
       :unique-opened="false"
       router
     >
-      <el-menu-item index="/agents">
-        <el-icon><Monitor /></el-icon>
-        <template #title>
-          <span>{{ t('menu.agents') }}</span>
-        </template>
-      </el-menu-item>
-      <el-sub-menu index="service-auth">
-        <template #title>
-          <el-icon><Connection /></el-icon>
-          <span>{{ t('menu.serviceAuth') }}</span>
-        </template>
-        <el-menu-item index="/service-auth/desktop">
-          {{ t('menu.serviceAuthDesktop') }}
-        </el-menu-item>
-        <el-menu-item index="/service-auth/agent">
-          {{ t('menu.serviceAuthAgent') }}
-        </el-menu-item>
-      </el-sub-menu>
-      <el-sub-menu index="agent-auth">
-        <template #title>
-          <el-icon><Key /></el-icon>
-          <span>{{ t('menu.agentAuth') }}</span>
-        </template>
-        <el-menu-item index="/agent-auth/desktop">
-          {{ t('menu.agentAuthDesktop') }}
-        </el-menu-item>
-        <el-menu-item index="/agent-auth/agent">
-          {{ t('menu.agentAuthAgent') }}
-        </el-menu-item>
-      </el-sub-menu>
-      <el-menu-item index="/clients">
+      <!-- 用户管理 -->
+      <el-menu-item index="/users">
         <el-icon><User /></el-icon>
         <template #title>
-          <span>{{ t('menu.clients') }}</span>
+          <span>{{ t('menu.users') }}</span>
         </template>
       </el-menu-item>
-      <el-sub-menu index="groups">
+      <!-- 设备管理 -->
+      <el-menu-item index="/nodes">
+        <el-icon><Monitor /></el-icon>
         <template #title>
-          <el-icon><UserFilled /></el-icon>
+          <span>{{ t('menu.nodes') }}</span>
+        </template>
+      </el-menu-item>
+      <!-- 分组管理 -->
+      <el-menu-item index="/groups">
+        <el-icon><UserFilled /></el-icon>
+        <template #title>
           <span>{{ t('menu.groups') }}</span>
         </template>
-        <el-menu-item index="/groups/clients">
-          {{ t('menu.clientGroups') }}
+      </el-menu-item>
+      <!-- ACL 授权管理 -->
+      <el-sub-menu index="acl">
+        <template #title>
+          <el-icon><Key /></el-icon>
+          <span>{{ t('menu.acl') }}</span>
+        </template>
+        <el-menu-item index="/acl/services">
+          {{ t('menu.aclServices') }}
         </el-menu-item>
-        <el-menu-item index="/groups/agents">
-          {{ t('menu.agentGroups') }}
+        <el-menu-item index="/acl/users">
+          {{ t('menu.aclUsers') }}
+        </el-menu-item>
+        <el-menu-item index="/acl/groups">
+          {{ t('menu.aclGroups') }}
+        </el-menu-item>
+        <el-menu-item index="/acl/ssh">
+          {{ t('menu.aclSSH') }}
         </el-menu-item>
       </el-sub-menu>
-      <el-menu-item index="/ssh">
-        <el-icon><Platform /></el-icon>
-        <template #title>
-          <span>{{ t('menu.ssh') }}</span>
-        </template>
-      </el-menu-item>
+      <!-- 隧道管理 -->
       <el-sub-menu index="tunnel">
         <template #title>
           <el-icon><Share /></el-icon>
@@ -82,12 +69,14 @@
           {{ t('menu.tunnelSSH') }}
         </el-menu-item>
       </el-sub-menu>
+      <!-- 审计日志 -->
       <el-menu-item index="/audit-logs">
         <el-icon><Document /></el-icon>
         <template #title>
           <span>{{ t('menu.auditLogs') }}</span>
         </template>
       </el-menu-item>
+      <!-- 系统配置 -->
       <el-menu-item index="/system/config">
         <el-icon><Setting /></el-icon>
         <template #title>
@@ -136,7 +125,6 @@ const toggleSidebar = () => {
   overflow-x: hidden;
 }
 
-/* 隐藏滚动条但保持滚动功能 */
 .el-menu::-webkit-scrollbar {
   width: 0;
   height: 0;
@@ -152,13 +140,11 @@ const toggleSidebar = () => {
   width: 200px;
 }
 
-/* 强制覆盖 Element Plus 的菜单背景色 */
 :deep(.el-menu),
 :deep(.el-menu.el-menu--vertical) {
   background-color: #ffffff !important;
 }
 
-/* 统一菜单项样式 */
 :deep(.el-menu-item) {
   height: 56px;
   line-height: 56px;
@@ -168,41 +154,35 @@ const toggleSidebar = () => {
   color: #303133 !important;
 }
 
-/* 关键修复：确保 title 内容水平排列 */
 :deep(.el-menu-item .el-menu-title-content) {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-/* 统一图标样式 */
 :deep(.el-menu-item .el-icon) {
   font-size: 18px;
   width: 18px;
   height: 18px;
   flex-shrink: 0;
-  margin-right: 12px !important; /* 强制设置右边距 */
+  margin-right: 12px !important;
 }
 
-/* 统一文字样式 */
 :deep(.el-menu-item span) {
   font-size: 14px;
   line-height: 1;
 }
 
-/* hover 状态 */
 :deep(.el-menu-item:hover) {
   background-color: #ecf5ff !important;
 }
 
-/* 激活状态 */
 :deep(.el-menu-item.is-active) {
   background-color: #ecf5ff !important;
   color: #409eff !important;
   font-weight: 500;
 }
 
-/* 子菜单样式 */
 :deep(.el-sub-menu) {
   background-color: #ffffff !important;
 }
@@ -220,7 +200,6 @@ const toggleSidebar = () => {
   background-color: #ecf5ff !important;
 }
 
-/* 优化子菜单展开动画性能 - 完全禁用动画 */
 :deep(.el-menu--inline) {
   transition: none !important;
   animation: none !important;
@@ -239,12 +218,10 @@ const toggleSidebar = () => {
   transition: transform 0.15s ease !important;
 }
 
-/* 禁用 collapse 动画 */
 :deep(.el-menu--collapse .el-sub-menu) {
   transition: none !important;
 }
 
-/* 使用 GPU 加速 */
 :deep(.el-sub-menu),
 :deep(.el-menu-item) {
   will-change: auto;
@@ -259,11 +236,10 @@ const toggleSidebar = () => {
   margin-right: 12px !important;
 }
 
-/* 子菜单项样式 */
 :deep(.el-sub-menu .el-menu-item) {
   height: 48px;
   line-height: 48px;
-  padding-left: 52px !important; /* 增加左侧缩进 */
+  padding-left: 52px !important;
   background-color: #fafafa !important;
   font-size: 14px;
 }
@@ -278,7 +254,6 @@ const toggleSidebar = () => {
   font-weight: 500;
 }
 
-/* 折叠状态下的样式 */
 :deep(.el-menu--collapse .el-menu-item) {
   padding: 0 !important;
   text-align: center;
@@ -293,7 +268,6 @@ const toggleSidebar = () => {
   text-align: center;
 }
 
-/* 侧边栏底部折叠按钮 */
 .sidebar-footer {
   height: 48px;
   display: flex;
@@ -303,7 +277,7 @@ const toggleSidebar = () => {
   background-color: #ffffff;
   cursor: pointer;
   transition: all 0.3s;
-  flex-shrink: 0; /* 防止被压缩 */
+  flex-shrink: 0;
 }
 
 .sidebar-footer:hover {
@@ -320,7 +294,6 @@ const toggleSidebar = () => {
   color: #409eff;
 }
 
-/* 确保侧边栏底部不会显示其他内容 */
 .sidebar-footer * {
   pointer-events: auto;
 }

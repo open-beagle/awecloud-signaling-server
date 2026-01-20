@@ -30,10 +30,10 @@ type ACLRule struct {
 
 // SSHRule SSH 访问规则
 type SSHRule struct {
-	Action string   `json:"action"`          // accept
-	Src    []string `json:"src"`             // 来源 Tag
-	Dst    []string `json:"dst"`             // 目标 Tag
-	Users  []string `json:"users,omitempty"` // 允许的 Linux 用户名
+	Action string   `json:"action"`
+	Src    []string `json:"src"`
+	Dst    []string `json:"dst"`
+	Users  []string `json:"users,omitempty"`
 }
 
 // ACLSyncService ACL 同步服务
@@ -60,19 +60,16 @@ func (s *ACLSyncService) SyncACL(ctx context.Context) error {
 
 	logger.Info("开始同步 ACL 规则到 Headscale")
 
-	// 生成 ACL 策略
-	policy, err := s.generateACLPolicy()
+	policy, err := s.generateACLPolicy(ctx)
 	if err != nil {
 		return fmt.Errorf("生成 ACL 策略失败: %w", err)
 	}
 
-	// 序列化为 JSON
 	policyJSON, err := json.MarshalIndent(policy, "", "  ")
 	if err != nil {
 		return fmt.Errorf("序列化 ACL 策略失败: %w", err)
 	}
 
-	// 设置 ACL 策略，带重试机制
 	var lastErr error
 	for i := 0; i < 3; i++ {
 		err := s.client.SetPolicy(ctx, string(policyJSON))
@@ -94,31 +91,38 @@ func (s *ACLSyncService) SyncACL(ctx context.Context) error {
 }
 
 // generateACLPolicy 根据数据库配置生成 ACL 策略
-// 设计文档: docs/design_headscale_integration.md 第 10 节
+// 使用新的统一模型：User, Node, Group, GroupMember
 // Tag 格式:
-//   - 身份 Tag: tag:agent-{name} / tag:desktop-{name}
-//   - 分组 Tag: tag:agent-group-{group.name} / tag:desktop-group-{group.name}
-func (s *ACLSyncService) generateACLPolicy() (*ACLPolicy, error) {
+//   - 身份 Tag: tag:agent-{name} / tag:client-{name}
+//   - 分组 Tag: tag:group-{group.name}
+func (s *ACLSyncService) generateACLPolicy(ctx context.Context) (*ACLPolicy, error) {
 	policy := &ACLPolicy{
 		Groups:    make(map[string][]string),
 		TagOwners: make(map[string][]string),
 		ACLs:      []ACLRule{},
 	}
 
-	// 收集所有用到的 Tag，用于生成 tagOwners
-	// Headscale 要求 ACL 中引用的 Tag 必须在 tagOwners 中定义
 	usedTags := make(map[string]bool)
 
-	// 生成代理分组的同组互访规则
-	// 业务 1: Agent 同组互访 - src: tag:agent-group-{name}, dst: tag:agent-group-{name}:*
-	var agentGroups []model.AgentGroup
-	db.DB.Find(&agentGroups)
-
-	for _, group := range agentGroups {
-		tagName := fmt.Sprintf("tag:agent-group-%s", group.Name)
+	// 生成所有用户的身份 Tag
+	var users []model.User
+	db.DB.WithContext(ctx).Find(&users)
+	for _, user := range users {
+		tagName := fmt.Sprintf("tag:%s-%s", user.Role, user.Name)
 		usedTags[tagName] = true
+	}
 
-		// Agent 同组互访规则
+	// 生成所有分组的 Tag
+	var groups []model.Group
+	db.DB.WithContext(ctx).Find(&groups)
+	for _, group := range groups {
+		tagName := fmt.Sprintf("tag:group-%s", group.Name)
+		usedTags[tagName] = true
+	}
+
+	// 1. 分组内互访规则 - 同一分组的成员可以互相访问
+	for _, group := range groups {
+		tagName := fmt.Sprintf("tag:group-%s", group.Name)
 		rule := ACLRule{
 			Action: "accept",
 			Src:    []string{tagName},
@@ -127,163 +131,63 @@ func (s *ACLSyncService) generateACLPolicy() (*ACLPolicy, error) {
 		policy.ACLs = append(policy.ACLs, rule)
 	}
 
-	// 生成 Desktop 分组的 Tag
-	var desktopGroups []model.ClientGroup
-	db.DB.Find(&desktopGroups)
-	for _, group := range desktopGroups {
-		tagName := fmt.Sprintf("tag:desktop-group-%s", group.Name)
-		usedTags[tagName] = true
-	}
+	// 2. 服务授权规则 - 用户级别
+	var serviceUserPerms []model.AclServiceUserPermission
+	db.DB.WithContext(ctx).Preload("Service").Preload("Service.User").Preload("User").Find(&serviceUserPerms)
 
-	// 生成所有 Agent 的身份 Tag（即使没有授权，也需要定义 tagOwners）
-	var agents []model.Agent
-	db.DB.Find(&agents)
-	for _, agent := range agents {
-		tagName := fmt.Sprintf("tag:agent-%s", agent.Name)
-		usedTags[tagName] = true
-	}
-
-	// 生成所有 Desktop/Client 的身份 Tag
-	var clients []model.Client
-	db.DB.Find(&clients)
-	for _, client := range clients {
-		tagName := fmt.Sprintf("tag:desktop-%s", client.Name)
-		usedTags[tagName] = true
-	}
-
-	// 生成 ACL 规则
-	// 1. Desktop 分组授权 -> Agent（基于 Tag）
-	var desktopGroupPerms []model.ServiceClientGroupPermission
-	db.DB.Preload("Service").Preload("Service.Agent").Preload("Group").Find(&desktopGroupPerms)
-
-	// 按 DesktopGroup -> 目标 聚合，避免重复规则
-	desktopToTargetPerms := make(map[string]map[string]bool)
-	for _, perm := range desktopGroupPerms {
-		if perm.Service == nil || perm.Group == nil || perm.Service.Agent == nil {
+	for _, perm := range serviceUserPerms {
+		if perm.Service == nil || perm.User == nil || perm.Service.User == nil {
 			continue
 		}
 
-		// 使用 desktop-group 格式
-		desktopGroupTag := fmt.Sprintf("tag:desktop-group-%s", perm.Group.Name)
-		usedTags[desktopGroupTag] = true
+		srcTag := fmt.Sprintf("tag:%s-%s", perm.User.Role, perm.User.Name)
+		dstTag := fmt.Sprintf("tag:%s-%s", perm.Service.User.Role, perm.Service.User.Name)
+		usedTags[srcTag] = true
+		usedTags[dstTag] = true
 
-		if desktopToTargetPerms[desktopGroupTag] == nil {
-			desktopToTargetPerms[desktopGroupTag] = make(map[string]bool)
+		port := extractPort(perm.Service.SourceAddr)
+		rule := ACLRule{
+			Action: "accept",
+			Src:    []string{srcTag},
+			Dst:    []string{fmt.Sprintf("%s:%s", dstTag, port)},
 		}
-
-		// 查找 Agent 所属的分组
-		var agentGroupMembers []model.AgentGroupMember
-		db.DB.Preload("Group").Where("agent_id = ?", perm.Service.AgentID).Find(&agentGroupMembers)
-
-		if len(agentGroupMembers) > 0 {
-			// Agent 在分组中，授权到分组 Tag
-			for _, agm := range agentGroupMembers {
-				if agm.Group != nil {
-					agentGroupTag := fmt.Sprintf("tag:agent-group-%s", agm.Group.Name)
-					usedTags[agentGroupTag] = true
-					desktopToTargetPerms[desktopGroupTag][agentGroupTag] = true
-				}
-			}
-		} else {
-			// Agent 不在任何分组，使用身份 Tag
-			// 业务 4: 单个 Agent 端口给 Desktop 组 - dst: tag:agent-{agent.name}:{port}
-			port := extractPort(perm.Service.SourceAddr)
-			if port != "" {
-				agentTag := fmt.Sprintf("tag:agent-%s", perm.Service.Agent.Name)
-				usedTags[agentTag] = true
-				dst := fmt.Sprintf("%s:%s", agentTag, port)
-				desktopToTargetPerms[desktopGroupTag][dst] = true
-			}
-		}
+		policy.ACLs = append(policy.ACLs, rule)
 	}
 
-	// 生成 Desktop 分组 -> Agent 的 ACL 规则
-	for desktopGroupTag, targets := range desktopToTargetPerms {
-		for target := range targets {
-			dst := target
-			// 如果是分组 Tag 且没有端口，添加 :* 后缀
-			if isTagFormat(target) && !containsPort(target) {
-				dst = fmt.Sprintf("%s:*", target)
-			}
-			rule := ACLRule{
-				Action: "accept",
-				Src:    []string{desktopGroupTag},
-				Dst:    []string{dst},
-			}
-			policy.ACLs = append(policy.ACLs, rule)
-		}
-	}
+	// 3. 服务授权规则 - 分组级别
+	var serviceGroupPerms []model.AclServiceGroupPermission
+	db.DB.WithContext(ctx).Preload("Service").Preload("Service.User").Preload("Group").Find(&serviceGroupPerms)
 
-	// 2. Agent 分组授权 -> Agent（基于 Tag）
-	var agentGroupPerms []model.ServiceAgentGroupPermission
-	db.DB.Preload("Service").Preload("Service.Agent").Preload("Group").Find(&agentGroupPerms)
-
-	// 按 AgentGroup -> 目标 聚合
-	agentToTargetPerms := make(map[string]map[string]bool)
-	for _, perm := range agentGroupPerms {
-		if perm.Service == nil || perm.Group == nil || perm.Service.Agent == nil {
+	for _, perm := range serviceGroupPerms {
+		if perm.Service == nil || perm.Group == nil || perm.Service.User == nil {
 			continue
 		}
 
-		srcGroupTag := fmt.Sprintf("tag:agent-group-%s", perm.Group.Name)
-		usedTags[srcGroupTag] = true
+		srcTag := fmt.Sprintf("tag:group-%s", perm.Group.Name)
+		dstTag := fmt.Sprintf("tag:%s-%s", perm.Service.User.Role, perm.Service.User.Name)
+		usedTags[srcTag] = true
+		usedTags[dstTag] = true
 
-		if agentToTargetPerms[srcGroupTag] == nil {
-			agentToTargetPerms[srcGroupTag] = make(map[string]bool)
+		port := extractPort(perm.Service.SourceAddr)
+		rule := ACLRule{
+			Action: "accept",
+			Src:    []string{srcTag},
+			Dst:    []string{fmt.Sprintf("%s:%s", dstTag, port)},
 		}
-
-		// 查找目标 Agent 所属的分组
-		var agentGroupMembers []model.AgentGroupMember
-		db.DB.Preload("Group").Where("agent_id = ?", perm.Service.AgentID).Find(&agentGroupMembers)
-
-		if len(agentGroupMembers) > 0 {
-			for _, agm := range agentGroupMembers {
-				if agm.Group != nil {
-					dstGroupTag := fmt.Sprintf("tag:agent-group-%s", agm.Group.Name)
-					usedTags[dstGroupTag] = true
-					agentToTargetPerms[srcGroupTag][dstGroupTag] = true
-				}
-			}
-		} else {
-			// 目标 Agent 不在任何分组，使用身份 Tag
-			port := extractPort(perm.Service.SourceAddr)
-			if port != "" {
-				agentTag := fmt.Sprintf("tag:agent-%s", perm.Service.Agent.Name)
-				usedTags[agentTag] = true
-				dst := fmt.Sprintf("%s:%s", agentTag, port)
-				agentToTargetPerms[srcGroupTag][dst] = true
-			}
-		}
+		policy.ACLs = append(policy.ACLs, rule)
 	}
 
-	// 生成 Agent 分组 -> Agent 的 ACL 规则
-	for srcGroupTag, targets := range agentToTargetPerms {
-		for target := range targets {
-			dst := target
-			if isTagFormat(target) && !containsPort(target) {
-				dst = fmt.Sprintf("%s:*", target)
-			}
-			rule := ACLRule{
-				Action: "accept",
-				Src:    []string{srcGroupTag},
-				Dst:    []string{dst},
-			}
-			policy.ACLs = append(policy.ACLs, rule)
-		}
-	}
+	// 4. 用户授权规则 - 用户级别（访问某个 Agent 的所有端口）
+	var userUserPerms []model.AclUserUserPermission
+	db.DB.WithContext(ctx).Preload("TargetUser").Preload("GrantedUser").Find(&userUserPerms)
 
-	// ========== Agent 级别授权规则 ==========
-	// 3. Agent-Client 授权（Agent 级别）
-	var agentClientPerms []model.AgentClientPermission
-	db.DB.Preload("Agent").Preload("Client").Find(&agentClientPerms)
-
-	for _, perm := range agentClientPerms {
-		if perm.Agent == nil || perm.Client == nil {
+	for _, perm := range userUserPerms {
+		if perm.TargetUser == nil || perm.GrantedUser == nil {
 			continue
 		}
 
-		srcTag := fmt.Sprintf("tag:desktop-%s", perm.Client.Name)
-		dstTag := fmt.Sprintf("tag:agent-%s", perm.Agent.Name)
+		srcTag := fmt.Sprintf("tag:%s-%s", perm.GrantedUser.Role, perm.GrantedUser.Name)
+		dstTag := fmt.Sprintf("tag:%s-%s", perm.TargetUser.Role, perm.TargetUser.Name)
 		usedTags[srcTag] = true
 		usedTags[dstTag] = true
 
@@ -295,17 +199,17 @@ func (s *ACLSyncService) generateACLPolicy() (*ACLPolicy, error) {
 		policy.ACLs = append(policy.ACLs, rule)
 	}
 
-	// 4. Agent-ClientGroup 授权（Agent 级别）
-	var agentClientGroupPerms []model.AgentClientGroupPermission
-	db.DB.Preload("Agent").Preload("Group").Find(&agentClientGroupPerms)
+	// 5. 用户授权规则 - 分组级别
+	var userGroupPerms []model.AclUserGroupPermission
+	db.DB.WithContext(ctx).Preload("TargetUser").Preload("Group").Find(&userGroupPerms)
 
-	for _, perm := range agentClientGroupPerms {
-		if perm.Agent == nil || perm.Group == nil {
+	for _, perm := range userGroupPerms {
+		if perm.TargetUser == nil || perm.Group == nil {
 			continue
 		}
 
-		srcTag := fmt.Sprintf("tag:desktop-group-%s", perm.Group.Name)
-		dstTag := fmt.Sprintf("tag:agent-%s", perm.Agent.Name)
+		srcTag := fmt.Sprintf("tag:group-%s", perm.Group.Name)
+		dstTag := fmt.Sprintf("tag:%s-%s", perm.TargetUser.Role, perm.TargetUser.Name)
 		usedTags[srcTag] = true
 		usedTags[dstTag] = true
 
@@ -317,17 +221,17 @@ func (s *ACLSyncService) generateACLPolicy() (*ACLPolicy, error) {
 		policy.ACLs = append(policy.ACLs, rule)
 	}
 
-	// 5. Agent-Agent 授权（Agent 级别）
-	var agentAgentPerms []model.AgentAgentPermission
-	db.DB.Preload("TargetAgent").Preload("SourceAgent").Find(&agentAgentPerms)
+	// 6. 分组授权规则 - 用户级别（访问某个分组的所有端口）
+	var groupUserPerms []model.AclGroupUserPermission
+	db.DB.WithContext(ctx).Preload("TargetGroup").Preload("User").Find(&groupUserPerms)
 
-	for _, perm := range agentAgentPerms {
-		if perm.TargetAgent == nil || perm.SourceAgent == nil {
+	for _, perm := range groupUserPerms {
+		if perm.TargetGroup == nil || perm.User == nil {
 			continue
 		}
 
-		srcTag := fmt.Sprintf("tag:agent-%s", perm.SourceAgent.Name)
-		dstTag := fmt.Sprintf("tag:agent-%s", perm.TargetAgent.Name)
+		srcTag := fmt.Sprintf("tag:%s-%s", perm.User.Role, perm.User.Name)
+		dstTag := fmt.Sprintf("tag:group-%s", perm.TargetGroup.Name)
 		usedTags[srcTag] = true
 		usedTags[dstTag] = true
 
@@ -339,17 +243,17 @@ func (s *ACLSyncService) generateACLPolicy() (*ACLPolicy, error) {
 		policy.ACLs = append(policy.ACLs, rule)
 	}
 
-	// 6. Agent-AgentGroup 授权（Agent 级别）
-	var agentAgentGroupPerms []model.AgentAgentGroupPermission
-	db.DB.Preload("TargetAgent").Preload("Group").Find(&agentAgentGroupPerms)
+	// 7. 分组授权规则 - 分组级别
+	var groupGroupPerms []model.AclGroupGroupPermission
+	db.DB.WithContext(ctx).Preload("TargetGroup").Preload("GrantedGroup").Find(&groupGroupPerms)
 
-	for _, perm := range agentAgentGroupPerms {
-		if perm.TargetAgent == nil || perm.Group == nil {
+	for _, perm := range groupGroupPerms {
+		if perm.TargetGroup == nil || perm.GrantedGroup == nil {
 			continue
 		}
 
-		srcTag := fmt.Sprintf("tag:agent-group-%s", perm.Group.Name)
-		dstTag := fmt.Sprintf("tag:agent-%s", perm.TargetAgent.Name)
+		srcTag := fmt.Sprintf("tag:group-%s", perm.GrantedGroup.Name)
+		dstTag := fmt.Sprintf("tag:group-%s", perm.TargetGroup.Name)
 		usedTags[srcTag] = true
 		usedTags[dstTag] = true
 
@@ -361,14 +265,13 @@ func (s *ACLSyncService) generateACLPolicy() (*ACLPolicy, error) {
 		policy.ACLs = append(policy.ACLs, rule)
 	}
 
-	// 生成 tagOwners - Headscale 要求 ACL 中使用的 Tag 必须在 tagOwners 中定义
-	// 使用空数组表示由 Headscale 管理员管理
+	// 生成 tagOwners
 	for tag := range usedTags {
 		policy.TagOwners[tag] = []string{}
 	}
 
 	// 生成 SSH 规则
-	sshRules, err := s.generateSSHRules(usedTags)
+	sshRules, err := s.generateSSHRules(ctx, usedTags)
 	if err != nil {
 		logger.Warnf("生成 SSH 规则失败: %v", err)
 	} else {
@@ -383,31 +286,12 @@ func extractPort(addr string) string {
 	if addr == "" {
 		return "*"
 	}
-	// 处理格式: "100.64.0.1:3306" 或 ":3306" 或 "3306"
-	if idx := len(addr) - 1; idx >= 0 {
-		for i := idx; i >= 0; i-- {
-			if addr[i] == ':' {
-				return addr[i+1:]
-			}
+	for i := len(addr) - 1; i >= 0; i-- {
+		if addr[i] == ':' {
+			return addr[i+1:]
 		}
 	}
-	// 如果没有冒号，可能整个就是端口号
 	return addr
-}
-
-// isTagFormat 检查字符串是否是 Tag 格式
-func isTagFormat(s string) bool {
-	return len(s) > 4 && s[:4] == "tag:"
-}
-
-// containsPort 检查字符串是否包含端口号（以 :数字 或 :* 结尾）
-func containsPort(s string) bool {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == ':' {
-			return true
-		}
-	}
-	return false
 }
 
 // StartPeriodicSync 启动定时全量同步
@@ -417,12 +301,10 @@ func (s *ACLSyncService) StartPeriodicSync(ctx context.Context) {
 
 	logger.Info("启动 ACL 定时同步任务，间隔 5 分钟")
 
-	// 启动时先同步所有 Node 的 Tag
 	if err := s.SyncAllNodeTags(ctx); err != nil {
 		logger.Errorf("初始 Node Tag 同步失败: %v", err)
 	}
 
-	// 然后同步 ACL 规则
 	if err := s.SyncACL(ctx); err != nil {
 		logger.Errorf("初始 ACL 同步失败: %v", err)
 	}
@@ -445,11 +327,9 @@ func (s *ACLSyncService) StartPeriodicSync(ctx context.Context) {
 }
 
 // SyncAllNodeTags 同步所有 Node 的 Tag
-// Server 启动时调用，确保所有 Agent 和 Desktop 的 Node 都有正确的 Tag
 func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 	logger.Info("开始同步所有 Node 的 Tag")
 
-	// 先获取所有 Headscale Node，建立 User 名称到 Node 的映射
 	nodes, err := s.client.ListNodes(ctx)
 	if err != nil {
 		logger.Warnf("获取 Headscale Node 列表失败: %v", err)
@@ -480,105 +360,54 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 		}
 	}
 
-	// 同步所有 Agent 的 Tag
-	var agents []model.Agent
-	db.DB.Find(&agents)
-	logger.Infof("找到 %d 个 Agent", len(agents))
+	// 同步所有 Node 的 Tag
+	var dbNodes []model.Node
+	db.DB.WithContext(ctx).Preload("User").Find(&dbNodes)
+	logger.Infof("找到 %d 个 Node", len(dbNodes))
 
-	for _, agent := range agents {
-		// 通过 User 名称查找 Node（User 名称格式: agent-{agent.name}）
-		userName := "agent-" + agent.Name
-		nodeInfo, found := userNodeMap[userName]
-
-		if !found {
-			logger.Warnf("Agent %s 在 Headscale 中没有对应的 Node (User: %s)", agent.Name, userName)
+	for _, dbNode := range dbNodes {
+		if dbNode.User == nil {
 			continue
 		}
 
-		// 如果数据库中的 NodeID 为空，更新它
-		if agent.NodeID == 0 || agent.NodeID != nodeInfo.NodeID {
-			agent.NodeID = nodeInfo.NodeID
-			if nodeInfo.IP != "" {
-				agent.IP = nodeInfo.IP
-			}
-			if err := db.DB.Save(&agent).Error; err != nil {
-				logger.Warnf("更新 Agent %s NodeID 失败: %v", agent.Name, err)
-			} else {
-				logger.Infof("Agent %s NodeID 已更新为 %d, IP: %s", agent.Name, nodeInfo.NodeID, nodeInfo.IP)
+		// 通过 User 名称查找 Headscale Node
+		userName := fmt.Sprintf("%s-%s", dbNode.User.Role, dbNode.User.Name)
+		nodeInfo, found := userNodeMap[userName]
+
+		if !found {
+			logger.Warnf("Node %s 在 Headscale 中没有对应的 Node (User: %s)", dbNode.Name, userName)
+			continue
+		}
+
+		// 更新数据库中的 Node ID 和 IP
+		if dbNode.ID != nodeInfo.NodeID || dbNode.IP != nodeInfo.IP {
+			dbNode.ID = nodeInfo.NodeID
+			dbNode.IP = nodeInfo.IP
+			if err := db.DB.WithContext(ctx).Save(&dbNode).Error; err != nil {
+				logger.Warnf("更新 Node %s 失败: %v", dbNode.Name, err)
 			}
 		}
 
-		// 构建 Agent 应该有的 Tag 列表
+		// 构建期望的 Tag 列表
 		expectedTags := []string{
-			fmt.Sprintf("tag:agent-%s", agent.Name), // 身份 Tag
+			fmt.Sprintf("tag:%s-%s", dbNode.User.Role, dbNode.User.Name),
 		}
 
-		// 查询 Agent 所属的分组
-		var groupMembers []model.AgentGroupMember
-		db.DB.Preload("Group").Where("agent_id = ?", agent.ID).Find(&groupMembers)
+		// 查询用户所属的分组
+		var groupMembers []model.GroupMember
+		db.DB.WithContext(ctx).Preload("Group").Where("user_id = ?", dbNode.UserID).Find(&groupMembers)
 		for _, gm := range groupMembers {
 			if gm.Group != nil {
-				expectedTags = append(expectedTags, fmt.Sprintf("tag:agent-group-%s", gm.Group.Name))
+				expectedTags = append(expectedTags, fmt.Sprintf("tag:group-%s", gm.Group.Name))
 			}
 		}
-
-		logger.Infof("Agent %s (NodeID=%d) 当前 Tag: %v, 期望 Tag: %v", agent.Name, nodeInfo.NodeID, nodeInfo.Tags, expectedTags)
 
 		// 检查是否需要更新
 		if !tagsEqual(nodeInfo.Tags, expectedTags) {
 			if err := s.client.SetTags(ctx, nodeInfo.NodeID, expectedTags); err != nil {
-				logger.Warnf("设置 Agent %s Tag 失败: %v", agent.Name, err)
+				logger.Warnf("设置 Node %s Tag 失败: %v", dbNode.Name, err)
 			} else {
-				logger.Infof("Agent %s Tag 已同步: %v", agent.Name, expectedTags)
-			}
-		} else {
-			logger.Infof("Agent %s Tag 已是最新，无需更新", agent.Name)
-		}
-	}
-
-	// 同步所有 Desktop 的 Tag
-	var desktops []model.Desktop
-	db.DB.Find(&desktops)
-
-	for _, desktop := range desktops {
-		if desktop.ID == 0 {
-			continue
-		}
-
-		// 查询 Client 信息
-		var client model.Client
-		if err := db.DB.First(&client, desktop.ClientID).Error; err != nil {
-			logger.Warnf("获取 Desktop %d 的 Client 失败: %v", desktop.ID, err)
-			continue
-		}
-
-		// 构建 Desktop 应该有的 Tag 列表
-		expectedTags := []string{
-			fmt.Sprintf("tag:desktop-%s", client.Name), // 身份 Tag
-		}
-
-		// 查询 Client 所属的分组
-		var groupMembers []model.ClientGroupMember
-		db.DB.Preload("Group").Where("client_id = ?", desktop.ClientID).Find(&groupMembers)
-		for _, gm := range groupMembers {
-			if gm.Group != nil {
-				expectedTags = append(expectedTags, fmt.Sprintf("tag:desktop-group-%s", gm.Group.Name))
-			}
-		}
-
-		// 获取当前 Node 的 Tag
-		node, err := s.client.GetNode(ctx, desktop.ID)
-		if err != nil {
-			logger.Warnf("获取 Desktop %d 失败: %v", desktop.ID, err)
-			continue
-		}
-
-		// 检查是否需要更新
-		if !tagsEqual(node.ForcedTags, expectedTags) {
-			if err := s.client.SetTags(ctx, desktop.ID, expectedTags); err != nil {
-				logger.Warnf("设置 Desktop %d Tag 失败: %v", desktop.ID, err)
-			} else {
-				logger.Infof("Desktop %d Tag 已同步: %v", desktop.ID, expectedTags)
+				logger.Infof("Node %s Tag 已同步: %v", dbNode.Name, expectedTags)
 			}
 		}
 	}
@@ -587,7 +416,7 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 	return nil
 }
 
-// tagsEqual 比较两个 Tag 列表是否相等（忽略顺序）
+// tagsEqual 比较两个 Tag 列表是否相等
 func tagsEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -605,30 +434,25 @@ func tagsEqual(a, b []string) bool {
 }
 
 // generateSSHRules 根据数据库配置生成 SSH 规则
-// SSHUsers 控制 Desktop 用户能以 Agent 机器上的哪些 Linux 账号登录
-// 支持的值:
-//   - 普通用户名（如 root、code）：Agent 机器上必须已存在该 Linux 用户
-//   - autogroup:nonroot：Tailscale SSH 会自动创建一个非 root 用户
-func (s *ACLSyncService) generateSSHRules(usedTags map[string]bool) ([]SSHRule, error) {
+func (s *ACLSyncService) generateSSHRules(ctx context.Context, usedTags map[string]bool) ([]SSHRule, error) {
 	var rules []SSHRule
 
-	// 1. 处理 Desktop -> Agent 的 SSH 授权
-	var clientPerms []model.SSHClientPermission
-	if err := db.DB.Preload("Client").Preload("Agent").Where("enabled = ?", true).Find(&clientPerms).Error; err != nil {
-		return nil, fmt.Errorf("查询 SSH Client 授权失败: %w", err)
+	// 1. SSH 用户授权
+	var userPerms []model.AclSSHUserPermission
+	if err := db.DB.WithContext(ctx).Preload("TargetUser").Preload("User").Where("enabled = ?", true).Find(&userPerms).Error; err != nil {
+		return nil, fmt.Errorf("查询 SSH 用户授权失败: %w", err)
 	}
 
-	for _, perm := range clientPerms {
-		if perm.Client == nil || perm.Agent == nil {
+	for _, perm := range userPerms {
+		if perm.TargetUser == nil || perm.User == nil {
 			continue
 		}
 
-		srcTag := fmt.Sprintf("tag:desktop-%s", perm.Client.Name)
-		dstTag := fmt.Sprintf("tag:agent-%s", perm.Agent.Name)
+		srcTag := fmt.Sprintf("tag:%s-%s", perm.User.Role, perm.User.Name)
+		dstTag := fmt.Sprintf("tag:%s-%s", perm.TargetUser.Role, perm.TargetUser.Name)
 		usedTags[srcTag] = true
 		usedTags[dstTag] = true
 
-		// 解析 SSHUsers JSON 数组
 		users := parseSSHUsers(perm.SSHUsers)
 		if len(users) == 0 {
 			continue
@@ -643,23 +467,22 @@ func (s *ACLSyncService) generateSSHRules(usedTags map[string]bool) ([]SSHRule, 
 		rules = append(rules, rule)
 	}
 
-	// 2. 处理 Desktop 分组 -> Agent 的 SSH 授权
-	var groupPerms []model.SSHClientGroupPermission
-	if err := db.DB.Preload("Group").Preload("Agent").Where("enabled = ?", true).Find(&groupPerms).Error; err != nil {
-		return nil, fmt.Errorf("查询 SSH ClientGroup 授权失败: %w", err)
+	// 2. SSH 分组授权
+	var groupPerms []model.AclSSHGroupPermission
+	if err := db.DB.WithContext(ctx).Preload("TargetUser").Preload("Group").Where("enabled = ?", true).Find(&groupPerms).Error; err != nil {
+		return nil, fmt.Errorf("查询 SSH 分组授权失败: %w", err)
 	}
 
 	for _, perm := range groupPerms {
-		if perm.Group == nil || perm.Agent == nil {
+		if perm.TargetUser == nil || perm.Group == nil {
 			continue
 		}
 
-		srcTag := fmt.Sprintf("tag:desktop-group-%s", perm.Group.Name)
-		dstTag := fmt.Sprintf("tag:agent-%s", perm.Agent.Name)
+		srcTag := fmt.Sprintf("tag:group-%s", perm.Group.Name)
+		dstTag := fmt.Sprintf("tag:%s-%s", perm.TargetUser.Role, perm.TargetUser.Name)
 		usedTags[srcTag] = true
 		usedTags[dstTag] = true
 
-		// 解析 SSHUsers JSON 数组
 		users := parseSSHUsers(perm.SSHUsers)
 		if len(users) == 0 {
 			continue

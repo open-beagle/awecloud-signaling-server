@@ -25,8 +25,8 @@ import (
 
 // DesktopConnection Desktop 连接信息
 type DesktopConnection struct {
-	DesktopID uint64
-	ClientID  uint64
+	NodeID    uint64
+	UserID    uint64
 	Stream    pb.DesktopService_HeartbeatServer
 	TunnelIP  string
 	Connected bool
@@ -37,17 +37,11 @@ type DesktopConnection struct {
 // DesktopServiceServer Desktop 服务实现
 type DesktopServiceServer struct {
 	pb.UnimplementedDesktopServiceServer
-
-	// Desktop 连接管理
-	connections map[uint64]*DesktopConnection
-	connMutex   sync.RWMutex
-
-	// Headscale 客户端
+	connections     map[uint64]*DesktopConnection
+	connMutex       sync.RWMutex
 	headscaleClient *headscale.Client
 	config          *config.ServerConfig
-
-	// Agent 服务（用于获取服务列表）
-	agentService *AgentServiceServer
+	agentService    *AgentServiceServer
 }
 
 // NewDesktopServiceServer 创建 Desktop 服务
@@ -56,8 +50,6 @@ func NewDesktopServiceServer(cfg *config.ServerConfig) *DesktopServiceServer {
 		connections: make(map[uint64]*DesktopConnection),
 		config:      cfg,
 	}
-
-	// 初始化 Headscale 客户端
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
 		client, err := headscale.NewClient(headscale.Config{
 			URL:    cfg.Tailscale.HeadscaleURL,
@@ -67,10 +59,8 @@ func NewDesktopServiceServer(cfg *config.ServerConfig) *DesktopServiceServer {
 			logger.Errorf("初始化 Desktop 服务 Headscale 客户端失败: %v", err)
 		} else {
 			s.headscaleClient = client
-			logger.Infof("Desktop 服务 Headscale 客户端已初始化")
 		}
 	}
-
 	return s
 }
 
@@ -83,224 +73,115 @@ func (s *DesktopServiceServer) SetAgentService(agentService *AgentServiceServer)
 func (s *DesktopServiceServer) Login(ctx context.Context, req *pb.DesktopLoginRequest) (*pb.DesktopLoginResponse, error) {
 	logger.Infof("Desktop 登录请求: client_name=%s, device_name=%s", req.ClientName, req.DeviceName)
 
-	// 验证 Client
-	var client model.Client
-	if err := db.DB.Where("name = ?", req.ClientName).First(&client).Error; err != nil {
-		logger.Warnf("Client 不存在: %s", req.ClientName)
-		return &pb.DesktopLoginResponse{
-			Success: false,
-			Message: "Client 不存在",
-		}, nil
+	var user model.User
+	if err := db.DB.WithContext(ctx).Where("name = ? AND role = ?", req.ClientName, model.UserRoleClient).First(&user).Error; err != nil {
+		return &pb.DesktopLoginResponse{Success: false, Message: "Client 不存在"}, nil
 	}
 
-	// 验证 Client 密钥
-	if err := bcrypt.CompareHashAndPassword([]byte(client.SecretHash), []byte(req.ClientSecret)); err != nil {
-		logger.Warnf("Client 密钥验证失败: %s", req.ClientName)
-		return &pb.DesktopLoginResponse{
-			Success: false,
-			Message: "认证失败",
-		}, nil
+	if err := bcrypt.CompareHashAndPassword([]byte(user.SecretHash), []byte(req.ClientSecret)); err != nil {
+		return &pb.DesktopLoginResponse{Success: false, Message: "认证失败"}, nil
 	}
 
-	// 检查设备是否已存在（通过设备指纹）
-	var desktop model.Desktop
-	err := db.DB.Where("client_id = ?", client.ID).
-		Where("name = ?", req.DeviceName).
-		First(&desktop).Error
-
+	var node model.Node
+	err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ? AND name = ?", user.ID, model.NodeTypeDesktop, req.DeviceName).First(&node).Error
 	isNewDevice := err != nil
-	var desktopSecret string
+	var nodeSecret string
 
 	if isNewDevice {
-		// 新设备，创建 Desktop 记录
-		desktopSecret = generateSecret()
-		secretHash, err := bcrypt.GenerateFromPassword([]byte(desktopSecret), bcrypt.DefaultCost)
-		if err != nil {
-			logger.Errorf("生成密钥哈希失败: %v", err)
-			return &pb.DesktopLoginResponse{
-				Success: false,
-				Message: "内部错误",
-			}, nil
-		}
-
-		// 准备系统信息
+		nodeSecret = generateDesktopSecret()
+		secretHash, _ := bcrypt.GenerateFromPassword([]byte(nodeSecret), bcrypt.DefaultCost)
 		var systemInfoJSON string
 		if req.SystemInfo != nil {
-			systemInfo := model.DesktopSystemInfo{
-				OS:        req.SystemInfo.Os,
-				OSVersion: req.SystemInfo.OsVersion,
-				Arch:      req.SystemInfo.Arch,
-				Hostname:  req.SystemInfo.Hostname,
-				CPU:       req.SystemInfo.Cpu,
-				CPUCores:  int(req.SystemInfo.CpuCores),
-				MemoryGB:  int(req.SystemInfo.MemoryGb),
+			si := model.NodeSystemInfo{
+				OS: req.SystemInfo.Os, OSVersion: req.SystemInfo.OsVersion, Arch: req.SystemInfo.Arch,
+				Hostname: req.SystemInfo.Hostname, CPU: req.SystemInfo.Cpu,
+				CPUCores: int(req.SystemInfo.CpuCores), MemoryGB: int(req.SystemInfo.MemoryGb),
 			}
-			if data, err := json.Marshal(systemInfo); err == nil {
+			if data, err := json.Marshal(si); err == nil {
 				systemInfoJSON = string(data)
 			}
 		}
-
-		// 创建 Desktop
 		now := time.Now()
-		desktop = model.Desktop{
-			ClientID:   client.ID,
-			Name:       req.DeviceName,
-			SecretHash: string(secretHash),
-			SystemInfo: systemInfoJSON,
-			LastOnline: &now,
+		node = model.Node{
+			UserID: user.ID, Name: req.DeviceName, Type: model.NodeTypeDesktop,
+			SecretHash: string(secretHash), SystemInfo: systemInfoJSON, LastHeartbeat: &now,
 		}
-
-		// 如果有 Headscale，先创建 Node 获取 ID
-		if s.headscaleClient != nil {
-			nodeID, authKey, err := s.createDesktopNode(ctx, client.ID, req.DeviceName)
-			if err != nil {
-				logger.Errorf("创建 Headscale Node 失败: %v", err)
-				// 继续创建 Desktop，但不设置 Node ID
-			} else {
-				desktop.ID = nodeID
-				// 保存 authKey 用于返回
-				defer func() {
-					// 在响应中设置 authKey
-				}()
-				_ = authKey // 稍后使用
-			}
-		}
-
-		if err := db.DB.Create(&desktop).Error; err != nil {
-			logger.Errorf("创建 Desktop 失败: %v", err)
-			return &pb.DesktopLoginResponse{
-				Success: false,
-				Message: "创建设备失败",
-			}, nil
-		}
-
-		logger.Infof("新 Desktop 创建成功: id=%d, client_id=%d, name=%s", desktop.ID, client.ID, req.DeviceName)
-	} else {
-		// 已存在的设备，重新生成 secret（用户用密码登录时总是刷新 token）
-		desktopSecret = generateSecret()
-		secretHash, err := bcrypt.GenerateFromPassword([]byte(desktopSecret), bcrypt.DefaultCost)
-		if err != nil {
-			logger.Errorf("生成密钥哈希失败: %v", err)
-			return &pb.DesktopLoginResponse{
-				Success: false,
-				Message: "内部错误",
-			}, nil
-		}
-		desktop.SecretHash = string(secretHash)
-
-		// 更新信息
-		now := time.Now()
-		desktop.LastOnline = &now
-		desktop.LastOnline = &now
-
 		if req.SystemInfo != nil {
-			systemInfo := model.DesktopSystemInfo{
-				OS:        req.SystemInfo.Os,
-				OSVersion: req.SystemInfo.OsVersion,
-				Arch:      req.SystemInfo.Arch,
-				Hostname:  req.SystemInfo.Hostname,
-				CPU:       req.SystemInfo.Cpu,
-				CPUCores:  int(req.SystemInfo.CpuCores),
-				MemoryGB:  int(req.SystemInfo.MemoryGb),
-			}
-			if data, err := json.Marshal(systemInfo); err == nil {
-				desktop.SystemInfo = string(data)
-			}
+			node.Hostname = req.SystemInfo.Hostname
 		}
-
-		if err := db.DB.Save(&desktop).Error; err != nil {
-			logger.Errorf("更新 Desktop 失败: %v", err)
+		if err := db.DB.WithContext(ctx).Create(&node).Error; err != nil {
+			return &pb.DesktopLoginResponse{Success: false, Message: "创建设备失败"}, nil
 		}
-
-		logger.Infof("Desktop 登录成功（已存在设备）: id=%d", desktop.ID)
+	} else {
+		nodeSecret = generateDesktopSecret()
+		secretHash, _ := bcrypt.GenerateFromPassword([]byte(nodeSecret), bcrypt.DefaultCost)
+		node.SecretHash = string(secretHash)
+		now := time.Now()
+		node.LastHeartbeat = &now
+		if req.SystemInfo != nil {
+			si := model.NodeSystemInfo{
+				OS: req.SystemInfo.Os, OSVersion: req.SystemInfo.OsVersion, Arch: req.SystemInfo.Arch,
+				Hostname: req.SystemInfo.Hostname, CPU: req.SystemInfo.Cpu,
+				CPUCores: int(req.SystemInfo.CpuCores), MemoryGB: int(req.SystemInfo.MemoryGb),
+			}
+			if data, err := json.Marshal(si); err == nil {
+				node.SystemInfo = string(data)
+			}
+			node.Hostname = req.SystemInfo.Hostname
+		}
+		db.DB.WithContext(ctx).Save(&node)
 	}
 
-	// 构建响应
-	resp := &pb.DesktopLoginResponse{
-		Success:   true,
-		Message:   "登录成功",
-		DesktopId: desktop.ID,
-		Secret:    desktopSecret, // 密码登录时总是返回 secret（新设备或刷新 token）
-	}
-
-	// 创建或获取 Tailscale 预认证密钥
+	resp := &pb.DesktopLoginResponse{Success: true, Message: "登录成功", DesktopId: node.ID, Secret: nodeSecret}
 	if s.headscaleClient != nil && s.config != nil {
-		authKey, serverURL, err := s.getOrCreateAuthKey(ctx, client.ID, desktop.ID)
-		if err != nil {
-			logger.Errorf("获取 Tailscale 预认证密钥失败: %v", err)
-		} else {
+		if authKey, serverURL, err := s.getOrCreateAuthKey(ctx, user.ID, user.Name); err == nil {
 			resp.AuthKey = authKey
 			resp.ServerUrl = serverURL
 		}
 	}
-
 	return resp, nil
 }
 
 // Authenticate Desktop 认证
 func (s *DesktopServiceServer) Authenticate(ctx context.Context, req *pb.DesktopAuthenticateRequest) (*pb.DesktopAuthenticateResponse, error) {
-	logger.Infof("Desktop 认证请求: desktop_id=%d", req.DesktopId)
-
-	// 查询 Desktop
-	var desktop model.Desktop
-	if err := db.DB.First(&desktop, req.DesktopId).Error; err != nil {
-		logger.Warnf("Desktop 不存在: %d", req.DesktopId)
-		return &pb.DesktopAuthenticateResponse{
-			Success: false,
-			Message: "设备不存在",
-		}, nil
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, req.DesktopId).Error; err != nil {
+		return &pb.DesktopAuthenticateResponse{Success: false, Message: "设备不存在"}, nil
+	}
+	if node.Type != model.NodeTypeDesktop {
+		return &pb.DesktopAuthenticateResponse{Success: false, Message: "设备类型错误"}, nil
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(node.SecretHash), []byte(req.Secret)); err != nil {
+		return &pb.DesktopAuthenticateResponse{Success: false, Message: "认证失败"}, nil
 	}
 
-	// 验证密钥
-	if err := bcrypt.CompareHashAndPassword([]byte(desktop.SecretHash), []byte(req.Secret)); err != nil {
-		logger.Warnf("Desktop 密钥验证失败: %d", req.DesktopId)
-		return &pb.DesktopAuthenticateResponse{
-			Success: false,
-			Message: "认证失败",
-		}, nil
-	}
-
-	// 更新 Desktop 信息
 	now := time.Now()
-	desktop.LastOnline = &now
-
+	node.LastHeartbeat = &now
 	if req.SystemInfo != nil {
-		systemInfo := model.DesktopSystemInfo{
-			OS:        req.SystemInfo.Os,
-			OSVersion: req.SystemInfo.OsVersion,
-			Arch:      req.SystemInfo.Arch,
-			Hostname:  req.SystemInfo.Hostname,
-			CPU:       req.SystemInfo.Cpu,
-			CPUCores:  int(req.SystemInfo.CpuCores),
-			MemoryGB:  int(req.SystemInfo.MemoryGb),
+		si := model.NodeSystemInfo{
+			OS: req.SystemInfo.Os, OSVersion: req.SystemInfo.OsVersion, Arch: req.SystemInfo.Arch,
+			Hostname: req.SystemInfo.Hostname, CPU: req.SystemInfo.Cpu,
+			CPUCores: int(req.SystemInfo.CpuCores), MemoryGB: int(req.SystemInfo.MemoryGb),
 		}
-		if data, err := json.Marshal(systemInfo); err == nil {
-			desktop.SystemInfo = string(data)
+		if data, err := json.Marshal(si); err == nil {
+			node.SystemInfo = string(data)
 		}
+		node.Hostname = req.SystemInfo.Hostname
+	}
+	db.DB.WithContext(ctx).Save(&node)
+
+	var user model.User
+	if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err != nil {
+		return &pb.DesktopAuthenticateResponse{Success: false, Message: "用户不存在"}, nil
 	}
 
-	if err := db.DB.Save(&desktop).Error; err != nil {
-		logger.Errorf("更新 Desktop 失败: %v", err)
-	}
-
-	// 构建响应
-	resp := &pb.DesktopAuthenticateResponse{
-		Success: true,
-		Message: "认证成功",
-	}
-
-	// 检查是否需要重新创建预认证密钥
+	resp := &pb.DesktopAuthenticateResponse{Success: true, Message: "认证成功"}
 	if s.headscaleClient != nil && s.config != nil {
-		authKey, serverURL, err := s.getOrCreateAuthKey(ctx, desktop.ClientID, desktop.ID)
-		if err != nil {
-			logger.Errorf("获取 Tailscale 预认证密钥失败: %v", err)
-		} else {
+		if authKey, serverURL, err := s.getOrCreateAuthKey(ctx, user.ID, user.Name); err == nil {
 			resp.AuthKey = authKey
 			resp.ServerUrl = serverURL
 		}
 	}
-
-	logger.Infof("Desktop 认证成功: %d", req.DesktopId)
 	return resp, nil
 }
 
@@ -309,60 +190,44 @@ func (s *DesktopServiceServer) Heartbeat(stream pb.DesktopService_HeartbeatServe
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 
-	var desktopID uint64
-	var conn *DesktopConnection
-
-	// 接收第一个心跳消息获取 Desktop ID
 	firstReq, err := stream.Recv()
 	if err != nil {
 		return status.Error(codes.InvalidArgument, "无法接收初始消息")
 	}
 
-	desktopID = firstReq.DesktopId
-	logger.Infof("Desktop 心跳流建立: desktop_id=%d", desktopID)
-
-	// 验证 Desktop 存在
-	var desktop model.Desktop
-	if err := db.DB.First(&desktop, desktopID).Error; err != nil {
+	nodeID := firstReq.DesktopId
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, nodeID).Error; err != nil {
 		return status.Error(codes.NotFound, "Desktop 不存在")
 	}
+	if node.Type != model.NodeTypeDesktop {
+		return status.Error(codes.InvalidArgument, "设备类型错误")
+	}
 
-	// 注册连接
-	conn = &DesktopConnection{
-		DesktopID: desktopID,
-		ClientID:  desktop.ClientID,
-		Stream:    stream,
-		TunnelIP:  firstReq.TunnelIp,
-		Connected: firstReq.TunnelConnected,
-		LastSeen:  time.Now(),
-		Cancel:    cancel,
+	conn := &DesktopConnection{
+		NodeID: nodeID, UserID: node.UserID, Stream: stream,
+		TunnelIP: firstReq.TunnelIp, Connected: firstReq.TunnelConnected,
+		LastSeen: time.Now(), Cancel: cancel,
 	}
 
 	s.connMutex.Lock()
-	// 如果已有连接，先关闭旧连接
-	if oldConn, exists := s.connections[desktopID]; exists {
+	if oldConn, exists := s.connections[nodeID]; exists {
 		oldConn.Cancel()
 	}
-	s.connections[desktopID] = conn
+	s.connections[nodeID] = conn
 	s.connMutex.Unlock()
 
 	defer func() {
 		s.connMutex.Lock()
-		delete(s.connections, desktopID)
+		delete(s.connections, nodeID)
 		s.connMutex.Unlock()
-		logger.Infof("Desktop 心跳流断开: desktop_id=%d", desktopID)
 	}()
 
-	// 处理第一个心跳
-	s.handleDesktopHeartbeat(desktopID, firstReq)
-
-	// 发送首次响应（包含已授权服务）
-	if err := s.sendDesktopHeartbeatResponse(stream, desktop.ClientID); err != nil {
-		logger.Errorf("发送首次心跳响应失败: %v", err)
+	s.handleDesktopHeartbeat(ctx, nodeID, firstReq)
+	if err := s.sendDesktopHeartbeatResponse(ctx, stream, node.UserID); err != nil {
 		return err
 	}
 
-	// 持续接收心跳
 	for {
 		select {
 		case <-ctx.Done():
@@ -375,191 +240,92 @@ func (s *DesktopServiceServer) Heartbeat(stream pb.DesktopService_HeartbeatServe
 			if err != nil {
 				return err
 			}
-
-			// 更新连接信息
 			conn.TunnelIP = req.TunnelIp
 			conn.Connected = req.TunnelConnected
 			conn.LastSeen = time.Now()
-
-			// 处理心跳
-			s.handleDesktopHeartbeat(desktopID, req)
-
-			// 发送响应
-			if err := s.sendDesktopHeartbeatResponse(stream, desktop.ClientID); err != nil {
-				logger.Errorf("发送心跳响应失败: %v", err)
+			s.handleDesktopHeartbeat(ctx, nodeID, req)
+			if err := s.sendDesktopHeartbeatResponse(ctx, stream, node.UserID); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-// handleDesktopHeartbeat 处理 Desktop 心跳请求
-func (s *DesktopServiceServer) handleDesktopHeartbeat(desktopID uint64, req *pb.DesktopHeartbeatRequest) {
-	// 更新数据库
+func (s *DesktopServiceServer) handleDesktopHeartbeat(ctx context.Context, nodeID uint64, req *pb.DesktopHeartbeatRequest) {
 	now := time.Now()
-	if err := db.DB.Model(&model.Desktop{}).Where("id = ?", desktopID).Updates(map[string]interface{}{
-		"last_online": now,
-		"ip":          req.TunnelIp,
-	}).Error; err != nil {
-		logger.Errorf("更新 Desktop 心跳失败: %v", err)
-	}
+	db.DB.WithContext(ctx).Model(&model.Node{}).Where("id = ?", nodeID).Updates(map[string]any{
+		"last_heartbeat": now, "ip": req.TunnelIp,
+	})
 }
 
-// sendDesktopHeartbeatResponse 发送 Desktop 心跳响应
-func (s *DesktopServiceServer) sendDesktopHeartbeatResponse(stream pb.DesktopService_HeartbeatServer, clientID uint64) error {
+func (s *DesktopServiceServer) sendDesktopHeartbeatResponse(ctx context.Context, stream pb.DesktopService_HeartbeatServer, userID uint64) error {
 	resp := &pb.DesktopHeartbeatResponse{}
-
-	// 查询该 Client 有权访问的服务
-	// 这里简化处理，实际应该根据权限系统查询
 	var services []model.ProxyService
-	if err := db.DB.Preload("Agent").Find(&services).Error; err != nil {
-		logger.Errorf("查询服务列表失败: %v", err)
-	} else {
+	if err := db.DB.WithContext(ctx).Preload("User").Where("enabled = ?", true).Find(&services).Error; err == nil {
 		for _, svc := range services {
-			if !svc.Enabled {
+			if s.agentService != nil && !s.agentService.IsAgentOnline(svc.UserID) {
 				continue
 			}
-
-			// 检查 Agent 是否在线
-			if s.agentService != nil && !s.agentService.IsAgentOnline(svc.AgentID) {
-				continue
-			}
-
 			agentName := ""
-			if svc.Agent != nil {
-				agentName = svc.Agent.Name
+			if svc.User != nil {
+				agentName = svc.User.Name
 			}
-
 			resp.AuthorizedServices = append(resp.AuthorizedServices, &pb.AuthorizedService{
-				Id:         svc.ID,
-				Name:       svc.Name,
-				AgentName:  agentName,
-				ListenAddr: svc.SourceAddr,
-				TargetAddr: svc.TargetAddr,
+				Id: svc.ID, Name: svc.Name, AgentName: agentName,
+				ListenAddr: svc.SourceAddr, TargetAddr: svc.TargetAddr,
 			})
 		}
 	}
-
 	return stream.Send(resp)
 }
 
-// createDesktopNode 为 Desktop 创建 Headscale Node
-func (s *DesktopServiceServer) createDesktopNode(ctx context.Context, clientID uint64, deviceName string) (uint64, string, error) {
-	// 查询 Client 信息获取 name
-	var client model.Client
-	if err := db.DB.First(&client, clientID).Error; err != nil {
-		return 0, "", fmt.Errorf("查询 Client 失败: %w", err)
-	}
-
-	// 为每个 Client 创建独立的 Headscale User
-	// User 命名规则: desktop-{client.name}，参见 docs/design_headscale_integration.md
-	userName := fmt.Sprintf("desktop-%s", client.Name)
-
-	// 获取 User（不自动创建，User 应该在 Web 创建 Client 时已创建）
-	user, err := s.headscaleClient.GetUserByName(ctx, userName)
-	if err != nil {
-		return 0, "", fmt.Errorf("查询 Headscale User 失败: %w", err)
-	}
-	if user == nil {
-		return 0, "", fmt.Errorf("Headscale User %s 不存在，请先在 Web 管理界面创建 Client", userName)
-	}
-
-	// 构建 Tags 列表
-	// 身份 Tag: tag:desktop-{client.name}，参见 docs/design_headscale_integration.md 第 10 节
-	tags := []string{fmt.Sprintf("tag:desktop-%s", client.Name)}
-
-	// 查询 Client 所属的分组，添加分组 Tag
-	var groupMembers []model.ClientGroupMember
-	if err := db.DB.Preload("Group").Where("client_id = ?", clientID).Find(&groupMembers).Error; err == nil {
-		for _, gm := range groupMembers {
-			if gm.Group != nil {
-				// 分组 Tag: tag:desktop-group-{group.name}
-				tags = append(tags, fmt.Sprintf("tag:desktop-group-%s", gm.Group.Name))
-			}
-		}
-	}
-
-	// 创建预认证密钥（24 小时有效，临时节点，带 Tags）
-	authKey, err := s.headscaleClient.CreatePreAuthKeyWithTags(ctx, user.Id, 24*time.Hour, true, tags)
-	if err != nil {
-		return 0, "", fmt.Errorf("创建预认证密钥失败: %w", err)
-	}
-
-	// 注意：Node ID 在 Tailscale 连接后才能获取
-	// 这里暂时返回 0，后续通过心跳更新
-	return 0, authKey.Key, nil
-}
-
-// getOrCreateAuthKey 获取或创建预认证密钥
-func (s *DesktopServiceServer) getOrCreateAuthKey(ctx context.Context, clientID uint64, desktopID uint64) (string, string, error) {
-	// 查询 Client 信息获取 name
-	var client model.Client
-	if err := db.DB.First(&client, clientID).Error; err != nil {
-		return "", "", fmt.Errorf("查询 Client 失败: %w", err)
-	}
-
-	// 为每个 Client 创建独立的 Headscale User
-	// User 命名规则: desktop-{client.name}，参见 docs/design_headscale_integration.md
-	userName := fmt.Sprintf("desktop-%s", client.Name)
-
-	// 获取 User（不自动创建，User 应该在 Web 创建 Client 时已创建）
-	user, err := s.headscaleClient.GetUserByName(ctx, userName)
+func (s *DesktopServiceServer) getOrCreateAuthKey(ctx context.Context, userID uint64, userName string) (string, string, error) {
+	hsUserName := fmt.Sprintf("client-%s", userName)
+	user, err := s.headscaleClient.GetUserByName(ctx, hsUserName)
 	if err != nil {
 		return "", "", fmt.Errorf("查询 Headscale User 失败: %w", err)
 	}
 	if user == nil {
-		return "", "", fmt.Errorf("Headscale User %s 不存在，请先在 Web 管理界面创建 Client", userName)
+		user, err = s.headscaleClient.CreateUser(ctx, hsUserName)
+		if err != nil {
+			return "", "", fmt.Errorf("创建 Headscale User 失败: %w", err)
+		}
 	}
-
-	// 构建 Tags 列表
-	// 身份 Tag: tag:desktop-{client.name}
-	tags := []string{fmt.Sprintf("tag:desktop-%s", client.Name)}
-
-	// 查询 Client 所属的分组，添加分组 Tag
-	var groupMembers []model.ClientGroupMember
-	if err := db.DB.Preload("Group").Where("client_id = ?", clientID).Find(&groupMembers).Error; err == nil {
+	tags := []string{fmt.Sprintf("tag:client-%s", userName)}
+	var groupMembers []model.GroupMember
+	if err := db.DB.WithContext(ctx).Preload("Group").Where("user_id = ?", userID).Find(&groupMembers).Error; err == nil {
 		for _, gm := range groupMembers {
 			if gm.Group != nil {
-				// 分组 Tag: tag:desktop-group-{group.name}
-				tags = append(tags, fmt.Sprintf("tag:desktop-group-%s", gm.Group.Name))
+				tags = append(tags, fmt.Sprintf("tag:group-%s", gm.Group.Name))
 			}
 		}
 	}
-
-	// 创建预认证密钥（24 小时有效，临时节点，带 Tags）
 	authKey, err := s.headscaleClient.CreatePreAuthKeyWithTags(ctx, user.Id, 24*time.Hour, true, tags)
 	if err != nil {
 		return "", "", fmt.Errorf("创建预认证密钥失败: %w", err)
 	}
-
 	return authKey.Key, s.config.Tailscale.HeadscalePublicURL, nil
 }
 
-// IsDesktopOnline 检查 Desktop 是否在线
-func (s *DesktopServiceServer) IsDesktopOnline(desktopID uint64) bool {
+func (s *DesktopServiceServer) IsDesktopOnline(nodeID uint64) bool {
 	s.connMutex.RLock()
-	conn, exists := s.connections[desktopID]
+	conn, exists := s.connections[nodeID]
 	s.connMutex.RUnlock()
-
 	if exists && time.Since(conn.LastSeen) < 60*time.Second {
 		return true
 	}
-
-	// 检查数据库
-	var desktop model.Desktop
-	if err := db.DB.First(&desktop, desktopID).Error; err != nil {
+	// 使用 background context，因为这是状态检查
+	var node model.Node
+	if err := db.DB.First(&node, nodeID).Error; err != nil {
 		return false
 	}
-
-	if desktop.LastOnline == nil {
+	if node.LastHeartbeat == nil {
 		return false
 	}
-
-	return time.Since(*desktop.LastOnline) < 60*time.Second
+	return time.Since(*node.LastHeartbeat) < 60*time.Second
 }
 
-// generateSecret 生成随机密钥
-func generateSecret() string {
+func generateDesktopSecret() string {
 	bytes := make([]byte, 32)
 	rand.Read(bytes)
 	return hex.EncodeToString(bytes)

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -20,6 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/telemetry"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
@@ -170,6 +172,16 @@ func (a *Agent) connectToServer() error {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		logger.Debug("gRPC使用明文连接")
 	}
+
+	// 添加 OpenTelemetry gRPC 客户端追踪（带限流）
+	clientOpts := []otelgrpc.Option{}
+	if filter := telemetry.GetGRPCLimiterFilter(); filter != nil {
+		clientOpts = append(clientOpts, otelgrpc.WithFilter(filter))
+		logger.Debug("gRPC OpenTelemetry 追踪已启用（带限流）")
+	} else {
+		logger.Debug("gRPC OpenTelemetry 追踪已启用")
+	}
+	opts = append(opts, grpc.WithStatsHandler(otelgrpc.NewClientHandler(clientOpts...)))
 
 	// 创建gRPC连接
 	conn, err := grpc.NewClient(grpcAddr, opts...)

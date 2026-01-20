@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
@@ -28,6 +29,7 @@ type VersionCheckResponse struct {
 
 // CheckVersion Desktop 客户端版本检查
 func CheckVersion(c *gin.Context) {
+	ctx := c.Request.Context()
 	var req VersionCheckRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -40,7 +42,7 @@ func CheckVersion(c *gin.Context) {
 	// 获取最低版本配置
 	var minVersionConfig model.SystemConfig
 	minVersion := "1.0.0"
-	if err := db.DB.Where("key = ?", model.ConfigDesktopMinVersion).First(&minVersionConfig).Error; err == nil {
+	if err := db.DB.WithContext(ctx).Where("key = ?", model.ConfigDesktopMinVersion).First(&minVersionConfig).Error; err == nil {
 		if minVersionConfig.Value != "" {
 			minVersion = minVersionConfig.Value
 		}
@@ -52,7 +54,7 @@ func CheckVersion(c *gin.Context) {
 	// 获取下载地址配置
 	var downloadURLConfig model.SystemConfig
 	downloadURL := ""
-	if err := db.DB.Where("key = ?", model.ConfigClientDownloadURL).First(&downloadURLConfig).Error; err == nil {
+	if err := db.DB.WithContext(ctx).Where("key = ?", model.ConfigClientDownloadURL).First(&downloadURLConfig).Error; err == nil {
 		downloadURL = downloadURLConfig.Value
 	}
 	if downloadURL == "" {

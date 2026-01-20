@@ -97,6 +97,30 @@ bash scripts/build_desktop.sh
 ./scripts/run_agent.sh
 ```
 
+## 可观测性
+
+Server 支持 OpenTelemetry 分布式追踪，通过环境变量配置：
+
+| 环境变量                      | 说明                          | 示例                         |
+| ----------------------------- | ----------------------------- | ---------------------------- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP Endpoint，设置后自动启用 | `http://otel-collector:4317` |
+| `OTEL_SERVICE_NAME`           | 服务名称（可选）              | `signaling-server`           |
+| `OTEL_SERVICE_NAMESPACE`      | 服务命名空间（可选）          | `default`                    |
+
+Endpoint 自动识别协议：`http://` 使用非安全连接，`https://` 使用 TLS。
+
+K8s 部署示例：
+
+```yaml
+env:
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: "http://otel-collector:4317"
+  - name: OTEL_SERVICE_NAME
+    value: "signaling-server"
+  - name: OTEL_SERVICE_NAMESPACE
+    value: "default"
+```
+
 ## License
 
 MIT

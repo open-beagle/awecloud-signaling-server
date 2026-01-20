@@ -32,11 +32,11 @@ token = "your-agent-token-from-server"
 [server]
 address = "http://localhost:8080"
 
-# Tailscale 配置
+# 隧道配置
 # Agent 通过 Tailscale (tsnet) 连接到 Headscale 控制平面
 # 认证信息（ControlURL、AuthKey）由 Server 在注册时下发
-[tailscale]
-# Tailscale 状态存储目录
+[tunnel]
+# 隧道状态存储目录
 # - 如果配置：使用本地持久化，Server 作为备份（推荐生产环境）
 # - 如果为空：使用临时目录，完全依赖 Server（适合临时容器）
 # - 支持 ~ 扩展为用户主目录
@@ -46,8 +46,8 @@ state_dir = "~/.config/awecloud-signaling/"
 # 状态同步到 Server 的间隔（分钟）
 state_sync_interval = 5
 
-# 是否启用 Tailscale SSH
-# 启用后，Desktop 用户可以通过 Tailscale 网络直接 SSH 到此 Agent
+# 是否启用 SSH
+# 启用后，Desktop 用户可以通过隧道网络直接 SSH 到此 Agent
 # 需要配合 Server 端的 SSH 授权策略使用
 # 注意：启用 SSH 需要 Agent 以 root 权限运行，或具有 CAP_NET_ADMIN 能力
 enable_ssh = false
@@ -76,3 +76,18 @@ port = 8090  # 健康检查HTTP端口，用于Kubernetes探测
 # 日志配置
 [log]
 level = "info"
+
+# OpenTelemetry 配置（可选）
+# 设置 endpoint 后自动启用追踪
+[telemetry]
+# OTLP Endpoint
+# - http:// 前缀使用非安全连接
+# - https:// 前缀使用 TLS
+# - 不指定端口时：https 默认 443，http 默认 80
+# endpoint = "https://otel.example.com"
+
+# 服务名称（默认 signaling-agent）
+# service_name = "signaling-agent"
+
+# 服务命名空间（默认 default）
+# namespace = "default"

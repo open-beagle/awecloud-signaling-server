@@ -31,6 +31,7 @@ type SavePortPreferenceRequest struct {
 
 // GetPortPreferences 获取用户的端口偏好
 func (a *PortPreferenceAPI) GetPortPreferences(c *gin.Context) {
+	ctx := c.Request.Context()
 	// 从JWT获取client_id
 	clientID, exists := c.Get("client_id")
 	if !exists {
@@ -43,7 +44,7 @@ func (a *PortPreferenceAPI) GetPortPreferences(c *gin.Context) {
 
 	// 查询用户的所有端口偏好
 	var preferences []model.PortPreference
-	if err := db.DB.Where("client_id = ?", int64(clientID.(float64))).
+	if err := db.DB.WithContext(ctx).Where("client_id = ?", int64(clientID.(float64))).
 		Find(&preferences).Error; err != nil {
 		logger.Warnf("查询端口偏好失败: %v", err)
 		c.JSON(http.StatusInternalServerError, GetPortPreferencesResponse{
@@ -67,6 +68,7 @@ func (a *PortPreferenceAPI) GetPortPreferences(c *gin.Context) {
 
 // SavePortPreference 保存端口偏好
 func (a *PortPreferenceAPI) SavePortPreference(c *gin.Context) {
+	ctx := c.Request.Context()
 	var req SavePortPreferenceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -88,7 +90,7 @@ func (a *PortPreferenceAPI) SavePortPreference(c *gin.Context) {
 
 	// 检查端口映射服务是否存在
 	var service model.ProxyService
-	if err := db.DB.First(&service, req.STCPInstanceID).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&service, req.STCPInstanceID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
 			"message": "服务不存在",
@@ -98,7 +100,7 @@ func (a *PortPreferenceAPI) SavePortPreference(c *gin.Context) {
 
 	// 查找或创建端口偏好记录
 	var preference model.PortPreference
-	result := db.DB.Where("client_id = ? AND stcp_instance_id = ?",
+	result := db.DB.WithContext(ctx).Where("client_id = ? AND stcp_instance_id = ?",
 		int64(clientID.(float64)), req.STCPInstanceID).
 		First(&preference)
 
@@ -109,7 +111,7 @@ func (a *PortPreferenceAPI) SavePortPreference(c *gin.Context) {
 			STCPInstanceID: req.STCPInstanceID,
 			PreferredPort:  req.PreferredPort,
 		}
-		if err := db.DB.Create(&preference).Error; err != nil {
+		if err := db.DB.WithContext(ctx).Create(&preference).Error; err != nil {
 			logger.Warnf("创建端口偏好失败: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
@@ -120,7 +122,7 @@ func (a *PortPreferenceAPI) SavePortPreference(c *gin.Context) {
 	} else {
 		// 记录存在，更新
 		preference.PreferredPort = req.PreferredPort
-		if err := db.DB.Save(&preference).Error; err != nil {
+		if err := db.DB.WithContext(ctx).Save(&preference).Error; err != nil {
 			logger.Warnf("更新端口偏好失败: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,

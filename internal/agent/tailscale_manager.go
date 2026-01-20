@@ -104,7 +104,7 @@ func (m *TailscaleManager) Start(controlURL, authKey string) error {
 		logger.Infof("Tailscale 已连接，IP: %s", m.tailscaleIP)
 
 		// 如果配置启用 SSH，设置 RunSSH = true
-		if m.config.Tailscale.EnableSSH {
+		if m.config.Tunnel.EnableSSH {
 			if err := m.enableSSH(); err != nil {
 				logger.Warnf("启用 Tailscale SSH 失败: %v", err)
 			} else {
@@ -254,7 +254,7 @@ func (m *TailscaleManager) expandHomeDir(path string) string {
 
 // initStateDir 初始化状态目录（本地或临时）
 func (m *TailscaleManager) initStateDir() error {
-	configuredDir := m.config.Tailscale.StateDir
+	configuredDir := m.config.Tunnel.StateDir
 
 	// 如果配置为空，使用临时目录（无状态模式）
 	if configuredDir == "" {
@@ -434,7 +434,7 @@ func (m *TailscaleManager) saveStateToServer() error {
 // periodicStateSave 定期保存状态到 Server
 func (m *TailscaleManager) periodicStateSave() {
 	// 获取同步间隔（分钟）
-	interval := m.config.Tailscale.StateSyncInterval
+	interval := m.config.Tunnel.StateSyncInterval
 	if interval <= 0 {
 		interval = 5 // 默认 5 分钟
 	}

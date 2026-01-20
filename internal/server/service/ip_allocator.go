@@ -86,27 +86,32 @@ func (ia *IPAllocator) getUsedIPs(nodeType string) ([]string, error) {
 
 	switch nodeType {
 	case "agent":
-		var agents []model.Agent
-		if err := ia.db.Select("ip").Find(&agents).Error; err != nil {
+		// 查询 Agent 角色用户的所有 Node
+		var nodes []model.Node
+		if err := ia.db.Joins("JOIN user ON user.id = node.user_id").
+			Where("user.role = ? AND node.type = ?", model.UserRoleAgent, model.NodeTypeAgent).
+			Select("node.ip").Find(&nodes).Error; err != nil {
 			return nil, err
 		}
-		for _, agent := range agents {
-			if agent.IP != "" {
-				ips = append(ips, agent.IP)
+		for _, node := range nodes {
+			if node.IP != "" {
+				ips = append(ips, node.IP)
 			}
 		}
 
 	case "desktop":
-		// TODO: 从 DesktopInstance 表查询
-		// var instances []model.DesktopInstance
-		// if err := ia.db.Select("tailscale_ip").Find(&instances).Error; err != nil {
-		// 	return nil, err
-		// }
-		// for _, inst := range instances {
-		// 	if inst.TailscaleIP != "" {
-		// 		ips = append(ips, inst.TailscaleIP)
-		// 	}
-		// }
+		// 查询 Client 角色用户的所有 Node
+		var nodes []model.Node
+		if err := ia.db.Joins("JOIN user ON user.id = node.user_id").
+			Where("user.role = ? AND node.type = ?", model.UserRoleClient, model.NodeTypeDesktop).
+			Select("node.ip").Find(&nodes).Error; err != nil {
+			return nil, err
+		}
+		for _, node := range nodes {
+			if node.IP != "" {
+				ips = append(ips, node.IP)
+			}
+		}
 
 	case "server":
 		// TODO: 从 Server 节点表查询（如果有的话）

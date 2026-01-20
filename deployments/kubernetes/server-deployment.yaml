@@ -45,6 +45,14 @@ spec:
             # 示例: wss://signaling.example.com/ws
             - name: PUBLIC_URL
               value: ""
+            # OpenTelemetry 配置（可选）
+            # K8s 内部访问 otel-collector
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://otel-collector:4317"
+            # - name: OTEL_SERVICE_NAME
+            #   value: "signaling-server"
+            # - name: OTEL_SERVICE_NAMESPACE
+            #   value: "default"
           volumeMounts:
             - name: data
               mountPath: /home/code/data

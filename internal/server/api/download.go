@@ -56,9 +56,10 @@ var (
 )
 
 // getClientDownloadURL 从系统配置获取客户端下载地址
-func getClientDownloadURL() (string, error) {
+func getClientDownloadURL(c *gin.Context) (string, error) {
+	ctx := c.Request.Context()
 	var config model.SystemConfig
-	if err := db.DB.Where("key = ?", model.ConfigClientDownloadURL).First(&config).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Where("key = ?", model.ConfigClientDownloadURL).First(&config).Error; err != nil {
 		return "", err
 	}
 	return config.Value, nil
@@ -249,7 +250,7 @@ func buildAllDownloads(baseURL string, versionInfo *VersionInfo) map[string]Down
 // 根据 User-Agent 或 os 参数返回适合的下载信息
 func (a *DownloadAPI) GetDesktopDownload(c *gin.Context) {
 	// 获取系统配置中的下载地址
-	baseURL, err := getClientDownloadURL()
+	baseURL, err := getClientDownloadURL(c)
 	if err != nil || baseURL == "" {
 		logger.Warnf("[Download] 获取下载地址失败: %v", err)
 		c.JSON(http.StatusOK, gin.H{
@@ -283,7 +284,7 @@ func (a *DownloadAPI) GetDesktopDownload(c *gin.Context) {
 // GetDesktopDownloadDirect 直接重定向到最新版本下载（公开接口）
 func (a *DownloadAPI) GetDesktopDownloadDirect(c *gin.Context) {
 	// 获取系统配置中的下载地址
-	baseURL, err := getClientDownloadURL()
+	baseURL, err := getClientDownloadURL(c)
 	if err != nil || baseURL == "" {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -308,7 +309,7 @@ func (a *DownloadAPI) GetDesktopDownloadDirect(c *gin.Context) {
 // ListDesktopVersions 列出所有可用版本（公开接口）
 func (a *DownloadAPI) ListDesktopVersions(c *gin.Context) {
 	// 获取系统配置中的下载地址
-	baseURL, err := getClientDownloadURL()
+	baseURL, err := getClientDownloadURL(c)
 	if err != nil || baseURL == "" {
 		c.JSON(http.StatusOK, AllDownloadsResponse{
 			Success: false,

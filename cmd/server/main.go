@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/banner"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/telemetry"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server"
 )
 
@@ -56,6 +59,30 @@ func main() {
 	}
 
 	logger.Infof("配置文件: %s", *configPath)
+
+	// 初始化 OpenTelemetry
+	if err := telemetry.Init(telemetry.Config{
+		Endpoint:    cfg.Telemetry.Endpoint,
+		ServiceName: cfg.Telemetry.ServiceName,
+		Namespace:   cfg.Telemetry.Namespace,
+	}, telemetry.BuildInfo{
+		Version:   version,
+		GitCommit: gitCommit,
+		BuildDate: buildDate,
+		GoVersion: goVersion,
+	}); err != nil {
+		logger.Warnf("初始化 OpenTelemetry 失败: %v", err)
+	} else if cfg.Telemetry.Endpoint != "" {
+		// 初始化 gRPC trace 限流器（每分钟每方法最多 10 条）
+		telemetry.InitGRPCLimiter(10)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := telemetry.Shutdown(ctx); err != nil {
+			logger.Warnf("关闭 OpenTelemetry 失败: %v", err)
+		}
+	}()
 
 	// 创建并启动服务器
 	srv, err := server.NewServer(cfg)

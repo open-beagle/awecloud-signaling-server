@@ -16,7 +16,7 @@ import (
 // PortForwardAPI 端口转发 API
 type PortForwardAPI struct {
 	config       *config.ServerConfig
-	configNotify ConfigNotifier // 配置变更通知接口
+	configNotify ConfigNotifier
 }
 
 // NewPortForwardAPI 创建 PortForwardAPI
@@ -31,64 +31,66 @@ func (a *PortForwardAPI) SetConfigNotifier(notifier ConfigNotifier) {
 
 // CreateForwardRequest 创建端口转发请求
 type CreateForwardRequest struct {
-	AgentID         uint64 `json:"agent_id" binding:"required"`
+	UserID          uint64 `json:"user_id" binding:"required"`
 	TargetServiceID string `json:"target_service_id" binding:"required"`
 	SourceAddr      string `json:"source_addr" binding:"required"`
 }
 
 // Create 创建端口转发
 func (a *PortForwardAPI) Create(c *gin.Context) {
+	ctx := c.Request.Context()
 	var req CreateForwardRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
 		return
 	}
 
-	// 验证 Agent 存在
-	var agent model.Agent
-	if err := db.DB.First(&agent, req.AgentID).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("Agent 不存在"))
+	// 验证 User 存在且为 Agent 角色
+	var user model.User
+	if err := db.DB.WithContext(ctx).First(&user, req.UserID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
+		return
+	}
+	if user.Role != model.UserRoleAgent {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("只有 Agent 用户可以创建端口转发"))
 		return
 	}
 
 	// 验证目标服务存在
 	var targetService model.ProxyService
-	if err := db.DB.First(&targetService, "id = ?", req.TargetServiceID).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&targetService, "id = ?", req.TargetServiceID).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("目标服务不存在"))
 		return
 	}
 
 	// 检查是否已存在相同的转发配置
 	var existing model.PortForward
-	if err := db.DB.Where("agent_id = ? AND source_addr = ?", req.AgentID, req.SourceAddr).First(&existing).Error; err == nil {
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND source_addr = ?", req.UserID, req.SourceAddr).First(&existing).Error; err == nil {
 		c.JSON(http.StatusConflict, NewErrorResponse("该源地址已被使用"))
 		return
 	}
 
-	// 获取目标服务的 VPN 地址作为 target_addr
 	targetAddr := targetService.SourceAddr
 
 	forward := &model.PortForward{
 		ID:              uuid.New().String(),
-		AgentID:         req.AgentID,
+		UserID:          req.UserID,
 		TargetServiceID: req.TargetServiceID,
 		SourceAddr:      req.SourceAddr,
 		TargetAddr:      targetAddr,
 		Enabled:         true,
 	}
 
-	if err := db.DB.Create(forward).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Create(forward).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("创建失败: "+err.Error()))
 		return
 	}
 
-	// 初始化运行时状态为 pending
 	cache.UpdatePortForwardStatus(forward.ID, cache.ServiceStatusPending, "", "")
 
-	logger.Infof("创建端口转发: id=%s, agent_id=%d, target_service_id=%s", forward.ID, forward.AgentID, forward.TargetServiceID)
-	recordAuditLog(c, model.ActionCreateService, "port_forward", forward.ID, "", nil)
+	logger.Infof("创建端口转发: id=%s, user_id=%d, target_service_id=%s", forward.ID, forward.UserID, forward.TargetServiceID)
+	recordAuditLog(ctx, c, model.ActionCreatePortForward, "port_forward", forward.ID, "", nil)
 
-	// 通知配置变更
 	if a.configNotify != nil {
 		a.configNotify.NotifyConfigChange()
 	}
@@ -104,6 +106,7 @@ type UpdateForwardRequest struct {
 
 // Update 更新端口转发
 func (a *PortForwardAPI) Update(c *gin.Context) {
+	ctx := c.Request.Context()
 	id := c.Param("id")
 
 	var req UpdateForwardRequest
@@ -113,12 +116,11 @@ func (a *PortForwardAPI) Update(c *gin.Context) {
 	}
 
 	var forward model.PortForward
-	if err := db.DB.First(&forward, "id = ?", id).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&forward, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("端口转发不存在"))
 		return
 	}
 
-	// 只更新提供的字段
 	updates := make(map[string]interface{})
 	if req.SourceAddr != "" {
 		updates["source_addr"] = req.SourceAddr
@@ -132,15 +134,14 @@ func (a *PortForwardAPI) Update(c *gin.Context) {
 		return
 	}
 
-	if err := db.DB.Model(&forward).Updates(updates).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Model(&forward).Updates(updates).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新失败"))
 		return
 	}
 
 	logger.Infof("更新端口转发: id=%s", id)
-	recordAuditLog(c, model.ActionUpdateService, "port_forward", id, "", nil)
+	recordAuditLog(ctx, c, model.ActionUpdatePortForward, "port_forward", id, "", nil)
 
-	// 通知配置变更
 	if a.configNotify != nil {
 		a.configNotify.NotifyConfigChange()
 	}
@@ -150,6 +151,7 @@ func (a *PortForwardAPI) Update(c *gin.Context) {
 
 // Toggle 启用/禁用端口转发
 func (a *PortForwardAPI) Toggle(c *gin.Context) {
+	ctx := c.Request.Context()
 	id := c.Param("id")
 
 	var req struct {
@@ -161,26 +163,23 @@ func (a *PortForwardAPI) Toggle(c *gin.Context) {
 	}
 
 	var forward model.PortForward
-	if err := db.DB.First(&forward, "id = ?", id).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&forward, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("端口转发不存在"))
 		return
 	}
 
-	// 更新启用状态
-	if err := db.DB.Model(&forward).Update("enabled", req.Enabled).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Model(&forward).Update("enabled", req.Enabled).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新失败"))
 		return
 	}
 
-	// 如果是启用操作，将运行时状态设置为 pending
 	if req.Enabled {
 		cache.UpdatePortForwardStatus(id, cache.ServiceStatusPending, "", "")
 	}
 
 	logger.Infof("切换端口转发状态: id=%s, enabled=%v", id, req.Enabled)
-	recordAuditLog(c, model.ActionUpdateService, "port_forward", id, "", nil)
+	recordAuditLog(ctx, c, model.ActionTogglePortForward, "port_forward", id, "", nil)
 
-	// 通知配置变更
 	if a.configNotify != nil {
 		a.configNotify.NotifyConfigChange()
 	}
@@ -190,52 +189,49 @@ func (a *PortForwardAPI) Toggle(c *gin.Context) {
 
 // Retry 重试错误状态的端口转发
 func (a *PortForwardAPI) Retry(c *gin.Context) {
+	ctx := c.Request.Context()
 	id := c.Param("id")
 
 	var forward model.PortForward
-	if err := db.DB.First(&forward, "id = ?", id).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&forward, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("端口转发不存在"))
 		return
 	}
 
-	// 检查运行时状态是否为错误
 	runtimeStatus := cache.GetPortForwardStatus(id)
 	if runtimeStatus == nil || runtimeStatus.Status != cache.ServiceStatusError {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("只有错误状态的端口转发才能重试"))
 		return
 	}
 
-	// 重置运行时状态为 pending
 	cache.UpdatePortForwardStatus(id, cache.ServiceStatusPending, "", "")
 
 	logger.Infof("重试端口转发: id=%s", id)
-	recordAuditLog(c, model.ActionUpdateService, "port_forward", id, "", nil)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("重试成功", nil))
 }
 
 // Delete 删除端口转发
 func (a *PortForwardAPI) Delete(c *gin.Context) {
+	ctx := c.Request.Context()
 	id := c.Param("id")
 
 	var forward model.PortForward
-	if err := db.DB.First(&forward, "id = ?", id).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&forward, "id = ?", id).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("端口转发不存在"))
 		return
 	}
 
-	if err := db.DB.Delete(&forward).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Delete(&forward).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
 		return
 	}
 
-	// 清理运行时状态缓存
 	cache.DeletePortForwardStatus(id)
 
 	logger.Infof("删除端口转发: id=%s", id)
-	recordAuditLog(c, model.ActionDeleteService, "port_forward", id, "", nil)
+	recordAuditLog(ctx, c, model.ActionDeletePortForward, "port_forward", id, "", nil)
 
-	// 通知配置变更
 	if a.configNotify != nil {
 		a.configNotify.NotifyConfigChange()
 	}

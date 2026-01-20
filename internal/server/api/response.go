@@ -1,5 +1,15 @@
 package api
 
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+)
+
 // Response 统一响应格式
 type Response struct {
 	Success bool        `json:"success"`
@@ -52,4 +62,32 @@ func NewPagedResponse(data interface{}, total int64, page, size int) PagedRespon
 		Page:    page,
 		Size:    size,
 	}
+}
+
+// recordAuditLog 记录审计日志
+func recordAuditLog(ctx context.Context, c *gin.Context, actionType, targetType, targetID, targetName string, detail interface{}) {
+	adminID, _ := c.Get("admin_id")
+	var userID int64
+	if id, ok := adminID.(float64); ok {
+		userID = int64(id)
+	}
+
+	var detailStr string
+	if detail != nil {
+		if data, err := json.Marshal(detail); err == nil {
+			detailStr = string(data)
+		}
+	}
+
+	log := &model.AuditLog{
+		UserID:     userID,
+		UserType:   "admin",
+		ActionType: actionType,
+		TargetType: targetType,
+		TargetID:   targetID,
+		TargetName: targetName,
+		Detail:     detailStr,
+	}
+
+	db.DB.WithContext(ctx).Create(log)
 }

@@ -1,110 +1,67 @@
 import request from '@/utils/request'
-import type { ApiResponse } from '@/types/models'
+import type { ApiResponse, PagedResponse } from '@/types/models'
 
+// 分组模型
 export interface Group {
   id: number
   name: string
   alias?: string
-  description: string
+  description?: string
   member_count?: number
   created_at: string
   updated_at: string
 }
 
+// 分组成员
 export interface GroupMember {
   id: number
   group_id: number
-  client_id: number
-  role: string
+  user_id: number
   created_at: string
-  client?: {
-    id: number
-    client_id: string
-    name?: string
-    alias?: string
-  }
-}
-
-export interface AgentGroupMember {
-  id: number
-  group_id: number
-  agent_id: number
-  created_at: string
-  agent?: {
+  user?: {
     id: number
     name: string
     alias?: string
-    ip?: string
+    role: string
   }
 }
 
-// 用户分组 API
-export const getGroups = () => {
-  return request.get<any, ApiResponse<Group[]>>('/api/v1/admin/client-groups')
+// 获取分组列表
+export const getGroups = (params?: { search?: string; page?: number; size?: number }) => {
+  return request.get<any, PagedResponse<Group[]>>('/api/v1/admin/groups', { params })
 }
 
+// 获取分组详情
 export const getGroup = (id: number) => {
-  return request.get<any, ApiResponse<Group>>(`/api/v1/admin/client-groups/${id}`)
+  return request.get<any, ApiResponse<Group>>(`/api/v1/admin/groups/${id}`)
 }
 
+// 创建分组
 export const createGroup = (data: { name: string; alias?: string; description?: string }) => {
-  return request.post<any, ApiResponse<Group>>('/api/v1/admin/client-groups', data)
+  return request.post<any, ApiResponse<Group>>('/api/v1/admin/groups', data)
 }
 
+// 更新分组
 export const updateGroup = (id: number, data: { name?: string; alias?: string; description?: string }) => {
-  return request.put<any, ApiResponse>(`/api/v1/admin/client-groups/${id}`, data)
+  return request.put<any, ApiResponse<Group>>(`/api/v1/admin/groups/${id}`, data)
 }
 
+// 删除分组
 export const deleteGroup = (id: number) => {
-  return request.delete<any, ApiResponse>(`/api/v1/admin/client-groups/${id}`)
+  return request.delete<any, ApiResponse>(`/api/v1/admin/groups/${id}`)
 }
 
+// 获取分组成员
 export const getGroupMembers = (groupId: number) => {
-  return request.get<any, ApiResponse<GroupMember[]>>(`/api/v1/admin/client-groups/${groupId}/members`)
+  return request.get<any, ApiResponse<GroupMember[]>>(`/api/v1/admin/groups/${groupId}/members`)
 }
 
-export const addGroupMember = (groupId: number, clientId: number, role: string = 'member') => {
-  return request.post<any, ApiResponse>(`/api/v1/admin/client-groups/${groupId}/members`, {
-    client_id: clientId,
-    role
-  })
+// 添加分组成员
+export const addGroupMember = (groupId: number, userId: number) => {
+  return request.post<any, ApiResponse>(`/api/v1/admin/groups/${groupId}/members`, { user_id: userId })
 }
 
-export const removeGroupMember = (groupId: number, clientId: number) => {
-  return request.delete<any, ApiResponse>(`/api/v1/admin/client-groups/${groupId}/members/${clientId}`)
-}
-
-// 代理分组 API
-export const getAgentGroups = () => {
-  return request.get<any, ApiResponse<Group[]>>('/api/v1/admin/agent-groups')
-}
-
-export const getAgentGroup = (id: number) => {
-  return request.get<any, ApiResponse<Group>>(`/api/v1/admin/agent-groups/${id}`)
-}
-
-export const createAgentGroup = (data: { name: string; alias?: string; description?: string }) => {
-  return request.post<any, ApiResponse<Group>>('/api/v1/admin/agent-groups', data)
-}
-
-export const updateAgentGroup = (id: number, data: { name?: string; alias?: string; description?: string }) => {
-  return request.put<any, ApiResponse>(`/api/v1/admin/agent-groups/${id}`, data)
-}
-
-export const deleteAgentGroup = (id: number) => {
-  return request.delete<any, ApiResponse>(`/api/v1/admin/agent-groups/${id}`)
-}
-
-export const getAgentGroupMembers = (groupId: number) => {
-  return request.get<any, ApiResponse<AgentGroupMember[]>>(`/api/v1/admin/agent-groups/${groupId}/members`)
-}
-
-export const addAgentGroupMember = (groupId: number, agentId: number) => {
-  return request.post<any, ApiResponse>(`/api/v1/admin/agent-groups/${groupId}/members`, {
-    agent_id: agentId
-  })
-}
-
-export const removeAgentGroupMember = (groupId: number, agentId: number) => {
-  return request.delete<any, ApiResponse>(`/api/v1/admin/agent-groups/${groupId}/members/${agentId}`)
+// 移除分组成员
+export const removeGroupMember = (groupId: number, userId: number) => {
+  return request.delete<any, ApiResponse>(`/api/v1/admin/groups/${groupId}/members/${userId}`)
 }

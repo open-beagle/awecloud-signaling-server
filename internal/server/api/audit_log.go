@@ -31,6 +31,7 @@ type AuditLogItem struct {
 
 // QueryAuditLogs 查询审计日志
 func (a *AuditLogAPI) QueryAuditLogs(c *gin.Context) {
+	ctx := c.Request.Context()
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
 	actionType := c.Query("action_type")
@@ -45,7 +46,7 @@ func (a *AuditLogAPI) QueryAuditLogs(c *gin.Context) {
 		size = 20
 	}
 
-	query := db.DB.Model(&model.AuditLog{})
+	query := db.DB.WithContext(ctx).Model(&model.AuditLog{})
 
 	// 按操作类型筛选
 	if actionType != "" {
@@ -93,7 +94,7 @@ func (a *AuditLogAPI) QueryAuditLogs(c *gin.Context) {
 	adminMap := make(map[int64]string)
 	if len(userIDs) > 0 {
 		var admins []model.Admin
-		db.DB.Where("id IN ?", userIDs).Find(&admins)
+		db.DB.WithContext(ctx).Where("id IN ?", userIDs).Find(&admins)
 		for _, admin := range admins {
 			adminMap[admin.ID] = admin.Username
 		}
@@ -150,8 +151,9 @@ type AdminOption struct {
 
 // GetUsers 获取操作用户列表（用于筛选）
 func (a *AuditLogAPI) GetUsers(c *gin.Context) {
+	ctx := c.Request.Context()
 	var admins []model.Admin
-	if err := db.DB.Select("id, username").Find(&admins).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Select("id, username").Find(&admins).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
 		return
 	}

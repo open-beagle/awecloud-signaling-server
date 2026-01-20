@@ -47,5 +47,23 @@ headscale_public_url = "https://signaling.example.com"
 
 # Headscale API 密钥（建议通过环境变量配置）
 # 环境变量：HEADSCALE_API_KEY
-# 生成方式：headscale apikeys create --expiration 365d
+# 生成方式：headscale apikeys create --expiration 36500d
 headscale_api_key = ""
+
+# OpenTelemetry 配置
+# 设置 endpoint 后自动启用，留空则禁用
+[telemetry]
+# OTLP Endpoint
+# 环境变量：OTEL_EXPORTER_OTLP_ENDPOINT
+# 
+# K8s 内部：http://otel-collector.beagle-devops:4317
+# 外网访问：https://otel.ali.example.com:443
+endpoint = ""
+
+# 服务名称（默认：signaling-server）
+# 环境变量：OTEL_SERVICE_NAME
+service_name = "signaling-server"
+
+# 服务命名空间（默认：default）
+# 环境变量：OTEL_SERVICE_NAMESPACE
+namespace = "default"
