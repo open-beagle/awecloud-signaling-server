@@ -10,6 +10,9 @@ import (
 	"time"
 
 	v1 "github.com/juanfont/headscale/gen/go/headscale/v1"
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel/attribute"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -121,10 +124,20 @@ func NewClient(cfg Config) (*Client, error) {
 		opts = append(opts, grpc.WithStreamInterceptor(prefixStreamInterceptor(parsed.prefix)))
 	}
 
+	// 添加 OpenTelemetry gRPC 客户端追踪
+	// 使用 peer.service 属性让 Headscale 在 Jaeger 中显示为独立节点
+	opts = append(opts, grpc.WithStatsHandler(otelgrpc.NewClientHandler(
+		otelgrpc.WithSpanAttributes(
+			attribute.String("peer.service", "headscale"),
+		),
+	)))
+
 	conn, err := grpc.NewClient(parsed.host, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("连接 Headscale gRPC 失败: %w", err)
 	}
+
+	logger.Info("Headscale OpenTelemetry 追踪已启用")
 
 	return &Client{
 		conn:   conn,

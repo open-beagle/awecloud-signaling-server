@@ -222,7 +222,7 @@ func (s *Server) setupRouter() *gin.Engine {
 
 	// OpenTelemetry 中间件
 	if s.config.Telemetry.Endpoint != "" {
-		router.Use(telemetry.GinMiddleware(s.config.Telemetry.ServiceName))
+		router.Use(telemetry.GinMiddleware(s.config.Telemetry.Name))
 	}
 
 	// Headscale 反向代理

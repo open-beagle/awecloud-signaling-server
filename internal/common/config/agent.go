@@ -117,11 +117,14 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	}
 
 	// Telemetry 默认值
-	if cfg.Telemetry.ServiceName == "" {
-		cfg.Telemetry.ServiceName = "signaling-agent"
+	if cfg.Telemetry.Name == "" {
+		cfg.Telemetry.Name = "signaling-agent"
 	}
 	if cfg.Telemetry.Namespace == "" {
 		cfg.Telemetry.Namespace = "default"
+	}
+	if cfg.Telemetry.Cluster == "" {
+		cfg.Telemetry.Cluster = "default"
 	}
 
 	// Telemetry 环境变量覆盖
@@ -129,10 +132,13 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 		cfg.Telemetry.Endpoint = endpoint
 	}
 	if serviceName := os.Getenv("OTEL_SERVICE_NAME"); serviceName != "" {
-		cfg.Telemetry.ServiceName = serviceName
+		cfg.Telemetry.Name = serviceName
 	}
 	if namespace := os.Getenv("OTEL_SERVICE_NAMESPACE"); namespace != "" {
 		cfg.Telemetry.Namespace = namespace
+	}
+	if cluster := os.Getenv("OTEL_SERVICE_CLUSTER"); cluster != "" {
+		cfg.Telemetry.Cluster = cluster
 	}
 
 	return &cfg, nil

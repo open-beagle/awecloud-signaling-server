@@ -94,13 +94,16 @@ func main() {
 	// 初始化 OpenTelemetry
 	if err := telemetry.Init(telemetry.Config{
 		Endpoint:    cfg.Telemetry.Endpoint,
-		ServiceName: cfg.Telemetry.ServiceName,
+		ServiceName: cfg.Telemetry.Name,
 		Namespace:   cfg.Telemetry.Namespace,
-	}, telemetry.BuildInfo{
+		Cluster:     cfg.Telemetry.Cluster,
+	}, &telemetry.BuildInfo{
 		Version:   version,
 		GitCommit: gitCommit,
 		BuildDate: buildDate,
 		GoVersion: goVersion,
+	}, &telemetry.ProcessAttributes{
+		Node: cfg.Agent.AgentName, // 使用 AgentName 作为节点标识
 	}); err != nil {
 		logger.Warnf("初始化 OpenTelemetry 失败: %v", err)
 	} else {

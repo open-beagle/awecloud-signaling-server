@@ -18,9 +18,10 @@ type ServerConfig struct {
 
 // TelemetrySection OpenTelemetry 配置
 type TelemetrySection struct {
-	Endpoint    string `toml:"endpoint"`     // OTLP Endpoint，设置后自动启用
-	ServiceName string `toml:"service_name"` // 服务名称
-	Namespace   string `toml:"namespace"`    // 服务命名空间
+	Endpoint  string `toml:"endpoint"`  // OTLP Endpoint，设置后自动启用
+	Name      string `toml:"name"`      // 服务名称
+	Namespace string `toml:"namespace"` // 服务命名空间
+	Cluster   string `toml:"cluster"`   // 集群标识（业务集群/数据来源）
 }
 
 // ServerSection FRP 配置（废弃，保留兼容）
@@ -159,11 +160,14 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 
 	// Telemetry 默认值
-	if cfg.Telemetry.ServiceName == "" {
-		cfg.Telemetry.ServiceName = "signaling-server"
+	if cfg.Telemetry.Name == "" {
+		cfg.Telemetry.Name = "signaling-server"
 	}
 	if cfg.Telemetry.Namespace == "" {
 		cfg.Telemetry.Namespace = "default"
+	}
+	if cfg.Telemetry.Cluster == "" {
+		cfg.Telemetry.Cluster = "default"
 	}
 
 	// Telemetry 环境变量覆盖
@@ -171,10 +175,13 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 		cfg.Telemetry.Endpoint = endpoint
 	}
 	if serviceName := os.Getenv("OTEL_SERVICE_NAME"); serviceName != "" {
-		cfg.Telemetry.ServiceName = serviceName
+		cfg.Telemetry.Name = serviceName
 	}
 	if namespace := os.Getenv("OTEL_SERVICE_NAMESPACE"); namespace != "" {
 		cfg.Telemetry.Namespace = namespace
+	}
+	if cluster := os.Getenv("OTEL_SERVICE_CLUSTER"); cluster != "" {
+		cfg.Telemetry.Cluster = cluster
 	}
 
 	return &cfg, nil

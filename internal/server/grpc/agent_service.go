@@ -479,9 +479,10 @@ func (s *AgentServiceServer) IsAgentOnline(agentID uint64) bool {
 		return true
 	}
 
-	// 检查数据库中的 Node（使用 background context，因为这是状态检查）
+	// 检查数据库中的 Node（状态检查不需要 trace，使用 background context）
 	var node model.Node
-	if err := db.DB.Where("user_id = ? AND type = ?", agentID, model.NodeTypeAgent).First(&node).Error; err != nil {
+	ctx := context.Background()
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", agentID, model.NodeTypeAgent).First(&node).Error; err != nil {
 		return false
 	}
 

@@ -25,6 +25,7 @@ type Config struct {
 	Endpoint    string // OTLP Endpoint，设置后自动启用
 	ServiceName string // 服务名称
 	Namespace   string // 服务命名空间
+	Cluster     string // 集群标识
 }
 
 // BuildInfo 构建信息，用于 Process 版本标识
@@ -33,6 +34,12 @@ type BuildInfo struct {
 	GitCommit string // Git 提交哈希
 	BuildDate string // 构建日期
 	GoVersion string // Go 编译器版本
+}
+
+// ProcessAttributes Process 级别的属性，用于区分不同实例
+type ProcessAttributes struct {
+	Node string // Agent 节点名称（如 agent-prod-01）
+	User string // Desktop 用户名称（如 user@example.com）
 }
 
 var (
@@ -47,7 +54,8 @@ func (c Config) IsEnabled() bool {
 
 // Init 初始化 OpenTelemetry
 // buildInfo 可选，传入构建信息用于 Process 版本标识
-func Init(cfg Config, buildInfo ...BuildInfo) error {
+// processAttrs 可选，传入 Process 属性用于区分实例
+func Init(cfg Config, buildInfo *BuildInfo, processAttrs *ProcessAttributes) error {
 	if !cfg.IsEnabled() {
 		logger.Info("OpenTelemetry 未配置 endpoint，跳过初始化")
 		return nil
@@ -59,6 +67,9 @@ func Init(cfg Config, buildInfo ...BuildInfo) error {
 	if cfg.Namespace == "" {
 		cfg.Namespace = "default"
 	}
+	if cfg.Cluster == "" {
+		cfg.Cluster = "default"
+	}
 
 	ctx := context.Background()
 
@@ -66,25 +77,36 @@ func Init(cfg Config, buildInfo ...BuildInfo) error {
 	attrs := []attribute.KeyValue{
 		semconv.ServiceName(cfg.ServiceName),
 		semconv.ServiceNamespace(cfg.Namespace),
+		// service.cluster 表示服务所在的业务集群（数据来源）
+		attribute.String("service.cluster", cfg.Cluster),
 	}
 
 	// 添加构建信息
-	if len(buildInfo) > 0 {
-		bi := buildInfo[0]
-		if bi.Version != "" {
-			attrs = append(attrs, semconv.ServiceVersion(bi.Version))
+	if buildInfo != nil {
+		if buildInfo.Version != "" {
+			attrs = append(attrs, semconv.ServiceVersion(buildInfo.Version))
 		}
-		if bi.GitCommit != "" {
-			attrs = append(attrs, attribute.String("service.git_commit", bi.GitCommit))
+		if buildInfo.GitCommit != "" {
+			attrs = append(attrs, attribute.String("service.git_commit", buildInfo.GitCommit))
 		}
-		if bi.BuildDate != "" {
-			attrs = append(attrs, attribute.String("service.build_date", bi.BuildDate))
+		if buildInfo.BuildDate != "" {
+			attrs = append(attrs, attribute.String("service.build_date", buildInfo.BuildDate))
 		}
-		if bi.GoVersion != "" {
-			attrs = append(attrs, attribute.String("go.version", bi.GoVersion))
+		if buildInfo.GoVersion != "" {
+			attrs = append(attrs, attribute.String("go.version", buildInfo.GoVersion))
 		}
 	} else {
 		attrs = append(attrs, semconv.ServiceVersion("dev"))
+	}
+
+	// 添加 Process 属性（用于区分不同实例）
+	if processAttrs != nil {
+		if processAttrs.Node != "" {
+			attrs = append(attrs, attribute.String("service.node", processAttrs.Node))
+		}
+		if processAttrs.User != "" {
+			attrs = append(attrs, attribute.String("service.user", processAttrs.User))
+		}
 	}
 
 	// 创建资源
@@ -151,8 +173,8 @@ func Init(cfg Config, buildInfo ...BuildInfo) error {
 	// 创建 Tracer
 	tracer = tracerProvider.Tracer(cfg.ServiceName)
 
-	logger.Infof("OpenTelemetry 初始化成功: endpoint=%s, service=%s, namespace=%s, tls=%v",
-		cfg.Endpoint, cfg.ServiceName, cfg.Namespace, useTLS)
+	logger.Infof("OpenTelemetry 初始化成功: endpoint=%s, service=%s, namespace=%s, cluster=%s, tls=%v",
+		cfg.Endpoint, cfg.ServiceName, cfg.Namespace, cfg.Cluster, useTLS)
 	return nil
 }
 

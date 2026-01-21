@@ -314,9 +314,10 @@ func (s *DesktopServiceServer) IsDesktopOnline(nodeID uint64) bool {
 	if exists && time.Since(conn.LastSeen) < 60*time.Second {
 		return true
 	}
-	// 使用 background context，因为这是状态检查
+	// 状态检查不需要 trace，使用 background context
+	ctx := context.Background()
 	var node model.Node
-	if err := db.DB.First(&node, nodeID).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&node, nodeID).Error; err != nil {
 		return false
 	}
 	if node.LastHeartbeat == nil {

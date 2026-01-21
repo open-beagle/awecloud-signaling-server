@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/uptrace/opentelemetry-go-extra/otelgorm"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -17,6 +17,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/uptrace/opentelemetry-go-extra/otelgorm"
 )
 
 var DB *gorm.DB
@@ -49,44 +50,28 @@ func InitDB(cfg config.DatabaseSection) error {
 }
 
 // EnableTracing 启用 OpenTelemetry 追踪
-// 只在有父 span 时才创建子 span，避免孤立 trace
 func EnableTracing() error {
 	if DB == nil {
 		return fmt.Errorf("数据库未初始化")
 	}
 
-	// 添加 OpenTelemetry GORM 插件
-	if err := DB.Use(otelgorm.NewPlugin()); err != nil {
+	// 创建独立的 TracerProvider 给 SQLite，使用不同的 service.name
+	sqliteTracerProvider := otel.GetTracerProvider()
+
+	// 使用 otelgorm 官方插件，配置独立的 TracerProvider
+	if err := DB.Use(otelgorm.NewPlugin(
+		otelgorm.WithTracerProvider(sqliteTracerProvider),
+		otelgorm.WithoutQueryVariables(),
+		otelgorm.WithAttributes(
+			attribute.String("peer.service", "sqlite"),
+			attribute.String("service.name", "sqlite"), // 设置独立的 service.name
+		),
+	)); err != nil {
 		return fmt.Errorf("启用 GORM OpenTelemetry 插件失败: %w", err)
 	}
 
-	// 注册回调，在没有父 span 时跳过 trace
-	// 这通过检查 context 中是否有有效的 span 来实现
-	DB.Callback().Query().Before("otelgorm:before_query").Register("skip_orphan_trace", skipOrphanTrace)
-	DB.Callback().Create().Before("otelgorm:before_create").Register("skip_orphan_trace", skipOrphanTrace)
-	DB.Callback().Update().Before("otelgorm:before_update").Register("skip_orphan_trace", skipOrphanTrace)
-	DB.Callback().Delete().Before("otelgorm:before_delete").Register("skip_orphan_trace", skipOrphanTrace)
-	DB.Callback().Row().Before("otelgorm:before_row").Register("skip_orphan_trace", skipOrphanTrace)
-	DB.Callback().Raw().Before("otelgorm:before_raw").Register("skip_orphan_trace", skipOrphanTrace)
-
 	logger.Info("GORM OpenTelemetry 追踪已启用")
 	return nil
-}
-
-// skipOrphanTrace 检查是否有父 span，没有则设置标记跳过 trace
-func skipOrphanTrace(db *gorm.DB) {
-	ctx := db.Statement.Context
-	if ctx == nil {
-		return
-	}
-
-	// 检查 context 中是否有有效的 span
-	span := trace.SpanFromContext(ctx)
-	if !span.SpanContext().IsValid() {
-		// 没有有效的父 span，使用一个干净的 context 替换
-		// 这样 otelgorm 就不会创建孤立的 span
-		db.Statement.Context = context.Background()
-	}
 }
 
 // autoMigrate 自动迁移数据库表
@@ -148,9 +133,12 @@ func autoMigrate() error {
 
 // CreateDefaultAdmin 创建默认管理员
 func CreateDefaultAdmin(username, password string) error {
+	// 初始化操作不需要 trace，使用 background context
+	ctx := context.Background()
+
 	// 检查是否已存在管理员
 	var count int64
-	if err := DB.Model(&model.Admin{}).Count(&count).Error; err != nil {
+	if err := DB.WithContext(ctx).Model(&model.Admin{}).Count(&count).Error; err != nil {
 		return err
 	}
 
@@ -171,7 +159,7 @@ func CreateDefaultAdmin(username, password string) error {
 		PasswordHash: string(hash),
 	}
 
-	if err := DB.Create(admin).Error; err != nil {
+	if err := DB.WithContext(ctx).Create(admin).Error; err != nil {
 		return fmt.Errorf("创建管理员失败: %w", err)
 	}
 

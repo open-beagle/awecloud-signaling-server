@@ -62,8 +62,14 @@ endpoint = ""
 
 # 服务名称（默认：signaling-server）
 # 环境变量：OTEL_SERVICE_NAME
-service_name = "signaling-server"
+name = "signaling-server"
 
 # 服务命名空间（默认：default）
 # 环境变量：OTEL_SERVICE_NAMESPACE
 namespace = "default"
+
+# 集群标识（默认：default）
+# 环境变量：OTEL_SERVICE_CLUSTER
+# 用于标识服务所在的业务集群/数据来源，在 Jaeger 中显示为 service.cluster tag
+# 注意：这与 k8s.cluster.name 不同，后者表示 OTEL Collector 所在的 K8s 集群
+cluster = "default"

@@ -63,14 +63,15 @@ func main() {
 	// 初始化 OpenTelemetry
 	if err := telemetry.Init(telemetry.Config{
 		Endpoint:    cfg.Telemetry.Endpoint,
-		ServiceName: cfg.Telemetry.ServiceName,
+		ServiceName: cfg.Telemetry.Name,
 		Namespace:   cfg.Telemetry.Namespace,
-	}, telemetry.BuildInfo{
+		Cluster:     cfg.Telemetry.Cluster,
+	}, &telemetry.BuildInfo{
 		Version:   version,
 		GitCommit: gitCommit,
 		BuildDate: buildDate,
 		GoVersion: goVersion,
-	}); err != nil {
+	}, nil); err != nil {
 		logger.Warnf("初始化 OpenTelemetry 失败: %v", err)
 	} else if cfg.Telemetry.Endpoint != "" {
 		// 初始化 gRPC trace 限流器（每分钟每方法最多 10 条）
