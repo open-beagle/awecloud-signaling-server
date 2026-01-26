@@ -1,3 +1,7 @@
+---
+inclusion: manual
+---
+
 # Go 应用 OpenTelemetry 接入规范
 
 本规范指导 Go 应用如何接入 OpenTelemetry 追踪。

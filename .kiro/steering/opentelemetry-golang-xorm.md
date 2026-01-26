@@ -1,3 +1,7 @@
+---
+inclusion: manual
+---
+
 # XORM OpenTelemetry 集成规范
 
 ## 概述

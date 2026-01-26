@@ -1,3 +1,7 @@
+---
+inclusion: manual
+---
+
 # Redis OpenTelemetry 集成规范
 
 ## 概述

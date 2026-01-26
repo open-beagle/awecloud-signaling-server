@@ -1,3 +1,7 @@
+---
+inclusion: manual
+---
+
 # OpenTelemetry 应用接入指南
 
 ## 快速开始

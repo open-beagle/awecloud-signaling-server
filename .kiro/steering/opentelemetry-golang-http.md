@@ -1,3 +1,7 @@
+---
+inclusion: manual
+---
+
 # HTTP OpenTelemetry 集成规范
 
 ## 概述

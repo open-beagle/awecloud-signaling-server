@@ -1,3 +1,7 @@
+---
+inclusion: manual
+---
+
 # GORM OpenTelemetry 集成规范
 
 ## 概述
