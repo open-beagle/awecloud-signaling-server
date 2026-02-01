@@ -662,7 +662,7 @@ func (s *DesktopServiceServer) ToggleFavorite(ctx context.Context, req *pb.Toggl
 		// 未收藏，添加收藏
 		favorite = model.ServiceFavorite{
 			ClientID:       int64(node.UserID),
-			STCPInstanceID: int64(service.ID),
+			STCPInstanceID: service.ID,
 		}
 		if err := db.DB.WithContext(ctx).Create(&favorite).Error; err != nil {
 			return &pb.ToggleFavoriteResponse{Success: false, Message: "添加收藏失败"}, nil
@@ -692,7 +692,7 @@ func (s *DesktopServiceServer) GetFavoriteServices(ctx context.Context, req *pb.
 		// 查询服务的 user_id
 		var service model.ProxyService
 		if err := db.DB.WithContext(ctx).Select("user_id").First(&service, fav.STCPInstanceID).Error; err == nil {
-			serviceID := fmt.Sprintf("%d:%d", service.UserID, fav.STCPInstanceID)
+			serviceID := fmt.Sprintf("%d:%s", service.UserID, fav.STCPInstanceID)
 			serviceIDs = append(serviceIDs, serviceID)
 		}
 	}

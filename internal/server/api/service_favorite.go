@@ -18,8 +18,8 @@ func NewServiceFavoriteAPI() *ServiceFavoriteAPI {
 
 // FavoriteInfo 收藏信息
 type FavoriteInfo struct {
-	STCPInstanceID int64 `json:"stcp_instance_id"`
-	LocalPort      int   `json:"local_port"`
+	STCPInstanceID string `json:"stcp_instance_id"`
+	LocalPort      int    `json:"local_port"`
 }
 
 // GetServiceFavoritesResponse 获取服务收藏响应
@@ -31,8 +31,8 @@ type GetServiceFavoritesResponse struct {
 
 // ToggleFavoriteRequest 切换收藏请求
 type ToggleFavoriteRequest struct {
-	STCPInstanceID int64 `json:"stcp_instance_id" binding:"required"`
-	LocalPort      int   `json:"local_port,omitempty"` // 可选的本地端口
+	STCPInstanceID string `json:"stcp_instance_id" binding:"required"`
+	LocalPort      int    `json:"local_port,omitempty"` // 可选的本地端口
 }
 
 // ToggleFavoriteResponse 切换收藏响应
@@ -94,7 +94,7 @@ func (a *ServiceFavoriteAPI) ToggleFavorite(c *gin.Context) {
 		return
 	}
 
-	logger.Infof("[ServiceFavorite] ToggleFavorite: instance_id=%d, local_port=%d", req.STCPInstanceID, req.LocalPort)
+	logger.Infof("[ServiceFavorite] ToggleFavorite: instance_id=%s, local_port=%d", req.STCPInstanceID, req.LocalPort)
 
 	// 从JWT获取client_id
 	clientID, exists := c.Get("client_id")
@@ -131,7 +131,7 @@ func (a *ServiceFavoriteAPI) ToggleFavorite(c *gin.Context) {
 			STCPInstanceID: req.STCPInstanceID,
 			LocalPort:      req.LocalPort,
 		}
-		logger.Infof("[ServiceFavorite] Creating favorite: client_id=%d, instance_id=%d, local_port=%d",
+		logger.Infof("[ServiceFavorite] Creating favorite: client_id=%d, instance_id=%s, local_port=%d",
 			favorite.ClientID, favorite.STCPInstanceID, favorite.LocalPort)
 		if err := db.DB.WithContext(ctx).Create(&favorite).Error; err != nil {
 			logger.Infof("创建服务收藏失败: %v", err)
@@ -164,8 +164,8 @@ func (a *ServiceFavoriteAPI) ToggleFavorite(c *gin.Context) {
 
 // UpdateFavoritePortRequest 更新收藏端口请求
 type UpdateFavoritePortRequest struct {
-	STCPInstanceID int64 `json:"stcp_instance_id" binding:"required"`
-	LocalPort      int   `json:"local_port" binding:"required,min=1,max=65535"`
+	STCPInstanceID string `json:"stcp_instance_id" binding:"required"`
+	LocalPort      int    `json:"local_port" binding:"required,min=1,max=65535"`
 }
 
 // UpdateFavoritePort 更新收藏服务的端口
@@ -226,7 +226,7 @@ type FavoriteListItem struct {
 	ID             int64  `json:"id"`
 	ClientID       int64  `json:"client_id"`
 	ClientName     string `json:"client_name"`
-	STCPInstanceID int64  `json:"stcp_instance_id"`
+	STCPInstanceID string `json:"stcp_instance_id"`
 	InstanceName   string `json:"instance_name"`
 	AgentName      string `json:"agent_name"`
 	LocalPort      int    `json:"local_port"`
