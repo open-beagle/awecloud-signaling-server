@@ -94,14 +94,29 @@ docker build --no-cache -f .beagle/server.dockerfile \
 docker push ${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION}
 
 # 构建 Agent 镜像
-docker build -f .beagle/agent.dockerfile \
+docker build --no-cache -f .beagle/agent.dockerfile \
   --build-arg BASE=${REGISTRY}/alpine:3 \
   --build-arg AUTHOR=${AUTHOR} \
   --build-arg VERSION=${BUILD_VERSION} \
   -t ${REGISTRY}/awecloud-signaling-agent:${BUILD_VERSION} \
-  --push \
-  .
+  . && \
+docker push ${REGISTRY}/awecloud-signaling-agent:${BUILD_VERSION}
+```
 
+### 3. 部署到 Kubernetes
+
+推送镜像后，更新 Kubernetes 部署：
+
+```bash
+# 重启部署
+kubectl --context aliyun --namespace beagle-access rollout restart deployment/awecloud-signal-server
+
+# 更新镜像
+kubectl --context aliyun --namespace beagle-access set image deployment/awecloud-signal-server \
+  server=${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION}
+
+# 查看日志
+kubectl --context aliyun --namespace beagle-access logs -f deployment/awecloud-signal-server
 ```
 
 ## GitHub Actions 自动构建
