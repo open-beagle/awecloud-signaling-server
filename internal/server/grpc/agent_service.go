@@ -238,10 +238,10 @@ func (s *AgentServiceServer) Authenticate(ctx context.Context, req *pb.AgentAuth
 	if s.headscaleClient != nil && s.config != nil {
 		needAuthKey := false
 
-		if node.ID == 0 {
+		if node.HeadscaleNodeID == 0 {
 			needAuthKey = true
 		} else {
-			hsNode, err := s.headscaleClient.GetNode(ctx, node.ID)
+			hsNode, err := s.headscaleClient.GetNode(ctx, node.HeadscaleNodeID)
 			if err != nil || hsNode == nil {
 				needAuthKey = true
 			}
@@ -453,6 +453,24 @@ func (s *AgentServiceServer) createAgentAuthKey(ctx context.Context, agentName s
 		}
 	}
 
+	// 检查该 User 下是否已有 Node，如果有则删除旧节点
+	// 这样可以避免同一个 Agent 注册多次产生多个节点
+	nodes, err := s.headscaleClient.ListNodes(ctx)
+	if err != nil {
+		logger.Warnf("查询 Headscale Node 列表失败: %v", err)
+	} else {
+		for _, node := range nodes {
+			if node.User != nil && node.User.Id == user.Id {
+				logger.Infof("删除 Agent %s 的旧 Headscale 节点: id=%d, name=%s", agentName, node.Id, node.GivenName)
+				if err := s.headscaleClient.DeleteNode(ctx, node.Id); err != nil {
+					logger.Warnf("删除旧节点失败: %v", err)
+				}
+				// 清空本地数据库中对应 Node 的 HeadscaleNodeID
+				db.DB.WithContext(ctx).Model(&model.Node{}).Where("headscale_node_id = ?", node.Id).Update("headscale_node_id", 0)
+			}
+		}
+	}
+
 	// 构建 Tags 列表
 	// 身份 Tag: tag:agent-{name}
 	tags := []string{fmt.Sprintf("tag:agent-%s", agentName)}
@@ -468,8 +486,9 @@ func (s *AgentServiceServer) createAgentAuthKey(ctx context.Context, agentName s
 		}
 	}
 
-	// 创建预认证密钥（24 小时有效，临时节点，带 Tags）
-	authKey, err := s.headscaleClient.CreatePreAuthKeyWithTags(ctx, user.Id, 24*time.Hour, true, tags)
+	// 创建预认证密钥（24 小时有效，持久节点，带 Tags）
+	// Agent 使用持久节点以保持 IP 稳定，避免断开后节点被删除
+	authKey, err := s.headscaleClient.CreatePreAuthKeyWithTags(ctx, user.Id, 24*time.Hour, false, tags)
 	if err != nil {
 		return "", "", fmt.Errorf("创建预认证密钥失败: %w", err)
 	}

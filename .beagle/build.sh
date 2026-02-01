@@ -20,16 +20,6 @@ mkdir -p ${BIN_DIR}
 # 分割架构列表
 IFS=',' read -ra ARCH_ARRAY <<< "$GOARCHS"
 
-echo "Building AWECloud Signaling (CI/CD)"
-echo "Target OS: ${GOOS}"
-echo "Target architectures: ${GOARCHS}"
-echo "Build targets: ${BUILD_TARGETS}"
-echo "Version: ${BUILD_VERSION}"
-echo "Git Commit: ${GIT_COMMIT}"
-echo "Build Date: ${BUILD_DATE}"
-echo "Go Version: ${BUILD_GO}"
-echo "---"
-
 # 检查是否需要构建 server 和 agent
 BUILD_SERVER=false
 BUILD_AGENT=false

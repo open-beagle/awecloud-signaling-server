@@ -338,9 +338,9 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 
 	// 建立 User 名称 -> Node 的映射
 	userNodeMap := make(map[string]*struct {
-		NodeID uint64
-		IP     string
-		Tags   []string
+		HeadscaleNodeID uint64
+		IP              string
+		Tags            []string
 	})
 	for _, node := range nodes {
 		if node.User != nil {
@@ -349,13 +349,13 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 				ip = node.IpAddresses[0]
 			}
 			userNodeMap[node.User.Name] = &struct {
-				NodeID uint64
-				IP     string
-				Tags   []string
+				HeadscaleNodeID uint64
+				IP              string
+				Tags            []string
 			}{
-				NodeID: node.Id,
-				IP:     ip,
-				Tags:   node.ForcedTags,
+				HeadscaleNodeID: node.Id,
+				IP:              ip,
+				Tags:            node.ForcedTags,
 			}
 		}
 	}
@@ -379,9 +379,9 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 			continue
 		}
 
-		// 更新数据库中的 Node ID 和 IP
-		if dbNode.ID != nodeInfo.NodeID || dbNode.IP != nodeInfo.IP {
-			dbNode.ID = nodeInfo.NodeID
+		// 更新数据库中的 Headscale Node ID 和 IP
+		if dbNode.HeadscaleNodeID != nodeInfo.HeadscaleNodeID || dbNode.IP != nodeInfo.IP {
+			dbNode.HeadscaleNodeID = nodeInfo.HeadscaleNodeID
 			dbNode.IP = nodeInfo.IP
 			if err := db.DB.WithContext(ctx).Save(&dbNode).Error; err != nil {
 				logger.Warnf("更新 Node %s 失败: %v", dbNode.Name, err)
@@ -404,7 +404,7 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 
 		// 检查是否需要更新
 		if !tagsEqual(nodeInfo.Tags, expectedTags) {
-			if err := s.client.SetTags(ctx, nodeInfo.NodeID, expectedTags); err != nil {
+			if err := s.client.SetTags(ctx, nodeInfo.HeadscaleNodeID, expectedTags); err != nil {
 				logger.Warnf("设置 Node %s Tag 失败: %v", dbNode.Name, err)
 			} else {
 				logger.Infof("Node %s Tag 已同步: %v", dbNode.Name, expectedTags)

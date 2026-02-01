@@ -129,12 +129,12 @@ message GetAuthorizedHostsRequest {
   uint64 desktop_id = 1; // Desktop ID
 }
 
-// AuthorizedHost 已授权主机
+// AuthorizedHost 已授权主机（SSH 授权）
 message AuthorizedHost {
   string host_id = 1; // 主机ID（Agent用户ID）
   string host_name = 2; // 主机名称（Agent别名）
   string tunnel_ip = 3; // 隧道IP
-  int32 service_count = 4; // 服务数量
+  repeated string ssh_users = 4; // 允许的 SSH 用户名列表
   string status = 5; // 状态（online/offline）
   string last_seen = 6; // 最后在线时间
 }

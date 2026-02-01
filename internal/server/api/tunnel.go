@@ -632,7 +632,7 @@ func (a *TunnelAPI) GetTunnelNode(c *gin.Context) {
 				detail.LinkedType = "agent"
 				detail.LinkedID = localNode.ID
 			}
-		} else if strings.HasPrefix(node.User.Name, "desktop-") {
+		} else if strings.HasPrefix(node.User.Name, "client-") {
 			var localNode model.Node
 			if err := db.DB.WithContext(ctx).Where("id = ? AND type = ?", id, model.NodeTypeDesktop).First(&localNode).Error; err == nil {
 				detail.LinkedType = "desktop"
@@ -770,7 +770,7 @@ func (a *TunnelAPI) DeleteTunnelNode(c *gin.Context) {
 				Where("user.name = ? AND user.role = ? AND node.id = ?", localUserName, model.UserRoleAgent, id).
 				Updates(map[string]interface{}{"ip": ""})
 			logger.Infof("清空 Agent Node IP: user=%s, node_id=%d", localUserName, id)
-		} else if strings.HasPrefix(node.User.Name, "desktop-") {
+		} else if strings.HasPrefix(node.User.Name, "client-") {
 			// 删除 Desktop Node 记录
 			db.DB.WithContext(ctx).Where("id = ? AND type = ?", id, model.NodeTypeDesktop).Delete(&model.Node{})
 			logger.Infof("删除 Desktop Node: node_id=%d", id)

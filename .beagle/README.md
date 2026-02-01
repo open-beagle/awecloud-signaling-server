@@ -43,16 +43,31 @@ BUILD_VERSION=v0.2.3 bash scripts/build_frontend.sh
 
 # 构建后端代码（在 Alpine 容器中）
 docker run --rm \
-   -v $(pwd):/go/src/github.com/open-beagle/awecloud-signaling-server \
-   -v $HOME/go/pkg:/go/pkg \
-   -w /go/src/github.com/open-beagle/awecloud-signaling-server \
-   -e BUILD_VERSION=v0.2.3 \
-   -e GOARCHS=amd64 \
-   registry.cn-qingdao.aliyuncs.com/wod/golang:1.25-alpine \
+  -v $(pwd):/go/src/github.com/open-beagle/awecloud-signaling-server \
+  -v $HOME/go/pkg:/go/pkg \
+  -w /go/src/github.com/open-beagle/awecloud-signaling-server \
+  -e BUILD_VERSION=v0.2.3 \
+  -e GOARCHS=amd64 \
+  -e BUILD_TARGETS=server \
+  registry.cn-qingdao.aliyuncs.com/wod/golang:1.25-alpine \
    bash ./.beagle/build.sh
 
-# 注意：此方式编译的二进制需要 musl libc，不能直接在 Ubuntu 上运行
-# 仅用于构建 Docker 镜像
+# 设置版本和镜像仓库
+export BUILD_VERSION=v0.2.3
+export REGISTRY=registry.cn-qingdao.aliyuncs.com/wod
+export AUTHOR=open-beagle
+
+# 构建 Server 镜像
+docker build --no-cache -f .beagle/server.dockerfile \
+  --build-arg BASE=${REGISTRY}/alpine:3 \
+  --build-arg AUTHOR=${AUTHOR} \
+  --build-arg VERSION=${BUILD_VERSION} \
+  -t ${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION} \
+  . && \
+docker push ${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION}
+
+# 重启部署
+sleep 3 && kubectl --context aliyun --namespace beagle-access rollout restart deployment/awecloud-signal-server
 ```
 
 ### 查看版本信息
@@ -83,15 +98,6 @@ docker run --rm \
 export BUILD_VERSION=v0.2.3
 export REGISTRY=registry.cn-qingdao.aliyuncs.com/wod
 export AUTHOR=open-beagle
-
-# 构建 Server 镜像
-docker build --no-cache -f .beagle/server.dockerfile \
-  --build-arg BASE=${REGISTRY}/alpine:3 \
-  --build-arg AUTHOR=${AUTHOR} \
-  --build-arg VERSION=${BUILD_VERSION} \
-  -t ${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION} \
-  . && \
-docker push ${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION}
 
 # 构建 Agent 镜像
 docker build --no-cache -f .beagle/agent.dockerfile \

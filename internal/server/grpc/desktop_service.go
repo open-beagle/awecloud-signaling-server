@@ -133,6 +133,7 @@ func (s *DesktopServiceServer) Login(ctx context.Context, req *pb.DesktopLoginRe
 	}
 
 	resp := &pb.DesktopLoginResponse{Success: true, Message: "登录成功", DesktopId: node.ID, Secret: nodeSecret}
+	logger.Infof("Desktop 登录成功: client=%s, device=%s, nodeId=%d", req.ClientName, req.DeviceName, node.ID)
 	if s.headscaleClient != nil && s.config != nil {
 		if authKey, serverURL, err := s.getOrCreateAuthKey(ctx, user.ID, user.Name); err == nil {
 			resp.AuthKey = authKey
@@ -196,13 +197,19 @@ func (s *DesktopServiceServer) Heartbeat(stream pb.DesktopService_HeartbeatServe
 	}
 
 	nodeID := firstReq.DesktopId
+	logger.Infof("Desktop 心跳流建立: desktopId=%d, tunnelIp=%s", nodeID, firstReq.TunnelIp)
+
 	var node model.Node
 	if err := db.DB.WithContext(ctx).First(&node, nodeID).Error; err != nil {
+		logger.Errorf("Desktop 心跳流建立失败: desktopId=%d 不存在", nodeID)
 		return status.Error(codes.NotFound, "Desktop 不存在")
 	}
 	if node.Type != model.NodeTypeDesktop {
+		logger.Errorf("Desktop 心跳流建立失败: desktopId=%d 类型错误 (type=%s)", nodeID, node.Type)
 		return status.Error(codes.InvalidArgument, "设备类型错误")
 	}
+
+	logger.Infof("Desktop 心跳流验证通过: desktopId=%d, name=%s, userId=%d", nodeID, node.Name, node.UserID)
 
 	conn := &DesktopConnection{
 		NodeID: nodeID, UserID: node.UserID, Stream: stream,
@@ -256,9 +263,21 @@ func (s *DesktopServiceServer) Heartbeat(stream pb.DesktopService_HeartbeatServe
 
 func (s *DesktopServiceServer) handleDesktopHeartbeat(ctx context.Context, nodeID uint64, req *pb.DesktopHeartbeatRequest) {
 	now := time.Now()
-	db.DB.WithContext(ctx).Model(&model.Node{}).Where("id = ?", nodeID).Updates(map[string]any{
-		"last_heartbeat": now, "ip": req.TunnelIp,
-	})
+	// 通过 nodeID 查询 node，获取 user_id 和 name
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, nodeID).Error; err != nil {
+		logger.Errorf("Desktop 心跳更新失败: nodeID=%d 不存在", nodeID)
+		return
+	}
+	// 使用 user_id + type + name 定位设备（稳定唯一标识）
+	result := db.DB.WithContext(ctx).Model(&model.Node{}).
+		Where("user_id = ? AND type = ? AND name = ?", node.UserID, model.NodeTypeDesktop, node.Name).
+		Updates(map[string]any{
+			"last_heartbeat": now, "ip": req.TunnelIp,
+		})
+	if result.Error != nil {
+		logger.Errorf("Desktop 心跳更新失败: %v", result.Error)
+	}
 }
 
 func (s *DesktopServiceServer) sendDesktopHeartbeatResponse(ctx context.Context, stream pb.DesktopService_HeartbeatServer, userID uint64) error {
@@ -294,6 +313,25 @@ func (s *DesktopServiceServer) getOrCreateAuthKey(ctx context.Context, userID ui
 			return "", "", fmt.Errorf("创建 Headscale User 失败: %w", err)
 		}
 	}
+
+	// 检查该 User 下是否已有 Node，如果有则删除旧节点
+	// Desktop 使用临时节点，但同一用户同一设备重新登录时应该清理旧节点
+	nodes, err := s.headscaleClient.ListNodes(ctx)
+	if err != nil {
+		logger.Warnf("查询 Headscale Node 列表失败: %v", err)
+	} else {
+		for _, node := range nodes {
+			if node.User != nil && node.User.Id == user.Id {
+				logger.Infof("删除 Desktop %s 的旧 Headscale 节点: id=%d, name=%s", userName, node.Id, node.GivenName)
+				if err := s.headscaleClient.DeleteNode(ctx, node.Id); err != nil {
+					logger.Warnf("删除旧节点失败: %v", err)
+				}
+				// 清空本地数据库中对应 Node 的 HeadscaleNodeID
+				db.DB.WithContext(ctx).Model(&model.Node{}).Where("headscale_node_id = ?", node.Id).Update("headscale_node_id", 0)
+			}
+		}
+	}
+
 	tags := []string{fmt.Sprintf("tag:client-%s", userName)}
 	var groupMembers []model.GroupMember
 	if err := db.DB.WithContext(ctx).Preload("Group").Where("user_id = ?", userID).Find(&groupMembers).Error; err == nil {
@@ -319,84 +357,131 @@ func (s *DesktopServiceServer) IsDesktopOnline(nodeID uint64) bool {
 	return exists && time.Since(conn.LastSeen) < 60*time.Second
 }
 
-// GetAuthorizedHosts 获取已授权主机列表
+// GetAuthorizedHosts 获取已授权主机列表（SSH 授权）
 func (s *DesktopServiceServer) GetAuthorizedHosts(ctx context.Context, req *pb.GetAuthorizedHostsRequest) (*pb.GetAuthorizedHostsResponse, error) {
+	logger.Infof("GetAuthorizedHosts: desktopId=%d", req.DesktopId)
+
 	// 验证 Desktop 是否存在
 	var node model.Node
 	if err := db.DB.WithContext(ctx).First(&node, req.DesktopId).Error; err != nil {
+		logger.Warnf("GetAuthorizedHosts: Desktop %d 不存在", req.DesktopId)
 		return nil, status.Error(codes.NotFound, "Desktop 不存在")
 	}
 	if node.Type != model.NodeTypeDesktop {
+		logger.Warnf("GetAuthorizedHosts: 设备 %d 类型错误 (type=%s)", req.DesktopId, node.Type)
 		return nil, status.Error(codes.InvalidArgument, "设备类型错误")
 	}
 
 	// 获取用户信息
 	var user model.User
 	if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err != nil {
+		logger.Warnf("GetAuthorizedHosts: 用户 %d 不存在", node.UserID)
 		return nil, status.Error(codes.NotFound, "用户不存在")
 	}
+	logger.Infof("GetAuthorizedHosts: user=%s (id=%d)", user.Name, user.ID)
 
-	// 查询已授权的 Agent（通过服务权限）
-	var services []model.ProxyService
-	if err := db.DB.WithContext(ctx).Preload("User").Where("enabled = ?", true).Find(&services).Error; err != nil {
-		return nil, status.Error(codes.Internal, "查询服务失败")
+	// 获取用户所属的分组 ID 列表
+	var groupIDs []int64
+	db.DB.WithContext(ctx).Model(&model.GroupMember{}).Where("user_id = ?", user.ID).Pluck("group_id", &groupIDs)
+	logger.Infof("GetAuthorizedHosts: user %s 所属分组: %v", user.Name, groupIDs)
+
+	// 收集已授权的 Agent 及其 SSH 用户（按 Agent 分组）
+	// key: agentID, value: SSH 用户名列表
+	authorizedAgents := make(map[uint64][]string)
+
+	// 1. 通过 SSH 用户授权（AclSSHUserPermission）
+	var sshUserPerms []model.AclSSHUserPermission
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", user.ID, true).Find(&sshUserPerms).Error; err == nil {
+		logger.Infof("GetAuthorizedHosts: 找到 %d 个 SSH 用户授权", len(sshUserPerms))
+		for _, perm := range sshUserPerms {
+			// 解析 SSH 用户名列表
+			var sshUsers []string
+			if err := json.Unmarshal([]byte(perm.SSHUsers), &sshUsers); err == nil {
+				authorizedAgents[perm.TargetUserID] = appendUniqueStrings(authorizedAgents[perm.TargetUserID], sshUsers...)
+			}
+		}
 	}
 
-	// 按 Agent 分组统计
-	hostMap := make(map[uint64]*pb.AuthorizedHost)
-	for _, svc := range services {
-		if svc.User == nil {
+	// 2. 通过 SSH 分组授权（AclSSHGroupPermission）
+	if len(groupIDs) > 0 {
+		var sshGroupPerms []model.AclSSHGroupPermission
+		if err := db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&sshGroupPerms).Error; err == nil {
+			logger.Infof("GetAuthorizedHosts: 找到 %d 个 SSH 分组授权", len(sshGroupPerms))
+			for _, perm := range sshGroupPerms {
+				// 解析 SSH 用户名列表
+				var sshUsers []string
+				if err := json.Unmarshal([]byte(perm.SSHUsers), &sshUsers); err == nil {
+					authorizedAgents[perm.TargetUserID] = appendUniqueStrings(authorizedAgents[perm.TargetUserID], sshUsers...)
+				}
+			}
+		}
+	}
+
+	logger.Infof("GetAuthorizedHosts: 共找到 %d 个已授权 SSH 主机", len(authorizedAgents))
+
+	// 查询所有已授权 Agent 的信息
+	resp := &pb.GetAuthorizedHostsResponse{
+		Hosts: make([]*pb.AuthorizedHost, 0, len(authorizedAgents)),
+	}
+
+	for agentID, sshUsers := range authorizedAgents {
+		// 查询 Agent 用户信息
+		var agentUser model.User
+		if err := db.DB.WithContext(ctx).First(&agentUser, agentID).Error; err != nil {
+			continue
+		}
+		if agentUser.Role != model.UserRoleAgent {
 			continue
 		}
 
 		// 检查 Agent 是否在线
 		agentOnline := false
 		if s.agentService != nil {
-			agentOnline = s.agentService.IsAgentOnline(svc.UserID)
+			agentOnline = s.agentService.IsAgentOnline(agentID)
 		}
 
-		// 获取或创建主机信息
-		host, exists := hostMap[svc.UserID]
-		if !exists {
-			// 查询 Agent 节点信息
-			var agentNode model.Node
-			tunnelIP := ""
-			lastSeen := ""
-			if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", svc.UserID, model.NodeTypeAgent).First(&agentNode).Error; err == nil {
-				tunnelIP = agentNode.IP
-				if agentNode.LastHeartbeat != nil {
-					lastSeen = agentNode.LastHeartbeat.Format(time.RFC3339)
-				}
+		// 查询 Agent 节点信息
+		var agentNode model.Node
+		tunnelIP := ""
+		lastSeen := ""
+		if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", agentID, model.NodeTypeAgent).First(&agentNode).Error; err == nil {
+			tunnelIP = agentNode.IP
+			if agentNode.LastHeartbeat != nil {
+				lastSeen = agentNode.LastHeartbeat.Format(time.RFC3339)
 			}
-
-			host = &pb.AuthorizedHost{
-				HostId:       fmt.Sprintf("%d", svc.UserID),
-				HostName:     svc.User.Name,
-				TunnelIp:     tunnelIP,
-				ServiceCount: 0,
-				Status:       "offline",
-				LastSeen:     lastSeen,
-			}
-			if agentOnline {
-				host.Status = "online"
-			}
-			hostMap[svc.UserID] = host
 		}
 
-		// 增加服务计数
-		host.ServiceCount++
-	}
-
-	// 转换为列表
-	resp := &pb.GetAuthorizedHostsResponse{
-		Hosts: make([]*pb.AuthorizedHost, 0, len(hostMap)),
-	}
-	for _, host := range hostMap {
+		host := &pb.AuthorizedHost{
+			HostId:   fmt.Sprintf("%d", agentID),
+			HostName: agentUser.Name,
+			TunnelIp: tunnelIP,
+			SshUsers: sshUsers,
+			Status:   "offline",
+			LastSeen: lastSeen,
+		}
+		if agentOnline {
+			host.Status = "online"
+		}
 		resp.Hosts = append(resp.Hosts, host)
 	}
 
 	logger.Infof("Desktop %d 获取已授权主机列表: %d 个主机", req.DesktopId, len(resp.Hosts))
 	return resp, nil
+}
+
+// appendUniqueStrings 追加不重复的字符串
+func appendUniqueStrings(slice []string, items ...string) []string {
+	existing := make(map[string]bool)
+	for _, s := range slice {
+		existing[s] = true
+	}
+	for _, item := range items {
+		if !existing[item] {
+			slice = append(slice, item)
+			existing[item] = true
+		}
+	}
+	return slice
 }
 
 // GetHostServices 获取指定主机的服务列表

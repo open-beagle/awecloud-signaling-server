@@ -12,20 +12,20 @@ const (
 
 // Node 设备模型
 // 统一 Agent 设备和 Desktop 设备
-// 与 Headscale 集成，使用 Headscale Node ID 作为主键
 type Node struct {
-	ID            uint64     `gorm:"primaryKey" json:"id"`               // Headscale Node ID
-	UserID        uint64     `gorm:"not null;index" json:"user_id"`      // 所属用户 ID
-	Name          string     `gorm:"size:100;not null" json:"name"`      // 设备名称
-	Type          NodeType   `gorm:"size:20;not null;index" json:"type"` // 类型：agent / desktop
-	IP            string     `gorm:"size:50" json:"ip"`                  // 隧道 IP
-	Version       string     `gorm:"size:50" json:"version"`             // 版本号
-	Hostname      string     `gorm:"size:100" json:"hostname"`           // 主机名
-	SystemInfo    string     `gorm:"type:text" json:"system_info"`       // 系统信息 JSON
-	SecretHash    string     `gorm:"size:255" json:"-"`                  // 设备认证密钥哈希（Desktop 用）
-	LastHeartbeat *time.Time `json:"last_heartbeat"`                     // 最后心跳时间
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID              uint64     `gorm:"primaryKey;autoIncrement" json:"id"`                                          // 自增主键
+	UserID          uint64     `gorm:"not null;index" json:"user_id"`                                               // 所属用户 ID
+	Name            string     `gorm:"size:100;not null" json:"name"`                                               // 设备名称
+	Type            NodeType   `gorm:"size:20;not null;index;uniqueIndex:uk_node_user_type,priority:2" json:"type"` // 类型：agent / desktop
+	HeadscaleNodeID uint64     `gorm:"index" json:"headscale_node_id"`                                              // Headscale Node ID（外部系统 ID）
+	IP              string     `gorm:"size:50" json:"ip"`                                                           // 隧道 IP
+	Version         string     `gorm:"size:50" json:"version"`                                                      // 版本号
+	Hostname        string     `gorm:"size:100" json:"hostname"`                                                    // 主机名
+	SystemInfo      string     `gorm:"type:text" json:"system_info"`                                                // 系统信息 JSON
+	SecretHash      string     `gorm:"size:255" json:"-"`                                                           // 设备认证密钥哈希（Desktop 用）
+	LastHeartbeat   *time.Time `json:"last_heartbeat"`                                                              // 最后心跳时间
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 
 	// 关联
 	User *User `gorm:"foreignKey:UserID" json:"user,omitempty"`

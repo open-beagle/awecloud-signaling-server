@@ -26,18 +26,7 @@ mkdir -p ${BIN_DIR}
 # 分割架构列表
 IFS=',' read -ra ARCH_ARRAY <<< "$GOARCHS"
 
-echo "Building AWECloud Signaling Server"
-echo "Build Target: ${BUILD_TARGET}"
-echo "Target OS: ${GOOS}"
-echo "Target architectures: ${GOARCHS}"
-echo "Version: ${BUILD_VERSION}"
-echo "Git Commit: ${GIT_COMMIT}"
-echo "Build Date: ${BUILD_DATE}"
-echo "Go Version: ${BUILD_GO}"
-if [ -n "${BUILD_URL}" ]; then
-    echo "Build URL: ${BUILD_URL}"
-fi
-echo "---"
+
 
 # 构建 ldflags，注入版本信息
 LDFLAGS="-w -s"
@@ -136,3 +125,12 @@ fi
 echo ""
 echo "Build completed successfully!"
 echo "Binaries are in: ${BIN_DIR}/"
+
+# 验证 Server 版本信息
+CURRENT_ARCH=$(go env GOARCH)
+SERVER_BIN="${BIN_DIR}/server-${GOOS}-${CURRENT_ARCH}"
+if [ -f "${SERVER_BIN}" ]; then
+    echo ""
+    echo "Server version:"
+    ${SERVER_BIN} --version
+fi

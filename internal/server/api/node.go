@@ -218,11 +218,11 @@ func (a *NodeAPI) Expire(c *gin.Context) {
 		return
 	}
 
-	// 在 Headscale 使节点过期
-	if a.hsClient != nil && node.ID > 0 {
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	// 在 Headscale 使节点过期（使用 HeadscaleNodeID）
+	if a.hsClient != nil && node.HeadscaleNodeID > 0 {
+		hsCtx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 		defer cancel()
-		if err := a.hsClient.ExpireNode(ctx, node.ID); err != nil {
+		if err := a.hsClient.ExpireNode(hsCtx, node.HeadscaleNodeID); err != nil {
 			logger.Warnf("Headscale 注销节点失败: %v", err)
 		}
 	}
@@ -247,11 +247,11 @@ func (a *NodeAPI) Delete(c *gin.Context) {
 		return
 	}
 
-	// 在 Headscale 删除节点
-	if a.hsClient != nil && node.ID > 0 {
+	// 在 Headscale 删除节点（使用 HeadscaleNodeID）
+	if a.hsClient != nil && node.HeadscaleNodeID > 0 {
 		hsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		if err := a.hsClient.DeleteNode(hsCtx, node.ID); err != nil {
+		if err := a.hsClient.DeleteNode(hsCtx, node.HeadscaleNodeID); err != nil {
 			logger.Warnf("Headscale 删除节点失败: %v", err)
 		}
 	}
