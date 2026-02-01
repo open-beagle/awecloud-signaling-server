@@ -14,10 +14,11 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
+	"github.com/uptrace/opentelemetry-go-extra/otelgorm"
+
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
-	"github.com/uptrace/opentelemetry-go-extra/otelgorm"
 )
 
 var DB *gorm.DB

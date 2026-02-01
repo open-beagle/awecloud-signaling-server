@@ -13,12 +13,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/gin-gonic/gin"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/telemetry"
@@ -164,6 +164,8 @@ func (a *Agent) connectToServer() error {
 		tlsConfig := &tls.Config{
 			InsecureSkipVerify: true,
 			ServerName:         parsedURL.Hostname(),
+			// 必须设置 NextProtos 以支持 HTTP/2（gRPC 要求）
+			NextProtos: []string{"h2"},
 		}
 		creds := credentials.NewTLS(tlsConfig)
 		opts = append(opts, grpc.WithTransportCredentials(creds))

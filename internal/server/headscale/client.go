@@ -10,13 +10,14 @@ import (
 	"time"
 
 	v1 "github.com/juanfont/headscale/gen/go/headscale/v1"
-	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel/attribute"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 )
 
 // Client Headscale gRPC 客户端
@@ -110,7 +111,10 @@ func NewClient(cfg Config) (*Client, error) {
 	}))
 
 	if parsed.useTLS {
-		tlsConfig := &tls.Config{}
+		tlsConfig := &tls.Config{
+			// 必须设置 NextProtos 以支持 HTTP/2（gRPC 要求）
+			NextProtos: []string{"h2"},
+		}
 		if cfg.Insecure {
 			tlsConfig.InsecureSkipVerify = true
 		}

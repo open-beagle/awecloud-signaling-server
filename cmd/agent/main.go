@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/agent"
@@ -224,34 +222,10 @@ func runSSHChild() {
 
 	// 如果指定了 --shell，启动交互式 shell
 	if shell {
-		// 锁定当前 goroutine 到 OS 线程，确保 setuid/setgid 生效
-		runtime.LockOSThread()
-		defer runtime.UnlockOSThread()
-
 		// 切换用户身份（如果指定了 uid/gid）
-		// 顺序很重要：setgroups -> setgid -> setuid
-		// 参考 Tailscale 的实现
-		if len(groups) > 0 {
-			// 在 Darwin/FreeBSD 上，第一个组应该是 gid
-			if (runtime.GOOS == "darwin" || runtime.GOOS == "freebsd") && (len(groups) == 0 || groups[0] != gid) {
-				groups = append([]int{gid}, groups...)
-			}
-			if err := syscall.Setgroups(groups); err != nil {
-				fmt.Fprintf(os.Stderr, "failed to setgroups: %v\n", err)
-				os.Exit(1)
-			}
-		}
-		if gid >= 0 && os.Getegid() != gid {
-			if err := syscall.Setgid(gid); err != nil {
-				fmt.Fprintf(os.Stderr, "failed to setgid(%d): %v\n", gid, err)
-				os.Exit(1)
-			}
-		}
-		if uid >= 0 && os.Geteuid() != uid {
-			if err := syscall.Setuid(uid); err != nil {
-				fmt.Fprintf(os.Stderr, "failed to setuid(%d): %v\n", uid, err)
-				os.Exit(1)
-			}
+		if err := switchUserIdentity(uid, gid, groups); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to switch user identity: %v\n", err)
+			os.Exit(1)
 		}
 
 		// 设置环境变量
@@ -274,10 +248,8 @@ func runSSHChild() {
 		// 显示登录横幅
 		printSSHBanner(localUser, remoteUser, remoteIP)
 
-		// 使用 syscall.Exec 替换当前进程为 shell
-		// 这样可以保持 stdin/stdout/stderr 的连接
-		err := syscall.Exec(loginShell, []string{loginShell, "-l"}, env)
-		if err != nil {
+		// 使用平台特定的方式启动 shell
+		if err := execShell(loginShell, env); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to exec shell: %v\n", err)
 			os.Exit(1)
 		}
