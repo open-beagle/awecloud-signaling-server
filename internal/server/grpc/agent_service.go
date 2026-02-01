@@ -92,14 +92,14 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 		}, nil
 	}
 
-	// 查询或创建 Node
+	// 查询或创建 Node（Agent 类型按 user_id + type 唯一）
 	var node model.Node
 	// 设备名：优先使用 SystemInfo.Hostname，否则使用 Agent 名称
 	deviceName := req.Name
 	if req.SystemInfo != nil && req.SystemInfo.Hostname != "" {
 		deviceName = req.SystemInfo.Hostname
 	}
-	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ? AND name = ?", user.ID, model.NodeTypeAgent, deviceName).First(&node).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", user.ID, model.NodeTypeAgent).First(&node).Error; err != nil {
 		// 创建新 Node
 		node = model.Node{
 			UserID: user.ID,
@@ -107,6 +107,9 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 			Type:   model.NodeTypeAgent,
 		}
 		db.DB.WithContext(ctx).Create(&node)
+	} else {
+		// 更新 Node 名称
+		node.Name = deviceName
 	}
 
 	// 更新 Node 信息

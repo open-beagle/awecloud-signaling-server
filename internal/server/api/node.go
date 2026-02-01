@@ -40,19 +40,27 @@ func NewNodeAPI(cfg *config.ServerConfig) *NodeAPI {
 	return api
 }
 
+// NodeUserInfo 设备关联的用户信息
+type NodeUserInfo struct {
+	ID    uint64 `json:"id"`
+	Name  string `json:"name"`
+	Alias string `json:"alias,omitempty"`
+	Role  string `json:"role"`
+}
+
 // NodeListItem 设备列表项
 type NodeListItem struct {
-	ID            uint64     `json:"id"`
-	Name          string     `json:"name"`
-	Type          string     `json:"type"`
-	UserID        uint64     `json:"user_id"`
-	UserName      string     `json:"user_name"`
-	IP            string     `json:"ip"`
-	Version       string     `json:"version"`
-	Hostname      string     `json:"hostname"`
-	Status        string     `json:"status"`
-	LastHeartbeat *time.Time `json:"last_heartbeat"`
-	CreatedAt     time.Time  `json:"created_at"`
+	ID            uint64        `json:"id"`
+	Name          string        `json:"name"`
+	Type          string        `json:"type"`
+	UserID        uint64        `json:"user_id"`
+	User          *NodeUserInfo `json:"user,omitempty"`
+	IP            string        `json:"ip"`
+	Version       string        `json:"version"`
+	Hostname      string        `json:"hostname"`
+	Status        string        `json:"status"`
+	LastHeartbeat *time.Time    `json:"last_heartbeat"`
+	CreatedAt     time.Time     `json:"created_at"`
 }
 
 // List 获取设备列表
@@ -100,9 +108,14 @@ func (a *NodeAPI) List(c *gin.Context) {
 			status = "online"
 		}
 
-		userName := ""
+		var userInfo *NodeUserInfo
 		if node.User != nil {
-			userName = node.User.Name
+			userInfo = &NodeUserInfo{
+				ID:    node.User.ID,
+				Name:  node.User.Name,
+				Alias: node.User.Alias,
+				Role:  string(node.User.Role),
+			}
 		}
 
 		result[i] = NodeListItem{
@@ -110,7 +123,7 @@ func (a *NodeAPI) List(c *gin.Context) {
 			Name:          node.Name,
 			Type:          string(node.Type),
 			UserID:        node.UserID,
-			UserName:      userName,
+			User:          userInfo,
 			IP:            node.IP,
 			Version:       node.Version,
 			Hostname:      node.Hostname,
@@ -125,19 +138,19 @@ func (a *NodeAPI) List(c *gin.Context) {
 
 // NodeDetail 设备详情
 type NodeDetail struct {
-	ID            uint64     `json:"id"`
-	Name          string     `json:"name"`
-	Type          string     `json:"type"`
-	UserID        uint64     `json:"user_id"`
-	UserName      string     `json:"user_name"`
-	IP            string     `json:"ip"`
-	Version       string     `json:"version"`
-	Hostname      string     `json:"hostname"`
-	SystemInfo    string     `json:"system_info"`
-	Status        string     `json:"status"`
-	LastHeartbeat *time.Time `json:"last_heartbeat"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID            uint64        `json:"id"`
+	Name          string        `json:"name"`
+	Type          string        `json:"type"`
+	UserID        uint64        `json:"user_id"`
+	User          *NodeUserInfo `json:"user,omitempty"`
+	IP            string        `json:"ip"`
+	Version       string        `json:"version"`
+	Hostname      string        `json:"hostname"`
+	SystemInfo    string        `json:"system_info"`
+	Status        string        `json:"status"`
+	LastHeartbeat *time.Time    `json:"last_heartbeat"`
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
 }
 
 // Get 获取设备详情
@@ -161,9 +174,14 @@ func (a *NodeAPI) Get(c *gin.Context) {
 		status = "online"
 	}
 
-	userName := ""
+	var userInfo *NodeUserInfo
 	if node.User != nil {
-		userName = node.User.Name
+		userInfo = &NodeUserInfo{
+			ID:    node.User.ID,
+			Name:  node.User.Name,
+			Alias: node.User.Alias,
+			Role:  string(node.User.Role),
+		}
 	}
 
 	result := NodeDetail{
@@ -171,7 +189,7 @@ func (a *NodeAPI) Get(c *gin.Context) {
 		Name:          node.Name,
 		Type:          string(node.Type),
 		UserID:        node.UserID,
-		UserName:      userName,
+		User:          userInfo,
 		IP:            node.IP,
 		Version:       node.Version,
 		Hostname:      node.Hostname,

@@ -100,6 +100,7 @@ export default {
     namePlaceholder: '请输入名称',
     aliasPlaceholder: '请输入别名（可选）',
     nameRequired: '请输入名称',
+    namePattern: '名称必须以字母开头，只能包含字母、数字、下划线、横线、@和点',
     roleRequired: '请选择角色',
     deleteConfirm: '确认删除用户 {name} 吗？',
     secretTitle: '用户密钥',

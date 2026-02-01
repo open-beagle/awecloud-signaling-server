@@ -127,14 +127,14 @@ func (a *TunnelAPI) ListTunnelUsers(c *gin.Context) {
 	for i := range agentUsers {
 		agentMap["agent-"+agentUsers[i].Name] = &agentUsers[i]
 	}
-	// Client User 的 Headscale User 命名规则是 desktop-{user.name}
+	// Client User 的 Headscale User 命名规则是 client-{user.name}
 	clientMap := make(map[string]*model.User)
 	for i := range clientUsers {
-		clientMap["desktop-"+clientUsers[i].Name] = &clientUsers[i]
+		clientMap["client-"+clientUsers[i].Name] = &clientUsers[i]
 	}
 
 	// 构建结果
-	var result []TunnelUserListItem
+	result := make([]TunnelUserListItem, 0)
 	for _, user := range users {
 		item := TunnelUserListItem{
 			ID:          user.Id,
@@ -151,7 +151,7 @@ func (a *TunnelAPI) ListTunnelUsers(c *gin.Context) {
 				item.LinkedEntity = u.Name
 				item.LinkedID = u.ID
 			}
-		} else if strings.HasPrefix(user.Name, "desktop-") {
+		} else if strings.HasPrefix(user.Name, "client-") {
 			item.Type = "desktop"
 			if u, ok := clientMap[user.Name]; ok {
 				item.LinkedEntity = u.Name
@@ -249,9 +249,9 @@ func (a *TunnelAPI) GetTunnelUser(c *gin.Context) {
 			targetUser.LinkedEntity = user.Name
 			targetUser.LinkedID = user.ID
 		}
-	} else if strings.HasPrefix(targetUser.Name, "desktop-") {
+	} else if strings.HasPrefix(targetUser.Name, "client-") {
 		targetUser.Type = "desktop"
-		userName := strings.TrimPrefix(targetUser.Name, "desktop-")
+		userName := strings.TrimPrefix(targetUser.Name, "client-")
 		var user model.User
 		if err := db.DB.WithContext(ctx).Where("name = ? AND role = ?", userName, model.UserRoleClient).First(&user).Error; err == nil {
 			targetUser.LinkedEntity = user.Name
@@ -392,8 +392,8 @@ func (a *TunnelAPI) DeleteTunnelUser(c *gin.Context) {
 			db.DB.WithContext(ctx).Delete(&user)
 			logger.Infof("同步删除本地 Agent User: %s", localUserName)
 		}
-	} else if strings.HasPrefix(userName, "desktop-") {
-		localUserName := strings.TrimPrefix(userName, "desktop-")
+	} else if strings.HasPrefix(userName, "client-") {
+		localUserName := strings.TrimPrefix(userName, "client-")
 		var user model.User
 		if err := db.DB.WithContext(ctx).Where("name = ? AND role = ?", localUserName, model.UserRoleClient).First(&user).Error; err == nil {
 			// 删除相关 Node 和权限
@@ -428,11 +428,12 @@ func (a *TunnelAPI) GetTunnelUserNodes(c *gin.Context) {
 
 	nodes, err := a.hsClient.ListNodes(ctx)
 	if err != nil {
+		logger.Errorf("获取 Headscale Node 列表失败: %v", err)
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("获取 Node 列表失败"))
 		return
 	}
 
-	var result []TunnelNodeListItem
+	result := make([]TunnelNodeListItem, 0)
 	for _, node := range nodes {
 		if node.User != nil && node.User.Id == id {
 			item := TunnelNodeListItem{
@@ -513,11 +514,12 @@ func (a *TunnelAPI) ListTunnelNodes(c *gin.Context) {
 
 	nodes, err := a.hsClient.ListNodes(ctx)
 	if err != nil {
+		logger.Errorf("获取 Headscale Node 列表失败: %v", err)
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("获取 Node 列表失败"))
 		return
 	}
 
-	var result []TunnelNodeListItem
+	result := make([]TunnelNodeListItem, 0)
 	for _, node := range nodes {
 		// User ID 筛选
 		if userIDStr != "" {

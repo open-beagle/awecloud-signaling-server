@@ -100,6 +100,7 @@ export default {
     namePlaceholder: 'Enter name',
     aliasPlaceholder: 'Enter alias (optional)',
     nameRequired: 'Name is required',
+    namePattern: 'Name must start with a letter and can only contain letters, numbers, underscores, hyphens, @ and dots',
     roleRequired: 'Please select role',
     deleteConfirm: 'Are you sure to delete user {name}?',
     secretTitle: 'User Secret',

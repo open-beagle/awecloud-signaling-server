@@ -87,7 +87,7 @@ const form = reactive<CreateUserRequest>({
 const rules: FormRules = {
   name: [
     { required: true, message: () => t('user.nameRequired'), trigger: 'blur' },
-    { pattern: /^[a-zA-Z][a-zA-Z0-9_-]*$/, message: () => t('user.namePattern'), trigger: 'blur' }
+    { pattern: /^[a-zA-Z][a-zA-Z0-9_@.-]*$/, message: () => t('user.namePattern'), trigger: 'blur' }
   ],
   role: [
     { required: true, message: () => t('user.roleRequired'), trigger: 'change' }
