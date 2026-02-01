@@ -78,13 +78,13 @@ awecloud-signaling-server/
 
 ```bash
 # Server & Agent（日常开发，默认当前架构）
-bash scripts/build.sh
+BUILD_VERSION=v0.2.3 bash scripts/build.sh
 
 # Web 前端
-bash scripts/build_frontend.sh
+BUILD_VERSION=v0.2.3 bash scripts/build_frontend.sh
 
 # Desktop 客户端
-bash scripts/build_desktop.sh
+BUILD_VERSION=v0.2.3 bash scripts/build_desktop.sh
 ```
 
 ### 运行命令

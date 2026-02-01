@@ -112,8 +112,7 @@ docker push ${REGISTRY}/awecloud-signaling-agent:${BUILD_VERSION}
 kubectl --context aliyun --namespace beagle-access rollout restart deployment/awecloud-signal-server
 
 # 更新镜像
-kubectl --context aliyun --namespace beagle-access set image deployment/awecloud-signal-server \
-  server=${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION}
+kubectl --context aliyun --namespace beagle-access set image deployment/awecloud-signal-server server=${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION}
 
 # 查看日志
 kubectl --context aliyun --namespace beagle-access logs -f deployment/awecloud-signal-server
