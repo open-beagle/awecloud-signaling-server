@@ -124,3 +124,37 @@ jobs:
           docker buildx imagetools create -t registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:${{ env.BUILD_VERSION }} \
             registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:${{ env.BUILD_VERSION }}-amd64 \
             registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:${{ env.BUILD_VERSION }}-arm64
+
+      # Upload Agent binaries to S3
+      - name: Setup MinIO Client
+        run: |
+          wget -q https://dl.min.io/client/mc/release/linux-amd64/mc
+          chmod +x mc
+          sudo mv mc /usr/local/bin/
+
+      - name: Upload Agent to S3
+        run: |
+          mc alias set aliyun --api=S3v4 https://cache.ali.wodcloud.com \
+            ${{ secrets.S3_ACCESS_KEY_ALIYUN }} ${{ secrets.S3_SECRET_KEY_ALIYUN }}
+          
+          VERSION="${{ env.BUILD_VERSION }}"
+          
+          # 上传安装脚本
+          echo "Uploading install.sh..."
+          mc cp scripts/install_agent.sh "aliyun/vscode/awecloud-signaling/install.sh"
+          
+          # 上传 Agent 二进制
+          echo "Uploading agent-${VERSION}-linux-amd64..."
+          mc cp bin/agent-linux-amd64 "aliyun/vscode/awecloud-signaling/agent-${VERSION}-linux-amd64"
+          
+          echo "Uploading agent-${VERSION}-linux-arm64..."
+          mc cp bin/agent-linux-arm64 "aliyun/vscode/awecloud-signaling/agent-${VERSION}-linux-arm64"
+          
+          # 创建 Agent 版本信息文件
+          echo "{\"version\":\"${VERSION}\",\"build_date\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > agent-version.json
+          mc cp agent-version.json "aliyun/vscode/awecloud-signaling/agent-version.json"
+          
+          echo "Agent ${VERSION} uploaded successfully!"
+        env:
+          S3_ACCESS_KEY_ALIYUN: ${{ secrets.S3_ACCESS_KEY_ALIYUN }}
+          S3_SECRET_KEY_ALIYUN: ${{ secrets.S3_SECRET_KEY_ALIYUN }}

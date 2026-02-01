@@ -76,9 +76,21 @@ func (m *TailscaleManager) Start(controlURL, authKey string) error {
 		return fmt.Errorf("初始化状态目录失败: %w", err)
 	}
 
+	// 确定 Tailscale 节点名：优先使用配置的 device，否则使用系统 hostname
+	hostname := m.config.Agent.Device
+	if hostname == "" {
+		var err error
+		hostname, err = os.Hostname()
+		if err != nil {
+			logger.Warnf("获取系统 hostname 失败: %v，使用 Agent 名称", err)
+			hostname = m.config.Agent.AgentName
+		}
+	}
+	logger.Infof("Tailscale 节点名: %s", hostname)
+
 	// 创建 tsnet.Server
 	m.tsServer = &tsnet.Server{
-		Hostname:   m.config.Agent.AgentName,
+		Hostname:   hostname,
 		Dir:        m.stateDir,
 		ControlURL: controlURL,
 		AuthKey:    authKey,

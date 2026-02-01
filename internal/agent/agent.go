@@ -208,10 +208,16 @@ func (a *Agent) register() error {
 	logger.Infof("注册Agent: %s (version: %s)", a.config.Agent.AgentName, a.version)
 
 	// 构建系统信息
+	// 如果配置了 device，使用 device 作为 hostname；否则使用自动检测的 hostname
+	hostname := a.config.Agent.Device
+	if hostname == "" && a.networkInfo != nil {
+		hostname = a.networkInfo.Hostname
+	}
+
 	var systemInfo *pb.SystemInfo
-	if a.networkInfo != nil {
+	if hostname != "" {
 		systemInfo = &pb.SystemInfo{
-			Hostname: a.networkInfo.Hostname,
+			Hostname: hostname,
 		}
 	}
 
@@ -383,8 +389,15 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 	}
 
 	// 添加网络信息
+	// 如果配置了 device，使用 device 作为 hostname
+	hostname := a.config.Agent.Device
+	if hostname == "" && a.networkInfo != nil {
+		hostname = a.networkInfo.Hostname
+	}
+	if hostname != "" {
+		req.Hostname = hostname
+	}
 	if a.networkInfo != nil {
-		req.Hostname = a.networkInfo.Hostname
 		req.Runtime = a.networkInfo.RuntimeEnv
 		// 添加网络接口列表
 		if a.networkInfo.LanIP != "" && a.networkInfo.LanIP != "127.0.0.1" {

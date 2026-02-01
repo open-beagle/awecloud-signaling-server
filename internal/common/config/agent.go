@@ -10,7 +10,7 @@ import (
 type AgentConfig struct {
 	Agent     AgentSection     `toml:"agent"`
 	Server    ServerConnect    `toml:"server"`
-	Tunnel    TunnelSection    `toml:"tunnel"`
+	Tunnel    TunnelSection    `toml:"tunnel"` // 使用 [tunnel] 屏蔽技术细节
 	Visitor   VisitorSection   `toml:"visitor"`
 	Health    HealthSection    `toml:"health"`
 	Log       LogConfig        `toml:"log"`
@@ -22,8 +22,9 @@ type HealthSection struct {
 }
 
 type AgentSection struct {
-	AgentName  string `toml:"name"`  // 配置文件中使用 name
-	AgentToken string `toml:"token"` // 配置文件中使用 token
+	AgentName  string `toml:"name"`   // 配置文件中使用 name（Agent 名称/区域，如 beijing.beagle）
+	AgentToken string `toml:"token"`  // 配置文件中使用 token
+	Device     string `toml:"device"` // 设备名（如 beagle-241），用于标识同一 Agent 下的不同设备
 }
 
 type ServerConnect struct {
@@ -31,7 +32,7 @@ type ServerConnect struct {
 	PublicURL string `toml:"public_url"` // FRP公网地址（可选），如果配置则忽略Server返回的地址
 }
 
-// TunnelSection Agent 端隧道配置
+// TunnelSection Agent 端隧道配置（使用 [tunnel] 屏蔽技术细节）
 type TunnelSection struct {
 	StateDir          string `toml:"state_dir"`           // 隧道状态存储目录，支持 ~ 扩展
 	StateSyncInterval int    `toml:"state_sync_interval"` // 状态同步到 Server 的间隔（分钟），默认 5
@@ -79,6 +80,9 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	}
 	if token := os.Getenv("AGENT_TOKEN"); token != "" {
 		cfg.Agent.AgentToken = token
+	}
+	if device := os.Getenv("AGENT_DEVICE"); device != "" {
+		cfg.Agent.Device = device
 	}
 	if addr := os.Getenv("AGENT_ADDRESS"); addr != "" {
 		cfg.Server.Address = addr

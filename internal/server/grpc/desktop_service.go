@@ -221,6 +221,9 @@ func (s *DesktopServiceServer) Heartbeat(stream pb.DesktopService_HeartbeatServe
 		s.connMutex.Lock()
 		delete(s.connections, nodeID)
 		s.connMutex.Unlock()
+		// 清除数据库中的心跳时间，确保离线状态正确
+		db.DB.Model(&model.Node{}).Where("id = ?", nodeID).Update("last_heartbeat", nil)
+		logger.Infof("Desktop %d gRPC 连接断开，已清除心跳时间", nodeID)
 	}()
 
 	s.handleDesktopHeartbeat(ctx, nodeID, firstReq)
@@ -308,22 +311,12 @@ func (s *DesktopServiceServer) getOrCreateAuthKey(ctx context.Context, userID ui
 }
 
 func (s *DesktopServiceServer) IsDesktopOnline(nodeID uint64) bool {
+	// 只检查内存中的连接状态，不再检查数据库
+	// 因为 gRPC 断开时会清除数据库的 last_heartbeat
 	s.connMutex.RLock()
 	conn, exists := s.connections[nodeID]
 	s.connMutex.RUnlock()
-	if exists && time.Since(conn.LastSeen) < 60*time.Second {
-		return true
-	}
-	// 状态检查不需要 trace，使用 background context
-	ctx := context.Background()
-	var node model.Node
-	if err := db.DB.WithContext(ctx).First(&node, nodeID).Error; err != nil {
-		return false
-	}
-	if node.LastHeartbeat == nil {
-		return false
-	}
-	return time.Since(*node.LastHeartbeat) < 60*time.Second
+	return exists && time.Since(conn.LastSeen) < 60*time.Second
 }
 
 // GetAuthorizedHosts 获取已授权主机列表

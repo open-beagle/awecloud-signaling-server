@@ -17,7 +17,7 @@ func (SystemConfig) TableName() string {
 
 // 系统配置键常量
 const (
-	ConfigClientDownloadURL  = "client_download_url"   // 客户端下载地址
+	ConfigClientDownloadURL  = "client_download_url"   // 客户端/Agent 下载地址（共用）
 	ConfigDesktopMinVersion  = "desktop_min_version"   // 客户端最低版本
 	ConfigHeadscalePublicURL = "headscale_public_url"  // 隧道公网地址
 	ConfigStunPort           = "stun_port"             // STUN 端口

@@ -388,7 +388,8 @@ func (a *UserAPI) Create(c *gin.Context) {
 
 // UpdateUserRequest 更新用户请求
 type UpdateUserRequest struct {
-	Alias string `json:"alias"`
+	Alias      string `json:"alias"`
+	SSHEnabled *bool  `json:"ssh_enabled"` // 使用指针区分未传递和传递 false
 }
 
 // Update 更新用户
@@ -413,6 +414,11 @@ func (a *UserAPI) Update(c *gin.Context) {
 	}
 
 	user.Alias = req.Alias
+
+	// 更新 SSH 配置（仅 Agent 用户）
+	if req.SSHEnabled != nil && user.Role == model.UserRoleAgent {
+		user.SSHEnabled = *req.SSHEnabled
+	}
 
 	if err := db.DB.WithContext(ctx).Save(&user).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新失败"))

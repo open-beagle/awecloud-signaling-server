@@ -1,10 +1,11 @@
 # AWECloud Signaling Agent 配置文件
 
 # Agent 配置
-# 注意：name 和 token 可以通过环境变量覆盖
-# 环境变量：AGENT_NAME, AGENT_TOKEN
+# 注意：name、device 和 token 可以通过环境变量覆盖
+# 环境变量：AGENT_NAME, AGENT_DEVICE, AGENT_TOKEN
 [agent]
-name = "agent-dev-001"
+name = "beijing.beagle"           # Agent 名称（区域），如 beijing.beagle
+device = "beagle-241"             # 设备名，用于标识同一 Agent 下的不同设备
 token = "your-agent-token-from-server"
 
 # Server 连接配置
@@ -32,9 +33,9 @@ token = "your-agent-token-from-server"
 [server]
 address = "http://localhost:8080"
 
-# 隧道配置
-# Agent 通过 Tailscale (tsnet) 连接到 Headscale 控制平面
-# 认证信息（ControlURL、AuthKey）由 Server 在注册时下发
+# Tunnel 配置（隧道）
+# Agent 通过隧道连接到控制平面
+# 认证信息由 Server 在注册时下发
 [tunnel]
 # 隧道状态存储目录
 # - 如果配置：使用本地持久化，Server 作为备份（推荐生产环境）

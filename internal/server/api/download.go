@@ -331,3 +331,159 @@ func (a *DownloadAPI) ListDesktopVersions(c *gin.Context) {
 		Downloads: downloads,
 	})
 }
+
+// ============================================
+// Agent 下载相关 API
+// ============================================
+
+// GetAgentInstallScript 获取 Agent 安装脚本（公开接口）
+// GET /api/v1/download/install.sh
+// 重定向到 S3 上的安装脚本
+func (a *DownloadAPI) GetAgentInstallScript(c *gin.Context) {
+	// 获取系统配置中的 Agent 下载地址
+	baseURL, err := getAgentDownloadURL(c)
+	if err != nil || baseURL == "" {
+		logger.Warnf("[Download] 获取 Agent 下载地址失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "Agent 下载服务未配置",
+		})
+		return
+	}
+
+	// 重定向到 S3 上的安装脚本
+	if !strings.HasSuffix(baseURL, "/") {
+		baseURL += "/"
+	}
+	c.Redirect(http.StatusFound, baseURL+"install.sh")
+}
+
+// GetAgentDownload 获取 Agent 二进制下载（公开接口）
+// GET /api/v1/download/agent?os=linux&arch=amd64&version=v0.1.0
+func (a *DownloadAPI) GetAgentDownload(c *gin.Context) {
+	osType := c.DefaultQuery("os", "linux")
+	arch := c.DefaultQuery("arch", "amd64")
+	version := c.Query("version")
+
+	// 获取系统配置中的 Agent 下载地址
+	baseURL, err := getAgentDownloadURL(c)
+	if err != nil || baseURL == "" {
+		logger.Warnf("[Download] 获取 Agent 下载地址失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "Agent 下载服务未配置",
+		})
+		return
+	}
+
+	// 如果没有指定版本，获取最新版本
+	if version == "" {
+		versionInfo := getAgentVersionInfo(baseURL)
+		version = versionInfo.Version
+	}
+
+	// 构建下载 URL
+	// 格式: baseURL/agent-v0.1.0-linux-amd64
+	filename := fmt.Sprintf("agent-%s-%s-%s", version, osType, arch)
+	if !strings.HasSuffix(baseURL, "/") {
+		baseURL += "/"
+	}
+	downloadURL := baseURL + filename
+
+	// 重定向到实际下载地址
+	c.Redirect(http.StatusFound, downloadURL)
+}
+
+// GetAgentVersion 获取 Agent 版本信息（公开接口）
+// GET /api/v1/download/agent/version
+func (a *DownloadAPI) GetAgentVersion(c *gin.Context) {
+	// 获取系统配置中的 Agent 下载地址
+	baseURL, err := getAgentDownloadURL(c)
+	if err != nil || baseURL == "" {
+		logger.Warnf("[Download] 获取 Agent 下载地址失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "Agent 下载服务未配置",
+		})
+		return
+	}
+
+	// 获取版本信息
+	versionInfo := getAgentVersionInfo(baseURL)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":    true,
+		"version":    versionInfo.Version,
+		"build_date": versionInfo.BuildDate,
+	})
+}
+
+// Agent 版本信息缓存
+var (
+	cachedAgentVersionInfo *VersionInfo
+	agentVersionCacheMutex sync.RWMutex
+	agentVersionCacheTime  time.Time
+)
+
+// getAgentVersionInfo 获取 Agent 版本信息
+func getAgentVersionInfo(baseURL string) *VersionInfo {
+	// 检查缓存
+	agentVersionCacheMutex.RLock()
+	if cachedAgentVersionInfo != nil && time.Since(agentVersionCacheTime) < versionCacheTTL {
+		info := cachedAgentVersionInfo
+		agentVersionCacheMutex.RUnlock()
+		return info
+	}
+	agentVersionCacheMutex.RUnlock()
+
+	// 构建 version.json URL
+	versionURL := baseURL
+	if !strings.HasSuffix(versionURL, "/") {
+		versionURL += "/"
+	}
+	versionURL += "agent-version.json"
+
+	// 发起 HTTP 请求
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+	resp, err := client.Get(versionURL)
+	if err != nil {
+		logger.Warnf("[Download] 获取 Agent 版本信息失败: %v", err)
+		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		logger.Warnf("[Download] 获取 Agent 版本信息失败: HTTP %d", resp.StatusCode)
+		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+	}
+
+	// 读取响应
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logger.Warnf("[Download] 读取 Agent 版本信息失败: %v", err)
+		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+	}
+
+	// 解析 JSON
+	var versionInfo VersionInfo
+	if err := json.Unmarshal(body, &versionInfo); err != nil {
+		logger.Warnf("[Download] 解析 Agent 版本信息失败: %v", err)
+		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+	}
+
+	// 更新缓存
+	agentVersionCacheMutex.Lock()
+	cachedAgentVersionInfo = &versionInfo
+	agentVersionCacheTime = time.Now()
+	agentVersionCacheMutex.Unlock()
+
+	return &versionInfo
+}
+
+// getAgentDownloadURL 从系统配置获取 Agent 下载地址
+// Agent 和 Desktop 共用同一个下载地址
+func getAgentDownloadURL(c *gin.Context) (string, error) {
+	return getClientDownloadURL(c)
+}

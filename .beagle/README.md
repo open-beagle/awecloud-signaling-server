@@ -171,6 +171,27 @@ kubectl --context aliyun --namespace beagle-access logs -f deployment/awecloud-s
 
 当前版本：`v0.2.3`
 
+## Agent 发布到 S3
+
+用于发布 Agent 二进制和安装脚本到 S3 存储：
+
+```bash
+# 1. 构建 Agent（多架构，Agent 不需要 CGO 可直接交叉编译）
+GOARCHS=amd64,arm64 BUILD_VERSION=v0.2.3 bash scripts/build.sh agent
+
+# 2. 发布到 S3
+BUILD_VERSION=v0.2.3 bash scripts/publish_agent_s3.sh
+```
+
+发布内容：
+
+- `agent-v0.2.3-linux-amd64` - Agent 二进制（amd64）
+- `agent-v0.2.3-linux-arm64` - Agent 二进制（arm64）
+- `install.sh` - 一键安装脚本
+- `agent-version.json` - 版本信息
+
+注意：Server 需要 CGO（SQLite），本地无法交叉编译 arm64，需要使用 Docker 容器或 CI/CD。
+
 ## 注意事项
 
 1. **CGO**：

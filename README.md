@@ -97,6 +97,59 @@ BUILD_VERSION=v0.2.3 bash scripts/build_desktop.sh
 ./scripts/run_agent.sh
 ```
 
+## Agent 部署
+
+Agent 支持一键部署到 Linux 服务器，默认启用 SSH 功能。
+
+### 部署流程
+
+1. 在 Server Web 界面创建 Agent 用户（角色选择"代理"），获取 Token
+2. 在目标服务器执行安装命令
+
+### 安装命令
+
+```bash
+curl -fsSL https://your-server.com/api/v1/download/install.sh | \
+  sudo bash -s -- \
+    -n <AGENT_NAME> \
+    -t <TOKEN> \
+    -s https://your-server.com
+```
+
+### 参数说明
+
+| 参数              | 说明                                 |
+| ----------------- | ------------------------------------ |
+| `-n, --name`      | Agent 名称，如 `beijing-242`         |
+| `-t, --token`     | 认证 Token（从 Server 获取）         |
+| `-s, --server`    | Server 地址                          |
+| `--no-ssh`        | 禁用 SSH（默认启用）                 |
+| `-u, --upgrade`   | 升级模式，保留现有配置               |
+| `-U, --uninstall` | 卸载 Agent                           |
+
+### 安装路径
+
+| 路径                                                     | 说明                   |
+| -------------------------------------------------------- | ---------------------- |
+| `/etc/kubernetes/downloads/signaling-<version>-linux-<arch>` | Agent 二进制（带版本） |
+| `/opt/bin/signaling`                                     | 软链接                 |
+| `/etc/kubernetes/config/k8s-signaling.toml`              | 配置文件               |
+| `/etc/kubernetes/data/signaling/`                        | 数据目录               |
+| `k8s-signaling.service`                                  | systemd 服务名         |
+
+### 常用命令
+
+```bash
+# 查看状态
+systemctl status k8s-signaling
+
+# 查看日志
+journalctl -u k8s-signaling -f
+
+# 重启服务
+systemctl restart k8s-signaling
+```
+
 ## 可观测性
 
 Server 支持 OpenTelemetry 分布式追踪，通过环境变量配置：

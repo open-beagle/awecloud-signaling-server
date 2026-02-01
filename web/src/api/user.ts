@@ -19,9 +19,20 @@ export interface User {
   group_count?: number
 }
 
+// 用户详情中的设备
+export interface UserNode {
+  id: number
+  name: string
+  type: string
+  ip: string
+  version: string
+  status: string
+  last_heartbeat?: string
+}
+
 // 用户详情
 export interface UserDetail extends User {
-  nodes?: Node[]
+  nodes?: UserNode[]
 }
 
 // 创建用户请求

@@ -59,8 +59,8 @@
         <el-table-column prop="hostname" :label="$t('node.hostname')" min-width="120" />
         <el-table-column :label="$t('node.status')" width="100">
           <template #default="{ row }">
-            <el-tag :type="row.online ? 'success' : 'info'" size="small">
-              {{ row.online ? $t('common.online') : $t('common.offline') }}
+            <el-tag :type="row.status === 'online' ? 'success' : 'info'" size="small">
+              {{ row.status === 'online' ? $t('common.online') : $t('common.offline') }}
             </el-tag>
           </template>
         </el-table-column>
@@ -112,8 +112,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
-import { getUser, updateUser, deleteUser, regenerateUserSecret, type User, type UserDetail } from '@/api/user'
-import { getNodesByUser, type Node } from '@/api/node'
+import { getUser, updateUser, deleteUser, regenerateUserSecret, type User, type UserDetail, type UserNode } from '@/api/user'
 import { formatTime } from '@/utils/time'
 
 const { t } = useI18n()
@@ -123,7 +122,7 @@ const router = useRouter()
 const loading = ref(false)
 const saving = ref(false)
 const user = ref<UserDetail | null>(null)
-const nodes = ref<Node[]>([])
+const nodes = ref<UserNode[]>([])
 const showEditDialog = ref(false)
 const showSecretDialog = ref(false)
 const newSecret = ref('')
@@ -143,6 +142,7 @@ const fetchUser = async () => {
     const res = await getUser(id)
     if (res.success && res.data) {
       user.value = res.data
+      nodes.value = res.data.nodes || []
       editForm.alias = res.data.alias || ''
       editForm.ssh_enabled = res.data.ssh_enabled || false
     }
@@ -150,21 +150,6 @@ const fetchUser = async () => {
     console.error('获取用户详情失败:', error)
   } finally {
     loading.value = false
-  }
-}
-
-// 获取设备列表
-const fetchNodes = async () => {
-  const id = Number(route.params.id)
-  if (!id) return
-
-  try {
-    const res = await getNodesByUser(id)
-    if (res.success && res.data) {
-      nodes.value = res.data
-    }
-  } catch (error) {
-    console.error('获取设备列表失败:', error)
   }
 }
 
@@ -250,7 +235,6 @@ const copySecret = async () => {
 
 onMounted(() => {
   fetchUser()
-  fetchNodes()
 })
 </script>
 

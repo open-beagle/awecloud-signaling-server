@@ -94,11 +94,16 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 
 	// 查询或创建 Node
 	var node model.Node
-	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", user.ID, model.NodeTypeAgent).First(&node).Error; err != nil {
+	// 设备名：优先使用 SystemInfo.Hostname，否则使用 Agent 名称
+	deviceName := req.Name
+	if req.SystemInfo != nil && req.SystemInfo.Hostname != "" {
+		deviceName = req.SystemInfo.Hostname
+	}
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ? AND name = ?", user.ID, model.NodeTypeAgent, deviceName).First(&node).Error; err != nil {
 		// 创建新 Node
 		node = model.Node{
 			UserID: user.ID,
-			Name:   req.Name,
+			Name:   deviceName,
 			Type:   model.NodeTypeAgent,
 		}
 		db.DB.WithContext(ctx).Create(&node)

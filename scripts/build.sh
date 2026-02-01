@@ -2,6 +2,9 @@
 
 set -e
 
+# 构建目标：all（默认）、server、agent
+BUILD_TARGET="${1:-all}"
+
 # 参数配置
 # 日常开发默认只构建当前架构，流水线传递完整参数
 GOARCHS="${GOARCHS:-$(go env GOARCH)}"
@@ -24,6 +27,7 @@ mkdir -p ${BIN_DIR}
 IFS=',' read -ra ARCH_ARRAY <<< "$GOARCHS"
 
 echo "Building AWECloud Signaling Server"
+echo "Build Target: ${BUILD_TARGET}"
 echo "Target OS: ${GOOS}"
 echo "Target architectures: ${GOARCHS}"
 echo "Version: ${BUILD_VERSION}"
@@ -49,8 +53,9 @@ else
     AGENT_LDFLAGS="${LDFLAGS}"
 fi
 
-# 遍历每个架构进行编译
-for ARCH in "${ARCH_ARRAY[@]}"; do
+# 构建 Server
+build_server() {
+    local ARCH=$1
     echo "Building Server for ${GOOS}/${ARCH}..."
     
     OUTPUT="${BIN_DIR}/server-${GOOS}-${ARCH}"
@@ -64,7 +69,6 @@ for ARCH in "${ARCH_ARRAY[@]}"; do
         -o ${OUTPUT} \
         ./cmd/server
     
-    # 检查编译是否成功
     if [ -f "${OUTPUT}" ]; then
         echo "✓ Successfully built: ${OUTPUT}"
         ls -lh ${OUTPUT}
@@ -72,9 +76,12 @@ for ARCH in "${ARCH_ARRAY[@]}"; do
         echo "✗ Failed to build: ${OUTPUT}"
         exit 1
     fi
-    
     echo "---"
-    
+}
+
+# 构建 Agent
+build_agent() {
+    local ARCH=$1
     echo "Building Agent for ${GOOS}/${ARCH}..."
     
     OUTPUT="${BIN_DIR}/agent-${GOOS}-${ARCH}"
@@ -88,7 +95,6 @@ for ARCH in "${ARCH_ARRAY[@]}"; do
         -o ${OUTPUT} \
         ./cmd/agent
     
-    # 检查编译是否成功
     if [ -f "${OUTPUT}" ]; then
         echo "✓ Successfully built: ${OUTPUT}"
         ls -lh ${OUTPUT}
@@ -96,8 +102,23 @@ for ARCH in "${ARCH_ARRAY[@]}"; do
         echo "✗ Failed to build: ${OUTPUT}"
         exit 1
     fi
-    
     echo "---"
+}
+
+# 遍历每个架构进行编译
+for ARCH in "${ARCH_ARRAY[@]}"; do
+    case ${BUILD_TARGET} in
+        server)
+            build_server ${ARCH}
+            ;;
+        agent)
+            build_agent ${ARCH}
+            ;;
+        all|*)
+            build_server ${ARCH}
+            build_agent ${ARCH}
+            ;;
+    esac
 done
 
 # 创建当前平台的符号链接（方便本地开发）
@@ -113,5 +134,5 @@ if [ -f "${BIN_DIR}/agent-${GOOS}-${CURRENT_ARCH}" ]; then
 fi
 
 echo ""
-echo "All builds completed successfully!"
+echo "Build completed successfully!"
 echo "Binaries are in: ${BIN_DIR}/"

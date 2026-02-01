@@ -1,86 +1,193 @@
 # Agent 部署模式设计
 
-> 版本：v0.1.0
+> 版本：v0.2.0
 
 ## 1. 概述
 
 Agent 支持多种部署模式，不同模式适用于不同场景，功能支持也有差异。
 
-## 2. 部署模式对比
+## 2. 多区域 Agent 架构
 
-| 部署模式   | 适用场景                | SSH 到 Agent | TCP 代理转发 | 升级方式   |
-| ---------- | ----------------------- | ------------ | ------------ | ---------- |
-| Systemd    | 需要 SSH 功能的服务器   | ✅ 支持      | ✅ 支持      | 自动/手动  |
-| Docker     | 纯 TCP 代理场景         | ❌ 不支持    | ✅ 支持      | 镜像更新   |
-| Kubernetes | 云原生环境，纯 TCP 代理 | ❌ 不支持    | ✅ 支持      | Deployment |
+### 2.1 命名规范
 
-## 3. Systemd 部署模式
+Agent 按区域命名，格式：`<location>.<project>`
 
-### 3.1 适用场景
+示例：
 
-- 需要 SSH 到 Agent 本机的场景
-- 需要完整系统管理能力
-- 长期运行的物理服务器或虚拟机
+- `beijing.beagle` - 北京区域
+- `chengdu.beagle` - 成都区域
+- `aliyun.beagle` - 阿里云区域
 
-### 3.2 为什么 SSH 需要 Systemd 部署
+### 2.2 Agent 与设备的关系
 
-Tailscale SSH 的工作原理：
+一个 Agent（区域）可以部署到该区域的多台服务器上：
 
-```
+```txt
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  Tailscale SSH 需要访问宿主机资源                                            │
+│                      Agent 与设备对应关系                                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  ┌────────────────────────────────────────────────────────────────────┐    │
-│  │                      Tailscale SSH 服务                             │    │
-│  │                                                                     │    │
-│  │  1. 读取 /etc/passwd 获取用户列表                                   │    │
-│  │  2. 切换到目标用户（setuid）                                        │    │
-│  │  3. 启动用户 Shell（/bin/bash）                                     │    │
-│  │  4. 设置用户环境变量（HOME, PATH 等）                               │    │
-│  │  5. 访问用户 home 目录                                              │    │
-│  └────────────────────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                     beijing.beagle（北京区域）                       │   │
+│  │                                                                      │   │
+│  │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │   │
+│  │   │ beagle-241   │  │ beagle-242   │  │ beagle-243   │   ...        │   │
+│  │   │ 192.168.1.10 │  │ 192.168.1.11 │  │ 192.168.1.12 │              │   │
+│  │   │ SSH: ✅      │  │ SSH: ✅      │  │ SSH: ✅      │              │   │
+│  │   └──────────────┘  └──────────────┘  └──────────────┘              │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
-│  Docker 容器的限制：                                                        │
-│  ├─ 容器内用户与宿主机隔离                                                  │
-│  ├─ 无法切换到宿主机用户                                                    │
-│  ├─ 文件系统隔离，无法访问宿主机目录                                        │
-│  └─ SSH 进去只能看到容器环境，无法管理宿主机                                │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                     chengdu.beagle（成都区域）                       │   │
+│  │                                                                      │   │
+│  │   ┌──────────────┐  ┌──────────────┐                                │   │
+│  │   │ beagle-301   │  │ beagle-302   │   ...                          │   │
+│  │   │ 10.0.1.10    │  │ 10.0.1.11    │                                │   │
+│  │   │ SSH: ✅      │  │ SSH: ✅      │                                │   │
+│  │   └──────────────┘  └──────────────┘                                │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  说明：                                                                      │
+│  - 每个区域对应一个 Agent 用户账号（如 beijing.beagle）                      │
+│  - 该账号可部署到区域内的多台服务器                                          │
+│  - 每台服务器用设备名标识（如 beagle-241）                                   │
+│  - 所有设备共享同一个 Token，但有不同的设备名                                │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.3 安装流程
+### 2.3 部署流程
 
-```
+```txt
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                      Systemd 安装流程                                        │
+│                      部署流程                                                │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  1. 下载安装脚本                                                            │
-│     curl -fsSL https://example.com/install.sh | bash                        │
+│  1. 在 Server Web 界面创建 Agent 用户                                        │
+│     - 名称：beijing.beagle                                                  │
+│     - 角色：代理                                                            │
+│     - 获取 Token                                                            │
 │                                                                             │
-│  2. 脚本执行步骤                                                            │
-│     ├─ 检测系统架构（amd64/arm64）                                          │
-│     ├─ 下载对应架构的 Agent 二进制                                          │
-│     ├─ 安装到 /usr/local/bin/awecloud-agent                                │
-│     ├─ 创建配置目录 /etc/awecloud/                                          │
-│     ├─ 生成默认配置 /etc/awecloud/agent.toml                               │
-│     ├─ 创建数据目录 /var/lib/awecloud/                                      │
-│     ├─ 创建日志目录 /var/log/awecloud/                                      │
-│     ├─ 安装 systemd 服务文件                                                │
-│     └─ 启用并启动服务                                                       │
+│  2. 在北京区域的每台服务器上部署                                             │
 │                                                                             │
-│  3. 配置 Agent                                                              │
-│     编辑 /etc/awecloud/agent.toml，填入 Server 地址和认证信息               │
+│     服务器 beagle-241:                                                      │
+│     curl -fsSL https://server/install.sh | sudo bash -s -- \                │
+│       -n beijing.beagle \                                                   │
+│       -d beagle-241 \                                                       │
+│       -t <TOKEN> \                                                          │
+│       -s https://server                                                     │
 │                                                                             │
-│  4. 重启服务                                                                │
-│     systemctl restart awecloud-agent                                        │
+│     服务器 beagle-242:                                                      │
+│     curl -fsSL https://server/install.sh | sudo bash -s -- \                │
+│       -n beijing.beagle \                                                   │
+│       -d beagle-242 \                                                       │
+│       -t <TOKEN> \                                                          │
+│       -s https://server                                                     │
+│                                                                             │
+│  3. 重复步骤 1-2 部署其他区域（chengdu.beagle 等）                           │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.4 目录结构
+## 3. 部署模式对比
+
+| 部署模式   | 适用场景                | SSH 到设备 | TCP 代理转发 | 升级方式   |
+| ---------- | ----------------------- | ---------- | ------------ | ---------- |
+| Systemd    | 需要 SSH 功能的服务器   | ✅ 支持    | ✅ 支持      | 脚本升级   |
+| Docker     | 纯 TCP 代理场景         | ❌ 不支持  | ✅ 支持      | 镜像更新   |
+| Kubernetes | 云原生环境，纯 TCP 代理 | ❌ 不支持  | ✅ 支持      | Deployment |
+
+## 4. Systemd 一键部署
+
+### 4.1 部署命令
+
+```bash
+curl -fsSL https://your-server.com/api/v1/download/install.sh | \
+  sudo bash -s -- \
+    -n beijing.beagle \
+    -d beagle-241 \
+    -t <TOKEN> \
+    -s https://your-server.com
+```
+
+### 4.2 参数说明
+
+| 参数        | 简写 | 必填 | 说明                            |
+| ----------- | ---- | ---- | ------------------------------- |
+| --name      | -n   | 是   | Agent 名称（区域），如 beijing.beagle |
+| --device    | -d   | 是   | 设备名，如 beagle-241           |
+| --token     | -t   | 是   | 从 Server 获取的认证 Token      |
+| --server    | -s   | 是   | Server 地址                     |
+| --no-ssh    |      | 否   | 禁用 SSH（默认启用）            |
+| --upgrade   | -u   | 否   | 升级模式，保留配置              |
+| --uninstall | -U   | 否   | 卸载 Agent                      |
+
+### 4.3 配置文件生成
+
+脚本会自动生成 /etc/awecloud/agent.toml：
+
+```toml
+[agent]
+name = "beijing.beagle"      # Agent 名称（区域）
+token = "xxx..."             # 认证 Token
+device = "beagle-241"        # 设备名
+
+[server]
+address = "https://your-server.com"
+
+[tunnel]
+state_dir = "/var/lib/awecloud/"
+enable_ssh = true            # 默认启用 SSH
+```
+
+### 4.4 多设备部署示例
+
+```txt
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      北京区域部署示例                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  准备工作：                                                                  │
+│  1. Server Web 界面 → 用户管理 → 创建用户                                    │
+│     - 名称：beijing.beagle                                                  │
+│     - 角色：代理                                                            │
+│  2. 复制 Token                                                              │
+│                                                                             │
+│  部署到 beagle-241:                                                         │
+│  ─────────────────                                                          │
+│  curl -fsSL https://signaling.example.com/api/v1/download/install.sh | \    │
+│    sudo bash -s -- \                                                        │
+│      -n beijing.beagle \                                                    │
+│      -d beagle-241 \                                                        │
+│      -t eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... \                           │
+│      -s https://signaling.example.com                                       │
+│                                                                             │
+│  部署到 beagle-242:                                                         │
+│  ─────────────────                                                          │
+│  curl -fsSL https://signaling.example.com/api/v1/download/install.sh | \    │
+│    sudo bash -s -- \                                                        │
+│      -n beijing.beagle \                                                    │
+│      -d beagle-242 \                                                        │
+│      -t eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... \                           │
+│      -s https://signaling.example.com                                       │
+│                                                                             │
+│  部署到 beagle-243:                                                         │
+│  ─────────────────                                                          │
+│  curl -fsSL https://signaling.example.com/api/v1/download/install.sh | \    │
+│    sudo bash -s -- \                                                        │
+│      -n beijing.beagle \                                                    │
+│      -d beagle-243 \                                                        │
+│      -t eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9... \                           │
+│      -s https://signaling.example.com                                       │
+│                                                                             │
+│  注意：三台服务器使用相同的 Agent 名称和 Token，但设备名不同                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## 5. Systemd 部署详情
+
+### 5.1 目录结构
 
 | 路径                                       | 说明             |
 | ------------------------------------------ | ---------------- |
@@ -90,206 +197,96 @@ Tailscale SSH 的工作原理：
 | /var/log/awecloud/agent.log                | 日志文件         |
 | /etc/systemd/system/awecloud-agent.service | Systemd 服务文件 |
 
-### 3.5 Systemd 服务文件
+### 5.2 Systemd 服务配置
 
-```
-[Unit]
-Description=AWECloud Agent
-After=network-online.target
-Wants=network-online.target
+关键配置项：
 
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/awecloud-agent -c /etc/awecloud/agent.toml
-Restart=always
-RestartSec=5
-StandardOutput=append:/var/log/awecloud/agent.log
-StandardError=append:/var/log/awecloud/agent.log
+| 配置项          | 值        | 说明                        |
+| --------------- | --------- | --------------------------- |
+| Type            | simple    | 简单服务类型                |
+| Restart         | always    | 总是重启                    |
+| RestartSec      | 5         | 重启间隔 5 秒               |
+| NoNewPrivileges | false     | 允许提权（SSH 需要 setuid） |
+| ProtectSystem   | full      | 保护系统目录                |
+| ProtectHome     | read-only | 只读访问 home 目录          |
 
-# 安全加固
-NoNewPrivileges=false
-ProtectSystem=full
-ProtectHome=read-only
+### 5.3 常用命令
 
-[Install]
-WantedBy=multi-user.target
-```
+```bash
+# 查看服务状态
+systemctl status awecloud-agent
 
-注意：`NoNewPrivileges=false` 是必须的，因为 Tailscale SSH 需要 setuid 切换用户。
+# 查看日志
+journalctl -u awecloud-agent -f
 
-### 3.6 升级机制
+# 重启服务
+systemctl restart awecloud-agent
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      Agent 升级流程                                          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  方式一：自动升级（推荐）                                                    │
-│  ─────────────────────                                                      │
-│                                                                             │
-│  ┌─────────┐    检查版本    ┌─────────┐    有新版本    ┌─────────┐         │
-│  │  Agent  │ ─────────────▶ │ Server  │ ─────────────▶ │  Agent  │         │
-│  │ 定时器  │                │  API    │                │ 下载更新 │         │
-│  └─────────┘                └─────────┘                └────┬────┘         │
-│                                                              │              │
-│                                                              ▼              │
-│                                                        ┌─────────┐         │
-│                                                        │ 替换二进制│         │
-│                                                        │ 重启服务 │         │
-│                                                        └─────────┘         │
-│                                                                             │
-│  自动升级流程：                                                              │
-│  1. Agent 定期（如每小时）向 Server 查询最新版本                             │
-│  2. 对比当前版本，如有更新则下载新版本                                       │
-│  3. 校验文件完整性（SHA256）                                                 │
-│  4. 下载到临时目录                                                          │
-│  5. 停止当前服务                                                            │
-│  6. 备份旧版本                                                              │
-│  7. 替换二进制文件                                                          │
-│  8. 启动新版本                                                              │
-│  9. 健康检查，失败则回滚                                                    │
-│                                                                             │
-│  方式二：手动升级                                                            │
-│  ─────────────                                                              │
-│                                                                             │
-│  curl -fsSL https://example.com/install.sh | bash -s -- --upgrade           │
-│                                                                             │
-│  或者：                                                                      │
-│  systemctl stop awecloud-agent                                              │
-│  wget https://example.com/agent-linux-amd64 -O /usr/local/bin/awecloud-agent│
-│  chmod +x /usr/local/bin/awecloud-agent                                     │
-│  systemctl start awecloud-agent                                             │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+# 停止服务
+systemctl stop awecloud-agent
 ```
 
-### 3.7 版本检查 API
+### 5.4 升级
 
-| 接口                   | 方法 | 说明                |
-| ---------------------- | ---- | ------------------- |
-| /api/v1/agent/version  | GET  | 获取最新 Agent 版本 |
-| /api/v1/agent/download | GET  | 下载 Agent 二进制   |
-
-版本响应示例：
-
-```
-{
-  "version": "1.2.0",
-  "release_date": "2024-01-15",
-  "download_url": "/api/v1/agent/download?arch=amd64",
-  "checksum": "sha256:abc123...",
-  "changelog": "修复了 xxx 问题"
-}
+```bash
+curl -fsSL https://server/api/v1/download/install.sh | \
+  sudo bash -s -- --upgrade -s https://server
 ```
 
-## 4. Docker 部署模式
+### 5.5 卸载
 
-### 4.1 适用场景
+```bash
+curl -fsSL https://server/api/v1/download/install.sh | \
+  sudo bash -s -- --uninstall
+```
+
+## 6. Docker 部署模式
+
+### 6.1 适用场景
 
 - 只需要 TCP 代理转发功能
-- 不需要 SSH 到 Agent 本机
+- 不需要 SSH 到设备
 - 容器化环境
 
-### 4.2 功能限制
+### 6.2 功能限制
 
 | 功能         | 支持情况  | 说明                          |
 | ------------ | --------- | ----------------------------- |
 | TCP 代理转发 | ✅ 支持   | 转发到内网其他机器            |
-| SSH 到 Agent | ❌ 不支持 | 容器内用户环境受限            |
+| SSH 到设备   | ❌ 不支持 | 容器内用户环境受限            |
 | SSH 代理转发 | ✅ 支持   | 作为跳板转发到内网 SSH 服务器 |
 
-### 4.3 部署方式
+## 7. 部署模式选择指南
 
-```
-docker run -d \
-  --name awecloud-agent \
-  --restart always \
-  -v /path/to/agent.toml:/etc/awecloud/agent.toml \
-  awecloud/agent:latest
-```
-
-### 4.4 升级方式
-
-```
-docker pull awecloud/agent:latest
-docker stop awecloud-agent
-docker rm awecloud-agent
-docker run -d ... awecloud/agent:latest
-```
-
-## 5. Kubernetes 部署模式
-
-### 5.1 适用场景
-
-- 云原生环境
-- 需要高可用
-- 只需要 TCP 代理功能
-
-### 5.2 功能限制
-
-与 Docker 模式相同，不支持 SSH 到 Agent 本机。
-
-### 5.3 升级方式
-
-更新 Deployment 的镜像版本，Kubernetes 自动滚动更新。
-
-## 6. 部署模式选择指南
-
-```
+```txt
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                      部署模式选择流程                                        │
+│                      部署模式选择                                            │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│                        需要 SSH 到 Agent 本机？                              │
-│                                 │                                           │
-│                    ┌────────────┴────────────┐                              │
-│                    │                         │                              │
-│                   是                        否                              │
-│                    │                         │                              │
-│                    ▼                         ▼                              │
-│             ┌───────────┐           运行环境是什么？                         │
-│             │  Systemd  │                    │                              │
-│             │   部署    │         ┌──────────┼──────────┐                   │
-│             └───────────┘         │          │          │                   │
-│                               物理机/VM   Docker    Kubernetes              │
-│                                   │          │          │                   │
-│                                   ▼          ▼          ▼                   │
-│                             ┌─────────┐ ┌────────┐ ┌──────────┐            │
-│                             │ Systemd │ │ Docker │ │ K8s 部署  │            │
-│                             │  部署   │ │  部署  │ │          │            │
-│                             └─────────┘ └────────┘ └──────────┘            │
+│                        需要 SSH 到设备？                                     │
+│                              │                                              │
+│                 ┌────────────┴────────────┐                                 │
+│                 │                         │                                 │
+│                是                        否                                 │
+│                 │                         │                                 │
+│                 ▼                         ▼                                 │
+│          ┌───────────┐           ┌─────────────────┐                       │
+│          │  Systemd  │           │ Docker / K8s    │                       │
+│          │  （推荐）  │           │                 │                       │
+│          └───────────┘           └─────────────────┘                       │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## 7. 配置差异
+## 8. 安装脚本
 
-| 配置项       | Systemd                  | Docker      | Kubernetes |
-| ------------ | ------------------------ | ----------- | ---------- |
-| 配置文件路径 | /etc/awecloud/agent.toml | 挂载卷      | ConfigMap  |
-| 数据目录     | /var/lib/awecloud/       | 挂载卷      | PVC        |
-| 日志         | /var/log/awecloud/       | stdout      | stdout     |
-| 网络模式     | 宿主机网络               | bridge/host | Pod 网络   |
-| SSH 功能     | 启用                     | 禁用        | 禁用       |
+安装脚本位于 `scripts/install_agent.sh`，由 Server 通过 `/api/v1/download/install.sh` 提供下载。
 
-## 8. 安全考虑
+脚本功能：
 
-### 8.1 Systemd 模式
-
-- Agent 以 root 运行（SSH 需要）
-- 使用 systemd 安全加固选项
-- 配置文件权限 600
-
-### 8.2 Docker/K8s 模式
-
-- 可以使用非 root 用户运行
-- 网络隔离
-- 资源限制
-
-## 9. 监控和日志
-
-| 部署模式   | 日志查看命令                     | 健康检查         |
-| ---------- | -------------------------------- | ---------------- |
-| Systemd    | journalctl -u awecloud-agent -f  | systemctl status |
-| Docker     | docker logs -f awecloud-agent    | docker inspect   |
-| Kubernetes | kubectl logs -f deployment/agent | livenessProbe    |
+- 自动检测系统架构（amd64/arm64）
+- 下载对应架构的 Agent 二进制
+- 生成配置文件（包含 Agent 名称、设备名、Token）
+- 安装 systemd 服务
+- 默认启用 SSH
+- 支持升级和卸载模式

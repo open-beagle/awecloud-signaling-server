@@ -268,6 +268,15 @@ func (s *Server) setupRouter() *gin.Engine {
 			// 公开 API
 			v1Group.GET("/public/system/config", api.GetPublicSystemConfig)
 
+			// 下载 API（公开）
+			downloadAPI := api.NewDownloadAPI()
+			v1Group.GET("/public/download/desktop", downloadAPI.GetDesktopDownload)
+			v1Group.GET("/public/download/desktop/direct", downloadAPI.GetDesktopDownloadDirect)
+			v1Group.GET("/public/download/desktop/versions", downloadAPI.ListDesktopVersions)
+			v1Group.GET("/download/install.sh", downloadAPI.GetAgentInstallScript)
+			v1Group.GET("/download/agent", downloadAPI.GetAgentDownload)
+			v1Group.GET("/download/agent/version", downloadAPI.GetAgentVersion)
+
 			// 管理员 API
 			adminGroup := v1Group.Group("/admin")
 			{
