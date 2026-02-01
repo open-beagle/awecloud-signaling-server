@@ -14,6 +14,27 @@ service DesktopService {
 
   // 心跳 - 保持连接状态
   rpc Heartbeat(stream DesktopHeartbeatRequest) returns (stream DesktopHeartbeatResponse);
+
+  // 获取已授权主机列表
+  rpc GetAuthorizedHosts(GetAuthorizedHostsRequest) returns (GetAuthorizedHostsResponse);
+
+  // 获取指定主机的服务列表
+  rpc GetHostServices(GetHostServicesRequest) returns (GetHostServicesResponse);
+
+  // 获取我的设备列表
+  rpc GetMyDevices(GetMyDevicesRequest) returns (GetMyDevicesResponse);
+
+  // 设备下线
+  rpc OfflineDevice(OfflineDeviceRequest) returns (OfflineDeviceResponse);
+
+  // 删除设备
+  rpc DeleteDevice(DeleteDeviceRequest) returns (DeleteDeviceResponse);
+
+  // 切换服务收藏状态
+  rpc ToggleFavorite(ToggleFavoriteRequest) returns (ToggleFavoriteResponse);
+
+  // 获取收藏的服务列表
+  rpc GetFavoriteServices(GetFavoriteServicesRequest) returns (GetFavoriteServicesResponse);
 }
 
 // ============================================
@@ -97,4 +118,133 @@ message AuthorizedService {
 // DesktopHeartbeatResponse Desktop 心跳响应
 message DesktopHeartbeatResponse {
   repeated AuthorizedService authorized_services = 1; // 已授权服务列表
+}
+
+// ============================================
+// 获取已授权主机列表
+// ============================================
+
+// GetAuthorizedHostsRequest 获取已授权主机列表请求
+message GetAuthorizedHostsRequest {
+  uint64 desktop_id = 1; // Desktop ID
+}
+
+// AuthorizedHost 已授权主机
+message AuthorizedHost {
+  string host_id = 1; // 主机ID（Agent用户ID）
+  string host_name = 2; // 主机名称（Agent别名）
+  string tunnel_ip = 3; // 隧道IP
+  int32 service_count = 4; // 服务数量
+  string status = 5; // 状态（online/offline）
+  string last_seen = 6; // 最后在线时间
+}
+
+// GetAuthorizedHostsResponse 获取已授权主机列表响应
+message GetAuthorizedHostsResponse {
+  repeated AuthorizedHost hosts = 1; // 主机列表
+}
+
+// ============================================
+// 获取指定主机的服务列表
+// ============================================
+
+// GetHostServicesRequest 获取指定主机的服务列表请求
+message GetHostServicesRequest {
+  uint64 desktop_id = 1; // Desktop ID
+  string host_id = 2; // 主机ID
+}
+
+// GetHostServicesResponse 获取指定主机的服务列表响应
+message GetHostServicesResponse {
+  repeated AuthorizedService services = 1; // 服务列表
+}
+
+// ============================================
+// 获取我的设备列表
+// ============================================
+
+// GetMyDevicesRequest 获取我的设备列表请求
+message GetMyDevicesRequest {
+  uint64 desktop_id = 1; // Desktop ID
+}
+
+// DeviceInfo 设备信息
+message DeviceInfo {
+  string device_token = 1; // 设备令牌
+  string device_name = 2; // 设备名称
+  string os = 3; // 操作系统
+  string arch = 4; // 架构
+  string hostname = 5; // 主机名
+  string status = 6; // 状态（online/offline）
+  string last_used_at = 7; // 最后使用时间
+  string created_at = 8; // 创建时间
+  bool is_current = 9; // 是否是当前设备
+}
+
+// GetMyDevicesResponse 获取我的设备列表响应
+message GetMyDevicesResponse {
+  repeated DeviceInfo devices = 1; // 设备列表
+}
+
+// ============================================
+// 设备下线
+// ============================================
+
+// OfflineDeviceRequest 设备下线请求
+message OfflineDeviceRequest {
+  uint64 desktop_id = 1; // 当前 Desktop ID
+  string device_token = 2; // 要下线的设备令牌
+}
+
+// OfflineDeviceResponse 设备下线响应
+message OfflineDeviceResponse {
+  bool success = 1; // 是否成功
+  string message = 2; // 响应消息
+}
+
+// ============================================
+// 删除设备
+// ============================================
+
+// DeleteDeviceRequest 删除设备请求
+message DeleteDeviceRequest {
+  uint64 desktop_id = 1; // 当前 Desktop ID
+  string device_token = 2; // 要删除的设备令牌
+}
+
+// DeleteDeviceResponse 删除设备响应
+message DeleteDeviceResponse {
+  bool success = 1; // 是否成功
+  string message = 2; // 响应消息
+}
+
+// ============================================
+// 切换服务收藏状态
+// ============================================
+
+// ToggleFavoriteRequest 切换服务收藏状态请求
+message ToggleFavoriteRequest {
+  uint64 desktop_id = 1; // Desktop ID
+  string service_id = 2; // 服务 ID
+}
+
+// ToggleFavoriteResponse 切换服务收藏状态响应
+message ToggleFavoriteResponse {
+  bool success = 1; // 是否成功
+  string message = 2; // 响应消息
+  bool is_favorite = 3; // 当前收藏状态
+}
+
+// ============================================
+// 获取收藏的服务列表
+// ============================================
+
+// GetFavoriteServicesRequest 获取收藏的服务列表请求
+message GetFavoriteServicesRequest {
+  uint64 desktop_id = 1; // Desktop ID
+}
+
+// GetFavoriteServicesResponse 获取收藏的服务列表响应
+message GetFavoriteServicesResponse {
+  repeated string service_ids = 1; // 收藏的服务 ID 列表
 }
