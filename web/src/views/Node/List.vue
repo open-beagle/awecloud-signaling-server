@@ -23,7 +23,13 @@
     <el-card shadow="never">
       <el-table v-loading="loading" :data="nodes" stripe>
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="name" :label="$t('node.name')" min-width="120" />
+        <el-table-column prop="name" :label="$t('node.name')" min-width="120">
+          <template #default="{ row }">
+            <router-link :to="`/nodes/${row.id}`" class="node-link">
+              {{ row.name }}
+            </router-link>
+          </template>
+        </el-table-column>
         <el-table-column :label="$t('node.user')" min-width="120">
           <template #default="{ row }">
             <router-link v-if="row.user" :to="`/users/${row.user.id}`" class="user-link">
@@ -196,6 +202,15 @@ onMounted(() => {
 }
 
 .user-link:hover {
+  text-decoration: underline;
+}
+
+.node-link {
+  color: var(--el-color-primary);
+  text-decoration: none;
+}
+
+.node-link:hover {
   text-decoration: underline;
 }
 </style>

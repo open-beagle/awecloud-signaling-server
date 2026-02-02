@@ -15,16 +15,32 @@ export interface NodeSystemInfo {
   memory_gb: number
 }
 
+// Headscale 节点信息
+export interface HeadscaleNodeInfo {
+  id: number
+  name: string
+  given_name: string
+  ip_addresses: string[]
+  online: boolean
+  last_seen?: string
+  expiry?: string
+  created_at?: string
+  forced_tags?: string[]
+  user_name?: string
+}
+
 // 设备模型
 export interface Node {
   id: number
   user_id: number
   name: string
   type: NodeType
+  headscale_node_id?: number
   ip?: string
   version?: string
   hostname?: string
   system_info?: string
+  status?: string
   last_heartbeat?: string
   created_at: string
   updated_at: string
@@ -42,6 +58,7 @@ export interface Node {
 // 设备详情
 export interface NodeDetail extends Node {
   system_info_parsed?: NodeSystemInfo
+  headscale?: HeadscaleNodeInfo
 }
 
 // 获取设备列表

@@ -304,6 +304,30 @@ func (c *Client) ListNodes(ctx context.Context) ([]*v1.Node, error) {
 	return resp.Nodes, nil
 }
 
+// ListNodesByUser 列出指定用户的节点
+func (c *Client) ListNodesByUser(ctx context.Context, userName string) ([]*v1.Node, error) {
+	resp, err := c.client.ListNodes(ctx, &v1.ListNodesRequest{
+		User: userName,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("列出用户 %s 的节点失败: %w", userName, err)
+	}
+	return resp.Nodes, nil
+}
+
+// GetNodeByUser 获取指定用户的节点（假设每个用户只有一个节点）
+func (c *Client) GetNodeByUser(ctx context.Context, userName string) (*v1.Node, error) {
+	nodes, err := c.ListNodesByUser(ctx, userName)
+	if err != nil {
+		return nil, err
+	}
+	if len(nodes) == 0 {
+		return nil, nil
+	}
+	// 返回第一个节点（通常每个用户只有一个节点）
+	return nodes[0], nil
+}
+
 // DeleteNode 删除节点
 func (c *Client) DeleteNode(ctx context.Context, nodeID uint64) error {
 	_, err := c.client.DeleteNode(ctx, &v1.DeleteNodeRequest{

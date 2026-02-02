@@ -269,12 +269,36 @@ func (s *DesktopServiceServer) handleDesktopHeartbeat(ctx context.Context, nodeI
 		logger.Errorf("Desktop 心跳更新失败: nodeID=%d 不存在", nodeID)
 		return
 	}
+
+	updates := map[string]any{
+		"last_heartbeat": now,
+		"ip":             req.TunnelIp,
+	}
+
+	// 如果 Headscale 客户端可用，查询并更新 HeadscaleNodeID
+	if s.headscaleClient != nil {
+		// 只有当 HeadscaleNodeID 为 0 时才查询 Headscale
+		if node.HeadscaleNodeID == 0 {
+			// 查询 User 获取名称
+			var user model.User
+			if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err == nil {
+				// Headscale User 命名规则: client-{name}
+				hsUserName := fmt.Sprintf("client-%s", user.Name)
+				hsNode, err := s.headscaleClient.GetNodeByUser(ctx, hsUserName)
+				if err != nil {
+					logger.Warnf("通过 User 查询 Headscale 节点失败: %v", err)
+				} else if hsNode != nil {
+					updates["headscale_node_id"] = hsNode.Id
+					logger.Infof("Desktop %d 关联 Headscale 节点: id=%d, name=%s, user=%s", nodeID, hsNode.Id, hsNode.GivenName, hsUserName)
+				}
+			}
+		}
+	}
+
 	// 使用 user_id + type + name 定位设备（稳定唯一标识）
 	result := db.DB.WithContext(ctx).Model(&model.Node{}).
 		Where("user_id = ? AND type = ? AND name = ?", node.UserID, model.NodeTypeDesktop, node.Name).
-		Updates(map[string]any{
-			"last_heartbeat": now, "ip": req.TunnelIp,
-		})
+		Updates(updates)
 	if result.Error != nil {
 		logger.Errorf("Desktop 心跳更新失败: %v", result.Error)
 	}
@@ -314,23 +338,8 @@ func (s *DesktopServiceServer) getOrCreateAuthKey(ctx context.Context, userID ui
 		}
 	}
 
-	// 检查该 User 下是否已有 Node，如果有则删除旧节点
-	// Desktop 使用临时节点，但同一用户同一设备重新登录时应该清理旧节点
-	nodes, err := s.headscaleClient.ListNodes(ctx)
-	if err != nil {
-		logger.Warnf("查询 Headscale Node 列表失败: %v", err)
-	} else {
-		for _, node := range nodes {
-			if node.User != nil && node.User.Id == user.Id {
-				logger.Infof("删除 Desktop %s 的旧 Headscale 节点: id=%d, name=%s", userName, node.Id, node.GivenName)
-				if err := s.headscaleClient.DeleteNode(ctx, node.Id); err != nil {
-					logger.Warnf("删除旧节点失败: %v", err)
-				}
-				// 清空本地数据库中对应 Node 的 HeadscaleNodeID
-				db.DB.WithContext(ctx).Model(&model.Node{}).Where("headscale_node_id = ?", node.Id).Update("headscale_node_id", 0)
-			}
-		}
-	}
+	// 注意：不再删除旧节点，保持节点稳定性
+	// Desktop 使用持久化状态，重连时应复用现有节点
 
 	tags := []string{fmt.Sprintf("tag:client-%s", userName)}
 	var groupMembers []model.GroupMember
@@ -341,7 +350,8 @@ func (s *DesktopServiceServer) getOrCreateAuthKey(ctx context.Context, userID ui
 			}
 		}
 	}
-	authKey, err := s.headscaleClient.CreatePreAuthKeyWithTags(ctx, user.Id, 24*time.Hour, true, tags)
+	// ephemeral=false：保持节点稳定，不自动删除
+	authKey, err := s.headscaleClient.CreatePreAuthKeyWithTags(ctx, user.Id, 24*time.Hour, false, tags)
 	if err != nil {
 		return "", "", fmt.Errorf("创建预认证密钥失败: %w", err)
 	}

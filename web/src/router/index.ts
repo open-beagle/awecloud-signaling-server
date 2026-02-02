@@ -41,6 +41,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Node/List.vue'),
         meta: { requiresAuth: true }
       },
+      {
+        path: 'nodes/:id',
+        name: 'NodeDetail',
+        component: () => import('@/views/Node/Detail.vue'),
+        meta: { requiresAuth: true }
+      },
       // 分组管理
       {
         path: 'groups',

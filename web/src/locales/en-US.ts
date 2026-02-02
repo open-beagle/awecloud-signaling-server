@@ -115,9 +115,20 @@ export default {
     typeDesktop: 'Desktop Device',
     ip: 'IP Address',
     version: 'Version',
+    hostname: 'Hostname',
     lastHeartbeat: 'Last Heartbeat',
     searchPlaceholder: 'Search node name',
-    deleteConfirm: 'Are you sure to delete node {name}?'
+    deleteConfirm: 'Are you sure to delete node {name}?',
+    user: 'Owner User',
+    basicInfo: 'Basic Info',
+    nodeInfo: 'Node Info',
+    systemInfo: 'System Info',
+    noHeadscaleInfo: 'No Headscale node associated',
+    os: 'Operating System',
+    osVersion: 'OS Version',
+    arch: 'CPU Architecture',
+    cpuCores: 'CPU Cores',
+    memory: 'Memory'
   },
   group: {
     title: 'Group Management',

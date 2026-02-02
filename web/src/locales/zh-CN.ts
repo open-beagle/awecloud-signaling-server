@@ -115,9 +115,20 @@ export default {
     typeDesktop: '桌面设备',
     ip: 'IP 地址',
     version: '版本',
+    hostname: '主机名',
     lastHeartbeat: '最后心跳',
     searchPlaceholder: '搜索设备名称',
-    deleteConfirm: '确认删除设备 {name} 吗？'
+    deleteConfirm: '确认删除设备 {name} 吗？',
+    user: '所属用户',
+    basicInfo: '基本信息',
+    nodeInfo: '节点信息',
+    systemInfo: '系统信息',
+    noHeadscaleInfo: '未关联 Headscale 节点',
+    os: '操作系统',
+    osVersion: '系统版本',
+    arch: 'CPU 架构',
+    cpuCores: 'CPU 核心数',
+    memory: '内存'
   },
   group: {
     title: '分组管理',

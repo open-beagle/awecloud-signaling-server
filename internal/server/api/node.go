@@ -136,21 +136,37 @@ func (a *NodeAPI) List(c *gin.Context) {
 	c.JSON(http.StatusOK, NewPagedResponse(result, total, page, size))
 }
 
+// HeadscaleNodeInfo Headscale 节点信息
+type HeadscaleNodeInfo struct {
+	ID          uint64   `json:"id"`
+	Name        string   `json:"name"`
+	GivenName   string   `json:"given_name"`
+	IPAddresses []string `json:"ip_addresses"`
+	Online      bool     `json:"online"`
+	LastSeen    string   `json:"last_seen,omitempty"`
+	Expiry      string   `json:"expiry,omitempty"`
+	CreatedAt   string   `json:"created_at,omitempty"`
+	ForcedTags  []string `json:"forced_tags,omitempty"`
+	UserName    string   `json:"user_name,omitempty"`
+}
+
 // NodeDetail 设备详情
 type NodeDetail struct {
-	ID            uint64        `json:"id"`
-	Name          string        `json:"name"`
-	Type          string        `json:"type"`
-	UserID        uint64        `json:"user_id"`
-	User          *NodeUserInfo `json:"user,omitempty"`
-	IP            string        `json:"ip"`
-	Version       string        `json:"version"`
-	Hostname      string        `json:"hostname"`
-	SystemInfo    string        `json:"system_info"`
-	Status        string        `json:"status"`
-	LastHeartbeat *time.Time    `json:"last_heartbeat"`
-	CreatedAt     time.Time     `json:"created_at"`
-	UpdatedAt     time.Time     `json:"updated_at"`
+	ID              uint64             `json:"id"`
+	Name            string             `json:"name"`
+	Type            string             `json:"type"`
+	UserID          uint64             `json:"user_id"`
+	User            *NodeUserInfo      `json:"user,omitempty"`
+	HeadscaleNodeID uint64             `json:"headscale_node_id"`
+	IP              string             `json:"ip"`
+	Version         string             `json:"version"`
+	Hostname        string             `json:"hostname"`
+	SystemInfo      string             `json:"system_info"`
+	Status          string             `json:"status"`
+	LastHeartbeat   *time.Time         `json:"last_heartbeat"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+	Headscale       *HeadscaleNodeInfo `json:"headscale,omitempty"`
 }
 
 // Get 获取设备详情
@@ -185,19 +201,51 @@ func (a *NodeAPI) Get(c *gin.Context) {
 	}
 
 	result := NodeDetail{
-		ID:            node.ID,
-		Name:          node.Name,
-		Type:          string(node.Type),
-		UserID:        node.UserID,
-		User:          userInfo,
-		IP:            node.IP,
-		Version:       node.Version,
-		Hostname:      node.Hostname,
-		SystemInfo:    node.SystemInfo,
-		Status:        status,
-		LastHeartbeat: node.LastHeartbeat,
-		CreatedAt:     node.CreatedAt,
-		UpdatedAt:     node.UpdatedAt,
+		ID:              node.ID,
+		Name:            node.Name,
+		Type:            string(node.Type),
+		UserID:          node.UserID,
+		User:            userInfo,
+		HeadscaleNodeID: node.HeadscaleNodeID,
+		IP:              node.IP,
+		Version:         node.Version,
+		Hostname:        node.Hostname,
+		SystemInfo:      node.SystemInfo,
+		Status:          status,
+		LastHeartbeat:   node.LastHeartbeat,
+		CreatedAt:       node.CreatedAt,
+		UpdatedAt:       node.UpdatedAt,
+	}
+
+	// 获取 Headscale 节点信息
+	if a.hsClient != nil && node.HeadscaleNodeID > 0 {
+		hsCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if hsNode, err := a.hsClient.GetNode(hsCtx, node.HeadscaleNodeID); err == nil && hsNode != nil {
+			hsInfo := &HeadscaleNodeInfo{
+				ID:          hsNode.Id,
+				Name:        hsNode.Name,
+				GivenName:   hsNode.GivenName,
+				IPAddresses: hsNode.IpAddresses,
+				Online:      hsNode.Online,
+				ForcedTags:  hsNode.ForcedTags,
+			}
+			if hsNode.User != nil {
+				hsInfo.UserName = hsNode.User.Name
+			}
+			if hsNode.LastSeen != nil {
+				hsInfo.LastSeen = hsNode.LastSeen.AsTime().Format(time.RFC3339)
+			}
+			if hsNode.Expiry != nil {
+				hsInfo.Expiry = hsNode.Expiry.AsTime().Format(time.RFC3339)
+			}
+			if hsNode.CreatedAt != nil {
+				hsInfo.CreatedAt = hsNode.CreatedAt.AsTime().Format(time.RFC3339)
+			}
+			result.Headscale = hsInfo
+		} else if err != nil {
+			logger.Warnf("获取 Headscale 节点信息失败: %v", err)
+		}
 	}
 
 	c.JSON(http.StatusOK, NewSuccessResponse(result))

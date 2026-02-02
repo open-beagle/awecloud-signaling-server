@@ -358,9 +358,33 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64, req *pb.AgentHeartbeatRequest) {
 	// 更新 Node 信息
 	now := time.Now()
-	updates := map[string]interface{}{
+	updates := map[string]any{
 		"last_heartbeat": now,
 		"ip":             req.TunnelIp,
+	}
+
+	// 如果 Headscale 客户端可用，查询并更新 HeadscaleNodeID
+	if s.headscaleClient != nil {
+		// 先查询当前 Node 的 HeadscaleNodeID 和对应的 User 名称
+		var node model.Node
+		var user model.User
+		if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", agentID, model.NodeTypeAgent).First(&node).Error; err == nil {
+			// 只有当 HeadscaleNodeID 为 0 时才查询 Headscale
+			if node.HeadscaleNodeID == 0 {
+				// 查询 User 获取名称
+				if err := db.DB.WithContext(ctx).First(&user, agentID).Error; err == nil {
+					// Headscale User 命名规则: agent-{name}
+					hsUserName := fmt.Sprintf("agent-%s", user.Name)
+					hsNode, err := s.headscaleClient.GetNodeByUser(ctx, hsUserName)
+					if err != nil {
+						logger.Warnf("通过 User 查询 Headscale 节点失败: %v", err)
+					} else if hsNode != nil {
+						updates["headscale_node_id"] = hsNode.Id
+						logger.Infof("Agent %d 关联 Headscale 节点: id=%d, name=%s, user=%s", agentID, hsNode.Id, hsNode.GivenName, hsUserName)
+					}
+				}
+			}
+		}
 	}
 
 	if err := db.DB.WithContext(ctx).Model(&model.Node{}).
@@ -453,23 +477,8 @@ func (s *AgentServiceServer) createAgentAuthKey(ctx context.Context, agentName s
 		}
 	}
 
-	// 检查该 User 下是否已有 Node，如果有则删除旧节点
-	// 这样可以避免同一个 Agent 注册多次产生多个节点
-	nodes, err := s.headscaleClient.ListNodes(ctx)
-	if err != nil {
-		logger.Warnf("查询 Headscale Node 列表失败: %v", err)
-	} else {
-		for _, node := range nodes {
-			if node.User != nil && node.User.Id == user.Id {
-				logger.Infof("删除 Agent %s 的旧 Headscale 节点: id=%d, name=%s", agentName, node.Id, node.GivenName)
-				if err := s.headscaleClient.DeleteNode(ctx, node.Id); err != nil {
-					logger.Warnf("删除旧节点失败: %v", err)
-				}
-				// 清空本地数据库中对应 Node 的 HeadscaleNodeID
-				db.DB.WithContext(ctx).Model(&model.Node{}).Where("headscale_node_id = ?", node.Id).Update("headscale_node_id", 0)
-			}
-		}
-	}
+	// 注意：不再删除旧节点，让 Agent 复用现有节点以保持 IP 稳定
+	// Agent 使用 tsnet.Server 的 StateDir 持久化状态，重启后会自动复用现有节点
 
 	// 构建 Tags 列表
 	// 身份 Tag: tag:agent-{name}

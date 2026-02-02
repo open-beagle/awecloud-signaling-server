@@ -114,7 +114,7 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 		cfg.Server.Address = "http://localhost:8080"
 	}
 	if cfg.Tunnel.StateDir == "" {
-		cfg.Tunnel.StateDir = "~/.config/awecloud-signaling/"
+		cfg.Tunnel.StateDir = "/etc/kubernetes/data/signaling/tunnel"
 	}
 	if cfg.Tunnel.StateSyncInterval == 0 {
 		cfg.Tunnel.StateSyncInterval = 5
