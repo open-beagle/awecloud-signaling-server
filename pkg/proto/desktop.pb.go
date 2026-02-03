@@ -1799,6 +1799,120 @@ func (x *LogtoUserInfo) GetAvatar() string {
 	return ""
 }
 
+// CheckSavedCredentialsRequest 检查保存的凭据请求
+type CheckSavedCredentialsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ServerUrl     string                 `protobuf:"bytes,1,opt,name=server_url,json=serverUrl,proto3" json:"server_url,omitempty"` // 服务器地址
+	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`                    // 用户名
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckSavedCredentialsRequest) Reset() {
+	*x = CheckSavedCredentialsRequest{}
+	mi := &file_pkg_proto_desktop_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckSavedCredentialsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckSavedCredentialsRequest) ProtoMessage() {}
+
+func (x *CheckSavedCredentialsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_desktop_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckSavedCredentialsRequest.ProtoReflect.Descriptor instead.
+func (*CheckSavedCredentialsRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *CheckSavedCredentialsRequest) GetServerUrl() string {
+	if x != nil {
+		return x.ServerUrl
+	}
+	return ""
+}
+
+func (x *CheckSavedCredentialsRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+// CheckSavedCredentialsResponse 检查保存的凭据响应
+type CheckSavedCredentialsResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	HasCredentials bool                   `protobuf:"varint,1,opt,name=has_credentials,json=hasCredentials,proto3" json:"has_credentials,omitempty"` // 是否有保存的凭据
+	Username       string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`                                    // 用户名
+	DesktopId      uint64                 `protobuf:"varint,3,opt,name=desktop_id,json=desktopId,proto3" json:"desktop_id,omitempty"`                // Desktop ID（如果有）
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *CheckSavedCredentialsResponse) Reset() {
+	*x = CheckSavedCredentialsResponse{}
+	mi := &file_pkg_proto_desktop_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckSavedCredentialsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckSavedCredentialsResponse) ProtoMessage() {}
+
+func (x *CheckSavedCredentialsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_desktop_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckSavedCredentialsResponse.ProtoReflect.Descriptor instead.
+func (*CheckSavedCredentialsResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *CheckSavedCredentialsResponse) GetHasCredentials() bool {
+	if x != nil {
+		return x.HasCredentials
+	}
+	return false
+}
+
+func (x *CheckSavedCredentialsResponse) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *CheckSavedCredentialsResponse) GetDesktopId() uint64 {
+	if x != nil {
+		return x.DesktopId
+	}
+	return 0
+}
+
 var File_pkg_proto_desktop_proto protoreflect.FileDescriptor
 
 const file_pkg_proto_desktop_proto_rawDesc = "" +
@@ -1953,13 +2067,23 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x14\n" +
 	"\x05email\x18\x03 \x01(\tR\x05email\x12\x12\n" +
 	"\x04name\x18\x04 \x01(\tR\x04name\x12\x16\n" +
-	"\x06avatar\x18\x05 \x01(\tR\x06avatar*\xb5\x01\n" +
+	"\x06avatar\x18\x05 \x01(\tR\x06avatar\"Y\n" +
+	"\x1cCheckSavedCredentialsRequest\x12\x1d\n" +
+	"\n" +
+	"server_url\x18\x01 \x01(\tR\tserverUrl\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\"\x83\x01\n" +
+	"\x1dCheckSavedCredentialsResponse\x12'\n" +
+	"\x0fhas_credentials\x18\x01 \x01(\bR\x0ehasCredentials\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\x12\x1d\n" +
+	"\n" +
+	"desktop_id\x18\x03 \x01(\x04R\tdesktopId*\xb5\x01\n" +
 	"\x10LogtoLoginStatus\x12\"\n" +
 	"\x1eLOGTO_LOGIN_STATUS_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aLOGTO_LOGIN_STATUS_PENDING\x10\x01\x12\x1e\n" +
 	"\x1aLOGTO_LOGIN_STATUS_SUCCESS\x10\x02\x12\x1d\n" +
 	"\x19LOGTO_LOGIN_STATUS_FAILED\x10\x03\x12\x1e\n" +
-	"\x1aLOGTO_LOGIN_STATUS_EXPIRED\x10\x042\x9a\t\n" +
+	"\x1aLOGTO_LOGIN_STATUS_EXPIRED\x10\x042\x98\n" +
+	"\n" +
 	"\x0eDesktopService\x12Z\n" +
 	"\x05Login\x12'.awecloud.signaling.DesktopLoginRequest\x1a(.awecloud.signaling.DesktopLoginResponse\x12a\n" +
 	"\x0eLoginWithLogto\x12%.awecloud.signaling.LogtoLoginRequest\x1a&.awecloud.signaling.LogtoLoginResponse0\x01\x12o\n" +
@@ -1971,7 +2095,8 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\rOfflineDevice\x12(.awecloud.signaling.OfflineDeviceRequest\x1a).awecloud.signaling.OfflineDeviceResponse\x12a\n" +
 	"\fDeleteDevice\x12'.awecloud.signaling.DeleteDeviceRequest\x1a(.awecloud.signaling.DeleteDeviceResponse\x12g\n" +
 	"\x0eToggleFavorite\x12).awecloud.signaling.ToggleFavoriteRequest\x1a*.awecloud.signaling.ToggleFavoriteResponse\x12v\n" +
-	"\x13GetFavoriteServices\x12..awecloud.signaling.GetFavoriteServicesRequest\x1a/.awecloud.signaling.GetFavoriteServicesResponseB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
+	"\x13GetFavoriteServices\x12..awecloud.signaling.GetFavoriteServicesRequest\x1a/.awecloud.signaling.GetFavoriteServicesResponse\x12|\n" +
+	"\x15CheckSavedCredentials\x120.awecloud.signaling.CheckSavedCredentialsRequest\x1a1.awecloud.signaling.CheckSavedCredentialsResponseB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
 
 var (
 	file_pkg_proto_desktop_proto_rawDescOnce sync.Once
@@ -1986,36 +2111,38 @@ func file_pkg_proto_desktop_proto_rawDescGZIP() []byte {
 }
 
 var file_pkg_proto_desktop_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_pkg_proto_desktop_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_pkg_proto_desktop_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_pkg_proto_desktop_proto_goTypes = []any{
-	(LogtoLoginStatus)(0),               // 0: awecloud.signaling.LogtoLoginStatus
-	(*DesktopSystemInfo)(nil),           // 1: awecloud.signaling.DesktopSystemInfo
-	(*DesktopLoginRequest)(nil),         // 2: awecloud.signaling.DesktopLoginRequest
-	(*DesktopLoginResponse)(nil),        // 3: awecloud.signaling.DesktopLoginResponse
-	(*DesktopAuthenticateRequest)(nil),  // 4: awecloud.signaling.DesktopAuthenticateRequest
-	(*DesktopAuthenticateResponse)(nil), // 5: awecloud.signaling.DesktopAuthenticateResponse
-	(*DesktopHeartbeatRequest)(nil),     // 6: awecloud.signaling.DesktopHeartbeatRequest
-	(*AuthorizedService)(nil),           // 7: awecloud.signaling.AuthorizedService
-	(*DesktopHeartbeatResponse)(nil),    // 8: awecloud.signaling.DesktopHeartbeatResponse
-	(*GetAuthorizedHostsRequest)(nil),   // 9: awecloud.signaling.GetAuthorizedHostsRequest
-	(*AuthorizedHost)(nil),              // 10: awecloud.signaling.AuthorizedHost
-	(*GetAuthorizedHostsResponse)(nil),  // 11: awecloud.signaling.GetAuthorizedHostsResponse
-	(*GetHostServicesRequest)(nil),      // 12: awecloud.signaling.GetHostServicesRequest
-	(*GetHostServicesResponse)(nil),     // 13: awecloud.signaling.GetHostServicesResponse
-	(*GetMyDevicesRequest)(nil),         // 14: awecloud.signaling.GetMyDevicesRequest
-	(*DeviceInfo)(nil),                  // 15: awecloud.signaling.DeviceInfo
-	(*GetMyDevicesResponse)(nil),        // 16: awecloud.signaling.GetMyDevicesResponse
-	(*OfflineDeviceRequest)(nil),        // 17: awecloud.signaling.OfflineDeviceRequest
-	(*OfflineDeviceResponse)(nil),       // 18: awecloud.signaling.OfflineDeviceResponse
-	(*DeleteDeviceRequest)(nil),         // 19: awecloud.signaling.DeleteDeviceRequest
-	(*DeleteDeviceResponse)(nil),        // 20: awecloud.signaling.DeleteDeviceResponse
-	(*ToggleFavoriteRequest)(nil),       // 21: awecloud.signaling.ToggleFavoriteRequest
-	(*ToggleFavoriteResponse)(nil),      // 22: awecloud.signaling.ToggleFavoriteResponse
-	(*GetFavoriteServicesRequest)(nil),  // 23: awecloud.signaling.GetFavoriteServicesRequest
-	(*GetFavoriteServicesResponse)(nil), // 24: awecloud.signaling.GetFavoriteServicesResponse
-	(*LogtoLoginRequest)(nil),           // 25: awecloud.signaling.LogtoLoginRequest
-	(*LogtoLoginResponse)(nil),          // 26: awecloud.signaling.LogtoLoginResponse
-	(*LogtoUserInfo)(nil),               // 27: awecloud.signaling.LogtoUserInfo
+	(LogtoLoginStatus)(0),                 // 0: awecloud.signaling.LogtoLoginStatus
+	(*DesktopSystemInfo)(nil),             // 1: awecloud.signaling.DesktopSystemInfo
+	(*DesktopLoginRequest)(nil),           // 2: awecloud.signaling.DesktopLoginRequest
+	(*DesktopLoginResponse)(nil),          // 3: awecloud.signaling.DesktopLoginResponse
+	(*DesktopAuthenticateRequest)(nil),    // 4: awecloud.signaling.DesktopAuthenticateRequest
+	(*DesktopAuthenticateResponse)(nil),   // 5: awecloud.signaling.DesktopAuthenticateResponse
+	(*DesktopHeartbeatRequest)(nil),       // 6: awecloud.signaling.DesktopHeartbeatRequest
+	(*AuthorizedService)(nil),             // 7: awecloud.signaling.AuthorizedService
+	(*DesktopHeartbeatResponse)(nil),      // 8: awecloud.signaling.DesktopHeartbeatResponse
+	(*GetAuthorizedHostsRequest)(nil),     // 9: awecloud.signaling.GetAuthorizedHostsRequest
+	(*AuthorizedHost)(nil),                // 10: awecloud.signaling.AuthorizedHost
+	(*GetAuthorizedHostsResponse)(nil),    // 11: awecloud.signaling.GetAuthorizedHostsResponse
+	(*GetHostServicesRequest)(nil),        // 12: awecloud.signaling.GetHostServicesRequest
+	(*GetHostServicesResponse)(nil),       // 13: awecloud.signaling.GetHostServicesResponse
+	(*GetMyDevicesRequest)(nil),           // 14: awecloud.signaling.GetMyDevicesRequest
+	(*DeviceInfo)(nil),                    // 15: awecloud.signaling.DeviceInfo
+	(*GetMyDevicesResponse)(nil),          // 16: awecloud.signaling.GetMyDevicesResponse
+	(*OfflineDeviceRequest)(nil),          // 17: awecloud.signaling.OfflineDeviceRequest
+	(*OfflineDeviceResponse)(nil),         // 18: awecloud.signaling.OfflineDeviceResponse
+	(*DeleteDeviceRequest)(nil),           // 19: awecloud.signaling.DeleteDeviceRequest
+	(*DeleteDeviceResponse)(nil),          // 20: awecloud.signaling.DeleteDeviceResponse
+	(*ToggleFavoriteRequest)(nil),         // 21: awecloud.signaling.ToggleFavoriteRequest
+	(*ToggleFavoriteResponse)(nil),        // 22: awecloud.signaling.ToggleFavoriteResponse
+	(*GetFavoriteServicesRequest)(nil),    // 23: awecloud.signaling.GetFavoriteServicesRequest
+	(*GetFavoriteServicesResponse)(nil),   // 24: awecloud.signaling.GetFavoriteServicesResponse
+	(*LogtoLoginRequest)(nil),             // 25: awecloud.signaling.LogtoLoginRequest
+	(*LogtoLoginResponse)(nil),            // 26: awecloud.signaling.LogtoLoginResponse
+	(*LogtoUserInfo)(nil),                 // 27: awecloud.signaling.LogtoUserInfo
+	(*CheckSavedCredentialsRequest)(nil),  // 28: awecloud.signaling.CheckSavedCredentialsRequest
+	(*CheckSavedCredentialsResponse)(nil), // 29: awecloud.signaling.CheckSavedCredentialsResponse
 }
 var file_pkg_proto_desktop_proto_depIdxs = []int32{
 	1,  // 0: awecloud.signaling.DesktopLoginRequest.system_info:type_name -> awecloud.signaling.DesktopSystemInfo
@@ -2038,19 +2165,21 @@ var file_pkg_proto_desktop_proto_depIdxs = []int32{
 	19, // 17: awecloud.signaling.DesktopService.DeleteDevice:input_type -> awecloud.signaling.DeleteDeviceRequest
 	21, // 18: awecloud.signaling.DesktopService.ToggleFavorite:input_type -> awecloud.signaling.ToggleFavoriteRequest
 	23, // 19: awecloud.signaling.DesktopService.GetFavoriteServices:input_type -> awecloud.signaling.GetFavoriteServicesRequest
-	3,  // 20: awecloud.signaling.DesktopService.Login:output_type -> awecloud.signaling.DesktopLoginResponse
-	26, // 21: awecloud.signaling.DesktopService.LoginWithLogto:output_type -> awecloud.signaling.LogtoLoginResponse
-	5,  // 22: awecloud.signaling.DesktopService.Authenticate:output_type -> awecloud.signaling.DesktopAuthenticateResponse
-	8,  // 23: awecloud.signaling.DesktopService.Heartbeat:output_type -> awecloud.signaling.DesktopHeartbeatResponse
-	11, // 24: awecloud.signaling.DesktopService.GetAuthorizedHosts:output_type -> awecloud.signaling.GetAuthorizedHostsResponse
-	13, // 25: awecloud.signaling.DesktopService.GetHostServices:output_type -> awecloud.signaling.GetHostServicesResponse
-	16, // 26: awecloud.signaling.DesktopService.GetMyDevices:output_type -> awecloud.signaling.GetMyDevicesResponse
-	18, // 27: awecloud.signaling.DesktopService.OfflineDevice:output_type -> awecloud.signaling.OfflineDeviceResponse
-	20, // 28: awecloud.signaling.DesktopService.DeleteDevice:output_type -> awecloud.signaling.DeleteDeviceResponse
-	22, // 29: awecloud.signaling.DesktopService.ToggleFavorite:output_type -> awecloud.signaling.ToggleFavoriteResponse
-	24, // 30: awecloud.signaling.DesktopService.GetFavoriteServices:output_type -> awecloud.signaling.GetFavoriteServicesResponse
-	20, // [20:31] is the sub-list for method output_type
-	9,  // [9:20] is the sub-list for method input_type
+	28, // 20: awecloud.signaling.DesktopService.CheckSavedCredentials:input_type -> awecloud.signaling.CheckSavedCredentialsRequest
+	3,  // 21: awecloud.signaling.DesktopService.Login:output_type -> awecloud.signaling.DesktopLoginResponse
+	26, // 22: awecloud.signaling.DesktopService.LoginWithLogto:output_type -> awecloud.signaling.LogtoLoginResponse
+	5,  // 23: awecloud.signaling.DesktopService.Authenticate:output_type -> awecloud.signaling.DesktopAuthenticateResponse
+	8,  // 24: awecloud.signaling.DesktopService.Heartbeat:output_type -> awecloud.signaling.DesktopHeartbeatResponse
+	11, // 25: awecloud.signaling.DesktopService.GetAuthorizedHosts:output_type -> awecloud.signaling.GetAuthorizedHostsResponse
+	13, // 26: awecloud.signaling.DesktopService.GetHostServices:output_type -> awecloud.signaling.GetHostServicesResponse
+	16, // 27: awecloud.signaling.DesktopService.GetMyDevices:output_type -> awecloud.signaling.GetMyDevicesResponse
+	18, // 28: awecloud.signaling.DesktopService.OfflineDevice:output_type -> awecloud.signaling.OfflineDeviceResponse
+	20, // 29: awecloud.signaling.DesktopService.DeleteDevice:output_type -> awecloud.signaling.DeleteDeviceResponse
+	22, // 30: awecloud.signaling.DesktopService.ToggleFavorite:output_type -> awecloud.signaling.ToggleFavoriteResponse
+	24, // 31: awecloud.signaling.DesktopService.GetFavoriteServices:output_type -> awecloud.signaling.GetFavoriteServicesResponse
+	29, // 32: awecloud.signaling.DesktopService.CheckSavedCredentials:output_type -> awecloud.signaling.CheckSavedCredentialsResponse
+	21, // [21:33] is the sub-list for method output_type
+	9,  // [9:21] is the sub-list for method input_type
 	9,  // [9:9] is the sub-list for extension type_name
 	9,  // [9:9] is the sub-list for extension extendee
 	0,  // [0:9] is the sub-list for field type_name
@@ -2067,7 +2196,7 @@ func file_pkg_proto_desktop_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_desktop_proto_rawDesc), len(file_pkg_proto_desktop_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   27,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

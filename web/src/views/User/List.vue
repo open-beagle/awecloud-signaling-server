@@ -57,11 +57,9 @@
             {{ formatTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="260" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="row.role === 'agent'" type="primary" link size="small" :icon="Upload" @click="handleDeploy(row)">{{ $t('agent.deploy') }}</el-button>
-            <el-button v-if="row.role === 'client'" type="primary" link size="small" :icon="Key" @click="handleToken(row)">Token</el-button>
-            <el-button type="primary" link size="small" @click="handleView(row)">{{ $t('common.view') }}</el-button>
+            <el-button type="primary" link size="small" :icon="Upload" @click="handleDeploy(row)">{{ $t('user.deploy') }}</el-button>
             <el-button type="primary" link size="small" @click="handleEdit(row)">{{ $t('common.edit') }}</el-button>
             <el-button type="danger" link size="small" @click="handleDelete(row)">{{ $t('common.delete') }}</el-button>
           </template>
@@ -85,11 +83,8 @@
     <!-- 创建用户弹窗 -->
     <CreateDialog v-model="showCreateDialog" @success="handleCreateSuccess" />
 
-    <!-- Agent 部署弹窗 -->
-    <DeployDialog v-model="showDeployDialog" :agent="selectedAgent" />
-
-    <!-- Client Token 弹窗 -->
-    <ClientTokenDialog v-model="showTokenDialog" :user="selectedUser" />
+    <!-- 部署弹窗（Agent 和 Client 通用） -->
+    <DeployDialog v-model="showDeployDialog" :user="selectedUser" @success="fetchUsers" />
   </div>
 </template>
 
@@ -97,13 +92,12 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Upload, Key } from '@element-plus/icons-vue'
+import { Plus, Upload } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import { getUsers, deleteUser, type User, type UserRole } from '@/api/user'
 import { formatTime } from '@/utils/time'
 import CreateDialog from './components/CreateDialog.vue'
-import DeployDialog from '../Agent/components/DeployDialog.vue'
-import ClientTokenDialog from './components/ClientTokenDialog.vue'
+import DeployDialog from './components/DeployDialog.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -112,8 +106,6 @@ const loading = ref(false)
 const users = ref<User[]>([])
 const showCreateDialog = ref(false)
 const showDeployDialog = ref(false)
-const showTokenDialog = ref(false)
-const selectedAgent = ref<User | null>(null)
 const selectedUser = ref<User | null>(null)
 
 const searchForm = reactive({
@@ -194,16 +186,10 @@ const handleDelete = async (row: User) => {
   }
 }
 
-// 部署 Agent
+// 部署（Agent 和 Client 通用）
 const handleDeploy = (row: User) => {
-  selectedAgent.value = row
-  showDeployDialog.value = true
-}
-
-// 生成 Client Token
-const handleToken = (row: User) => {
   selectedUser.value = row
-  showTokenDialog.value = true
+  showDeployDialog.value = true
 }
 
 // 创建成功

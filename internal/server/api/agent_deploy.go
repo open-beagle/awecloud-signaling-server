@@ -90,8 +90,7 @@ func (a *AgentDeployAPI) CreateDeployToken(c *gin.Context) {
 	}
 
 	// 获取管理员 ID
-	adminID, _ := c.Get("admin_id")
-	createdBy, _ := adminID.(uint64)
+	adminID := getAdminIDFromContext(c)
 
 	// 创建部署 Token 记录
 	expiresAt := time.Now().Add(24 * time.Hour)
@@ -100,7 +99,7 @@ func (a *AgentDeployAPI) CreateDeployToken(c *gin.Context) {
 		UserID:     userID,
 		DeviceName: req.DeviceName,
 		Status:     model.AgentDeployTokenStatusPending,
-		CreatedBy:  createdBy,
+		CreatedBy:  uint64(adminID),
 		ExpiresAt:  expiresAt,
 	}
 

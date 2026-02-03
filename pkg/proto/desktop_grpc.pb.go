@@ -19,17 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DesktopService_Login_FullMethodName               = "/awecloud.signaling.DesktopService/Login"
-	DesktopService_LoginWithLogto_FullMethodName      = "/awecloud.signaling.DesktopService/LoginWithLogto"
-	DesktopService_Authenticate_FullMethodName        = "/awecloud.signaling.DesktopService/Authenticate"
-	DesktopService_Heartbeat_FullMethodName           = "/awecloud.signaling.DesktopService/Heartbeat"
-	DesktopService_GetAuthorizedHosts_FullMethodName  = "/awecloud.signaling.DesktopService/GetAuthorizedHosts"
-	DesktopService_GetHostServices_FullMethodName     = "/awecloud.signaling.DesktopService/GetHostServices"
-	DesktopService_GetMyDevices_FullMethodName        = "/awecloud.signaling.DesktopService/GetMyDevices"
-	DesktopService_OfflineDevice_FullMethodName       = "/awecloud.signaling.DesktopService/OfflineDevice"
-	DesktopService_DeleteDevice_FullMethodName        = "/awecloud.signaling.DesktopService/DeleteDevice"
-	DesktopService_ToggleFavorite_FullMethodName      = "/awecloud.signaling.DesktopService/ToggleFavorite"
-	DesktopService_GetFavoriteServices_FullMethodName = "/awecloud.signaling.DesktopService/GetFavoriteServices"
+	DesktopService_Login_FullMethodName                 = "/awecloud.signaling.DesktopService/Login"
+	DesktopService_LoginWithLogto_FullMethodName        = "/awecloud.signaling.DesktopService/LoginWithLogto"
+	DesktopService_Authenticate_FullMethodName          = "/awecloud.signaling.DesktopService/Authenticate"
+	DesktopService_Heartbeat_FullMethodName             = "/awecloud.signaling.DesktopService/Heartbeat"
+	DesktopService_GetAuthorizedHosts_FullMethodName    = "/awecloud.signaling.DesktopService/GetAuthorizedHosts"
+	DesktopService_GetHostServices_FullMethodName       = "/awecloud.signaling.DesktopService/GetHostServices"
+	DesktopService_GetMyDevices_FullMethodName          = "/awecloud.signaling.DesktopService/GetMyDevices"
+	DesktopService_OfflineDevice_FullMethodName         = "/awecloud.signaling.DesktopService/OfflineDevice"
+	DesktopService_DeleteDevice_FullMethodName          = "/awecloud.signaling.DesktopService/DeleteDevice"
+	DesktopService_ToggleFavorite_FullMethodName        = "/awecloud.signaling.DesktopService/ToggleFavorite"
+	DesktopService_GetFavoriteServices_FullMethodName   = "/awecloud.signaling.DesktopService/GetFavoriteServices"
+	DesktopService_CheckSavedCredentials_FullMethodName = "/awecloud.signaling.DesktopService/CheckSavedCredentials"
 )
 
 // DesktopServiceClient is the client API for DesktopService service.
@@ -60,6 +61,8 @@ type DesktopServiceClient interface {
 	ToggleFavorite(ctx context.Context, in *ToggleFavoriteRequest, opts ...grpc.CallOption) (*ToggleFavoriteResponse, error)
 	// 获取收藏的服务列表
 	GetFavoriteServices(ctx context.Context, in *GetFavoriteServicesRequest, opts ...grpc.CallOption) (*GetFavoriteServicesResponse, error)
+	// 检查保存的凭据（用于自动登录）
+	CheckSavedCredentials(ctx context.Context, in *CheckSavedCredentialsRequest, opts ...grpc.CallOption) (*CheckSavedCredentialsResponse, error)
 }
 
 type desktopServiceClient struct {
@@ -192,6 +195,16 @@ func (c *desktopServiceClient) GetFavoriteServices(ctx context.Context, in *GetF
 	return out, nil
 }
 
+func (c *desktopServiceClient) CheckSavedCredentials(ctx context.Context, in *CheckSavedCredentialsRequest, opts ...grpc.CallOption) (*CheckSavedCredentialsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckSavedCredentialsResponse)
+	err := c.cc.Invoke(ctx, DesktopService_CheckSavedCredentials_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DesktopServiceServer is the server API for DesktopService service.
 // All implementations must embed UnimplementedDesktopServiceServer
 // for forward compatibility.
@@ -220,6 +233,8 @@ type DesktopServiceServer interface {
 	ToggleFavorite(context.Context, *ToggleFavoriteRequest) (*ToggleFavoriteResponse, error)
 	// 获取收藏的服务列表
 	GetFavoriteServices(context.Context, *GetFavoriteServicesRequest) (*GetFavoriteServicesResponse, error)
+	// 检查保存的凭据（用于自动登录）
+	CheckSavedCredentials(context.Context, *CheckSavedCredentialsRequest) (*CheckSavedCredentialsResponse, error)
 	mustEmbedUnimplementedDesktopServiceServer()
 }
 
@@ -262,6 +277,9 @@ func (UnimplementedDesktopServiceServer) ToggleFavorite(context.Context, *Toggle
 }
 func (UnimplementedDesktopServiceServer) GetFavoriteServices(context.Context, *GetFavoriteServicesRequest) (*GetFavoriteServicesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetFavoriteServices not implemented")
+}
+func (UnimplementedDesktopServiceServer) CheckSavedCredentials(context.Context, *CheckSavedCredentialsRequest) (*CheckSavedCredentialsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CheckSavedCredentials not implemented")
 }
 func (UnimplementedDesktopServiceServer) mustEmbedUnimplementedDesktopServiceServer() {}
 func (UnimplementedDesktopServiceServer) testEmbeddedByValue()                        {}
@@ -464,6 +482,24 @@ func _DesktopService_GetFavoriteServices_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DesktopService_CheckSavedCredentials_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckSavedCredentialsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DesktopServiceServer).CheckSavedCredentials(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DesktopService_CheckSavedCredentials_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DesktopServiceServer).CheckSavedCredentials(ctx, req.(*CheckSavedCredentialsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DesktopService_ServiceDesc is the grpc.ServiceDesc for DesktopService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -506,6 +542,10 @@ var DesktopService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetFavoriteServices",
 			Handler:    _DesktopService_GetFavoriteServices_Handler,
+		},
+		{
+			MethodName: "CheckSavedCredentials",
+			Handler:    _DesktopService_CheckSavedCredentials_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -111,7 +111,12 @@ func (s *DesktopServiceServer) LoginWithLogto(req *pb.LogtoLoginRequest, stream 
 
 	// 注册登录结果通道
 	resultCh := s.loginService.RegisterLoginSession(session.SessionID)
-	defer s.loginService.UnregisterLoginSession(session.SessionID)
+	// 注意：不要在这里 defer UnregisterLoginSession
+	// 因为用户可能还在浏览器中登录，Session 存储需要保留
+	// 会话会在以下情况被清理：
+	// 1. 登录成功后，由回调处理器清理
+	// 2. 登录失败后，由回调处理器清理
+	// 3. 超时后，由定时任务清理（TODO）
 
 	// 等待登录结果或超时
 	select {
@@ -231,78 +236,14 @@ func (s *DesktopServiceServer) createOrGetDesktopNode(ctx context.Context, userI
 	return &node, nodeSecret, nil
 }
 
-// Login Desktop 首次登录
+// Login Desktop 首次登录（已废弃，请使用 LoginWithLogto）
+// Deprecated: 使用 LoginWithLogto 代替
 func (s *DesktopServiceServer) Login(ctx context.Context, req *pb.DesktopLoginRequest) (*pb.DesktopLoginResponse, error) {
-	logger.Infof("Desktop 登录请求: client_name=%s, device_name=%s", req.ClientName, req.DeviceName)
-
-	var user model.User
-	if err := db.DB.WithContext(ctx).Where("name = ? AND role = ?", req.ClientName, model.UserRoleClient).First(&user).Error; err != nil {
-		return &pb.DesktopLoginResponse{Success: false, Message: "Client 不存在"}, nil
-	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(user.SecretHash), []byte(req.ClientSecret)); err != nil {
-		return &pb.DesktopLoginResponse{Success: false, Message: "认证失败"}, nil
-	}
-
-	var node model.Node
-	err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ? AND name = ?", user.ID, model.NodeTypeDesktop, req.DeviceName).First(&node).Error
-	isNewDevice := err != nil
-	var nodeSecret string
-
-	if isNewDevice {
-		nodeSecret = generateDesktopSecret()
-		secretHash, _ := bcrypt.GenerateFromPassword([]byte(nodeSecret), bcrypt.DefaultCost)
-		var systemInfoJSON string
-		if req.SystemInfo != nil {
-			si := model.NodeSystemInfo{
-				OS: req.SystemInfo.Os, OSVersion: req.SystemInfo.OsVersion, Arch: req.SystemInfo.Arch,
-				Hostname: req.SystemInfo.Hostname, CPU: req.SystemInfo.Cpu,
-				CPUCores: int(req.SystemInfo.CpuCores), MemoryGB: int(req.SystemInfo.MemoryGb),
-			}
-			if data, err := json.Marshal(si); err == nil {
-				systemInfoJSON = string(data)
-			}
-		}
-		now := time.Now()
-		node = model.Node{
-			UserID: user.ID, Name: req.DeviceName, Type: model.NodeTypeDesktop,
-			SecretHash: string(secretHash), SystemInfo: systemInfoJSON, LastHeartbeat: &now,
-		}
-		if req.SystemInfo != nil {
-			node.Hostname = req.SystemInfo.Hostname
-		}
-		if err := db.DB.WithContext(ctx).Create(&node).Error; err != nil {
-			return &pb.DesktopLoginResponse{Success: false, Message: "创建设备失败"}, nil
-		}
-	} else {
-		nodeSecret = generateDesktopSecret()
-		secretHash, _ := bcrypt.GenerateFromPassword([]byte(nodeSecret), bcrypt.DefaultCost)
-		node.SecretHash = string(secretHash)
-		now := time.Now()
-		node.LastHeartbeat = &now
-		if req.SystemInfo != nil {
-			si := model.NodeSystemInfo{
-				OS: req.SystemInfo.Os, OSVersion: req.SystemInfo.OsVersion, Arch: req.SystemInfo.Arch,
-				Hostname: req.SystemInfo.Hostname, CPU: req.SystemInfo.Cpu,
-				CPUCores: int(req.SystemInfo.CpuCores), MemoryGB: int(req.SystemInfo.MemoryGb),
-			}
-			if data, err := json.Marshal(si); err == nil {
-				node.SystemInfo = string(data)
-			}
-			node.Hostname = req.SystemInfo.Hostname
-		}
-		db.DB.WithContext(ctx).Save(&node)
-	}
-
-	resp := &pb.DesktopLoginResponse{Success: true, Message: "登录成功", DesktopId: node.ID, Secret: nodeSecret}
-	logger.Infof("Desktop 登录成功: client=%s, device=%s, nodeId=%d", req.ClientName, req.DeviceName, node.ID)
-	if s.headscaleClient != nil && s.config != nil {
-		if authKey, serverURL, err := s.getOrCreateAuthKey(ctx, user.ID, user.Name); err == nil {
-			resp.AuthKey = authKey
-			resp.ServerUrl = serverURL
-		}
-	}
-	return resp, nil
+	logger.Warnf("Desktop 使用已废弃的 Login 方法: client_name=%s", req.ClientName)
+	return &pb.DesktopLoginResponse{
+		Success: false,
+		Message: "密码登录已废弃，请升级 Desktop 客户端并使用 Logto 登录",
+	}, nil
 }
 
 // Authenticate Desktop 认证
@@ -875,6 +816,37 @@ func generateDesktopSecret() string {
 	bytes := make([]byte, 32)
 	rand.Read(bytes)
 	return hex.EncodeToString(bytes)
+}
+
+// CheckSavedCredentials 检查保存的凭据
+func (s *DesktopServiceServer) CheckSavedCredentials(ctx context.Context, req *pb.CheckSavedCredentialsRequest) (*pb.CheckSavedCredentialsResponse, error) {
+	logger.Infof("检查保存的凭据: username=%s", req.Username)
+
+	// 查询用户是否存在
+	var user model.User
+	if err := db.DB.WithContext(ctx).Where("name = ? AND role = ?", req.Username, model.UserRoleClient).First(&user).Error; err != nil {
+		// 用户不存在
+		return &pb.CheckSavedCredentialsResponse{
+			HasCredentials: false,
+		}, nil
+	}
+
+	// 查询该用户的 Desktop 节点（任意一个即可）
+	var node model.Node
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", user.ID, model.NodeTypeDesktop).First(&node).Error; err != nil {
+		// 没有 Desktop 节点
+		return &pb.CheckSavedCredentialsResponse{
+			HasCredentials: false,
+		}, nil
+	}
+
+	// 返回用户信息和 Desktop ID
+	// 注意：不返回 secret，由前端本地存储
+	return &pb.CheckSavedCredentialsResponse{
+		HasCredentials: true,
+		Username:       user.Name,
+		DesktopId:      node.ID,
+	}, nil
 }
 
 // ToggleFavorite 切换服务收藏状态

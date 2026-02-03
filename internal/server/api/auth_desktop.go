@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -84,6 +85,8 @@ func (a *DesktopAuthAPI) DesktopLoginCallback(c *gin.Context) {
 	errorParam := c.Query("error")
 	errorDesc := c.Query("error_description")
 
+	logger.Infof("Desktop 登录回调: error=%s, query=%s", errorParam, c.Request.URL.RawQuery)
+
 	// 处理错误
 	if errorParam != "" {
 		logger.Errorf("Logto 回调错误: error=%s, description=%s", errorParam, errorDesc)
@@ -91,8 +94,7 @@ func (a *DesktopAuthAPI) DesktopLoginCallback(c *gin.Context) {
 		return
 	}
 
-	// 获取完整的回调 URL
-	callbackURL := a.config.Logto.CallbackURL + "?" + c.Request.URL.RawQuery
+	logger.Infof("处理回调请求: URL=%s", c.Request.URL.String())
 
 	// 从 state 参数中获取 session_id
 	// Logto SDK 会在 state 中编码信息，我们需要遍历所有会话来找到匹配的
@@ -102,25 +104,33 @@ func (a *DesktopAuthAPI) DesktopLoginCallback(c *gin.Context) {
 	// 查找所有 pending 状态的会话
 	var sessions []model.DesktopLoginSession
 	if err := db.WithContext(ctx).Where("status = ?", model.DesktopLoginSessionStatusPending).Find(&sessions).Error; err != nil {
+		logger.Errorf("查询会话失败: %v", err)
 		a.renderCallbackError(c, "查询会话失败")
 		return
 	}
 
+	logger.Infof("找到 %d 个 pending 状态的会话", len(sessions))
+
 	// 尝试用每个会话的存储来处理回调
 	for _, s := range sessions {
+		logger.Infof("尝试会话: sessionID=%s", s.SessionID)
+
 		st := a.loginService.GetSessionStorage(s.SessionID)
 		if st == nil {
+			logger.Warnf("会话 %s 的存储不存在", s.SessionID)
 			continue
 		}
 
-		// 尝试处理回调
+		// 尝试处理回调 - 直接传入 Gin 的 Request
 		logtoClient := a.loginService.GetLogtoClient()
-		userInfo, err := logtoClient.HandleCallback(st, callbackURL)
+		userInfo, err := logtoClient.HandleCallback(st, c.Request)
 		if err != nil {
+			logger.Warnf("会话 %s 处理回调失败: %v", s.SessionID, err)
 			continue // 不是这个会话，继续尝试
 		}
 
 		// 找到了匹配的会话
+		logger.Infof("找到匹配的会话: sessionID=%s, user=%s", s.SessionID, userInfo.Username)
 		session = s
 		storage = st
 
@@ -152,12 +162,22 @@ func (a *DesktopAuthAPI) DesktopLoginCallback(c *gin.Context) {
 			Avatar:      userInfo.Picture,
 		})
 
+		logger.Infof("Desktop 登录成功: sessionID=%s, user=%s", session.SessionID, user.Name)
+
+		// 清理会话存储（延迟清理，给 gRPC 流一点时间接收结果）
+		go func() {
+			time.Sleep(5 * time.Second)
+			a.loginService.UnregisterLoginSession(session.SessionID)
+			logger.Infof("清理登录会话存储: sessionID=%s", session.SessionID)
+		}()
+
 		// 显示成功页面
 		a.renderCallbackSuccess(c)
 		return
 	}
 
 	// 没有找到匹配的会话
+	logger.Errorf("没有找到匹配的会话，共尝试了 %d 个会话", len(sessions))
 	if storage == nil {
 		a.renderCallbackError(c, "登录会话不存在或已过期")
 		return

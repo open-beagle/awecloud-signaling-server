@@ -38,6 +38,9 @@ service DesktopService {
 
   // 获取收藏的服务列表
   rpc GetFavoriteServices(GetFavoriteServicesRequest) returns (GetFavoriteServicesResponse);
+
+  // 检查保存的凭据（用于自动登录）
+  rpc CheckSavedCredentials(CheckSavedCredentialsRequest) returns (CheckSavedCredentialsResponse);
 }
 
 // ============================================
@@ -297,4 +300,22 @@ message LogtoUserInfo {
   string email = 3; // 邮箱
   string name = 4; // 显示名称
   string avatar = 5; // 头像 URL
+}
+
+// ============================================
+// 检查保存的凭据
+// ============================================
+
+// CheckSavedCredentialsRequest 检查保存的凭据请求
+message CheckSavedCredentialsRequest {
+  string server_url = 1; // 服务器地址
+  string username = 2; // 用户名
+}
+
+// CheckSavedCredentialsResponse 检查保存的凭据响应
+message CheckSavedCredentialsResponse {
+  bool has_credentials = 1; // 是否有保存的凭据
+  string username = 2; // 用户名
+  uint64 desktop_id = 3; // Desktop ID（如果有）
+  // 注意：不返回 secret，由前端本地存储
 }

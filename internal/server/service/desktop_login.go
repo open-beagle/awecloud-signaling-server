@@ -110,7 +110,15 @@ func (s *DesktopLoginService) NotifyLoginResult(sessionID string, result *LoginR
 func (s *DesktopLoginService) GetSessionStorage(sessionID string) *auth.MemorySessionStorage {
 	s.sessionStorageMutex.RLock()
 	defer s.sessionStorageMutex.RUnlock()
-	return s.sessionStorages[sessionID]
+
+	storage := s.sessionStorages[sessionID]
+	if storage == nil {
+		logger.Warnf("获取 Session 存储失败: sessionID=%s 不存在，当前存储数量=%d", sessionID, len(s.sessionStorages))
+	} else {
+		logger.Infof("获取 Session 存储成功: sessionID=%s", sessionID)
+	}
+
+	return storage
 }
 
 // CreateLoginSession 创建登录会话
@@ -123,7 +131,10 @@ func (s *DesktopLoginService) CreateLoginSession(deviceFingerprint, deviceName, 
 	// 保存会话存储
 	s.sessionStorageMutex.Lock()
 	s.sessionStorages[sessionID] = storage
+	storageCount := len(s.sessionStorages)
 	s.sessionStorageMutex.Unlock()
+
+	logger.Infof("创建 Session 存储: sessionID=%s, 当前存储数量=%d", sessionID, storageCount)
 
 	// 使用 Logto SDK 生成登录 URL
 	loginURL, err := s.logtoClient.GetSignInURL(storage, sessionID)
@@ -132,8 +143,11 @@ func (s *DesktopLoginService) CreateLoginSession(deviceFingerprint, deviceName, 
 		s.sessionStorageMutex.Lock()
 		delete(s.sessionStorages, sessionID)
 		s.sessionStorageMutex.Unlock()
+		logger.Errorf("生成登录 URL 失败: %v", err)
 		return nil, "", err
 	}
+
+	logger.Infof("生成登录 URL 成功: sessionID=%s, url=%s", sessionID, loginURL)
 
 	// 创建会话记录
 	session := &model.DesktopLoginSession{
@@ -150,6 +164,7 @@ func (s *DesktopLoginService) CreateLoginSession(deviceFingerprint, deviceName, 
 		s.sessionStorageMutex.Lock()
 		delete(s.sessionStorages, sessionID)
 		s.sessionStorageMutex.Unlock()
+		logger.Errorf("创建会话记录失败: %v", err)
 		return nil, "", err
 	}
 

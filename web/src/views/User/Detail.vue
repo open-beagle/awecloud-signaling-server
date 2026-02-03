@@ -72,6 +72,88 @@
       </el-table>
     </el-card>
 
+    <!-- 部署历史 -->
+    <el-card class="deploy-history-card" shadow="never">
+      <template #header>
+        <div class="card-header">
+          <span>{{ $t('user.deployHistory') }}</span>
+          <el-button type="primary" size="small" @click="showDeployDialog = true">
+            {{ $t('user.deploy') }}
+          </el-button>
+        </div>
+      </template>
+
+      <!-- Agent 部署历史 -->
+      <el-table v-if="user?.role === 'agent'" v-loading="deployLoading" :data="deployTokens" stripe>
+        <el-table-column :label="$t('common.status')" width="100">
+          <template #default="{ row }">
+            <el-tag :type="getDeployStatusType(row.status)" size="small">
+              {{ getDeployStatusText(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="device_name" :label="$t('agent.deviceName')" min-width="120" />
+        <el-table-column prop="created_by_name" :label="$t('common.createdBy')" width="100" />
+        <el-table-column :label="$t('common.createdAt')" width="180">
+          <template #default="{ row }">
+            {{ formatTime(row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('agent.boundAt')" width="180">
+          <template #default="{ row }">
+            {{ row.bound_at ? formatTime(row.bound_at) : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('common.actions')" width="100" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.status === 'pending'"
+              size="small"
+              type="danger"
+              @click="handleRevokeDeployToken(row)"
+            >
+              {{ $t('common.revoke') }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <!-- Client Token 历史 -->
+      <el-table v-else-if="user?.role === 'client'" v-loading="tokensLoading" :data="tokens" stripe>
+        <el-table-column :label="$t('common.status')" width="100">
+          <template #default="{ row }">
+            <el-tag :type="getTokenStatusType(row.status)" size="small">
+              {{ getTokenStatusText(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="name" :label="$t('clientToken.tokenName')" min-width="120" />
+        <el-table-column prop="device_name" :label="$t('clientToken.deviceName')" min-width="120" />
+        <el-table-column prop="created_by_name" :label="$t('common.createdBy')" width="100" />
+        <el-table-column :label="$t('common.createdAt')" width="180">
+          <template #default="{ row }">
+            {{ formatTime(row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('clientToken.boundAt')" width="180">
+          <template #default="{ row }">
+            {{ row.bound_at ? formatTime(row.bound_at) : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('common.actions')" width="100" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              size="small"
+              type="danger"
+              @click="handleDeleteToken(row)"
+            >
+              {{ $t('common.delete') }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
     <!-- 编辑弹窗 -->
     <el-dialog v-model="showEditDialog" :title="$t('user.edit')" width="500px">
       <el-form ref="editFormRef" :model="editForm" label-width="100px">
@@ -104,6 +186,9 @@
         <el-button type="primary" @click="showSecretDialog = false">{{ $t('common.close') }}</el-button>
       </template>
     </el-dialog>
+
+    <!-- 部署弹窗（Agent 和 Client 通用） -->
+    <DeployDialog v-model="showDeployDialog" :user="user" @success="loadDeployHistory" />
   </div>
 </template>
 
@@ -113,7 +198,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { getUser, updateUser, deleteUser, regenerateUserSecret, type User, type UserDetail, type UserNode } from '@/api/user'
+import { getClientTokens, deleteClientToken, type ClientToken } from '@/api/clientToken'
 import { formatTime } from '@/utils/time'
+import ClientTokenDialog from './components/ClientTokenDialog.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -126,6 +213,11 @@ const nodes = ref<UserNode[]>([])
 const showEditDialog = ref(false)
 const showSecretDialog = ref(false)
 const newSecret = ref('')
+
+// Client Token 相关
+const showTokenDialog = ref(false)
+const tokensLoading = ref(false)
+const tokens = ref<ClientToken[]>([])
 
 const editForm = reactive({
   alias: '',
@@ -145,11 +237,73 @@ const fetchUser = async () => {
       nodes.value = res.data.nodes || []
       editForm.alias = res.data.alias || ''
       editForm.ssh_enabled = res.data.ssh_enabled || false
+      
+      // 如果是 client 用户，加载 Token 列表
+      if (res.data.role === 'client') {
+        loadTokens()
+      }
     }
   } catch (error) {
     console.error('获取用户详情失败:', error)
   } finally {
     loading.value = false
+  }
+}
+
+// 加载 Token 列表
+const loadTokens = async () => {
+  if (!user.value) return
+  tokensLoading.value = true
+  try {
+    const res = await getClientTokens({ user_id: user.value.id })
+    if (res.success && res.data) {
+      tokens.value = res.data
+    }
+  } catch (error) {
+    console.error('加载 Token 列表失败:', error)
+  } finally {
+    tokensLoading.value = false
+  }
+}
+
+// 删除 Token
+const handleDeleteToken = async (token: ClientToken) => {
+  try {
+    await ElMessageBox.confirm(
+      t('clientToken.deleteConfirm'),
+      t('common.warning'),
+      { type: 'warning' }
+    )
+    const res = await deleteClientToken(token.id)
+    if (res.success) {
+      ElMessage.success(t('common.deleteSuccess'))
+      loadTokens()
+    } else {
+      ElMessage.error(res.message || t('common.deleteFailed'))
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('删除 Token 失败:', error)
+      ElMessage.error(t('common.deleteFailed'))
+    }
+  }
+}
+
+// Token 状态类型
+const getTokenStatusType = (status: string) => {
+  switch (status) {
+    case 'pending': return 'warning'
+    case 'bound': return 'success'
+    default: return 'info'
+  }
+}
+
+// Token 状态文本
+const getTokenStatusText = (status: string) => {
+  switch (status) {
+    case 'pending': return t('clientToken.statusPending')
+    case 'bound': return t('clientToken.statusBound')
+    default: return status
   }
 }
 
@@ -248,6 +402,10 @@ onMounted(() => {
 }
 
 .nodes-card {
+  margin-bottom: 20px;
+}
+
+.tokens-card {
   margin-bottom: 20px;
 }
 

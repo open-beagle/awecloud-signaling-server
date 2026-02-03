@@ -91,6 +91,8 @@ export default {
   user: {
     list: 'User List',
     create: 'Create User',
+    deploy: 'Deploy',
+    deployHistory: 'Deploy History',
     name: 'Name',
     alias: 'Alias',
     role: 'Role',
@@ -108,7 +110,12 @@ export default {
     deleteConfirm: 'Are you sure to delete user {name}?',
     secretTitle: 'User Secret',
     secretTip: 'Please save this secret carefully, it will only be displayed once!',
-    regenerateConfirm: 'Are you sure to regenerate secret? The old secret will be invalid'
+    regenerateConfirm: 'Are you sure to regenerate secret? The old secret will be invalid',
+    basicInfo: 'Basic Info',
+    nodes: 'Nodes',
+    regenerateSecret: 'Regenerate Secret',
+    newSecret: 'New Secret',
+    secretWarning: 'Please save this secret carefully, it cannot be viewed again after closing!'
   },
   node: {
     list: 'Node List',

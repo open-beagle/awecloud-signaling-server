@@ -82,7 +82,7 @@ func CreateClientToken(c *gin.Context) {
 	}
 
 	// 获取当前管理员 ID
-	adminID, _ := c.Get("admin_id")
+	adminID := getAdminIDFromContext(c)
 
 	// 创建 Token 记录
 	clientToken := &model.ClientToken{
@@ -90,7 +90,7 @@ func CreateClientToken(c *gin.Context) {
 		UserID:     req.UserID,
 		Name:       req.Name,
 		DeviceName: req.DeviceName,
-		CreatedBy:  adminID.(uint),
+		CreatedBy:  uint(adminID),
 	}
 
 	if err := db.WithContext(ctx).Create(clientToken).Error; err != nil {

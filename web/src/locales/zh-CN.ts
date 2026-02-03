@@ -91,6 +91,8 @@ export default {
   user: {
     list: '用户列表',
     create: '创建用户',
+    deploy: '部署',
+    deployHistory: '部署历史',
     name: '名称',
     alias: '别名',
     role: '角色',
@@ -108,7 +110,12 @@ export default {
     deleteConfirm: '确认删除用户 {name} 吗？',
     secretTitle: '用户密钥',
     secretTip: '请妥善保存此密钥，它只会显示一次！',
-    regenerateConfirm: '重新生成密钥后，旧的密钥将失效，确定继续吗？'
+    regenerateConfirm: '重新生成密钥后，旧的密钥将失效，确定继续吗？',
+    basicInfo: '基本信息',
+    nodes: '设备列表',
+    regenerateSecret: '重新生成密钥',
+    newSecret: '新密钥',
+    secretWarning: '请妥善保存此密钥，关闭后将无法再次查看！'
   },
   node: {
     list: '设备列表',

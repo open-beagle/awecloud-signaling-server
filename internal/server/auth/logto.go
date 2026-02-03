@@ -2,7 +2,6 @@ package auth
 
 import (
 	"net/http"
-	"net/url"
 	"sync"
 
 	"github.com/logto-io/go/v2/client"
@@ -115,23 +114,12 @@ func (c *LogtoClient) GetSignInURL(storage *MemorySessionStorage, loginHint stri
 }
 
 // HandleCallback 处理回调
-func (c *LogtoClient) HandleCallback(storage *MemorySessionStorage, callbackURL string) (*LogtoUserInfo, error) {
+func (c *LogtoClient) HandleCallback(storage *MemorySessionStorage, req *http.Request) (*LogtoUserInfo, error) {
 	logtoClient := c.CreateLogtoClient(storage)
 
-	// 解析回调 URL 为 http.Request
-	parsedURL, err := url.Parse(callbackURL)
-	if err != nil {
-		logger.Errorf("解析回调 URL 失败: %v", err)
-		return nil, err
-	}
-
-	// 创建一个模拟的 http.Request
-	req := &http.Request{
-		URL: parsedURL,
-	}
-
+	// 直接使用传入的 http.Request
 	// 处理回调
-	err = logtoClient.HandleSignInCallback(req)
+	err := logtoClient.HandleSignInCallback(req)
 	if err != nil {
 		logger.Errorf("处理 Logto 回调失败: %v", err)
 		return nil, err

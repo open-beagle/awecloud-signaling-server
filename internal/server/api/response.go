@@ -66,11 +66,7 @@ func NewPagedResponse(data interface{}, total int64, page, size int) PagedRespon
 
 // recordAuditLog 记录审计日志
 func recordAuditLog(ctx context.Context, c *gin.Context, actionType, targetType, targetID, targetName string, detail interface{}) {
-	adminID, _ := c.Get("admin_id")
-	var userID int64
-	if id, ok := adminID.(float64); ok {
-		userID = int64(id)
-	}
+	userID := getAdminIDFromContext(c)
 
 	var detailStr string
 	if detail != nil {
