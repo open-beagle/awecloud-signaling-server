@@ -18,6 +18,7 @@ DEVICE_NAME=""  # 设备名，默认使用 hostname
 ENABLE_SSH="true"  # 默认启用 SSH
 UPGRADE_MODE="false"
 UNINSTALL_MODE="false"
+DEPLOY_MODE="false"  # 部署模式：使用 Token 自动注册
 
 # 安装路径（与现有部署保持一致）
 DOWNLOAD_DIR="/etc/kubernetes/downloads"
@@ -48,12 +49,17 @@ AWECloud Agent 安装脚本
   -s, --server <url>      Server 地址（必填，如 https://signal.wodcloud.com）
   -d, --device <name>     设备名（可选，默认使用 hostname）
       --no-ssh            禁用 SSH（默认启用）
+      --deploy            部署模式：使用 Token 自动注册获取配置
   -u, --upgrade           升级模式，保留现有配置
   -U, --uninstall         卸载 Agent
   -h, --help              显示帮助信息
 
 示例:
-  # 安装（默认启用 SSH，设备名使用 hostname）
+  # 部署模式（推荐）：使用 Web 生成的 Token 自动注册
+  curl -fsSL https://server/api/v1/download/install.sh | \\
+    sudo bash -s -- --deploy -t <TOKEN> -s https://signal.wodcloud.com
+
+  # 传统安装（手动指定 Agent 名称）
   curl -fsSL https://server/api/v1/download/install.sh | \\
     sudo bash -s -- -n beijing -t <TOKEN> -s https://signal.wodcloud.com
 
@@ -93,6 +99,10 @@ parse_args() {
                 ;;
             --no-ssh)
                 ENABLE_SSH="false"
+                shift
+                ;;
+            --deploy)
+                DEPLOY_MODE="true"
                 shift
                 ;;
             -u|--upgrade)
@@ -348,6 +358,84 @@ uninstall_agent() {
     info "如需完全删除，请手动执行: rm -rf ${CONFIG_FILE} ${DATA_DIR}"
 }
 
+# 生成设备指纹
+generate_fingerprint() {
+    local fingerprint=""
+    
+    # 尝试获取机器 ID
+    if [[ -f /etc/machine-id ]]; then
+        fingerprint=$(cat /etc/machine-id)
+    elif [[ -f /var/lib/dbus/machine-id ]]; then
+        fingerprint=$(cat /var/lib/dbus/machine-id)
+    fi
+    
+    # 如果没有机器 ID，使用 MAC 地址
+    if [[ -z "$fingerprint" ]]; then
+        fingerprint=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' | tr -d ':')
+    fi
+    
+    # 如果还是没有，使用 hostname + 随机数
+    if [[ -z "$fingerprint" ]]; then
+        fingerprint=$(hostname)-$(date +%s)
+    fi
+    
+    echo "$fingerprint"
+}
+
+# 部署模式：使用 Token 注册获取配置
+deploy_with_token() {
+    info "部署模式：使用 Token 注册..."
+    
+    local fingerprint=$(generate_fingerprint)
+    local register_url="${SERVER_ADDRESS}/api/v1/agent/register"
+    
+    info "设备指纹: ${fingerprint}"
+    info "注册地址: ${register_url}"
+    
+    # 构建请求体
+    local request_body=$(cat << EOF
+{
+    "token": "${AGENT_TOKEN}",
+    "device_fingerprint": "${fingerprint}",
+    "device_name": "${DEVICE_NAME}"
+}
+EOF
+)
+    
+    # 发送注册请求
+    local response=""
+    if command -v curl &> /dev/null; then
+        response=$(curl -fsSL -X POST \
+            -H "Content-Type: application/json" \
+            -d "$request_body" \
+            "$register_url" 2>&1) || error "注册失败: $response"
+    elif command -v wget &> /dev/null; then
+        response=$(wget -qO- --post-data="$request_body" \
+            --header="Content-Type: application/json" \
+            "$register_url" 2>&1) || error "注册失败: $response"
+    else
+        error "需要 curl 或 wget"
+    fi
+    
+    # 解析响应
+    local success=$(echo "$response" | grep -o '"success":\s*true' || true)
+    if [[ -z "$success" ]]; then
+        local message=$(echo "$response" | grep -o '"message":"[^"]*"' | cut -d'"' -f4)
+        error "注册失败: ${message:-$response}"
+    fi
+    
+    # 提取配置信息
+    AGENT_NAME=$(echo "$response" | grep -o '"agent_name":"[^"]*"' | cut -d'"' -f4)
+    AGENT_TOKEN=$(echo "$response" | grep -o '"agent_token":"[^"]*"' | cut -d'"' -f4)
+    
+    if [[ -z "$AGENT_NAME" ]] || [[ -z "$AGENT_TOKEN" ]]; then
+        error "注册响应缺少必要字段"
+    fi
+    
+    info "注册成功！"
+    info "  Agent 名称: ${AGENT_NAME}"
+}
+
 # 验证参数
 validate_args() {
     if [[ "$UNINSTALL_MODE" == "true" ]]; then
@@ -358,6 +446,18 @@ validate_args() {
         return
     fi
     
+    # 部署模式只需要 token 和 server
+    if [[ "$DEPLOY_MODE" == "true" ]]; then
+        if [[ -z "$AGENT_TOKEN" ]]; then
+            error "缺少参数: --token (-t)"
+        fi
+        if [[ -z "$SERVER_ADDRESS" ]]; then
+            error "缺少参数: --server (-s)"
+        fi
+        return
+    fi
+    
+    # 传统模式需要 name, token, server
     if [[ -z "$AGENT_NAME" ]]; then
         error "缺少参数: --name (-n)"
     fi
@@ -390,6 +490,11 @@ main() {
     if [[ "$UPGRADE_MODE" == "true" ]]; then
         upgrade_agent
         exit 0
+    fi
+    
+    # 部署模式：先注册获取配置
+    if [[ "$DEPLOY_MODE" == "true" ]]; then
+        deploy_with_token
     fi
     
     # 全新安装

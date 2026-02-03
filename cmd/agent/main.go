@@ -1,14 +1,23 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/open-beagle/awecloud-signaling-server/internal/agent"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/banner"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
@@ -34,6 +43,13 @@ func main() {
 	configPath := flag.String("c", "config/agent.toml", "配置文件路径")
 	showVersion := flag.Bool("v", false, "显示版本信息")
 	showVersionLong := flag.Bool("version", false, "显示版本信息")
+
+	// 部署模式参数
+	deployToken := flag.String("t", "", "部署 Token（用于首次部署或升级）")
+	agentName := flag.String("n", "", "Agent 名称（部署模式必填）")
+	deviceName := flag.String("d", "", "设备名称（部署模式必填）")
+	serverAddr := flag.String("s", "", "Server 地址（部署模式必填）")
+
 	flag.Parse()
 
 	// 显示版本信息
@@ -55,10 +71,39 @@ func main() {
 		GoVersion: goVersion,
 	})
 
-	// 加载配置
-	cfg, err := config.LoadAgentConfig(*configPath)
-	if err != nil {
-		log.Fatalf("加载配置失败: %v", err)
+	var cfg *config.AgentConfig
+	var err error
+
+	// 检查是否为部署模式
+	if *deployToken != "" {
+		// 部署模式：使用 Token 向 Server 注册
+		if *agentName == "" || *deviceName == "" || *serverAddr == "" {
+			log.Fatalf("部署模式需要指定: -n <agent_name> -d <device_name> -s <server_address>")
+		}
+
+		fmt.Printf("进入部署模式...\n")
+		fmt.Printf("Agent Name: %s\n", *agentName)
+		fmt.Printf("Device Name: %s\n", *deviceName)
+		fmt.Printf("Server Address: %s\n", *serverAddr)
+
+		// 向 Server 注册并获取配置
+		cfg, err = registerWithToken(*serverAddr, *deployToken, *agentName, *deviceName)
+		if err != nil {
+			log.Fatalf("部署注册失败: %v", err)
+		}
+
+		// 保存配置到文件
+		if err := saveAgentConfig(*configPath, cfg); err != nil {
+			fmt.Printf("警告: 保存配置文件失败: %v（将使用内存配置继续运行）\n", err)
+		} else {
+			fmt.Printf("配置已保存到: %s\n", *configPath)
+		}
+	} else {
+		// 正常模式：从配置文件加载
+		cfg, err = config.LoadAgentConfig(*configPath)
+		if err != nil {
+			log.Fatalf("加载配置失败: %v", err)
+		}
 	}
 
 	// 初始化日志
@@ -322,4 +367,128 @@ func extractRealUser(remoteUser string) string {
 
 	// 如果没找到，返回原始值
 	return remoteUser
+}
+
+// registerWithToken 使用部署 Token 向 Server 注册
+func registerWithToken(serverAddr, token, agentName, deviceName string) (*config.AgentConfig, error) {
+	// 生成设备指纹
+	fingerprint := generateDeviceFingerprint()
+
+	// 构建请求
+	reqBody := map[string]string{
+		"token":              token,
+		"device_fingerprint": fingerprint,
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("序列化请求失败: %w", err)
+	}
+
+	// 发送注册请求
+	url := strings.TrimSuffix(serverAddr, "/") + "/api/v1/agent/register"
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
+			return nil, fmt.Errorf("%s", errResp.Error)
+		}
+		return nil, fmt.Errorf("注册失败: HTTP %d", resp.StatusCode)
+	}
+
+	// 解析响应
+	var result struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Message      string                 `json:"message"`
+			Config       map[string]interface{} `json:"config"`
+			HeadscaleURL string                 `json:"headscale_url"`
+			AuthKey      string                 `json:"auth_key"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if !result.Success {
+		return nil, fmt.Errorf("注册失败")
+	}
+
+	fmt.Printf("注册成功: %s\n", result.Data.Message)
+
+	// 构建配置
+	cfg := &config.AgentConfig{
+		Agent: config.AgentSection{
+			AgentName: agentName,
+			Device:    deviceName,
+		},
+		Server: config.ServerConnect{
+			Address: serverAddr,
+		},
+	}
+
+	return cfg, nil
+}
+
+// saveAgentConfig 保存配置到 TOML 文件
+func saveAgentConfig(path string, cfg *config.AgentConfig) error {
+	// 创建目录
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("创建目录失败: %w", err)
+	}
+
+	// 序列化为 TOML
+	var buf bytes.Buffer
+	encoder := toml.NewEncoder(&buf)
+	if err := encoder.Encode(cfg); err != nil {
+		return fmt.Errorf("序列化配置失败: %w", err)
+	}
+
+	// 写入文件
+	if err := os.WriteFile(path, buf.Bytes(), 0644); err != nil {
+		return fmt.Errorf("写入文件失败: %w", err)
+	}
+
+	return nil
+}
+
+// generateDeviceFingerprint 生成设备指纹
+func generateDeviceFingerprint() string {
+	// 收集设备信息
+	hostname, _ := os.Hostname()
+	info := fmt.Sprintf("%s-%s-%s-%s",
+		hostname,
+		runtime.GOOS,
+		runtime.GOARCH,
+		getMachineID(),
+	)
+
+	// 计算 SHA256 哈希
+	hash := sha256.Sum256([]byte(info))
+	return hex.EncodeToString(hash[:])
+}
+
+// getMachineID 获取机器 ID
+func getMachineID() string {
+	// Linux: /etc/machine-id
+	if data, err := os.ReadFile("/etc/machine-id"); err == nil {
+		return strings.TrimSpace(string(data))
+	}
+
+	// macOS: 使用 IOPlatformUUID（简化处理，使用 hostname）
+	// Windows: 使用注册表（简化处理，使用 hostname）
+	hostname, _ := os.Hostname()
+	return hostname
 }

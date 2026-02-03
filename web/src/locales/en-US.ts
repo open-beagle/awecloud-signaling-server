@@ -20,6 +20,7 @@ export default {
     updateSuccess: 'Updated successfully',
     copy: 'Copy',
     copySuccess: 'Copied',
+    copyFailed: 'Copy failed',
     logout: 'Logout',
     search: 'Search',
     reset: 'Reset',
@@ -40,6 +41,8 @@ export default {
     disabled: 'Disabled',
     warning: 'Warning',
     createdAt: 'Created At',
+    createdBy: 'Created By',
+    revoke: 'Revoke',
     // Network errors
     networkError: 'Network Error',
     networkTimeout: 'Request timeout, please check your network connection',
@@ -129,6 +132,35 @@ export default {
     arch: 'CPU Architecture',
     cpuCores: 'CPU Cores',
     memory: 'Memory'
+  },
+  agent: {
+    deploy: 'Deploy',
+    generateCommand: 'Generate Command',
+    deviceName: 'Device Name',
+    deviceNamePlaceholder: 'Enter device name for identification',
+    tokenExpireWarning: 'Token expires in 24 hours. Please complete deployment promptly.',
+    installCommand: 'Install Command',
+    deployHistory: 'Deploy History',
+    boundAt: 'Bound At',
+    statusPending: 'Pending',
+    statusBound: 'Bound',
+    statusExpired: 'Expired',
+    revokeConfirm: 'Are you sure to revoke this deploy token?'
+  },
+  clientToken: {
+    title: 'Client Token',
+    generateToken: 'Generate Token',
+    tokenName: 'Token Name',
+    tokenNamePlaceholder: 'Enter token name, e.g. cloudide-project-abc',
+    deviceName: 'Device Name',
+    deviceNamePlaceholder: 'Enter device name for identification',
+    tokenWarning: 'Token will be bound to device fingerprint after first use.',
+    envConfig: 'Environment Variables',
+    tokenList: 'Token List',
+    boundAt: 'Bound At',
+    statusPending: 'Pending',
+    statusBound: 'Bound',
+    deleteConfirm: 'Are you sure to delete this client token?'
   },
   group: {
     title: 'Group Management',

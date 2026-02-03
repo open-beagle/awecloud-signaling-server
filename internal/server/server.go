@@ -25,6 +25,7 @@ import (
 	grpcserver "github.com/open-beagle/awecloud-signaling-server/internal/server/grpc"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/proxy"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
@@ -35,6 +36,8 @@ type Server struct {
 
 	agentService   *grpcserver.AgentServiceServer
 	desktopService *grpcserver.DesktopServiceServer
+	loginService   *service.DesktopLoginService
+	desktopAuthAPI *api.DesktopAuthAPI
 
 	aclSyncService *headscale.ACLSyncService
 	aclSyncCtx     context.Context
@@ -111,6 +114,11 @@ func (s *Server) Run() error {
 	s.agentService = grpcserver.NewAgentServiceServer(s.config)
 	s.desktopService = grpcserver.NewDesktopServiceServer(s.config)
 	s.desktopService.SetAgentService(s.agentService)
+
+	// 创建 Desktop 登录服务和认证 API
+	s.loginService = service.NewDesktopLoginService(s.config)
+	s.desktopService.SetLoginService(s.loginService)
+	s.desktopAuthAPI = api.NewDesktopAuthAPI(s.config, s.loginService)
 
 	// 创建 gRPC Server，根据配置启用 OpenTelemetry 拦截器
 	var grpcOpts []grpc.ServerOption
@@ -255,6 +263,13 @@ func (s *Server) setupRouter() *gin.Engine {
 	router.GET("/health", healthAPI.Health)
 	router.GET("/health/ready", healthAPI.Ready)
 
+	// Desktop Logto 登录回调（公开）
+	if s.desktopAuthAPI != nil && s.desktopAuthAPI.IsLogtoConfigured() {
+		router.GET("/auth/desktop/:session_id", s.desktopAuthAPI.DesktopLoginRedirect)
+		router.GET("/auth/desktop/callback", s.desktopAuthAPI.DesktopLoginCallback)
+		logger.Info("Desktop Logto 登录已启用")
+	}
+
 	// 静态文件
 	router.Static("/assets", "./web/dist/assets")
 	router.StaticFile("/favicon.ico", "./web/dist/favicon.ico")
@@ -276,6 +291,13 @@ func (s *Server) setupRouter() *gin.Engine {
 			v1Group.GET("/download/install.sh", downloadAPI.GetAgentInstallScript)
 			v1Group.GET("/download/agent", downloadAPI.GetAgentDownload)
 			v1Group.GET("/download/agent/version", downloadAPI.GetAgentVersion)
+
+			// Agent 注册 API（公开，用于部署）
+			agentDeployPublicAPI := api.NewAgentDeployAPI(s.config)
+			v1Group.POST("/agent/register", agentDeployPublicAPI.Register)
+
+			// Client 注册 API（公开，用于 CloudIDE）
+			v1Group.POST("/client/register", api.ClientRegister)
 
 			// 管理员 API
 			adminGroup := v1Group.Group("/admin")
@@ -300,6 +322,19 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.PUT("/users/:id/ssh", userAPI.UpdateSSH)
 					adminAuthGroup.DELETE("/users/:id", userAPI.Delete)
 					adminAuthGroup.POST("/users/:id/regenerate-secret", userAPI.RegenerateSecret)
+
+					// Agent 部署 Token
+					agentDeployAPI := api.NewAgentDeployAPI(s.config)
+					adminAuthGroup.POST("/users/:id/deploy-token", agentDeployAPI.CreateDeployToken)
+					adminAuthGroup.GET("/users/:id/deploy-tokens", agentDeployAPI.ListDeployTokens)
+					adminAuthGroup.GET("/deploy-tokens/:token_id/command", agentDeployAPI.GetDeployCommand)
+					adminAuthGroup.DELETE("/deploy-tokens/:token_id", agentDeployAPI.RevokeDeployToken)
+
+					// Client Token
+					adminAuthGroup.POST("/client/token", api.CreateClientToken)
+					adminAuthGroup.GET("/client/tokens", api.ListClientTokens)
+					adminAuthGroup.GET("/client/token/:id", api.GetClientToken)
+					adminAuthGroup.DELETE("/client/token/:id", api.DeleteClientToken)
 
 					// 设备管理
 					nodeAPI := api.NewNodeAPI(s.config)

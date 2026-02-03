@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	DesktopService_Login_FullMethodName               = "/awecloud.signaling.DesktopService/Login"
+	DesktopService_LoginWithLogto_FullMethodName      = "/awecloud.signaling.DesktopService/LoginWithLogto"
 	DesktopService_Authenticate_FullMethodName        = "/awecloud.signaling.DesktopService/Authenticate"
 	DesktopService_Heartbeat_FullMethodName           = "/awecloud.signaling.DesktopService/Heartbeat"
 	DesktopService_GetAuthorizedHosts_FullMethodName  = "/awecloud.signaling.DesktopService/GetAuthorizedHosts"
@@ -39,6 +40,8 @@ const (
 type DesktopServiceClient interface {
 	// 首次登录 - Desktop 用 Client 凭证登录
 	Login(ctx context.Context, in *DesktopLoginRequest, opts ...grpc.CallOption) (*DesktopLoginResponse, error)
+	// Logto 登录 - Desktop 通过 Server 中转进行 Logto 认证（流式）
+	LoginWithLogto(ctx context.Context, in *LogtoLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogtoLoginResponse], error)
 	// 认证 - Desktop 用设备凭证认证
 	Authenticate(ctx context.Context, in *DesktopAuthenticateRequest, opts ...grpc.CallOption) (*DesktopAuthenticateResponse, error)
 	// 心跳 - 保持连接状态
@@ -77,6 +80,25 @@ func (c *desktopServiceClient) Login(ctx context.Context, in *DesktopLoginReques
 	return out, nil
 }
 
+func (c *desktopServiceClient) LoginWithLogto(ctx context.Context, in *LogtoLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogtoLoginResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &DesktopService_ServiceDesc.Streams[0], DesktopService_LoginWithLogto_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[LogtoLoginRequest, LogtoLoginResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DesktopService_LoginWithLogtoClient = grpc.ServerStreamingClient[LogtoLoginResponse]
+
 func (c *desktopServiceClient) Authenticate(ctx context.Context, in *DesktopAuthenticateRequest, opts ...grpc.CallOption) (*DesktopAuthenticateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DesktopAuthenticateResponse)
@@ -89,7 +111,7 @@ func (c *desktopServiceClient) Authenticate(ctx context.Context, in *DesktopAuth
 
 func (c *desktopServiceClient) Heartbeat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[DesktopHeartbeatRequest, DesktopHeartbeatResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &DesktopService_ServiceDesc.Streams[0], DesktopService_Heartbeat_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &DesktopService_ServiceDesc.Streams[1], DesktopService_Heartbeat_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +200,8 @@ func (c *desktopServiceClient) GetFavoriteServices(ctx context.Context, in *GetF
 type DesktopServiceServer interface {
 	// 首次登录 - Desktop 用 Client 凭证登录
 	Login(context.Context, *DesktopLoginRequest) (*DesktopLoginResponse, error)
+	// Logto 登录 - Desktop 通过 Server 中转进行 Logto 认证（流式）
+	LoginWithLogto(*LogtoLoginRequest, grpc.ServerStreamingServer[LogtoLoginResponse]) error
 	// 认证 - Desktop 用设备凭证认证
 	Authenticate(context.Context, *DesktopAuthenticateRequest) (*DesktopAuthenticateResponse, error)
 	// 心跳 - 保持连接状态
@@ -208,6 +232,9 @@ type UnimplementedDesktopServiceServer struct{}
 
 func (UnimplementedDesktopServiceServer) Login(context.Context, *DesktopLoginRequest) (*DesktopLoginResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Login not implemented")
+}
+func (UnimplementedDesktopServiceServer) LoginWithLogto(*LogtoLoginRequest, grpc.ServerStreamingServer[LogtoLoginResponse]) error {
+	return status.Error(codes.Unimplemented, "method LoginWithLogto not implemented")
 }
 func (UnimplementedDesktopServiceServer) Authenticate(context.Context, *DesktopAuthenticateRequest) (*DesktopAuthenticateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Authenticate not implemented")
@@ -274,6 +301,17 @@ func _DesktopService_Login_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	return interceptor(ctx, in, info, handler)
 }
+
+func _DesktopService_LoginWithLogto_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(LogtoLoginRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DesktopServiceServer).LoginWithLogto(m, &grpc.GenericServerStream[LogtoLoginRequest, LogtoLoginResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DesktopService_LoginWithLogtoServer = grpc.ServerStreamingServer[LogtoLoginResponse]
 
 func _DesktopService_Authenticate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DesktopAuthenticateRequest)
@@ -471,6 +509,11 @@ var DesktopService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "LoginWithLogto",
+			Handler:       _DesktopService_LoginWithLogto_Handler,
+			ServerStreams: true,
+		},
 		{
 			StreamName:    "Heartbeat",
 			Handler:       _DesktopService_Heartbeat_Handler,

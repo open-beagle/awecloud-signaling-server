@@ -14,6 +14,7 @@ type ServerConfig struct {
 	Log       LogConfig        `toml:"log"`
 	Tailscale TailscaleSection `toml:"tailscale"`
 	Telemetry TelemetrySection `toml:"telemetry"`
+	Logto     LogtoSection     `toml:"logto"`
 }
 
 // TelemetrySection OpenTelemetry 配置
@@ -52,6 +53,16 @@ type TailscaleSection struct {
 	// User 字段已废弃，每个 Agent/Desktop 使用独立的 User
 	// Agent User: agent-{agent_name}
 	// Desktop User: desktop-{client_id}
+}
+
+// LogtoSection Logto 配置
+type LogtoSection struct {
+	Endpoint    string `toml:"endpoint"`     // Logto 端点地址
+	AppID       string `toml:"app_id"`       // Logto 应用 ID
+	AppSecret   string `toml:"app_secret"`   // Logto 应用密钥
+	CallbackURL string `toml:"callback_url"` // OAuth 回调 URL
+	Resource    string `toml:"resource"`     // API Resource（可选）
+	Scopes      string `toml:"scopes"`       // 请求的 Scopes（逗号分隔）
 }
 
 type DatabaseSection struct {
@@ -182,6 +193,31 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 	if cluster := os.Getenv("OTEL_SERVICE_CLUSTER"); cluster != "" {
 		cfg.Telemetry.Cluster = cluster
+	}
+
+	// Logto 默认值
+	if cfg.Logto.Scopes == "" {
+		cfg.Logto.Scopes = "openid,profile,email"
+	}
+
+	// Logto 环境变量覆盖
+	if endpoint := os.Getenv("LOGTO_ENDPOINT"); endpoint != "" {
+		cfg.Logto.Endpoint = endpoint
+	}
+	if appID := os.Getenv("LOGTO_APP_ID"); appID != "" {
+		cfg.Logto.AppID = appID
+	}
+	if appSecret := os.Getenv("LOGTO_APP_SECRET"); appSecret != "" {
+		cfg.Logto.AppSecret = appSecret
+	}
+	if callbackURL := os.Getenv("LOGTO_CALLBACK_URL"); callbackURL != "" {
+		cfg.Logto.CallbackURL = callbackURL
+	}
+	if resource := os.Getenv("LOGTO_RESOURCE"); resource != "" {
+		cfg.Logto.Resource = resource
+	}
+	if scopes := os.Getenv("LOGTO_SCOPES"); scopes != "" {
+		cfg.Logto.Scopes = scopes
 	}
 
 	return &cfg, nil

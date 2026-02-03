@@ -20,6 +20,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
@@ -42,6 +43,7 @@ type DesktopServiceServer struct {
 	headscaleClient *headscale.Client
 	config          *config.ServerConfig
 	agentService    *AgentServiceServer
+	loginService    *service.DesktopLoginService
 }
 
 // NewDesktopServiceServer 创建 Desktop 服务
@@ -67,6 +69,166 @@ func NewDesktopServiceServer(cfg *config.ServerConfig) *DesktopServiceServer {
 // SetAgentService 设置 Agent 服务
 func (s *DesktopServiceServer) SetAgentService(agentService *AgentServiceServer) {
 	s.agentService = agentService
+}
+
+// SetLoginService 设置 Desktop 登录服务
+func (s *DesktopServiceServer) SetLoginService(loginService *service.DesktopLoginService) {
+	s.loginService = loginService
+}
+
+// LoginWithLogto Desktop 通过 Logto 登录（流式）
+func (s *DesktopServiceServer) LoginWithLogto(req *pb.LogtoLoginRequest, stream pb.DesktopService_LoginWithLogtoServer) error {
+	ctx := stream.Context()
+	logger.Infof("Desktop Logto 登录请求: device_name=%s, username_hint=%s", req.DeviceName, req.UsernameHint)
+
+	// 检查 Logto 是否已配置
+	if s.loginService == nil || !s.loginService.IsLogtoConfigured() {
+		return stream.Send(&pb.LogtoLoginResponse{
+			Status:  pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_FAILED,
+			Message: "Logto 未配置",
+		})
+	}
+
+	// 创建登录会话
+	session, loginURL, err := s.loginService.CreateLoginSession(req.DeviceFingerprint, req.DeviceName, req.UsernameHint)
+	if err != nil {
+		logger.Errorf("创建登录会话失败: %v", err)
+		return stream.Send(&pb.LogtoLoginResponse{
+			Status:  pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_FAILED,
+			Message: "创建登录会话失败",
+		})
+	}
+
+	// 发送第一条消息：session_id 和 login_url
+	if err := stream.Send(&pb.LogtoLoginResponse{
+		Status:    pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_PENDING,
+		SessionId: session.SessionID,
+		LoginUrl:  loginURL,
+		Message:   "请在浏览器中完成登录",
+	}); err != nil {
+		return err
+	}
+
+	// 注册登录结果通道
+	resultCh := s.loginService.RegisterLoginSession(session.SessionID)
+	defer s.loginService.UnregisterLoginSession(session.SessionID)
+
+	// 等待登录结果或超时
+	select {
+	case <-ctx.Done():
+		logger.Infof("Logto 登录流被取消: sessionID=%s", session.SessionID)
+		return ctx.Err()
+
+	case result, ok := <-resultCh:
+		if !ok {
+			return stream.Send(&pb.LogtoLoginResponse{
+				Status:  pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_FAILED,
+				Message: "登录会话已关闭",
+			})
+		}
+
+		if !result.Success {
+			return stream.Send(&pb.LogtoLoginResponse{
+				Status:  pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_FAILED,
+				Message: result.ErrorMessage,
+			})
+		}
+
+		// 登录成功，创建或获取 Desktop 节点
+		node, nodeSecret, err := s.createOrGetDesktopNode(ctx, result.UserID, result.UserName, req.DeviceName, req.SystemInfo)
+		if err != nil {
+			logger.Errorf("创建 Desktop 节点失败: %v", err)
+			return stream.Send(&pb.LogtoLoginResponse{
+				Status:  pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_FAILED,
+				Message: "创建设备失败",
+			})
+		}
+
+		// 获取 Headscale AuthKey
+		resp := &pb.LogtoLoginResponse{
+			Status:    pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_SUCCESS,
+			Message:   "登录成功",
+			DesktopId: node.ID,
+			Secret:    nodeSecret,
+			UserInfo: &pb.LogtoUserInfo{
+				UserId:   fmt.Sprintf("%d", result.UserID),
+				Username: result.UserName,
+				Email:    result.Email,
+				Name:     result.DisplayName,
+				Avatar:   result.Avatar,
+			},
+		}
+
+		if s.headscaleClient != nil && s.config != nil {
+			if authKey, serverURL, err := s.getOrCreateAuthKey(ctx, result.UserID, result.UserName); err == nil {
+				resp.AuthKey = authKey
+				resp.ServerUrl = serverURL
+			}
+		}
+
+		logger.Infof("Desktop Logto 登录成功: user=%s, device=%s, nodeId=%d", result.UserName, req.DeviceName, node.ID)
+		return stream.Send(resp)
+
+	case <-time.After(10 * time.Minute):
+		// 超时
+		return stream.Send(&pb.LogtoLoginResponse{
+			Status:  pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_EXPIRED,
+			Message: "登录超时，请重试",
+		})
+	}
+}
+
+// createOrGetDesktopNode 创建或获取 Desktop 节点
+func (s *DesktopServiceServer) createOrGetDesktopNode(ctx context.Context, userID uint64, userName, deviceName string, systemInfo *pb.DesktopSystemInfo) (*model.Node, string, error) {
+	var node model.Node
+	err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ? AND name = ?", userID, model.NodeTypeDesktop, deviceName).First(&node).Error
+	isNewDevice := err != nil
+
+	nodeSecret := generateDesktopSecret()
+	secretHash, _ := bcrypt.GenerateFromPassword([]byte(nodeSecret), bcrypt.DefaultCost)
+
+	if isNewDevice {
+		var systemInfoJSON string
+		if systemInfo != nil {
+			si := model.NodeSystemInfo{
+				OS: systemInfo.Os, OSVersion: systemInfo.OsVersion, Arch: systemInfo.Arch,
+				Hostname: systemInfo.Hostname, CPU: systemInfo.Cpu,
+				CPUCores: int(systemInfo.CpuCores), MemoryGB: int(systemInfo.MemoryGb),
+			}
+			if data, err := json.Marshal(si); err == nil {
+				systemInfoJSON = string(data)
+			}
+		}
+		now := time.Now()
+		node = model.Node{
+			UserID: userID, Name: deviceName, Type: model.NodeTypeDesktop,
+			SecretHash: string(secretHash), SystemInfo: systemInfoJSON, LastHeartbeat: &now,
+		}
+		if systemInfo != nil {
+			node.Hostname = systemInfo.Hostname
+		}
+		if err := db.DB.WithContext(ctx).Create(&node).Error; err != nil {
+			return nil, "", err
+		}
+	} else {
+		node.SecretHash = string(secretHash)
+		now := time.Now()
+		node.LastHeartbeat = &now
+		if systemInfo != nil {
+			si := model.NodeSystemInfo{
+				OS: systemInfo.Os, OSVersion: systemInfo.OsVersion, Arch: systemInfo.Arch,
+				Hostname: systemInfo.Hostname, CPU: systemInfo.Cpu,
+				CPUCores: int(systemInfo.CpuCores), MemoryGB: int(systemInfo.MemoryGb),
+			}
+			if data, err := json.Marshal(si); err == nil {
+				node.SystemInfo = string(data)
+			}
+			node.Hostname = systemInfo.Hostname
+		}
+		db.DB.WithContext(ctx).Save(&node)
+	}
+
+	return &node, nodeSecret, nil
 }
 
 // Login Desktop 首次登录

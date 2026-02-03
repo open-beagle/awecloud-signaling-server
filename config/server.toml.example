@@ -73,3 +73,32 @@ namespace = "default"
 # 用于标识服务所在的业务集群/数据来源，在 Jaeger 中显示为 service.cluster tag
 # 注意：这与 k8s.cluster.name 不同，后者表示 OTEL Collector 所在的 K8s 集群
 cluster = "default"
+
+# Logto 配置（Desktop 登录）
+# 设置 endpoint 和 app_id 后启用 Desktop Logto 登录
+[logto]
+# Logto 端点地址
+# 环境变量：LOGTO_ENDPOINT
+# 示例：https://login.example.com
+endpoint = ""
+
+# Logto 应用 ID
+# 环境变量：LOGTO_APP_ID
+app_id = ""
+
+# Logto 应用密钥
+# 环境变量：LOGTO_APP_SECRET
+app_secret = ""
+
+# OAuth 回调 URL
+# 环境变量：LOGTO_CALLBACK_URL
+# 示例：https://signaling.example.com/auth/desktop/callback
+callback_url = ""
+
+# API Resource（可选）
+# 环境变量：LOGTO_RESOURCE
+resource = ""
+
+# 请求的 Scopes（逗号分隔，默认：openid,profile,email）
+# 环境变量：LOGTO_SCOPES
+scopes = "openid,profile,email"

@@ -9,6 +9,9 @@ service DesktopService {
   // 首次登录 - Desktop 用 Client 凭证登录
   rpc Login(DesktopLoginRequest) returns (DesktopLoginResponse);
 
+  // Logto 登录 - Desktop 通过 Server 中转进行 Logto 认证（流式）
+  rpc LoginWithLogto(LogtoLoginRequest) returns (stream LogtoLoginResponse);
+
   // 认证 - Desktop 用设备凭证认证
   rpc Authenticate(DesktopAuthenticateRequest) returns (DesktopAuthenticateResponse);
 
@@ -247,4 +250,51 @@ message GetFavoriteServicesRequest {
 // GetFavoriteServicesResponse 获取收藏的服务列表响应
 message GetFavoriteServicesResponse {
   repeated string service_ids = 1; // 收藏的服务 ID 列表
+}
+
+
+// ============================================
+// Logto 登录（流式）
+// ============================================
+
+// LogtoLoginRequest Logto 登录请求
+message LogtoLoginRequest {
+  string device_fingerprint = 1; // 设备指纹
+  string device_name = 2; // 设备名称
+  string username_hint = 3; // 用户名提示（可选，用于预填）
+  DesktopSystemInfo system_info = 4; // 系统信息
+}
+
+// LogtoLoginResponse Logto 登录响应（流式）
+// 第一条消息：返回 session_id 和 login_url
+// 第二条消息：返回登录结果（成功时包含 token 和用户信息）
+message LogtoLoginResponse {
+  LogtoLoginStatus status = 1; // 状态
+  string session_id = 2; // 会话 ID
+  string login_url = 3; // 登录 URL（浏览器打开）
+  string message = 4; // 消息
+  // 登录成功后返回
+  uint64 desktop_id = 5; // Desktop ID
+  string secret = 6; // Desktop 专属密钥
+  string auth_key = 7; // Tailscale PreAuthKey
+  string server_url = 8; // Headscale 服务器地址
+  LogtoUserInfo user_info = 9; // 用户信息
+}
+
+// LogtoLoginStatus Logto 登录状态
+enum LogtoLoginStatus {
+  LOGTO_LOGIN_STATUS_UNSPECIFIED = 0; // 未指定
+  LOGTO_LOGIN_STATUS_PENDING = 1; // 待登录（返回 login_url）
+  LOGTO_LOGIN_STATUS_SUCCESS = 2; // 登录成功
+  LOGTO_LOGIN_STATUS_FAILED = 3; // 登录失败
+  LOGTO_LOGIN_STATUS_EXPIRED = 4; // 会话过期
+}
+
+// LogtoUserInfo Logto 用户信息
+message LogtoUserInfo {
+  string user_id = 1; // 用户 ID（Logto sub）
+  string username = 2; // 用户名
+  string email = 3; // 邮箱
+  string name = 4; // 显示名称
+  string avatar = 5; // 头像 URL
 }

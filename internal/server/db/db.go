@@ -119,6 +119,15 @@ func autoMigrate() error {
 
 		// Visitor
 		&model.Visitor{},
+
+		// Agent 部署 Token
+		&model.AgentDeployToken{},
+
+		// Client Token
+		&model.ClientToken{},
+
+		// Desktop 登录会话
+		&model.DesktopLoginSession{},
 	)
 	if err != nil {
 		// 忽略"索引已存在"的错误（SQLite 在某些情况下会报这个错误）

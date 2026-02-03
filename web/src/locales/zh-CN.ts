@@ -20,6 +20,7 @@ export default {
     updateSuccess: '更新成功',
     copy: '复制',
     copySuccess: '复制成功',
+    copyFailed: '复制失败',
     logout: '退出登录',
     search: '查询',
     reset: '重置',
@@ -40,6 +41,8 @@ export default {
     disabled: '禁用',
     warning: '警告',
     createdAt: '创建时间',
+    createdBy: '创建人',
+    revoke: '撤销',
     // 网络错误
     networkError: '网络错误',
     networkTimeout: '请求超时，请检查网络连接后重试',
@@ -129,6 +132,35 @@ export default {
     arch: 'CPU 架构',
     cpuCores: 'CPU 核心数',
     memory: '内存'
+  },
+  agent: {
+    deploy: '部署',
+    generateCommand: '生成命令',
+    deviceName: '设备名称',
+    deviceNamePlaceholder: '输入设备名称用于标识',
+    tokenExpireWarning: 'Token 有效期 24 小时，请尽快完成部署。',
+    installCommand: '安装命令',
+    deployHistory: '部署历史',
+    boundAt: '绑定时间',
+    statusPending: '待使用',
+    statusBound: '已绑定',
+    statusExpired: '已过期',
+    revokeConfirm: '确认撤销此部署 Token 吗？'
+  },
+  clientToken: {
+    title: 'Client Token',
+    generateToken: '生成 Token',
+    tokenName: 'Token 名称',
+    tokenNamePlaceholder: '输入 Token 名称，如 cloudide-project-abc',
+    deviceName: '设备名称',
+    deviceNamePlaceholder: '输入设备名称用于标识',
+    tokenWarning: 'Token 首次使用后将绑定设备指纹，仅可用于该设备。',
+    envConfig: '环境变量配置',
+    tokenList: 'Token 列表',
+    boundAt: '绑定时间',
+    statusPending: '待使用',
+    statusBound: '已绑定',
+    deleteConfirm: '确认删除此 Client Token 吗？'
   },
   group: {
     title: '分组管理',

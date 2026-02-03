@@ -83,9 +83,12 @@
             <TimeAgo :time="row.last_online" />
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" width="150" fixed="right">
+        <el-table-column :label="t('common.actions')" width="180" fixed="right">
           <template #default="{ row }">
             <div class="action-buttons">
+              <el-tooltip :content="t('agent.deploy')" placement="top">
+                <el-button size="small" :icon="Upload" @click="handleDeploy(row)" />
+              </el-tooltip>
               <el-tooltip :content="t('common.edit')" placement="top">
                 <el-button size="small" :icon="Edit" @click="handleEdit(row)" />
               </el-tooltip>
@@ -108,6 +111,7 @@
 
     <CreateDialog v-model="createDialogVisible" @success="handleCreateSuccess" />
     <TokenDialog v-model="tokenDialogVisible" :agent="currentAgent" :initial-secret="initialSecret" />
+    <DeployDialog v-model="deployDialogVisible" :agent="currentAgent" />
     
     <!-- 编辑对话框 -->
     <el-dialog v-model="editDialogVisible" :title="t('common.edit')" width="500px">
@@ -132,13 +136,14 @@ import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete, View, Edit } from '@element-plus/icons-vue'
+import { Plus, Delete, View, Edit, Upload } from '@element-plus/icons-vue'
 import { getAgents, deleteAgent, updateAgent, updateAgentSSHConfig } from '@/api/agent'
 import type { Agent } from '@/types/models'
 import StatusTag from '@/components/Common/StatusTag.vue'
 import TimeAgo from '@/components/Common/TimeAgo.vue'
 import CreateDialog from './components/CreateDialog.vue'
 import TokenDialog from './components/TokenDialog.vue'
+import DeployDialog from './components/DeployDialog.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -147,6 +152,7 @@ const loading = ref(false)
 const agents = ref<Agent[]>([])
 const createDialogVisible = ref(false)
 const tokenDialogVisible = ref(false)
+const deployDialogVisible = ref(false)
 const currentAgent = ref<Agent | null>(null)
 const initialSecret = ref('')
 const sshSwitchLoading = ref<Record<number, boolean>>({}) // SSH 开关加载状态
@@ -191,6 +197,11 @@ const handleViewToken = (agent: Agent) => {
   currentAgent.value = agent
   initialSecret.value = '' // 查看已有 Agent 时不显示密钥
   tokenDialogVisible.value = true
+}
+
+const handleDeploy = (agent: Agent) => {
+  currentAgent.value = agent
+  deployDialogVisible.value = true
 }
 
 const handleViewDetail = (agent: Agent) => {
