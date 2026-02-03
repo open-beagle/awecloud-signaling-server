@@ -57,6 +57,5 @@ config/*.toml
 # Kubernetes deployment (local configs)
 deployments/kubernetes/*.local.yaml
 
-# Desktop client (independent git repository)
+# Kiro spec
 /.kiro/spec
-/desktop
