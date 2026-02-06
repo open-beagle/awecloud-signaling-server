@@ -228,6 +228,21 @@ func (s *Server) setupRouter() *gin.Engine {
 	router.Use(gin.Recovery())
 	router.Use(s.customLogger())
 
+	// CORS 中间件 - 允许所有来源的请求
+	router.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	})
+
 	// OpenTelemetry 中间件
 	if s.config.Telemetry.Endpoint != "" {
 		router.Use(telemetry.GinMiddleware(s.config.Telemetry.Name))
@@ -291,6 +306,13 @@ func (s *Server) setupRouter() *gin.Engine {
 			v1Group.GET("/download/install.sh", downloadAPI.GetAgentInstallScript)
 			v1Group.GET("/download/agent", downloadAPI.GetAgentDownload)
 			v1Group.GET("/download/agent/version", downloadAPI.GetAgentVersion)
+
+			// Desktop 登录 API（公开）
+			if s.desktopAuthAPI != nil {
+				v1Group.GET("/auth/desktop/login-url", s.desktopAuthAPI.GetLoginURL)
+				v1Group.GET("/auth/desktop/login-result", s.desktopAuthAPI.GetLoginResult)
+				logger.Info("Desktop 登录 API 已启用")
+			}
 
 			// Agent 注册 API（公开，用于部署）
 			agentDeployPublicAPI := api.NewAgentDeployAPI(s.config)

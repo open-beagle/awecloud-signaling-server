@@ -199,8 +199,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { getUser, updateUser, deleteUser, regenerateUserSecret, type User, type UserDetail, type UserNode } from '@/api/user'
 import { getClientTokens, deleteClientToken, type ClientToken } from '@/api/clientToken'
+import { getDeployTokens, revokeDeployToken, type DeployToken } from '@/api/agentDeploy'
 import { formatTime } from '@/utils/time'
-import ClientTokenDialog from './components/ClientTokenDialog.vue'
+import DeployDialog from './components/DeployDialog.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -219,6 +220,11 @@ const showTokenDialog = ref(false)
 const tokensLoading = ref(false)
 const tokens = ref<ClientToken[]>([])
 
+// Agent 部署相关
+const showDeployDialog = ref(false)
+const deployLoading = ref(false)
+const deployTokens = ref<DeployToken[]>([])
+
 const editForm = reactive({
   alias: '',
   ssh_enabled: false
@@ -226,12 +232,12 @@ const editForm = reactive({
 
 // 获取用户详情
 const fetchUser = async () => {
-  const id = Number(route.params.id)
-  if (!id) return
+  const username = route.params.username as string
+  if (!username) return
 
   loading.value = true
   try {
-    const res = await getUser(id)
+    const res = await getUser(username)
     if (res.success && res.data) {
       user.value = res.data
       nodes.value = res.data.nodes || []
@@ -241,6 +247,11 @@ const fetchUser = async () => {
       // 如果是 client 用户，加载 Token 列表
       if (res.data.role === 'client') {
         loadTokens()
+      }
+      
+      // 如果是 agent 用户，加载部署历史
+      if (res.data.role === 'agent') {
+        loadDeployHistory()
       }
     }
   } catch (error) {
@@ -307,13 +318,72 @@ const getTokenStatusText = (status: string) => {
   }
 }
 
+// 加载部署历史
+const loadDeployHistory = async () => {
+  if (!user.value || user.value.role !== 'agent') return
+  deployLoading.value = true
+  try {
+    const res = await getDeployTokens(user.value.name)
+    if (res.success && res.data) {
+      deployTokens.value = res.data
+    }
+  } catch (error) {
+    console.error('加载部署历史失败:', error)
+  } finally {
+    deployLoading.value = false
+  }
+}
+
+// 撤销部署 Token
+const handleRevokeDeployToken = async (token: DeployToken) => {
+  try {
+    await ElMessageBox.confirm(
+      t('agent.revokeDeployTokenConfirm'),
+      t('common.warning'),
+      { type: 'warning' }
+    )
+    const res = await revokeDeployToken(token.id)
+    if (res.success) {
+      ElMessage.success(t('common.revokeSuccess'))
+      loadDeployHistory()
+    } else {
+      ElMessage.error(res.message || t('common.revokeFailed'))
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('撤销部署 Token 失败:', error)
+      ElMessage.error(t('common.revokeFailed'))
+    }
+  }
+}
+
+// 部署状态类型
+const getDeployStatusType = (status: string) => {
+  switch (status) {
+    case 'pending': return 'warning'
+    case 'bound': return 'success'
+    case 'expired': return 'info'
+    default: return 'info'
+  }
+}
+
+// 部署状态文本
+const getDeployStatusText = (status: string) => {
+  switch (status) {
+    case 'pending': return t('agent.deployStatusPending')
+    case 'bound': return t('agent.deployStatusBound')
+    case 'expired': return t('agent.deployStatusExpired')
+    default: return status
+  }
+}
+
 // 保存编辑
 const handleSave = async () => {
   if (!user.value) return
 
   saving.value = true
   try {
-    const res = await updateUser(user.value.id, editForm)
+    const res = await updateUser(user.value.name, editForm)
     if (res.success) {
       ElMessage.success(t('common.saveSuccess'))
       showEditDialog.value = false
@@ -339,7 +409,7 @@ const handleRegenerateSecret = async () => {
       t('common.warning'),
       { type: 'warning' }
     )
-    const res = await regenerateUserSecret(user.value.id)
+    const res = await regenerateUserSecret(user.value.name)
     if (res.success && res.data) {
       newSecret.value = res.data.secret
       showSecretDialog.value = true
@@ -363,7 +433,7 @@ const handleDelete = async () => {
       t('common.warning'),
       { type: 'warning' }
     )
-    const res = await deleteUser(user.value.id)
+    const res = await deleteUser(user.value.name)
     if (res.success) {
       ElMessage.success(t('common.deleteSuccess'))
       router.push('/users')

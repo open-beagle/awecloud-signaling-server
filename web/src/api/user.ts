@@ -61,9 +61,9 @@ export const getUsers = (params?: { role?: UserRole; search?: string; page?: num
   return request.get<any, PagedResponse<User[]>>('/api/v1/admin/users', { params })
 }
 
-// 获取用户详情
-export const getUser = (id: number) => {
-  return request.get<any, ApiResponse<UserDetail>>(`/api/v1/admin/users/${id}`)
+// 获取用户详情（支持 ID 或用户名）
+export const getUser = (identifier: number | string) => {
+  return request.get<any, ApiResponse<UserDetail>>(`/api/v1/admin/users/${identifier}`)
 }
 
 // 创建用户
@@ -71,22 +71,22 @@ export const createUser = (data: CreateUserRequest) => {
   return request.post<any, ApiResponse<CreateUserResponse>>('/api/v1/admin/users', data)
 }
 
-// 更新用户
-export const updateUser = (id: number, data: UpdateUserRequest) => {
-  return request.put<any, ApiResponse<User>>(`/api/v1/admin/users/${id}`, data)
+// 更新用户（支持 ID 或用户名）
+export const updateUser = (identifier: number | string, data: UpdateUserRequest) => {
+  return request.put<any, ApiResponse<User>>(`/api/v1/admin/users/${identifier}`, data)
 }
 
-// 删除用户
-export const deleteUser = (id: number) => {
-  return request.delete<any, ApiResponse>(`/api/v1/admin/users/${id}`)
+// 删除用户（支持 ID 或用户名）
+export const deleteUser = (identifier: number | string) => {
+  return request.delete<any, ApiResponse>(`/api/v1/admin/users/${identifier}`)
 }
 
-// 重新生成密钥
-export const regenerateUserSecret = (id: number) => {
-  return request.post<any, ApiResponse<{ secret: string }>>(`/api/v1/admin/users/${id}/regenerate-secret`)
+// 重新生成密钥（支持 ID 或用户名）
+export const regenerateUserSecret = (identifier: number | string) => {
+  return request.post<any, ApiResponse<{ secret: string }>>(`/api/v1/admin/users/${identifier}/regenerate-secret`)
 }
 
-// 获取用户实时信息（仅 Agent）
+// 获取用户实时信息（仅 Agent，支持 ID 或用户名）
 export interface UserRealtimeInfo {
   hostname: string
   runtime: string
@@ -100,6 +100,6 @@ export interface UserRealtimeInfo {
   }>
 }
 
-export const getUserRealtime = (id: number) => {
-  return request.get<any, ApiResponse<UserRealtimeInfo>>(`/api/v1/admin/users/${id}/realtime`)
+export const getUserRealtime = (identifier: number | string) => {
+  return request.get<any, ApiResponse<UserRealtimeInfo>>(`/api/v1/admin/users/${identifier}/realtime`)
 }

@@ -78,13 +78,13 @@ awecloud-signaling-server/
 
 ```bash
 # Server & Agent（日常开发，默认当前架构）
-BUILD_VERSION=v0.2.3 bash scripts/build.sh
+BUILD_VERSION=$(cat version) bash scripts/build.sh
 
 # Web 前端
-BUILD_VERSION=v0.2.3 bash scripts/build_frontend.sh
+BUILD_VERSION=$(cat version) bash scripts/build_frontend.sh
 
 # Desktop 客户端
-BUILD_VERSION=v0.2.3 bash scripts/build_desktop.sh
+BUILD_VERSION=$(cat desktop/version) bash scripts/build_desktop.sh
 ```
 
 ### 运行命令
@@ -118,24 +118,24 @@ curl -fsSL https://your-server.com/api/v1/download/install.sh | \
 
 ### 参数说明
 
-| 参数              | 说明                                 |
-| ----------------- | ------------------------------------ |
-| `-n, --name`      | Agent 名称，如 `beijing-242`         |
-| `-t, --token`     | 认证 Token（从 Server 获取）         |
-| `-s, --server`    | Server 地址                          |
-| `--no-ssh`        | 禁用 SSH（默认启用）                 |
-| `-u, --upgrade`   | 升级模式，保留现有配置               |
-| `-U, --uninstall` | 卸载 Agent                           |
+| 参数              | 说明                         |
+| ----------------- | ---------------------------- |
+| `-n, --name`      | Agent 名称，如 `beijing-242` |
+| `-t, --token`     | 认证 Token（从 Server 获取） |
+| `-s, --server`    | Server 地址                  |
+| `--no-ssh`        | 禁用 SSH（默认启用）         |
+| `-u, --upgrade`   | 升级模式，保留现有配置       |
+| `-U, --uninstall` | 卸载 Agent                   |
 
 ### 安装路径
 
-| 路径                                                     | 说明                   |
-| -------------------------------------------------------- | ---------------------- |
+| 路径                                                         | 说明                   |
+| ------------------------------------------------------------ | ---------------------- |
 | `/etc/kubernetes/downloads/signaling-<version>-linux-<arch>` | Agent 二进制（带版本） |
-| `/opt/bin/signaling`                                     | 软链接                 |
-| `/etc/kubernetes/config/k8s-signaling.toml`              | 配置文件               |
-| `/etc/kubernetes/data/signaling/`                        | 数据目录               |
-| `k8s-signaling.service`                                  | systemd 服务名         |
+| `/opt/bin/signaling`                                         | 软链接                 |
+| `/etc/kubernetes/config/k8s-signaling.toml`                  | 配置文件               |
+| `/etc/kubernetes/data/signaling/`                            | 数据目录               |
+| `k8s-signaling.service`                                      | systemd 服务名         |
 
 ### 常用命令
 

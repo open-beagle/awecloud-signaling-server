@@ -106,6 +106,14 @@ func (s *DesktopLoginService) NotifyLoginResult(sessionID string, result *LoginR
 	}
 }
 
+// GetLoginResultChannel 获取登录结果通道
+func (s *DesktopLoginService) GetLoginResultChannel(sessionID string) chan *LoginResult {
+	s.loginResultMutex.RLock()
+	defer s.loginResultMutex.RUnlock()
+
+	return s.loginResults[sessionID]
+}
+
 // GetSessionStorage 获取会话存储
 func (s *DesktopLoginService) GetSessionStorage(sessionID string) *auth.MemorySessionStorage {
 	s.sessionStorageMutex.RLock()
@@ -171,4 +179,14 @@ func (s *DesktopLoginService) CreateLoginSession(deviceFingerprint, deviceName, 
 	logger.Infof("创建 Desktop 登录会话: sessionID=%s, device=%s", sessionID, deviceName)
 
 	return session, loginURL, nil
+}
+
+
+// RegisterSessionStorage 注册会话存储
+func (s *DesktopLoginService) RegisterSessionStorage(sessionID string, storage *auth.MemorySessionStorage) {
+	s.sessionStorageMutex.Lock()
+	defer s.sessionStorageMutex.Unlock()
+
+	s.sessionStorages[sessionID] = storage
+	logger.Infof("注册 Session 存储: sessionID=%s, 当前存储数量=%d", sessionID, len(s.sessionStorages))
 }

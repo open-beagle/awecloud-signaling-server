@@ -39,21 +39,13 @@ bash scripts/build.sh
 
 ```bash
 # 构建前端代码
-BUILD_VERSION=v0.2.3 bash scripts/build_frontend.sh
+BUILD_VERSION=$(cat version) bash scripts/build_frontend.sh
 
-# 构建后端代码（在 Alpine 容器中）
-docker run --rm \
-  -v $(pwd):/go/src/github.com/open-beagle/awecloud-signaling-server \
-  -v $HOME/go/pkg:/go/pkg \
-  -w /go/src/github.com/open-beagle/awecloud-signaling-server \
-  -e BUILD_VERSION=v0.2.3 \
-  -e GOARCHS=amd64 \
-  -e BUILD_TARGETS=server \
-  registry.cn-qingdao.aliyuncs.com/wod/golang:1.25-alpine \
-   bash ./.beagle/build.sh
+# 构建Server代码
+BUILD_VERSION=$(cat version) bash scripts/build.sh
 
 # 设置版本和镜像仓库
-export BUILD_VERSION=v0.2.3
+export BUILD_VERSION=$(cat version)
 export REGISTRY=registry.cn-qingdao.aliyuncs.com/wod
 export AUTHOR=open-beagle
 
@@ -95,7 +87,7 @@ sleep 3 && kubectl --context aliyun --namespace beagle-access rollout restart de
 
 ```bash
 # 设置版本和镜像仓库
-export BUILD_VERSION=v0.2.3
+export BUILD_VERSION=$(cat version)
 export REGISTRY=registry.cn-qingdao.aliyuncs.com/wod
 export AUTHOR=open-beagle
 
@@ -183,10 +175,10 @@ kubectl --context aliyun --namespace beagle-access logs -f deployment/awecloud-s
 
 ```bash
 # 1. 构建 Agent（多架构，Agent 不需要 CGO 可直接交叉编译）
-GOARCHS=amd64,arm64 BUILD_VERSION=v0.2.3 bash scripts/build.sh agent
+GOARCHS=amd64,arm64 BUILD_VERSION=$(cat version) bash scripts/build.sh agent
 
 # 2. 发布到 S3
-BUILD_VERSION=v0.2.3 bash scripts/publish_agent_s3.sh
+BUILD_VERSION=$(cat version) bash scripts/publish_agent_s3.sh
 ```
 
 发布内容：

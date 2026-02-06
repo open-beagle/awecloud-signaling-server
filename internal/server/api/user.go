@@ -209,24 +209,31 @@ type UserServiceItem struct {
 	ErrorMsg      string `json:"error_msg,omitempty"`
 }
 
-// Get 获取用户详情
+// Get 获取用户详情（支持 ID 或用户名）
 func (a *UserAPI) Get(c *gin.Context) {
 	ctx := c.Request.Context()
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
-		return
-	}
+	identifier := c.Param("id")
 
 	var user model.User
-	if err := db.DB.WithContext(ctx).First(&user, id).Error; err != nil {
+	var err error
+
+	// 尝试解析为 ID
+	if id, parseErr := strconv.ParseUint(identifier, 10, 64); parseErr == nil {
+		// 是数字，按 ID 查询
+		err = db.DB.WithContext(ctx).First(&user, id).Error
+	} else {
+		// 不是数字，按用户名查询
+		err = db.DB.WithContext(ctx).Where("name = ?", identifier).First(&user).Error
+	}
+
+	if err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
 		return
 	}
 
 	// 查询设备列表
 	var nodes []model.Node
-	db.DB.WithContext(ctx).Where("user_id = ?", id).Find(&nodes)
+	db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Find(&nodes)
 
 	now := time.Now()
 	nodeItems := make([]UserNodeItem, len(nodes))
@@ -250,7 +257,7 @@ func (a *UserAPI) Get(c *gin.Context) {
 	var serviceItems []UserServiceItem
 	if user.Role == model.UserRoleAgent {
 		var services []model.ProxyService
-		db.DB.WithContext(ctx).Where("user_id = ?", id).Find(&services)
+		db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Find(&services)
 
 		// 判断用户是否在线（任一设备在线即为在线）
 		userOnline := false
@@ -392,14 +399,10 @@ type UpdateUserRequest struct {
 	SSHEnabled *bool  `json:"ssh_enabled"` // 使用指针区分未传递和传递 false
 }
 
-// Update 更新用户
+// Update 更新用户（支持 ID 或用户名）
 func (a *UserAPI) Update(c *gin.Context) {
 	ctx := c.Request.Context()
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
-		return
-	}
+	identifier := c.Param("id")
 
 	var req UpdateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -408,7 +411,16 @@ func (a *UserAPI) Update(c *gin.Context) {
 	}
 
 	var user model.User
-	if err := db.DB.WithContext(ctx).First(&user, id).Error; err != nil {
+	var err error
+
+	// 尝试解析为 ID
+	if id, parseErr := strconv.ParseUint(identifier, 10, 64); parseErr == nil {
+		err = db.DB.WithContext(ctx).First(&user, id).Error
+	} else {
+		err = db.DB.WithContext(ctx).Where("name = ?", identifier).First(&user).Error
+	}
+
+	if err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
 		return
 	}
@@ -425,13 +437,13 @@ func (a *UserAPI) Update(c *gin.Context) {
 		return
 	}
 
-	logger.Infof("更新用户: id=%d", id)
+	logger.Infof("更新用户: id=%d, name=%s", user.ID, user.Name)
 
 	actionType := model.ActionUpdateAgent
 	if user.Role == model.UserRoleClient {
 		actionType = model.ActionUpdateClient
 	}
-	recordAuditLog(ctx, c, actionType, "user", strconv.FormatUint(id, 10), user.Name, nil)
+	recordAuditLog(ctx, c, actionType, "user", strconv.FormatUint(user.ID, 10), user.Name, nil)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("更新成功", nil))
 }
@@ -441,14 +453,10 @@ type UpdateUserSSHRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
-// UpdateSSH 更新用户 SSH 配置（仅 Agent）
+// UpdateSSH 更新用户 SSH 配置（仅 Agent，支持 ID 或用户名）
 func (a *UserAPI) UpdateSSH(c *gin.Context) {
 	ctx := c.Request.Context()
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
-		return
-	}
+	identifier := c.Param("id")
 
 	var req UpdateUserSSHRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -457,7 +465,16 @@ func (a *UserAPI) UpdateSSH(c *gin.Context) {
 	}
 
 	var user model.User
-	if err := db.DB.WithContext(ctx).First(&user, id).Error; err != nil {
+	var err error
+
+	// 尝试解析为 ID
+	if id, parseErr := strconv.ParseUint(identifier, 10, 64); parseErr == nil {
+		err = db.DB.WithContext(ctx).First(&user, id).Error
+	} else {
+		err = db.DB.WithContext(ctx).Where("name = ?", identifier).First(&user).Error
+	}
+
+	if err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
 		return
 	}
@@ -475,28 +492,33 @@ func (a *UserAPI) UpdateSSH(c *gin.Context) {
 		return
 	}
 
-	logger.Infof("更新用户 SSH 配置: id=%d, enabled=%v", id, req.Enabled)
+	logger.Infof("更新用户 SSH 配置: id=%d, name=%s, enabled=%v", user.ID, user.Name, req.Enabled)
 
 	detail := map[string]interface{}{
 		"old_enabled": oldEnabled,
 		"new_enabled": req.Enabled,
 	}
-	recordAuditLog(ctx, c, model.ActionUpdateAgent, "user", strconv.FormatUint(id, 10), user.Name, detail)
+	recordAuditLog(ctx, c, model.ActionUpdateAgent, "user", strconv.FormatUint(user.ID, 10), user.Name, detail)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("SSH 配置更新成功", nil))
 }
 
-// Delete 删除用户
+// Delete 删除用户（支持 ID 或用户名）
 func (a *UserAPI) Delete(c *gin.Context) {
 	ctx := c.Request.Context()
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
-		return
-	}
+	identifier := c.Param("id")
 
 	var user model.User
-	if err := db.DB.WithContext(ctx).First(&user, id).Error; err != nil {
+	var err error
+
+	// 尝试解析为 ID
+	if id, parseErr := strconv.ParseUint(identifier, 10, 64); parseErr == nil {
+		err = db.DB.WithContext(ctx).First(&user, id).Error
+	} else {
+		err = db.DB.WithContext(ctx).Where("name = ?", identifier).First(&user).Error
+	}
+
+	if err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
 		return
 	}
@@ -508,7 +530,7 @@ func (a *UserAPI) Delete(c *gin.Context) {
 
 		// 删除所有关联的 Node
 		var nodes []model.Node
-		db.DB.WithContext(ctx).Where("user_id = ?", id).Find(&nodes)
+		db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Find(&nodes)
 		for _, node := range nodes {
 			if node.ID > 0 {
 				_ = a.hsClient.DeleteNode(hsCtx, node.ID)
@@ -521,39 +543,44 @@ func (a *UserAPI) Delete(c *gin.Context) {
 	}
 
 	// 删除相关数据
-	db.DB.WithContext(ctx).Where("user_id = ?", id).Delete(&model.Node{})
-	db.DB.WithContext(ctx).Where("user_id = ?", id).Delete(&model.ProxyService{})
-	db.DB.WithContext(ctx).Where("user_id = ?", id).Delete(&model.PortForward{})
-	db.DB.WithContext(ctx).Where("user_id = ?", id).Delete(&model.GroupMember{})
+	db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.Node{})
+	db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.ProxyService{})
+	db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.PortForward{})
+	db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.GroupMember{})
 
 	// 删除用户
-	if err := db.DB.WithContext(ctx).Delete(&model.User{}, id).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Delete(&model.User{}, user.ID).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
 		return
 	}
 
-	logger.Infof("删除用户: id=%d, name=%s", id, user.Name)
+	logger.Infof("删除用户: id=%d, name=%s", user.ID, user.Name)
 
 	actionType := model.ActionDeleteAgent
 	if user.Role == model.UserRoleClient {
 		actionType = model.ActionDeleteClient
 	}
-	recordAuditLog(ctx, c, actionType, "user", strconv.FormatUint(id, 10), user.Name, nil)
+	recordAuditLog(ctx, c, actionType, "user", strconv.FormatUint(user.ID, 10), user.Name, nil)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
 }
 
-// RegenerateSecret 重新生成用户密钥
+// RegenerateSecret 重新生成用户密钥（支持 ID 或用户名）
 func (a *UserAPI) RegenerateSecret(c *gin.Context) {
 	ctx := c.Request.Context()
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
-		return
-	}
+	identifier := c.Param("id")
 
 	var user model.User
-	if err := db.DB.WithContext(ctx).First(&user, id).Error; err != nil {
+	var err error
+
+	// 尝试解析为 ID
+	if id, parseErr := strconv.ParseUint(identifier, 10, 64); parseErr == nil {
+		err = db.DB.WithContext(ctx).First(&user, id).Error
+	} else {
+		err = db.DB.WithContext(ctx).Where("name = ?", identifier).First(&user).Error
+	}
+
+	if err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
 		return
 	}
@@ -576,13 +603,13 @@ func (a *UserAPI) RegenerateSecret(c *gin.Context) {
 		return
 	}
 
-	logger.Infof("重置用户密钥: id=%d", id)
+	logger.Infof("重置用户密钥: id=%d, name=%s", user.ID, user.Name)
 
 	actionType := model.ActionResetAgentSecret
 	if user.Role == model.UserRoleClient {
 		actionType = model.ActionResetClientSecret
 	}
-	recordAuditLog(ctx, c, actionType, "user", strconv.FormatUint(id, 10), user.Name, nil)
+	recordAuditLog(ctx, c, actionType, "user", strconv.FormatUint(user.ID, 10), user.Name, nil)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("密钥重置成功", map[string]string{
 		"secret": secret,

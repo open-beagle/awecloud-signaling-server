@@ -921,3 +921,170 @@ func (s *DesktopServiceServer) GetFavoriteServices(ctx context.Context, req *pb.
 
 	return &pb.GetFavoriteServicesResponse{ServiceIds: serviceIDs}, nil
 }
+
+// WaitForLoginResult 等待登录结果（gRPC 双向流）
+// Desktop 通过此方法等待登录完成，Server 会在用户完成 Logto 登录后推送结果
+func (s *DesktopServiceServer) WaitForLoginResult(stream pb.DesktopService_WaitForLoginResultServer) error {
+	ctx := stream.Context()
+
+	// 接收第一条请求消息
+	req, err := stream.Recv()
+	if err != nil {
+		logger.Errorf("WaitForLoginResult 接收请求失败: %v", err)
+		return status.Error(codes.InvalidArgument, "无法接收请求")
+	}
+
+	sessionID := req.SessionId
+	deviceFingerprint := req.DeviceFingerprint
+
+	logger.Infof("WaitForLoginResult 流建立: sessionId=%s, deviceFingerprint=%s", sessionID, deviceFingerprint)
+
+	// 检查登录会话是否存在
+	var session model.DesktopLoginSession
+	if err := db.DB.WithContext(ctx).Where("session_id = ?", sessionID).First(&session).Error; err != nil {
+		logger.Errorf("登录会话不存在: sessionId=%s", sessionID)
+		return stream.Send(&pb.WaitForLoginResultResponse{
+			Status:  pb.WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_FAILED,
+			Message: "登录会话不存在",
+		})
+	}
+
+	// 检查会话是否已过期
+	if session.IsExpired() {
+		logger.Warnf("登录会话已过期: sessionId=%s", sessionID)
+		return stream.Send(&pb.WaitForLoginResultResponse{
+			Status:  pb.WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_TIMEOUT,
+			Message: "登录会话已过期",
+		})
+	}
+
+	// 获取已注册的登录结果通道
+	// 通道应该已经在 GetLoginURL() 中注册了
+	resultCh := s.loginService.GetLoginResultChannel(sessionID)
+	if resultCh == nil {
+		logger.Errorf("登录结果通道不存在: sessionId=%s", sessionID)
+		return stream.Send(&pb.WaitForLoginResultResponse{
+			Status:  pb.WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_FAILED,
+			Message: "登录会话不存在",
+		})
+	}
+
+	// 创建超时上下文（5 分钟）
+	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	logger.Infof("等待登录结果: sessionId=%s", sessionID)
+
+	// 等待登录结果或超时
+	select {
+	case <-timeoutCtx.Done():
+		logger.Warnf("登录超时: sessionId=%s", sessionID)
+		return stream.Send(&pb.WaitForLoginResultResponse{
+			Status:  pb.WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_TIMEOUT,
+			Message: "登录超时，请重试",
+		})
+
+	case result, ok := <-resultCh:
+		if !ok {
+			logger.Errorf("登录结果通道已关闭: sessionId=%s", sessionID)
+			return stream.Send(&pb.WaitForLoginResultResponse{
+				Status:  pb.WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_FAILED,
+				Message: "登录会话已关闭",
+			})
+		}
+
+		if !result.Success {
+			logger.Warnf("登录失败: sessionId=%s, error=%s", sessionID, result.ErrorMessage)
+			return stream.Send(&pb.WaitForLoginResultResponse{
+				Status:  pb.WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_FAILED,
+				Message: result.ErrorMessage,
+			})
+		}
+
+		// 登录成功，生成 Desktop 凭证
+		logger.Infof("登录成功，生成凭证: sessionId=%s, userId=%d, username=%s", sessionID, result.UserID, result.UserName)
+
+		desktopID, deviceToken, authKey, err := s.generateDesktopCredentials(ctx, result.UserID)
+		if err != nil {
+			logger.Errorf("生成 Desktop 凭证失败: %v", err)
+			return stream.Send(&pb.WaitForLoginResultResponse{
+				Status:  pb.WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_FAILED,
+				Message: "生成凭证失败",
+			})
+		}
+
+		// 获取 Server URL
+		serverURL := s.config.Tailscale.HeadscalePublicURL
+		if serverURL == "" {
+			serverURL = s.config.Tailscale.HeadscaleURL
+		}
+
+		logger.Infof("推送登录成功结果: sessionId=%s, desktopId=%d", sessionID, desktopID)
+
+		// 清理会话（在返回结果后）
+		defer s.loginService.UnregisterLoginSession(sessionID)
+
+		return stream.Send(&pb.WaitForLoginResultResponse{
+			Status:      pb.WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_SUCCESS,
+			Message:     "登录成功",
+			DesktopId:   desktopID,
+			DeviceToken: deviceToken,
+			AuthKey:     authKey,
+			ServerUrl:   serverURL,
+			Username:    result.UserName,
+		})
+	}
+}
+
+// generateDesktopCredentials 生成 Desktop 凭证
+func (s *DesktopServiceServer) generateDesktopCredentials(ctx context.Context, userID uint64) (uint64, string, string, error) {
+	// 1. 为用户创建 DeviceToken
+	deviceToken := model.DeviceToken{
+		ClientID:          int64(userID),
+		DeviceToken:       generateDeviceToken(),
+		DeviceFingerprint: generateDeviceFingerprint(),
+		LastUsedAt:        time.Now(),
+		ExpiresAt:         time.Now().AddDate(1, 0, 0), // 1 年过期
+	}
+
+	if err := db.DB.WithContext(ctx).Create(&deviceToken).Error; err != nil {
+		logger.Errorf("创建 DeviceToken 失败: %v", err)
+		return 0, "", "", err
+	}
+
+	logger.Infof("创建 DeviceToken: id=%d, token=%s", deviceToken.ID, maskToken(deviceToken.DeviceToken))
+
+	// 2. 在 Headscale 中创建 Node 并获取 AuthKey
+	// TODO: 调用 Headscale API 创建 Node 和 PreAuthKey
+	// 暂时使用临时值
+	authKey := "temp-auth-key-" + generateDeviceToken()[:16]
+
+	logger.Infof("生成 Desktop 凭证: desktopId=%d, authKey=%s", deviceToken.ID, maskToken(authKey))
+
+	return uint64(deviceToken.ID), deviceToken.DeviceToken, authKey, nil
+}
+
+// generateDeviceToken 生成设备令牌
+func generateDeviceToken() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// generateDeviceFingerprint 生成设备指纹
+func generateDeviceFingerprint() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// maskToken 隐藏 token 中间部分，用于日志
+func maskToken(token string) string {
+	if token == "" {
+		return "<empty>"
+	}
+	if len(token) <= 10 {
+		return "***"
+	}
+	return token[:5] + "***" + token[len(token)-5:]
+}

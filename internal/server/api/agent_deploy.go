@@ -54,16 +54,12 @@ type CreateDeployTokenResponse struct {
 	InstallCommand string `json:"install_command"`
 }
 
-// CreateDeployToken 生成部署 Token
+// CreateDeployToken 生成部署 Token（支持 ID 或用户名）
 func (a *AgentDeployAPI) CreateDeployToken(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// 获取 Agent 用户 ID
-	userID, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的用户 ID"))
-		return
-	}
+	// 获取 Agent 用户 ID 或用户名
+	identifier := c.Param("id")
 
 	var req CreateDeployTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -73,7 +69,16 @@ func (a *AgentDeployAPI) CreateDeployToken(c *gin.Context) {
 
 	// 验证用户存在且为 Agent 角色
 	var user model.User
-	if err := db.DB.WithContext(ctx).First(&user, userID).Error; err != nil {
+	var err error
+
+	// 尝试解析为 ID
+	if id, parseErr := strconv.ParseUint(identifier, 10, 64); parseErr == nil {
+		err = db.DB.WithContext(ctx).First(&user, id).Error
+	} else {
+		err = db.DB.WithContext(ctx).Where("name = ?", identifier).First(&user).Error
+	}
+
+	if err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
 		return
 	}
@@ -96,7 +101,7 @@ func (a *AgentDeployAPI) CreateDeployToken(c *gin.Context) {
 	expiresAt := time.Now().Add(24 * time.Hour)
 	deployToken := &model.AgentDeployToken{
 		Token:      token,
-		UserID:     userID,
+		UserID:     user.ID,
 		DeviceName: req.DeviceName,
 		Status:     model.AgentDeployTokenStatusPending,
 		CreatedBy:  uint64(adminID),
@@ -118,7 +123,7 @@ func (a *AgentDeployAPI) CreateDeployToken(c *gin.Context) {
 		serverAddr, user.Name, req.DeviceName, token, serverAddr,
 	)
 
-	logger.Infof("生成部署 Token: user_id=%d, device_name=%s", userID, req.DeviceName)
+	logger.Infof("生成部署 Token: user_id=%d, user_name=%s, device_name=%s", user.ID, user.Name, req.DeviceName)
 
 	c.JSON(http.StatusOK, NewSuccessResponse(CreateDeployTokenResponse{
 		Token:          token,
@@ -141,13 +146,25 @@ type DeployTokenListItem struct {
 	LastUsedAt        *time.Time `json:"last_used_at,omitempty"`
 }
 
-// ListDeployTokens 查询部署 Token 历史
+// ListDeployTokens 查询部署 Token 历史（支持 ID 或用户名）
 func (a *AgentDeployAPI) ListDeployTokens(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	userID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	identifier := c.Param("id")
+
+	// 查找用户
+	var user model.User
+	var err error
+
+	// 尝试解析为 ID
+	if id, parseErr := strconv.ParseUint(identifier, 10, 64); parseErr == nil {
+		err = db.DB.WithContext(ctx).First(&user, id).Error
+	} else {
+		err = db.DB.WithContext(ctx).Where("name = ?", identifier).First(&user).Error
+	}
+
 	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的用户 ID"))
+		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
 		return
 	}
 
@@ -163,11 +180,11 @@ func (a *AgentDeployAPI) ListDeployTokens(c *gin.Context) {
 
 	// 先更新过期状态
 	db.DB.WithContext(ctx).Model(&model.AgentDeployToken{}).
-		Where("user_id = ? AND status = ? AND expires_at < ?", userID, model.AgentDeployTokenStatusPending, time.Now()).
+		Where("user_id = ? AND status = ? AND expires_at < ?", user.ID, model.AgentDeployTokenStatusPending, time.Now()).
 		Update("status", model.AgentDeployTokenStatusExpired)
 
 	query := db.DB.WithContext(ctx).Model(&model.AgentDeployToken{}).
-		Where("user_id = ?", userID).
+		Where("user_id = ?", user.ID).
 		Preload("CreatedByAdmin")
 
 	var total int64

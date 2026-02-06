@@ -152,9 +152,12 @@ func Init(cfg Config, buildInfo *BuildInfo, processAttrs *ProcessAttributes) err
 		return err
 	}
 
+	// 使用 RootSpanFilter 包装 exporter，过滤非法的 Root Span
+	filteredExporter := NewRootSpanFilter(exporter)
+
 	// 创建 TracerProvider
 	tracerProvider = sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter,
+		sdktrace.WithBatcher(filteredExporter,
 			sdktrace.WithBatchTimeout(5*time.Second),
 		),
 		sdktrace.WithResource(res),

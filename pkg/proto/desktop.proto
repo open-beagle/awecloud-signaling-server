@@ -41,6 +41,9 @@ service DesktopService {
 
   // 检查保存的凭据（用于自动登录）
   rpc CheckSavedCredentials(CheckSavedCredentialsRequest) returns (CheckSavedCredentialsResponse);
+
+  // 等待登录结果 - 通过 gRPC 双向流等待登录完成（新增）
+  rpc WaitForLoginResult(stream WaitForLoginResultRequest) returns (stream WaitForLoginResultResponse);
 }
 
 // ============================================
@@ -318,4 +321,37 @@ message CheckSavedCredentialsResponse {
   string username = 2; // 用户名
   uint64 desktop_id = 3; // Desktop ID（如果有）
   // 注意：不返回 secret，由前端本地存储
+}
+
+// ============================================
+// 等待登录结果（gRPC 双向流）
+// ============================================
+
+// WaitForLoginResultRequest 等待登录结果请求
+message WaitForLoginResultRequest {
+  string session_id = 1; // 登录会话 ID
+  string device_fingerprint = 2; // 设备指纹
+}
+
+// WaitForLoginResultResponse 等待登录结果响应
+message WaitForLoginResultResponse {
+  WaitForLoginResultStatus status = 1; // 状态
+  string message = 2; // 消息
+  
+  // 登录成功时返回
+  uint64 desktop_id = 3; // Desktop ID
+  string device_token = 4; // 设备令牌
+  string auth_key = 5; // Tailscale PreAuthKey
+  string server_url = 6; // Headscale 服务器地址
+  string username = 7; // 用户名
+}
+
+// WaitForLoginResultStatus 等待登录结果状态
+enum WaitForLoginResultStatus {
+  WAIT_FOR_LOGIN_RESULT_STATUS_UNSPECIFIED = 0; // 未指定
+  WAIT_FOR_LOGIN_RESULT_STATUS_PENDING = 1; // 等待中
+  WAIT_FOR_LOGIN_RESULT_STATUS_SUCCESS = 2; // 登录成功
+  WAIT_FOR_LOGIN_RESULT_STATUS_FAILED = 3; // 登录失败
+  WAIT_FOR_LOGIN_RESULT_STATUS_TIMEOUT = 4; // 超时
+  WAIT_FOR_LOGIN_RESULT_STATUS_CANCELLED = 5; // 已取消
 }

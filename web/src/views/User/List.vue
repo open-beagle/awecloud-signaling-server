@@ -156,12 +156,12 @@ const handleReset = () => {
 
 // 查看详情
 const handleView = (row: User) => {
-  router.push(`/users/${row.id}`)
+  router.push(`/users/${row.name}`)
 }
 
 // 编辑
 const handleEdit = (row: User) => {
-  router.push(`/users/${row.id}?edit=true`)
+  router.push(`/users/${row.name}?edit=true`)
 }
 
 // 删除
@@ -172,7 +172,7 @@ const handleDelete = async (row: User) => {
       t('common.warning'),
       { type: 'warning' }
     )
-    const res = await deleteUser(row.id)
+    const res = await deleteUser(row.name)
     if (res.success) {
       ElMessage.success(t('common.deleteSuccess'))
       fetchUsers()

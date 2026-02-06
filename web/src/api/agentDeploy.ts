@@ -35,18 +35,18 @@ export interface GetDeployCommandResponse {
   install_command: string
 }
 
-// 生成部署 Token
-export const createDeployToken = (userId: number, data: CreateDeployTokenRequest) => {
+// 生成部署 Token（支持 ID 或用户名）
+export const createDeployToken = (userIdentifier: number | string, data: CreateDeployTokenRequest) => {
   return request.post<any, ApiResponse<CreateDeployTokenResponse>>(
-    `/api/v1/admin/users/${userId}/deploy-token`,
+    `/api/v1/admin/users/${userIdentifier}/deploy-token`,
     data
   )
 }
 
-// 获取部署 Token 列表
-export const getDeployTokens = (userId: number, params?: { page?: number; size?: number }) => {
+// 获取部署 Token 列表（支持 ID 或用户名）
+export const getDeployTokens = (userIdentifier: number | string, params?: { page?: number; size?: number }) => {
   return request.get<any, PagedResponse<DeployToken[]>>(
-    `/api/v1/admin/users/${userId}/deploy-tokens`,
+    `/api/v1/admin/users/${userIdentifier}/deploy-tokens`,
     { params }
   )
 }

@@ -10,10 +10,9 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
-
+	"github.com/glebarez/sqlite" // 纯 Go SQLite 驱动
 	"github.com/uptrace/opentelemetry-go-extra/otelgorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
@@ -125,6 +124,9 @@ func autoMigrate() error {
 
 		// Client Token
 		&model.ClientToken{},
+
+		// Device Token
+		&model.DeviceToken{},
 
 		// Desktop 登录会话
 		&model.DesktopLoginSession{},

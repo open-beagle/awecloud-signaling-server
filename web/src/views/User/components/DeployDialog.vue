@@ -198,7 +198,7 @@ const generateAgentDeploy = async () => {
   if (!props.user || !agentForm.value.deviceName) return
 
   try {
-    const res = await createDeployToken(props.user.id, {
+    const res = await createDeployToken(props.user.name, {
       device_name: agentForm.value.deviceName
     })
     if (res.success && res.data) {

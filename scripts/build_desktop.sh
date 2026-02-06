@@ -12,7 +12,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # 版本信息（日常开发使用默认值，流水线传递完整参数）
-BUILD_VERSION="${BUILD_VERSION:-v0.2.0}"
+BUILD_VERSION="${BUILD_VERSION:-dev}"
 BUILD_ADDRESS="${BUILD_ADDRESS:-${SIGNALING_ADDRESS}}"
 PLATFORMS="${PLATFORMS:-windows/amd64}"
 

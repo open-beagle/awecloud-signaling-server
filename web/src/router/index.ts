@@ -29,7 +29,7 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true }
       },
       {
-        path: 'users/:id',
+        path: 'users/:username',
         name: 'UserDetail',
         component: () => import('@/views/User/Detail.vue'),
         meta: { requiresAuth: true }
@@ -154,16 +154,16 @@ const routes: RouteRecordRaw[] = [
         redirect: '/users?role=agent'
       },
       {
-        path: 'agents/:id',
-        redirect: to => `/users/${to.params.id}`
+        path: 'agents/:identifier',
+        redirect: to => `/users/${to.params.identifier}`
       },
       {
         path: 'clients',
         redirect: '/users?role=client'
       },
       {
-        path: 'clients/:id',
-        redirect: to => `/users/${to.params.id}`
+        path: 'clients/:identifier',
+        redirect: to => `/users/${to.params.identifier}`
       },
       {
         path: 'groups/clients',

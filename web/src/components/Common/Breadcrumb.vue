@@ -26,10 +26,10 @@ const items = computed(() => {
   // 1. 用户管理
   if (path === '/users') {
     breadcrumbs.push({ path: '/users', title: '用户管理' })
-  } else if (path.match(/^\/users\/\d+$/)) {
-    const userName = (route.query.name as string) || `#${route.params.id}`
+  } else if (path.startsWith('/users/')) {
+    const username = route.params.username as string
     breadcrumbs.push({ path: '/users', title: '用户管理' })
-    breadcrumbs.push({ title: `用户详情: ${userName}` })
+    breadcrumbs.push({ title: `用户详情: ${username}` })
   }
   
   // 2. 设备管理

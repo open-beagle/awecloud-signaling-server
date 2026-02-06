@@ -11,7 +11,7 @@ GOARCHS="${GOARCHS:-$(go env GOARCH)}"
 GOOS="${GOOS:-linux}"
 
 # 版本信息
-BUILD_VERSION="${BUILD_VERSION:-v0.2.0}"
+BUILD_VERSION="${BUILD_VERSION:-dev}"
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE=$(date '+%Y-%m-%d_%H:%M:%S')
 BUILD_GO=$(go version | awk '{print $3}')
@@ -49,7 +49,7 @@ build_server() {
     
     OUTPUT="${BIN_DIR}/server-${GOOS}-${ARCH}"
     
-    CGO_ENABLED=1 \
+    CGO_ENABLED=0 \
     GOOS=${GOOS} \
     GOARCH=${ARCH} \
     go build \
