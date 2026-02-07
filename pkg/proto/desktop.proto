@@ -6,12 +6,6 @@ option go_package = "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 
 // DesktopService Desktop 管理服务
 service DesktopService {
-  // 首次登录 - Desktop 用 Client 凭证登录
-  rpc Login(DesktopLoginRequest) returns (DesktopLoginResponse);
-
-  // Logto 登录 - Desktop 通过 Server 中转进行 Logto 认证（流式）
-  rpc LoginWithLogto(LogtoLoginRequest) returns (stream LogtoLoginResponse);
-
   // 认证 - Desktop 用设备凭证认证
   rpc Authenticate(DesktopAuthenticateRequest) returns (DesktopAuthenticateResponse);
 
@@ -42,8 +36,14 @@ service DesktopService {
   // 检查保存的凭据（用于自动登录）
   rpc CheckSavedCredentials(CheckSavedCredentialsRequest) returns (CheckSavedCredentialsResponse);
 
-  // 等待登录结果 - 通过 gRPC 双向流等待登录完成（新增）
+  // 创建登录会话 - 返回 session_id 和 login_url
+  rpc CreateLoginSession(CreateLoginSessionRequest) returns (CreateLoginSessionResponse);
+
+  // 等待登录结果 - 通过 gRPC 双向流等待登录完成
   rpc WaitForLoginResult(stream WaitForLoginResultRequest) returns (stream WaitForLoginResultResponse);
+
+  // 注销 - Desktop 安全离场
+  rpc Logout(DesktopLogoutRequest) returns (DesktopLogoutResponse);
 }
 
 // ============================================
@@ -59,29 +59,6 @@ message DesktopSystemInfo {
   string cpu = 5; // CPU 型号
   int32 cpu_cores = 6; // CPU 核心数
   int32 memory_gb = 7; // 内存大小（GB）
-}
-
-// ============================================
-// Desktop 首次登录
-// ============================================
-
-// DesktopLoginRequest Desktop 首次登录请求
-message DesktopLoginRequest {
-  string client_name = 1; // Client 用户名
-  string client_secret = 2; // Client 认证密钥
-  string device_name = 3; // 设备名称（主机名）
-  string device_fingerprint = 4; // 设备指纹（硬件唯一标识）
-  DesktopSystemInfo system_info = 5; // 系统信息
-}
-
-// DesktopLoginResponse Desktop 首次登录响应
-message DesktopLoginResponse {
-  bool success = 1; // 是否成功
-  string message = 2; // 响应消息
-  uint64 desktop_id = 3; // Desktop ID（Headscale Node ID）
-  string secret = 4; // Desktop 专属密钥（仅首次返回）
-  string auth_key = 5; // Tailscale PreAuthKey，用于隧道连接
-  string server_url = 6; // Headscale 服务器地址
 }
 
 // ============================================
@@ -188,6 +165,7 @@ message DeviceInfo {
   string last_used_at = 7; // 最后使用时间
   string created_at = 8; // 创建时间
   bool is_current = 9; // 是否是当前设备
+  string ip = 10; // 隧道 IP
 }
 
 // GetMyDevicesResponse 获取我的设备列表响应
@@ -260,49 +238,22 @@ message GetFavoriteServicesResponse {
 
 
 // ============================================
-// Logto 登录（流式）
+// 创建登录会话
 // ============================================
 
-// LogtoLoginRequest Logto 登录请求
-message LogtoLoginRequest {
-  string device_fingerprint = 1; // 设备指纹
-  string device_name = 2; // 设备名称
-  string username_hint = 3; // 用户名提示（可选，用于预填）
-  DesktopSystemInfo system_info = 4; // 系统信息
+// CreateLoginSessionRequest 创建登录会话请求
+message CreateLoginSessionRequest {
+  string username_hint = 1; // 用户名提示（可选，用于预填）
+  string device_fingerprint = 2; // 设备指纹
+  string device_name = 3; // 设备名称
 }
 
-// LogtoLoginResponse Logto 登录响应（流式）
-// 第一条消息：返回 session_id 和 login_url
-// 第二条消息：返回登录结果（成功时包含 token 和用户信息）
-message LogtoLoginResponse {
-  LogtoLoginStatus status = 1; // 状态
-  string session_id = 2; // 会话 ID
-  string login_url = 3; // 登录 URL（浏览器打开）
-  string message = 4; // 消息
-  // 登录成功后返回
-  uint64 desktop_id = 5; // Desktop ID
-  string secret = 6; // Desktop 专属密钥
-  string auth_key = 7; // Tailscale PreAuthKey
-  string server_url = 8; // Headscale 服务器地址
-  LogtoUserInfo user_info = 9; // 用户信息
-}
-
-// LogtoLoginStatus Logto 登录状态
-enum LogtoLoginStatus {
-  LOGTO_LOGIN_STATUS_UNSPECIFIED = 0; // 未指定
-  LOGTO_LOGIN_STATUS_PENDING = 1; // 待登录（返回 login_url）
-  LOGTO_LOGIN_STATUS_SUCCESS = 2; // 登录成功
-  LOGTO_LOGIN_STATUS_FAILED = 3; // 登录失败
-  LOGTO_LOGIN_STATUS_EXPIRED = 4; // 会话过期
-}
-
-// LogtoUserInfo Logto 用户信息
-message LogtoUserInfo {
-  string user_id = 1; // 用户 ID（Logto sub）
-  string username = 2; // 用户名
-  string email = 3; // 邮箱
-  string name = 4; // 显示名称
-  string avatar = 5; // 头像 URL
+// CreateLoginSessionResponse 创建登录会话响应
+message CreateLoginSessionResponse {
+  bool success = 1; // 是否成功
+  string message = 2; // 响应消息
+  string session_id = 3; // 登录会话 ID
+  string login_url = 4; // 登录页面相对路径（/auth/desktop/{session_id}）
 }
 
 // ============================================
@@ -344,6 +295,21 @@ message WaitForLoginResultResponse {
   string auth_key = 5; // Tailscale PreAuthKey
   string server_url = 6; // Headscale 服务器地址
   string username = 7; // 用户名
+}
+
+// ============================================
+// 注销
+// ============================================
+
+// DesktopLogoutRequest 注销请求
+message DesktopLogoutRequest {
+  uint64 desktop_id = 1; // Desktop ID
+}
+
+// DesktopLogoutResponse 注销响应
+message DesktopLogoutResponse {
+  bool success = 1; // 是否成功
+  string message = 2; // 响应消息
 }
 
 // WaitForLoginResultStatus 等待登录结果状态

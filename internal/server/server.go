@@ -307,13 +307,6 @@ func (s *Server) setupRouter() *gin.Engine {
 			v1Group.GET("/download/agent", downloadAPI.GetAgentDownload)
 			v1Group.GET("/download/agent/version", downloadAPI.GetAgentVersion)
 
-			// Desktop 登录 API（公开）
-			if s.desktopAuthAPI != nil {
-				v1Group.GET("/auth/desktop/login-url", s.desktopAuthAPI.GetLoginURL)
-				v1Group.GET("/auth/desktop/login-result", s.desktopAuthAPI.GetLoginResult)
-				logger.Info("Desktop 登录 API 已启用")
-			}
-
 			// Agent 注册 API（公开，用于部署）
 			agentDeployPublicAPI := api.NewAgentDeployAPI(s.config)
 			v1Group.POST("/agent/register", agentDeployPublicAPI.Register)

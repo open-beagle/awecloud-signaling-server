@@ -484,7 +484,7 @@ func (m *TailscaleManager) WaitForConnection(timeout time.Duration) error {
 	return fmt.Errorf("等待 Tailscale 连接超时")
 }
 
-// monitorConnectionStatus 监控连接状态并更新连接类型
+// monitorConnectionStatus 监控连接状态并更新连接类型，断开时自动重连
 func (m *TailscaleManager) monitorConnectionStatus() {
 	// 启动时立即更新一次状态
 	m.updateConnectionStatus()
@@ -492,14 +492,84 @@ func (m *TailscaleManager) monitorConnectionStatus() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
+	reconnectBackoff := time.Minute // 重连退避时间
+	maxReconnectBackoff := 5 * time.Minute
+
 	for {
 		select {
 		case <-m.ctx.Done():
 			return
 		case <-ticker.C:
+			wasConnected := m.IsConnected()
 			m.updateConnectionStatus()
+			nowConnected := m.IsConnected()
+
+			// 检测到断开，尝试重连
+			if wasConnected && !nowConnected {
+				logger.Warnf("Tailscale 连接断开，%v 后尝试重连", reconnectBackoff)
+				go func() {
+					select {
+					case <-time.After(reconnectBackoff):
+					case <-m.ctx.Done():
+						return
+					}
+					if err := m.tryReconnect(); err != nil {
+						logger.Warnf("Tailscale 重连失败: %v", err)
+						reconnectBackoff = min(reconnectBackoff*2, maxReconnectBackoff)
+					} else {
+						logger.Info("Tailscale 重连成功")
+						reconnectBackoff = time.Minute // 重置退避
+					}
+				}()
+			} else if nowConnected {
+				reconnectBackoff = time.Minute // 连接正常，重置退避
+			}
 		}
 	}
+}
+
+// tryReconnect 尝试重连 Tailscale
+func (m *TailscaleManager) tryReconnect() error {
+	if m.tsServer == nil {
+		return fmt.Errorf("Tailscale 未初始化")
+	}
+
+	lc, err := m.tsServer.LocalClient()
+	if err != nil {
+		return fmt.Errorf("获取 LocalClient 失败: %w", err)
+	}
+
+	// 检查当前状态
+	status, err := lc.Status(m.ctx)
+	if err != nil {
+		return fmt.Errorf("获取状态失败: %w", err)
+	}
+
+	// 如果后端已经在运行，只需等待恢复
+	if status.BackendState == "Running" {
+		m.mutex.Lock()
+		m.connected = true
+		m.mutex.Unlock()
+		return nil
+	}
+
+	logger.Infof("Tailscale 后端状态: %s，尝试重新启动", status.BackendState)
+
+	// 尝试通过 Up 重新连接
+	newStatus, err := m.tsServer.Up(m.ctx)
+	if err != nil {
+		return fmt.Errorf("重新启动 Tailscale 失败: %w", err)
+	}
+
+	if len(newStatus.TailscaleIPs) > 0 {
+		m.mutex.Lock()
+		m.tailscaleIP = newStatus.TailscaleIPs[0].String()
+		m.connected = true
+		m.mutex.Unlock()
+		logger.Infof("Tailscale 重连成功，IP: %s", m.tailscaleIP)
+	}
+
+	return nil
 }
 
 // updateConnectionStatus 更新连接状态

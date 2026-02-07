@@ -19,8 +19,6 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DesktopService_Login_FullMethodName                 = "/awecloud.signaling.DesktopService/Login"
-	DesktopService_LoginWithLogto_FullMethodName        = "/awecloud.signaling.DesktopService/LoginWithLogto"
 	DesktopService_Authenticate_FullMethodName          = "/awecloud.signaling.DesktopService/Authenticate"
 	DesktopService_Heartbeat_FullMethodName             = "/awecloud.signaling.DesktopService/Heartbeat"
 	DesktopService_GetAuthorizedHosts_FullMethodName    = "/awecloud.signaling.DesktopService/GetAuthorizedHosts"
@@ -31,7 +29,9 @@ const (
 	DesktopService_ToggleFavorite_FullMethodName        = "/awecloud.signaling.DesktopService/ToggleFavorite"
 	DesktopService_GetFavoriteServices_FullMethodName   = "/awecloud.signaling.DesktopService/GetFavoriteServices"
 	DesktopService_CheckSavedCredentials_FullMethodName = "/awecloud.signaling.DesktopService/CheckSavedCredentials"
+	DesktopService_CreateLoginSession_FullMethodName    = "/awecloud.signaling.DesktopService/CreateLoginSession"
 	DesktopService_WaitForLoginResult_FullMethodName    = "/awecloud.signaling.DesktopService/WaitForLoginResult"
+	DesktopService_Logout_FullMethodName                = "/awecloud.signaling.DesktopService/Logout"
 )
 
 // DesktopServiceClient is the client API for DesktopService service.
@@ -40,10 +40,6 @@ const (
 //
 // DesktopService Desktop 管理服务
 type DesktopServiceClient interface {
-	// 首次登录 - Desktop 用 Client 凭证登录
-	Login(ctx context.Context, in *DesktopLoginRequest, opts ...grpc.CallOption) (*DesktopLoginResponse, error)
-	// Logto 登录 - Desktop 通过 Server 中转进行 Logto 认证（流式）
-	LoginWithLogto(ctx context.Context, in *LogtoLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogtoLoginResponse], error)
 	// 认证 - Desktop 用设备凭证认证
 	Authenticate(ctx context.Context, in *DesktopAuthenticateRequest, opts ...grpc.CallOption) (*DesktopAuthenticateResponse, error)
 	// 心跳 - 保持连接状态
@@ -64,8 +60,12 @@ type DesktopServiceClient interface {
 	GetFavoriteServices(ctx context.Context, in *GetFavoriteServicesRequest, opts ...grpc.CallOption) (*GetFavoriteServicesResponse, error)
 	// 检查保存的凭据（用于自动登录）
 	CheckSavedCredentials(ctx context.Context, in *CheckSavedCredentialsRequest, opts ...grpc.CallOption) (*CheckSavedCredentialsResponse, error)
-	// 等待登录结果 - 通过 gRPC 双向流等待登录完成（新增）
+	// 创建登录会话 - 返回 session_id 和 login_url
+	CreateLoginSession(ctx context.Context, in *CreateLoginSessionRequest, opts ...grpc.CallOption) (*CreateLoginSessionResponse, error)
+	// 等待登录结果 - 通过 gRPC 双向流等待登录完成
 	WaitForLoginResult(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[WaitForLoginResultRequest, WaitForLoginResultResponse], error)
+	// 注销 - Desktop 安全离场
+	Logout(ctx context.Context, in *DesktopLogoutRequest, opts ...grpc.CallOption) (*DesktopLogoutResponse, error)
 }
 
 type desktopServiceClient struct {
@@ -75,35 +75,6 @@ type desktopServiceClient struct {
 func NewDesktopServiceClient(cc grpc.ClientConnInterface) DesktopServiceClient {
 	return &desktopServiceClient{cc}
 }
-
-func (c *desktopServiceClient) Login(ctx context.Context, in *DesktopLoginRequest, opts ...grpc.CallOption) (*DesktopLoginResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DesktopLoginResponse)
-	err := c.cc.Invoke(ctx, DesktopService_Login_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *desktopServiceClient) LoginWithLogto(ctx context.Context, in *LogtoLoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogtoLoginResponse], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &DesktopService_ServiceDesc.Streams[0], DesktopService_LoginWithLogto_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[LogtoLoginRequest, LogtoLoginResponse]{ClientStream: stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type DesktopService_LoginWithLogtoClient = grpc.ServerStreamingClient[LogtoLoginResponse]
 
 func (c *desktopServiceClient) Authenticate(ctx context.Context, in *DesktopAuthenticateRequest, opts ...grpc.CallOption) (*DesktopAuthenticateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -117,7 +88,7 @@ func (c *desktopServiceClient) Authenticate(ctx context.Context, in *DesktopAuth
 
 func (c *desktopServiceClient) Heartbeat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[DesktopHeartbeatRequest, DesktopHeartbeatResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &DesktopService_ServiceDesc.Streams[1], DesktopService_Heartbeat_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &DesktopService_ServiceDesc.Streams[0], DesktopService_Heartbeat_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -208,9 +179,19 @@ func (c *desktopServiceClient) CheckSavedCredentials(ctx context.Context, in *Ch
 	return out, nil
 }
 
+func (c *desktopServiceClient) CreateLoginSession(ctx context.Context, in *CreateLoginSessionRequest, opts ...grpc.CallOption) (*CreateLoginSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateLoginSessionResponse)
+	err := c.cc.Invoke(ctx, DesktopService_CreateLoginSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *desktopServiceClient) WaitForLoginResult(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[WaitForLoginResultRequest, WaitForLoginResultResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &DesktopService_ServiceDesc.Streams[2], DesktopService_WaitForLoginResult_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &DesktopService_ServiceDesc.Streams[1], DesktopService_WaitForLoginResult_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -221,16 +202,22 @@ func (c *desktopServiceClient) WaitForLoginResult(ctx context.Context, opts ...g
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DesktopService_WaitForLoginResultClient = grpc.BidiStreamingClient[WaitForLoginResultRequest, WaitForLoginResultResponse]
 
+func (c *desktopServiceClient) Logout(ctx context.Context, in *DesktopLogoutRequest, opts ...grpc.CallOption) (*DesktopLogoutResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DesktopLogoutResponse)
+	err := c.cc.Invoke(ctx, DesktopService_Logout_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DesktopServiceServer is the server API for DesktopService service.
 // All implementations must embed UnimplementedDesktopServiceServer
 // for forward compatibility.
 //
 // DesktopService Desktop 管理服务
 type DesktopServiceServer interface {
-	// 首次登录 - Desktop 用 Client 凭证登录
-	Login(context.Context, *DesktopLoginRequest) (*DesktopLoginResponse, error)
-	// Logto 登录 - Desktop 通过 Server 中转进行 Logto 认证（流式）
-	LoginWithLogto(*LogtoLoginRequest, grpc.ServerStreamingServer[LogtoLoginResponse]) error
 	// 认证 - Desktop 用设备凭证认证
 	Authenticate(context.Context, *DesktopAuthenticateRequest) (*DesktopAuthenticateResponse, error)
 	// 心跳 - 保持连接状态
@@ -251,8 +238,12 @@ type DesktopServiceServer interface {
 	GetFavoriteServices(context.Context, *GetFavoriteServicesRequest) (*GetFavoriteServicesResponse, error)
 	// 检查保存的凭据（用于自动登录）
 	CheckSavedCredentials(context.Context, *CheckSavedCredentialsRequest) (*CheckSavedCredentialsResponse, error)
-	// 等待登录结果 - 通过 gRPC 双向流等待登录完成（新增）
+	// 创建登录会话 - 返回 session_id 和 login_url
+	CreateLoginSession(context.Context, *CreateLoginSessionRequest) (*CreateLoginSessionResponse, error)
+	// 等待登录结果 - 通过 gRPC 双向流等待登录完成
 	WaitForLoginResult(grpc.BidiStreamingServer[WaitForLoginResultRequest, WaitForLoginResultResponse]) error
+	// 注销 - Desktop 安全离场
+	Logout(context.Context, *DesktopLogoutRequest) (*DesktopLogoutResponse, error)
 	mustEmbedUnimplementedDesktopServiceServer()
 }
 
@@ -263,12 +254,6 @@ type DesktopServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedDesktopServiceServer struct{}
 
-func (UnimplementedDesktopServiceServer) Login(context.Context, *DesktopLoginRequest) (*DesktopLoginResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Login not implemented")
-}
-func (UnimplementedDesktopServiceServer) LoginWithLogto(*LogtoLoginRequest, grpc.ServerStreamingServer[LogtoLoginResponse]) error {
-	return status.Error(codes.Unimplemented, "method LoginWithLogto not implemented")
-}
 func (UnimplementedDesktopServiceServer) Authenticate(context.Context, *DesktopAuthenticateRequest) (*DesktopAuthenticateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Authenticate not implemented")
 }
@@ -299,8 +284,14 @@ func (UnimplementedDesktopServiceServer) GetFavoriteServices(context.Context, *G
 func (UnimplementedDesktopServiceServer) CheckSavedCredentials(context.Context, *CheckSavedCredentialsRequest) (*CheckSavedCredentialsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CheckSavedCredentials not implemented")
 }
+func (UnimplementedDesktopServiceServer) CreateLoginSession(context.Context, *CreateLoginSessionRequest) (*CreateLoginSessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateLoginSession not implemented")
+}
 func (UnimplementedDesktopServiceServer) WaitForLoginResult(grpc.BidiStreamingServer[WaitForLoginResultRequest, WaitForLoginResultResponse]) error {
 	return status.Error(codes.Unimplemented, "method WaitForLoginResult not implemented")
+}
+func (UnimplementedDesktopServiceServer) Logout(context.Context, *DesktopLogoutRequest) (*DesktopLogoutResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Logout not implemented")
 }
 func (UnimplementedDesktopServiceServer) mustEmbedUnimplementedDesktopServiceServer() {}
 func (UnimplementedDesktopServiceServer) testEmbeddedByValue()                        {}
@@ -322,35 +313,6 @@ func RegisterDesktopServiceServer(s grpc.ServiceRegistrar, srv DesktopServiceSer
 	}
 	s.RegisterService(&DesktopService_ServiceDesc, srv)
 }
-
-func _DesktopService_Login_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DesktopLoginRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DesktopServiceServer).Login(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DesktopService_Login_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DesktopServiceServer).Login(ctx, req.(*DesktopLoginRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DesktopService_LoginWithLogto_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(LogtoLoginRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(DesktopServiceServer).LoginWithLogto(m, &grpc.GenericServerStream[LogtoLoginRequest, LogtoLoginResponse]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type DesktopService_LoginWithLogtoServer = grpc.ServerStreamingServer[LogtoLoginResponse]
 
 func _DesktopService_Authenticate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DesktopAuthenticateRequest)
@@ -521,12 +483,48 @@ func _DesktopService_CheckSavedCredentials_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DesktopService_CreateLoginSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateLoginSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DesktopServiceServer).CreateLoginSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DesktopService_CreateLoginSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DesktopServiceServer).CreateLoginSession(ctx, req.(*CreateLoginSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DesktopService_WaitForLoginResult_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(DesktopServiceServer).WaitForLoginResult(&grpc.GenericServerStream[WaitForLoginResultRequest, WaitForLoginResultResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DesktopService_WaitForLoginResultServer = grpc.BidiStreamingServer[WaitForLoginResultRequest, WaitForLoginResultResponse]
+
+func _DesktopService_Logout_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DesktopLogoutRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DesktopServiceServer).Logout(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DesktopService_Logout_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DesktopServiceServer).Logout(ctx, req.(*DesktopLogoutRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
 
 // DesktopService_ServiceDesc is the grpc.ServiceDesc for DesktopService service.
 // It's only intended for direct use with grpc.RegisterService,
@@ -535,10 +533,6 @@ var DesktopService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "awecloud.signaling.DesktopService",
 	HandlerType: (*DesktopServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "Login",
-			Handler:    _DesktopService_Login_Handler,
-		},
 		{
 			MethodName: "Authenticate",
 			Handler:    _DesktopService_Authenticate_Handler,
@@ -575,13 +569,16 @@ var DesktopService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "CheckSavedCredentials",
 			Handler:    _DesktopService_CheckSavedCredentials_Handler,
 		},
+		{
+			MethodName: "CreateLoginSession",
+			Handler:    _DesktopService_CreateLoginSession_Handler,
+		},
+		{
+			MethodName: "Logout",
+			Handler:    _DesktopService_Logout_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "LoginWithLogto",
-			Handler:       _DesktopService_LoginWithLogto_Handler,
-			ServerStreams: true,
-		},
 		{
 			StreamName:    "Heartbeat",
 			Handler:       _DesktopService_Heartbeat_Handler,

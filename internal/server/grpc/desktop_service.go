@@ -76,111 +76,42 @@ func (s *DesktopServiceServer) SetLoginService(loginService *service.DesktopLogi
 	s.loginService = loginService
 }
 
-// LoginWithLogto Desktop 通过 Logto 登录（流式）
-func (s *DesktopServiceServer) LoginWithLogto(req *pb.LogtoLoginRequest, stream pb.DesktopService_LoginWithLogtoServer) error {
-	ctx := stream.Context()
-	logger.Infof("Desktop Logto 登录请求: device_name=%s, username_hint=%s", req.DeviceName, req.UsernameHint)
+// CreateLoginSession 创建登录会话，返回 session_id 和 login_url
+func (s *DesktopServiceServer) CreateLoginSession(ctx context.Context, req *pb.CreateLoginSessionRequest) (*pb.CreateLoginSessionResponse, error) {
+	logger.Infof("创建登录会话: device_name=%s, username_hint=%s", req.DeviceName, req.UsernameHint)
 
 	// 检查 Logto 是否已配置
 	if s.loginService == nil || !s.loginService.IsLogtoConfigured() {
-		return stream.Send(&pb.LogtoLoginResponse{
-			Status:  pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_FAILED,
+		return &pb.CreateLoginSessionResponse{
+			Success: false,
 			Message: "Logto 未配置",
-		})
+		}, nil
 	}
 
 	// 创建登录会话
-	session, loginURL, err := s.loginService.CreateLoginSession(req.DeviceFingerprint, req.DeviceName, req.UsernameHint)
+	session, _, err := s.loginService.CreateLoginSession(req.DeviceFingerprint, req.DeviceName, req.UsernameHint)
 	if err != nil {
 		logger.Errorf("创建登录会话失败: %v", err)
-		return stream.Send(&pb.LogtoLoginResponse{
-			Status:  pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_FAILED,
+		return &pb.CreateLoginSessionResponse{
+			Success: false,
 			Message: "创建登录会话失败",
-		})
+		}, nil
 	}
 
-	// 发送第一条消息：session_id 和 login_url
-	if err := stream.Send(&pb.LogtoLoginResponse{
-		Status:    pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_PENDING,
+	// 注册登录结果通道（WaitForLoginResult 会用到）
+	s.loginService.RegisterLoginSession(session.SessionID)
+
+	// 返回相对路径，Desktop 端拼接 server 地址
+	loginURL := "/auth/desktop/" + session.SessionID
+
+	logger.Infof("登录会话创建成功: sessionID=%s, loginURL=%s", session.SessionID, loginURL)
+
+	return &pb.CreateLoginSessionResponse{
+		Success:   true,
+		Message:   "登录会话创建成功",
 		SessionId: session.SessionID,
 		LoginUrl:  loginURL,
-		Message:   "请在浏览器中完成登录",
-	}); err != nil {
-		return err
-	}
-
-	// 注册登录结果通道
-	resultCh := s.loginService.RegisterLoginSession(session.SessionID)
-	// 注意：不要在这里 defer UnregisterLoginSession
-	// 因为用户可能还在浏览器中登录，Session 存储需要保留
-	// 会话会在以下情况被清理：
-	// 1. 登录成功后，由回调处理器清理
-	// 2. 登录失败后，由回调处理器清理
-	// 3. 超时后，由定时任务清理（TODO）
-
-	// 等待登录结果或超时
-	select {
-	case <-ctx.Done():
-		logger.Infof("Logto 登录流被取消: sessionID=%s", session.SessionID)
-		return ctx.Err()
-
-	case result, ok := <-resultCh:
-		if !ok {
-			return stream.Send(&pb.LogtoLoginResponse{
-				Status:  pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_FAILED,
-				Message: "登录会话已关闭",
-			})
-		}
-
-		if !result.Success {
-			return stream.Send(&pb.LogtoLoginResponse{
-				Status:  pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_FAILED,
-				Message: result.ErrorMessage,
-			})
-		}
-
-		// 登录成功，创建或获取 Desktop 节点
-		node, nodeSecret, err := s.createOrGetDesktopNode(ctx, result.UserID, result.UserName, req.DeviceName, req.SystemInfo)
-		if err != nil {
-			logger.Errorf("创建 Desktop 节点失败: %v", err)
-			return stream.Send(&pb.LogtoLoginResponse{
-				Status:  pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_FAILED,
-				Message: "创建设备失败",
-			})
-		}
-
-		// 获取 Headscale AuthKey
-		resp := &pb.LogtoLoginResponse{
-			Status:    pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_SUCCESS,
-			Message:   "登录成功",
-			DesktopId: node.ID,
-			Secret:    nodeSecret,
-			UserInfo: &pb.LogtoUserInfo{
-				UserId:   fmt.Sprintf("%d", result.UserID),
-				Username: result.UserName,
-				Email:    result.Email,
-				Name:     result.DisplayName,
-				Avatar:   result.Avatar,
-			},
-		}
-
-		if s.headscaleClient != nil && s.config != nil {
-			if authKey, serverURL, err := s.getOrCreateAuthKey(ctx, result.UserID, result.UserName); err == nil {
-				resp.AuthKey = authKey
-				resp.ServerUrl = serverURL
-			}
-		}
-
-		logger.Infof("Desktop Logto 登录成功: user=%s, device=%s, nodeId=%d", result.UserName, req.DeviceName, node.ID)
-		return stream.Send(resp)
-
-	case <-time.After(10 * time.Minute):
-		// 超时
-		return stream.Send(&pb.LogtoLoginResponse{
-			Status:  pb.LogtoLoginStatus_LOGTO_LOGIN_STATUS_EXPIRED,
-			Message: "登录超时，请重试",
-		})
-	}
+	}, nil
 }
 
 // createOrGetDesktopNode 创建或获取 Desktop 节点
@@ -234,16 +165,6 @@ func (s *DesktopServiceServer) createOrGetDesktopNode(ctx context.Context, userI
 	}
 
 	return &node, nodeSecret, nil
-}
-
-// Login Desktop 首次登录（已废弃，请使用 LoginWithLogto）
-// Deprecated: 使用 LoginWithLogto 代替
-func (s *DesktopServiceServer) Login(ctx context.Context, req *pb.DesktopLoginRequest) (*pb.DesktopLoginResponse, error) {
-	logger.Warnf("Desktop 使用已废弃的 Login 方法: client_name=%s", req.ClientName)
-	return &pb.DesktopLoginResponse{
-		Success: false,
-		Message: "密码登录已废弃，请升级 Desktop 客户端并使用 Logto 登录",
-	}, nil
 }
 
 // Authenticate Desktop 认证
@@ -564,9 +485,15 @@ func (s *DesktopServiceServer) GetAuthorizedHosts(ctx context.Context, req *pb.G
 			}
 		}
 
+		// 主机名格式：用户名.设备名
+		hostName := agentUser.Name
+		if agentNode.Name != "" {
+			hostName = fmt.Sprintf("%s.%s", agentUser.Name, agentNode.Name)
+		}
+
 		host := &pb.AuthorizedHost{
 			HostId:   fmt.Sprintf("%d", agentID),
-			HostName: agentUser.Name,
+			HostName: hostName,
 			TunnelIp: tunnelIP,
 			SshUsers: sshUsers,
 			Status:   "offline",
@@ -673,6 +600,23 @@ func (s *DesktopServiceServer) GetMyDevices(ctx context.Context, req *pb.GetMyDe
 		return nil, status.Error(codes.Internal, "查询设备失败")
 	}
 
+	// 从 Headscale 获取该用户的所有节点 IP（实时数据）
+	nodeIPMap := make(map[string]string) // hostname -> IP
+	if s.headscaleClient != nil {
+		var user model.User
+		if err := db.DB.WithContext(ctx).First(&user, currentNode.UserID).Error; err == nil {
+			hsUserName := fmt.Sprintf("client-%s", user.Name)
+			hsNodes, err := s.headscaleClient.ListNodesByUser(ctx, hsUserName)
+			if err == nil {
+				for _, hsNode := range hsNodes {
+					if len(hsNode.IpAddresses) > 0 {
+						nodeIPMap[hsNode.GivenName] = hsNode.IpAddresses[0]
+					}
+				}
+			}
+		}
+	}
+
 	// 转换为响应格式
 	resp := &pb.GetMyDevicesResponse{
 		Devices: make([]*pb.DeviceInfo, 0, len(nodes)),
@@ -709,6 +653,9 @@ func (s *DesktopServiceServer) GetMyDevices(ctx context.Context, req *pb.GetMyDe
 		}
 		createdAt := node.CreatedAt.Format(time.RFC3339)
 
+		// 从 Headscale 获取实时 IP（优先匹配 node.Name）
+		ip := nodeIPMap[node.Name]
+
 		resp.Devices = append(resp.Devices, &pb.DeviceInfo{
 			DeviceToken: fmt.Sprintf("%d:%s", node.ID, "***"), // 不返回真实 secret
 			DeviceName:  node.Name,
@@ -719,6 +666,7 @@ func (s *DesktopServiceServer) GetMyDevices(ctx context.Context, req *pb.GetMyDe
 			LastUsedAt:  lastUsedAt,
 			CreatedAt:   createdAt,
 			IsCurrent:   node.ID == req.DesktopId,
+			Ip:          ip,
 		})
 	}
 
@@ -1004,22 +952,39 @@ func (s *DesktopServiceServer) WaitForLoginResult(stream pb.DesktopService_WaitF
 		// 登录成功，生成 Desktop 凭证
 		logger.Infof("登录成功，生成凭证: sessionId=%s, userId=%d, username=%s", sessionID, result.UserID, result.UserName)
 
-		desktopID, deviceToken, authKey, err := s.generateDesktopCredentials(ctx, result.UserID)
+		// 使用 session 中保存的主机名作为设备名（由 Desktop 端在 CreateLoginSession 时传入）
+		deviceName := session.DeviceName
+		if deviceName == "" {
+			deviceName = fmt.Sprintf("desktop-%d", result.UserID)
+		}
+		node, nodeSecret, err := s.createOrGetDesktopNode(ctx, result.UserID, result.UserName, deviceName, nil)
 		if err != nil {
-			logger.Errorf("生成 Desktop 凭证失败: %v", err)
+			logger.Errorf("创建 Desktop 节点失败: %v", err)
 			return stream.Send(&pb.WaitForLoginResultResponse{
 				Status:  pb.WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_FAILED,
 				Message: "生成凭证失败",
 			})
 		}
 
-		// 获取 Server URL
-		serverURL := s.config.Tailscale.HeadscalePublicURL
+		// 获取 Headscale AuthKey
+		var authKey string
+		serverURL := ""
+		if s.headscaleClient != nil && s.config != nil {
+			if key, url, err := s.getOrCreateAuthKey(ctx, result.UserID, result.UserName); err == nil {
+				authKey = key
+				serverURL = url
+			} else {
+				logger.Warnf("获取 AuthKey 失败: %v", err)
+			}
+		}
 		if serverURL == "" {
-			serverURL = s.config.Tailscale.HeadscaleURL
+			serverURL = s.config.Tailscale.HeadscalePublicURL
+			if serverURL == "" {
+				serverURL = s.config.Tailscale.HeadscaleURL
+			}
 		}
 
-		logger.Infof("推送登录成功结果: sessionId=%s, desktopId=%d", sessionID, desktopID)
+		logger.Infof("推送登录成功结果: sessionId=%s, desktopId=%d", sessionID, node.ID)
 
 		// 清理会话（在返回结果后）
 		defer s.loginService.UnregisterLoginSession(sessionID)
@@ -1027,8 +992,8 @@ func (s *DesktopServiceServer) WaitForLoginResult(stream pb.DesktopService_WaitF
 		return stream.Send(&pb.WaitForLoginResultResponse{
 			Status:      pb.WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_SUCCESS,
 			Message:     "登录成功",
-			DesktopId:   desktopID,
-			DeviceToken: deviceToken,
+			DesktopId:   node.ID,
+			DeviceToken: nodeSecret,
 			AuthKey:     authKey,
 			ServerUrl:   serverURL,
 			Username:    result.UserName,
@@ -1036,46 +1001,32 @@ func (s *DesktopServiceServer) WaitForLoginResult(stream pb.DesktopService_WaitF
 	}
 }
 
-// generateDesktopCredentials 生成 Desktop 凭证
-func (s *DesktopServiceServer) generateDesktopCredentials(ctx context.Context, userID uint64) (uint64, string, string, error) {
-	// 1. 为用户创建 DeviceToken
-	deviceToken := model.DeviceToken{
-		ClientID:          int64(userID),
-		DeviceToken:       generateDeviceToken(),
-		DeviceFingerprint: generateDeviceFingerprint(),
-		LastUsedAt:        time.Now(),
-		ExpiresAt:         time.Now().AddDate(1, 0, 0), // 1 年过期
+// Logout Desktop 注销（安全离场）
+func (s *DesktopServiceServer) Logout(ctx context.Context, req *pb.DesktopLogoutRequest) (*pb.DesktopLogoutResponse, error) {
+	logger.Infof("Desktop 注销请求: desktopId=%d", req.DesktopId)
+
+	// 验证 Desktop 是否存在
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, req.DesktopId).Error; err != nil {
+		return &pb.DesktopLogoutResponse{Success: false, Message: "设备不存在"}, nil
+	}
+	if node.Type != model.NodeTypeDesktop {
+		return &pb.DesktopLogoutResponse{Success: false, Message: "设备类型错误"}, nil
 	}
 
-	if err := db.DB.WithContext(ctx).Create(&deviceToken).Error; err != nil {
-		logger.Errorf("创建 DeviceToken 失败: %v", err)
-		return 0, "", "", err
+	// 关闭该设备的心跳连接
+	s.connMutex.Lock()
+	if conn, exists := s.connections[req.DesktopId]; exists {
+		conn.Cancel()
+		delete(s.connections, req.DesktopId)
 	}
+	s.connMutex.Unlock()
 
-	logger.Infof("创建 DeviceToken: id=%d, token=%s", deviceToken.ID, maskToken(deviceToken.DeviceToken))
+	// 清除数据库中的心跳时间
+	db.DB.WithContext(ctx).Model(&model.Node{}).Where("id = ?", req.DesktopId).Update("last_heartbeat", nil)
 
-	// 2. 在 Headscale 中创建 Node 并获取 AuthKey
-	// TODO: 调用 Headscale API 创建 Node 和 PreAuthKey
-	// 暂时使用临时值
-	authKey := "temp-auth-key-" + generateDeviceToken()[:16]
-
-	logger.Infof("生成 Desktop 凭证: desktopId=%d, authKey=%s", deviceToken.ID, maskToken(authKey))
-
-	return uint64(deviceToken.ID), deviceToken.DeviceToken, authKey, nil
-}
-
-// generateDeviceToken 生成设备令牌
-func generateDeviceToken() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return hex.EncodeToString(b)
-}
-
-// generateDeviceFingerprint 生成设备指纹
-func generateDeviceFingerprint() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	logger.Infof("Desktop %d 注销成功", req.DesktopId)
+	return &pb.DesktopLogoutResponse{Success: true, Message: "注销成功"}, nil
 }
 
 // maskToken 隐藏 token 中间部分，用于日志
