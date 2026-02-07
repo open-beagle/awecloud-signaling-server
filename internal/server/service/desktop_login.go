@@ -22,6 +22,7 @@ type LoginResult struct {
 	DisplayName  string
 	Avatar       string
 	ErrorMessage string
+	IsDisabled   bool // 用户已禁用/待审批
 }
 
 // SessionData 会话数据（包含 Logto SDK 需要的存储）

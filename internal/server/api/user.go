@@ -54,18 +54,20 @@ func (a *UserAPI) SetAgentService(service *grpcserver.AgentServiceServer) {
 
 // UserListItem 用户列表项
 type UserListItem struct {
-	ID           uint64     `json:"id"`
-	Name         string     `json:"name"`
-	Alias        string     `json:"alias"`
-	Role         string     `json:"role"`
-	NodeCount    int64      `json:"node_count"`    // 设备数量
-	OnlineCount  int64      `json:"online_count"`  // 在线设备数量
-	ServiceCount int64      `json:"service_count"` // 服务数量（仅 Agent）
-	GroupCount   int64      `json:"group_count"`   // 分组数量
-	Status       string     `json:"status"`
-	SSHEnabled   bool       `json:"ssh_enabled"` // SSH 是否启用（仅 Agent）
-	LastOnline   *time.Time `json:"last_online"`
-	CreatedAt    time.Time  `json:"created_at"`
+	ID           uint64           `json:"id"`
+	Name         string           `json:"name"`
+	Alias        string           `json:"alias"`
+	Role         string           `json:"role"`
+	NodeCount    int64            `json:"node_count"`    // 设备数量
+	OnlineCount  int64            `json:"online_count"`  // 在线设备数量
+	ServiceCount int64            `json:"service_count"` // 服务数量（仅 Agent）
+	GroupCount   int64            `json:"group_count"`   // 分组数量
+	Status       string           `json:"status"`
+	SSHEnabled   bool             `json:"ssh_enabled"` // SSH 是否启用（仅 Agent）
+	Enabled      bool             `json:"enabled"`     // 是否启用
+	Source       model.UserSource `json:"source"`      // 来源：manual / logto
+	LastOnline   *time.Time       `json:"last_online"`
+	CreatedAt    time.Time        `json:"created_at"`
 }
 
 // List 获取用户列表
@@ -74,7 +76,9 @@ func (a *UserAPI) List(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
 	search := c.Query("search")
-	role := c.Query("role") // 筛选角色：agent / client
+	role := c.Query("role")       // 筛选角色：agent / client
+	enabled := c.Query("enabled") // 筛选启用状态：true / false
+	source := c.Query("source")   // 筛选来源：manual / logto
 
 	if page < 1 {
 		page = 1
@@ -89,6 +93,14 @@ func (a *UserAPI) List(c *gin.Context) {
 	}
 	if role != "" {
 		query = query.Where("role = ?", role)
+	}
+	if enabled == "true" {
+		query = query.Where("enabled = ?", true)
+	} else if enabled == "false" {
+		query = query.Where("enabled = ?", false)
+	}
+	if source != "" {
+		query = query.Where("source = ?", source)
 	}
 
 	var total int64
@@ -165,6 +177,8 @@ func (a *UserAPI) List(c *gin.Context) {
 			GroupCount:   groupCountMap[user.ID],
 			Status:       status,
 			SSHEnabled:   user.SSHEnabled,
+			Enabled:      user.Enabled,
+			Source:       user.Source,
 			LastOnline:   stats.LastOnline,
 			CreatedAt:    user.CreatedAt,
 		}
@@ -614,6 +628,62 @@ func (a *UserAPI) RegenerateSecret(c *gin.Context) {
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("密钥重置成功", map[string]string{
 		"secret": secret,
 	}))
+}
+
+// Enable 启用用户（支持 ID 或用户名）
+func (a *UserAPI) Enable(c *gin.Context) {
+	a.setUserEnabled(c, true)
+}
+
+// Disable 禁用用户（支持 ID 或用户名）
+func (a *UserAPI) Disable(c *gin.Context) {
+	a.setUserEnabled(c, false)
+}
+
+// setUserEnabled 设置用户启用/禁用状态
+func (a *UserAPI) setUserEnabled(c *gin.Context, enabled bool) {
+	ctx := c.Request.Context()
+	identifier := c.Param("id")
+
+	var user model.User
+	var err error
+
+	if id, parseErr := strconv.ParseUint(identifier, 10, 64); parseErr == nil {
+		err = db.DB.WithContext(ctx).First(&user, id).Error
+	} else {
+		err = db.DB.WithContext(ctx).Where("name = ?", identifier).First(&user).Error
+	}
+
+	if err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
+		return
+	}
+
+	oldEnabled := user.Enabled
+	user.Enabled = enabled
+
+	if err := db.DB.WithContext(ctx).Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新失败"))
+		return
+	}
+
+	action := "启用"
+	if !enabled {
+		action = "禁用"
+	}
+	logger.Infof("%s用户: id=%d, name=%s", action, user.ID, user.Name)
+
+	actionType := model.ActionUpdateAgent
+	if user.Role == model.UserRoleClient {
+		actionType = model.ActionUpdateClient
+	}
+	detail := map[string]interface{}{
+		"old_enabled": oldEnabled,
+		"new_enabled": enabled,
+	}
+	recordAuditLog(ctx, c, actionType, "user", strconv.FormatUint(user.ID, 10), user.Name, detail)
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse(action+"成功", nil))
 }
 
 // generateUserSecret 生成随机密钥

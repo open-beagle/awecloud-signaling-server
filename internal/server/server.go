@@ -335,6 +335,8 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.POST("/users", userAPI.Create)
 					adminAuthGroup.PUT("/users/:id", userAPI.Update)
 					adminAuthGroup.PUT("/users/:id/ssh", userAPI.UpdateSSH)
+					adminAuthGroup.PUT("/users/:id/enable", userAPI.Enable)
+					adminAuthGroup.PUT("/users/:id/disable", userAPI.Disable)
 					adminAuthGroup.DELETE("/users/:id", userAPI.Delete)
 					adminAuthGroup.POST("/users/:id/regenerate-secret", userAPI.RegenerateSecret)
 

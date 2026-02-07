@@ -941,9 +941,14 @@ func (s *DesktopServiceServer) WaitForLoginResult(stream pb.DesktopService_WaitF
 		}
 
 		if !result.Success {
-			logger.Warnf("登录失败: sessionId=%s, error=%s", sessionID, result.ErrorMessage)
+			// 区分禁用/待审批和普通失败
+			resultStatus := pb.WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_FAILED
+			if result.IsDisabled {
+				resultStatus = pb.WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_DISABLED
+			}
+			logger.Warnf("登录失败: sessionId=%s, error=%s, disabled=%v", sessionID, result.ErrorMessage, result.IsDisabled)
 			return stream.Send(&pb.WaitForLoginResultResponse{
-				Status:  pb.WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_FAILED,
+				Status:  resultStatus,
 				Message: result.ErrorMessage,
 			})
 		}

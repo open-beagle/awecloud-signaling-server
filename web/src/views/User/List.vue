@@ -9,6 +9,18 @@
             <el-option :label="$t('user.roleClient')" value="client" />
           </el-select>
         </el-form-item>
+        <el-form-item :label="$t('user.enabled')">
+          <el-select v-model="searchForm.enabled" :placeholder="$t('common.all')" clearable style="width: 120px">
+            <el-option :label="$t('user.enabledTrue')" value="true" />
+            <el-option :label="$t('user.enabledFalse')" value="false" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="$t('user.source')">
+          <el-select v-model="searchForm.source" :placeholder="$t('common.all')" clearable style="width: 120px">
+            <el-option :label="$t('user.sourceManual')" value="manual" />
+            <el-option :label="$t('user.sourceLogto')" value="logto" />
+          </el-select>
+        </el-form-item>
         <el-form-item :label="$t('common.search')">
           <el-input v-model="searchForm.search" :placeholder="$t('user.searchPlaceholder')" clearable style="width: 200px" @keyup.enter="handleSearch" />
         </el-form-item>
@@ -52,13 +64,27 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
+        <el-table-column prop="enabled" :label="$t('user.enabled')" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.enabled" type="success" size="small">{{ $t('user.enabledTrue') }}</el-tag>
+            <el-tag v-else type="danger" size="small">{{ row.source === 'logto' ? $t('user.pendingApproval') : $t('user.enabledFalse') }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="source" :label="$t('user.source')" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.source === 'logto'" type="warning" size="small">{{ $t('user.sourceLogto') }}</el-tag>
+            <el-tag v-else type="info" size="small">{{ $t('user.sourceManual') }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="created_at" :label="$t('common.createdAt')" width="180">
           <template #default="{ row }">
             {{ formatTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="200" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="260" fixed="right">
           <template #default="{ row }">
+            <el-button v-if="!row.enabled" type="success" link size="small" @click="handleEnable(row)">{{ $t('user.enabledTrue') }}</el-button>
+            <el-button v-else type="warning" link size="small" @click="handleDisable(row)">{{ $t('user.enabledFalse') }}</el-button>
             <el-button type="primary" link size="small" :icon="Upload" @click="handleDeploy(row)">{{ $t('user.deploy') }}</el-button>
             <el-button type="primary" link size="small" @click="handleEdit(row)">{{ $t('common.edit') }}</el-button>
             <el-button type="danger" link size="small" @click="handleDelete(row)">{{ $t('common.delete') }}</el-button>
@@ -94,7 +120,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Upload } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
-import { getUsers, deleteUser, type User, type UserRole } from '@/api/user'
+import { getUsers, deleteUser, enableUser, disableUser, type User, type UserRole, type UserSource } from '@/api/user'
 import { formatTime } from '@/utils/time'
 import CreateDialog from './components/CreateDialog.vue'
 import DeployDialog from './components/DeployDialog.vue'
@@ -110,7 +136,9 @@ const selectedUser = ref<User | null>(null)
 
 const searchForm = reactive({
   role: '' as UserRole | '',
-  search: ''
+  search: '',
+  enabled: '' as string,
+  source: '' as UserSource | ''
 })
 
 const pagination = reactive({
@@ -126,6 +154,8 @@ const fetchUsers = async () => {
     const res = await getUsers({
       role: (searchForm.role || undefined) as UserRole | undefined,
       search: searchForm.search || undefined,
+      enabled: searchForm.enabled || undefined,
+      source: (searchForm.source || undefined) as UserSource | undefined,
       page: pagination.page,
       size: pagination.size
     })
@@ -150,6 +180,8 @@ const handleSearch = () => {
 const handleReset = () => {
   searchForm.role = ''
   searchForm.search = ''
+  searchForm.enabled = ''
+  searchForm.source = ''
   pagination.page = 1
   fetchUsers()
 }
@@ -190,6 +222,50 @@ const handleDelete = async (row: User) => {
 const handleDeploy = (row: User) => {
   selectedUser.value = row
   showDeployDialog.value = true
+}
+
+// 启用用户
+const handleEnable = async (row: User) => {
+  try {
+    await ElMessageBox.confirm(
+      t('user.enableConfirm', { name: row.name }),
+      t('common.warning'),
+      { type: 'warning' }
+    )
+    const res = await enableUser(row.name)
+    if (res.success) {
+      ElMessage.success(t('user.enableSuccess'))
+      fetchUsers()
+    } else {
+      ElMessage.error(res.message || t('common.failed'))
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('启用用户失败:', error)
+    }
+  }
+}
+
+// 禁用用户
+const handleDisable = async (row: User) => {
+  try {
+    await ElMessageBox.confirm(
+      t('user.disableConfirm', { name: row.name }),
+      t('common.warning'),
+      { type: 'warning' }
+    )
+    const res = await disableUser(row.name)
+    if (res.success) {
+      ElMessage.success(t('user.disableSuccess'))
+      fetchUsers()
+    } else {
+      ElMessage.error(res.message || t('common.failed'))
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('禁用用户失败:', error)
+    }
+  }
 }
 
 // 创建成功

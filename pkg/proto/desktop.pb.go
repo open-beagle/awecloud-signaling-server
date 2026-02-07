@@ -90,6 +90,7 @@ const (
 	WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_FAILED      WaitForLoginResultStatus = 3 // 登录失败
 	WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_TIMEOUT     WaitForLoginResultStatus = 4 // 超时
 	WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_CANCELLED   WaitForLoginResultStatus = 5 // 已取消
+	WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_DISABLED    WaitForLoginResultStatus = 6 // 用户已禁用/待审批
 )
 
 // Enum value maps for WaitForLoginResultStatus.
@@ -101,6 +102,7 @@ var (
 		3: "WAIT_FOR_LOGIN_RESULT_STATUS_FAILED",
 		4: "WAIT_FOR_LOGIN_RESULT_STATUS_TIMEOUT",
 		5: "WAIT_FOR_LOGIN_RESULT_STATUS_CANCELLED",
+		6: "WAIT_FOR_LOGIN_RESULT_STATUS_DISABLED",
 	}
 	WaitForLoginResultStatus_value = map[string]int32{
 		"WAIT_FOR_LOGIN_RESULT_STATUS_UNSPECIFIED": 0,
@@ -109,6 +111,7 @@ var (
 		"WAIT_FOR_LOGIN_RESULT_STATUS_FAILED":      3,
 		"WAIT_FOR_LOGIN_RESULT_STATUS_TIMEOUT":     4,
 		"WAIT_FOR_LOGIN_RESULT_STATUS_CANCELLED":   5,
+		"WAIT_FOR_LOGIN_RESULT_STATUS_DISABLED":    6,
 	}
 )
 
@@ -2238,14 +2241,15 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\x1aDESKTOP_DATA_TYPE_SERVICES\x10\x02\x12\x1b\n" +
 	"\x17DESKTOP_DATA_TYPE_HOSTS\x10\x03\x12\x1d\n" +
 	"\x19DESKTOP_DATA_TYPE_DEVICES\x10\x04\x12\x1f\n" +
-	"\x1bDESKTOP_DATA_TYPE_FAVORITES\x10\x05*\x9b\x02\n" +
+	"\x1bDESKTOP_DATA_TYPE_FAVORITES\x10\x05*\xc6\x02\n" +
 	"\x18WaitForLoginResultStatus\x12,\n" +
 	"(WAIT_FOR_LOGIN_RESULT_STATUS_UNSPECIFIED\x10\x00\x12(\n" +
 	"$WAIT_FOR_LOGIN_RESULT_STATUS_PENDING\x10\x01\x12(\n" +
 	"$WAIT_FOR_LOGIN_RESULT_STATUS_SUCCESS\x10\x02\x12'\n" +
 	"#WAIT_FOR_LOGIN_RESULT_STATUS_FAILED\x10\x03\x12(\n" +
 	"$WAIT_FOR_LOGIN_RESULT_STATUS_TIMEOUT\x10\x04\x12*\n" +
-	"&WAIT_FOR_LOGIN_RESULT_STATUS_CANCELLED\x10\x052\x89\f\n" +
+	"&WAIT_FOR_LOGIN_RESULT_STATUS_CANCELLED\x10\x05\x12)\n" +
+	"%WAIT_FOR_LOGIN_RESULT_STATUS_DISABLED\x10\x062\x89\f\n" +
 	"\x0eDesktopService\x12o\n" +
 	"\fAuthenticate\x12..awecloud.signaling.DesktopAuthenticateRequest\x1a/.awecloud.signaling.DesktopAuthenticateResponse\x12j\n" +
 	"\tHeartbeat\x12+.awecloud.signaling.DesktopHeartbeatRequest\x1a,.awecloud.signaling.DesktopHeartbeatResponse(\x010\x01\x12a\n" +

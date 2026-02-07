@@ -139,7 +139,7 @@ func (a *DesktopAuthAPI) DesktopLoginCallback(c *gin.Context) {
 		storage = st
 
 		// 处理成功，创建或查找用户
-		user, err := a.findOrCreateUser(ctx, userInfo)
+		user, isDisabled, err := a.findOrCreateUser(ctx, userInfo)
 		if err != nil {
 			logger.Errorf("创建用户失败: %v", err)
 			session.Fail("创建用户失败")
@@ -149,6 +149,27 @@ func (a *DesktopAuthAPI) DesktopLoginCallback(c *gin.Context) {
 				ErrorMessage: "创建用户失败",
 			})
 			a.renderCallbackError(c, "登录失败，请重试")
+			return
+		}
+
+		// 用户被禁用或待审批
+		if isDisabled {
+			logger.Warnf("用户已禁用/待审批: sessionID=%s, user=%s", session.SessionID, user.Name)
+			session.Fail("用户已禁用")
+			db.WithContext(ctx).Save(&session)
+
+			// 根据来源区分提示信息
+			errMsg := "用户已禁用，请联系管理员"
+			if user.Source == model.UserSourceLogto && !user.Enabled {
+				errMsg = "用户未注册，等待管理员审批"
+			}
+
+			a.loginService.NotifyLoginResult(session.SessionID, &service.LoginResult{
+				Success:      false,
+				IsDisabled:   true,
+				ErrorMessage: errMsg,
+			})
+			a.renderCallbackError(c, errMsg)
 			return
 		}
 
@@ -185,7 +206,9 @@ func (a *DesktopAuthAPI) DesktopLoginCallback(c *gin.Context) {
 }
 
 // findOrCreateUser 查找或创建用户
-func (a *DesktopAuthAPI) findOrCreateUser(ctx interface{}, userInfo *auth.LogtoUserInfo) (*model.User, error) {
+// 返回值: user, isDisabled, error
+// isDisabled=true 表示用户存在但被禁用（或新注册待审批）
+func (a *DesktopAuthAPI) findOrCreateUser(ctx interface{}, userInfo *auth.LogtoUserInfo) (*model.User, bool, error) {
 	// 优先使用 username，如果没有则使用 email 前缀，最后使用 sub
 	userName := userInfo.Username
 	if userName == "" && userInfo.Email != "" {
@@ -200,22 +223,29 @@ func (a *DesktopAuthAPI) findOrCreateUser(ctx interface{}, userInfo *auth.LogtoU
 	var user model.User
 	err := db.DB.Where("name = ? AND role = ?", userName, model.UserRoleClient).First(&user).Error
 	if err == nil {
-		return &user, nil
+		// 用户已存在，检查是否启用
+		if !user.Enabled {
+			logger.Warnf("用户已禁用: name=%s, source=%s", user.Name, user.Source)
+			return &user, true, nil
+		}
+		return &user, false, nil
 	}
 
-	// 创建新用户
+	// 创建新用户（Logto 来源，默认禁用，等待管理员审批）
 	user = model.User{
-		Name:  userName,
-		Alias: userInfo.Name,
-		Role:  model.UserRoleClient,
+		Name:    userName,
+		Alias:   userInfo.Name,
+		Role:    model.UserRoleClient,
+		Enabled: false,
+		Source:  model.UserSourceLogto,
 	}
 
 	if err := db.DB.Create(&user).Error; err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	logger.Infof("创建新用户: name=%s, alias=%s", user.Name, user.Alias)
-	return &user, nil
+	logger.Infof("创建新用户（待审批）: name=%s, alias=%s, source=logto", user.Name, user.Alias)
+	return &user, true, nil
 }
 
 // renderCallbackSuccess 渲染成功页面

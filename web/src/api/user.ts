@@ -4,6 +4,9 @@ import type { ApiResponse, PagedResponse } from '@/types/models'
 // 用户角色
 export type UserRole = 'agent' | 'client'
 
+// 用户来源
+export type UserSource = 'manual' | 'logto'
+
 // 用户模型
 export interface User {
   id: number
@@ -11,6 +14,8 @@ export interface User {
   alias?: string
   role: UserRole
   ssh_enabled?: boolean
+  enabled?: boolean
+  source?: UserSource
   created_at: string
   updated_at: string
   // 关联数据
@@ -57,7 +62,7 @@ export interface UpdateUserRequest {
 }
 
 // 获取用户列表
-export const getUsers = (params?: { role?: UserRole; search?: string; page?: number; size?: number }) => {
+export const getUsers = (params?: { role?: UserRole; search?: string; enabled?: string; source?: UserSource; page?: number; size?: number }) => {
   return request.get<any, PagedResponse<User[]>>('/api/v1/admin/users', { params })
 }
 
@@ -102,4 +107,14 @@ export interface UserRealtimeInfo {
 
 export const getUserRealtime = (identifier: number | string) => {
   return request.get<any, ApiResponse<UserRealtimeInfo>>(`/api/v1/admin/users/${identifier}/realtime`)
+}
+
+// 启用用户（支持 ID 或用户名）
+export const enableUser = (identifier: number | string) => {
+  return request.put<any, ApiResponse>(`/api/v1/admin/users/${identifier}/enable`)
+}
+
+// 禁用用户（支持 ID 或用户名）
+export const disableUser = (identifier: number | string) => {
+  return request.put<any, ApiResponse>(`/api/v1/admin/users/${identifier}/disable`)
 }
