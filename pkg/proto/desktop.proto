@@ -9,8 +9,11 @@ service DesktopService {
   // 认证 - Desktop 用设备凭证认证
   rpc Authenticate(DesktopAuthenticateRequest) returns (DesktopAuthenticateResponse);
 
-  // 心跳 - 保持连接状态
+  // 心跳 - 保持连接状态（纯心跳，不携带业务数据）
   rpc Heartbeat(stream DesktopHeartbeatRequest) returns (stream DesktopHeartbeatResponse);
+
+  // 数据流 - Server 主动推送业务数据变更
+  rpc DataStream(stream DesktopDataRequest) returns (stream DesktopDataResponse);
 
   // 获取已授权主机列表
   rpc GetAuthorizedHosts(GetAuthorizedHostsRequest) returns (GetAuthorizedHostsResponse);
@@ -101,9 +104,39 @@ message AuthorizedService {
   string target_addr = 5; // 目标地址（内网地址，如 192.168.1.10:3306）
 }
 
-// DesktopHeartbeatResponse Desktop 心跳响应
+// DesktopHeartbeatResponse Desktop 心跳响应（纯心跳确认，不携带业务数据）
 message DesktopHeartbeatResponse {
-  repeated AuthorizedService authorized_services = 1; // 已授权服务列表
+  // 保留字段号，兼容旧版本（不再填充数据）
+  reserved 1;
+}
+
+// ============================================
+// Desktop 数据流（双向流）
+// ============================================
+
+// DesktopDataType 数据类型枚举
+enum DesktopDataType {
+  DESKTOP_DATA_TYPE_UNSPECIFIED = 0; // 未指定
+  DESKTOP_DATA_TYPE_ALL = 1; // 所有数据（初始快照）
+  DESKTOP_DATA_TYPE_SERVICES = 2; // 服务列表
+  DESKTOP_DATA_TYPE_HOSTS = 3; // 主机列表
+  DESKTOP_DATA_TYPE_DEVICES = 4; // 设备列表
+  DESKTOP_DATA_TYPE_FAVORITES = 5; // 收藏列表
+}
+
+// DesktopDataRequest Desktop 数据流请求
+message DesktopDataRequest {
+  uint64 desktop_id = 1; // Desktop ID
+  DesktopDataType refresh_type = 2; // 请求刷新的数据类型（0 或 ALL 表示全部）
+}
+
+// DesktopDataResponse Desktop 数据流响应（Server 推送）
+message DesktopDataResponse {
+  DesktopDataType type = 1; // 数据类型
+  repeated AuthorizedService services = 2; // 服务列表（当 type = SERVICES 或 ALL）
+  repeated AuthorizedHost hosts = 3; // 主机列表（当 type = HOSTS 或 ALL）
+  repeated DeviceInfo devices = 4; // 设备列表（当 type = DEVICES 或 ALL）
+  repeated string favorite_service_ids = 5; // 收藏的服务 ID 列表（当 type = FAVORITES 或 ALL）
 }
 
 // ============================================

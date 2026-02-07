@@ -35,11 +35,21 @@ type DesktopConnection struct {
 	Cancel    context.CancelFunc
 }
 
+// DesktopDataStream Desktop 数据流连接信息
+type DesktopDataStream struct {
+	NodeID uint64
+	UserID uint64
+	Stream pb.DesktopService_DataStreamServer
+	Cancel context.CancelFunc
+}
+
 // DesktopServiceServer Desktop 服务实现
 type DesktopServiceServer struct {
 	pb.UnimplementedDesktopServiceServer
 	connections     map[uint64]*DesktopConnection
 	connMutex       sync.RWMutex
+	dataStreams     map[uint64]*DesktopDataStream // 数据流连接（key: nodeID）
+	dataStreamMutex sync.RWMutex
 	headscaleClient *headscale.Client
 	config          *config.ServerConfig
 	agentService    *AgentServiceServer
@@ -50,6 +60,7 @@ type DesktopServiceServer struct {
 func NewDesktopServiceServer(cfg *config.ServerConfig) *DesktopServiceServer {
 	s := &DesktopServiceServer{
 		connections: make(map[uint64]*DesktopConnection),
+		dataStreams: make(map[uint64]*DesktopDataStream),
 		config:      cfg,
 	}
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
@@ -329,24 +340,8 @@ func (s *DesktopServiceServer) handleDesktopHeartbeat(ctx context.Context, nodeI
 }
 
 func (s *DesktopServiceServer) sendDesktopHeartbeatResponse(ctx context.Context, stream pb.DesktopService_HeartbeatServer, userID uint64) error {
-	resp := &pb.DesktopHeartbeatResponse{}
-	var services []model.ProxyService
-	if err := db.DB.WithContext(ctx).Preload("User").Where("enabled = ?", true).Find(&services).Error; err == nil {
-		for _, svc := range services {
-			if s.agentService != nil && !s.agentService.IsAgentOnline(svc.UserID) {
-				continue
-			}
-			agentName := ""
-			if svc.User != nil {
-				agentName = svc.User.Name
-			}
-			resp.AuthorizedServices = append(resp.AuthorizedServices, &pb.AuthorizedService{
-				Id: svc.ID, Name: svc.Name, AgentName: agentName,
-				ListenAddr: svc.SourceAddr, TargetAddr: svc.TargetAddr,
-			})
-		}
-	}
-	return stream.Send(resp)
+	// 纯心跳确认，不携带业务数据
+	return stream.Send(&pb.DesktopHeartbeatResponse{})
 }
 
 func (s *DesktopServiceServer) getOrCreateAuthKey(ctx context.Context, userID uint64, userName string) (string, string, error) {
@@ -827,6 +822,8 @@ func (s *DesktopServiceServer) ToggleFavorite(ctx context.Context, req *pb.Toggl
 			return &pb.ToggleFavoriteResponse{Success: false, Message: "取消收藏失败"}, nil
 		}
 		logger.Infof("Desktop %d 取消收藏服务 %s", req.DesktopId, req.ServiceId)
+		// 推送收藏列表变更
+		go s.NotifyDesktopDataChange(req.DesktopId, pb.DesktopDataType_DESKTOP_DATA_TYPE_FAVORITES)
 		return &pb.ToggleFavoriteResponse{Success: true, Message: "已取消收藏", IsFavorite: false}, nil
 	} else {
 		// 未收藏，添加收藏
@@ -838,6 +835,8 @@ func (s *DesktopServiceServer) ToggleFavorite(ctx context.Context, req *pb.Toggl
 			return &pb.ToggleFavoriteResponse{Success: false, Message: "添加收藏失败"}, nil
 		}
 		logger.Infof("Desktop %d 收藏服务 %s", req.DesktopId, req.ServiceId)
+		// 推送收藏列表变更
+		go s.NotifyDesktopDataChange(req.DesktopId, pb.DesktopDataType_DESKTOP_DATA_TYPE_FAVORITES)
 		return &pb.ToggleFavoriteResponse{Success: true, Message: "已添加收藏", IsFavorite: true}, nil
 	}
 }
@@ -1022,6 +1021,14 @@ func (s *DesktopServiceServer) Logout(ctx context.Context, req *pb.DesktopLogout
 	}
 	s.connMutex.Unlock()
 
+	// 关闭该设备的数据流连接
+	s.dataStreamMutex.Lock()
+	if ds, exists := s.dataStreams[req.DesktopId]; exists {
+		ds.Cancel()
+		delete(s.dataStreams, req.DesktopId)
+	}
+	s.dataStreamMutex.Unlock()
+
 	// 清除数据库中的心跳时间
 	db.DB.WithContext(ctx).Model(&model.Node{}).Where("id = ?", req.DesktopId).Update("last_heartbeat", nil)
 
@@ -1038,4 +1045,343 @@ func maskToken(token string) string {
 		return "***"
 	}
 	return token[:5] + "***" + token[len(token)-5:]
+}
+
+// DataStream Desktop 数据流（双向流）
+// Server 主动推送业务数据变更，Desktop 可发送刷新请求
+func (s *DesktopServiceServer) DataStream(stream pb.DesktopService_DataStreamServer) error {
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
+
+	// 接收首条消息，获取 desktop_id
+	firstReq, err := stream.Recv()
+	if err != nil {
+		return status.Error(codes.InvalidArgument, "无法接收初始消息")
+	}
+
+	nodeID := firstReq.DesktopId
+	logger.Infof("Desktop 数据流建立: desktopId=%d", nodeID)
+
+	// 验证 Desktop 是否存在
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, nodeID).Error; err != nil {
+		return status.Error(codes.NotFound, "Desktop 不存在")
+	}
+	if node.Type != model.NodeTypeDesktop {
+		return status.Error(codes.InvalidArgument, "设备类型错误")
+	}
+
+	// 注册数据流连接
+	ds := &DesktopDataStream{
+		NodeID: nodeID,
+		UserID: node.UserID,
+		Stream: stream,
+		Cancel: cancel,
+	}
+
+	s.dataStreamMutex.Lock()
+	if oldDS, exists := s.dataStreams[nodeID]; exists {
+		oldDS.Cancel()
+	}
+	s.dataStreams[nodeID] = ds
+	s.dataStreamMutex.Unlock()
+
+	defer func() {
+		s.dataStreamMutex.Lock()
+		delete(s.dataStreams, nodeID)
+		s.dataStreamMutex.Unlock()
+		logger.Infof("Desktop %d 数据流断开", nodeID)
+	}()
+
+	// 发送初始数据快照（ALL）
+	if err := s.sendDataSnapshot(ctx, stream, node.UserID, nodeID, pb.DesktopDataType_DESKTOP_DATA_TYPE_ALL); err != nil {
+		logger.Errorf("Desktop %d 发送初始数据快照失败: %v", nodeID, err)
+		return err
+	}
+
+	// 持续接收 Desktop 的刷新请求
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			req, err := stream.Recv()
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+
+			// 处理刷新请求
+			refreshType := req.RefreshType
+			if refreshType == pb.DesktopDataType_DESKTOP_DATA_TYPE_UNSPECIFIED {
+				refreshType = pb.DesktopDataType_DESKTOP_DATA_TYPE_ALL
+			}
+			if err := s.sendDataSnapshot(ctx, stream, node.UserID, nodeID, refreshType); err != nil {
+				logger.Errorf("Desktop %d 发送刷新数据失败: %v", nodeID, err)
+				return err
+			}
+		}
+	}
+}
+
+// sendDataSnapshot 发送数据快照
+func (s *DesktopServiceServer) sendDataSnapshot(ctx context.Context, stream pb.DesktopService_DataStreamServer, userID, nodeID uint64, dataType pb.DesktopDataType) error {
+	switch dataType {
+	case pb.DesktopDataType_DESKTOP_DATA_TYPE_ALL:
+		// 发送所有数据
+		resp := &pb.DesktopDataResponse{
+			Type:               pb.DesktopDataType_DESKTOP_DATA_TYPE_ALL,
+			Services:           s.buildServicesData(ctx),
+			Hosts:              s.buildHostsData(ctx, userID),
+			Devices:            s.buildDevicesData(ctx, userID, nodeID),
+			FavoriteServiceIds: s.buildFavoritesData(ctx, userID),
+		}
+		return stream.Send(resp)
+	case pb.DesktopDataType_DESKTOP_DATA_TYPE_SERVICES:
+		return stream.Send(&pb.DesktopDataResponse{
+			Type:     pb.DesktopDataType_DESKTOP_DATA_TYPE_SERVICES,
+			Services: s.buildServicesData(ctx),
+		})
+	case pb.DesktopDataType_DESKTOP_DATA_TYPE_HOSTS:
+		return stream.Send(&pb.DesktopDataResponse{
+			Type:  pb.DesktopDataType_DESKTOP_DATA_TYPE_HOSTS,
+			Hosts: s.buildHostsData(ctx, userID),
+		})
+	case pb.DesktopDataType_DESKTOP_DATA_TYPE_DEVICES:
+		return stream.Send(&pb.DesktopDataResponse{
+			Type:    pb.DesktopDataType_DESKTOP_DATA_TYPE_DEVICES,
+			Devices: s.buildDevicesData(ctx, userID, nodeID),
+		})
+	case pb.DesktopDataType_DESKTOP_DATA_TYPE_FAVORITES:
+		return stream.Send(&pb.DesktopDataResponse{
+			Type:               pb.DesktopDataType_DESKTOP_DATA_TYPE_FAVORITES,
+			FavoriteServiceIds: s.buildFavoritesData(ctx, userID),
+		})
+	}
+	return nil
+}
+
+// buildServicesData 构建服务列表数据（所有在线 Agent 的已启用服务）
+func (s *DesktopServiceServer) buildServicesData(ctx context.Context) []*pb.AuthorizedService {
+	var services []model.ProxyService
+	if err := db.DB.WithContext(ctx).Preload("User").Where("enabled = ?", true).Find(&services).Error; err != nil {
+		logger.Errorf("构建服务列表数据失败: %v", err)
+		return nil
+	}
+
+	var result []*pb.AuthorizedService
+	for _, svc := range services {
+		if s.agentService != nil && !s.agentService.IsAgentOnline(svc.UserID) {
+			continue
+		}
+		agentName := ""
+		if svc.User != nil {
+			agentName = svc.User.Name
+		}
+		result = append(result, &pb.AuthorizedService{
+			Id: svc.ID, Name: svc.Name, AgentName: agentName,
+			ListenAddr: svc.SourceAddr, TargetAddr: svc.TargetAddr,
+		})
+	}
+	return result
+}
+
+// buildHostsData 构建主机列表数据（复用 GetAuthorizedHosts 的查询逻辑）
+func (s *DesktopServiceServer) buildHostsData(ctx context.Context, userID uint64) []*pb.AuthorizedHost {
+	// 获取用户信息
+	var user model.User
+	if err := db.DB.WithContext(ctx).First(&user, userID).Error; err != nil {
+		return nil
+	}
+
+	// 获取用户所属的分组 ID 列表
+	var groupIDs []int64
+	db.DB.WithContext(ctx).Model(&model.GroupMember{}).Where("user_id = ?", user.ID).Pluck("group_id", &groupIDs)
+
+	// 收集已授权的 Agent 及其 SSH 用户
+	authorizedAgents := make(map[uint64][]string)
+
+	// 通过 SSH 用户授权
+	var sshUserPerms []model.AclSSHUserPermission
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", user.ID, true).Find(&sshUserPerms).Error; err == nil {
+		for _, perm := range sshUserPerms {
+			var sshUsers []string
+			if err := json.Unmarshal([]byte(perm.SSHUsers), &sshUsers); err == nil {
+				authorizedAgents[perm.TargetUserID] = appendUniqueStrings(authorizedAgents[perm.TargetUserID], sshUsers...)
+			}
+		}
+	}
+
+	// 通过 SSH 分组授权
+	if len(groupIDs) > 0 {
+		var sshGroupPerms []model.AclSSHGroupPermission
+		if err := db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&sshGroupPerms).Error; err == nil {
+			for _, perm := range sshGroupPerms {
+				var sshUsers []string
+				if err := json.Unmarshal([]byte(perm.SSHUsers), &sshUsers); err == nil {
+					authorizedAgents[perm.TargetUserID] = appendUniqueStrings(authorizedAgents[perm.TargetUserID], sshUsers...)
+				}
+			}
+		}
+	}
+
+	// 构建主机列表
+	var hosts []*pb.AuthorizedHost
+	for agentID, sshUsers := range authorizedAgents {
+		var agentUser model.User
+		if err := db.DB.WithContext(ctx).First(&agentUser, agentID).Error; err != nil {
+			continue
+		}
+		if agentUser.Role != model.UserRoleAgent {
+			continue
+		}
+
+		agentOnline := false
+		if s.agentService != nil {
+			agentOnline = s.agentService.IsAgentOnline(agentID)
+		}
+
+		var agentNode model.Node
+		tunnelIP := ""
+		lastSeen := ""
+		if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", agentID, model.NodeTypeAgent).First(&agentNode).Error; err == nil {
+			tunnelIP = agentNode.IP
+			if agentNode.LastHeartbeat != nil {
+				lastSeen = agentNode.LastHeartbeat.Format(time.RFC3339)
+			}
+		}
+
+		hostName := agentUser.Name
+		if agentNode.Name != "" {
+			hostName = fmt.Sprintf("%s.%s", agentUser.Name, agentNode.Name)
+		}
+
+		host := &pb.AuthorizedHost{
+			HostId: fmt.Sprintf("%d", agentID), HostName: hostName,
+			TunnelIp: tunnelIP, SshUsers: sshUsers,
+			Status: "offline", LastSeen: lastSeen,
+		}
+		if agentOnline {
+			host.Status = "online"
+		}
+		hosts = append(hosts, host)
+	}
+	return hosts
+}
+
+// buildDevicesData 构建设备列表数据（复用 GetMyDevices 的查询逻辑）
+func (s *DesktopServiceServer) buildDevicesData(ctx context.Context, userID, currentNodeID uint64) []*pb.DeviceInfo {
+	var nodes []model.Node
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", userID, model.NodeTypeDesktop).Find(&nodes).Error; err != nil {
+		return nil
+	}
+
+	// 从 Headscale 获取 IP
+	nodeIPMap := make(map[string]string)
+	if s.headscaleClient != nil {
+		var user model.User
+		if err := db.DB.WithContext(ctx).First(&user, userID).Error; err == nil {
+			hsUserName := fmt.Sprintf("client-%s", user.Name)
+			hsNodes, err := s.headscaleClient.ListNodesByUser(ctx, hsUserName)
+			if err == nil {
+				for _, hsNode := range hsNodes {
+					if len(hsNode.IpAddresses) > 0 {
+						nodeIPMap[hsNode.GivenName] = hsNode.IpAddresses[0]
+					}
+				}
+			}
+		}
+	}
+
+	var devices []*pb.DeviceInfo
+	for _, node := range nodes {
+		var sysInfo model.NodeSystemInfo
+		os := "未知"
+		arch := "未知"
+		hostname := node.Hostname
+		if node.SystemInfo != "" {
+			if err := json.Unmarshal([]byte(node.SystemInfo), &sysInfo); err == nil {
+				os = sysInfo.OS
+				if sysInfo.OSVersion != "" {
+					os = sysInfo.OSVersion
+				}
+				arch = sysInfo.Arch
+				if sysInfo.Hostname != "" {
+					hostname = sysInfo.Hostname
+				}
+			}
+		}
+
+		deviceStatus := "offline"
+		if node.LastHeartbeat != nil && time.Since(*node.LastHeartbeat) < 60*time.Second {
+			deviceStatus = "online"
+		}
+
+		lastUsedAt := ""
+		if node.LastHeartbeat != nil {
+			lastUsedAt = node.LastHeartbeat.Format(time.RFC3339)
+		}
+		createdAt := node.CreatedAt.Format(time.RFC3339)
+		ip := nodeIPMap[node.Name]
+
+		devices = append(devices, &pb.DeviceInfo{
+			DeviceToken: fmt.Sprintf("%d:%s", node.ID, "***"),
+			DeviceName:  node.Name, Os: os, Arch: arch, Hostname: hostname,
+			Status: deviceStatus, LastUsedAt: lastUsedAt, CreatedAt: createdAt,
+			IsCurrent: node.ID == currentNodeID, Ip: ip,
+		})
+	}
+	return devices
+}
+
+// buildFavoritesData 构建收藏列表数据
+func (s *DesktopServiceServer) buildFavoritesData(ctx context.Context, userID uint64) []string {
+	var favorites []model.ServiceFavorite
+	if err := db.DB.WithContext(ctx).Where("client_id = ?", userID).Find(&favorites).Error; err != nil {
+		return nil
+	}
+
+	var serviceIDs []string
+	for _, fav := range favorites {
+		var service model.ProxyService
+		if err := db.DB.WithContext(ctx).Select("user_id").First(&service, fav.STCPInstanceID).Error; err == nil {
+			serviceIDs = append(serviceIDs, fmt.Sprintf("%d:%s", service.UserID, fav.STCPInstanceID))
+		}
+	}
+	return serviceIDs
+}
+
+// NotifyDesktopDataChange 通知指定 Desktop 数据变更，推送更新
+func (s *DesktopServiceServer) NotifyDesktopDataChange(nodeID uint64, dataType pb.DesktopDataType) {
+	s.dataStreamMutex.RLock()
+	ds, exists := s.dataStreams[nodeID]
+	s.dataStreamMutex.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	ctx := context.Background()
+	if err := s.sendDataSnapshot(ctx, ds.Stream, ds.UserID, ds.NodeID, dataType); err != nil {
+		logger.Errorf("推送数据变更到 Desktop %d 失败: %v", nodeID, err)
+	}
+}
+
+// NotifyAllDesktopsDataChange 通知所有在线 Desktop 数据变更
+func (s *DesktopServiceServer) NotifyAllDesktopsDataChange(dataType pb.DesktopDataType) {
+	s.dataStreamMutex.RLock()
+	streams := make([]*DesktopDataStream, 0, len(s.dataStreams))
+	for _, ds := range s.dataStreams {
+		streams = append(streams, ds)
+	}
+	s.dataStreamMutex.RUnlock()
+
+	ctx := context.Background()
+	for _, ds := range streams {
+		if err := s.sendDataSnapshot(ctx, ds.Stream, ds.UserID, ds.NodeID, dataType); err != nil {
+			logger.Errorf("推送数据变更到 Desktop %d 失败: %v", ds.NodeID, err)
+		}
+	}
 }

@@ -21,6 +21,65 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// DesktopDataType 数据类型枚举
+type DesktopDataType int32
+
+const (
+	DesktopDataType_DESKTOP_DATA_TYPE_UNSPECIFIED DesktopDataType = 0 // 未指定
+	DesktopDataType_DESKTOP_DATA_TYPE_ALL         DesktopDataType = 1 // 所有数据（初始快照）
+	DesktopDataType_DESKTOP_DATA_TYPE_SERVICES    DesktopDataType = 2 // 服务列表
+	DesktopDataType_DESKTOP_DATA_TYPE_HOSTS       DesktopDataType = 3 // 主机列表
+	DesktopDataType_DESKTOP_DATA_TYPE_DEVICES     DesktopDataType = 4 // 设备列表
+	DesktopDataType_DESKTOP_DATA_TYPE_FAVORITES   DesktopDataType = 5 // 收藏列表
+)
+
+// Enum value maps for DesktopDataType.
+var (
+	DesktopDataType_name = map[int32]string{
+		0: "DESKTOP_DATA_TYPE_UNSPECIFIED",
+		1: "DESKTOP_DATA_TYPE_ALL",
+		2: "DESKTOP_DATA_TYPE_SERVICES",
+		3: "DESKTOP_DATA_TYPE_HOSTS",
+		4: "DESKTOP_DATA_TYPE_DEVICES",
+		5: "DESKTOP_DATA_TYPE_FAVORITES",
+	}
+	DesktopDataType_value = map[string]int32{
+		"DESKTOP_DATA_TYPE_UNSPECIFIED": 0,
+		"DESKTOP_DATA_TYPE_ALL":         1,
+		"DESKTOP_DATA_TYPE_SERVICES":    2,
+		"DESKTOP_DATA_TYPE_HOSTS":       3,
+		"DESKTOP_DATA_TYPE_DEVICES":     4,
+		"DESKTOP_DATA_TYPE_FAVORITES":   5,
+	}
+)
+
+func (x DesktopDataType) Enum() *DesktopDataType {
+	p := new(DesktopDataType)
+	*p = x
+	return p
+}
+
+func (x DesktopDataType) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (DesktopDataType) Descriptor() protoreflect.EnumDescriptor {
+	return file_pkg_proto_desktop_proto_enumTypes[0].Descriptor()
+}
+
+func (DesktopDataType) Type() protoreflect.EnumType {
+	return &file_pkg_proto_desktop_proto_enumTypes[0]
+}
+
+func (x DesktopDataType) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use DesktopDataType.Descriptor instead.
+func (DesktopDataType) EnumDescriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{0}
+}
+
 // WaitForLoginResultStatus 等待登录结果状态
 type WaitForLoginResultStatus int32
 
@@ -64,11 +123,11 @@ func (x WaitForLoginResultStatus) String() string {
 }
 
 func (WaitForLoginResultStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_pkg_proto_desktop_proto_enumTypes[0].Descriptor()
+	return file_pkg_proto_desktop_proto_enumTypes[1].Descriptor()
 }
 
 func (WaitForLoginResultStatus) Type() protoreflect.EnumType {
-	return &file_pkg_proto_desktop_proto_enumTypes[0]
+	return &file_pkg_proto_desktop_proto_enumTypes[1]
 }
 
 func (x WaitForLoginResultStatus) Number() protoreflect.EnumNumber {
@@ -77,7 +136,7 @@ func (x WaitForLoginResultStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use WaitForLoginResultStatus.Descriptor instead.
 func (WaitForLoginResultStatus) EnumDescriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{0}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{1}
 }
 
 // DesktopSystemInfo 系统信息（Desktop 专用）
@@ -449,12 +508,11 @@ func (x *AuthorizedService) GetTargetAddr() string {
 	return ""
 }
 
-// DesktopHeartbeatResponse Desktop 心跳响应
+// DesktopHeartbeatResponse Desktop 心跳响应（纯心跳确认，不携带业务数据）
 type DesktopHeartbeatResponse struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	AuthorizedServices []*AuthorizedService   `protobuf:"bytes,1,rep,name=authorized_services,json=authorizedServices,proto3" json:"authorized_services,omitempty"` // 已授权服务列表
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DesktopHeartbeatResponse) Reset() {
@@ -487,9 +545,132 @@ func (*DesktopHeartbeatResponse) Descriptor() ([]byte, []int) {
 	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *DesktopHeartbeatResponse) GetAuthorizedServices() []*AuthorizedService {
+// DesktopDataRequest Desktop 数据流请求
+type DesktopDataRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DesktopId     uint64                 `protobuf:"varint,1,opt,name=desktop_id,json=desktopId,proto3" json:"desktop_id,omitempty"`                                               // Desktop ID
+	RefreshType   DesktopDataType        `protobuf:"varint,2,opt,name=refresh_type,json=refreshType,proto3,enum=awecloud.signaling.DesktopDataType" json:"refresh_type,omitempty"` // 请求刷新的数据类型（0 或 ALL 表示全部）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DesktopDataRequest) Reset() {
+	*x = DesktopDataRequest{}
+	mi := &file_pkg_proto_desktop_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DesktopDataRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DesktopDataRequest) ProtoMessage() {}
+
+func (x *DesktopDataRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_desktop_proto_msgTypes[6]
 	if x != nil {
-		return x.AuthorizedServices
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DesktopDataRequest.ProtoReflect.Descriptor instead.
+func (*DesktopDataRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *DesktopDataRequest) GetDesktopId() uint64 {
+	if x != nil {
+		return x.DesktopId
+	}
+	return 0
+}
+
+func (x *DesktopDataRequest) GetRefreshType() DesktopDataType {
+	if x != nil {
+		return x.RefreshType
+	}
+	return DesktopDataType_DESKTOP_DATA_TYPE_UNSPECIFIED
+}
+
+// DesktopDataResponse Desktop 数据流响应（Server 推送）
+type DesktopDataResponse struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Type               DesktopDataType        `protobuf:"varint,1,opt,name=type,proto3,enum=awecloud.signaling.DesktopDataType" json:"type,omitempty"`                // 数据类型
+	Services           []*AuthorizedService   `protobuf:"bytes,2,rep,name=services,proto3" json:"services,omitempty"`                                                 // 服务列表（当 type = SERVICES 或 ALL）
+	Hosts              []*AuthorizedHost      `protobuf:"bytes,3,rep,name=hosts,proto3" json:"hosts,omitempty"`                                                       // 主机列表（当 type = HOSTS 或 ALL）
+	Devices            []*DeviceInfo          `protobuf:"bytes,4,rep,name=devices,proto3" json:"devices,omitempty"`                                                   // 设备列表（当 type = DEVICES 或 ALL）
+	FavoriteServiceIds []string               `protobuf:"bytes,5,rep,name=favorite_service_ids,json=favoriteServiceIds,proto3" json:"favorite_service_ids,omitempty"` // 收藏的服务 ID 列表（当 type = FAVORITES 或 ALL）
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *DesktopDataResponse) Reset() {
+	*x = DesktopDataResponse{}
+	mi := &file_pkg_proto_desktop_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DesktopDataResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DesktopDataResponse) ProtoMessage() {}
+
+func (x *DesktopDataResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_desktop_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DesktopDataResponse.ProtoReflect.Descriptor instead.
+func (*DesktopDataResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *DesktopDataResponse) GetType() DesktopDataType {
+	if x != nil {
+		return x.Type
+	}
+	return DesktopDataType_DESKTOP_DATA_TYPE_UNSPECIFIED
+}
+
+func (x *DesktopDataResponse) GetServices() []*AuthorizedService {
+	if x != nil {
+		return x.Services
+	}
+	return nil
+}
+
+func (x *DesktopDataResponse) GetHosts() []*AuthorizedHost {
+	if x != nil {
+		return x.Hosts
+	}
+	return nil
+}
+
+func (x *DesktopDataResponse) GetDevices() []*DeviceInfo {
+	if x != nil {
+		return x.Devices
+	}
+	return nil
+}
+
+func (x *DesktopDataResponse) GetFavoriteServiceIds() []string {
+	if x != nil {
+		return x.FavoriteServiceIds
 	}
 	return nil
 }
@@ -504,7 +685,7 @@ type GetAuthorizedHostsRequest struct {
 
 func (x *GetAuthorizedHostsRequest) Reset() {
 	*x = GetAuthorizedHostsRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[6]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -516,7 +697,7 @@ func (x *GetAuthorizedHostsRequest) String() string {
 func (*GetAuthorizedHostsRequest) ProtoMessage() {}
 
 func (x *GetAuthorizedHostsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[6]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -529,7 +710,7 @@ func (x *GetAuthorizedHostsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAuthorizedHostsRequest.ProtoReflect.Descriptor instead.
 func (*GetAuthorizedHostsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{6}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GetAuthorizedHostsRequest) GetDesktopId() uint64 {
@@ -554,7 +735,7 @@ type AuthorizedHost struct {
 
 func (x *AuthorizedHost) Reset() {
 	*x = AuthorizedHost{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[7]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -566,7 +747,7 @@ func (x *AuthorizedHost) String() string {
 func (*AuthorizedHost) ProtoMessage() {}
 
 func (x *AuthorizedHost) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[7]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -579,7 +760,7 @@ func (x *AuthorizedHost) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizedHost.ProtoReflect.Descriptor instead.
 func (*AuthorizedHost) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{7}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *AuthorizedHost) GetHostId() string {
@@ -634,7 +815,7 @@ type GetAuthorizedHostsResponse struct {
 
 func (x *GetAuthorizedHostsResponse) Reset() {
 	*x = GetAuthorizedHostsResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[8]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -646,7 +827,7 @@ func (x *GetAuthorizedHostsResponse) String() string {
 func (*GetAuthorizedHostsResponse) ProtoMessage() {}
 
 func (x *GetAuthorizedHostsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[8]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -659,7 +840,7 @@ func (x *GetAuthorizedHostsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAuthorizedHostsResponse.ProtoReflect.Descriptor instead.
 func (*GetAuthorizedHostsResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{8}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetAuthorizedHostsResponse) GetHosts() []*AuthorizedHost {
@@ -680,7 +861,7 @@ type GetHostServicesRequest struct {
 
 func (x *GetHostServicesRequest) Reset() {
 	*x = GetHostServicesRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[9]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -692,7 +873,7 @@ func (x *GetHostServicesRequest) String() string {
 func (*GetHostServicesRequest) ProtoMessage() {}
 
 func (x *GetHostServicesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[9]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -705,7 +886,7 @@ func (x *GetHostServicesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetHostServicesRequest.ProtoReflect.Descriptor instead.
 func (*GetHostServicesRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{9}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetHostServicesRequest) GetDesktopId() uint64 {
@@ -732,7 +913,7 @@ type GetHostServicesResponse struct {
 
 func (x *GetHostServicesResponse) Reset() {
 	*x = GetHostServicesResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[10]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -744,7 +925,7 @@ func (x *GetHostServicesResponse) String() string {
 func (*GetHostServicesResponse) ProtoMessage() {}
 
 func (x *GetHostServicesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[10]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -757,7 +938,7 @@ func (x *GetHostServicesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetHostServicesResponse.ProtoReflect.Descriptor instead.
 func (*GetHostServicesResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{10}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GetHostServicesResponse) GetServices() []*AuthorizedService {
@@ -777,7 +958,7 @@ type GetMyDevicesRequest struct {
 
 func (x *GetMyDevicesRequest) Reset() {
 	*x = GetMyDevicesRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[11]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -789,7 +970,7 @@ func (x *GetMyDevicesRequest) String() string {
 func (*GetMyDevicesRequest) ProtoMessage() {}
 
 func (x *GetMyDevicesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[11]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -802,7 +983,7 @@ func (x *GetMyDevicesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMyDevicesRequest.ProtoReflect.Descriptor instead.
 func (*GetMyDevicesRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{11}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GetMyDevicesRequest) GetDesktopId() uint64 {
@@ -831,7 +1012,7 @@ type DeviceInfo struct {
 
 func (x *DeviceInfo) Reset() {
 	*x = DeviceInfo{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[12]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -843,7 +1024,7 @@ func (x *DeviceInfo) String() string {
 func (*DeviceInfo) ProtoMessage() {}
 
 func (x *DeviceInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[12]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -856,7 +1037,7 @@ func (x *DeviceInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceInfo.ProtoReflect.Descriptor instead.
 func (*DeviceInfo) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{12}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DeviceInfo) GetDeviceToken() string {
@@ -939,7 +1120,7 @@ type GetMyDevicesResponse struct {
 
 func (x *GetMyDevicesResponse) Reset() {
 	*x = GetMyDevicesResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[13]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -951,7 +1132,7 @@ func (x *GetMyDevicesResponse) String() string {
 func (*GetMyDevicesResponse) ProtoMessage() {}
 
 func (x *GetMyDevicesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[13]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -964,7 +1145,7 @@ func (x *GetMyDevicesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMyDevicesResponse.ProtoReflect.Descriptor instead.
 func (*GetMyDevicesResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{13}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *GetMyDevicesResponse) GetDevices() []*DeviceInfo {
@@ -985,7 +1166,7 @@ type OfflineDeviceRequest struct {
 
 func (x *OfflineDeviceRequest) Reset() {
 	*x = OfflineDeviceRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[14]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -997,7 +1178,7 @@ func (x *OfflineDeviceRequest) String() string {
 func (*OfflineDeviceRequest) ProtoMessage() {}
 
 func (x *OfflineDeviceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[14]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1010,7 +1191,7 @@ func (x *OfflineDeviceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OfflineDeviceRequest.ProtoReflect.Descriptor instead.
 func (*OfflineDeviceRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{14}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *OfflineDeviceRequest) GetDesktopId() uint64 {
@@ -1038,7 +1219,7 @@ type OfflineDeviceResponse struct {
 
 func (x *OfflineDeviceResponse) Reset() {
 	*x = OfflineDeviceResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[15]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1050,7 +1231,7 @@ func (x *OfflineDeviceResponse) String() string {
 func (*OfflineDeviceResponse) ProtoMessage() {}
 
 func (x *OfflineDeviceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[15]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1063,7 +1244,7 @@ func (x *OfflineDeviceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OfflineDeviceResponse.ProtoReflect.Descriptor instead.
 func (*OfflineDeviceResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{15}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *OfflineDeviceResponse) GetSuccess() bool {
@@ -1091,7 +1272,7 @@ type DeleteDeviceRequest struct {
 
 func (x *DeleteDeviceRequest) Reset() {
 	*x = DeleteDeviceRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[16]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1103,7 +1284,7 @@ func (x *DeleteDeviceRequest) String() string {
 func (*DeleteDeviceRequest) ProtoMessage() {}
 
 func (x *DeleteDeviceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[16]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1116,7 +1297,7 @@ func (x *DeleteDeviceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteDeviceRequest.ProtoReflect.Descriptor instead.
 func (*DeleteDeviceRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{16}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *DeleteDeviceRequest) GetDesktopId() uint64 {
@@ -1144,7 +1325,7 @@ type DeleteDeviceResponse struct {
 
 func (x *DeleteDeviceResponse) Reset() {
 	*x = DeleteDeviceResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[17]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1156,7 +1337,7 @@ func (x *DeleteDeviceResponse) String() string {
 func (*DeleteDeviceResponse) ProtoMessage() {}
 
 func (x *DeleteDeviceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[17]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1169,7 +1350,7 @@ func (x *DeleteDeviceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteDeviceResponse.ProtoReflect.Descriptor instead.
 func (*DeleteDeviceResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{17}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DeleteDeviceResponse) GetSuccess() bool {
@@ -1197,7 +1378,7 @@ type ToggleFavoriteRequest struct {
 
 func (x *ToggleFavoriteRequest) Reset() {
 	*x = ToggleFavoriteRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[18]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1209,7 +1390,7 @@ func (x *ToggleFavoriteRequest) String() string {
 func (*ToggleFavoriteRequest) ProtoMessage() {}
 
 func (x *ToggleFavoriteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[18]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1222,7 +1403,7 @@ func (x *ToggleFavoriteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToggleFavoriteRequest.ProtoReflect.Descriptor instead.
 func (*ToggleFavoriteRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{18}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ToggleFavoriteRequest) GetDesktopId() uint64 {
@@ -1251,7 +1432,7 @@ type ToggleFavoriteResponse struct {
 
 func (x *ToggleFavoriteResponse) Reset() {
 	*x = ToggleFavoriteResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[19]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1263,7 +1444,7 @@ func (x *ToggleFavoriteResponse) String() string {
 func (*ToggleFavoriteResponse) ProtoMessage() {}
 
 func (x *ToggleFavoriteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[19]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1276,7 +1457,7 @@ func (x *ToggleFavoriteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToggleFavoriteResponse.ProtoReflect.Descriptor instead.
 func (*ToggleFavoriteResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{19}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ToggleFavoriteResponse) GetSuccess() bool {
@@ -1310,7 +1491,7 @@ type GetFavoriteServicesRequest struct {
 
 func (x *GetFavoriteServicesRequest) Reset() {
 	*x = GetFavoriteServicesRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[20]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1322,7 +1503,7 @@ func (x *GetFavoriteServicesRequest) String() string {
 func (*GetFavoriteServicesRequest) ProtoMessage() {}
 
 func (x *GetFavoriteServicesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[20]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1335,7 +1516,7 @@ func (x *GetFavoriteServicesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetFavoriteServicesRequest.ProtoReflect.Descriptor instead.
 func (*GetFavoriteServicesRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{20}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *GetFavoriteServicesRequest) GetDesktopId() uint64 {
@@ -1355,7 +1536,7 @@ type GetFavoriteServicesResponse struct {
 
 func (x *GetFavoriteServicesResponse) Reset() {
 	*x = GetFavoriteServicesResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[21]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1367,7 +1548,7 @@ func (x *GetFavoriteServicesResponse) String() string {
 func (*GetFavoriteServicesResponse) ProtoMessage() {}
 
 func (x *GetFavoriteServicesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[21]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1380,7 +1561,7 @@ func (x *GetFavoriteServicesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetFavoriteServicesResponse.ProtoReflect.Descriptor instead.
 func (*GetFavoriteServicesResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{21}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *GetFavoriteServicesResponse) GetServiceIds() []string {
@@ -1402,7 +1583,7 @@ type CreateLoginSessionRequest struct {
 
 func (x *CreateLoginSessionRequest) Reset() {
 	*x = CreateLoginSessionRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[22]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1414,7 +1595,7 @@ func (x *CreateLoginSessionRequest) String() string {
 func (*CreateLoginSessionRequest) ProtoMessage() {}
 
 func (x *CreateLoginSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[22]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1427,7 +1608,7 @@ func (x *CreateLoginSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateLoginSessionRequest.ProtoReflect.Descriptor instead.
 func (*CreateLoginSessionRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{22}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *CreateLoginSessionRequest) GetUsernameHint() string {
@@ -1464,7 +1645,7 @@ type CreateLoginSessionResponse struct {
 
 func (x *CreateLoginSessionResponse) Reset() {
 	*x = CreateLoginSessionResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[23]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1476,7 +1657,7 @@ func (x *CreateLoginSessionResponse) String() string {
 func (*CreateLoginSessionResponse) ProtoMessage() {}
 
 func (x *CreateLoginSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[23]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1489,7 +1670,7 @@ func (x *CreateLoginSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateLoginSessionResponse.ProtoReflect.Descriptor instead.
 func (*CreateLoginSessionResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{23}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *CreateLoginSessionResponse) GetSuccess() bool {
@@ -1531,7 +1712,7 @@ type CheckSavedCredentialsRequest struct {
 
 func (x *CheckSavedCredentialsRequest) Reset() {
 	*x = CheckSavedCredentialsRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[24]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1543,7 +1724,7 @@ func (x *CheckSavedCredentialsRequest) String() string {
 func (*CheckSavedCredentialsRequest) ProtoMessage() {}
 
 func (x *CheckSavedCredentialsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[24]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1556,7 +1737,7 @@ func (x *CheckSavedCredentialsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckSavedCredentialsRequest.ProtoReflect.Descriptor instead.
 func (*CheckSavedCredentialsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{24}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *CheckSavedCredentialsRequest) GetServerUrl() string {
@@ -1585,7 +1766,7 @@ type CheckSavedCredentialsResponse struct {
 
 func (x *CheckSavedCredentialsResponse) Reset() {
 	*x = CheckSavedCredentialsResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[25]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1597,7 +1778,7 @@ func (x *CheckSavedCredentialsResponse) String() string {
 func (*CheckSavedCredentialsResponse) ProtoMessage() {}
 
 func (x *CheckSavedCredentialsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[25]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1610,7 +1791,7 @@ func (x *CheckSavedCredentialsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckSavedCredentialsResponse.ProtoReflect.Descriptor instead.
 func (*CheckSavedCredentialsResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{25}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *CheckSavedCredentialsResponse) GetHasCredentials() bool {
@@ -1645,7 +1826,7 @@ type WaitForLoginResultRequest struct {
 
 func (x *WaitForLoginResultRequest) Reset() {
 	*x = WaitForLoginResultRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[26]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1657,7 +1838,7 @@ func (x *WaitForLoginResultRequest) String() string {
 func (*WaitForLoginResultRequest) ProtoMessage() {}
 
 func (x *WaitForLoginResultRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[26]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1670,7 +1851,7 @@ func (x *WaitForLoginResultRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WaitForLoginResultRequest.ProtoReflect.Descriptor instead.
 func (*WaitForLoginResultRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{26}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *WaitForLoginResultRequest) GetSessionId() string {
@@ -1704,7 +1885,7 @@ type WaitForLoginResultResponse struct {
 
 func (x *WaitForLoginResultResponse) Reset() {
 	*x = WaitForLoginResultResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[27]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1716,7 +1897,7 @@ func (x *WaitForLoginResultResponse) String() string {
 func (*WaitForLoginResultResponse) ProtoMessage() {}
 
 func (x *WaitForLoginResultResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[27]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1729,7 +1910,7 @@ func (x *WaitForLoginResultResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WaitForLoginResultResponse.ProtoReflect.Descriptor instead.
 func (*WaitForLoginResultResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{27}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *WaitForLoginResultResponse) GetStatus() WaitForLoginResultStatus {
@@ -1791,7 +1972,7 @@ type DesktopLogoutRequest struct {
 
 func (x *DesktopLogoutRequest) Reset() {
 	*x = DesktopLogoutRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[28]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1803,7 +1984,7 @@ func (x *DesktopLogoutRequest) String() string {
 func (*DesktopLogoutRequest) ProtoMessage() {}
 
 func (x *DesktopLogoutRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[28]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1816,7 +1997,7 @@ func (x *DesktopLogoutRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopLogoutRequest.ProtoReflect.Descriptor instead.
 func (*DesktopLogoutRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{28}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *DesktopLogoutRequest) GetDesktopId() uint64 {
@@ -1837,7 +2018,7 @@ type DesktopLogoutResponse struct {
 
 func (x *DesktopLogoutResponse) Reset() {
 	*x = DesktopLogoutResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[29]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1849,7 +2030,7 @@ func (x *DesktopLogoutResponse) String() string {
 func (*DesktopLogoutResponse) ProtoMessage() {}
 
 func (x *DesktopLogoutResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[29]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1862,7 +2043,7 @@ func (x *DesktopLogoutResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopLogoutResponse.ProtoReflect.Descriptor instead.
 func (*DesktopLogoutResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{29}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *DesktopLogoutResponse) GetSuccess() bool {
@@ -1919,9 +2100,18 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\vlisten_addr\x18\x04 \x01(\tR\n" +
 	"listenAddr\x12\x1f\n" +
 	"\vtarget_addr\x18\x05 \x01(\tR\n" +
-	"targetAddr\"r\n" +
-	"\x18DesktopHeartbeatResponse\x12V\n" +
-	"\x13authorized_services\x18\x01 \x03(\v2%.awecloud.signaling.AuthorizedServiceR\x12authorizedServices\":\n" +
+	"targetAddr\" \n" +
+	"\x18DesktopHeartbeatResponseJ\x04\b\x01\x10\x02\"{\n" +
+	"\x12DesktopDataRequest\x12\x1d\n" +
+	"\n" +
+	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12F\n" +
+	"\frefresh_type\x18\x02 \x01(\x0e2#.awecloud.signaling.DesktopDataTypeR\vrefreshType\"\xb7\x02\n" +
+	"\x13DesktopDataResponse\x127\n" +
+	"\x04type\x18\x01 \x01(\x0e2#.awecloud.signaling.DesktopDataTypeR\x04type\x12A\n" +
+	"\bservices\x18\x02 \x03(\v2%.awecloud.signaling.AuthorizedServiceR\bservices\x128\n" +
+	"\x05hosts\x18\x03 \x03(\v2\".awecloud.signaling.AuthorizedHostR\x05hosts\x128\n" +
+	"\adevices\x18\x04 \x03(\v2\x1e.awecloud.signaling.DeviceInfoR\adevices\x120\n" +
+	"\x14favorite_service_ids\x18\x05 \x03(\tR\x12favoriteServiceIds\":\n" +
 	"\x19GetAuthorizedHostsRequest\x12\x1d\n" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\"\xb5\x01\n" +
@@ -2031,17 +2221,26 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\"K\n" +
 	"\x15DesktopLogoutResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage*\x9b\x02\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage*\xcc\x01\n" +
+	"\x0fDesktopDataType\x12!\n" +
+	"\x1dDESKTOP_DATA_TYPE_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15DESKTOP_DATA_TYPE_ALL\x10\x01\x12\x1e\n" +
+	"\x1aDESKTOP_DATA_TYPE_SERVICES\x10\x02\x12\x1b\n" +
+	"\x17DESKTOP_DATA_TYPE_HOSTS\x10\x03\x12\x1d\n" +
+	"\x19DESKTOP_DATA_TYPE_DEVICES\x10\x04\x12\x1f\n" +
+	"\x1bDESKTOP_DATA_TYPE_FAVORITES\x10\x05*\x9b\x02\n" +
 	"\x18WaitForLoginResultStatus\x12,\n" +
 	"(WAIT_FOR_LOGIN_RESULT_STATUS_UNSPECIFIED\x10\x00\x12(\n" +
 	"$WAIT_FOR_LOGIN_RESULT_STATUS_PENDING\x10\x01\x12(\n" +
 	"$WAIT_FOR_LOGIN_RESULT_STATUS_SUCCESS\x10\x02\x12'\n" +
 	"#WAIT_FOR_LOGIN_RESULT_STATUS_FAILED\x10\x03\x12(\n" +
 	"$WAIT_FOR_LOGIN_RESULT_STATUS_TIMEOUT\x10\x04\x12*\n" +
-	"&WAIT_FOR_LOGIN_RESULT_STATUS_CANCELLED\x10\x052\xa6\v\n" +
+	"&WAIT_FOR_LOGIN_RESULT_STATUS_CANCELLED\x10\x052\x89\f\n" +
 	"\x0eDesktopService\x12o\n" +
 	"\fAuthenticate\x12..awecloud.signaling.DesktopAuthenticateRequest\x1a/.awecloud.signaling.DesktopAuthenticateResponse\x12j\n" +
-	"\tHeartbeat\x12+.awecloud.signaling.DesktopHeartbeatRequest\x1a,.awecloud.signaling.DesktopHeartbeatResponse(\x010\x01\x12s\n" +
+	"\tHeartbeat\x12+.awecloud.signaling.DesktopHeartbeatRequest\x1a,.awecloud.signaling.DesktopHeartbeatResponse(\x010\x01\x12a\n" +
+	"\n" +
+	"DataStream\x12&.awecloud.signaling.DesktopDataRequest\x1a'.awecloud.signaling.DesktopDataResponse(\x010\x01\x12s\n" +
 	"\x12GetAuthorizedHosts\x12-.awecloud.signaling.GetAuthorizedHostsRequest\x1a..awecloud.signaling.GetAuthorizedHostsResponse\x12j\n" +
 	"\x0fGetHostServices\x12*.awecloud.signaling.GetHostServicesRequest\x1a+.awecloud.signaling.GetHostServicesResponse\x12a\n" +
 	"\fGetMyDevices\x12'.awecloud.signaling.GetMyDevicesRequest\x1a(.awecloud.signaling.GetMyDevicesResponse\x12d\n" +
@@ -2066,79 +2265,88 @@ func file_pkg_proto_desktop_proto_rawDescGZIP() []byte {
 	return file_pkg_proto_desktop_proto_rawDescData
 }
 
-var file_pkg_proto_desktop_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_pkg_proto_desktop_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_pkg_proto_desktop_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_pkg_proto_desktop_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_pkg_proto_desktop_proto_goTypes = []any{
-	(WaitForLoginResultStatus)(0),         // 0: awecloud.signaling.WaitForLoginResultStatus
-	(*DesktopSystemInfo)(nil),             // 1: awecloud.signaling.DesktopSystemInfo
-	(*DesktopAuthenticateRequest)(nil),    // 2: awecloud.signaling.DesktopAuthenticateRequest
-	(*DesktopAuthenticateResponse)(nil),   // 3: awecloud.signaling.DesktopAuthenticateResponse
-	(*DesktopHeartbeatRequest)(nil),       // 4: awecloud.signaling.DesktopHeartbeatRequest
-	(*AuthorizedService)(nil),             // 5: awecloud.signaling.AuthorizedService
-	(*DesktopHeartbeatResponse)(nil),      // 6: awecloud.signaling.DesktopHeartbeatResponse
-	(*GetAuthorizedHostsRequest)(nil),     // 7: awecloud.signaling.GetAuthorizedHostsRequest
-	(*AuthorizedHost)(nil),                // 8: awecloud.signaling.AuthorizedHost
-	(*GetAuthorizedHostsResponse)(nil),    // 9: awecloud.signaling.GetAuthorizedHostsResponse
-	(*GetHostServicesRequest)(nil),        // 10: awecloud.signaling.GetHostServicesRequest
-	(*GetHostServicesResponse)(nil),       // 11: awecloud.signaling.GetHostServicesResponse
-	(*GetMyDevicesRequest)(nil),           // 12: awecloud.signaling.GetMyDevicesRequest
-	(*DeviceInfo)(nil),                    // 13: awecloud.signaling.DeviceInfo
-	(*GetMyDevicesResponse)(nil),          // 14: awecloud.signaling.GetMyDevicesResponse
-	(*OfflineDeviceRequest)(nil),          // 15: awecloud.signaling.OfflineDeviceRequest
-	(*OfflineDeviceResponse)(nil),         // 16: awecloud.signaling.OfflineDeviceResponse
-	(*DeleteDeviceRequest)(nil),           // 17: awecloud.signaling.DeleteDeviceRequest
-	(*DeleteDeviceResponse)(nil),          // 18: awecloud.signaling.DeleteDeviceResponse
-	(*ToggleFavoriteRequest)(nil),         // 19: awecloud.signaling.ToggleFavoriteRequest
-	(*ToggleFavoriteResponse)(nil),        // 20: awecloud.signaling.ToggleFavoriteResponse
-	(*GetFavoriteServicesRequest)(nil),    // 21: awecloud.signaling.GetFavoriteServicesRequest
-	(*GetFavoriteServicesResponse)(nil),   // 22: awecloud.signaling.GetFavoriteServicesResponse
-	(*CreateLoginSessionRequest)(nil),     // 23: awecloud.signaling.CreateLoginSessionRequest
-	(*CreateLoginSessionResponse)(nil),    // 24: awecloud.signaling.CreateLoginSessionResponse
-	(*CheckSavedCredentialsRequest)(nil),  // 25: awecloud.signaling.CheckSavedCredentialsRequest
-	(*CheckSavedCredentialsResponse)(nil), // 26: awecloud.signaling.CheckSavedCredentialsResponse
-	(*WaitForLoginResultRequest)(nil),     // 27: awecloud.signaling.WaitForLoginResultRequest
-	(*WaitForLoginResultResponse)(nil),    // 28: awecloud.signaling.WaitForLoginResultResponse
-	(*DesktopLogoutRequest)(nil),          // 29: awecloud.signaling.DesktopLogoutRequest
-	(*DesktopLogoutResponse)(nil),         // 30: awecloud.signaling.DesktopLogoutResponse
+	(DesktopDataType)(0),                  // 0: awecloud.signaling.DesktopDataType
+	(WaitForLoginResultStatus)(0),         // 1: awecloud.signaling.WaitForLoginResultStatus
+	(*DesktopSystemInfo)(nil),             // 2: awecloud.signaling.DesktopSystemInfo
+	(*DesktopAuthenticateRequest)(nil),    // 3: awecloud.signaling.DesktopAuthenticateRequest
+	(*DesktopAuthenticateResponse)(nil),   // 4: awecloud.signaling.DesktopAuthenticateResponse
+	(*DesktopHeartbeatRequest)(nil),       // 5: awecloud.signaling.DesktopHeartbeatRequest
+	(*AuthorizedService)(nil),             // 6: awecloud.signaling.AuthorizedService
+	(*DesktopHeartbeatResponse)(nil),      // 7: awecloud.signaling.DesktopHeartbeatResponse
+	(*DesktopDataRequest)(nil),            // 8: awecloud.signaling.DesktopDataRequest
+	(*DesktopDataResponse)(nil),           // 9: awecloud.signaling.DesktopDataResponse
+	(*GetAuthorizedHostsRequest)(nil),     // 10: awecloud.signaling.GetAuthorizedHostsRequest
+	(*AuthorizedHost)(nil),                // 11: awecloud.signaling.AuthorizedHost
+	(*GetAuthorizedHostsResponse)(nil),    // 12: awecloud.signaling.GetAuthorizedHostsResponse
+	(*GetHostServicesRequest)(nil),        // 13: awecloud.signaling.GetHostServicesRequest
+	(*GetHostServicesResponse)(nil),       // 14: awecloud.signaling.GetHostServicesResponse
+	(*GetMyDevicesRequest)(nil),           // 15: awecloud.signaling.GetMyDevicesRequest
+	(*DeviceInfo)(nil),                    // 16: awecloud.signaling.DeviceInfo
+	(*GetMyDevicesResponse)(nil),          // 17: awecloud.signaling.GetMyDevicesResponse
+	(*OfflineDeviceRequest)(nil),          // 18: awecloud.signaling.OfflineDeviceRequest
+	(*OfflineDeviceResponse)(nil),         // 19: awecloud.signaling.OfflineDeviceResponse
+	(*DeleteDeviceRequest)(nil),           // 20: awecloud.signaling.DeleteDeviceRequest
+	(*DeleteDeviceResponse)(nil),          // 21: awecloud.signaling.DeleteDeviceResponse
+	(*ToggleFavoriteRequest)(nil),         // 22: awecloud.signaling.ToggleFavoriteRequest
+	(*ToggleFavoriteResponse)(nil),        // 23: awecloud.signaling.ToggleFavoriteResponse
+	(*GetFavoriteServicesRequest)(nil),    // 24: awecloud.signaling.GetFavoriteServicesRequest
+	(*GetFavoriteServicesResponse)(nil),   // 25: awecloud.signaling.GetFavoriteServicesResponse
+	(*CreateLoginSessionRequest)(nil),     // 26: awecloud.signaling.CreateLoginSessionRequest
+	(*CreateLoginSessionResponse)(nil),    // 27: awecloud.signaling.CreateLoginSessionResponse
+	(*CheckSavedCredentialsRequest)(nil),  // 28: awecloud.signaling.CheckSavedCredentialsRequest
+	(*CheckSavedCredentialsResponse)(nil), // 29: awecloud.signaling.CheckSavedCredentialsResponse
+	(*WaitForLoginResultRequest)(nil),     // 30: awecloud.signaling.WaitForLoginResultRequest
+	(*WaitForLoginResultResponse)(nil),    // 31: awecloud.signaling.WaitForLoginResultResponse
+	(*DesktopLogoutRequest)(nil),          // 32: awecloud.signaling.DesktopLogoutRequest
+	(*DesktopLogoutResponse)(nil),         // 33: awecloud.signaling.DesktopLogoutResponse
 }
 var file_pkg_proto_desktop_proto_depIdxs = []int32{
-	1,  // 0: awecloud.signaling.DesktopAuthenticateRequest.system_info:type_name -> awecloud.signaling.DesktopSystemInfo
-	5,  // 1: awecloud.signaling.DesktopHeartbeatResponse.authorized_services:type_name -> awecloud.signaling.AuthorizedService
-	8,  // 2: awecloud.signaling.GetAuthorizedHostsResponse.hosts:type_name -> awecloud.signaling.AuthorizedHost
-	5,  // 3: awecloud.signaling.GetHostServicesResponse.services:type_name -> awecloud.signaling.AuthorizedService
-	13, // 4: awecloud.signaling.GetMyDevicesResponse.devices:type_name -> awecloud.signaling.DeviceInfo
-	0,  // 5: awecloud.signaling.WaitForLoginResultResponse.status:type_name -> awecloud.signaling.WaitForLoginResultStatus
-	2,  // 6: awecloud.signaling.DesktopService.Authenticate:input_type -> awecloud.signaling.DesktopAuthenticateRequest
-	4,  // 7: awecloud.signaling.DesktopService.Heartbeat:input_type -> awecloud.signaling.DesktopHeartbeatRequest
-	7,  // 8: awecloud.signaling.DesktopService.GetAuthorizedHosts:input_type -> awecloud.signaling.GetAuthorizedHostsRequest
-	10, // 9: awecloud.signaling.DesktopService.GetHostServices:input_type -> awecloud.signaling.GetHostServicesRequest
-	12, // 10: awecloud.signaling.DesktopService.GetMyDevices:input_type -> awecloud.signaling.GetMyDevicesRequest
-	15, // 11: awecloud.signaling.DesktopService.OfflineDevice:input_type -> awecloud.signaling.OfflineDeviceRequest
-	17, // 12: awecloud.signaling.DesktopService.DeleteDevice:input_type -> awecloud.signaling.DeleteDeviceRequest
-	19, // 13: awecloud.signaling.DesktopService.ToggleFavorite:input_type -> awecloud.signaling.ToggleFavoriteRequest
-	21, // 14: awecloud.signaling.DesktopService.GetFavoriteServices:input_type -> awecloud.signaling.GetFavoriteServicesRequest
-	25, // 15: awecloud.signaling.DesktopService.CheckSavedCredentials:input_type -> awecloud.signaling.CheckSavedCredentialsRequest
-	23, // 16: awecloud.signaling.DesktopService.CreateLoginSession:input_type -> awecloud.signaling.CreateLoginSessionRequest
-	27, // 17: awecloud.signaling.DesktopService.WaitForLoginResult:input_type -> awecloud.signaling.WaitForLoginResultRequest
-	29, // 18: awecloud.signaling.DesktopService.Logout:input_type -> awecloud.signaling.DesktopLogoutRequest
-	3,  // 19: awecloud.signaling.DesktopService.Authenticate:output_type -> awecloud.signaling.DesktopAuthenticateResponse
-	6,  // 20: awecloud.signaling.DesktopService.Heartbeat:output_type -> awecloud.signaling.DesktopHeartbeatResponse
-	9,  // 21: awecloud.signaling.DesktopService.GetAuthorizedHosts:output_type -> awecloud.signaling.GetAuthorizedHostsResponse
-	11, // 22: awecloud.signaling.DesktopService.GetHostServices:output_type -> awecloud.signaling.GetHostServicesResponse
-	14, // 23: awecloud.signaling.DesktopService.GetMyDevices:output_type -> awecloud.signaling.GetMyDevicesResponse
-	16, // 24: awecloud.signaling.DesktopService.OfflineDevice:output_type -> awecloud.signaling.OfflineDeviceResponse
-	18, // 25: awecloud.signaling.DesktopService.DeleteDevice:output_type -> awecloud.signaling.DeleteDeviceResponse
-	20, // 26: awecloud.signaling.DesktopService.ToggleFavorite:output_type -> awecloud.signaling.ToggleFavoriteResponse
-	22, // 27: awecloud.signaling.DesktopService.GetFavoriteServices:output_type -> awecloud.signaling.GetFavoriteServicesResponse
-	26, // 28: awecloud.signaling.DesktopService.CheckSavedCredentials:output_type -> awecloud.signaling.CheckSavedCredentialsResponse
-	24, // 29: awecloud.signaling.DesktopService.CreateLoginSession:output_type -> awecloud.signaling.CreateLoginSessionResponse
-	28, // 30: awecloud.signaling.DesktopService.WaitForLoginResult:output_type -> awecloud.signaling.WaitForLoginResultResponse
-	30, // 31: awecloud.signaling.DesktopService.Logout:output_type -> awecloud.signaling.DesktopLogoutResponse
-	19, // [19:32] is the sub-list for method output_type
-	6,  // [6:19] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	2,  // 0: awecloud.signaling.DesktopAuthenticateRequest.system_info:type_name -> awecloud.signaling.DesktopSystemInfo
+	0,  // 1: awecloud.signaling.DesktopDataRequest.refresh_type:type_name -> awecloud.signaling.DesktopDataType
+	0,  // 2: awecloud.signaling.DesktopDataResponse.type:type_name -> awecloud.signaling.DesktopDataType
+	6,  // 3: awecloud.signaling.DesktopDataResponse.services:type_name -> awecloud.signaling.AuthorizedService
+	11, // 4: awecloud.signaling.DesktopDataResponse.hosts:type_name -> awecloud.signaling.AuthorizedHost
+	16, // 5: awecloud.signaling.DesktopDataResponse.devices:type_name -> awecloud.signaling.DeviceInfo
+	11, // 6: awecloud.signaling.GetAuthorizedHostsResponse.hosts:type_name -> awecloud.signaling.AuthorizedHost
+	6,  // 7: awecloud.signaling.GetHostServicesResponse.services:type_name -> awecloud.signaling.AuthorizedService
+	16, // 8: awecloud.signaling.GetMyDevicesResponse.devices:type_name -> awecloud.signaling.DeviceInfo
+	1,  // 9: awecloud.signaling.WaitForLoginResultResponse.status:type_name -> awecloud.signaling.WaitForLoginResultStatus
+	3,  // 10: awecloud.signaling.DesktopService.Authenticate:input_type -> awecloud.signaling.DesktopAuthenticateRequest
+	5,  // 11: awecloud.signaling.DesktopService.Heartbeat:input_type -> awecloud.signaling.DesktopHeartbeatRequest
+	8,  // 12: awecloud.signaling.DesktopService.DataStream:input_type -> awecloud.signaling.DesktopDataRequest
+	10, // 13: awecloud.signaling.DesktopService.GetAuthorizedHosts:input_type -> awecloud.signaling.GetAuthorizedHostsRequest
+	13, // 14: awecloud.signaling.DesktopService.GetHostServices:input_type -> awecloud.signaling.GetHostServicesRequest
+	15, // 15: awecloud.signaling.DesktopService.GetMyDevices:input_type -> awecloud.signaling.GetMyDevicesRequest
+	18, // 16: awecloud.signaling.DesktopService.OfflineDevice:input_type -> awecloud.signaling.OfflineDeviceRequest
+	20, // 17: awecloud.signaling.DesktopService.DeleteDevice:input_type -> awecloud.signaling.DeleteDeviceRequest
+	22, // 18: awecloud.signaling.DesktopService.ToggleFavorite:input_type -> awecloud.signaling.ToggleFavoriteRequest
+	24, // 19: awecloud.signaling.DesktopService.GetFavoriteServices:input_type -> awecloud.signaling.GetFavoriteServicesRequest
+	28, // 20: awecloud.signaling.DesktopService.CheckSavedCredentials:input_type -> awecloud.signaling.CheckSavedCredentialsRequest
+	26, // 21: awecloud.signaling.DesktopService.CreateLoginSession:input_type -> awecloud.signaling.CreateLoginSessionRequest
+	30, // 22: awecloud.signaling.DesktopService.WaitForLoginResult:input_type -> awecloud.signaling.WaitForLoginResultRequest
+	32, // 23: awecloud.signaling.DesktopService.Logout:input_type -> awecloud.signaling.DesktopLogoutRequest
+	4,  // 24: awecloud.signaling.DesktopService.Authenticate:output_type -> awecloud.signaling.DesktopAuthenticateResponse
+	7,  // 25: awecloud.signaling.DesktopService.Heartbeat:output_type -> awecloud.signaling.DesktopHeartbeatResponse
+	9,  // 26: awecloud.signaling.DesktopService.DataStream:output_type -> awecloud.signaling.DesktopDataResponse
+	12, // 27: awecloud.signaling.DesktopService.GetAuthorizedHosts:output_type -> awecloud.signaling.GetAuthorizedHostsResponse
+	14, // 28: awecloud.signaling.DesktopService.GetHostServices:output_type -> awecloud.signaling.GetHostServicesResponse
+	17, // 29: awecloud.signaling.DesktopService.GetMyDevices:output_type -> awecloud.signaling.GetMyDevicesResponse
+	19, // 30: awecloud.signaling.DesktopService.OfflineDevice:output_type -> awecloud.signaling.OfflineDeviceResponse
+	21, // 31: awecloud.signaling.DesktopService.DeleteDevice:output_type -> awecloud.signaling.DeleteDeviceResponse
+	23, // 32: awecloud.signaling.DesktopService.ToggleFavorite:output_type -> awecloud.signaling.ToggleFavoriteResponse
+	25, // 33: awecloud.signaling.DesktopService.GetFavoriteServices:output_type -> awecloud.signaling.GetFavoriteServicesResponse
+	29, // 34: awecloud.signaling.DesktopService.CheckSavedCredentials:output_type -> awecloud.signaling.CheckSavedCredentialsResponse
+	27, // 35: awecloud.signaling.DesktopService.CreateLoginSession:output_type -> awecloud.signaling.CreateLoginSessionResponse
+	31, // 36: awecloud.signaling.DesktopService.WaitForLoginResult:output_type -> awecloud.signaling.WaitForLoginResultResponse
+	33, // 37: awecloud.signaling.DesktopService.Logout:output_type -> awecloud.signaling.DesktopLogoutResponse
+	24, // [24:38] is the sub-list for method output_type
+	10, // [10:24] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_pkg_proto_desktop_proto_init() }
@@ -2151,8 +2359,8 @@ func file_pkg_proto_desktop_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_desktop_proto_rawDesc), len(file_pkg_proto_desktop_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   30,
+			NumEnums:      2,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

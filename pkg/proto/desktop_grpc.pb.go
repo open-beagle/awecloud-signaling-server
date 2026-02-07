@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	DesktopService_Authenticate_FullMethodName          = "/awecloud.signaling.DesktopService/Authenticate"
 	DesktopService_Heartbeat_FullMethodName             = "/awecloud.signaling.DesktopService/Heartbeat"
+	DesktopService_DataStream_FullMethodName            = "/awecloud.signaling.DesktopService/DataStream"
 	DesktopService_GetAuthorizedHosts_FullMethodName    = "/awecloud.signaling.DesktopService/GetAuthorizedHosts"
 	DesktopService_GetHostServices_FullMethodName       = "/awecloud.signaling.DesktopService/GetHostServices"
 	DesktopService_GetMyDevices_FullMethodName          = "/awecloud.signaling.DesktopService/GetMyDevices"
@@ -42,8 +43,10 @@ const (
 type DesktopServiceClient interface {
 	// 认证 - Desktop 用设备凭证认证
 	Authenticate(ctx context.Context, in *DesktopAuthenticateRequest, opts ...grpc.CallOption) (*DesktopAuthenticateResponse, error)
-	// 心跳 - 保持连接状态
+	// 心跳 - 保持连接状态（纯心跳，不携带业务数据）
 	Heartbeat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[DesktopHeartbeatRequest, DesktopHeartbeatResponse], error)
+	// 数据流 - Server 主动推送业务数据变更
+	DataStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[DesktopDataRequest, DesktopDataResponse], error)
 	// 获取已授权主机列表
 	GetAuthorizedHosts(ctx context.Context, in *GetAuthorizedHostsRequest, opts ...grpc.CallOption) (*GetAuthorizedHostsResponse, error)
 	// 获取指定主机的服务列表
@@ -98,6 +101,19 @@ func (c *desktopServiceClient) Heartbeat(ctx context.Context, opts ...grpc.CallO
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DesktopService_HeartbeatClient = grpc.BidiStreamingClient[DesktopHeartbeatRequest, DesktopHeartbeatResponse]
+
+func (c *desktopServiceClient) DataStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[DesktopDataRequest, DesktopDataResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &DesktopService_ServiceDesc.Streams[1], DesktopService_DataStream_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[DesktopDataRequest, DesktopDataResponse]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DesktopService_DataStreamClient = grpc.BidiStreamingClient[DesktopDataRequest, DesktopDataResponse]
 
 func (c *desktopServiceClient) GetAuthorizedHosts(ctx context.Context, in *GetAuthorizedHostsRequest, opts ...grpc.CallOption) (*GetAuthorizedHostsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -191,7 +207,7 @@ func (c *desktopServiceClient) CreateLoginSession(ctx context.Context, in *Creat
 
 func (c *desktopServiceClient) WaitForLoginResult(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[WaitForLoginResultRequest, WaitForLoginResultResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &DesktopService_ServiceDesc.Streams[1], DesktopService_WaitForLoginResult_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &DesktopService_ServiceDesc.Streams[2], DesktopService_WaitForLoginResult_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -220,8 +236,10 @@ func (c *desktopServiceClient) Logout(ctx context.Context, in *DesktopLogoutRequ
 type DesktopServiceServer interface {
 	// 认证 - Desktop 用设备凭证认证
 	Authenticate(context.Context, *DesktopAuthenticateRequest) (*DesktopAuthenticateResponse, error)
-	// 心跳 - 保持连接状态
+	// 心跳 - 保持连接状态（纯心跳，不携带业务数据）
 	Heartbeat(grpc.BidiStreamingServer[DesktopHeartbeatRequest, DesktopHeartbeatResponse]) error
+	// 数据流 - Server 主动推送业务数据变更
+	DataStream(grpc.BidiStreamingServer[DesktopDataRequest, DesktopDataResponse]) error
 	// 获取已授权主机列表
 	GetAuthorizedHosts(context.Context, *GetAuthorizedHostsRequest) (*GetAuthorizedHostsResponse, error)
 	// 获取指定主机的服务列表
@@ -259,6 +277,9 @@ func (UnimplementedDesktopServiceServer) Authenticate(context.Context, *DesktopA
 }
 func (UnimplementedDesktopServiceServer) Heartbeat(grpc.BidiStreamingServer[DesktopHeartbeatRequest, DesktopHeartbeatResponse]) error {
 	return status.Error(codes.Unimplemented, "method Heartbeat not implemented")
+}
+func (UnimplementedDesktopServiceServer) DataStream(grpc.BidiStreamingServer[DesktopDataRequest, DesktopDataResponse]) error {
+	return status.Error(codes.Unimplemented, "method DataStream not implemented")
 }
 func (UnimplementedDesktopServiceServer) GetAuthorizedHosts(context.Context, *GetAuthorizedHostsRequest) (*GetAuthorizedHostsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAuthorizedHosts not implemented")
@@ -338,6 +359,13 @@ func _DesktopService_Heartbeat_Handler(srv interface{}, stream grpc.ServerStream
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DesktopService_HeartbeatServer = grpc.BidiStreamingServer[DesktopHeartbeatRequest, DesktopHeartbeatResponse]
+
+func _DesktopService_DataStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(DesktopServiceServer).DataStream(&grpc.GenericServerStream[DesktopDataRequest, DesktopDataResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DesktopService_DataStreamServer = grpc.BidiStreamingServer[DesktopDataRequest, DesktopDataResponse]
 
 func _DesktopService_GetAuthorizedHosts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetAuthorizedHostsRequest)
@@ -582,6 +610,12 @@ var DesktopService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Heartbeat",
 			Handler:       _DesktopService_Heartbeat_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "DataStream",
+			Handler:       _DesktopService_DataStream_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},
