@@ -116,7 +116,7 @@ import {
   revokeDeployToken,
   type DeployToken,
   type CreateDeployTokenResponse
-} from '@/api/agentDeploy'
+} from '@/api/deployToken'
 import type { Agent } from '@/types/models'
 
 const { t } = useI18n()
@@ -183,7 +183,7 @@ const handleGenerate = async () => {
   generating.value = true
   try {
     const res = await createDeployToken(props.agent.id, {
-      device_name: form.value.deviceName
+      name: form.value.deviceName
     })
     if (res.success && res.data) {
       deployResult.value = res.data

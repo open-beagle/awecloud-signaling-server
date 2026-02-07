@@ -307,12 +307,11 @@ func (s *Server) setupRouter() *gin.Engine {
 			v1Group.GET("/download/agent", downloadAPI.GetAgentDownload)
 			v1Group.GET("/download/agent/version", downloadAPI.GetAgentVersion)
 
-			// Agent 注册 API（公开，用于部署）
-			agentDeployPublicAPI := api.NewAgentDeployAPI(s.config)
-			v1Group.POST("/agent/register", agentDeployPublicAPI.Register)
-
-			// Client 注册 API（公开，用于 CloudIDE）
-			v1Group.POST("/client/register", api.ClientRegister)
+			// 统一注册 API（公开，Agent 和 Client 共用）
+			deployPublicAPI := api.NewDeployAPI(s.config)
+			v1Group.POST("/register", deployPublicAPI.Register)
+			// 兼容旧版 Agent 注册接口（deprecated）
+			v1Group.POST("/agent/register", deployPublicAPI.RegisterCompat)
 
 			// 管理员 API
 			adminGroup := v1Group.Group("/admin")
@@ -340,18 +339,12 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.DELETE("/users/:id", userAPI.Delete)
 					adminAuthGroup.POST("/users/:id/regenerate-secret", userAPI.RegenerateSecret)
 
-					// Agent 部署 Token
-					agentDeployAPI := api.NewAgentDeployAPI(s.config)
-					adminAuthGroup.POST("/users/:id/deploy-token", agentDeployAPI.CreateDeployToken)
-					adminAuthGroup.GET("/users/:id/deploy-tokens", agentDeployAPI.ListDeployTokens)
-					adminAuthGroup.GET("/deploy-tokens/:token_id/command", agentDeployAPI.GetDeployCommand)
-					adminAuthGroup.DELETE("/deploy-tokens/:token_id", agentDeployAPI.RevokeDeployToken)
-
-					// Client Token
-					adminAuthGroup.POST("/client/token", api.CreateClientToken)
-					adminAuthGroup.GET("/client/tokens", api.ListClientTokens)
-					adminAuthGroup.GET("/client/token/:id", api.GetClientToken)
-					adminAuthGroup.DELETE("/client/token/:id", api.DeleteClientToken)
+					// 部署 Token（统一管理 Agent 和 Client）
+					deployAPI := api.NewDeployAPI(s.config)
+					adminAuthGroup.POST("/users/:id/deploy-token", deployAPI.CreateDeployToken)
+					adminAuthGroup.GET("/users/:id/deploy-tokens", deployAPI.ListDeployTokens)
+					adminAuthGroup.GET("/deploy-tokens/:token_id/command", deployAPI.GetDeployCommand)
+					adminAuthGroup.DELETE("/deploy-tokens/:token_id", deployAPI.RevokeDeployToken)
 
 					// 设备管理
 					nodeAPI := api.NewNodeAPI(s.config)

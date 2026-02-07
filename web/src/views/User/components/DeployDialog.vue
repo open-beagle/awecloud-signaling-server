@@ -117,11 +117,7 @@ import { CopyDocument } from '@element-plus/icons-vue'
 import {
   createDeployToken,
   type CreateDeployTokenResponse
-} from '@/api/agentDeploy'
-import {
-  createClientToken,
-  type CreateClientTokenResponse
-} from '@/api/clientToken'
+} from '@/api/deployToken'
 import type { User } from '@/api/user'
 
 const { t } = useI18n()
@@ -149,7 +145,7 @@ const agentDeployResult = ref<CreateDeployTokenResponse | null>(null)
 
 // Client 表单和结果
 const clientForm = ref({ name: '', deviceName: '' })
-const clientTokenResult = ref<CreateClientTokenResponse | null>(null)
+const clientTokenResult = ref<CreateDeployTokenResponse | null>(null)
 
 // 监听对话框打开
 watch(visible, (val) => {
@@ -170,7 +166,7 @@ const canGenerate = () => {
   if (props.user?.role === 'agent') {
     return !!agentForm.value.deviceName
   } else if (props.user?.role === 'client') {
-    return !!clientForm.value.name && !!clientForm.value.deviceName
+    return !!clientForm.value.name
   }
   return false
 }
@@ -199,7 +195,7 @@ const generateAgentDeploy = async () => {
 
   try {
     const res = await createDeployToken(props.user.name, {
-      device_name: agentForm.value.deviceName
+      name: agentForm.value.deviceName
     })
     if (res.success && res.data) {
       agentDeployResult.value = res.data
@@ -213,13 +209,11 @@ const generateAgentDeploy = async () => {
 }
 
 const generateClientToken = async () => {
-  if (!props.user || !clientForm.value.name || !clientForm.value.deviceName) return
+  if (!props.user || !clientForm.value.name) return
 
   try {
-    const res = await createClientToken({
-      user_id: props.user.id,
-      name: clientForm.value.name,
-      device_name: clientForm.value.deviceName
+    const res = await createDeployToken(props.user.name, {
+      name: clientForm.value.name
     })
     if (res.success && res.data) {
       clientTokenResult.value = res.data

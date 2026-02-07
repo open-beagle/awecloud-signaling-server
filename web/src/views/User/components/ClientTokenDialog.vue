@@ -74,9 +74,9 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { CopyDocument } from '@element-plus/icons-vue'
 import {
-  createClientToken,
-  type CreateClientTokenResponse
-} from '@/api/clientToken'
+  createDeployToken,
+  type CreateDeployTokenResponse
+} from '@/api/deployToken'
 
 const { t } = useI18n()
 
@@ -102,7 +102,7 @@ const visible = computed({
 
 const form = ref({ name: '', deviceName: '' })
 const generating = ref(false)
-const tokenResult = ref<CreateClientTokenResponse | null>(null)
+const tokenResult = ref<CreateDeployTokenResponse | null>(null)
 
 // 监听对话框打开
 watch(visible, (val) => {
@@ -117,10 +117,8 @@ const handleGenerate = async () => {
 
   generating.value = true
   try {
-    const res = await createClientToken({
-      user_id: props.user.id,
-      name: form.value.name,
-      device_name: form.value.deviceName
+    const res = await createDeployToken(props.user.id, {
+      name: form.value.name
     })
     if (res.success && res.data) {
       tokenResult.value = res.data

@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -73,10 +72,11 @@ func main() {
 
 	var cfg *config.AgentConfig
 	var err error
+	var registerResult *config.RegisterResult
 
 	// 检查是否为部署模式
 	if *deployToken != "" {
-		// 部署模式：使用 Token 向 Server 注册
+		// 部署模式：使用 Token 向 Server 注册（命令行参数，通常是 install_agent.sh 调用）
 		if *agentName == "" || *deviceName == "" || *serverAddr == "" {
 			log.Fatalf("部署模式需要指定: -n <agent_name> -d <device_name> -s <server_address>")
 		}
@@ -87,7 +87,7 @@ func main() {
 		fmt.Printf("Server Address: %s\n", *serverAddr)
 
 		// 向 Server 注册并获取配置
-		cfg, err = registerWithToken(*serverAddr, *deployToken, *agentName, *deviceName)
+		cfg, registerResult, err = registerWithToken(*serverAddr, *deployToken, *agentName, *deviceName)
 		if err != nil {
 			log.Fatalf("部署注册失败: %v", err)
 		}
@@ -103,6 +103,40 @@ func main() {
 		cfg, err = config.LoadAgentConfig(*configPath)
 		if err != nil {
 			log.Fatalf("加载配置失败: %v", err)
+		}
+
+		// 检查是否有 SIGNAL_TOKEN 环境变量（Token 自动注册模式，CloudIDE 等场景）
+		if cfg.Agent.AgentToken != "" && cfg.Agent.AgentName == "" {
+			// 有 Token 但没有 AgentName → Token 注册模式
+			srvAddr := cfg.Server.Address
+			if srvAddr == "" && BUILD_URL != "" {
+				srvAddr = BUILD_URL
+			}
+			if srvAddr == "" {
+				log.Fatalf("Token 注册模式需要 SIGNAL_SERVER 环境变量")
+			}
+
+			hostname, _ := os.Hostname()
+			fmt.Printf("进入 Token 注册模式...\n")
+			fmt.Printf("Server Address: %s\n", srvAddr)
+			fmt.Printf("Device: %s\n", hostname)
+
+			cfg, registerResult, err = registerWithToken(srvAddr, cfg.Agent.AgentToken, "", hostname)
+			if err != nil {
+				log.Fatalf("Token 注册失败: %v", err)
+			}
+
+			// 合并环境变量中的其他配置（SSH、SOCKS 等）
+			envCfg, _ := config.LoadAgentConfig(*configPath)
+			if envCfg != nil {
+				cfg.Tunnel.EnableSSH = envCfg.Tunnel.EnableSSH
+				cfg.Tunnel.StateDir = envCfg.Tunnel.StateDir
+				cfg.Tunnel.StateSyncInterval = envCfg.Tunnel.StateSyncInterval
+				cfg.CloudIDE = envCfg.CloudIDE
+				cfg.Health = envCfg.Health
+				cfg.Log = envCfg.Log
+				cfg.Telemetry = envCfg.Telemetry
+			}
 		}
 	}
 
@@ -120,10 +154,9 @@ func main() {
 	log.SetFlags(0) // 不需要时间戳，logrus 会添加
 
 	// 应用配置优先级：环境变量 > 配置文件 > BUILD_URL > 默认值
-	if addr := os.Getenv("AGENT_ADDRESS"); addr != "" {
-		cfg.Server.Address = addr
-		logger.Infof("使用环境变量 AGENT_ADDRESS: %s", addr)
-	} else if cfg.Server.Address == "" && BUILD_URL != "" {
+	// 注意：SIGNAL_SERVER/AGENT_ADDRESS 已在 LoadAgentConfig 中处理
+	// 这里只处理 BUILD_URL 兜底逻辑
+	if cfg.Server.Address == "" && BUILD_URL != "" {
 		cfg.Server.Address = BUILD_URL
 		logger.Infof("使用编译时注入的 BUILD_URL: %s", BUILD_URL)
 	} else if cfg.Server.Address == "" {
@@ -168,8 +201,18 @@ func main() {
 		logger.Fatalf("创建Agent失败: %v", err)
 	}
 
-	if err := agt.Run(); err != nil {
-		logger.Fatalf("Agent运行失败: %v", err)
+	// 根据注册结果决定运行模式
+	if registerResult != nil && registerResult.IsClientMode() {
+		// Client 模式（CloudIDE 等）：只启动 tsnet + SSH，不启动 gRPC 心跳
+		logger.Infof("以 Client 模式运行（user_role=%s）", registerResult.UserRole)
+		if err := agt.RunClient(registerResult); err != nil {
+			logger.Fatalf("Client 模式运行失败: %v", err)
+		}
+	} else {
+		// Agent 模式：完整的 gRPC 注册 + 心跳 + ProxyManager + VisitorManager
+		if err := agt.Run(); err != nil {
+			logger.Fatalf("Agent运行失败: %v", err)
+		}
 	}
 }
 
@@ -370,7 +413,7 @@ func extractRealUser(remoteUser string) string {
 }
 
 // registerWithToken 使用部署 Token 向 Server 注册
-func registerWithToken(serverAddr, token, agentName, deviceName string) (*config.AgentConfig, error) {
+func registerWithToken(serverAddr, token, agentName, deviceName string) (*config.AgentConfig, *config.RegisterResult, error) {
 	// 生成设备指纹
 	fingerprint := generateDeviceFingerprint()
 
@@ -378,23 +421,24 @@ func registerWithToken(serverAddr, token, agentName, deviceName string) (*config
 	reqBody := map[string]string{
 		"token":              token,
 		"device_fingerprint": fingerprint,
+		"device_name":        deviceName,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("序列化请求失败: %w", err)
+		return nil, nil, fmt.Errorf("序列化请求失败: %w", err)
 	}
 
-	// 发送注册请求
-	url := strings.TrimSuffix(serverAddr, "/") + "/api/v1/agent/register"
+	// 发送注册请求（统一注册接口）
+	url := strings.TrimSuffix(serverAddr, "/") + "/api/v1/register"
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
-		return nil, fmt.Errorf("请求失败: %w", err)
+		return nil, nil, fmt.Errorf("请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("读取响应失败: %w", err)
+		return nil, nil, fmt.Errorf("读取响应失败: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -402,9 +446,9 @@ func registerWithToken(serverAddr, token, agentName, deviceName string) (*config
 			Error string `json:"error"`
 		}
 		if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
-			return nil, fmt.Errorf("%s", errResp.Error)
+			return nil, nil, fmt.Errorf("%s", errResp.Error)
 		}
-		return nil, fmt.Errorf("注册失败: HTTP %d", resp.StatusCode)
+		return nil, nil, fmt.Errorf("注册失败: HTTP %d", resp.StatusCode)
 	}
 
 	// 解析响应
@@ -412,33 +456,58 @@ func registerWithToken(serverAddr, token, agentName, deviceName string) (*config
 		Success bool `json:"success"`
 		Data    struct {
 			Message      string                 `json:"message"`
+			UserRole     string                 `json:"user_role"`
 			Config       map[string]interface{} `json:"config"`
 			HeadscaleURL string                 `json:"headscale_url"`
 			AuthKey      string                 `json:"auth_key"`
+			UserName     string                 `json:"user_name"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("解析响应失败: %w", err)
+		return nil, nil, fmt.Errorf("解析响应失败: %w", err)
 	}
 
 	if !result.Success {
-		return nil, fmt.Errorf("注册失败")
+		return nil, nil, fmt.Errorf("注册失败")
 	}
 
-	fmt.Printf("注册成功: %s\n", result.Data.Message)
+	fmt.Printf("注册成功: %s (role=%s, user=%s)\n", result.Data.Message, result.Data.UserRole, result.Data.UserName)
+
+	// 构建注册结果
+	regResult := &config.RegisterResult{
+		UserRole:     result.Data.UserRole,
+		HeadscaleURL: result.Data.HeadscaleURL,
+		AuthKey:      result.Data.AuthKey,
+		UserName:     result.Data.UserName,
+	}
 
 	// 构建配置
+	// Agent 模式：从响应的 config 中提取 agent name/device
+	cfgAgentName := agentName
+	cfgDevice := deviceName
+	if result.Data.Config != nil {
+		if agentCfg, ok := result.Data.Config["agent"].(map[string]interface{}); ok {
+			if name, ok := agentCfg["name"].(string); ok && cfgAgentName == "" {
+				cfgAgentName = name
+			}
+			if device, ok := agentCfg["device"].(string); ok && cfgDevice == "" {
+				cfgDevice = device
+			}
+		}
+	}
+
 	cfg := &config.AgentConfig{
 		Agent: config.AgentSection{
-			AgentName: agentName,
-			Device:    deviceName,
+			AgentName:  cfgAgentName,
+			AgentToken: token,
+			Device:     cfgDevice,
 		},
 		Server: config.ServerConnect{
 			Address: serverAddr,
 		},
 	}
 
-	return cfg, nil
+	return cfg, regResult, nil
 }
 
 // saveAgentConfig 保存配置到 TOML 文件
@@ -465,30 +534,11 @@ func saveAgentConfig(path string, cfg *config.AgentConfig) error {
 }
 
 // generateDeviceFingerprint 生成设备指纹
+// 统一使用 hostname 的 SHA256 哈希。
+// hostname 在各场景下都稳定：Desktop 是用户机器名，Agent 是主机名，
+// CloudIDE 是平台分配的 Pod 名。不使用 machine-id（容器重建后会变）。
 func generateDeviceFingerprint() string {
-	// 收集设备信息
 	hostname, _ := os.Hostname()
-	info := fmt.Sprintf("%s-%s-%s-%s",
-		hostname,
-		runtime.GOOS,
-		runtime.GOARCH,
-		getMachineID(),
-	)
-
-	// 计算 SHA256 哈希
-	hash := sha256.Sum256([]byte(info))
+	hash := sha256.Sum256([]byte(hostname))
 	return hex.EncodeToString(hash[:])
-}
-
-// getMachineID 获取机器 ID
-func getMachineID() string {
-	// Linux: /etc/machine-id
-	if data, err := os.ReadFile("/etc/machine-id"); err == nil {
-		return strings.TrimSpace(string(data))
-	}
-
-	// macOS: 使用 IOPlatformUUID（简化处理，使用 hostname）
-	// Windows: 使用注册表（简化处理，使用 hostname）
-	hostname, _ := os.Hostname()
-	return hostname
 }

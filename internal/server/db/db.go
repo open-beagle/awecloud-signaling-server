@@ -119,11 +119,8 @@ func autoMigrate() error {
 		// Visitor
 		&model.Visitor{},
 
-		// Agent 部署 Token
-		&model.AgentDeployToken{},
-
-		// Client Token
-		&model.ClientToken{},
+		// 部署 Token（统一）
+		&model.DeployToken{},
 
 		// Device Token
 		&model.DeviceToken{},

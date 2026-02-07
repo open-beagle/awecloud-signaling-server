@@ -198,8 +198,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { getUser, updateUser, deleteUser, regenerateUserSecret, type User, type UserDetail, type UserNode } from '@/api/user'
-import { getClientTokens, deleteClientToken, type ClientToken } from '@/api/clientToken'
-import { getDeployTokens, revokeDeployToken, type DeployToken } from '@/api/agentDeploy'
+import { getDeployTokens, revokeDeployToken, type DeployToken } from '@/api/deployToken'
 import { formatTime } from '@/utils/time'
 import DeployDialog from './components/DeployDialog.vue'
 
@@ -218,7 +217,7 @@ const newSecret = ref('')
 // Client Token 相关
 const showTokenDialog = ref(false)
 const tokensLoading = ref(false)
-const tokens = ref<ClientToken[]>([])
+const tokens = ref<DeployToken[]>([])
 
 // Agent 部署相关
 const showDeployDialog = ref(false)
@@ -266,7 +265,7 @@ const loadTokens = async () => {
   if (!user.value) return
   tokensLoading.value = true
   try {
-    const res = await getClientTokens({ user_id: user.value.id })
+    const res = await getDeployTokens(user.value.name)
     if (res.success && res.data) {
       tokens.value = res.data
     }
@@ -278,14 +277,14 @@ const loadTokens = async () => {
 }
 
 // 删除 Token
-const handleDeleteToken = async (token: ClientToken) => {
+const handleDeleteToken = async (token: DeployToken) => {
   try {
     await ElMessageBox.confirm(
       t('clientToken.deleteConfirm'),
       t('common.warning'),
       { type: 'warning' }
     )
-    const res = await deleteClientToken(token.id)
+    const res = await revokeDeployToken(token.id)
     if (res.success) {
       ElMessage.success(t('common.deleteSuccess'))
       loadTokens()
@@ -320,7 +319,7 @@ const getTokenStatusText = (status: string) => {
 
 // 加载部署历史
 const loadDeployHistory = async () => {
-  if (!user.value || user.value.role !== 'agent') return
+  if (!user.value) return
   deployLoading.value = true
   try {
     const res = await getDeployTokens(user.value.name)

@@ -15,9 +15,9 @@
 docker run -d \
   --name signaling-agent \
   --restart unless-stopped \
-  -e AGENT_NAME="my-agent" \
-  -e AGENT_TOKEN="your-agent-token" \
-  -e AGENT_ADDRESS="https://signaling.example.com" \
+  -e SIGNAL_NAME="my-agent" \
+  -e SIGNAL_TOKEN="your-agent-token" \
+  -e SIGNAL_SERVER="https://signaling.example.com" \
   registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.2
 ```
 
@@ -25,9 +25,9 @@ docker run -d \
 
 | 变量          | 必需 | 说明                                     | 示例                            |
 | ------------- | ---- | ---------------------------------------- | ------------------------------- |
-| AGENT_NAME    | 是   | Agent 名称，用于在 Server 中标识         | `my-agent`                      |
-| AGENT_TOKEN   | 是   | Agent 认证 Token，从 Server 管理界面获取 | `abc123...`                     |
-| AGENT_ADDRESS | 是   | Server 地址                              | `https://signaling.example.com` |
+| SIGNAL_NAME   | 是   | Agent 名称，用于在 Server 中标识         | `my-agent`                      |
+| SIGNAL_TOKEN  | 是   | Agent 认证 Token，从 Server 管理界面获取 | `abc123...`                     |
+| SIGNAL_SERVER | 是   | Server 地址                              | `https://signaling.example.com` |
 
 ### 带日志持久化
 
@@ -35,9 +35,9 @@ docker run -d \
 docker run -d \
   --name signaling-agent \
   --restart unless-stopped \
-  -e AGENT_NAME="my-agent" \
-  -e AGENT_TOKEN="your-agent-token" \
-  -e AGENT_ADDRESS="https://signaling.example.com" \
+  -e SIGNAL_NAME="my-agent" \
+  -e SIGNAL_TOKEN="your-agent-token" \
+  -e SIGNAL_SERVER="https://signaling.example.com" \
   -v /var/log/signaling-agent:/app/logs \
   registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.2
 ```
@@ -49,9 +49,9 @@ docker run -d \
   --name signaling-agent \
   --restart unless-stopped \
   --network host \
-  -e AGENT_NAME="my-agent" \
-  -e AGENT_TOKEN="your-agent-token" \
-  -e AGENT_ADDRESS="https://signaling.example.com" \
+  -e SIGNAL_NAME="my-agent" \
+  -e SIGNAL_TOKEN="your-agent-token" \
+  -e SIGNAL_SERVER="https://signaling.example.com" \
   registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.2
 ```
 
@@ -95,9 +95,9 @@ services:
     image: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.2
     restart: unless-stopped
     environment:
-      - AGENT_NAME=my-agent
-      - AGENT_TOKEN=your-agent-token
-      - AGENT_ADDRESS=http://server:8080
+      - SIGNAL_NAME=my-agent
+      - SIGNAL_TOKEN=your-agent-token
+      - SIGNAL_SERVER=http://server:8080
     depends_on:
       - server
 
@@ -121,8 +121,8 @@ curl http://localhost:8090/health
 
 ### Agent 无法连接 Server
 
-1. 检查 `AGENT_ADDRESS` 是否正确
-2. 检查 `AGENT_TOKEN` 是否有效
+1. 检查 `SIGNAL_SERVER` 是否正确
+2. 检查 `SIGNAL_TOKEN` 是否有效
 3. 检查网络连通性
 
 ### 查看日志

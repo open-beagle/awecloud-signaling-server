@@ -46,7 +46,7 @@ AWECloud Agent 安装脚本
 选项:
   -n, --name <name>       Agent 名称（必填，如 beijing）
   -t, --token <token>     认证 Token（必填，从 Server 获取）
-  -s, --server <url>      Server 地址（必填，如 https://signal.wodcloud.com）
+  -s, --server <url>      Server 地址（必填，如 https://signal.example.com）
   -d, --device <name>     设备名（可选，默认使用 hostname）
       --no-ssh            禁用 SSH（默认启用）
       --deploy            部署模式：使用 Token 自动注册获取配置
@@ -57,19 +57,19 @@ AWECloud Agent 安装脚本
 示例:
   # 部署模式（推荐）：使用 Web 生成的 Token 自动注册
   curl -fsSL https://server/api/v1/download/install.sh | \\
-    sudo bash -s -- --deploy -t <TOKEN> -s https://signal.wodcloud.com
+    sudo bash -s -- --deploy -t <TOKEN> -s https://signal.example.com
 
   # 传统安装（手动指定 Agent 名称）
   curl -fsSL https://server/api/v1/download/install.sh | \\
-    sudo bash -s -- -n beijing -t <TOKEN> -s https://signal.wodcloud.com
+    sudo bash -s -- -n beijing -t <TOKEN> -s https://signal.example.com
 
   # 安装（指定设备名）
   curl -fsSL https://server/api/v1/download/install.sh | \\
-    sudo bash -s -- -n beijing -t <TOKEN> -s https://signal.wodcloud.com -d beagle-242
+    sudo bash -s -- -n beijing -t <TOKEN> -s https://signal.example.com -d beagle-242
 
   # 升级
   curl -fsSL https://server/api/v1/download/install.sh | \\
-    sudo bash -s -- --upgrade -s https://signal.wodcloud.com
+    sudo bash -s -- --upgrade -s https://signal.example.com
 
   # 卸载
   curl -fsSL https://server/api/v1/download/install.sh | \\
@@ -358,28 +358,10 @@ uninstall_agent() {
     info "如需完全删除，请手动执行: rm -rf ${CONFIG_FILE} ${DATA_DIR}"
 }
 
-# 生成设备指纹
+# 生成设备指纹（统一使用 hostname 的 SHA256 哈希）
 generate_fingerprint() {
-    local fingerprint=""
-    
-    # 尝试获取机器 ID
-    if [[ -f /etc/machine-id ]]; then
-        fingerprint=$(cat /etc/machine-id)
-    elif [[ -f /var/lib/dbus/machine-id ]]; then
-        fingerprint=$(cat /var/lib/dbus/machine-id)
-    fi
-    
-    # 如果没有机器 ID，使用 MAC 地址
-    if [[ -z "$fingerprint" ]]; then
-        fingerprint=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' | tr -d ':')
-    fi
-    
-    # 如果还是没有，使用 hostname + 随机数
-    if [[ -z "$fingerprint" ]]; then
-        fingerprint=$(hostname)-$(date +%s)
-    fi
-    
-    echo "$fingerprint"
+    local hostname=$(hostname)
+    echo -n "$hostname" | sha256sum | awk '{print $1}'
 }
 
 # 部署模式：使用 Token 注册获取配置
@@ -387,7 +369,7 @@ deploy_with_token() {
     info "部署模式：使用 Token 注册..."
     
     local fingerprint=$(generate_fingerprint)
-    local register_url="${SERVER_ADDRESS}/api/v1/agent/register"
+    local register_url="${SERVER_ADDRESS}/api/v1/register"
     
     info "设备指纹: ${fingerprint}"
     info "注册地址: ${register_url}"

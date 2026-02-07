@@ -22,17 +22,17 @@ spec:
           image: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.2.0
           imagePullPolicy: Always
           env:
-            # Agent 标识（必需）
-            - name: AGENT_NAME
+            # Agent 名称（必需）
+            - name: SIGNAL_NAME
               value: "agent-k8s-001"
             # Agent 认证 Token（必需，从 Secret 获取）
-            - name: AGENT_TOKEN
+            - name: SIGNAL_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: awecloud-signaling-agent
                   key: agent-token
             # Server 地址
-            - name: AGENT_ADDRESS
+            - name: SIGNAL_SERVER
               value: "https://signaling.example.com"
           volumeMounts:
             - name: logs
@@ -44,11 +44,7 @@ spec:
             - name: health
               containerPort: 8090
               protocol: TCP
-          # Tailscale 需要 NET_ADMIN 权限
-          securityContext:
-            capabilities:
-              add:
-                - NET_ADMIN
+          # tsnet 用户态模式，不需要 NET_ADMIN 权限
           # 存活性探测
           livenessProbe:
             httpGet:

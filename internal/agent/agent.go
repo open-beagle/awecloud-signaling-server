@@ -79,7 +79,7 @@ func NewAgent(cfg *config.AgentConfig, version string) (*Agent, error) {
 	}, nil
 }
 
-// Run 运行Agent
+// Run 运行Agent（Agent 模式：完整的 gRPC 注册 + 心跳 + ProxyManager + VisitorManager）
 func (a *Agent) Run() error {
 	// 启动健康检查HTTP服务器
 	if err := a.startHealthServer(); err != nil {
@@ -127,6 +127,50 @@ func (a *Agent) Run() error {
 	a.wg.Wait()
 
 	logger.Info("Agent已关闭")
+	return nil
+}
+
+// RunClient 运行 Client 模式（CloudIDE 等场景）
+// 只启动 tsnet 连接网络 + SSH，不启动 gRPC 心跳/ProxyManager/VisitorManager
+func (a *Agent) RunClient(regResult *config.RegisterResult) error {
+	// 启动健康检查HTTP服务器
+	if err := a.startHealthServer(); err != nil {
+		return fmt.Errorf("启动健康检查服务器失败: %w", err)
+	}
+
+	// 检查注册结果
+	if regResult.HeadscaleURL == "" || regResult.AuthKey == "" {
+		return fmt.Errorf("注册结果缺少 Headscale 认证信息")
+	}
+
+	logger.Infof("Client 模式启动，用户: %s", regResult.UserName)
+
+	// 启动 Tailscale（仅网络连接）
+	a.tsManager = NewTailscaleManager(a.config, nil, 0, "", a.ctx)
+
+	if err := a.tsManager.Start(regResult.HeadscaleURL, regResult.AuthKey); err != nil {
+		return fmt.Errorf("启动 Tailscale 失败: %w", err)
+	}
+
+	a.tailscaleIP = a.tsManager.GetIP()
+	logger.Infof("Tailscale 已连接，IP: %s", a.tailscaleIP)
+
+	// 等待中断信号
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	logger.Info("正在关闭 Client...")
+	a.cancel()
+
+	// 停止 Tailscale
+	if a.tsManager != nil {
+		a.tsManager.Stop()
+	}
+
+	a.wg.Wait()
+
+	logger.Info("Client 已关闭")
 	return nil
 }
 

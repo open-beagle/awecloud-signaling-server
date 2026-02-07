@@ -2,40 +2,45 @@ import request from '@/utils/request'
 import type { ApiResponse, PagedResponse } from '@/types/models'
 
 // 部署 Token 状态
-export type DeployTokenStatus = 'pending' | 'bound' | 'expired'
+export type DeployTokenStatus = 'pending' | 'bound' | 'revoked'
 
 // 部署 Token 列表项
 export interface DeployToken {
   id: number
-  device_name: string
+  name: string
   status: DeployTokenStatus
   device_fingerprint?: string
+  device_name?: string
+  ssh_enabled: boolean
   created_by: number
   created_by_name?: string
   created_at: string
-  expires_at: string
+  expires_at?: string
   bound_at?: string
   last_used_at?: string
 }
 
 // 创建部署 Token 请求
 export interface CreateDeployTokenRequest {
-  device_name: string
+  name: string
 }
 
 // 创建部署 Token 响应
 export interface CreateDeployTokenResponse {
   token: string
-  expires_at: string
-  install_command: string
+  name: string
+  expires_at?: string
+  install_command?: string
+  env_config?: string
 }
 
 // 获取部署命令响应
 export interface GetDeployCommandResponse {
-  install_command: string
+  install_command?: string
+  env_config?: string
 }
 
-// 生成部署 Token（支持 ID 或用户名）
+// 创建部署 Token（支持 ID 或用户名）
 export const createDeployToken = (userIdentifier: number | string, data: CreateDeployTokenRequest) => {
   return request.post<any, ApiResponse<CreateDeployTokenResponse>>(
     `/api/v1/admin/users/${userIdentifier}/deploy-token`,

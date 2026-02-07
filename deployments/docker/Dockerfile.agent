@@ -29,10 +29,9 @@ COPY --from=builder /build/agent .
 # Create directories
 RUN mkdir -p /app/logs
 
-# Support environment variables
-ENV AGENT_NAME=""
-ENV AGENT_TOKEN=""
-ENV SERVER_ADDR=""
-ENV PROTOCOL="tcp"
+# 环境变量（统一 SIGNAL_ 前缀）
+ENV SIGNAL_NAME=""
+ENV SIGNAL_TOKEN=""
+ENV SIGNAL_SERVER=""
 
 CMD ["./agent"]

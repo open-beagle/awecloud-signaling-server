@@ -96,8 +96,8 @@ kubectl apply -f deployments/kubernetes/agent.local.yaml
 需要修改的配置：
 
 - `agent-token`: 从 Server Web 界面获取
-- `AGENT_NAME`: Agent 名称
-- `SERVER_ADDR`: Server 地址
+- `SIGNAL_NAME`: Agent 名称
+- `SIGNAL_SERVER`: Server 地址
 
 ## 验证部署
 

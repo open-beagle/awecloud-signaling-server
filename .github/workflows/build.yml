@@ -135,7 +135,7 @@ jobs:
 
       - name: Upload Agent to S3
         run: |
-          mc alias set aliyun --api=S3v4 https://cache.ali.wodcloud.com \
+          mc alias set aliyun --api=S3v4 https://cache.ali.example.com \
             ${{ secrets.S3_ACCESS_KEY_ALIYUN }} ${{ secrets.S3_SECRET_KEY_ALIYUN }}
           
           VERSION="${{ steps.version.outputs.BUILD_VERSION }}"

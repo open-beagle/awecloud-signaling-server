@@ -270,6 +270,21 @@ func (s *ACLSyncService) generateACLPolicy(ctx context.Context) (*ACLPolicy, err
 		policy.TagOwners[tag] = []string{}
 	}
 
+	// 8. 同用户节点互访规则 — Client 用户的多个设备（Desktop、CloudIDE 等）之间互相访问
+	for _, user := range users {
+		if user.Role == model.UserRoleClient {
+			tagName := fmt.Sprintf("tag:client-%s", user.Name)
+			usedTags[tagName] = true
+			policy.TagOwners[tagName] = []string{}
+			rule := ACLRule{
+				Action: "accept",
+				Src:    []string{tagName},
+				Dst:    []string{fmt.Sprintf("%s:*", tagName)},
+			}
+			policy.ACLs = append(policy.ACLs, rule)
+		}
+	}
+
 	// 生成 SSH 规则
 	sshRules, err := s.generateSSHRules(ctx, usedTags)
 	if err != nil {
