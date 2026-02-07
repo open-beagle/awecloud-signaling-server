@@ -91,12 +91,14 @@ func (c *LogtoClient) CreateLogtoClient(storage *MemorySessionStorage) *client.L
 }
 
 // GetSignInURL 获取登录 URL
+// 使用 prompt=login 强制 Logto 每次都显示登录页面，避免 cookie 残留导致自动登录
 func (c *LogtoClient) GetSignInURL(storage *MemorySessionStorage, loginHint string) (string, error) {
 	logtoClient := c.CreateLogtoClient(storage)
 
-	// 使用配置的回调 URL
+	// 使用配置的回调 URL，prompt=login 强制重新登录
 	options := &client.SignInOptions{
 		RedirectUri: c.config.CallbackURL,
+		Prompt:      "login",
 	}
 
 	if loginHint != "" {
@@ -145,6 +147,22 @@ func (c *LogtoClient) HandleCallback(storage *MemorySessionStorage, req *http.Re
 		userInfo.Sub, userInfo.Username, userInfo.Email)
 
 	return userInfo, nil
+}
+
+// SignOut 注销 Logto 会话
+// 撤销 refresh token（Server 端 API 调用），并返回注销 URL（需要浏览器访问以清除 cookie）
+func (c *LogtoClient) SignOut(storage *MemorySessionStorage, postLogoutRedirectUri string) (string, error) {
+	logtoClient := c.CreateLogtoClient(storage)
+
+	// 调用 SDK 的 SignOut：撤销 refresh token + 生成注销 URL
+	signOutURL, err := logtoClient.SignOut(postLogoutRedirectUri)
+	if err != nil {
+		logger.Errorf("Logto SignOut 失败: %v", err)
+		return "", err
+	}
+
+	logger.Infof("Logto token 已撤销，注销 URL: %s", signOutURL)
+	return signOutURL, nil
 }
 
 // IsAuthenticated 检查是否已认证

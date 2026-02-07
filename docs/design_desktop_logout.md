@@ -1,118 +1,111 @@
-# Desktop 注销设计
+# Desktop 注销流程设计
 
-## 概述
+## 问题现状
 
-Desktop 注销时应安全离场，通知 Server 清理相关资源，而不是仅在本地清除凭证。
+当前注销存在两个核心问题：
 
-## 当前问题
+1. Desktop 注销后，Server 端只断开了 gRPC 连接和清除心跳，但没有注销 Logto 会话
+2. 用户注销后重新登录时，Logto 浏览器 cookie 仍然有效，直接跳过登录页面弹出"登录成功"
 
-当前 Desktop 注销流程：
+根本原因：Server 端 Logout 方法只做了连接清理，没有撤销 Logto token，也没有清除 Logto 浏览器会话。
 
-1. 停止 gRPC 客户端
-2. 断开 Tunnel
-3. 清除本地配置（DeviceToken、ClientID 等）
+## 尝试过的方案
 
-问题：
+### 方案一：隐藏 WebView 打开 Logto 注销 URL（已废弃）
 
-- Server 不知道 Desktop 已注销
-- Server 端的心跳连接会等到超时才断开
-- Headscale 中的节点和 PreAuthKey 不会被清理
-- 上游 Logto 的登录状态不会被注销
+思路：注销时用隐藏 WebView 访问 Logto 的 end_session_endpoint 清除 cookie。
 
-## 目标行为
+问题：新创建的 WebView 窗口虽然与登录窗口共享 WebView2 用户数据目录，但 Logto 的 end_session_endpoint 只接受 client_id 参数（无 id_token_hint），实际效果不稳定。
 
-Desktop 注销时应按以下顺序执行：
+### 方案二：删除 WebView2 用户数据目录（已废弃）
+
+思路：注销时删除 WebView2 的用户数据目录（cookie、缓存等）。
+
+问题：应用运行时 WebView2 进程锁定了数据目录中的文件，无法删除。需要先关闭所有 WebView 窗口，用户体验差。
+
+### 方案三：prompt=login 强制重新登录（当前方案）
+
+思路：不清除 cookie，而是在生成 Logto 登录 URL 时加上 OIDC 标准参数 prompt=login，强制 Logto 每次都显示登录页面。
+
+优点：
+
+- 不需要清除 cookie，不需要额外的 WebView 操作
+- 利用 OIDC 标准协议，Logto 原生支持
+- 实现简单，只需修改 Server 端一行配置
+- 用户体验好，注销后重新登录一定会看到登录页面
+
+## 最终注销流程
 
 ```
-用户点击注销
-    │
-    ▼
-调用 Server gRPC Logout
-    │
-    ├── Server 清除心跳连接
-    ├── Server 清除设备心跳时间
-    ├── Server 过期 Headscale 节点（可选）
-    │
-    ▼
-断开 Tunnel 连接
-    │
-    ▼
-停止 gRPC 客户端
-    │
-    ▼
-清除本地凭证
-    │
-    ▼
-跳转登录页
+Desktop                    Server                     Logto
+  │                          │                          │
+  │── gRPC Logout ──────────▶│                          │
+  │                          │── 关闭心跳连接            │
+  │                          │── 关闭数据流连接          │
+  │                          │── 清除心跳时间            │
+  │                          │── 撤销 refresh token ────▶│── token 失效
+  │◀── 注销成功 ─────────────│                          │
+  │                          │                          │
+  │── 断开 Tailscale 隧道    │                          │
+  │── 停止 gRPC 客户端       │                          │
+  │── 清除本地配置           │                          │
+  │   (保留 ServerAddress)   │                          │
+  │                          │                          │
+  │ 重新登录时：              │                          │
+  │── CreateLoginSession ───▶│── 创建会话和 Storage      │
+  │◀── 返回 sessionID ──────│   (不生成 Logto URL)      │
+  │── 打开 WebView ─────────▶│                          │
+  │   /auth/desktop/{id}     │── 生成 Logto URL         │
+  │                          │   (prompt=login)          │
+  │                          │── 重定向到 Logto ────────▶│
+  │                          │                          │── prompt=login
+  │                          │                          │── 忽略已有 cookie
+  │                          │                          │── 强制显示登录页面
 ```
 
-## gRPC 接口设计
+## 改动范围
 
-新增 Logout RPC：
+### Server 端
 
-服务定义：DesktopService
-方法名：Logout
-请求参数：desktop_id（当前设备 ID）
-响应参数：success（是否成功）、message（消息）
+1. LogtoClient.GetSignInURL 添加 Prompt: "login" 参数
+2. DesktopLoginService 新增 BindUserSession / LogoutSession 方法
+3. gRPC Logout 方法增强，撤销 Logto refresh token
+4. 登录回调成功时绑定 userID → sessionID 映射
+5. CreateLoginSession 不再生成 Logto URL，只创建会话和 Storage
+6. DesktopLoginRedirect 中统一生成 Logto URL（避免重复调用覆盖 state）
+7. DesktopLoginRedirect 传入正确的 loginHint（用户名提示而非 sessionID）
 
-## Server 端处理
+### Desktop 端
 
-收到 Logout 请求后，Server 执行：
+1. App.Logout 调用 gRPC 注销后做本地清理（保留 ServerAddress）
+2. 移除 openLogoutWindow 方法（不再需要）
+3. Layout.vue 中 Logout 调用改为 async/await，确保配置清除后再跳转
 
-1. 验证 Desktop 是否存在
-2. 关闭该设备的心跳连接（从 connections map 中移除并 Cancel）
-3. 清除数据库中的心跳时间（last_heartbeat 设为 null）
-4. 可选：过期 Headscale 节点（调用 ExpireNode），使隧道立即失效
-5. 可选：删除 Headscale PreAuthKey
-6. 返回成功
+### Proto 变更
 
-## Desktop 端处理
+DesktopLogoutResponse 新增 logout_url 字段（field 3，保留但 Desktop 不再使用）
 
-注销流程改为：
+## 关键设计决策
 
-1. 调用 gRPC Logout（带超时，最多等 5 秒）
-2. 无论 Logout 是否成功，继续执行本地清理
-3. 断开 Tunnel
-4. 停止 gRPC 客户端
-5. 清除本地凭证
-6. 跳转登录页
+### 为什么用 prompt=login 而不是清除 cookie
 
-注意：即使 Server 不可达，注销也不应阻塞。gRPC Logout 调用失败时静默忽略，继续本地清理。
+WebView2 的 cookie 在应用运行时被进程锁定，无法通过删除文件清除。
+Wails v3 没有暴露 WebView2 的 CookieManager API，无法通过代码清除。
+prompt=login 是 OIDC 标准参数，Logto 原生支持，效果等同于"忽略已有会话"。
 
-## Headscale 节点处理策略
+### 为什么 Logto URL 只在 DesktopLoginRedirect 中生成
 
-两种方案：
+Logto SDK 的 SignIn 方法会在 Storage 中保存 state 和 codeVerifier。
+如果 CreateLoginSession 和 DesktopLoginRedirect 各调用一次，第二次会覆盖第一次的 state，
+导致回调时 state 不匹配或 codeVerifier 错误。
+因此 CreateLoginSession 只创建 Storage，URL 在 WebView 实际访问时才生成。
 
-| 方案     | 描述             | 优点               | 缺点               |
-| -------- | ---------------- | ------------------ | ------------------ |
-| 过期节点 | 调用 ExpireNode  | 隧道立即失效，安全 | 重新登录需要新节点 |
-| 仅断开   | 不操作 Headscale | 重新登录可复用节点 | 节点残留           |
+### 容错
 
-建议采用"仅断开"方案：
+- Server 重启后内存中的 SessionStorage 丢失：跳过 Logto token 撤销，仅做连接清理
+- Logto 不可达：撤销 token 失败记录日志，不影响注销流程
+- gRPC 注销超时（3秒）：跳过，继续本地清理
 
-- 注销只清除 Server 端的认证状态
-- Headscale 节点保留，下次登录时复用
-- 节点的 PreAuthKey 自然过期即可
+### Logto 配置要求
 
-## 前端交互
-
-注销按钮行为：
-
-1. 弹出确认对话框："确定要注销吗？"
-2. 确认后显示 loading 状态
-3. 调用 Go 后端的 Logout 方法
-4. 完成后跳转到登录页
-
-## 注销后重新登录
-
-注销后再登录不会创建新设备。设备唯一标识为 user_id + type + hostname（主机名），同一用户在同一台机器上重新登录时，Server 会复用已有设备记录，仅更新密钥和心跳时间。
-
-只有在不同物理机器上登录（hostname 不同）才会创建新设备记录。
-
-## 实现步骤
-
-1. Proto 定义：在 desktop.proto 中添加 Logout RPC
-2. Server 实现：在 desktop_service.go 中实现 Logout 方法
-3. Desktop 客户端：在 client.go 中添加 Logout 方法
-4. Desktop 后端：修改 app.go 的 Logout 方法，先调用 gRPC Logout
-5. Desktop 前端：确认注销交互（已有确认对话框）
+需要在 Logto 管理后台的应用设置中，添加"退出登录后重定向 URI"（使用 callback_url 即可）。

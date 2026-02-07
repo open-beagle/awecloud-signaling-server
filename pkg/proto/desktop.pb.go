@@ -2010,8 +2010,9 @@ func (x *DesktopLogoutRequest) GetDesktopId() uint64 {
 // DesktopLogoutResponse 注销响应
 type DesktopLogoutResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"` // 是否成功
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`  // 响应消息
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`                     // 是否成功
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`                      // 响应消息
+	LogoutUrl     string                 `protobuf:"bytes,3,opt,name=logout_url,json=logoutUrl,proto3" json:"logout_url,omitempty"` // Logto 注销 URL（Desktop 需要用 WebView 打开以清除浏览器会话）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2056,6 +2057,13 @@ func (x *DesktopLogoutResponse) GetSuccess() bool {
 func (x *DesktopLogoutResponse) GetMessage() string {
 	if x != nil {
 		return x.Message
+	}
+	return ""
+}
+
+func (x *DesktopLogoutResponse) GetLogoutUrl() string {
+	if x != nil {
+		return x.LogoutUrl
 	}
 	return ""
 }
@@ -2218,10 +2226,12 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\busername\x18\a \x01(\tR\busername\"5\n" +
 	"\x14DesktopLogoutRequest\x12\x1d\n" +
 	"\n" +
-	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\"K\n" +
+	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\"j\n" +
 	"\x15DesktopLogoutResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage*\xcc\x01\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
+	"\n" +
+	"logout_url\x18\x03 \x01(\tR\tlogoutUrl*\xcc\x01\n" +
 	"\x0fDesktopDataType\x12!\n" +
 	"\x1dDESKTOP_DATA_TYPE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15DESKTOP_DATA_TYPE_ALL\x10\x01\x12\x1e\n" +

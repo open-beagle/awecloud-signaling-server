@@ -1032,8 +1032,14 @@ func (s *DesktopServiceServer) Logout(ctx context.Context, req *pb.DesktopLogout
 	// 清除数据库中的心跳时间
 	db.DB.WithContext(ctx).Model(&model.Node{}).Where("id = ?", req.DesktopId).Update("last_heartbeat", nil)
 
-	logger.Infof("Desktop %d 注销成功", req.DesktopId)
-	return &pb.DesktopLogoutResponse{Success: true, Message: "注销成功"}, nil
+	// 注销 Logto 上游会话（尽力而为，失败不阻塞）
+	var logoutURL string
+	if s.loginService != nil {
+		logoutURL = s.loginService.LogoutSession(node.UserID)
+	}
+
+	logger.Infof("Desktop %d 注销成功, logoutURL=%s", req.DesktopId, logoutURL)
+	return &pb.DesktopLogoutResponse{Success: true, Message: "注销成功", LogoutUrl: logoutURL}, nil
 }
 
 // maskToken 隐藏 token 中间部分，用于日志

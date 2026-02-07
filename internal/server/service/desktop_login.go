@@ -40,6 +40,9 @@ type DesktopLoginService struct {
 	// 会话存储（用于 Logto SDK）
 	sessionStorages     map[string]*auth.MemorySessionStorage
 	sessionStorageMutex sync.RWMutex
+	// 用户 ID → 会话 ID 映射（用于注销时反查 Storage）
+	userSessions     map[uint64]string
+	userSessionMutex sync.RWMutex
 }
 
 // NewDesktopLoginService 创建 Desktop 登录服务
@@ -48,6 +51,7 @@ func NewDesktopLoginService(cfg *config.ServerConfig) *DesktopLoginService {
 		config:          cfg,
 		loginResults:    make(map[string]chan *LoginResult),
 		sessionStorages: make(map[string]*auth.MemorySessionStorage),
+		userSessions:    make(map[uint64]string),
 	}
 	if cfg.Logto.Endpoint != "" {
 		svc.logtoClient = auth.NewLogtoClient(cfg.Logto)
@@ -130,10 +134,12 @@ func (s *DesktopLoginService) GetSessionStorage(sessionID string) *auth.MemorySe
 }
 
 // CreateLoginSession 创建登录会话
+// 注意：此方法只创建会话和 Storage，不生成 Logto 登录 URL
+// Logto URL 在 DesktopLoginRedirect（WebView 访问时）才生成，避免重复调用覆盖 state
 func (s *DesktopLoginService) CreateLoginSession(deviceFingerprint, deviceName, usernameHint string) (*model.DesktopLoginSession, string, error) {
 	sessionID := uuid.New().String()
 
-	// 创建 Logto SDK 需要的会话存储
+	// 创建 Logto SDK 需要的会话存储（URL 稍后在 DesktopLoginRedirect 中生成）
 	storage := auth.NewMemorySessionStorage()
 
 	// 保存会话存储
@@ -143,19 +149,6 @@ func (s *DesktopLoginService) CreateLoginSession(deviceFingerprint, deviceName, 
 	s.sessionStorageMutex.Unlock()
 
 	logger.Infof("创建 Session 存储: sessionID=%s, 当前存储数量=%d", sessionID, storageCount)
-
-	// 使用 Logto SDK 生成登录 URL
-	loginURL, err := s.logtoClient.GetSignInURL(storage, sessionID)
-	if err != nil {
-		// 清理存储
-		s.sessionStorageMutex.Lock()
-		delete(s.sessionStorages, sessionID)
-		s.sessionStorageMutex.Unlock()
-		logger.Errorf("生成登录 URL 失败: %v", err)
-		return nil, "", err
-	}
-
-	logger.Infof("生成登录 URL 成功: sessionID=%s, url=%s", sessionID, loginURL)
 
 	// 创建会话记录
 	session := &model.DesktopLoginSession{
@@ -178,7 +171,7 @@ func (s *DesktopLoginService) CreateLoginSession(deviceFingerprint, deviceName, 
 
 	logger.Infof("创建 Desktop 登录会话: sessionID=%s, device=%s", sessionID, deviceName)
 
-	return session, loginURL, nil
+	return session, "", nil
 }
 
 
@@ -189,4 +182,71 @@ func (s *DesktopLoginService) RegisterSessionStorage(sessionID string, storage *
 
 	s.sessionStorages[sessionID] = storage
 	logger.Infof("注册 Session 存储: sessionID=%s, 当前存储数量=%d", sessionID, len(s.sessionStorages))
+}
+
+// BindUserSession 绑定用户 ID 与会话 ID 的映射（登录成功后调用）
+func (s *DesktopLoginService) BindUserSession(userID uint64, sessionID string) {
+	s.userSessionMutex.Lock()
+	defer s.userSessionMutex.Unlock()
+
+	s.userSessions[userID] = sessionID
+	logger.Infof("绑定用户会话: userID=%d, sessionID=%s", userID, sessionID)
+}
+
+// LogoutSession 注销用户的 Logto 会话
+// 通过 userID 反查 sessionID，获取 Storage 后调用 Logto SignOut
+// 返回 Logto 注销 URL（需要浏览器访问以清除 cookie）
+func (s *DesktopLoginService) LogoutSession(userID uint64) string {
+	if s.logtoClient == nil || !s.logtoClient.IsConfigured() {
+		logger.Warnf("Logto 未配置，跳过上游注销: userID=%d", userID)
+		return ""
+	}
+
+	// 通过 userID 查找 sessionID
+	s.userSessionMutex.RLock()
+	sessionID, exists := s.userSessions[userID]
+	s.userSessionMutex.RUnlock()
+
+	if !exists {
+		logger.Warnf("未找到用户会话映射，跳过 Logto 注销: userID=%d", userID)
+		return ""
+	}
+
+	// 获取 SessionStorage
+	s.sessionStorageMutex.RLock()
+	storage := s.sessionStorages[sessionID]
+	s.sessionStorageMutex.RUnlock()
+
+	if storage == nil {
+		logger.Warnf("Session 存储不存在（可能 Server 已重启），跳过 Logto 注销: userID=%d, sessionID=%s", userID, sessionID)
+		// 清理映射
+		s.userSessionMutex.Lock()
+		delete(s.userSessions, userID)
+		s.userSessionMutex.Unlock()
+		return ""
+	}
+
+	// 调用 Logto SignOut（撤销 token + 生成注销 URL）
+	postLogoutURI := s.config.Logto.CallbackURL
+	if postLogoutURI == "" {
+		postLogoutURI = "https://localhost/logout-callback"
+	}
+
+	logger.Infof("调用 Logto 注销: userID=%d, sessionID=%s", userID, sessionID)
+	logoutURL, err := s.logtoClient.SignOut(storage, postLogoutURI)
+	if err != nil {
+		logger.Warnf("Logto 注销失败（忽略）: userID=%d, err=%v", userID, err)
+	}
+
+	// 清理 Storage 和映射
+	s.sessionStorageMutex.Lock()
+	delete(s.sessionStorages, sessionID)
+	s.sessionStorageMutex.Unlock()
+
+	s.userSessionMutex.Lock()
+	delete(s.userSessions, userID)
+	s.userSessionMutex.Unlock()
+
+	logger.Infof("用户 Logto 会话已注销: userID=%d, sessionID=%s, logoutURL=%s", userID, sessionID, logoutURL)
+	return logoutURL
 }

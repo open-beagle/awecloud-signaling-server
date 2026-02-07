@@ -67,15 +67,16 @@ func (a *DesktopAuthAPI) DesktopLoginRedirect(c *gin.Context) {
 		return
 	}
 
-	// 使用 Logto SDK 生成登录 URL
-	loginURL, err := a.loginService.GetLogtoClient().GetSignInURL(storage, sessionID)
+	// 使用 Logto SDK 生成登录 URL（带 prompt=login 强制重新登录）
+	loginHint := session.UsernameHint
+	loginURL, err := a.loginService.GetLogtoClient().GetSignInURL(storage, loginHint)
 	if err != nil {
 		logger.Errorf("生成 Logto 登录 URL 失败: %v", err)
 		a.renderCallbackError(c, "生成登录链接失败")
 		return
 	}
 
-	logger.Infof("显示登录页面: sessionID=%s, loginURL=%s", sessionID, loginURL)
+	logger.Infof("显示登录页面: sessionID=%s, loginHint=%s, loginURL=%s", sessionID, loginHint, loginURL)
 
 	// 重定向到 Logto 登录页面
 	c.Redirect(http.StatusFound, loginURL)
@@ -154,6 +155,9 @@ func (a *DesktopAuthAPI) DesktopLoginCallback(c *gin.Context) {
 		// 更新会话状态
 		session.Complete(user.ID, "")
 		db.WithContext(ctx).Save(&session)
+
+		// 绑定用户会话映射（用于注销时反查 Storage）
+		a.loginService.BindUserSession(user.ID, session.SessionID)
 
 		// 通知 gRPC 流
 		a.loginService.NotifyLoginResult(session.SessionID, &service.LoginResult{

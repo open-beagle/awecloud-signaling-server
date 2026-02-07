@@ -343,6 +343,7 @@ message DesktopLogoutRequest {
 message DesktopLogoutResponse {
   bool success = 1; // 是否成功
   string message = 2; // 响应消息
+  string logout_url = 3; // Logto 注销 URL（Desktop 需要用 WebView 打开以清除浏览器会话）
 }
 
 // WaitForLoginResultStatus 等待登录结果状态
