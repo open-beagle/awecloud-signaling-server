@@ -83,7 +83,7 @@ SSH 规则来源（DB → Headscale SSH）：
 | --------------- | -------------------------------------- | ---------------- |
 | K8SAPI 授权     | 需要 namespace + role 级别控制         | 心跳下发到 Agent |
 | K8SService 授权 | 需要 namespace + service name 级别控制 | 心跳下发到 Agent |
-| 跳跃授权        | Endpoint 不在 Tailscale 网络中         | 心跳下发到 Agent |
+| Endpoint 授权   | Endpoint 不在 Tailscale 网络中         | 心跳下发到 Agent |
 
 同步时机：
 
@@ -151,4 +151,4 @@ Headscale 交互在 ZTNA 中的变更很小：
 | PreAuthKey | 不变                                      |
 | 节点管理   | 不变                                      |
 
-ZTNA 新增的 K8SAPI/K8SService/跳跃授权完全不涉及 Headscale，走 Agent 心跳下发。Headscale 只负责第 1 层（网络可达性）和第 2 层（SSH）的控制。
+ZTNA 新增的 K8SAPI/K8SService/Endpoint 授权完全不涉及 Headscale，走 Agent 心跳下发。Headscale 只负责第 1 层（网络可达性）和第 2 层（SSH）的控制。

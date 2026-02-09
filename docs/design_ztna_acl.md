@@ -134,21 +134,35 @@ Headscale ACL:
 
 这是最粗粒度的网络层控制。
 
-### 4. SSH 授权（/acl/ssh）
+### 4. SSH 授权（/acl/ssh）— 增强
 
-业务含义：控制谁能 SSH 到哪个 Agent，用哪些 Linux 用户。
+业务含义：控制谁能 SSH 到哪个 Agent 或 Endpoint，用哪些 Linux 用户。
 
-对象：AclSSHUserPermission、AclSSHGroupPermission。
+ZTNA 增强：SSH 授权现在包含两种目标：
 
-以 Agent 用户为维度（仅 ssh_enabled=true），管理 SSH 访问权限和允许的 Linux 用户名。
+- Agent SSH：直接 SSH 到 Agent（通过 Headscale SSH Policy）
+- Endpoint SSH：通过 Agent 跳跃到 Endpoint（应用层控制，不涉及 Headscale）
 
-翻译成 Headscale SSH Policy 示例：
+对象：
+
+- AclSSHUserPermission、AclSSHGroupPermission（Agent SSH，已有）
+- AclSSHJumpUserPermission、AclSSHJumpGroupPermission（Endpoint SSH，新增）
+
+Agent SSH 翻译成 Headscale SSH Policy 示例：
 
 ```
 数据库：target_user_id=beijing, user_id=zhangsan, ssh_users=["root","deploy"]
 
 Headscale SSH:
   { "action": "accept", "src": ["tag:client-zhangsan"], "dst": ["tag:agent-beijing"], "users": ["root","deploy"] }
+```
+
+Endpoint SSH 不翻译成 Headscale，由 Agent 本地鉴权：
+
+```
+数据库：endpoint_ssh_id=web-server-1, user_id=zhangsan, ssh_users=["deploy"]
+
+Agent 收到 Desktop 的 SSH 请求时，检查本地缓存的 ssh_jump_permissions，决定是否允许连接。
 ```
 
 SSH 授权和网络层授权是独立维度。有 SSH 授权但无用户授权时，SSH 仍可工作（Tailscale SSH 有独立通道）。
@@ -166,13 +180,21 @@ group:*:*         agent:*           agent:port
 
 ## ZTNA 新增授权（3 种，不同步 Headscale）
 
-### 5. K8SAPI 授权（/acl/k8s）— 新增
+### 5. K8S 授权（/acl/k8s）— 新增
 
-业务含义：控制谁能通过 Agent 访问 K8S API，以及命名空间和角色。
+业务含义：控制谁能访问 K8S API，以及命名空间和角色。包含 Agent K8S 和 Endpoint K8S。
 
-对象：AclK8sUserPermission、AclK8sGroupPermission。
+ZTNA 增强：K8S 授权现在包含两种目标：
 
-以 Agent 用户为维度（k8s.enabled=true），管理 K8S API 访问权限。
+- AgentK8SAPI：Agent 直接提供 K8S API 访问（Agent 有 kubeconfig）
+- EndpointK8SAPI：通过 Agent 跳跃到 Endpoint 访问 K8S API（Endpoint 有 kubeconfig）
+
+对象：
+
+- AclK8sUserPermission、AclK8sGroupPermission（AgentK8SAPI，新增）
+- AclK8SAPIJumpUserPermission、AclK8SAPIJumpGroupPermission（EndpointK8SAPI，新增）
+
+AgentK8SAPI 授权结构：
 
 ```
 AclK8sUserPermission:
@@ -182,17 +204,35 @@ AclK8sUserPermission:
   k8s_role        → Impersonation 使用的 K8S 角色
 ```
 
+EndpointK8SAPI 授权结构：
+
+```
+AclK8SAPIJumpUserPermission:
+  endpoint_k8sapi_id → 哪个 EndpointK8SAPI
+  user_id/group_id   → 被授权用户/分组
+  namespaces         → 允许的命名空间
+  k8s_role           → K8S 角色
+```
+
 与 Headscale 的关系：不翻译成 Headscale ACL。这是应用层控制，执行在 Agent 侧。前提条件是 Desktop 必须先能连到 Agent（第 1 层通过）。
 
 权限数据通过心跳同步到 Agent 本地缓存。
 
 ### 6. K8SService 授权（/acl/k8s-service）— 新增
 
-业务含义：控制谁能通过 Agent 访问自动发现的 K8S Service，按命名空间和 Service 名称控制。
+业务含义：控制谁能访问自动发现的 K8S Service，按命名空间和 Service 名称控制。包含 Agent K8SService 和 Endpoint K8SService。
 
-对象：AclK8SServiceUserPermission、AclK8SServiceGroupPermission。
+ZTNA 增强：K8SService 授权现在包含两种目标：
 
-以 Agent 用户为维度（svc.enabled=true），管理 K8S Service 访问权限。
+- AgentK8SService：Agent 自动发现的 K8S Service（Agent 在 K8S 集群内）
+- EndpointK8SService：Endpoint 自动发现的 K8S Service（Endpoint 在 K8S 集群内）
+
+对象：
+
+- AclK8SServiceUserPermission、AclK8SServiceGroupPermission（AgentK8SService，新增）
+- AclK8SServiceJumpUserPermission、AclK8SServiceJumpGroupPermission（EndpointK8SService，新增）
+
+AgentK8SService 授权结构：
 
 ```
 AclK8SServiceUserPermission:
@@ -202,35 +242,18 @@ AclK8SServiceUserPermission:
   service_pattern → 允许的 Service 名称模式（"*" = 全部，"pg*" = pg 开头）
 ```
 
+EndpointK8SService 授权结构：
+
+```
+AclK8SServiceJumpUserPermission:
+  endpoint_k8sservice_id → 哪个 EndpointK8SService
+  user_id/group_id       → 被授权用户/分组
+  service_pattern        → 允许的 Service 模式
+```
+
 与 Headscale 的关系：不翻译成 Headscale ACL。
 
 为什么不能复用服务授权（AclServicePermission）：AgentK8SService 是自动发现模式，同一个 Agent 上可能有多个 Service 使用相同端口（如多个命名空间各有一个 PostgreSQL:5432）。Headscale ACL 只认 tag + 端口，无法区分 namespace/service name。因此 K8SService 的权限控制必须在应用层，按 namespace + service name 级别控制。
-
-### 7. 跳跃授权（/acl/jump）— 新增
-
-业务含义：控制谁能通过 Agent 跳跃到内网 Endpoint。
-
-三种跳跃类型，结构对称：
-
-```
-SSH 跳跃（AclSSHJumpPermission）：
-  endpoint_ssh_id → 哪个 EndpointSSH
-  user_id/group_id → 被授权用户/分组
-  ssh_users → 允许的 Linux 用户列表
-
-K8SAPI 跳跃（AclK8SAPIJumpPermission）：
-  endpoint_k8sapi_id → 哪个 EndpointK8SAPI
-  user_id/group_id → 被授权用户/分组
-  namespaces → 允许的命名空间
-  k8s_role → K8S 角色
-
-K8SService 跳跃（AclK8SServiceJumpPermission）：
-  endpoint_k8sservice_id → 哪个 EndpointK8SService
-  user_id/group_id → 被授权用户/分组
-  service_pattern → 允许的 Service 模式
-```
-
-与 Headscale 的关系：完全不涉及 Headscale。Endpoint 不在 Tailscale 网络中，没有 Tag。
 
 ## AgentService 与 AgentK8SService 的区别
 
@@ -278,14 +301,13 @@ Desktop 侧用 VIP 隔离端口冲突：
 │ 服务授权         │ Headscale ACL│ 是           │ Agent 指定端口           │ AgentService     │
 │ 用户授权         │ Headscale ACL│ 是           │ Agent 所有端口           │ 通用             │
 │ 分组授权         │ Headscale ACL│ 是           │ 分组所有节点所有端口     │ 通用             │
-│ SSH 授权         │ Headscale SSH│ 是           │ Agent SSH + Linux 用户   │ AgentSSH         │
-│ K8SAPI 授权      │ Agent 本地   │ 否           │ Agent K8S + NS + 角色    │ AgentK8SAPI      │
-│ K8SService 授权  │ Agent 本地   │ 否           │ Agent SVC + NS + Service │ AgentK8SService  │
-│ 跳跃授权         │ Agent 本地   │ 否           │ Endpoint + 应用层参数    │ Endpoint         │
+│ SSH 授权         │ 混合         │ 部分         │ Agent/Endpoint SSH       │ Agent + Endpoint │
+│ K8S 授权         │ Agent 本地   │ 否           │ Agent/Endpoint K8S + NS  │ Agent + Endpoint │
+│ K8SService 授权  │ Agent 本地   │ 否           │ Agent/Endpoint SVC + NS  │ Agent + Endpoint │
 └──────────────────┴──────────────┴──────────────┴──────────────────────────┴──────────────────┘
 ```
 
-## 四层权限控制体系（更新）
+## 授权层级体系（更新）
 
 ```
 第 1 层：网络可达性（Headscale ACL）
@@ -293,17 +315,15 @@ Desktop 侧用 VIP 隔离端口冲突：
   用户授权 → Agent 全端口
   分组授权 → 分组全端口
 
-第 2 层：Agent 本机 SSH（Headscale SSH Policy）
-  SSH 授权 → AgentSSH
+第 2 层：SSH 访问（混合控制）
+  Agent SSH → Headscale SSH Policy
+  Endpoint SSH → Agent 本地鉴权
 
-第 3 层：Agent 本机应用层（Agent 本地鉴权）
-  K8SAPI 授权 → AgentK8SAPI
-  K8SService 授权 → AgentK8SService
-
-第 4 层：Endpoint 跳跃（Agent 本地鉴权）
-  SSH 跳跃授权 → EndpointSSH
-  K8SAPI 跳跃授权 → EndpointK8SAPI
-  K8SService 跳跃授权 → EndpointK8SService
+第 3 层：K8S 访问（Agent 本地鉴权）
+  Agent K8SAPI → Agent 本地鉴权
+  Endpoint K8SAPI → Agent 本地鉴权
+  Agent K8SService → Agent 本地鉴权
+  Endpoint K8SService → Agent 本地鉴权
 ```
 
 第 1 层是所有后续层的前提。Desktop 必须先能连到 Agent（第 1 层通过），后续层的鉴权才会被触发。
@@ -313,8 +333,8 @@ Desktop 侧用 VIP 隔离端口冲突：
 | 阶段 | 内容                                 | 依赖                 |
 | ---- | ------------------------------------ | -------------------- |
 | P0   | 现有 4 种授权不变                    | 已实现               |
-| P1   | K8SAPI 授权模型和 API                | AgentK8SAPI 实现     |
+| P1   | K8S 授权模型和 API                   | AgentK8SAPI 实现     |
 | P1   | K8SService 授权模型和 API            | AgentK8SService 实现 |
-| P2   | 跳跃授权模型和 API（SSH/K8S/SVC）    | Endpoint 体系        |
+| P2   | Endpoint 授权模型和 API              | Endpoint 体系        |
 | P2   | Web 授权管理页面（K8S + K8SService） | 授权 API             |
-| P2   | Web 跳跃授权页面                     | 跳跃授权 API         |
+| P2   | Web Endpoint 授权增强                | Endpoint 授权 API    |

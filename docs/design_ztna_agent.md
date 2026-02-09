@@ -311,9 +311,9 @@ Agent 通过 gRPC 心跳从 Server 获取权限数据：
 心跳响应新增字段：
   k8s_permissions:          → 第 3 层，AgentK8SAPI 权限
   k8s_service_permissions:  → 第 3 层，AgentK8SService 权限
-  ssh_jump_permissions:     → 第 4 层，EndpointSSH 跳跃授权
-  k8sapi_jump_permissions:  → 第 4 层，EndpointK8SAPI 跳跃授权
-  k8sservice_jump_permissions: → 第 4 层，EndpointK8SService 跳跃授权
+  ssh_endpoint_permissions: → Endpoint SSH 授权
+  k8sapi_endpoint_permissions: → Endpoint K8SAPI 授权
+  k8sservice_endpoint_permissions: → Endpoint K8SService 授权
 
 Agent 本地缓存，随心跳刷新（30 秒一次）。
 ```

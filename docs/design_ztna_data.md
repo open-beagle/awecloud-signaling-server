@@ -92,7 +92,6 @@ Agent 实体（页面上的一行）
 | ACL.SSHList             | SSH 授权列表     | DB(AclSSHPermission,User)                      |
 | ACL.K8SList（新增）     | K8S 授权列表     | DB(AclK8sPermission,User)                      |
 | ACL.K8SSvcList（新增）  | K8S 服务授权列表 | DB(AclK8SServicePermission,User)               |
-| ACL.JumpList（新增）    | 跳跃授权列表     | DB(AclJumpPermission,Endpoint\*,User)          |
 | Resource.List（新增）   | 资源发现         | Cache(K8SService+EndpointK8SService) + DB      |
 | Domain.List（新增）     | 域名列表         | DB(DomainRegistry)                             |
 | DeployToken.List        | 部署 Token 列表  | DB(DeployToken,User)                           |

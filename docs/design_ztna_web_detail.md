@@ -40,8 +40,8 @@
 三级页面（详情页）：
   授权管理 > 服务授权 > 授权详情: postgresql
 
-四级页面（跳跃授权详情）：
-  授权管理 > 跳跃授权 > SSH 跳跃授权: web-server-1
+四级页面（Endpoint 授权详情）：
+  授权管理 > SSH 授权 > Endpoint SSH: web-server-1
 ```
 
 详情页名称通过 ?name=xxx query 参数传递，Breadcrumb 组件从 route.query.name 读取显示。
@@ -138,9 +138,8 @@ ZTNA 新页面搜索区域设计：
 
 | 页面                    | 筛选条件                              | 布局     |
 | ----------------------- | ------------------------------------- | -------- |
-| K8SAPI 授权列表         | Agent 筛选 + 搜索                     | 简单搜索 |
+| K8S 授权列表            | Agent 筛选 + 搜索                     | 简单搜索 |
 | K8SService 授权列表     | Agent 筛选 + 搜索                     | 简单搜索 |
-| 跳跃授权列表            | Tab 切换 + Agent 筛选 + 搜索          | 简单搜索 |
 | EndpointSSH 列表        | Agent 筛选 + 状态筛选 + 搜索          | 简单搜索 |
 | EndpointK8SAPI 列表     | Agent 筛选 + 状态筛选 + 搜索          | 简单搜索 |
 | EndpointK8SService 列表 | Agent 筛选 + 状态筛选 + 搜索          | 简单搜索 |
@@ -284,9 +283,9 @@ ZTNA 新页面搜索区域设计：
 | 授权类型                       | 授权参数区域                                             |
 | ------------------------------ | -------------------------------------------------------- |
 | 服务授权 / 用户授权 / 分组授权 | 无额外参数（弹窗更紧凑）                                 |
-| SSH 授权 / SSH 跳跃授权        | Linux 用户：el-select multiple, filterable, allow-create |
+| SSH 授权（Agent + Endpoint）   | Linux 用户：el-select multiple, filterable, allow-create |
 |                                | 预设选项: root, autogroup:nonroot，支持自定义输入        |
-| K8SAPI 授权 / K8S 跳跃授权     | 命名空间：el-select multiple, filterable, allow-create   |
+| K8S 授权（Agent + Endpoint）   | 命名空间：el-select multiple, filterable, allow-create   |
 |                                | K8S 角色：el-select filterable, allow-create             |
 |                                | 预设选项: admin, developer, viewer                       |
 | K8SService 授权 / SVC 跳跃授权 | 命名空间：el-select multiple, filterable, allow-create   |

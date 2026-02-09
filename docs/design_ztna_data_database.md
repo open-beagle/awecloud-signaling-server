@@ -157,9 +157,9 @@ acl_k8s_service_group_permission:
 | service_pattern | string | NOT NULL                     | Service 名称模式            |
 | granted_at      | time   |                              | 授权时间                    |
 
-第 4 层 — Endpoint 跳跃授权（6 张）：
+第 4 层 — Endpoint 授权（6 张）：
 
-三种跳跃类型 × 用户/分组 = 6 张表，结构对称。
+三种 Endpoint 类型 × 用户/分组 = 6 张表，结构对称。
 
 acl_ssh_jump_user_permission / acl_ssh_jump_group_permission:
 

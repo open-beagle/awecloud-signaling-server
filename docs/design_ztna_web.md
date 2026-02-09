@@ -85,7 +85,7 @@ Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理�
 | 用户管理 | 用户列表（agent/client），Deploy Token | 不变                                                 |
 | 设备管理 | 设备列表（代理/桌面），IP/状态/心跳    | 不变                                                 |
 | 分组管理 | 分组列表，成员管理                     | 不变                                                 |
-| 授权管理 | 服务授权、用户授权、分组授权、SSH 授权 | 新增 K8SAPI/K8SService 授权 + 跳跃授权               |
+| 授权管理 | 服务授权、用户授权、分组授权、SSH 授权 | 新增 K8S 授权 + K8SService 授权                      |
 | 隧道管理 | Headscale User/Node/ACL/SSH            | 不变                                                 |
 | Endpoint | 无                                     | 新增 Endpoint 管理（SSH/K8SAPI/K8SService）          |
 | 资源发现 | 无                                     | 新增 AgentK8SService/EndpointK8SService 自动发现视图 |
@@ -103,10 +103,9 @@ Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理�
 │     ├── 服务授权    /acl/services             （不变，AgentService）
 │     ├── 用户授权    /acl/users                （不变）
 │     ├── 分组授权    /acl/groups               （不变）
-│     ├── SSH 授权    /acl/ssh                  （不变）
-│     ├── K8SAPI 授权 /acl/k8s                  （新增）
-│     ├── K8SService 授权 /acl/k8s-service      （新增）
-│     └── 跳跃授权    /acl/jump                 （新增）
+│     ├── SSH 授权    /acl/ssh                  （增强，包含 Endpoint SSH）
+│     ├── K8S 授权    /acl/k8s                  （新增，包含 Agent + Endpoint）
+│     └── K8SService 授权 /acl/k8s-service      （新增，包含 Agent + Endpoint）
 ├── Endpoint 管理（新增）
 │     ├── EndpointSSH        /endpoints/ssh     （新增）
 │     ├── EndpointK8SAPI     /endpoints/k8s     （新增）
@@ -199,52 +198,6 @@ Agent: beijing
 ```
 
 页面结构与 K8SAPI 授权页面类似。
-
-### 跳跃授权页面（/acl/jump）
-
-管理 Endpoint 跳跃的访问权限（第 4 层）。按 Endpoint 类型分 Tab 展示。
-
-```
-┌──────────────┬──────────────┬──────────────┐
-│ SSH 跳跃授权 │ K8S 跳跃授权 │ SVC 跳跃授权 │
-└──────────────┴──────────────┴──────────────┘
-```
-
-SSH 跳跃授权 Tab：
-
-| 列         | 说明              |
-| ---------- | ----------------- |
-| Endpoint   | EndpointSSH 名称  |
-| 所属 Agent | 连接的 Agent 名称 |
-| 别名       | 显示名称          |
-| 用户授权数 | 用户级授权条数    |
-| 分组授权数 | 分组级授权条数    |
-| 操作       | 管理授权          |
-
-详情页面（以 SSH 跳跃为例）：
-
-```
-EndpointSSH: web-server-1（web-server-1.beijing.k8s:22）
-所属 Agent: beijing
-
-用户级授权：
-  ┌──────────┬──────────────────┐
-  │ 用户     │ Linux 用户       │
-  │ zhangsan │ root, deploy     │
-  │ lisi     │ deploy           │
-  └──────────┴──────────────────┘
-  [+ 添加用户授权]
-
-分组级授权：
-  ┌──────────┬──────────────────┐
-  │ 分组     │ Linux 用户       │
-  │ 开发组   │ deploy           │
-  │ DBA 组   │ root             │
-  └──────────┴──────────────────┘
-  [+ 添加分组授权]
-```
-
-K8S 跳跃授权和 SVC 跳跃授权结构类似，字段分别对应 AclK8SAPIJumpPermission 和 AclK8SServiceJumpPermission。
 
 ### Endpoint 管理页面（/endpoints/\*）
 
@@ -346,22 +299,20 @@ menu.endpointK8SAPI     — EndpointK8SAPI
 menu.endpointK8SService — EndpointK8SService
 menu.resources          — 资源发现
 menu.domains            — 域名管理
-acl.k8s                 — K8SAPI 授权
+acl.k8s                 — K8S 授权
 acl.k8sService          — K8SService 授权
-acl.jump                — 跳跃授权
-acl.jumpSSH             — SSH 跳跃授权
-acl.jumpK8S             — K8S 跳跃授权
-acl.jumpSVC             — SVC 跳跃授权
+endpoint.ssh            — Endpoint SSH
+endpoint.k8s            — Endpoint K8SAPI
+endpoint.svc            — Endpoint K8SService
 ```
 
 ## 实现优先级
 
 | 阶段 | 内容                | 依赖                        |
 | ---- | ------------------- | --------------------------- |
-| P1   | K8SAPI 授权页面     | AclK8sPermission API        |
+| P1   | K8S 授权页面        | AclK8sPermission API        |
 | P1   | K8SService 授权页面 | AclK8SServicePermission API |
 | P1   | Endpoint 管理页面   | Endpoint 模型 API           |
-| P1   | 跳跃授权页面        | 跳跃 ACL 模型 API           |
 | P1   | 资源发现页面        | 资源发现 API                |
 | P1   | 域名管理页面        | 域名注册表 API              |
 | P2   | 审计日志增强        | 操作审计 API                |

@@ -155,12 +155,12 @@ GET /api/v1/client/dns/resolve
 | AclK8sGroupPermission            | 第 3 层 | AgentK8SAPI 权限（分组级）          |
 | AclK8SServiceUserPermission      | 第 3 层 | AgentK8SService 权限（用户级）      |
 | AclK8SServiceGroupPermission     | 第 3 层 | AgentK8SService 权限（分组级）      |
-| AclSSHJumpUserPermission         | 第 4 层 | EndpointSSH 跳跃授权（用户）        |
-| AclSSHJumpGroupPermission        | 第 4 层 | EndpointSSH 跳跃授权（分组）        |
-| AclK8SAPIJumpUserPermission      | 第 4 层 | EndpointK8SAPI 跳跃授权（用户）     |
-| AclK8SAPIJumpGroupPermission     | 第 4 层 | EndpointK8SAPI 跳跃授权（分组）     |
-| AclK8SServiceJumpUserPermission  | 第 4 层 | EndpointK8SService 跳跃授权（用户） |
-| AclK8SServiceJumpGroupPermission | 第 4 层 | EndpointK8SService 跳跃授权（分组） |
+| AclSSHJumpUserPermission         | Endpoint SSH | EndpointSSH 授权（用户）        |
+| AclSSHJumpGroupPermission        | Endpoint SSH | EndpointSSH 授权（分组）        |
+| AclK8SAPIJumpUserPermission      | Endpoint K8S | EndpointK8SAPI 授权（用户）     |
+| AclK8SAPIJumpGroupPermission     | Endpoint K8S | EndpointK8SAPI 授权（分组）     |
+| AclK8SServiceJumpUserPermission  | Endpoint K8S | EndpointK8SService 授权（用户） |
+| AclK8SServiceJumpGroupPermission | Endpoint K8S | EndpointK8SService 授权（分组） |
 
 ### ACL 字段说明
 
@@ -236,9 +236,9 @@ Agent 通过 gRPC 心跳从 Server 获取权限数据：
 心跳响应新增字段：
 k8s_permissions: → 第 3 层，AgentK8SAPI 权限
 k8s_service_permissions: → 第 3 层，AgentK8SService 权限
-ssh_jump_permissions: → 第 4 层，EndpointSSH 跳跃授权
-k8sapi_jump_permissions: → 第 4 层，EndpointK8SAPI 跳跃授权
-k8sservice_jump_permissions: → 第 4 层，EndpointK8SService 跳跃授权
+ssh_endpoint_permissions: → Endpoint SSH 授权
+k8sapi_endpoint_permissions: → Endpoint K8SAPI 授权
+k8sservice_endpoint_permissions: → Endpoint K8SService 授权
 
 Agent 本地缓存，随心跳刷新（30 秒一次）。
 
@@ -294,12 +294,12 @@ updated_at time
 | acl_k8s_group_permission             | AgentK8SAPI 权限（分组级）          |
 | acl_k8s_service_user_permission      | AgentK8SService 权限（用户级）      |
 | acl_k8s_service_group_permission     | AgentK8SService 权限（分组级）      |
-| acl_ssh_jump_user_permission         | EndpointSSH 跳跃授权（用户）        |
-| acl_ssh_jump_group_permission        | EndpointSSH 跳跃授权（分组）        |
-| acl_k8sapi_jump_user_permission      | EndpointK8SAPI 跳跃授权（用户）     |
-| acl_k8sapi_jump_group_permission     | EndpointK8SAPI 跳跃授权（分组）     |
-| acl_k8sservice_jump_user_permission  | EndpointK8SService 跳跃授权（用户） |
-| acl_k8sservice_jump_group_permission | EndpointK8SService 跳跃授权（分组） |
+| acl_ssh_jump_user_permission         | EndpointSSH 授权（用户）        |
+| acl_ssh_jump_group_permission        | EndpointSSH 授权（分组）        |
+| acl_k8sapi_jump_user_permission      | EndpointK8SAPI 授权（用户）     |
+| acl_k8sapi_jump_group_permission     | EndpointK8SAPI 授权（分组）     |
+| acl_k8sservice_jump_user_permission  | EndpointK8SService 授权（用户） |
+| acl_k8sservice_jump_group_permission | EndpointK8SService 授权（分组） |
 
 ### 其他新增表
 
