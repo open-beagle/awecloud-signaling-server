@@ -14,18 +14,18 @@ Desktop 是 ZTNA 架构中用户侧的核心组件，以 client 角色加入 Tai
 
 ## 两种形态对比
 
-| 维度      | Desktop.Host                    | Desktop.Pod                    |
-| --------- | ------------------------------- | ------------------------------ |
-| 运行环境  | 用户物理机                      | K8S Pod（CloudIDE 容器）       |
-| 用户界面  | Wails GUI                       | 无 GUI，纯后台 daemon          |
-| User.Role | client                          | client                         |
-| 网络接入  | tsnet 用户态                    | tsnet 用户态                   |
-| DNS 方案  | DNS 劫持 + VIP（127.1.x.x）     | DNS 劫持 + VIP（127.1.x.x）    |
-| DNS 配置  | /etc/resolver/k8s (macOS) 等    | /etc/resolv.conf 指向本地 DNS  |
-| SSH 出站  | 系统 SSH 客户端                 | signaling dial + ~/.ssh/config |
-| 注册方式  | Logto 登录 → Device Token       | Deploy Token → auth_key        |
-| 权限      | Client 的一切权限               | Client 的一切权限              |
-| 二进制    | desktop（Wails 应用，独立仓库） | agent 二进制的 RunClient 模式  |
+| 维度      | Desktop.Host                           | Desktop.Pod                          |
+| --------- | -------------------------------------- | ------------------------------------ |
+| 运行环境  | 用户物理机                             | K8S Pod（CloudIDE 容器）             |
+| 用户界面  | Wails GUI                              | 无 GUI，纯后台 daemon                |
+| User.Role | client                                 | client                               |
+| 网络接入  | tsnet 用户态                           | tsnet 用户态                         |
+| DNS 方案  | DNS 劫持 + VIP（127.1.x.x）            | DNS 劫持 + VIP（127.1.x.x）          |
+| DNS 配置  | /etc/resolver/k8s (macOS) 等           | /etc/resolv.conf 指向本地 DNS        |
+| SSH 出站  | 系统 SSH 客户端                        | signal_agent dial + ~/.ssh/config    |
+| 注册方式  | Logto 登录 → Device Token              | Deploy Token → auth_key              |
+| 权限      | Client 的一切权限                      | Client 的一切权限                    |
+| 二进制    | signal_desktop（Wails 应用，独立仓库） | signal_agent 二进制的 RunClient 模式 |
 
 ## 共同能力
 
@@ -38,8 +38,9 @@ Desktop（.Host 和 .Pod 共同）：
   ├── 从 tsnet 连接携带身份（tag:client-{name}）
   ├── 受 Headscale ACL 控制（第 1 层）
   ├── 可 SSH 直连 Agent（第 2 层）
-  ├── 可访问 AgentK8S（第 3 层）
-  ├── 可访问 AgentSVC（第 1 层）
+  ├── 可访问 AgentK8SAPI（第 3 层）
+  ├── 可访问 AgentK8SService（第 3 层）
+  ├── 可访问 AgentService（第 1 层）
   ├── 可通过 Agent gRPC 跳跃到 Endpoint（第 4 层）
   └── 同用户多设备互访（Desktop.Host ↔ Desktop.Pod）
 ```

@@ -9,9 +9,9 @@ Endpoint 的作用是让 Desktop 通过 Agent 中转，访问内网中没有安�
 三种 Endpoint 完全对称：
 
 ```
-  EndpointSSH     → 内网机器上的轻量 daemon，提供 SSH 会话桥接
-  EndpointK8S     → 内网 K8S 主节点上的轻量 daemon，提供 K8S API 代理
-  EndpointSVC     → 内网 K8S 节点上的轻量 daemon，提供 K8S SVC 代理
+  EndpointSSH          → 内网机器上的轻量 daemon，提供 SSH 会话桥接
+  EndpointK8SAPI       → 内网 K8S 主节点上的轻量 daemon，提供 K8S API 代理
+  EndpointK8SService   → 内网 K8S 节点上的轻量 daemon，提供 K8S SVC 代理
 ```
 
 ## 架构
@@ -24,11 +24,11 @@ Endpoint 的作用是让 Desktop 通过 Agent 中转，访问内网中没有安�
                        │                  │
                        │◀── gRPC 反向连接 ─┘
                        │
-                       │            EndpointK8S (192.168.1.10)
+                       │            EndpointK8SAPI (192.168.1.10)
                        │                  │
                        │◀── gRPC 反向连接 ─┘
                        │
-                       │            EndpointSVC (192.168.1.20)
+                       │            EndpointK8SService (192.168.1.20)
                        │                  │
                        │◀── gRPC 反向连接 ─┘
 ```
@@ -96,27 +96,27 @@ AclSSHJumpGroupPermission:
 web-server-1.beijing.k8s:22
 ```
 
-## EndpointK8S
+## EndpointK8SAPI
 
-EndpointK8S 装在内网 K8S 主节点上，提供 K8S API 代理。和 EndpointSSH 一样，反向连接 Agent。
+EndpointK8SAPI 装在内网 K8S 主节点上，提供 K8S API 代理。和 EndpointSSH 一样，反向连接 Agent。
 
 ### 工作流程
 
 ```
 Desktop kubectl 请求：
-  1. Desktop → tsnet → Agent gRPC Server → K8sProxy RPC
+  1. Desktop → tsnet → Agent gRPC Server → K8sAPIProxy RPC
   2. Agent 从 tsnet 提取身份 → zhangsan
-  3. Agent 查找目标 EndpointK8S → beijing-prod
-  4. Agent 查询 AclK8sJumpPermission → namespace: yygl, role: developer
-  5. Agent 通过 gRPC 流转发请求到 EndpointK8S
-  6. EndpointK8S 用本地 kubeconfig + Impersonation 转发到 K8S API Server
+  3. Agent 查找目标 EndpointK8SAPI → beijing-prod
+  4. Agent 查询 AclK8SAPIJumpPermission → namespace: yygl, role: developer
+  5. Agent 通过 gRPC 流转发请求到 EndpointK8SAPI
+  6. EndpointK8SAPI 用本地 kubeconfig + Impersonation 转发到 K8S API Server
   7. 返回结果
 ```
 
 ### 数据模型
 
 ```
-EndpointK8S:
+EndpointK8SAPI:
   字段              类型      说明
   ─────────────────────────────────────────────────
   id                string    UUID 主键
@@ -134,17 +134,17 @@ EndpointK8S:
 ### ACL
 
 ```
-AclK8sJumpUserPermission:
-  endpoint_k8s_id  → 哪个 EndpointK8S
-  user_id          → 被授权用户
-  namespaces       → 允许的命名空间列表
-  k8s_role         → Impersonation 角色
+AclK8SAPIJumpUserPermission:
+  endpoint_k8sapi_id → 哪个 EndpointK8SAPI
+  user_id            → 被授权用户
+  namespaces         → 允许的命名空间列表
+  k8s_role           → Impersonation 角色
 
-AclK8sJumpGroupPermission:
-  endpoint_k8s_id  → 哪个 EndpointK8S
-  group_id         → 被授权分组
-  namespaces       → 允许的命名空间列表
-  k8s_role         → Impersonation 角色
+AclK8SAPIJumpGroupPermission:
+  endpoint_k8sapi_id → 哪个 EndpointK8SAPI
+  group_id           → 被授权分组
+  namespaces         → 允许的命名空间列表
+  k8s_role           → Impersonation 角色
 ```
 
 ### 域名
@@ -154,9 +154,9 @@ api.<endpoint-name>.<agent-name>.k8s:6443
 api.beijing-prod.beijing.k8s:6443
 ```
 
-## EndpointSVC
+## EndpointK8SService
 
-EndpointSVC 装在内网 K8S 集群节点上，提供 K8S Service 代理。核心能力和 AgentSVC 一样：K8S Service 自动发现 + SVC 代理。区别是 EndpointSVC 不在 Tailscale 网络中，它通过 Agent 中转。
+EndpointK8SService 装在内网 K8S 集群节点上，提供 K8S Service 代理。核心能力和 AgentK8SService 一样：K8S Service 自动发现 + SVC 代理。区别是 EndpointK8SService 不在 Tailscale 网络中，它通过 Agent 中转。
 
 ### 工作流程
 
@@ -164,19 +164,19 @@ EndpointSVC 装在内网 K8S 集群节点上，提供 K8S Service 代理。核�
 Desktop 访问 pg.yygl.remote.k8s:5432：
   1. Desktop → tsnet → Agent gRPC Server → SVCProxy RPC
   2. Agent 从 tsnet 提取身份 → zhangsan
-  3. Agent 查找目标 EndpointSVC → remote-cluster
-  4. Agent 查询 AclSVCJumpPermission → zhangsan 能不能访问这个 SVC
-  5. Agent 通过 gRPC 流转发到 EndpointSVC
-  6. EndpointSVC 转发到 K8S ClusterIP (10.96.23.45:5432)
+  3. Agent 查找目标 EndpointK8SService → remote-cluster
+  4. Agent 查询 AclK8SServiceJumpPermission → zhangsan 能不能访问这个 SVC
+  5. Agent 通过 gRPC 流转发到 EndpointK8SService
+  6. EndpointK8SService 转发到 K8S ClusterIP (10.96.23.45:5432)
   7. 双向桥接
 ```
 
-EndpointSVC 启动后自动发现 K8S Service（和 AgentSVC 逻辑相同），通过 gRPC 上报给 Agent，Agent 再通过心跳上报给 Server。
+EndpointK8SService 启动后自动发现 K8S Service（和 AgentK8SService 逻辑相同），通过 gRPC 上报给 Agent，Agent 再通过心跳上报给 Server。
 
 ### 数据模型
 
 ```
-EndpointSVC:
+EndpointK8SService:
   字段              类型      说明
   ─────────────────────────────────────────────────
   id                string    UUID 主键
@@ -188,8 +188,8 @@ EndpointSVC:
   created_at        time
   updated_at        time
 
-EndpointSVC 发现的 Service 列表（Endpoint 上报，Agent 缓存）：
-  endpoint_svc_id   → 所属 EndpointSVC
+EndpointK8SService 发现的 Service 列表（Endpoint 上报，Agent 缓存）：
+  endpoint_k8sservice_id → 所属 EndpointK8SService
   service_name      → K8S Service 名称
   namespace         → 命名空间
   cluster_ip        → ClusterIP
@@ -200,15 +200,15 @@ EndpointSVC 发现的 Service 列表（Endpoint 上报，Agent 缓存）：
 ### ACL
 
 ```
-AclSVCJumpUserPermission:
-  endpoint_svc_id  → 哪个 EndpointSVC
-  user_id          → 被授权用户
-  service_pattern  → 允许访问的 Service 模式（如 "*.yygl" 或 "*"）
+AclK8SServiceJumpUserPermission:
+  endpoint_k8sservice_id → 哪个 EndpointK8SService
+  user_id                → 被授权用户
+  service_pattern        → 允许访问的 Service 模式（如 "*.yygl" 或 "*"）
 
-AclSVCJumpGroupPermission:
-  endpoint_svc_id  → 哪个 EndpointSVC
-  group_id         → 被授权分组
-  service_pattern  → 允许访问的 Service 模式
+AclK8SServiceJumpGroupPermission:
+  endpoint_k8sservice_id → 哪个 EndpointK8SService
+  group_id               → 被授权分组
+  service_pattern        → 允许访问的 Service 模式
 ```
 
 ### 域名
@@ -222,10 +222,10 @@ pg.yygl.remote-cluster.beijing.k8s:5432
 
 ### 统一二进制
 
-EndpointSSH、EndpointK8S、EndpointSVC 是同一个二进制 `signaling-endpoint`，通过配置决定启用哪些能力：
+EndpointSSH、EndpointK8SAPI、EndpointK8SService 是同一个二进制 `signal_endpoint`，通过配置决定启用哪些能力：
 
 ```
-signaling-endpoint 二进制
+signal_endpoint 二进制
 
   endpoint.toml:
     [agent]
@@ -246,7 +246,7 @@ signaling-endpoint 二进制
     label_selector = "tailscale=true"
     namespaces = []
 
-  一台机器可以同时是 SSH 端点、K8S 端点和 SVC 端点
+  一台机器可以同时是 SSH 端点、K8SAPI 端点和 K8SService 端点
 ```
 
 ### EndpointSSH 部署
@@ -255,7 +255,6 @@ signaling-endpoint 二进制
 内网机器上安装 EndpointSSH：
 
   安装方式：单个二进制，无依赖
-  配置文件：endpoint.toml
     [agent]
     address = "192.168.1.1:50052"
     token = "xxx"
@@ -272,10 +271,10 @@ signaling-endpoint 二进制
     5. 收到 OpenShell 指令 → 启动 shell → 桥接到 gRPC 流
 ```
 
-### EndpointK8S 部署
+### EndpointK8SAPI 部署
 
 ```
-K8S 主节点上安装 EndpointK8S：
+K8S 主节点上安装 EndpointK8SAPI：
 
   配置文件：endpoint.toml
     [agent]
@@ -290,13 +289,13 @@ K8S 主节点上安装 EndpointK8S：
   启动后：
     1. 连接 Agent 内网 gRPC Server
     2. 注册自己（集群名、API 地址）
-    3. 收到 K8sProxy 指令 → Impersonation 转发 → 返回结果
+    3. 收到 K8sAPIProxy 指令 → Impersonation 转发 → 返回结果
 ```
 
-### EndpointSVC 部署
+### EndpointK8SService 部署
 
 ```
-K8S 集群节点上安装 EndpointSVC：
+K8S 集群节点上安装 EndpointK8SService：
 
   配置文件：endpoint.toml
     [agent]
@@ -330,10 +329,10 @@ Endpoint 注册流程：
 
 ## 实现优先级
 
-| 阶段 | 内容                          | 依赖            |
-| ---- | ----------------------------- | --------------- |
-| P2   | signaling-endpoint 二进制框架 | 无              |
-| P2   | EndpointSSH — SSH 会话桥接    | Agent 内网 gRPC |
-| P2   | EndpointK8S — K8S API 代理    | Agent 内网 gRPC |
-| P2   | EndpointSVC — K8S SVC 代理    | Agent 内网 gRPC |
-| P2   | Endpoint 注册令牌管理         | Web 管理界面    |
+| 阶段 | 内容                              | 依赖            |
+| ---- | --------------------------------- | --------------- |
+| P2   | signal_endpoint 二进制框架        | 无              |
+| P2   | EndpointSSH — SSH 会话桥接        | Agent 内网 gRPC |
+| P2   | EndpointK8SAPI — K8S API 代理     | Agent 内网 gRPC |
+| P2   | EndpointK8SService — K8S SVC 代理 | Agent 内网 gRPC |
+| P2   | Endpoint 注册令牌管理             | Web 管理界面    |

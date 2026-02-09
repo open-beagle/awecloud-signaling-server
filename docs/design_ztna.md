@@ -70,7 +70,9 @@ Vaultwarden 集成降为远期目标，当前阶段不需要。
 │                 │          │  ┌────────────────────────────┐  │
 │  .Host (桌面)   │──tsnet──▶│  │ Agent (agent 角色)         │  │
 │  .Pod  (容器)   │          │  │                            │  │
-│                 │          │  │ AgentSSH  AgentK8S AgentSVC│  │
+│                 │          │  │ AgentSSH / AgentK8SAPI    │  │
+│  │ AgentK8SService           │  │
+│  │ AgentService              │  │
 │                 │          │  │                            │  │
 │                 │          │  │ gRPC Server (tsnet 侧)     │  │
 │                 │          │  │ gRPC Server (内网侧)       │  │
@@ -80,8 +82,8 @@ Vaultwarden 集成降为远期目标，当前阶段不需要。
 │                 │          │  │ Endpoint (轻量 daemon)     │  │
 │                 │          │  │                            │  │
 │                 │          │  │ EndpointSSH (内网机器)     │  │
-│                 │          │  │ EndpointK8S (K8S 主节点)   │  │
-│                 │          │  │ EndpointSVC (K8S 节点)     │  │
+│                 │          │  │ EndpointK8SAPI (主节点)    │  │
+│                 │          │  │ EndpointK8SService (节点)  │  │
 │                 │          │  └────────────────────────────┘  │
 │                 │          │                                  │
 └─────────────────┘          └──────────────────────────────────┘
@@ -100,42 +102,44 @@ Vaultwarden 集成降为远期目标，当前阶段不需要。
 
 Agent 就是 Agent，不区分类型。通过配置和挂载的能力对象决定它能做什么。任何 Agent 都可以挂载任意能力，只要网络可达。
 
-能力分两层，三种能力完全对称（SSH、K8S、SVC）：
+能力分两层，四种 Agent 能力 + 三种 Endpoint 跳跃能力：
 
 ```
-          Agent 本机（直连）          Endpoint 跳跃（中转）
-  SSH     AgentSSH                   EndpointSSH
-  K8S     AgentK8S                   EndpointK8S
-  SVC     AgentSVC                   EndpointSVC
+          Agent 本机（直连）              Endpoint 跳跃（中转）
+  SSH     AgentSSH                       EndpointSSH
+  K8SAPI  AgentK8SAPI                    EndpointK8SAPI
+  K8SSvc  AgentK8SService                EndpointK8SService
+  手动    AgentService（原 ProxyService）  —
 ```
 
 Agent 本机能力（配置级，不是独立对象）：
 
 - AgentSSH — Agent 本机 SSH（Tailscale SSH，已有）
-- AgentK8S — Agent 本机 K8S API 代理（Impersonation）
-- AgentSVC — Agent 本机 K8S SVC 代理（DNS 发现，SVC 发现）
+- AgentK8SAPI — Agent 本机 K8S API 代理（Impersonation，新增）
+- AgentK8SService — Agent 本机 K8S Service 自动发现和代理（新增）
+- AgentService — Agent 手动端口映射（现有 ProxyService 改名）
 
 Endpoint 跳跃能力（独立对象 + 独立进程）：
 
 - EndpointSSH — 内网机器上的轻量 daemon，提供 SSH 会话桥接
-- EndpointK8S — 内网 K8S 主节点上的轻量 daemon，提供 K8S API 代理
-- EndpointSVC — 内网 K8S 节点上的轻量 daemon，提供 K8S SVC 代理
+- EndpointK8SAPI — 内网 K8S 主节点上的轻量 daemon，提供 K8S API 代理
+- EndpointK8SService — 内网 K8S 节点上的轻量 daemon，提供 K8S Service 代理
 
 Endpoint 不在 Tailscale 网络中，不连 Server 或 Headscale，只反向连接 Agent 的内网 gRPC 端口。
 
 ## Desktop 两种形态
 
-| 维度      | Desktop.Host                    | Desktop.Pod                   |
-| --------- | ------------------------------- | ----------------------------- |
-| 运行环境  | 用户物理机                      | K8S Pod（CloudIDE 容器）      |
-| 用户界面  | Wails GUI                       | 无 GUI，纯后台 daemon         |
-| User.Role | client                          | client                        |
-| 网络接入  | tsnet 用户态                    | tsnet 用户态                  |
-| DNS 方案  | DNS 劫持 + VIP（127.1.x.x）     | DNS 劫持 + VIP（127.1.x.x）   |
-| DNS 配置  | /etc/resolver/k8s (macOS) 等    | /etc/resolv.conf 指向本地 DNS |
-| 注册方式  | Logto 登录 → Device Token       | Deploy Token → auth_key       |
-| 权限      | Client 的一切权限               | Client 的一切权限             |
-| 二进制    | desktop（Wails 应用，独立仓库） | agent 二进制的 RunClient 模式 |
+| 维度      | Desktop.Host                           | Desktop.Pod                          |
+| --------- | -------------------------------------- | ------------------------------------ |
+| 运行环境  | 用户物理机                             | K8S Pod（CloudIDE 容器）             |
+| 用户界面  | Wails GUI                              | 无 GUI，纯后台 daemon                |
+| User.Role | client                                 | client                               |
+| 网络接入  | tsnet 用户态                           | tsnet 用户态                         |
+| DNS 方案  | DNS 劫持 + VIP（127.1.x.x）            | DNS 劫持 + VIP（127.1.x.x）          |
+| DNS 配置  | /etc/resolver/k8s (macOS) 等           | /etc/resolv.conf 指向本地 DNS        |
+| 注册方式  | Logto 登录 → Device Token              | Deploy Token → auth_key              |
+| 权限      | Client 的一切权限                      | Client 的一切权限                    |
+| 二进制    | signal_desktop（Wails 应用，独立仓库） | signal_agent 二进制的 RunClient 模式 |
 
 两者都是 Client 角色，权限完全相同。
 
@@ -155,16 +159,16 @@ Endpoint 不在 Tailscale 网络中，不连 Server 或 Headscale，只反向连
 │  已实现。决定谁能 SSH 到 Agent 节点，用哪个 Linux 用户。        │
 │  规则来源：AclSSHUserPermission / AclSSHGroupPermission         │
 │                                                                 │
-│  第 3 层：Agent 本机 K8S API（Impersonation）                    │
-│  待实现。Agent 部署在主节点时，直接代理 K8S API 请求。          │
-│  规则来源：AclK8sUserPermission / AclK8sGroupPermission         │
+│  第 3 层：Agent 本机应用层（Agent 本地鉴权）                     │
+│  待实现。AgentK8SAPI 代理 K8S API 请求，AgentK8SService 代理    │
+│  自动发现的 K8S Service。Agent 从 tsnet 提取身份后本地鉴权。    │
+│  规则来源：AclK8sPermission / AclK8SServicePermission           │
 │                                                                 │
 │  第 4 层：Endpoint 跳跃（Agent 中转到内网）                      │
 │  待实现。通过 Agent 跳跃到内网的 Endpoint。                     │
 │  规则来源：                                                      │
-│    AclSSHJumpUserPermission / AclSSHJumpGroupPermission         │
-│    AclK8sJumpUserPermission / AclK8sJumpGroupPermission         │
-│    AclSVCJumpUserPermission / AclSVCJumpGroupPermission         │
+│    AclSSHJumpPermission / AclK8SAPIJumpPermission /             │
+│    AclK8SServiceJumpPermission                                  │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -178,11 +182,11 @@ Agent 本机（AgentSSH 直连）：
   <agent-name>.k8s:22
   beijing.k8s:22
 
-Agent 本机（AgentK8S 直连）：
+Agent 本机（AgentK8SAPI 直连）：
   api.<agent-name>.k8s:6443
   api.beijing.k8s:6443
 
-Agent 本机（AgentSVC 直连）：
+Agent 本机（AgentK8SService 直连）：
   <service>.<namespace>.<agent-name>.k8s
   pg.yygl.beijing.k8s:5432
 
@@ -190,34 +194,52 @@ EndpointSSH（跳跃）：
   <endpoint-name>.<agent-name>.k8s:22
   web-server-1.beijing.k8s:22
 
-EndpointK8S（跳跃）：
+EndpointK8SAPI（跳跃）：
   api.<endpoint-name>.<agent-name>.k8s:6443
   api.beijing-prod.beijing.k8s:6443
 
-EndpointSVC（跳跃）：
+EndpointK8SService（跳跃）：
   <service>.<namespace>.<endpoint-name>.<agent-name>.k8s
   pg.yygl.remote-cluster.beijing.k8s:5432
 ```
 
+## 二进制和构建产物
+
+ZTNA 体系共 4 个二进制，统一 signal\_ 前缀：
+
+| 二进制          | 源码位置             | 构建产物命名                         | 角色                  |
+| --------------- | -------------------- | ------------------------------------ | --------------------- |
+| signal_server   | cmd/server           | bin/signal_server-{os}-{arch}        | Server 控制面         |
+| signal_agent    | cmd/agent            | bin/signal_agent-{os}-{arch}         | Agent + Desktop.Pod   |
+| signal_desktop  | desktop/（独立仓库） | bin/signal_desktop-{ver}-{os}-{arch} | Desktop.Host 桌面应用 |
+| signal_endpoint | cmd/endpoint         | bin/signal_endpoint-{os}-{arch}      | Endpoint 轻量 daemon  |
+
+说明：
+
+- signal_agent 同时承担 Agent 和 Desktop.Pod 两个角色。通过 Deploy Token 注册时，Server 返回 user_role，signal_agent 根据 role 决定运行模式：role=agent 走 Agent 模式（gRPC 心跳 + ProxyManager），role=client 走 Client 模式（tsnet + DNS 劫持，即 Desktop.Pod）。不需要单独的 desktop_pod 二进制。
+- signal_endpoint 是 ZTNA 新增的二进制（P2 阶段）。一个 signal_endpoint 二进制通过配置决定启用哪些能力（SSH/K8SAPI/K8SService），不按能力拆分二进制。
+- signal_desktop 是 Wails 桌面应用，独立仓库独立构建，产物是平台原生格式（Windows .exe、macOS .app、Linux 可执行文件）。
+
 ## 实现优先级
 
-| 阶段 | 内容                                    | 依赖              |
-| ---- | --------------------------------------- | ----------------- |
-| P0   | Desktop tsnet 化（去掉 tailscaled）     | 无                |
-| P0   | DNS 劫持 + VIP 分配                     | Desktop tsnet     |
-| P0   | 域名体系设计和实现                      | DNS 劫持          |
-| P1   | AgentK8S — K8S API 代理 + Impersonation | 权限模型          |
-| P1   | AgentSVC — K8S Service 自动发现和代理   | K8S RBAC          |
-| P2   | Endpoint 体系（SSH/K8S/SVC 跳跃）       | Agent gRPC Server |
-| P2   | AI 安全审计（指令拦截、会话录像）       | Agent 网关层      |
-| P3   | Vaultwarden 集成（远期）                | 独立部署          |
+| 阶段 | 内容                                         | 依赖              |
+| ---- | -------------------------------------------- | ----------------- |
+| P0   | Desktop tsnet 化（去掉 tailscaled）          | 无                |
+| P0   | DNS 劫持 + VIP 分配                          | Desktop tsnet     |
+| P0   | 域名体系设计和实现                           | DNS 劫持          |
+| P1   | AgentK8SAPI — K8S API 代理 + Impersonation   | 权限模型          |
+| P1   | AgentK8SService — K8S Service 自动发现和代理 | K8S RBAC          |
+| P2   | Endpoint 体系（SSH/K8SAPI/K8SService 跳跃）  | Agent gRPC Server |
+| P2   | AI 安全审计（指令拦截、会话录像）            | Agent 网关层      |
+| P3   | Vaultwarden 集成（远期）                     | 独立部署          |
 
 ## 相关设计文档
 
+- design_ztna_acl.md — 授权管理设计（7 种授权的完整梳理）
 - design_ztna_server.md — Server 端变更
 - design_ztna_web.md — Web 管理界面变更
-- design_ztna_agent.md — Agent 能力对象设计（AgentSSH/AgentK8S/AgentSVC）
-- design_ztna_endpoint.md — Endpoint 跳跃端点设计（EndpointSSH/EndpointK8S/EndpointSVC）
+- design_ztna_agent.md — Agent 能力对象设计（AgentSSH/AgentK8SAPI/AgentK8SService/AgentService）
+- design_ztna_endpoint.md — Endpoint 跳跃端点设计（EndpointSSH/EndpointK8SAPI/EndpointK8SService）
 - design_ztna_desktop.md — Desktop 共通设计（.Host 和 .Pod）
 - design_ztna_desktop_host.md — Desktop.Host 桌面客户端重构
 - design_ztna_desktop_pod.md — Desktop.Pod 容器内 daemon

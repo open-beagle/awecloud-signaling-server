@@ -2,95 +2,255 @@
 
 ## 概述
 
-Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有 Agent/Client/Service 管理基础上，新增 Endpoint 管理、K8S 权限、域名管理、操作审计等功能模块。
+Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理功能基础上，新增 Endpoint 管理、K8S 权限、域名管理、操作审计等功能模块。
 
-## 与现有界面的关系
-
-| 模块       | 当前状态                   | ZTNA 新增/变更                    |
-| ---------- | -------------------------- | --------------------------------- |
-| Agent 管理 | Agent 列表、详情、服务配置 | 新增能力展示（SSH/K8S/SVC）       |
-| Endpoint   | 无                         | 新增 Endpoint 管理（SSH/K8S/SVC） |
-| 用户管理   | 用户列表、启用/禁用        | 不变                              |
-| 服务管理   | 手动配置 ProxyService      | 新增 AgentSVC 自动发现视图        |
-| 权限管理   | SSH ACL、服务权限          | 新增 K8S ACL + Endpoint 跳跃 ACL  |
-| 域名管理   | 无                         | 域名注册表查看和管理              |
-| 审计仪表盘 | 连接审计日志               | 操作级审计（直连 + 跳跃）         |
-
-## 导航结构变更
+## 现有导航结构
 
 ```
-现有导航：
-  ├── Agent 管理
-  ├── Client 管理
-  ├── 服务管理
-  ├── 分组管理
-  ├── SSH 管理
-  ├── 用户管理
-  ├── 审计日志
-  └── 系统设置
-
-ZTNA 导航：
-  ├── 资源总览（新增）          ← 仪表盘，展示所有资源状态
-  ├── Agent 管理（增强）
-  │     ├── Agent 列表
-  │     └── Agent 详情（能力 + Endpoint）
-  ├── Endpoint 管理（新增）
-  │     ├── EndpointSSH
-  │     ├── EndpointK8S
-  │     └── EndpointSVC
-  ├── 资源发现（新增）          ← AgentSVC 自动发现的 Service
-  ├── 域名管理（新增）          ← 域名注册表
-  ├── 用户管理
-  ├── 权限管理（增强）
-  │     ├── SSH 权限（已有）
-  │     ├── K8S 权限（新增）
-  │     ├── SVC 权限（已有，增强）
-  │     └── Endpoint 跳跃权限（新增）
-  ├── 审计中心（增强）
-  │     ├── 连接日志（已有）
-  │     └── 操作日志（新增）
-  └── 系统设置
+├── 用户管理          /users
+│     用户列表（agent/client 统一），支持角色/启用/来源筛选
+│     用户详情（Deploy Token、设备列表、服务列表）
+│
+├── 设备管理          /nodes
+│     设备列表（代理设备/桌面设备），显示 IP、主机名、状态、心跳
+│     设备详情
+│
+├── 分组管理          /groups
+│     分组列表，分组成员管理
+│
+├── 授权管理（展开）
+│     ├── 服务授权    /acl/services
+│     │     ProxyService 列表，管理用户/分组级服务访问权限
+│     ├── 用户授权    /acl/users
+│     │     用户级 Agent 访问权限（AclUserPermission）
+│     ├── 分组授权    /acl/groups
+│     │     分组级 Agent 访问权限（AclGroupPermission）
+│     └── SSH 授权    /acl/ssh
+│           SSH 访问权限，管理用户/分组级 SSH 授权和 Linux 用户
+│
+├── 隧道管理（展开）
+│     ├── User 管理   /tunnel/users    — Headscale 用户
+│     ├── Node 管理   /tunnel/nodes    — Headscale 节点
+│     ├── ACL 管理    /tunnel/acl      — Headscale ACL 策略
+│     └── SSH 策略    /tunnel/ssh      — Headscale SSH 策略
+│
+├── 审计日志          /audit-logs
+│     连接审计日志列表
+│
+└── 系统配置          /system/config
+      系统参数配置
 ```
 
-## Agent 管理增强
+## 现有页面功能说明
 
-### Agent 详情页增强
+### 用户管理
+
+用户列表页面统一管理 agent 和 client 两种角色的用户。支持按角色、启用状态、来源（手动/Logto）筛选，支持搜索。可创建用户、启用/禁用用户。
+
+用户详情页面展示用户基本信息，包含 Deploy Token 管理（生成/查看/删除）、关联的设备列表、关联的服务列表。
+
+### 设备管理
+
+设备列表页面展示所有 Headscale 节点。按类型分为代理设备（agent）和桌面设备（desktop）。显示 ID、名称、所属用户、类型、IP 地址、主机名、node.status、最后心跳时间。
+
+### 分组管理
+
+分组列表页面管理用户分组。支持创建分组、编辑分组、管理分组成员（添加/移除用户）。
+
+### 授权管理
+
+四个子页面：
+
+- 服务授权：以 ProxyService 为维度，管理谁能访问哪个服务（用户级 + 分组级）
+- 用户授权：以 Agent 用户为维度，管理谁能访问哪个 Agent 的所有端口
+- 分组授权：以分组为维度，管理分组间的访问权限
+- SSH 授权：以 Agent 用户为维度，管理 SSH 访问权限（允许的 Linux 用户列表）
+
+### 隧道管理
+
+直接对接 Headscale API 的管理界面，展示 Headscale 内部的用户、节点、ACL 策略、SSH 策略。主要用于调试和运维。
+
+### 审计日志
+
+连接级审计日志，记录用户的连接事件。
+
+### 系统配置
+
+系统参数配置页面。
+
+## ZTNA 变更总览
+
+| 模块     | 当前状态                               | ZTNA 新增/变更                                       |
+| -------- | -------------------------------------- | ---------------------------------------------------- |
+| 用户管理 | 用户列表（agent/client），Deploy Token | 不变                                                 |
+| 设备管理 | 设备列表（代理/桌面），IP/状态/心跳    | 不变                                                 |
+| 分组管理 | 分组列表，成员管理                     | 不变                                                 |
+| 授权管理 | 服务授权、用户授权、分组授权、SSH 授权 | 新增 K8SAPI/K8SService 授权 + 跳跃授权               |
+| 隧道管理 | Headscale User/Node/ACL/SSH            | 不变                                                 |
+| Endpoint | 无                                     | 新增 Endpoint 管理（SSH/K8SAPI/K8SService）          |
+| 资源发现 | 无                                     | 新增 AgentK8SService/EndpointK8SService 自动发现视图 |
+| 域名管理 | 无                                     | 新增域名注册表查看                                   |
+| 审计日志 | 连接审计                               | 增强为操作级审计（直连 + 跳跃）                      |
+| 系统配置 | 系统参数                               | 不变                                                 |
+
+## ZTNA 导航结构
 
 ```
-Agent 详情页新增 Tab：
-
-  ┌──────┬──────────┬──────────┬──────────┬──────────┐
-  │ 基本 │ 能力配置 │ Endpoint │ 发现资源 │ 操作日志 │
-  └──────┴──────────┴──────────┴──────────┴──────────┘
-
-  "能力配置" Tab：
-    展示 Agent 挂载的能力对象
-    AgentSSH: 启用/禁用，SSH 用户列表
-    AgentK8S: 启用/禁用，kubeconfig 路径，API Server 地址
-    AgentSVC: 启用/禁用，标签选择器，命名空间过滤
-
-  "Endpoint" Tab：
-    展示连接到该 Agent 的 Endpoint 列表
-    EndpointSSH: 名称、内网地址、状态
-    EndpointK8S: 集群名、API 地址、状态
-    EndpointSVC: 集群名、发现的 Service 数、状态
-
-  "发现资源" Tab：
-    展示 AgentSVC 自动发现的 K8S Service 列表
-    名称、命名空间、端口、标签、域名、状态
-
-  "操作日志" Tab：
-    展示通过该 Agent 的操作审计记录
-    SSH 直连/跳跃、K8S API 请求、SVC 连接
+├── 用户管理          /users                    （不变）
+├── 设备管理          /nodes                    （不变）
+├── 分组管理          /groups                   （不变）
+├── 授权管理（增强）
+│     ├── 服务授权    /acl/services             （不变，AgentService）
+│     ├── 用户授权    /acl/users                （不变）
+│     ├── 分组授权    /acl/groups               （不变）
+│     ├── SSH 授权    /acl/ssh                  （不变）
+│     ├── K8SAPI 授权 /acl/k8s                  （新增）
+│     ├── K8SService 授权 /acl/k8s-service      （新增）
+│     └── 跳跃授权    /acl/jump                 （新增）
+├── Endpoint 管理（新增）
+│     ├── EndpointSSH        /endpoints/ssh     （新增）
+│     ├── EndpointK8SAPI     /endpoints/k8s     （新增）
+│     └── EndpointK8SService /endpoints/svc     （新增）
+├── 资源发现（新增）    /resources               （新增）
+├── 域名管理（新增）    /domains                 （新增）
+├── 隧道管理                                    （不变）
+│     ├── User 管理   /tunnel/users
+│     ├── Node 管理   /tunnel/nodes
+│     ├── ACL 管理    /tunnel/acl
+│     └── SSH 策略    /tunnel/ssh
+├── 审计日志（增强）    /audit-logs              （增强）
+└── 系统配置          /system/config             （不变）
 ```
 
-## Endpoint 管理页
+## 新增页面设计
 
-### 功能
+### K8SAPI 授权页面（/acl/k8s）
 
-管理连接到 Agent 的 Endpoint（轻量 daemon）。按类型分 Tab 展示。
+管理 AgentK8SAPI 的访问权限（第 3 层）。以 Agent 为维度，配置哪些用户/分组可以访问哪个 Agent 的 K8S API，以及对应的命名空间和 K8S 角色。
 
-### EndpointSSH 列表
+列表视图：
+
+| 列         | 说明                               |
+| ---------- | ---------------------------------- |
+| Agent      | Agent 名称（启用了 K8SAPI 能力的） |
+| 别名       | Agent 别名                         |
+| 用户授权数 | 用户级授权条数                     |
+| 分组授权数 | 分组级授权条数                     |
+| 操作       | 管理授权                           |
+
+详情页面（点击"管理授权"进入）：
+
+```
+Agent: beijing（api.beijing.k8s:6443）
+
+用户级授权：
+  ┌──────────┬──────────┬──────────┐
+  │ 用户     │ 命名空间 │ K8S 角色 │
+  │ zhangsan │ yygl     │ developer│
+  │ lisi     │ *        │ admin    │
+  └──────────┴──────────┴──────────┘
+  [+ 添加用户授权]
+
+分组级授权：
+  ┌──────────┬──────────┬──────────┐
+  │ 分组     │ 命名空间 │ K8S 角色 │
+  │ 开发组   │ yygl     │ developer│
+  │ 运维组   │ *        │ admin    │
+  └──────────┴──────────┴──────────┘
+  [+ 添加分组授权]
+```
+
+页面结构与现有 SSH 授权页面（/acl/ssh）类似：列表页 + 详情页模式。
+
+### K8SService 授权页面（/acl/k8s-service）
+
+管理 AgentK8SService 的访问权限（第 3 层）。以 Agent 为维度，配置哪些用户/分组可以访问哪个 Agent 自动发现的 K8S Service，按命名空间和 Service 名称控制。
+
+列表视图：
+
+| 列         | 说明                                   |
+| ---------- | -------------------------------------- |
+| Agent      | Agent 名称（启用了 K8SService 能力的） |
+| 别名       | Agent 别名                             |
+| 用户授权数 | 用户级授权条数                         |
+| 分组授权数 | 分组级授权条数                         |
+| 操作       | 管理授权                               |
+
+详情页面（点击"管理授权"进入）：
+
+```
+Agent: beijing
+
+用户级授权：
+  ┌──────────┬──────────┬──────────────┐
+  │ 用户     │ 命名空间 │ Service 模式 │
+  │ zhangsan │ yygl     │ *            │
+  │ lisi     │ *        │ pg*          │
+  └──────────┴──────────┴──────────────┘
+  [+ 添加用户授权]
+
+分组级授权：
+  ┌──────────┬──────────┬──────────────┐
+  │ 分组     │ 命名空间 │ Service 模式 │
+  │ 开发组   │ yygl     │ *            │
+  │ 运维组   │ *        │ *            │
+  └──────────┴──────────┴──────────────┘
+  [+ 添加分组授权]
+```
+
+页面结构与 K8SAPI 授权页面类似。
+
+### 跳跃授权页面（/acl/jump）
+
+管理 Endpoint 跳跃的访问权限（第 4 层）。按 Endpoint 类型分 Tab 展示。
+
+```
+┌──────────────┬──────────────┬──────────────┐
+│ SSH 跳跃授权 │ K8S 跳跃授权 │ SVC 跳跃授权 │
+└──────────────┴──────────────┴──────────────┘
+```
+
+SSH 跳跃授权 Tab：
+
+| 列         | 说明              |
+| ---------- | ----------------- |
+| Endpoint   | EndpointSSH 名称  |
+| 所属 Agent | 连接的 Agent 名称 |
+| 别名       | 显示名称          |
+| 用户授权数 | 用户级授权条数    |
+| 分组授权数 | 分组级授权条数    |
+| 操作       | 管理授权          |
+
+详情页面（以 SSH 跳跃为例）：
+
+```
+EndpointSSH: web-server-1（web-server-1.beijing.k8s:22）
+所属 Agent: beijing
+
+用户级授权：
+  ┌──────────┬──────────────────┐
+  │ 用户     │ Linux 用户       │
+  │ zhangsan │ root, deploy     │
+  │ lisi     │ deploy           │
+  └──────────┴──────────────────┘
+  [+ 添加用户授权]
+
+分组级授权：
+  ┌──────────┬──────────────────┐
+  │ 分组     │ Linux 用户       │
+  │ 开发组   │ deploy           │
+  │ DBA 组   │ root             │
+  └──────────┴──────────────────┘
+  [+ 添加分组授权]
+```
+
+K8S 跳跃授权和 SVC 跳跃授权结构类似，字段分别对应 AclK8SAPIJumpPermission 和 AclK8SServiceJumpPermission。
+
+### Endpoint 管理页面（/endpoints/\*）
+
+管理连接到 Agent 的 Endpoint（轻量 daemon）。按类型分三个子页面。
+
+EndpointSSH 列表（/endpoints/ssh）：
 
 | 列        | 说明                             |
 | --------- | -------------------------------- |
@@ -100,126 +260,75 @@ Agent 详情页新增 Tab：
 | 内网地址  | Endpoint 上报的内网 IP           |
 | 域名      | 自动生成的域名                   |
 | 状态      | online/offline                   |
-| 操作      | 编辑、权限配置、禁用             |
+| 启用      | 是否启用                         |
+| 操作      | 编辑、禁用                       |
 
-### EndpointK8S 列表
+EndpointK8SAPI 列表（/endpoints/k8s）：
 
-| 列        | 说明                 |
-| --------- | -------------------- |
-| 集群名    | K8S 集群名称         |
-| 别名      | 显示名称             |
-| 所属Agent | 连接的 Agent 名称    |
-| API 地址  | K8S API Server 地址  |
-| 域名      | 自动生成的域名       |
-| 状态      | online/offline       |
-| 操作      | 编辑、权限配置、禁用 |
+| 列        | 说明                |
+| --------- | ------------------- |
+| 集群名    | K8S 集群名称        |
+| 别名      | 显示名称            |
+| 所属Agent | 连接的 Agent 名称   |
+| API 地址  | K8S API Server 地址 |
+| 域名      | 自动生成的域名      |
+| 状态      | online/offline      |
+| 操作      | 编辑、禁用          |
 
-### EndpointSVC 列表
+EndpointK8SService 列表（/endpoints/svc）：
 
-| 列        | 说明                               |
-| --------- | ---------------------------------- |
-| 集群名    | 远程集群名称                       |
-| 别名      | 显示名称                           |
-| 所属Agent | 连接的 Agent 名称                  |
-| Service数 | 发现的 Service 数量                |
-| 域名      | 自动生成的域名前缀                 |
-| 状态      | online/offline                     |
-| 操作      | 编辑、权限配置、禁用、查看 Service |
+| 列        | 说明                     |
+| --------- | ------------------------ |
+| 集群名    | 远程集群名称             |
+| 别名      | 显示名称                 |
+| 所属Agent | 连接的 Agent 名称        |
+| Service数 | 发现的 Service 数量      |
+| 状态      | online/offline           |
+| 操作      | 编辑、禁用、查看 Service |
 
-## 资源发现页
+### 资源发现页面（/resources）
 
-### 功能
+展示所有 AgentK8SService 和 EndpointK8SService 自动发现的 K8S Service。
 
-展示所有 AgentSVC 和 EndpointSVC 自动发现的 K8S Service，支持搜索、过滤。
+| 列       | 说明                                 |
+| -------- | ------------------------------------ |
+| 域名     | 完整域名（如 pg.yygl.beijing.k8s）   |
+| 来源     | AgentK8SService / EndpointK8SService |
+| Service  | K8S Service 名称                     |
+| 命名空间 | K8S 命名空间                         |
+| 端口     | 服务端口列表                         |
+| Agent    | 所属 Agent 名称                      |
+| 状态     | 在线/离线                            |
 
-### 列表视图
+过滤条件：按 Agent、来源、命名空间、状态筛选，支持关键词搜索。
 
-| 列       | 说明                               |
-| -------- | ---------------------------------- |
-| 域名     | 完整域名（如 pg.yygl.beijing.k8s） |
-| 来源     | AgentSVC / EndpointSVC             |
-| 端口     | 服务端口列表                       |
-| Agent    | 所属 Agent 名称                    |
-| 命名空间 | K8S 命名空间                       |
-| 状态     | 在线/离线                          |
-| 操作     | 查看详情                           |
+### 域名管理页面（/domains）
 
-### 过滤条件
+查看域名注册表，展示域名到 Agent/Endpoint 的映射关系。
 
-- 按 Agent 过滤
-- 按来源过滤（AgentSVC / EndpointSVC）
-- 按命名空间过滤
-- 按状态过滤
-- 关键词搜索（域名、名称）
+| 列       | 说明                                                                                                        |
+| -------- | ----------------------------------------------------------------------------------------------------------- |
+| 域名     | 完整域名                                                                                                    |
+| 类型     | AgentSSH / AgentK8SAPI / AgentK8SService / AgentService / EndpointSSH / EndpointK8SAPI / EndpointK8SService |
+| 目标     | Agent 名称 + Endpoint 名称（如有）                                                                          |
+| 端口     | 服务端口                                                                                                    |
+| 状态     | 活跃/离线                                                                                                   |
+| 注册时间 | 域名注册时间                                                                                                |
 
-## 权限管理增强
+### 审计日志增强
 
-### K8S 权限（新增）
+在现有连接审计基础上，新增操作类型筛选：
 
-管理 AgentK8S 的访问权限（第 3 层）：
+| 操作类型   | 说明                                            |
+| ---------- | ----------------------------------------------- |
+| ssh_direct | SSH 直连 Agent 节点（第 2 层）                  |
+| k8s_direct | K8SAPI 直连 Agent（第 3 层）                    |
+| svc_direct | K8SService 直连 Agent（第 3 层）                |
+| ssh_jump   | 通过 Agent 跳跃到 EndpointSSH（第 4 层）        |
+| k8s_jump   | 通过 Agent 跳跃到 EndpointK8SAPI（第 4 层）     |
+| svc_jump   | 通过 Agent 跳跃到 EndpointK8SService（第 4 层） |
 
-```
-K8s 权限配置页面：
-
-  ┌──────────────────────────────────────────────────────┐
-  │ 规则列表                                              │
-  ├──────────────────────────────────────────────────────┤
-  │ Agent       │ 用户/分组   │ 命名空间    │ K8S 角色   │
-  │ beijing     │ 张三        │ yygl        │ developer  │
-  │ beijing     │ 运维组      │ *           │ admin      │
-  │ shanghai    │ 上海团队    │ *           │ developer  │
-  └──────────────────────────────────────────────────────┘
-```
-
-### Endpoint 跳跃权限（新增）
-
-管理 Endpoint 跳跃的访问权限（第 4 层），按 Endpoint 类型分 Tab：
-
-```
-Endpoint 跳跃权限：
-
-  ┌──────────────┬──────────────┬──────────────┐
-  │ SSH 跳跃权限 │ K8S 跳跃权限 │ SVC 跳跃权限 │
-  └──────────────┴──────────────┴──────────────┘
-
-  SSH 跳跃权限：
-    ┌──────────────────────────────────────────────────┐
-    │ EndpointSSH     │ 用户/分组 │ Linux 用户         │
-    │ web-server-1    │ 张三      │ root, deploy       │
-    │ web-server-1    │ 开发组    │ deploy             │
-    │ db-server       │ DBA 组    │ root               │
-    └──────────────────────────────────────────────────┘
-
-  K8S 跳跃权限：
-    ┌──────────────────────────────────────────────────┐
-    │ EndpointK8S     │ 用户/分组 │ 命名空间 │ K8S 角色│
-    │ beijing-prod    │ 开发组    │ yygl     │ developer│
-    │ beijing-prod    │ 运维组    │ *        │ admin    │
-    └──────────────────────────────────────────────────┘
-
-  SVC 跳跃权限：
-    ┌──────────────────────────────────────────────────┐
-    │ EndpointSVC     │ 用户/分组 │ Service 模式       │
-    │ remote-cluster  │ 开发组    │ *.yygl             │
-    │ remote-cluster  │ DBA 组    │ *                  │
-    └──────────────────────────────────────────────────┘
-```
-
-## 审计中心增强
-
-### 操作日志页
-
-在现有连接日志基础上，新增操作级日志：
-
-| 列    | 说明                                                                  |
-| ----- | --------------------------------------------------------------------- |
-| 时间  | 操作时间                                                              |
-| 用户  | 操作用户                                                              |
-| 类型  | ssh_direct / k8s_direct / svc_direct / ssh_jump / k8s_jump / svc_jump |
-| Agent | 经过的 Agent                                                          |
-| 目标  | 目标域名或 Endpoint 名称                                              |
-| 详情  | 操作详情（命令摘要、API 路径等）                                      |
-| 结果  | 成功 / 拦截 / 失败                                                    |
+新增列：Agent（经过的 Agent）、Endpoint（目标 Endpoint，跳跃时）、详情（命令摘要、API 路径等）。
 
 ## 国际化
 
@@ -231,26 +340,28 @@ Endpoint 跳跃权限：
 翻译 key 命名规范：
 
 ```
-ztna.endpoint.title        — Endpoint 管理
-ztna.endpoint.ssh          — EndpointSSH
-ztna.endpoint.k8s          — EndpointK8S
-ztna.endpoint.svc          — EndpointSVC
-ztna.resource.title        — 资源发现
-ztna.domain.title          — 域名管理
-ztna.acl.k8s               — K8S 权限
-ztna.acl.jump              — 跳跃权限
-ztna.audit.operations      — 操作日志
+menu.endpoints          — Endpoint 管理
+menu.endpointSSH        — EndpointSSH
+menu.endpointK8SAPI     — EndpointK8SAPI
+menu.endpointK8SService — EndpointK8SService
+menu.resources          — 资源发现
+menu.domains            — 域名管理
+acl.k8s                 — K8SAPI 授权
+acl.k8sService          — K8SService 授权
+acl.jump                — 跳跃授权
+acl.jumpSSH             — SSH 跳跃授权
+acl.jumpK8S             — K8S 跳跃授权
+acl.jumpSVC             — SVC 跳跃授权
 ```
 
 ## 实现优先级
 
-| 阶段 | 内容                  | 依赖               |
-| ---- | --------------------- | ------------------ |
-| P0   | Agent 能力展示        | Agent 上报能力信息 |
-| P0   | 资源发现页面          | 资源发现 API       |
-| P0   | 域名管理页面          | 域名注册表 API     |
-| P1   | Endpoint 管理页面     | Endpoint 模型 API  |
-| P1   | K8S 权限配置页面      | ACL 模型           |
-| P1   | Endpoint 跳跃权限页面 | 跳跃 ACL 模型      |
-| P2   | 操作级审计日志页面    | 操作审计 API       |
-| P2   | 资源总览仪表盘        | 各模块数据汇总     |
+| 阶段 | 内容                | 依赖                        |
+| ---- | ------------------- | --------------------------- |
+| P1   | K8SAPI 授权页面     | AclK8sPermission API        |
+| P1   | K8SService 授权页面 | AclK8SServicePermission API |
+| P1   | Endpoint 管理页面   | Endpoint 模型 API           |
+| P1   | 跳跃授权页面        | 跳跃 ACL 模型 API           |
+| P1   | 资源发现页面        | 资源发现 API                |
+| P1   | 域名管理页面        | 域名注册表 API              |
+| P2   | 审计日志增强        | 操作审计 API                |

@@ -126,7 +126,7 @@ Desktop.Host 特有的 GUI 功能，展示用户可访问的所有资源：
 │  │   ├── 🖥 web-server-1.beijing.k8s            │    │
 │  │   │     EndpointSSH (22)  ● 在线             │    │
 │  │   └── 🔧 api.beijing-prod.beijing.k8s        │    │
-│  │         EndpointK8S (6443)  ● 在线           │    │
+│  │         EndpointK8SAPI (6443)  ● 在线        │    │
 │  └─────────────────────────────────────────────┘    │
 │                                                     │
 │  点击资源可复制连接命令                              │
@@ -135,13 +135,13 @@ Desktop.Host 特有的 GUI 功能，展示用户可访问的所有资源：
 
 ### 连接操作
 
-| 资源类型    | 操作                             |
-| ----------- | -------------------------------- |
-| AgentSSH    | 复制 ssh 命令 / 打开终端直接连接 |
-| EndpointSSH | 复制 ssh 命令                    |
-| AgentSVC    | 复制连接字符串 / 显示 VIP 地址   |
-| AgentK8S    | 复制 kubeconfig 配置             |
-| EndpointK8S | 复制 kubeconfig 配置             |
+| 资源类型        | 操作                             |
+| --------------- | -------------------------------- |
+| AgentSSH        | 复制 ssh 命令 / 打开终端直接连接 |
+| EndpointSSH     | 复制 ssh 命令                    |
+| AgentK8SService | 复制连接字符串 / 显示 VIP 地址   |
+| AgentK8SAPI     | 复制 kubeconfig 配置             |
+| EndpointK8SAPI  | 复制 kubeconfig 配置             |
 
 ## 实现优先级
 

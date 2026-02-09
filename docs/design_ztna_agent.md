@@ -6,15 +6,16 @@ Agent 部署在内网环境，以 agent 角色加入 Tailscale 网络。Agent �
 
 任何 Agent 都可以挂载任意能力，只要网络可达。部署在物理机上的 Agent 可以同时启用 SSH + K8S + SVC；部署在 K8S Pod 里的 Agent 也可以只启用 SVC。
 
-## 三种本机能力
+## 四种本机能力
 
 Agent 本机能力是配置级的，不是独立对象。通过 agent.toml 配置启用。
 
 ```
-          能力        说明                          控制方式
-  AgentSSH    Agent 本机 SSH（已有）            User.SSHEnabled + AclSSHPermission
-  AgentK8S    Agent 本机 K8S API 代理（新增）   agent.toml [k8s] + AclK8sPermission
-  AgentSVC    Agent 本机 K8S SVC 代理（新增）   agent.toml [svc] + AclServicePermission
+          能力              说明                              控制方式
+  AgentSSH          Agent 本机 SSH（已有）                User.SSHEnabled + AclSSHPermission
+  AgentK8SAPI       Agent 本机 K8S API 代理（新增）       agent.toml [k8s] + AclK8sPermission
+  AgentK8SService   Agent 本机 K8S SVC 代理（新增）       agent.toml [svc] + AclK8SServicePermission
+  AgentService      Agent 手动端口映射（现有 ProxyService 改名） agent.toml [service] + AclServicePermission
 ```
 
 ## AgentSSH — Agent 本机 SSH
@@ -32,7 +33,7 @@ Agent 本机能力是配置级的，不是独立对象。通过 agent.toml 配�
 不需要额外改动。
 ```
 
-## AgentK8S — Agent 本机 K8S API 代理
+## AgentK8SAPI — Agent 本机 K8S API 代理
 
 Agent 部署在 K8S 主节点时，直接访问本机 K8S API Server，做 Impersonation 代理。
 
@@ -95,11 +96,11 @@ api.<agent-name>.k8s:6443
 api.beijing.k8s:6443
 ```
 
-## AgentSVC — Agent 本机 K8S SVC 代理
+## AgentK8SService — Agent 本机 K8S SVC 代理
 
-Agent 部署在 K8S 集群中时，通过 K8S API 监听 Service 资源变更，自动发现带有特定标签的 Service，并在 tsnet 上暴露代理端口。
+Agent 部署在 K8S 集群中时，通过 K8S API 监听 Service 资源变更，自动发现带有特定标签的 Service，并通过 tsnet gRPC 代理暴露。
 
-AgentSVC 替代了原来的 ProxyService 手动配置模式，改为自动发现。已有的 AclServicePermission 继续用于控制 SVC 访问权限。
+AgentK8SService 和 AgentService（原 ProxyService）共存不冲突。AgentService 走 tsnet 独立端口（手动配置），AgentK8SService 走 tsnet gRPC 代理（自动发现）。
 
 ### 配置
 
@@ -117,9 +118,9 @@ agent.toml:
 Agent 启动时：
   如果 svc.enabled = true
     → 启动 K8S Service Informer（Watch 带标签的 Service）
-    → 发现 Service 后在 tsnet 上监听对应端口
-    → 收到连接时从 tsnet 提取身份
-    → 查询 AclServicePermission（已有）
+    → 发现 Service 后注册到 gRPC 代理
+    → 收到 gRPC SVCProxy 请求时从 tsnet 提取身份
+    → 查询 AclK8SServicePermission（心跳同步的缓存）
     → 透明转发到 K8S ClusterIP
 ```
 
@@ -173,8 +174,11 @@ K8S Service 变更事件
   postgresql.prod:5432
 
 解决方案：
-  Agent 维护端口映射表，冲突时分配不同的监听端口
-  Desktop 侧通过域名解析获取正确的端口
+  AgentK8SService 走 gRPC 代理（SVCProxy RPC），不走独立端口
+  通过 RPC 参数传递目标 Service 信息（namespace + service name）
+  Desktop 侧用 VIP 隔离端口冲突：
+    pg.yygl.beijing.k8s:5432   → VIP 127.1.0.1:5432 → gRPC SVCProxy(pg, yygl)
+    pg.prod.beijing.k8s:5432   → VIP 127.1.0.2:5432 → gRPC SVCProxy(pg, prod)
 ```
 
 ### 部署要求（K8S Pod 场景）
@@ -191,6 +195,40 @@ Agent 部署在 K8S Pod 中时需要：
     特权容器
 ```
 
+## AgentService — Agent 手动端口映射
+
+AgentService 是现有 ProxyService 的改名，保留用于非 K8S 场景。管理员手动配置端口映射，Agent 在 tsnet 上监听对应端口，透明转发到目标地址。
+
+与 AgentK8SService 的区别：AgentService 是手动配置、走 tsnet 独立端口、Headscale ACL 端口级控制；AgentK8SService 是自动发现、走 gRPC 代理、应用层鉴权。
+
+### 配置
+
+```
+agent.toml（现有配置不变）：
+  [[service]]
+  name = "postgresql"
+  local_addr = "192.168.1.100:5432"
+  remote_port = 5432
+```
+
+### 权限控制
+
+```
+AclServicePermission（现有，不变）：
+  service_id → 哪个 AgentService
+  user_id/group_id → 被授权用户/分组
+
+翻译成 Headscale ACL：
+  { "action": "accept", "src": ["tag:client-xxx"], "dst": ["tag:agent-xxx:5432"] }
+```
+
+### 域名
+
+```
+AgentService 不参与域名体系（手动配置，用户直接用 Tailscale IP + 端口访问）。
+未来可选：支持手动绑定域名。
+```
+
 ## Agent gRPC Server
 
 Agent 需要两个 gRPC 接口，用于对接 Desktop 和 Endpoint：
@@ -203,8 +241,8 @@ Agent 进程
   │     身份来自 tsnet 连接
   │     │
   │     ├── SSHJump RPC     → 桥接到 EndpointSSH
-  │     ├── K8sProxy RPC    → 桥接到 EndpointK8S
-  │     └── SVCProxy RPC    → 桥接到 EndpointSVC
+  │     ├── K8sAPIProxy RPC → 桥接到 EndpointK8SAPI
+  │     └── SVCProxy RPC    → 桥接到 EndpointK8SService
   │
   └── 内网 gRPC Server（面向 Endpoint）
         监听在内网地址上（如 0.0.0.0:50052）
@@ -212,7 +250,7 @@ Agent 进程
         │
         ├── RegisterEndpoint RPC  → Endpoint 注册自己
         ├── Heartbeat RPC         → Endpoint 心跳保活
-        └── 反向指令流             → Agent 下发 OpenShell / K8sProxy / SVCProxy 等
+        └── 反向指令流             → Agent 下发 OpenShell / K8sAPIProxy / SVCProxy 等
 ```
 
 ### Desktop 发起跳跃的完整流程
@@ -271,10 +309,11 @@ Agent 通过 gRPC 心跳从 Server 获取权限数据：
 
 ```
 心跳响应新增字段：
-  k8s_permissions:          → 第 3 层，AgentK8S 权限
+  k8s_permissions:          → 第 3 层，AgentK8SAPI 权限
+  k8s_service_permissions:  → 第 3 层，AgentK8SService 权限
   ssh_jump_permissions:     → 第 4 层，EndpointSSH 跳跃授权
-  k8s_jump_permissions:     → 第 4 层，EndpointK8S 跳跃授权
-  svc_jump_permissions:     → 第 4 层，EndpointSVC 跳跃授权
+  k8sapi_jump_permissions:  → 第 4 层，EndpointK8SAPI 跳跃授权
+  k8sservice_jump_permissions: → 第 4 层，EndpointK8SService 跳跃授权
 
 Agent 本地缓存，随心跳刷新（30 秒一次）。
 ```
@@ -287,12 +326,12 @@ User (agent-beijing)
   ├── AgentSSH（已有能力）— 本机 SSH
   │     通过 User.SSHEnabled + AclSSHPermission 控制
   │
-  ├── AgentK8S（新增配置）— 本机 K8S API 代理
+  ├── AgentK8SAPI（新增配置）— 本机 K8S API 代理
   │     通过 agent.toml [k8s] 配置 + AclK8sPermission 控制
   │
-  ├── AgentSVC（新增配置）— 本机 K8S SVC 代理
-  │     通过 agent.toml [svc] 配置 + AclServicePermission 控制
-  │     自动发现 K8S Service，在 tsnet 上暴露代理端口
+  ├── AgentK8SService（新增配置）— 本机 K8S SVC 代理
+  │     通过 agent.toml [svc] 配置 + AclK8SServicePermission 控制
+  │     自动发现 K8S Service，走 tsnet gRPC 代理
   │
   ├── EndpointSSH（新增对象）— 内网 SSH 跳跃端点
   │     ├── web-server-1  → 192.168.1.100 (online)
@@ -300,13 +339,13 @@ User (agent-beijing)
   │     └── db-server     → 192.168.1.200 (offline)
   │     通过 AclSSHJumpPermission 控制
   │
-  ├── EndpointK8S（新增对象）— 内网 K8S API 跳跃端点
+  ├── EndpointK8SAPI（新增对象）— 内网 K8S API 跳跃端点
   │     └── beijing-prod  → 192.168.1.10:6443 (online)
-  │     通过 AclK8sJumpPermission 控制
+  │     通过 AclK8SAPIJumpPermission 控制
   │
-  └── EndpointSVC（新增对象）— 内网 K8S SVC 跳跃端点
+  └── EndpointK8SService（新增对象）— 内网 K8S SVC 跳跃端点
         └── remote-cluster  → (online, 发现 12 个 Service)
-        通过 AclSVCJumpPermission 控制
+        通过 AclK8SServiceJumpPermission 控制
 ```
 
 ## 配置扩展
@@ -333,10 +372,10 @@ listen = "0.0.0.0:50052"           # 内网 gRPC 端口，面向 Endpoint
 
 ## 实现优先级
 
-| 阶段 | 内容                                    | 依赖             |
-| ---- | --------------------------------------- | ---------------- |
-| P1   | AgentK8S — K8S API 代理 + Impersonation | AclK8sPermission |
-| P1   | AgentSVC — Service 自动发现 + SVC 代理  | K8S RBAC         |
-| P2   | Agent tsnet gRPC Server（面向 Desktop） | Endpoint 体系    |
-| P2   | Agent 内网 gRPC Server（面向 Endpoint） | Endpoint 体系    |
-| P2   | 心跳同步扩展（权限数据下发）            | ACL 模型         |
+| 阶段 | 内容                                          | 依赖             |
+| ---- | --------------------------------------------- | ---------------- |
+| P1   | AgentK8SAPI — K8S API 代理 + Impersonation    | AclK8sPermission |
+| P1   | AgentK8SService — Service 自动发现 + SVC 代理 | K8S RBAC         |
+| P2   | Agent tsnet gRPC Server（面向 Desktop）       | Endpoint 体系    |
+| P2   | Agent 内网 gRPC Server（面向 Endpoint）       | Endpoint 体系    |
+| P2   | 心跳同步扩展（权限数据下发）                  | ACL 模型         |
