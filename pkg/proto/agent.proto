@@ -121,6 +121,19 @@ message AgentHeartbeatRequest {
   string hostname = 6; // 主机名
   string runtime = 7; // 运行环境：docker / kubernetes / physical
   repeated NetworkInterface networks = 8; // 网络接口列表
+  // ZTNA 域名注册（首次心跳或变更时上报）
+  repeated DomainRegistration domain_registrations = 9; // 域名注册列表
+}
+
+// DomainRegistration 域名注册信息（Agent 心跳上报）
+message DomainRegistration {
+  string domain = 1;       // 完整域名（如 beijing.k8s）
+  string type = 2;         // 类型：agent_ssh / agent_k8sapi / agent_k8s_service / agent_service
+  string target_ip = 3;    // 目标 IP
+  int32 target_port = 4;   // 目标端口
+  string namespace = 5;    // K8S 命名空间（K8S 类型时）
+  string service_name = 6; // K8S Service 名称（K8S 类型时）
+  string endpoint_id = 7;  // 关联的 Endpoint ID（Endpoint 类型时）
 }
 
 // ServiceConfig 端口映射配置

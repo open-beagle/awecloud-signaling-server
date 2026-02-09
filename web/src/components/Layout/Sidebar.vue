@@ -31,6 +31,13 @@
           <span>{{ t('menu.groups') }}</span>
         </template>
       </el-menu-item>
+      <!-- 域名管理 -->
+      <el-menu-item index="/domains">
+        <el-icon><Link /></el-icon>
+        <template #title>
+          <span>{{ t('menu.domains') }}</span>
+        </template>
+      </el-menu-item>
       <!-- ACL 授权管理 -->
       <el-sub-menu index="acl">
         <template #title>

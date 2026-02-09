@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+
 	"github.com/open-beagle/awecloud-signaling-server/internal/agent"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/banner"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
@@ -36,6 +39,12 @@ func main() {
 	// 检查是否是 be-child ssh 子命令
 	if len(os.Args) >= 3 && os.Args[1] == "be-child" && os.Args[2] == "ssh" {
 		runSSHChild()
+		return
+	}
+
+	// 检查是否是 dial 子命令：signal_agent dial <host> <port>
+	if len(os.Args) >= 4 && os.Args[1] == "dial" {
+		runDial(os.Args[2], os.Args[3])
 		return
 	}
 
@@ -541,4 +550,69 @@ func generateDeviceFingerprint() string {
 	hostname, _ := os.Hostname()
 	hash := sha256.Sum256([]byte(hostname))
 	return hex.EncodeToString(hash[:])
+}
+
+// runDial 处理 dial 子命令
+// 连接 Agent/Client 进程的 Unix Socket，请求 tsnet 代理转发
+// 用法：signal_agent dial <host> <port>
+// 协议：发送 [2字节大端长度][host:port]，读取 [1字节状态码]，然后桥接 stdin/stdout
+func runDial(host, port string) {
+	// 确定 Unix Socket 路径
+	socketPath := os.Getenv("SIGNAL_DIAL_SOCKET")
+	if socketPath == "" {
+		socketPath = "/tmp/signaling.sock"
+	}
+
+	// 构建目标地址
+	targetAddr := net.JoinHostPort(host, port)
+
+	// 连接 Unix Socket
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "连接 Unix Socket 失败 (%s): %v\n", socketPath, err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	// 发送目标地址（2字节大端长度 + 地址字符串）
+	addrBytes := []byte(targetAddr)
+	if len(addrBytes) > 512 {
+		fmt.Fprintf(os.Stderr, "目标地址过长: %s\n", targetAddr)
+		os.Exit(1)
+	}
+	lenBuf := make([]byte, 2)
+	binary.BigEndian.PutUint16(lenBuf, uint16(len(addrBytes)))
+	if _, err := conn.Write(lenBuf); err != nil {
+		fmt.Fprintf(os.Stderr, "发送地址长度失败: %v\n", err)
+		os.Exit(1)
+	}
+	if _, err := conn.Write(addrBytes); err != nil {
+		fmt.Fprintf(os.Stderr, "发送地址失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 读取状态码（0x00 成功，0x01 失败）
+	statusBuf := make([]byte, 1)
+	if _, err := io.ReadFull(conn, statusBuf); err != nil {
+		fmt.Fprintf(os.Stderr, "读取状态码失败: %v\n", err)
+		os.Exit(1)
+	}
+	if statusBuf[0] != 0x00 {
+		fmt.Fprintf(os.Stderr, "代理连接失败: 目标 %s 不可达\n", targetAddr)
+		os.Exit(1)
+	}
+
+	// 桥接 stdin/stdout ↔ Unix Socket
+	done := make(chan struct{}, 2)
+	go func() {
+		io.Copy(conn, os.Stdin)
+		done <- struct{}{}
+	}()
+	go func() {
+		io.Copy(os.Stdout, conn)
+		done <- struct{}{}
+	}()
+
+	// 等待任一方向完成
+	<-done
 }

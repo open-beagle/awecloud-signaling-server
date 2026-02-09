@@ -1396,3 +1396,56 @@ func (s *DesktopServiceServer) NotifyAllDesktopsDataChange(dataType pb.DesktopDa
 		}
 	}
 }
+
+// ResolveDomain 域名解析 - Desktop 查询 .k8s 域名对应的 Agent 地址
+func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.ResolveDomainRequest) (*pb.ResolveDomainResponse, error) {
+	if req.Domain == "" {
+		return &pb.ResolveDomainResponse{Success: false, Message: "域名不能为空"}, nil
+	}
+
+	// 验证 Desktop 是否存在
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, req.DesktopId).Error; err != nil {
+		return &pb.ResolveDomainResponse{Success: false, Message: "设备不存在"}, nil
+	}
+	if node.Type != model.NodeTypeDesktop {
+		return &pb.ResolveDomainResponse{Success: false, Message: "设备类型错误"}, nil
+	}
+
+	// 查询域名注册表
+	var record model.DomainRegistry
+	if err := db.DB.WithContext(ctx).Preload("AgentUser").
+		Where("domain = ? AND status = ?", req.Domain, model.DomainStatusOnline).
+		First(&record).Error; err != nil {
+		return &pb.ResolveDomainResponse{Success: false, Message: "域名未注册或已离线"}, nil
+	}
+
+	// 查询 Agent 节点的 Tailscale IP
+	var agentNode model.Node
+	agentIP := ""
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", record.AgentUserID, model.NodeTypeAgent).
+		First(&agentNode).Error; err == nil {
+		agentIP = agentNode.IP
+	}
+
+	if agentIP == "" {
+		return &pb.ResolveDomainResponse{Success: false, Message: "Agent 节点未找到或无 IP"}, nil
+	}
+
+	agentName := ""
+	if record.AgentUser != nil {
+		agentName = record.AgentUser.Name
+	}
+
+	logger.Infof("Desktop %d 解析域名: %s → %s:%d (agent=%s)", req.DesktopId, req.Domain, agentIP, record.TargetPort, agentName)
+
+	return &pb.ResolveDomainResponse{
+		Success:    true,
+		Message:    "解析成功",
+		Domain:     record.Domain,
+		AgentIp:    agentIP,
+		TargetPort: int32(record.TargetPort),
+		AgentName:  agentName,
+		DomainType: string(record.Type),
+	}, nil
+}

@@ -314,7 +314,15 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 		s.connMutex.Lock()
 		delete(s.connections, agentID)
 		s.connMutex.Unlock()
-		logger.Infof("Agent 心跳流断开: agent_id=%d", agentID)
+
+		// Agent 断连时，将其所有域名设为离线
+		if err := db.DB.Model(&model.DomainRegistry{}).
+			Where("agent_user_id = ? AND status = ?", agentID, model.DomainStatusOnline).
+			Update("status", model.DomainStatusOffline).Error; err != nil {
+			logger.Errorf("Agent 断连时设置域名离线失败: agent_id=%d, err=%v", agentID, err)
+		} else {
+			logger.Infof("Agent 断连，域名已设为离线: agent_id=%d", agentID)
+		}
 	}()
 
 	// 处理第一个心跳
@@ -391,6 +399,11 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		Where("user_id = ? AND type = ?", agentID, model.NodeTypeAgent).
 		Updates(updates).Error; err != nil {
 		logger.Errorf("更新 Node 心跳失败: %v", err)
+	}
+
+	// 处理域名注册上报
+	if len(req.DomainRegistrations) > 0 {
+		s.handleDomainRegistrations(ctx, agentID, req.DomainRegistrations)
 	}
 }
 
@@ -573,4 +586,55 @@ func (s *AgentServiceServer) ReportNetworkChange(ctx context.Context, req *pb.Re
 	return &pb.ReportNetworkChangeResponse{
 		Success: true,
 	}, nil
+}
+
+// handleDomainRegistrations 处理 Agent 心跳中的域名注册上报
+// 逻辑：遍历上报的域名列表，逐条 upsert 到 domain_registry 表
+func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agentID uint64, registrations []*pb.DomainRegistration) {
+	registered := 0
+	updated := 0
+
+	for _, reg := range registrations {
+		var existing model.DomainRegistry
+		err := db.DB.WithContext(ctx).Where("domain = ?", reg.Domain).First(&existing).Error
+
+		if err != nil {
+			// 不存在，创建
+			record := model.DomainRegistry{
+				Domain:      reg.Domain,
+				Type:        model.DomainType(reg.Type),
+				AgentUserID: agentID,
+				EndpointID:  reg.EndpointId,
+				TargetIP:    reg.TargetIp,
+				TargetPort:  int(reg.TargetPort),
+				Namespace:   reg.Namespace,
+				ServiceName: reg.ServiceName,
+				Status:      model.DomainStatusOnline,
+			}
+			if err := db.DB.WithContext(ctx).Create(&record).Error; err != nil {
+				logger.Errorf("域名注册失败: domain=%s, err=%v", reg.Domain, err)
+				continue
+			}
+			registered++
+		} else {
+			// 存在，更新
+			updates := map[string]any{
+				"type":          model.DomainType(reg.Type),
+				"agent_user_id": agentID,
+				"endpoint_id":   reg.EndpointId,
+				"target_ip":     reg.TargetIp,
+				"target_port":   int(reg.TargetPort),
+				"namespace":     reg.Namespace,
+				"service_name":  reg.ServiceName,
+				"status":        model.DomainStatusOnline,
+			}
+			if err := db.DB.WithContext(ctx).Model(&existing).Updates(updates).Error; err != nil {
+				logger.Errorf("域名更新失败: domain=%s, err=%v", reg.Domain, err)
+				continue
+			}
+			updated++
+		}
+	}
+
+	logger.Infof("Agent 域名注册上报完成: agent_id=%d, registered=%d, updated=%d", agentID, registered, updated)
 }

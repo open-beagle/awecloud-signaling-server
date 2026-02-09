@@ -109,17 +109,22 @@ const items = computed(() => {
     breadcrumbs.push({ path: '/tunnel/ssh', title: 'SSH 策略' })
   }
   
-  // 9. 审计日志
+  // 9. 域名管理
+  else if (path === '/domains') {
+    breadcrumbs.push({ path: '/domains', title: '域名管理' })
+  }
+  
+  // 10. 审计日志
   else if (path === '/audit-logs') {
     breadcrumbs.push({ path: '/audit-logs', title: '审计日志' })
   }
   
-  // 10. 系统配置
+  // 11. 系统配置
   else if (path === '/system/config') {
     breadcrumbs.push({ path: '/system/config', title: '系统配置' })
   }
   
-  // 11. 下载页面
+  // 12. 下载页面
   else if (path === '/download') {
     breadcrumbs.push({ path: '/download', title: '客户端下载' })
   }

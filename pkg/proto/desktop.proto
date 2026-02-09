@@ -47,6 +47,9 @@ service DesktopService {
 
   // 注销 - Desktop 安全离场
   rpc Logout(DesktopLogoutRequest) returns (DesktopLogoutResponse);
+
+  // 域名解析 - Desktop 查询 .k8s 域名对应的 Agent 地址
+  rpc ResolveDomain(ResolveDomainRequest) returns (ResolveDomainResponse);
 }
 
 // ============================================
@@ -355,4 +358,26 @@ enum WaitForLoginResultStatus {
   WAIT_FOR_LOGIN_RESULT_STATUS_TIMEOUT = 4; // 超时
   WAIT_FOR_LOGIN_RESULT_STATUS_CANCELLED = 5; // 已取消
   WAIT_FOR_LOGIN_RESULT_STATUS_DISABLED = 6; // 用户已禁用/待审批
+}
+
+
+// ============================================
+// 域名解析
+// ============================================
+
+// ResolveDomainRequest 域名解析请求
+message ResolveDomainRequest {
+  uint64 desktop_id = 1; // Desktop ID
+  string domain = 2; // 要解析的域名（如 pg.yygl.beijing.k8s）
+}
+
+// ResolveDomainResponse 域名解析响应
+message ResolveDomainResponse {
+  bool success = 1; // 是否成功
+  string message = 2; // 响应消息
+  string domain = 3; // 域名
+  string agent_ip = 4; // Agent 的 Tailscale IP
+  int32 target_port = 5; // 目标端口
+  string agent_name = 6; // Agent 名称
+  string domain_type = 7; // 域名类型
 }

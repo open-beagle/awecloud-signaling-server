@@ -414,6 +414,13 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.DELETE("/acl/ssh/:id/users/:uid", aclAPI.RemoveSSHACLUser)
 					adminAuthGroup.DELETE("/acl/ssh/:id/groups/:gid", aclAPI.RemoveSSHACLGroup)
 
+					// 域名管理
+					domainAPI := api.NewDomainAPI()
+					adminAuthGroup.GET("/domains", domainAPI.List)
+					adminAuthGroup.POST("/domains/register", domainAPI.Register)
+					adminAuthGroup.POST("/domains/batch-register", domainAPI.BatchRegister)
+					adminAuthGroup.PUT("/domains/offline/:agent_id", domainAPI.SetOffline)
+
 					// 审计日志
 					auditAPI := api.NewAuditLogAPI()
 					adminAuthGroup.GET("/audit/logs", auditAPI.QueryAuditLogs)
@@ -456,6 +463,10 @@ func (s *Server) setupRouter() *gin.Engine {
 				{
 					tunnelConfigAPI := api.NewTunnelConfigAPI(s.config)
 					clientAuthGroup.GET("/tunnel/config", tunnelConfigAPI.GetTunnelConfig)
+
+					// 域名解析（Desktop 查询）
+					clientDomainAPI := api.NewDomainAPI()
+					clientAuthGroup.GET("/dns/resolve", clientDomainAPI.Resolve)
 				}
 			}
 		}

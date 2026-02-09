@@ -33,6 +33,7 @@ const (
 	DesktopService_CreateLoginSession_FullMethodName    = "/awecloud.signaling.DesktopService/CreateLoginSession"
 	DesktopService_WaitForLoginResult_FullMethodName    = "/awecloud.signaling.DesktopService/WaitForLoginResult"
 	DesktopService_Logout_FullMethodName                = "/awecloud.signaling.DesktopService/Logout"
+	DesktopService_ResolveDomain_FullMethodName         = "/awecloud.signaling.DesktopService/ResolveDomain"
 )
 
 // DesktopServiceClient is the client API for DesktopService service.
@@ -69,6 +70,8 @@ type DesktopServiceClient interface {
 	WaitForLoginResult(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[WaitForLoginResultRequest, WaitForLoginResultResponse], error)
 	// 注销 - Desktop 安全离场
 	Logout(ctx context.Context, in *DesktopLogoutRequest, opts ...grpc.CallOption) (*DesktopLogoutResponse, error)
+	// 域名解析 - Desktop 查询 .k8s 域名对应的 Agent 地址
+	ResolveDomain(ctx context.Context, in *ResolveDomainRequest, opts ...grpc.CallOption) (*ResolveDomainResponse, error)
 }
 
 type desktopServiceClient struct {
@@ -228,6 +231,16 @@ func (c *desktopServiceClient) Logout(ctx context.Context, in *DesktopLogoutRequ
 	return out, nil
 }
 
+func (c *desktopServiceClient) ResolveDomain(ctx context.Context, in *ResolveDomainRequest, opts ...grpc.CallOption) (*ResolveDomainResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolveDomainResponse)
+	err := c.cc.Invoke(ctx, DesktopService_ResolveDomain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DesktopServiceServer is the server API for DesktopService service.
 // All implementations must embed UnimplementedDesktopServiceServer
 // for forward compatibility.
@@ -262,6 +275,8 @@ type DesktopServiceServer interface {
 	WaitForLoginResult(grpc.BidiStreamingServer[WaitForLoginResultRequest, WaitForLoginResultResponse]) error
 	// 注销 - Desktop 安全离场
 	Logout(context.Context, *DesktopLogoutRequest) (*DesktopLogoutResponse, error)
+	// 域名解析 - Desktop 查询 .k8s 域名对应的 Agent 地址
+	ResolveDomain(context.Context, *ResolveDomainRequest) (*ResolveDomainResponse, error)
 	mustEmbedUnimplementedDesktopServiceServer()
 }
 
@@ -313,6 +328,9 @@ func (UnimplementedDesktopServiceServer) WaitForLoginResult(grpc.BidiStreamingSe
 }
 func (UnimplementedDesktopServiceServer) Logout(context.Context, *DesktopLogoutRequest) (*DesktopLogoutResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Logout not implemented")
+}
+func (UnimplementedDesktopServiceServer) ResolveDomain(context.Context, *ResolveDomainRequest) (*ResolveDomainResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResolveDomain not implemented")
 }
 func (UnimplementedDesktopServiceServer) mustEmbedUnimplementedDesktopServiceServer() {}
 func (UnimplementedDesktopServiceServer) testEmbeddedByValue()                        {}
@@ -554,6 +572,24 @@ func _DesktopService_Logout_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DesktopService_ResolveDomain_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveDomainRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DesktopServiceServer).ResolveDomain(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DesktopService_ResolveDomain_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DesktopServiceServer).ResolveDomain(ctx, req.(*ResolveDomainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DesktopService_ServiceDesc is the grpc.ServiceDesc for DesktopService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -604,6 +640,10 @@ var DesktopService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Logout",
 			Handler:    _DesktopService_Logout_Handler,
+		},
+		{
+			MethodName: "ResolveDomain",
+			Handler:    _DesktopService_ResolveDomain_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

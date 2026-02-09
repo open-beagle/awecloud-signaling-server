@@ -155,6 +155,25 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 	a.tailscaleIP = a.tsManager.GetIP()
 	logger.Infof("Tailscale 已连接，IP: %s", a.tailscaleIP)
 
+	// 启动 Dial Socket 服务（供 dial 子命令使用）
+	dialSocketPath := a.config.CloudIDE.DialSocket
+	if dialSocketPath == "" {
+		dialSocketPath = "/tmp/signaling.sock"
+	}
+	dialSocket := NewDialSocketServer(dialSocketPath, a.tsManager)
+	if err := dialSocket.Start(); err != nil {
+		logger.Warnf("启动 Dial Socket 失败: %v", err)
+	} else {
+		defer dialSocket.Stop()
+	}
+
+	// 自动维护 ~/.ssh/config（如果配置启用）
+	if a.config.CloudIDE.SSHConfig {
+		if err := MaintainSSHConfig(dialSocketPath); err != nil {
+			logger.Warnf("维护 ~/.ssh/config 失败: %v", err)
+		}
+	}
+
 	// 等待中断信号
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -474,6 +493,9 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 		}
 	}
 
+	// 构建域名注册列表
+	req.DomainRegistrations = a.buildDomainRegistrations()
+
 	return stream.Send(req)
 }
 
@@ -590,6 +612,35 @@ func (a *Agent) GetVisitorLANIP() string {
 		return ""
 	}
 	return a.visitorManager.GetLANIP()
+}
+
+// buildDomainRegistrations 构建域名注册列表
+// 根据 Agent 当前配置和状态，生成需要上报给 Server 的域名列表
+func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
+	var registrations []*pb.DomainRegistration
+
+	// 1. Agent SSH 域名：如果启用了 SSH，注册 agent_name 作为 SSH 域名
+	if a.config.Tunnel.EnableSSH && a.tsManager != nil && a.tsManager.IsConnected() {
+		registrations = append(registrations, &pb.DomainRegistration{
+			Domain:     a.config.Agent.AgentName,
+			Type:       "agent_ssh",
+			TargetPort: 22,
+		})
+	}
+
+	// 2. Agent 端口映射服务域名：从 ProxyManager 获取运行中的服务
+	if a.proxyManager != nil {
+		for name, running := range a.proxyManager.GetStatus() {
+			if running {
+				registrations = append(registrations, &pb.DomainRegistration{
+					Domain: name + "." + a.config.Agent.AgentName,
+					Type:   "agent_service",
+				})
+			}
+		}
+	}
+
+	return registrations
 }
 
 // startHealthServer 启动健康检查HTTP服务器

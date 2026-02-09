@@ -60,6 +60,13 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Group/Members.vue'),
         meta: { requiresAuth: true }
       },
+      // 域名管理
+      {
+        path: 'domains',
+        name: 'Domains',
+        component: () => import('@/views/Domain/List.vue'),
+        meta: { requiresAuth: true }
+      },
       // ACL 授权管理
       {
         path: 'acl/services',

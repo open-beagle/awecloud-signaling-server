@@ -598,11 +598,13 @@ type AgentHeartbeatRequest struct {
 	ServiceStatus   []*ServiceStatus       `protobuf:"bytes,4,rep,name=service_status,json=serviceStatus,proto3" json:"service_status,omitempty"`        // 端口映射服务状态列表
 	ForwardStatus   []*ForwardStatus       `protobuf:"bytes,5,rep,name=forward_status,json=forwardStatus,proto3" json:"forward_status,omitempty"`        // 端口访问服务状态列表
 	// 网络信息（首次心跳或变更时上报）
-	Hostname      string              `protobuf:"bytes,6,opt,name=hostname,proto3" json:"hostname,omitempty"` // 主机名
-	Runtime       string              `protobuf:"bytes,7,opt,name=runtime,proto3" json:"runtime,omitempty"`   // 运行环境：docker / kubernetes / physical
-	Networks      []*NetworkInterface `protobuf:"bytes,8,rep,name=networks,proto3" json:"networks,omitempty"` // 网络接口列表
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Hostname string              `protobuf:"bytes,6,opt,name=hostname,proto3" json:"hostname,omitempty"` // 主机名
+	Runtime  string              `protobuf:"bytes,7,opt,name=runtime,proto3" json:"runtime,omitempty"`   // 运行环境：docker / kubernetes / physical
+	Networks []*NetworkInterface `protobuf:"bytes,8,rep,name=networks,proto3" json:"networks,omitempty"` // 网络接口列表
+	// ZTNA 域名注册（首次心跳或变更时上报）
+	DomainRegistrations []*DomainRegistration `protobuf:"bytes,9,rep,name=domain_registrations,json=domainRegistrations,proto3" json:"domain_registrations,omitempty"` // 域名注册列表
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *AgentHeartbeatRequest) Reset() {
@@ -691,6 +693,106 @@ func (x *AgentHeartbeatRequest) GetNetworks() []*NetworkInterface {
 	return nil
 }
 
+func (x *AgentHeartbeatRequest) GetDomainRegistrations() []*DomainRegistration {
+	if x != nil {
+		return x.DomainRegistrations
+	}
+	return nil
+}
+
+// DomainRegistration 域名注册信息（Agent 心跳上报）
+type DomainRegistration struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Domain        string                 `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"`                              // 完整域名（如 beijing.k8s）
+	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`                                  // 类型：agent_ssh / agent_k8sapi / agent_k8s_service / agent_service
+	TargetIp      string                 `protobuf:"bytes,3,opt,name=target_ip,json=targetIp,proto3" json:"target_ip,omitempty"`          // 目标 IP
+	TargetPort    int32                  `protobuf:"varint,4,opt,name=target_port,json=targetPort,proto3" json:"target_port,omitempty"`   // 目标端口
+	Namespace     string                 `protobuf:"bytes,5,opt,name=namespace,proto3" json:"namespace,omitempty"`                        // K8S 命名空间（K8S 类型时）
+	ServiceName   string                 `protobuf:"bytes,6,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"` // K8S Service 名称（K8S 类型时）
+	EndpointId    string                 `protobuf:"bytes,7,opt,name=endpoint_id,json=endpointId,proto3" json:"endpoint_id,omitempty"`    // 关联的 Endpoint ID（Endpoint 类型时）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DomainRegistration) Reset() {
+	*x = DomainRegistration{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DomainRegistration) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DomainRegistration) ProtoMessage() {}
+
+func (x *DomainRegistration) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DomainRegistration.ProtoReflect.Descriptor instead.
+func (*DomainRegistration) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *DomainRegistration) GetDomain() string {
+	if x != nil {
+		return x.Domain
+	}
+	return ""
+}
+
+func (x *DomainRegistration) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *DomainRegistration) GetTargetIp() string {
+	if x != nil {
+		return x.TargetIp
+	}
+	return ""
+}
+
+func (x *DomainRegistration) GetTargetPort() int32 {
+	if x != nil {
+		return x.TargetPort
+	}
+	return 0
+}
+
+func (x *DomainRegistration) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+func (x *DomainRegistration) GetServiceName() string {
+	if x != nil {
+		return x.ServiceName
+	}
+	return ""
+}
+
+func (x *DomainRegistration) GetEndpointId() string {
+	if x != nil {
+		return x.EndpointId
+	}
+	return ""
+}
+
 // ServiceConfig 端口映射配置
 type ServiceConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -705,7 +807,7 @@ type ServiceConfig struct {
 
 func (x *ServiceConfig) Reset() {
 	*x = ServiceConfig{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[9]
+	mi := &file_pkg_proto_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -717,7 +819,7 @@ func (x *ServiceConfig) String() string {
 func (*ServiceConfig) ProtoMessage() {}
 
 func (x *ServiceConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[9]
+	mi := &file_pkg_proto_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -730,7 +832,7 @@ func (x *ServiceConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceConfig.ProtoReflect.Descriptor instead.
 func (*ServiceConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{9}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ServiceConfig) GetId() string {
@@ -783,7 +885,7 @@ type ForwardConfig struct {
 
 func (x *ForwardConfig) Reset() {
 	*x = ForwardConfig{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[10]
+	mi := &file_pkg_proto_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -795,7 +897,7 @@ func (x *ForwardConfig) String() string {
 func (*ForwardConfig) ProtoMessage() {}
 
 func (x *ForwardConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[10]
+	mi := &file_pkg_proto_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -808,7 +910,7 @@ func (x *ForwardConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardConfig.ProtoReflect.Descriptor instead.
 func (*ForwardConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{10}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ForwardConfig) GetId() string {
@@ -865,7 +967,7 @@ type AgentHeartbeatResponse struct {
 
 func (x *AgentHeartbeatResponse) Reset() {
 	*x = AgentHeartbeatResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[11]
+	mi := &file_pkg_proto_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -877,7 +979,7 @@ func (x *AgentHeartbeatResponse) String() string {
 func (*AgentHeartbeatResponse) ProtoMessage() {}
 
 func (x *AgentHeartbeatResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[11]
+	mi := &file_pkg_proto_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -890,7 +992,7 @@ func (x *AgentHeartbeatResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentHeartbeatResponse.ProtoReflect.Descriptor instead.
 func (*AgentHeartbeatResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{11}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *AgentHeartbeatResponse) GetConfigVersion() int64 {
@@ -924,7 +1026,7 @@ type GetRealtimeStatusRequest struct {
 
 func (x *GetRealtimeStatusRequest) Reset() {
 	*x = GetRealtimeStatusRequest{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[12]
+	mi := &file_pkg_proto_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -936,7 +1038,7 @@ func (x *GetRealtimeStatusRequest) String() string {
 func (*GetRealtimeStatusRequest) ProtoMessage() {}
 
 func (x *GetRealtimeStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[12]
+	mi := &file_pkg_proto_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -949,7 +1051,7 @@ func (x *GetRealtimeStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRealtimeStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetRealtimeStatusRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{12}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GetRealtimeStatusRequest) GetAgentId() uint64 {
@@ -974,7 +1076,7 @@ type GetRealtimeStatusResponse struct {
 
 func (x *GetRealtimeStatusResponse) Reset() {
 	*x = GetRealtimeStatusResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[13]
+	mi := &file_pkg_proto_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -986,7 +1088,7 @@ func (x *GetRealtimeStatusResponse) String() string {
 func (*GetRealtimeStatusResponse) ProtoMessage() {}
 
 func (x *GetRealtimeStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[13]
+	mi := &file_pkg_proto_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -999,7 +1101,7 @@ func (x *GetRealtimeStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRealtimeStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetRealtimeStatusResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{13}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *GetRealtimeStatusResponse) GetHostname() string {
@@ -1057,7 +1159,7 @@ type ProxyStatus struct {
 
 func (x *ProxyStatus) Reset() {
 	*x = ProxyStatus{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[14]
+	mi := &file_pkg_proto_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1069,7 +1171,7 @@ func (x *ProxyStatus) String() string {
 func (*ProxyStatus) ProtoMessage() {}
 
 func (x *ProxyStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[14]
+	mi := &file_pkg_proto_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1082,7 +1184,7 @@ func (x *ProxyStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProxyStatus.ProtoReflect.Descriptor instead.
 func (*ProxyStatus) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{14}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ProxyStatus) GetServiceId() string {
@@ -1124,7 +1226,7 @@ type ReportProxyStatusRequest struct {
 
 func (x *ReportProxyStatusRequest) Reset() {
 	*x = ReportProxyStatusRequest{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[15]
+	mi := &file_pkg_proto_agent_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1136,7 +1238,7 @@ func (x *ReportProxyStatusRequest) String() string {
 func (*ReportProxyStatusRequest) ProtoMessage() {}
 
 func (x *ReportProxyStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[15]
+	mi := &file_pkg_proto_agent_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1149,7 +1251,7 @@ func (x *ReportProxyStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportProxyStatusRequest.ProtoReflect.Descriptor instead.
 func (*ReportProxyStatusRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{15}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ReportProxyStatusRequest) GetAgentId() uint64 {
@@ -1177,7 +1279,7 @@ type ReportProxyStatusResponse struct {
 
 func (x *ReportProxyStatusResponse) Reset() {
 	*x = ReportProxyStatusResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[16]
+	mi := &file_pkg_proto_agent_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1189,7 +1291,7 @@ func (x *ReportProxyStatusResponse) String() string {
 func (*ReportProxyStatusResponse) ProtoMessage() {}
 
 func (x *ReportProxyStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[16]
+	mi := &file_pkg_proto_agent_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1202,7 +1304,7 @@ func (x *ReportProxyStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportProxyStatusResponse.ProtoReflect.Descriptor instead.
 func (*ReportProxyStatusResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{16}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ReportProxyStatusResponse) GetSuccess() bool {
@@ -1236,7 +1338,7 @@ type VisitorStatus struct {
 
 func (x *VisitorStatus) Reset() {
 	*x = VisitorStatus{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[17]
+	mi := &file_pkg_proto_agent_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1248,7 +1350,7 @@ func (x *VisitorStatus) String() string {
 func (*VisitorStatus) ProtoMessage() {}
 
 func (x *VisitorStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[17]
+	mi := &file_pkg_proto_agent_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1261,7 +1363,7 @@ func (x *VisitorStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VisitorStatus.ProtoReflect.Descriptor instead.
 func (*VisitorStatus) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{17}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *VisitorStatus) GetForwardId() string {
@@ -1331,7 +1433,7 @@ type ReportVisitorStatusRequest struct {
 
 func (x *ReportVisitorStatusRequest) Reset() {
 	*x = ReportVisitorStatusRequest{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[18]
+	mi := &file_pkg_proto_agent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1343,7 +1445,7 @@ func (x *ReportVisitorStatusRequest) String() string {
 func (*ReportVisitorStatusRequest) ProtoMessage() {}
 
 func (x *ReportVisitorStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[18]
+	mi := &file_pkg_proto_agent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1356,7 +1458,7 @@ func (x *ReportVisitorStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportVisitorStatusRequest.ProtoReflect.Descriptor instead.
 func (*ReportVisitorStatusRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{18}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ReportVisitorStatusRequest) GetAgentId() uint64 {
@@ -1384,7 +1486,7 @@ type ReportVisitorStatusResponse struct {
 
 func (x *ReportVisitorStatusResponse) Reset() {
 	*x = ReportVisitorStatusResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[19]
+	mi := &file_pkg_proto_agent_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1396,7 +1498,7 @@ func (x *ReportVisitorStatusResponse) String() string {
 func (*ReportVisitorStatusResponse) ProtoMessage() {}
 
 func (x *ReportVisitorStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[19]
+	mi := &file_pkg_proto_agent_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1409,7 +1511,7 @@ func (x *ReportVisitorStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportVisitorStatusResponse.ProtoReflect.Descriptor instead.
 func (*ReportVisitorStatusResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{19}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ReportVisitorStatusResponse) GetSuccess() bool {
@@ -1437,7 +1539,7 @@ type ReportNetworkChangeRequest struct {
 
 func (x *ReportNetworkChangeRequest) Reset() {
 	*x = ReportNetworkChangeRequest{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[20]
+	mi := &file_pkg_proto_agent_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1449,7 +1551,7 @@ func (x *ReportNetworkChangeRequest) String() string {
 func (*ReportNetworkChangeRequest) ProtoMessage() {}
 
 func (x *ReportNetworkChangeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[20]
+	mi := &file_pkg_proto_agent_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1462,7 +1564,7 @@ func (x *ReportNetworkChangeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportNetworkChangeRequest.ProtoReflect.Descriptor instead.
 func (*ReportNetworkChangeRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{20}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ReportNetworkChangeRequest) GetAgentId() uint64 {
@@ -1490,7 +1592,7 @@ type ReportNetworkChangeResponse struct {
 
 func (x *ReportNetworkChangeResponse) Reset() {
 	*x = ReportNetworkChangeResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[21]
+	mi := &file_pkg_proto_agent_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1502,7 +1604,7 @@ func (x *ReportNetworkChangeResponse) String() string {
 func (*ReportNetworkChangeResponse) ProtoMessage() {}
 
 func (x *ReportNetworkChangeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[21]
+	mi := &file_pkg_proto_agent_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1515,7 +1617,7 @@ func (x *ReportNetworkChangeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportNetworkChangeResponse.ProtoReflect.Descriptor instead.
 func (*ReportNetworkChangeResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{21}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ReportNetworkChangeResponse) GetSuccess() bool {
@@ -1586,7 +1688,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\n" +
 	"forward_id\x18\x01 \x01(\tR\tforwardId\x12\x18\n" +
 	"\arunning\x18\x02 \x01(\bR\arunning\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\x86\x03\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xe1\x03\n" +
 	"\x15AgentHeartbeatRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\x04R\aagentId\x12\x1b\n" +
 	"\ttunnel_ip\x18\x02 \x01(\tR\btunnelIp\x12)\n" +
@@ -1595,7 +1697,18 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\x0eforward_status\x18\x05 \x03(\v2!.awecloud.signaling.ForwardStatusR\rforwardStatus\x12\x1a\n" +
 	"\bhostname\x18\x06 \x01(\tR\bhostname\x12\x18\n" +
 	"\aruntime\x18\a \x01(\tR\aruntime\x12@\n" +
-	"\bnetworks\x18\b \x03(\v2$.awecloud.signaling.NetworkInterfaceR\bnetworks\"\x8f\x01\n" +
+	"\bnetworks\x18\b \x03(\v2$.awecloud.signaling.NetworkInterfaceR\bnetworks\x12Y\n" +
+	"\x14domain_registrations\x18\t \x03(\v2&.awecloud.signaling.DomainRegistrationR\x13domainRegistrations\"\xe0\x01\n" +
+	"\x12DomainRegistration\x12\x16\n" +
+	"\x06domain\x18\x01 \x01(\tR\x06domain\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1b\n" +
+	"\ttarget_ip\x18\x03 \x01(\tR\btargetIp\x12\x1f\n" +
+	"\vtarget_port\x18\x04 \x01(\x05R\n" +
+	"targetPort\x12\x1c\n" +
+	"\tnamespace\x18\x05 \x01(\tR\tnamespace\x12!\n" +
+	"\fservice_name\x18\x06 \x01(\tR\vserviceName\x12\x1f\n" +
+	"\vendpoint_id\x18\a \x01(\tR\n" +
+	"endpointId\"\x8f\x01\n" +
 	"\rServiceConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1f\n" +
@@ -1686,7 +1799,7 @@ func file_pkg_proto_agent_proto_rawDescGZIP() []byte {
 	return file_pkg_proto_agent_proto_rawDescData
 }
 
-var file_pkg_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_pkg_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_pkg_proto_agent_proto_goTypes = []any{
 	(*SystemInfo)(nil),                  // 0: awecloud.signaling.SystemInfo
 	(*NetworkInterface)(nil),            // 1: awecloud.signaling.NetworkInterface
@@ -1697,19 +1810,20 @@ var file_pkg_proto_agent_proto_goTypes = []any{
 	(*ServiceStatus)(nil),               // 6: awecloud.signaling.ServiceStatus
 	(*ForwardStatus)(nil),               // 7: awecloud.signaling.ForwardStatus
 	(*AgentHeartbeatRequest)(nil),       // 8: awecloud.signaling.AgentHeartbeatRequest
-	(*ServiceConfig)(nil),               // 9: awecloud.signaling.ServiceConfig
-	(*ForwardConfig)(nil),               // 10: awecloud.signaling.ForwardConfig
-	(*AgentHeartbeatResponse)(nil),      // 11: awecloud.signaling.AgentHeartbeatResponse
-	(*GetRealtimeStatusRequest)(nil),    // 12: awecloud.signaling.GetRealtimeStatusRequest
-	(*GetRealtimeStatusResponse)(nil),   // 13: awecloud.signaling.GetRealtimeStatusResponse
-	(*ProxyStatus)(nil),                 // 14: awecloud.signaling.ProxyStatus
-	(*ReportProxyStatusRequest)(nil),    // 15: awecloud.signaling.ReportProxyStatusRequest
-	(*ReportProxyStatusResponse)(nil),   // 16: awecloud.signaling.ReportProxyStatusResponse
-	(*VisitorStatus)(nil),               // 17: awecloud.signaling.VisitorStatus
-	(*ReportVisitorStatusRequest)(nil),  // 18: awecloud.signaling.ReportVisitorStatusRequest
-	(*ReportVisitorStatusResponse)(nil), // 19: awecloud.signaling.ReportVisitorStatusResponse
-	(*ReportNetworkChangeRequest)(nil),  // 20: awecloud.signaling.ReportNetworkChangeRequest
-	(*ReportNetworkChangeResponse)(nil), // 21: awecloud.signaling.ReportNetworkChangeResponse
+	(*DomainRegistration)(nil),          // 9: awecloud.signaling.DomainRegistration
+	(*ServiceConfig)(nil),               // 10: awecloud.signaling.ServiceConfig
+	(*ForwardConfig)(nil),               // 11: awecloud.signaling.ForwardConfig
+	(*AgentHeartbeatResponse)(nil),      // 12: awecloud.signaling.AgentHeartbeatResponse
+	(*GetRealtimeStatusRequest)(nil),    // 13: awecloud.signaling.GetRealtimeStatusRequest
+	(*GetRealtimeStatusResponse)(nil),   // 14: awecloud.signaling.GetRealtimeStatusResponse
+	(*ProxyStatus)(nil),                 // 15: awecloud.signaling.ProxyStatus
+	(*ReportProxyStatusRequest)(nil),    // 16: awecloud.signaling.ReportProxyStatusRequest
+	(*ReportProxyStatusResponse)(nil),   // 17: awecloud.signaling.ReportProxyStatusResponse
+	(*VisitorStatus)(nil),               // 18: awecloud.signaling.VisitorStatus
+	(*ReportVisitorStatusRequest)(nil),  // 19: awecloud.signaling.ReportVisitorStatusRequest
+	(*ReportVisitorStatusResponse)(nil), // 20: awecloud.signaling.ReportVisitorStatusResponse
+	(*ReportNetworkChangeRequest)(nil),  // 21: awecloud.signaling.ReportNetworkChangeRequest
+	(*ReportNetworkChangeResponse)(nil), // 22: awecloud.signaling.ReportNetworkChangeResponse
 }
 var file_pkg_proto_agent_proto_depIdxs = []int32{
 	0,  // 0: awecloud.signaling.AgentRegisterRequest.system_info:type_name -> awecloud.signaling.SystemInfo
@@ -1717,31 +1831,32 @@ var file_pkg_proto_agent_proto_depIdxs = []int32{
 	6,  // 2: awecloud.signaling.AgentHeartbeatRequest.service_status:type_name -> awecloud.signaling.ServiceStatus
 	7,  // 3: awecloud.signaling.AgentHeartbeatRequest.forward_status:type_name -> awecloud.signaling.ForwardStatus
 	1,  // 4: awecloud.signaling.AgentHeartbeatRequest.networks:type_name -> awecloud.signaling.NetworkInterface
-	9,  // 5: awecloud.signaling.AgentHeartbeatResponse.services:type_name -> awecloud.signaling.ServiceConfig
-	10, // 6: awecloud.signaling.AgentHeartbeatResponse.forwards:type_name -> awecloud.signaling.ForwardConfig
-	1,  // 7: awecloud.signaling.GetRealtimeStatusResponse.networks:type_name -> awecloud.signaling.NetworkInterface
-	14, // 8: awecloud.signaling.ReportProxyStatusRequest.statuses:type_name -> awecloud.signaling.ProxyStatus
-	17, // 9: awecloud.signaling.ReportVisitorStatusRequest.statuses:type_name -> awecloud.signaling.VisitorStatus
-	1,  // 10: awecloud.signaling.ReportNetworkChangeRequest.networks:type_name -> awecloud.signaling.NetworkInterface
-	2,  // 11: awecloud.signaling.AgentService.Register:input_type -> awecloud.signaling.AgentRegisterRequest
-	4,  // 12: awecloud.signaling.AgentService.Authenticate:input_type -> awecloud.signaling.AgentAuthenticateRequest
-	8,  // 13: awecloud.signaling.AgentService.Heartbeat:input_type -> awecloud.signaling.AgentHeartbeatRequest
-	12, // 14: awecloud.signaling.AgentService.GetRealtimeStatus:input_type -> awecloud.signaling.GetRealtimeStatusRequest
-	15, // 15: awecloud.signaling.AgentService.ReportProxyStatus:input_type -> awecloud.signaling.ReportProxyStatusRequest
-	18, // 16: awecloud.signaling.AgentService.ReportVisitorStatus:input_type -> awecloud.signaling.ReportVisitorStatusRequest
-	20, // 17: awecloud.signaling.AgentService.ReportNetworkChange:input_type -> awecloud.signaling.ReportNetworkChangeRequest
-	3,  // 18: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.AgentRegisterResponse
-	5,  // 19: awecloud.signaling.AgentService.Authenticate:output_type -> awecloud.signaling.AgentAuthenticateResponse
-	11, // 20: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.AgentHeartbeatResponse
-	13, // 21: awecloud.signaling.AgentService.GetRealtimeStatus:output_type -> awecloud.signaling.GetRealtimeStatusResponse
-	16, // 22: awecloud.signaling.AgentService.ReportProxyStatus:output_type -> awecloud.signaling.ReportProxyStatusResponse
-	19, // 23: awecloud.signaling.AgentService.ReportVisitorStatus:output_type -> awecloud.signaling.ReportVisitorStatusResponse
-	21, // 24: awecloud.signaling.AgentService.ReportNetworkChange:output_type -> awecloud.signaling.ReportNetworkChangeResponse
-	18, // [18:25] is the sub-list for method output_type
-	11, // [11:18] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	9,  // 5: awecloud.signaling.AgentHeartbeatRequest.domain_registrations:type_name -> awecloud.signaling.DomainRegistration
+	10, // 6: awecloud.signaling.AgentHeartbeatResponse.services:type_name -> awecloud.signaling.ServiceConfig
+	11, // 7: awecloud.signaling.AgentHeartbeatResponse.forwards:type_name -> awecloud.signaling.ForwardConfig
+	1,  // 8: awecloud.signaling.GetRealtimeStatusResponse.networks:type_name -> awecloud.signaling.NetworkInterface
+	15, // 9: awecloud.signaling.ReportProxyStatusRequest.statuses:type_name -> awecloud.signaling.ProxyStatus
+	18, // 10: awecloud.signaling.ReportVisitorStatusRequest.statuses:type_name -> awecloud.signaling.VisitorStatus
+	1,  // 11: awecloud.signaling.ReportNetworkChangeRequest.networks:type_name -> awecloud.signaling.NetworkInterface
+	2,  // 12: awecloud.signaling.AgentService.Register:input_type -> awecloud.signaling.AgentRegisterRequest
+	4,  // 13: awecloud.signaling.AgentService.Authenticate:input_type -> awecloud.signaling.AgentAuthenticateRequest
+	8,  // 14: awecloud.signaling.AgentService.Heartbeat:input_type -> awecloud.signaling.AgentHeartbeatRequest
+	13, // 15: awecloud.signaling.AgentService.GetRealtimeStatus:input_type -> awecloud.signaling.GetRealtimeStatusRequest
+	16, // 16: awecloud.signaling.AgentService.ReportProxyStatus:input_type -> awecloud.signaling.ReportProxyStatusRequest
+	19, // 17: awecloud.signaling.AgentService.ReportVisitorStatus:input_type -> awecloud.signaling.ReportVisitorStatusRequest
+	21, // 18: awecloud.signaling.AgentService.ReportNetworkChange:input_type -> awecloud.signaling.ReportNetworkChangeRequest
+	3,  // 19: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.AgentRegisterResponse
+	5,  // 20: awecloud.signaling.AgentService.Authenticate:output_type -> awecloud.signaling.AgentAuthenticateResponse
+	12, // 21: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.AgentHeartbeatResponse
+	14, // 22: awecloud.signaling.AgentService.GetRealtimeStatus:output_type -> awecloud.signaling.GetRealtimeStatusResponse
+	17, // 23: awecloud.signaling.AgentService.ReportProxyStatus:output_type -> awecloud.signaling.ReportProxyStatusResponse
+	20, // 24: awecloud.signaling.AgentService.ReportVisitorStatus:output_type -> awecloud.signaling.ReportVisitorStatusResponse
+	22, // 25: awecloud.signaling.AgentService.ReportNetworkChange:output_type -> awecloud.signaling.ReportNetworkChangeResponse
+	19, // [19:26] is the sub-list for method output_type
+	12, // [12:19] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_pkg_proto_agent_proto_init() }
@@ -1755,7 +1870,7 @@ func file_pkg_proto_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_agent_proto_rawDesc), len(file_pkg_proto_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -85,6 +85,7 @@ export default {
     tunnelNodes: 'Node 管理',
     tunnelACL: 'ACL 管理',
     tunnelSSH: 'SSH 策略',
+    domains: '域名管理',
     auditLogs: '审计日志',
     systemConfig: '系统配置'
   },
@@ -316,5 +317,22 @@ export default {
     saveSuccess: '保存成功',
     saveFailed: '保存失败',
     loadFailed: '加载配置失败'
+  },
+  domain: {
+    title: '域名管理',
+    domain: '域名',
+    type: '类型',
+    agent: '所属 Agent',
+    targetPort: '目标端口',
+    namespace: '命名空间',
+    serviceName: '服务名称',
+    searchPlaceholder: '搜索域名',
+    typeAgentSSH: 'Agent SSH',
+    typeAgentK8SAPI: 'Agent K8S API',
+    typeAgentK8SService: 'Agent K8S Service',
+    typeAgentService: 'Agent 端口映射',
+    typeEndpointSSH: 'Endpoint SSH',
+    typeEndpointK8SAPI: 'Endpoint K8S API',
+    typeEndpointK8SService: 'Endpoint K8S Service'
   }
 }

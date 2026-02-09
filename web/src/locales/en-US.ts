@@ -85,6 +85,7 @@ export default {
     tunnelNodes: 'Node Management',
     tunnelACL: 'ACL Management',
     tunnelSSH: 'SSH Policy',
+    domains: 'Domains',
     auditLogs: 'Audit Logs',
     systemConfig: 'System Config'
   },
@@ -316,5 +317,22 @@ export default {
     saveSuccess: 'Saved successfully',
     saveFailed: 'Save failed',
     loadFailed: 'Failed to load configuration'
+  },
+  domain: {
+    title: 'Domain Management',
+    domain: 'Domain',
+    type: 'Type',
+    agent: 'Agent',
+    targetPort: 'Target Port',
+    namespace: 'Namespace',
+    serviceName: 'Service Name',
+    searchPlaceholder: 'Search domain',
+    typeAgentSSH: 'Agent SSH',
+    typeAgentK8SAPI: 'Agent K8S API',
+    typeAgentK8SService: 'Agent K8S Service',
+    typeAgentService: 'Agent Port Mapping',
+    typeEndpointSSH: 'Endpoint SSH',
+    typeEndpointK8SAPI: 'Endpoint K8S API',
+    typeEndpointK8SService: 'Endpoint K8S Service'
   }
 }
