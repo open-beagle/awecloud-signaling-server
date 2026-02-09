@@ -336,20 +336,19 @@ ZTNA 新页面搜索区域设计：
 ├── 用户管理          /users                    （不变）
 ├── 设备管理          /nodes                    （不变）
 ├── 分组管理          /groups                   （不变）
-├── 授权管理（el-sub-menu，增强）
-│     ├── 服务授权    /acl/services             （不变，AgentService）
-│     ├── 用户授权    /acl/users                （不变）
-│     ├── 分组授权    /acl/groups               （不变）
-│     ├── SSH 授权    /acl/ssh                  （不变）
-│     ├── K8SAPI 授权 /acl/k8s                  （新增）
-│     ├── K8SService 授权 /acl/k8s-service      （新增）
-│     └── 跳跃授权    /acl/jump                 （新增）
-├── Endpoint 管理（el-sub-menu，新增）
+├── 终端管理（el-sub-menu，新增）
 │     ├── EndpointSSH        /endpoints/ssh     （新增）
 │     ├── EndpointK8SAPI     /endpoints/k8s     （新增）
 │     └── EndpointK8SService /endpoints/svc     （新增）
 ├── 资源发现          /resources                 （新增）
 ├── 域名管理          /domains                   （新增）
+├── 授权管理（el-sub-menu，增强）
+│     ├── 服务授权    /acl/services             （不变，AgentService）
+│     ├── 用户授权    /acl/users                （不变）
+│     ├── 分组授权    /acl/groups               （不变）
+│     ├── SSH 授权    /acl/ssh                  （增强，包含 Agent SSH + Endpoint SSH）
+│     ├── K8S 授权    /acl/k8s                  （新增，包含 Agent K8SAPI + Endpoint K8SAPI）
+│     └── K8SService 授权 /acl/k8s-service      （新增，包含 Agent K8SService + Endpoint K8SService）
 ├── 隧道管理（el-sub-menu，不变）
 │     ├── User 管理   /tunnel/users
 │     ├── Node 管理   /tunnel/nodes

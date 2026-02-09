@@ -80,18 +80,17 @@ Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理�
 
 ## ZTNA 变更总览
 
-| 模块     | 当前状态                               | ZTNA 新增/变更                                       |
-| -------- | -------------------------------------- | ---------------------------------------------------- |
-| 用户管理 | 用户列表（agent/client），Deploy Token | 不变                                                 |
-| 设备管理 | 设备列表（代理/桌面），IP/状态/心跳    | 不变                                                 |
-| 分组管理 | 分组列表，成员管理                     | 不变                                                 |
-| 授权管理 | 服务授权、用户授权、分组授权、SSH 授权 | 新增 K8S 授权 + K8SService 授权                      |
-| 隧道管理 | Headscale User/Node/ACL/SSH            | 不变                                                 |
-| Endpoint | 无                                     | 新增 Endpoint 管理（SSH/K8SAPI/K8SService）          |
-| 资源发现 | 无                                     | 新增 AgentK8SService/EndpointK8SService 自动发现视图 |
-| 域名管理 | 无                                     | 新增域名注册表查看                                   |
-| 审计日志 | 连接审计                               | 增强为操作级审计（直连 + 跳跃）                      |
-| 系统配置 | 系统参数                               | 不变                                                 |
+| 模块               | 当前状态                               | ZTNA 新增/变更                                       |
+| ------------------ | -------------------------------------- | ---------------------------------------------------- |
+| 用户管理           | 用户列表（agent/client），Deploy Token | 不变                                                 |
+| 设备管理           | 设备列表（代理/桌面），IP/状态/心跳    | 不变                                                 |
+| 终端管理(Endpoint) | 无                                     | 新增 Endpoint 管理（SSH/K8SAPI/K8SService）          |
+| 资源发现           | 无                                     | 新增 AgentK8SService/EndpointK8SService 自动发现视图 |
+| 域名管理           | 无                                     | 新增域名注册表查看                                   |
+| 授权管理           | 服务授权、用户授权、分组授权、SSH 授权 | 新增 K8S 授权 + K8SService 授权                      |
+| 隧道管理           | Headscale User/Node/ACL/SSH            | 不变                                                 |
+| 审计日志           | 连接审计                               | 增强为操作级审计（直连 + 跳跃）                      |
+| 系统配置           | 系统参数                               | 不变                                                 |
 
 ## ZTNA 导航结构
 
@@ -99,19 +98,19 @@ Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理�
 ├── 用户管理          /users                    （不变）
 ├── 设备管理          /nodes                    （不变）
 ├── 分组管理          /groups                   （不变）
-├── 授权管理（增强）
-│     ├── 服务授权    /acl/services             （不变，AgentService）
-│     ├── 用户授权    /acl/users                （不变）
-│     ├── 分组授权    /acl/groups               （不变）
-│     ├── SSH 授权    /acl/ssh                  （增强，包含 Endpoint SSH）
-│     ├── K8S 授权    /acl/k8s                  （新增，包含 Agent + Endpoint）
-│     └── K8SService 授权 /acl/k8s-service      （新增，包含 Agent + Endpoint）
-├── Endpoint 管理（新增）
+├── 终端管理（新增）
 │     ├── EndpointSSH        /endpoints/ssh     （新增）
 │     ├── EndpointK8SAPI     /endpoints/k8s     （新增）
 │     └── EndpointK8SService /endpoints/svc     （新增）
 ├── 资源发现（新增）    /resources               （新增）
 ├── 域名管理（新增）    /domains                 （新增）
+├── 授权管理（增强）
+│     ├── 服务授权    /acl/services             （不变，AgentService）
+│     ├── 用户授权    /acl/users                （不变）
+│     ├── 分组授权    /acl/groups               （不变）
+│     ├── SSH 授权    /acl/ssh                  （增强，包含 Agent SSH + Endpoint SSH）
+│     ├── K8S 授权    /acl/k8s                  （新增，包含 Agent K8SAPI + Endpoint K8SAPI）
+│     └── K8SService 授权 /acl/k8s-service      （新增，包含 Agent K8SService + Endpoint K8SService）
 ├── 隧道管理                                    （不变）
 │     ├── User 管理   /tunnel/users
 │     ├── Node 管理   /tunnel/nodes
