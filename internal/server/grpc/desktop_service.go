@@ -1430,10 +1430,12 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 		return &pb.ResolveDomainResponse{Success: false, Message: "域名未注册或已离线"}, nil
 	}
 
-	// 查询 Agent 节点的 Tailscale IP
+	// 查询注册该域名的用户的节点 IP（Agent 或 Client 模式的 Agent）
 	var agentNode model.Node
 	agentIP := ""
-	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", record.UserID, model.NodeTypeAgent).
+	if err := db.DB.WithContext(ctx).
+		Where("user_id = ? AND ip != ''", record.UserID).
+		Order("last_heartbeat DESC").
 		First(&agentNode).Error; err == nil {
 		agentIP = agentNode.IP
 	}
