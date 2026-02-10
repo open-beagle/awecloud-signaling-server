@@ -654,11 +654,18 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		device = a.networkInfo.Hostname
 	}
 
+	// 获取 Agent 的 Tailscale IP（用于域名注册的目标 IP）
+	agentIP := ""
+	if a.tsManager != nil {
+		agentIP = a.tsManager.GetIP()
+	}
+
 	// 1. Agent SSH 域名：{device}.{agent_name}{domain_suffix}（如 beagle-242.beijing.beagle）
 	if a.config.Tunnel.EnableSSH && a.tsManager != nil && a.tsManager.IsConnected() && device != "" {
 		registrations = append(registrations, &pb.DomainRegistration{
 			Domain:     device + "." + a.config.Agent.AgentName + a.domainSuffix,
 			Type:       "ssh",
+			TargetIp:   agentIP,
 			TargetPort: 22,
 		})
 	}

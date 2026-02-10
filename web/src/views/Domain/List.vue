@@ -61,7 +61,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="updated_at" :label="$t('domain.updatedAt')" width="180" />
-        <el-table-column :label="$t('common.action')" width="100" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="100" fixed="right">
           <template #default="{ row }">
             <el-popconfirm :title="$t('common.deleteConfirm')" @confirm="handleDelete(row)">
               <template #reference>

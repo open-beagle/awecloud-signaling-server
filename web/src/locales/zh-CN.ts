@@ -150,7 +150,14 @@ export default {
     osVersion: '系统版本',
     arch: 'CPU 架构',
     cpuCores: 'CPU 核心数',
-    memory: '内存'
+    memory: '内存',
+    updatedAt: '更新时间',
+    givenName: '显示名称',
+    hsUser: '所属用户',
+    ipAddresses: 'IP 地址',
+    forcedTags: '强制标签',
+    lastSeen: '最后在线',
+    expiry: '过期时间'
   },
   agent: {
     deploy: '部署',

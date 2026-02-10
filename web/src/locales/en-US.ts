@@ -150,7 +150,14 @@ export default {
     osVersion: 'OS Version',
     arch: 'CPU Architecture',
     cpuCores: 'CPU Cores',
-    memory: 'Memory'
+    memory: 'Memory',
+    updatedAt: 'Updated At',
+    givenName: 'Given Name',
+    hsUser: 'User',
+    ipAddresses: 'IP Addresses',
+    forcedTags: 'Forced Tags',
+    lastSeen: 'Last Seen',
+    expiry: 'Expiry'
   },
   agent: {
     deploy: 'Deploy',

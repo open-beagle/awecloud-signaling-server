@@ -1,13 +1,5 @@
 <template>
   <div class="node-detail" v-loading="loading">
-    <!-- 返回按钮 -->
-    <div class="back-header">
-      <el-button link @click="$router.back()">
-        <el-icon><ArrowLeft /></el-icon>
-        {{ $t('common.back') }}
-      </el-button>
-    </div>
-
     <template v-if="node">
       <!-- 基本信息 -->
       <el-card shadow="never" class="info-card">
@@ -19,7 +11,7 @@
             </el-tag>
           </div>
         </template>
-        <el-descriptions :column="2" border>
+        <el-descriptions :column="2" border label-class-name="desc-label">
           <el-descriptions-item label="ID">{{ node.id }}</el-descriptions-item>
           <el-descriptions-item :label="$t('node.name')">{{ node.name }}</el-descriptions-item>
           <el-descriptions-item :label="$t('node.type')">
@@ -42,7 +34,7 @@
           <el-descriptions-item :label="$t('common.createdAt')">
             {{ formatTime(node.created_at) }}
           </el-descriptions-item>
-          <el-descriptions-item label="Updated At">
+          <el-descriptions-item :label="$t('node.updatedAt')">
             {{ formatTime(node.updated_at) }}
           </el-descriptions-item>
         </el-descriptions>
@@ -59,31 +51,32 @@
           </div>
         </template>
         <template v-if="node.headscale">
-          <el-descriptions :column="2" border>
+          <el-descriptions :column="2" border label-class-name="desc-label">
             <el-descriptions-item label="Node ID">{{ node.headscale.id }}</el-descriptions-item>
             <el-descriptions-item :label="$t('node.name')">{{ node.headscale.name }}</el-descriptions-item>
-            <el-descriptions-item label="Given Name">{{ node.headscale.given_name }}</el-descriptions-item>
-            <el-descriptions-item label="User">{{ node.headscale.user_name || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="IP Addresses" :span="2">
+            <el-descriptions-item :label="$t('node.givenName')">{{ node.headscale.given_name }}</el-descriptions-item>
+            <el-descriptions-item :label="$t('node.hsUser')">{{ node.headscale.user_name || '-' }}</el-descriptions-item>
+            <el-descriptions-item :label="$t('node.ipAddresses')">
               <el-tag v-for="ip in node.headscale.ip_addresses" :key="ip" size="small" class="ip-tag">
                 {{ ip }}
               </el-tag>
             </el-descriptions-item>
-            <el-descriptions-item label="Forced Tags" :span="2">
+            <el-descriptions-item :label="$t('node.forcedTags')">
               <el-tag v-for="tag in node.headscale.forced_tags" :key="tag" size="small" type="warning" class="tag-item">
                 {{ tag }}
               </el-tag>
               <span v-if="!node.headscale.forced_tags?.length">-</span>
             </el-descriptions-item>
-            <el-descriptions-item label="Last Seen">
+            <el-descriptions-item :label="$t('node.lastSeen')">
               {{ node.headscale.last_seen ? formatTime(node.headscale.last_seen) : '-' }}
             </el-descriptions-item>
-            <el-descriptions-item label="Expiry">
+            <el-descriptions-item :label="$t('node.expiry')">
               {{ node.headscale.expiry ? formatTime(node.headscale.expiry) : '-' }}
             </el-descriptions-item>
-            <el-descriptions-item label="Created At">
+            <el-descriptions-item :label="$t('common.createdAt')">
               {{ node.headscale.created_at ? formatTime(node.headscale.created_at) : '-' }}
             </el-descriptions-item>
+            <el-descriptions-item label="">&nbsp;</el-descriptions-item>
           </el-descriptions>
         </template>
         <template v-else>
@@ -98,7 +91,7 @@
         <template #header>
           <span>{{ $t('node.systemInfo') }}</span>
         </template>
-        <el-descriptions :column="2" border>
+        <el-descriptions :column="2" border label-class-name="desc-label">
           <el-descriptions-item :label="$t('node.os')">{{ systemInfo.os || '-' }}</el-descriptions-item>
           <el-descriptions-item :label="$t('node.osVersion')">{{ systemInfo.os_version || '-' }}</el-descriptions-item>
           <el-descriptions-item :label="$t('node.arch')">{{ systemInfo.arch || '-' }}</el-descriptions-item>
@@ -108,6 +101,7 @@
           <el-descriptions-item :label="$t('node.memory')">
             {{ systemInfo.memory_gb ? `${systemInfo.memory_gb} GB` : '-' }}
           </el-descriptions-item>
+          <el-descriptions-item label="">&nbsp;</el-descriptions-item>
         </el-descriptions>
       </el-card>
     </template>
@@ -117,7 +111,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { ArrowLeft } from '@element-plus/icons-vue'
 import { getNode, type NodeDetail, type NodeSystemInfo } from '@/api/node'
 import { formatTime } from '@/utils/time'
 
@@ -163,10 +156,6 @@ onMounted(() => {
   width: 100%;
 }
 
-.back-header {
-  margin-bottom: 16px;
-}
-
 .info-card {
   margin-bottom: 20px;
 }
@@ -194,5 +183,13 @@ onMounted(() => {
 .tag-item {
   margin-right: 8px;
   margin-bottom: 4px;
+}
+</style>
+
+<style>
+.node-detail .el-descriptions__label {
+  width: 100px !important;
+  min-width: 100px !important;
+  max-width: 100px !important;
 }
 </style>
