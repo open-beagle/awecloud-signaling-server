@@ -1430,19 +1430,21 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 		return &pb.ResolveDomainResponse{Success: false, Message: "域名未注册或已离线"}, nil
 	}
 
-	// 查询节点 IP：优先用域名记录关联的 NodeID，回退到按 UserID 查
-	var agentNode model.Node
-	agentIP := ""
-	if record.NodeID > 0 {
-		// 精确匹配：域名注册时关联了具体的 Node
+	// 确定 Agent IP：优先使用域名记录的 target_ip，再查 Node 表
+	agentIP := record.TargetIP
+
+	if agentIP == "" && record.NodeID > 0 {
+		// 域名记录无 target_ip，通过关联的 NodeID 查询
+		var agentNode model.Node
 		if err := db.DB.WithContext(ctx).First(&agentNode, record.NodeID).Error; err == nil {
 			agentIP = agentNode.IP
 		}
 	}
 	if agentIP == "" {
-		// 回退：按 UserID 查有 IP 的节点（兼容旧数据）
+		// 回退：按 UserID 查有 IP 的 Agent 节点（兼容旧数据）
+		var agentNode model.Node
 		if err := db.DB.WithContext(ctx).
-			Where("user_id = ? AND ip != ''", record.UserID).
+			Where("user_id = ? AND type = ? AND ip != ''", record.UserID, model.NodeTypeAgent).
 			Order("last_heartbeat DESC").
 			First(&agentNode).Error; err == nil {
 			agentIP = agentNode.IP
@@ -1458,7 +1460,7 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 		userName = record.User.Name
 	}
 
-	logger.Infof("Desktop %d 解析域名: %s → %s:%d (user=%s)", req.DesktopId, req.Domain, agentIP, record.TargetPort, userName)
+	logger.Infof("Desktop %d 解析域名: %s → %s:%d (user=%s, target_ip=%s)", req.DesktopId, req.Domain, agentIP, record.TargetPort, userName, record.TargetIP)
 
 	return &pb.ResolveDomainResponse{
 		Success:    true,
