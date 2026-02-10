@@ -8,11 +8,33 @@ Desktop.Pod 使用 signal_agent 二进制的 RunClient 模式运行，权限和 
 
 共通设计见 design_ztna_desktop.md。本文档仅描述 Desktop.Pod 特有的部分。
 
-相关文档：
+## 用户与角色关系
 
-- design_cloudide.md — CloudIDE 集成设计（当前实现）
-- design_cloudide_host.md — 主机集成（Desktop 发现 CloudIDE、双向 SSH）
-- design_cloudide_env.md — 环境变量设计
+Desktop.Pod（CloudIDE）属于某个 client 用户的一个部署节点，和 Desktop.Host 地位相同。管理员为 client 用户创建 deploy token，CloudIDE 用该 token 注册后以 Client 模式运行，自动继承该用户的所有权限（ACL、分组等）。
+
+```
+用户: zhangsan (role=client)
+  ├── Desktop.Host: macbook（Logto 登录）
+  ├── Desktop.Pod:  ide-zhangsan（Deploy Token 注册）  ← CloudIDE
+  └── 其他设备...
+
+用户: beijing (role=agent)
+  └── Agent: beagle-xxx（Deploy Token 注册）
+```
+
+注意区分：
+
+- client 用户（如 zhangsan）→ 创建 deploy token → CloudIDE 以 Client 模式运行（RunClient）
+- agent 用户（如 beijing）→ 创建 deploy token → Agent 以 Agent 模式运行（Run）
+
+两者使用同一套 deploy_tokens 机制和统一注册接口 POST /api/v1/register。Server 根据 User.Role 返回不同的 user_role，signal_agent 二进制据此决定运行模式。
+
+CloudIDE 的两个核心能力：
+
+1. 被 SSH 访问 — 用户通过 Desktop.Host SSH 进入 CloudIDE 使用 VSCode 等 IDE
+2. SSH 出站 — 在 CloudIDE 的终端中，通过 dial 子命令 SSH 访问其他 Agent 或 K8S 集群
+
+这两个能力都由 tsnet 连接提供，不需要 gRPC 心跳或 Agent 注册。
 
 ## 当前实现状态
 
@@ -25,8 +47,8 @@ Desktop.Pod 使用 signal_agent 二进制的 RunClient 模式运行，权限和 
 | SIGNAL\_ 环境变量         | 已完成 | 统一前缀，仅需 SIGNAL_TOKEN + SIGNAL_SERVER         |
 | 设备指纹（hostname 哈希） | 已完成 | Pod 重建不影响 Token 绑定                           |
 | ACL 同用户互访            | 已完成 | Desktop.Host ↔ Desktop.Pod 天然互通                 |
-| agent dial 子命令         | 待实现 | SSH 出站的核心                                      |
-| ~/.ssh/config 自动维护    | 待实现 | 静默劫持 SSH                                        |
+| agent dial 子命令         | 已完成 | SSH 出站的核心，通过 Unix Socket 桥接 tsnet         |
+| ~/.ssh/config 自动维护    | 已完成 | 静默劫持 \*.beagle 的 SSH 连接                      |
 | DNS 劫持                  | 待实现 | /etc/resolv.conf 指向本地 DNS                       |
 | VIP 分配                  | 待实现 | 127.1.x.x 本地地址                                  |
 
@@ -43,7 +65,7 @@ Desktop.Pod 启动后：
        nameserver 127.0.0.1
        # 保留原有的上游 DNS 作为转发目标
   3. 本地 DNS 处理逻辑：
-     ├── .k8s 后缀 → 查询 VIP 映射表，返回 127.1.x.x
+     ├── .beagle 后缀 → 查询 VIP 映射表，返回 127.1.x.x
      └── 其他域名 → 转发到原上游 DNS
 ```
 
@@ -59,14 +81,14 @@ signal_agent dial 子命令：
     → 桥接 stdin/stdout
 
 ~/.ssh/config 自动维护：
-  Host *.k8s
+  Host *.beagle
     ProxyCommand signal_agent dial %h %p
     StrictHostKeyChecking no
 
 效果：
-  ssh deploy@web-server-1.beijing.k8s
+  ssh deploy@web-server-1.beijing.beagle
     → SSH 客户端读取 ~/.ssh/config
-    → 调用 signal_agent dial web-server-1.beijing.k8s 22
+    → 调用 signal_agent dial web-server-1.beijing.beagle 22
     → DNS 劫持 → VIP → tsnet → Agent
 ```
 
@@ -79,7 +101,7 @@ Desktop.Pod 启动时：
   1. 从 Server 获取可访问的 K8S 集群列表
   2. 生成 kubeconfig
        每个集群一个 context
-       server 指向域名（如 api.beijing.k8s:6443）
+       server 指向域名（如 api.beijing.beagle:6443）
   3. 写入 ~/.kube/config
 ```
 

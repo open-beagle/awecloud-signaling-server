@@ -42,11 +42,11 @@ echo "---"
 # 上传 Agent 二进制
 ARCHS="amd64 arm64"
 for arch in $ARCHS; do
-    local_file="${BIN_DIR}/agent-linux-${arch}"
-    remote_file="${S3_BUCKET}/agent-${BUILD_VERSION}-linux-${arch}"
+    local_file="${BIN_DIR}/signal_agent-linux-${arch}"
+    remote_file="${S3_BUCKET}/signal_agent-${BUILD_VERSION}-linux-${arch}"
     
     if [ -f "$local_file" ]; then
-        info "上传 agent-${BUILD_VERSION}-linux-${arch}..."
+        info "上传 signal_agent-${BUILD_VERSION}-linux-${arch}..."
         mc cp "$local_file" "$remote_file"
         echo "  ✓ $remote_file"
     else
@@ -57,9 +57,9 @@ done
 # 上传安装脚本
 INSTALL_SCRIPT="./scripts/install_agent.sh"
 if [ -f "$INSTALL_SCRIPT" ]; then
-    info "上传 install.sh..."
-    mc cp "$INSTALL_SCRIPT" "${S3_BUCKET}/install.sh"
-    echo "  ✓ ${S3_BUCKET}/install.sh"
+    info "上传 install_agent.sh..."
+    mc cp "$INSTALL_SCRIPT" "${S3_BUCKET}/install_agent.sh"
+    echo "  ✓ ${S3_BUCKET}/install_agent.sh"
 else
     warn "安装脚本不存在: $INSTALL_SCRIPT"
 fi
@@ -72,21 +72,21 @@ cat > "$VERSION_FILE" << EOF
     "version": "${BUILD_VERSION}",
     "build_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
     "files": {
-        "linux-amd64": "agent-${BUILD_VERSION}-linux-amd64",
-        "linux-arm64": "agent-${BUILD_VERSION}-linux-arm64"
+        "linux-amd64": "signal_agent-${BUILD_VERSION}-linux-amd64",
+        "linux-arm64": "signal_agent-${BUILD_VERSION}-linux-arm64"
     }
 }
 EOF
-mc cp "$VERSION_FILE" "${S3_BUCKET}/agent-version.json"
+mc cp "$VERSION_FILE" "${S3_BUCKET}/signal_agent-version.json"
 rm -f "$VERSION_FILE"
-echo "  ✓ ${S3_BUCKET}/agent-version.json"
+echo "  ✓ ${S3_BUCKET}/signal_agent-version.json"
 
 # 设置公开访问权限
 info "设置公开访问权限..."
-mc anonymous set download "${S3_BUCKET}/install.sh" > /dev/null 2>&1
-mc anonymous set download "${S3_BUCKET}/agent-version.json" > /dev/null 2>&1
+mc anonymous set download "${S3_BUCKET}/install_agent.sh" > /dev/null 2>&1
+mc anonymous set download "${S3_BUCKET}/signal_agent-version.json" > /dev/null 2>&1
 for arch in $ARCHS; do
-    mc anonymous set download "${S3_BUCKET}/agent-${BUILD_VERSION}-linux-${arch}" > /dev/null 2>&1
+    mc anonymous set download "${S3_BUCKET}/signal_agent-${BUILD_VERSION}-linux-${arch}" > /dev/null 2>&1
 done
 echo "  ✓ 权限设置完成"
 

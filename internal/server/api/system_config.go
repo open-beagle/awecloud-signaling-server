@@ -19,6 +19,7 @@ type SystemConfigResponse struct {
 	StunPort           int    `json:"stun_port"`
 	IPPrefix           string `json:"ip_prefix"`
 	AuthKeyExpiryHours int    `json:"auth_key_expiry_hours"`
+	DomainSuffix       string `json:"domain_suffix"`
 }
 
 // GetSystemConfig 获取系统配置
@@ -27,6 +28,7 @@ func GetSystemConfig(c *gin.Context) {
 	config := SystemConfigResponse{
 		StunPort:           3478,
 		AuthKeyExpiryHours: 24,
+		DomainSuffix:       model.DefaultDomainSuffix,
 	}
 
 	// 从数据库读取配置
@@ -51,6 +53,8 @@ func GetSystemConfig(c *gin.Context) {
 			if v, err := strconv.Atoi(cfg.Value); err == nil {
 				config.AuthKeyExpiryHours = v
 			}
+		case model.ConfigDomainSuffix:
+			config.DomainSuffix = cfg.Value
 		}
 	}
 
@@ -65,6 +69,7 @@ type UpdateSystemConfigRequest struct {
 	StunPort           *int    `json:"stun_port"`
 	IPPrefix           *string `json:"ip_prefix"`
 	AuthKeyExpiryHours *int    `json:"auth_key_expiry_hours"`
+	DomainSuffix       *string `json:"domain_suffix"`
 }
 
 // UpdateSystemConfig 更新系统配置
@@ -96,6 +101,9 @@ func UpdateSystemConfig(c *gin.Context) {
 	}
 	if req.AuthKeyExpiryHours != nil {
 		updates[model.ConfigAuthKeyExpiryHours] = strconv.Itoa(*req.AuthKeyExpiryHours)
+	}
+	if req.DomainSuffix != nil {
+		updates[model.ConfigDomainSuffix] = *req.DomainSuffix
 	}
 
 	// 保存到数据库

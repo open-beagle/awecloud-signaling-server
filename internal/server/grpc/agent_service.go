@@ -83,9 +83,32 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 		}, nil
 	}
 
-	// 验证密钥
-	if err := bcrypt.CompareHashAndPassword([]byte(user.SecretHash), []byte(req.Secret)); err != nil {
-		logger.Warnf("Agent 密钥验证失败: %s", req.Name)
+	// 验证密钥（支持两种方式：user secret 或 deploy token）
+	authenticated := false
+
+	// 方式1：bcrypt 验证 user secret
+	if user.SecretHash != "" {
+		if err := bcrypt.CompareHashAndPassword([]byte(user.SecretHash), []byte(req.Secret)); err == nil {
+			authenticated = true
+		}
+	}
+
+	// 方式2：deploy token 验证（查询该用户的有效 deploy token）
+	if !authenticated {
+		var deployToken model.DeployToken
+		if err := db.DB.WithContext(ctx).Where(
+			"user_id = ? AND token = ? AND status = ?",
+			user.ID, req.Secret, model.DeployTokenStatusBound,
+		).First(&deployToken).Error; err == nil {
+			authenticated = true
+			// 更新最后使用时间
+			deployToken.UpdateLastUsed()
+			db.DB.WithContext(ctx).Save(&deployToken)
+		}
+	}
+
+	if !authenticated {
+		logger.Warnf("Agent 认证失败: %s", req.Name)
 		return &pb.AgentRegisterResponse{
 			Success: false,
 			Message: "认证失败",
@@ -182,8 +205,30 @@ func (s *AgentServiceServer) Authenticate(ctx context.Context, req *pb.AgentAuth
 		}, nil
 	}
 
-	// 验证密钥
-	if err := bcrypt.CompareHashAndPassword([]byte(user.SecretHash), []byte(req.Secret)); err != nil {
+	// 验证密钥（支持两种方式：user secret 或 deploy token）
+	authenticated := false
+
+	// 方式1：bcrypt 验证 user secret
+	if user.SecretHash != "" {
+		if err := bcrypt.CompareHashAndPassword([]byte(user.SecretHash), []byte(req.Secret)); err == nil {
+			authenticated = true
+		}
+	}
+
+	// 方式2：deploy token 验证
+	if !authenticated {
+		var deployToken model.DeployToken
+		if err := db.DB.WithContext(ctx).Where(
+			"user_id = ? AND token = ? AND status = ?",
+			user.ID, req.Secret, model.DeployTokenStatusBound,
+		).First(&deployToken).Error; err == nil {
+			authenticated = true
+			deployToken.UpdateLastUsed()
+			db.DB.WithContext(ctx).Save(&deployToken)
+		}
+	}
+
+	if !authenticated {
 		logger.Warnf("Agent 密钥验证失败: %d", req.AgentId)
 		return &pb.AgentAuthenticateResponse{
 			Success: false,
@@ -288,8 +333,8 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 		return fmt.Errorf("Agent 不存在: %d", agentID)
 	}
 
-	if user.Role != model.UserRoleAgent {
-		return fmt.Errorf("用户角色不是 Agent: %d", agentID)
+	if user.Role != model.UserRoleAgent && user.Role != model.UserRoleClient {
+		return fmt.Errorf("用户角色不支持心跳: %d (role=%s)", agentID, user.Role)
 	}
 
 	// 注册连接
@@ -315,13 +360,20 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 		delete(s.connections, agentID)
 		s.connMutex.Unlock()
 
+		// Agent 断连时，清空 Node 的 IP 和心跳时间，确保离线状态正确
+		if err := db.DB.Model(&model.Node{}).
+			Where("user_id = ?", agentID).
+			Updates(map[string]any{"ip": "", "last_heartbeat": nil}).Error; err != nil {
+			logger.Errorf("Agent 断连时清空 Node IP 失败: agent_id=%d, err=%v", agentID, err)
+		}
+
 		// Agent 断连时，将其所有域名设为离线
 		if err := db.DB.Model(&model.DomainRegistry{}).
-			Where("agent_user_id = ? AND status = ?", agentID, model.DomainStatusOnline).
+			Where("user_id = ? AND status = ?", agentID, model.DomainStatusOnline).
 			Update("status", model.DomainStatusOffline).Error; err != nil {
 			logger.Errorf("Agent 断连时设置域名离线失败: agent_id=%d, err=%v", agentID, err)
 		} else {
-			logger.Infof("Agent 断连，域名已设为离线: agent_id=%d", agentID)
+			logger.Infof("Agent 断连，域名已设为离线，Node IP 已清空: agent_id=%d", agentID)
 		}
 	}()
 
@@ -364,6 +416,43 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 
 // handleHeartbeat 处理心跳请求
 func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64, req *pb.AgentHeartbeatRequest) {
+	// 查询用户角色，确定 Node 类型
+	var user model.User
+	nodeType := model.NodeTypeAgent
+	hsPrefix := "agent"
+	if err := db.DB.WithContext(ctx).First(&user, agentID).Error; err == nil {
+		if user.Role == model.UserRoleClient {
+			nodeType = model.NodeTypeDesktop
+			hsPrefix = "client"
+		}
+	}
+
+	// 确定 Node 名称
+	nodeName := req.Hostname
+	if nodeName == "" {
+		nodeName = user.Name
+	}
+
+	// 查询或创建 Node（用 user_id + type + name 唯一定位）
+	var node model.Node
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ? AND name = ?", agentID, nodeType, nodeName).First(&node).Error; err != nil {
+		// Node 不存在，创建
+		now := time.Now()
+		node = model.Node{
+			UserID:        agentID,
+			Name:          nodeName,
+			Type:          nodeType,
+			Hostname:      nodeName,
+			IP:            req.TunnelIp,
+			LastHeartbeat: &now,
+		}
+		if err := db.DB.WithContext(ctx).Create(&node).Error; err != nil {
+			logger.Errorf("创建 Node 失败: user_id=%d, type=%s, name=%s, err=%v", agentID, nodeType, nodeName, err)
+		} else {
+			logger.Infof("创建 Node: user_id=%d, name=%s, type=%s", agentID, nodeName, nodeType)
+		}
+	}
+
 	// 更新 Node 信息
 	now := time.Now()
 	updates := map[string]any{
@@ -371,32 +460,34 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		"ip":             req.TunnelIp,
 	}
 
+	if req.Hostname != "" {
+		updates["hostname"] = req.Hostname
+	}
+
 	// 如果 Headscale 客户端可用，查询并更新 HeadscaleNodeID
-	if s.headscaleClient != nil {
-		// 先查询当前 Node 的 HeadscaleNodeID 和对应的 User 名称
-		var node model.Node
-		var user model.User
-		if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", agentID, model.NodeTypeAgent).First(&node).Error; err == nil {
-			// 只有当 HeadscaleNodeID 为 0 时才查询 Headscale
-			if node.HeadscaleNodeID == 0 {
-				// 查询 User 获取名称
-				if err := db.DB.WithContext(ctx).First(&user, agentID).Error; err == nil {
-					// Headscale User 命名规则: agent-{name}
-					hsUserName := fmt.Sprintf("agent-%s", user.Name)
-					hsNode, err := s.headscaleClient.GetNodeByUser(ctx, hsUserName)
-					if err != nil {
-						logger.Warnf("通过 User 查询 Headscale 节点失败: %v", err)
-					} else if hsNode != nil {
-						updates["headscale_node_id"] = hsNode.Id
-						logger.Infof("Agent %d 关联 Headscale 节点: id=%d, name=%s, user=%s", agentID, hsNode.Id, hsNode.GivenName, hsUserName)
-					}
-				}
+	if s.headscaleClient != nil && node.HeadscaleNodeID == 0 {
+		hsUserName := fmt.Sprintf("%s-%s", hsPrefix, user.Name)
+		// 按用户名 + 节点名精确匹配（一个 Headscale 用户下可能有多个节点）
+		hsNode, err := s.headscaleClient.GetNodeByUserAndName(ctx, hsUserName, nodeName)
+		if err != nil {
+			logger.Warnf("通过 User+Name 查询 Headscale 节点失败: %v", err)
+		} else if hsNode != nil {
+			updates["headscale_node_id"] = hsNode.Id
+			logger.Infof("用户 %d 关联 Headscale 节点: id=%d, name=%s, ip=%v, user=%s", agentID, hsNode.Id, hsNode.GivenName, hsNode.IpAddresses, hsUserName)
+		} else {
+			// 精确匹配失败，回退到第一个节点（兼容单节点场景）
+			hsNodeFallback, err := s.headscaleClient.GetNodeByUser(ctx, hsUserName)
+			if err != nil {
+				logger.Warnf("通过 User 查询 Headscale 节点失败: %v", err)
+			} else if hsNodeFallback != nil {
+				updates["headscale_node_id"] = hsNodeFallback.Id
+				logger.Infof("用户 %d 关联 Headscale 节点(回退): id=%d, name=%s, ip=%v, user=%s", agentID, hsNodeFallback.Id, hsNodeFallback.GivenName, hsNodeFallback.IpAddresses, hsUserName)
 			}
 		}
 	}
 
 	if err := db.DB.WithContext(ctx).Model(&model.Node{}).
-		Where("user_id = ? AND type = ?", agentID, model.NodeTypeAgent).
+		Where("user_id = ? AND type = ? AND name = ?", agentID, nodeType, nodeName).
 		Updates(updates).Error; err != nil {
 		logger.Errorf("更新 Node 心跳失败: %v", err)
 	}
@@ -413,8 +504,18 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 	configVersion := s.configVersion
 	s.versionMutex.RUnlock()
 
+	// 读取域名后缀配置
+	domainSuffix := model.DefaultDomainSuffix
+	var sysConfig model.SystemConfig
+	if err := db.DB.WithContext(ctx).Where("key = ?", model.ConfigDomainSuffix).First(&sysConfig).Error; err == nil {
+		if sysConfig.Value != "" {
+			domainSuffix = sysConfig.Value
+		}
+	}
+
 	resp := &pb.AgentHeartbeatResponse{
 		ConfigVersion: configVersion,
+		DomainSuffix:  domainSuffix,
 	}
 
 	// 查询该 Agent 的服务配置
@@ -589,28 +690,41 @@ func (s *AgentServiceServer) ReportNetworkChange(ctx context.Context, req *pb.Re
 }
 
 // handleDomainRegistrations 处理 Agent 心跳中的域名注册上报
-// 逻辑：遍历上报的域名列表，逐条 upsert 到 domain_registry 表
+// 逻辑：按 (domain, node_id) 或 (domain, endpoint_id) 联合唯一 upsert
+// 同一域名可有多条记录（不同 node_id），支持负载均衡
 func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agentID uint64, registrations []*pb.DomainRegistration) {
 	registered := 0
 	updated := 0
 
 	for _, reg := range registrations {
 		var existing model.DomainRegistry
-		err := db.DB.WithContext(ctx).Where("domain = ?", reg.Domain).First(&existing).Error
+		var err error
+
+		// 按联合唯一条件查询：node_id 和 endpoint_id 互斥
+		if reg.NodeId > 0 {
+			err = db.DB.WithContext(ctx).Where("domain = ? AND node_id = ?", reg.Domain, reg.NodeId).First(&existing).Error
+		} else if reg.EndpointId != "" {
+			err = db.DB.WithContext(ctx).Where("domain = ? AND endpoint_id = ?", reg.Domain, reg.EndpointId).First(&existing).Error
+		} else {
+			// 兼容：无 node_id 也无 endpoint_id，按 domain + user_id 查询
+			err = db.DB.WithContext(ctx).Where("domain = ? AND user_id = ? AND node_id = 0 AND endpoint_id = ''", reg.Domain, agentID).First(&existing).Error
+		}
+
+		record := model.DomainRegistry{
+			Domain:      reg.Domain,
+			Type:        model.DomainType(reg.Type),
+			UserID:      agentID,
+			NodeID:      reg.NodeId,
+			EndpointID:  reg.EndpointId,
+			TargetIP:    reg.TargetIp,
+			TargetPort:  int(reg.TargetPort),
+			Namespace:   reg.Namespace,
+			ServiceName: reg.ServiceName,
+			Status:      model.DomainStatusOnline,
+		}
 
 		if err != nil {
 			// 不存在，创建
-			record := model.DomainRegistry{
-				Domain:      reg.Domain,
-				Type:        model.DomainType(reg.Type),
-				AgentUserID: agentID,
-				EndpointID:  reg.EndpointId,
-				TargetIP:    reg.TargetIp,
-				TargetPort:  int(reg.TargetPort),
-				Namespace:   reg.Namespace,
-				ServiceName: reg.ServiceName,
-				Status:      model.DomainStatusOnline,
-			}
 			if err := db.DB.WithContext(ctx).Create(&record).Error; err != nil {
 				logger.Errorf("域名注册失败: domain=%s, err=%v", reg.Domain, err)
 				continue
@@ -619,14 +733,15 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 		} else {
 			// 存在，更新
 			updates := map[string]any{
-				"type":          model.DomainType(reg.Type),
-				"agent_user_id": agentID,
-				"endpoint_id":   reg.EndpointId,
-				"target_ip":     reg.TargetIp,
-				"target_port":   int(reg.TargetPort),
-				"namespace":     reg.Namespace,
-				"service_name":  reg.ServiceName,
-				"status":        model.DomainStatusOnline,
+				"type":         model.DomainType(reg.Type),
+				"user_id":      agentID,
+				"node_id":      reg.NodeId,
+				"endpoint_id":  reg.EndpointId,
+				"target_ip":    reg.TargetIp,
+				"target_port":  int(reg.TargetPort),
+				"namespace":    reg.Namespace,
+				"service_name": reg.ServiceName,
+				"status":       model.DomainStatusOnline,
 			}
 			if err := db.DB.WithContext(ctx).Model(&existing).Updates(updates).Error; err != nil {
 				logger.Errorf("域名更新失败: domain=%s, err=%v", reg.Domain, err)

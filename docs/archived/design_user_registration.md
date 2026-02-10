@@ -69,7 +69,7 @@ Desktop                    Server                     Logto
 ```
 Web 管理端                  Server
   │── PUT /users/:id/enable ▶│
-  │◀── 成功 ────────────────│
+  │◀── 成功 ──────────────── │
 
 Desktop                    Server                     Logto
   │── 重新登录 ────────────▶│── 重定向 ──────────────▶│

@@ -18,7 +18,7 @@ RUN set -ex && \
     chown -R code:code /home/code
 
 # Copy binary
-COPY --chown=code:code bin/agent-${TARGETOS}-${TARGETARCH} /usr/local/bin/agent
+COPY --chown=code:code bin/signal_agent-${TARGETOS}-${TARGETARCH} /usr/local/bin/signal_agent
 
 # Copy example config as default config
 COPY --chown=code:code config/agent.toml.example /home/code/config/agent.toml
@@ -34,4 +34,4 @@ VOLUME ["/home/code/logs"]
 # Declare volume for state (optional, for persistent state)
 VOLUME ["/home/code/.config/awecloud-signaling"]
 
-CMD ["agent", "-c", "/home/code/config/agent.toml"]
+CMD ["/usr/local/bin/signal_agent", "-c", "/home/code/config/agent.toml"]

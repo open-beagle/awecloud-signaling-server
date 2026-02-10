@@ -263,9 +263,9 @@ func (s *DesktopServiceServer) Heartbeat(stream pb.DesktopService_HeartbeatServe
 		s.connMutex.Lock()
 		delete(s.connections, nodeID)
 		s.connMutex.Unlock()
-		// 清除数据库中的心跳时间，确保离线状态正确
-		db.DB.Model(&model.Node{}).Where("id = ?", nodeID).Update("last_heartbeat", nil)
-		logger.Infof("Desktop %d gRPC 连接断开，已清除心跳时间", nodeID)
+		// 清除数据库中的心跳时间和 IP，确保离线状态正确
+		db.DB.Model(&model.Node{}).Where("id = ?", nodeID).Updates(map[string]any{"last_heartbeat": nil, "ip": ""})
+		logger.Infof("Desktop %d gRPC 连接断开，已清除心跳时间和 IP", nodeID)
 	}()
 
 	s.handleDesktopHeartbeat(ctx, nodeID, firstReq)
@@ -319,12 +319,22 @@ func (s *DesktopServiceServer) handleDesktopHeartbeat(ctx context.Context, nodeI
 			if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err == nil {
 				// Headscale User 命名规则: client-{name}
 				hsUserName := fmt.Sprintf("client-%s", user.Name)
-				hsNode, err := s.headscaleClient.GetNodeByUser(ctx, hsUserName)
+				// 按用户名 + 节点名精确匹配（一个 Headscale 用户下可能有多个节点）
+				hsNode, err := s.headscaleClient.GetNodeByUserAndName(ctx, hsUserName, node.Name)
 				if err != nil {
-					logger.Warnf("通过 User 查询 Headscale 节点失败: %v", err)
+					logger.Warnf("通过 User+Name 查询 Headscale 节点失败: %v", err)
 				} else if hsNode != nil {
 					updates["headscale_node_id"] = hsNode.Id
-					logger.Infof("Desktop %d 关联 Headscale 节点: id=%d, name=%s, user=%s", nodeID, hsNode.Id, hsNode.GivenName, hsUserName)
+					logger.Infof("Desktop %d 关联 Headscale 节点: id=%d, name=%s, ip=%v, user=%s", nodeID, hsNode.Id, hsNode.GivenName, hsNode.IpAddresses, hsUserName)
+				} else {
+					// 精确匹配失败，回退到第一个节点（兼容单节点场景）
+					hsNodeFallback, err := s.headscaleClient.GetNodeByUser(ctx, hsUserName)
+					if err != nil {
+						logger.Warnf("通过 User 查询 Headscale 节点失败: %v", err)
+					} else if hsNodeFallback != nil {
+						updates["headscale_node_id"] = hsNodeFallback.Id
+						logger.Infof("Desktop %d 关联 Headscale 节点(回退): id=%d, name=%s, ip=%v, user=%s", nodeID, hsNodeFallback.Id, hsNodeFallback.GivenName, hsNodeFallback.IpAddresses, hsUserName)
+					}
 				}
 			}
 		}
@@ -1414,7 +1424,7 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 
 	// 查询域名注册表
 	var record model.DomainRegistry
-	if err := db.DB.WithContext(ctx).Preload("AgentUser").
+	if err := db.DB.WithContext(ctx).Preload("User").
 		Where("domain = ? AND status = ?", req.Domain, model.DomainStatusOnline).
 		First(&record).Error; err != nil {
 		return &pb.ResolveDomainResponse{Success: false, Message: "域名未注册或已离线"}, nil
@@ -1423,7 +1433,7 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 	// 查询 Agent 节点的 Tailscale IP
 	var agentNode model.Node
 	agentIP := ""
-	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", record.AgentUserID, model.NodeTypeAgent).
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", record.UserID, model.NodeTypeAgent).
 		First(&agentNode).Error; err == nil {
 		agentIP = agentNode.IP
 	}
@@ -1432,12 +1442,12 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 		return &pb.ResolveDomainResponse{Success: false, Message: "Agent 节点未找到或无 IP"}, nil
 	}
 
-	agentName := ""
-	if record.AgentUser != nil {
-		agentName = record.AgentUser.Name
+	userName := ""
+	if record.User != nil {
+		userName = record.User.Name
 	}
 
-	logger.Infof("Desktop %d 解析域名: %s → %s:%d (agent=%s)", req.DesktopId, req.Domain, agentIP, record.TargetPort, agentName)
+	logger.Infof("Desktop %d 解析域名: %s → %s:%d (user=%s)", req.DesktopId, req.Domain, agentIP, record.TargetPort, userName)
 
 	return &pb.ResolveDomainResponse{
 		Success:    true,
@@ -1445,7 +1455,7 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 		Domain:     record.Domain,
 		AgentIp:    agentIP,
 		TargetPort: int32(record.TargetPort),
-		AgentName:  agentName,
+		AgentName:  userName,
 		DomainType: string(record.Type),
 	}, nil
 }

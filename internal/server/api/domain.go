@@ -20,17 +20,20 @@ func NewDomainAPI() *DomainAPI {
 
 // DomainListItem 域名列表项
 type DomainListItem struct {
-	ID           int64              `json:"id"`
-	Domain       string             `json:"domain"`
-	Type         model.DomainType   `json:"type"`
-	AgentUserID  uint64             `json:"agent_user_id"`
-	AgentName    string             `json:"agent_name"`
-	EndpointID   string             `json:"endpoint_id,omitempty"`
-	TargetPort   int                `json:"target_port,omitempty"`
-	Namespace    string             `json:"namespace,omitempty"`
-	ServiceName  string             `json:"service_name,omitempty"`
-	Status       model.DomainStatus `json:"status"`
-	CreatedAt    string             `json:"created_at"`
+	ID          int64              `json:"id"`
+	Domain      string             `json:"domain"`
+	Type        model.DomainType   `json:"type"`
+	UserID      uint64             `json:"user_id"`
+	UserName    string             `json:"user_name"`
+	NodeID      uint64             `json:"node_id,omitempty"`
+	EndpointID  string             `json:"endpoint_id,omitempty"`
+	TargetIP    string             `json:"target_ip,omitempty"`
+	TargetPort  int                `json:"target_port,omitempty"`
+	Namespace   string             `json:"namespace,omitempty"`
+	ServiceName string             `json:"service_name,omitempty"`
+	Status      model.DomainStatus `json:"status"`
+	CreatedAt   string             `json:"created_at"`
+	UpdatedAt   string             `json:"updated_at"`
 }
 
 // List 获取域名列表
@@ -40,7 +43,7 @@ func (a *DomainAPI) List(c *gin.Context) {
 	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
 	search := c.Query("search")
 	domainType := c.Query("type")
-	agentID := c.Query("agent_id")
+	userID := c.Query("user_id")
 	status := c.Query("status")
 
 	if page < 1 {
@@ -50,7 +53,7 @@ func (a *DomainAPI) List(c *gin.Context) {
 		size = 20
 	}
 
-	query := db.DB.WithContext(ctx).Model(&model.DomainRegistry{}).Preload("AgentUser")
+	query := db.DB.WithContext(ctx).Model(&model.DomainRegistry{}).Preload("User")
 
 	// 筛选条件
 	if search != "" {
@@ -59,9 +62,9 @@ func (a *DomainAPI) List(c *gin.Context) {
 	if domainType != "" {
 		query = query.Where("type = ?", domainType)
 	}
-	if agentID != "" {
-		id, _ := strconv.ParseUint(agentID, 10, 64)
-		query = query.Where("agent_user_id = ?", id)
+	if userID != "" {
+		id, _ := strconv.ParseUint(userID, 10, 64)
+		query = query.Where("user_id = ?", id)
 	}
 	if status != "" {
 		query = query.Where("status = ?", status)
@@ -72,7 +75,7 @@ func (a *DomainAPI) List(c *gin.Context) {
 
 	var domains []model.DomainRegistry
 	offset := (page - 1) * size
-	if err := query.Order("created_at DESC").Offset(offset).Limit(size).Find(&domains).Error; err != nil {
+	if err := query.Order("updated_at DESC").Offset(offset).Limit(size).Find(&domains).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
 		return
 	}
@@ -84,16 +87,19 @@ func (a *DomainAPI) List(c *gin.Context) {
 			ID:          d.ID,
 			Domain:      d.Domain,
 			Type:        d.Type,
-			AgentUserID: d.AgentUserID,
+			UserID:      d.UserID,
+			NodeID:      d.NodeID,
 			EndpointID:  d.EndpointID,
+			TargetIP:    d.TargetIP,
 			TargetPort:  d.TargetPort,
 			Namespace:   d.Namespace,
 			ServiceName: d.ServiceName,
 			Status:      d.Status,
 			CreatedAt:   d.CreatedAt.Format("2006-01-02 15:04:05"),
+			UpdatedAt:   d.UpdatedAt.Format("2006-01-02 15:04:05"),
 		}
-		if d.AgentUser != nil {
-			item.AgentName = d.AgentUser.Name
+		if d.User != nil {
+			item.UserName = d.User.Name
 		}
 		items = append(items, item)
 	}
@@ -101,8 +107,8 @@ func (a *DomainAPI) List(c *gin.Context) {
 	c.JSON(http.StatusOK, NewPagedResponse(items, total, page, size))
 }
 
-
 // Resolve DNS 域名解析（供 Desktop 查询）
+// 同一域名可能有多条记录（负载均衡），返回所有在线记录
 func (a *DomainAPI) Resolve(c *gin.Context) {
 	ctx := c.Request.Context()
 	domain := c.Query("domain")
@@ -111,171 +117,68 @@ func (a *DomainAPI) Resolve(c *gin.Context) {
 		return
 	}
 
-	var record model.DomainRegistry
-	if err := db.DB.WithContext(ctx).Preload("AgentUser").
+	var records []model.DomainRegistry
+	if err := db.DB.WithContext(ctx).Preload("User").
 		Where("domain = ? AND status = ?", domain, model.DomainStatusOnline).
-		First(&record).Error; err != nil {
+		Find(&records).Error; err != nil || len(records) == 0 {
 		c.JSON(http.StatusNotFound, NewErrorResponse("域名未注册或已离线"))
 		return
 	}
 
-	agentName := ""
-	if record.AgentUser != nil {
-		agentName = record.AgentUser.Name
+	// 返回所有在线记录，支持负载均衡
+	results := make([]gin.H, 0, len(records))
+	for _, record := range records {
+		userName := ""
+		if record.User != nil {
+			userName = record.User.Name
+		}
+		results = append(results, gin.H{
+			"domain":       record.Domain,
+			"type":         record.Type,
+			"user_id":      record.UserID,
+			"user_name":    userName,
+			"node_id":      record.NodeID,
+			"target_ip":    record.TargetIP,
+			"target_port":  record.TargetPort,
+			"endpoint_id":  record.EndpointID,
+			"namespace":    record.Namespace,
+			"service_name": record.ServiceName,
+		})
 	}
 
-	c.JSON(http.StatusOK, NewSuccessResponse(gin.H{
-		"domain":        record.Domain,
-		"type":          record.Type,
-		"agent_user_id": record.AgentUserID,
-		"agent_name":    agentName,
-		"target_ip":     record.TargetIP,
-		"target_port":   record.TargetPort,
-		"endpoint_id":   record.EndpointID,
-		"namespace":     record.Namespace,
-		"service_name":  record.ServiceName,
-	}))
+	c.JSON(http.StatusOK, NewSuccessResponse(results))
 }
 
-// DomainRegisterRequest 域名注册请求
-type DomainRegisterRequest struct {
-	Domain      string             `json:"domain" binding:"required"`
-	Type        model.DomainType   `json:"type" binding:"required"`
-	AgentUserID uint64             `json:"agent_user_id" binding:"required"`
-	EndpointID  string             `json:"endpoint_id,omitempty"`
-	TargetIP    string             `json:"target_ip,omitempty"`
-	TargetPort  int                `json:"target_port,omitempty"`
-	Namespace   string             `json:"namespace,omitempty"`
-	ServiceName string             `json:"service_name,omitempty"`
-}
-
-// Register 注册或更新域名（供 Agent 心跳调用，内部 API）
-func (a *DomainAPI) Register(c *gin.Context) {
+// Delete 删除域名记录
+func (a *DomainAPI) Delete(c *gin.Context) {
 	ctx := c.Request.Context()
-
-	var req DomainRegisterRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("参数错误: "+err.Error()))
-		return
-	}
-
-	// Upsert：存在则更新，不存在则创建
-	var existing model.DomainRegistry
-	err := db.DB.WithContext(ctx).Where("domain = ?", req.Domain).First(&existing).Error
-
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		// 不存在，创建
-		record := model.DomainRegistry{
-			Domain:      req.Domain,
-			Type:        req.Type,
-			AgentUserID: req.AgentUserID,
-			EndpointID:  req.EndpointID,
-			TargetIP:    req.TargetIP,
-			TargetPort:  req.TargetPort,
-			Namespace:   req.Namespace,
-			ServiceName: req.ServiceName,
-			Status:      model.DomainStatusOnline,
-		}
-		if err := db.DB.WithContext(ctx).Create(&record).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, NewErrorResponse("注册失败"))
-			return
-		}
-		c.JSON(http.StatusOK, NewSuccessMessageResponse("域名注册成功", gin.H{"id": record.ID}))
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
 		return
 	}
 
-	// 存在，更新
-	updates := map[string]any{
-		"type":          req.Type,
-		"agent_user_id": req.AgentUserID,
-		"endpoint_id":   req.EndpointID,
-		"target_ip":     req.TargetIP,
-		"target_port":   req.TargetPort,
-		"namespace":     req.Namespace,
-		"service_name":  req.ServiceName,
-		"status":        model.DomainStatusOnline,
-	}
-	if err := db.DB.WithContext(ctx).Model(&existing).Updates(updates).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新失败"))
-		return
-	}
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("域名更新成功", gin.H{"id": existing.ID}))
-}
-
-// BatchRegisterRequest 批量域名注册请求
-type BatchRegisterRequest struct {
-	AgentUserID uint64                 `json:"agent_user_id" binding:"required"`
-	Domains     []DomainRegisterRequest `json:"domains" binding:"required"`
-}
-
-// BatchRegister 批量注册域名（供 Agent 心跳批量上报）
-func (a *DomainAPI) BatchRegister(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	var req BatchRegisterRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("参数错误: "+err.Error()))
+	if err := db.DB.WithContext(ctx).Delete(&model.DomainRegistry{}, id).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
 		return
 	}
 
-	registered := 0
-	updated := 0
-
-	for _, d := range req.Domains {
-		d.AgentUserID = req.AgentUserID
-
-		var existing model.DomainRegistry
-		err := db.DB.WithContext(ctx).Where("domain = ?", d.Domain).First(&existing).Error
-
-		if err != nil {
-			// 创建
-			record := model.DomainRegistry{
-				Domain:      d.Domain,
-				Type:        d.Type,
-				AgentUserID: d.AgentUserID,
-				EndpointID:  d.EndpointID,
-				TargetIP:    d.TargetIP,
-				TargetPort:  d.TargetPort,
-				Namespace:   d.Namespace,
-				ServiceName: d.ServiceName,
-				Status:      model.DomainStatusOnline,
-			}
-			db.DB.WithContext(ctx).Create(&record)
-			registered++
-		} else {
-			// 更新
-			db.DB.WithContext(ctx).Model(&existing).Updates(map[string]any{
-				"type":          d.Type,
-				"agent_user_id": d.AgentUserID,
-				"endpoint_id":   d.EndpointID,
-				"target_ip":     d.TargetIP,
-				"target_port":   d.TargetPort,
-				"namespace":     d.Namespace,
-				"service_name":  d.ServiceName,
-				"status":        model.DomainStatusOnline,
-			})
-			updated++
-		}
-	}
-
-	c.JSON(http.StatusOK, NewSuccessResponse(gin.H{
-		"registered": registered,
-		"updated":    updated,
-	}))
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
 }
 
-// SetOffline 将 Agent 的所有域名设为离线
+// SetOffline 将指定用户的所有域名设为离线
 func (a *DomainAPI) SetOffline(c *gin.Context) {
 	ctx := c.Request.Context()
-	agentIDStr := c.Param("agent_id")
-	agentID, err := strconv.ParseUint(agentIDStr, 10, 64)
+	userIDStr := c.Param("user_id")
+	uid, err := strconv.ParseUint(userIDStr, 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 agent_id"))
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 user_id"))
 		return
 	}
 
 	if err := db.DB.WithContext(ctx).Model(&model.DomainRegistry{}).
-		Where("agent_user_id = ?", agentID).
+		Where("user_id = ?", uid).
 		Update("status", model.DomainStatusOffline).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新失败"))
 		return

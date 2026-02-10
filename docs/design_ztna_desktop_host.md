@@ -52,7 +52,7 @@ Desktop 进程
   ├── tsnet 引擎（替换 tailscaled）
   │
   ├── DNS 劫持模块（新增）
-  │     └── 拦截 .k8s 域名解析
+  │     └── 拦截 .beagle 域名解析
   │
   ├── VIP 分配器（新增）
   │     └── 分配 127.1.x.x 本地地址
@@ -81,12 +81,12 @@ Desktop 进程
 macOS 支持按域名后缀指定 DNS 服务器，最简洁：
 
 ```
-创建 /etc/resolver/k8s：
+创建 /etc/resolver/beagle：
   nameserver 127.0.0.1
   port 15353
 
 效果：
-  所有 .k8s 域名查询发送到 127.0.0.1:15353
+  所有 .beagle 域名查询发送到 127.0.0.1:15353
   其他域名不受影响
 ```
 
@@ -94,7 +94,7 @@ macOS 支持按域名后缀指定 DNS 服务器，最简洁：
 
 ```
 方案 1：systemd-resolved（推荐）
-  配置 .k8s 域名路由到本地 DNS
+  配置 .beagle 域名路由到本地 DNS
 
 方案 2：修改 /etc/resolv.conf
   添加本地 DNS 作为首选
@@ -119,13 +119,13 @@ Desktop.Host 特有的 GUI 功能，展示用户可访问的所有资源：
 │                                                     │
 │  ┌─────────────────────────────────────────────┐    │
 │  │ 📁 beijing                                   │    │
-│  │   ├── 🖥 beijing.k8s                         │    │
+│  │   ├── 🖥 beijing.beagle                         │    │
 │  │   │     SSH (22)  ● 在线                     │    │
-│  │   ├── 🗄 pg.yygl.beijing.k8s                 │    │
+│  │   ├── 🗄 pg.yygl.beijing.beagle                 │    │
 │  │   │     PostgreSQL (5432)  ● 在线            │    │
-│  │   ├── 🖥 web-server-1.beijing.k8s            │    │
+│  │   ├── 🖥 web-server-1.beijing.beagle            │    │
 │  │   │     EndpointSSH (22)  ● 在线             │    │
-│  │   └── 🔧 api.beijing-prod.beijing.k8s        │    │
+│  │   └── 🔧 api.beijing-prod.beijing.beagle        │    │
 │  │         EndpointK8SAPI (6443)  ● 在线        │    │
 │  └─────────────────────────────────────────────┘    │
 │                                                     │

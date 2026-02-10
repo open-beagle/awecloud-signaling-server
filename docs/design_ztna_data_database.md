@@ -196,22 +196,30 @@ acl_k8sservice_jump_user_permission / acl_k8sservice_jump_group_permission:
 
 domain_registry:
 
-| 字段          | 类型   | 约束                | 说明                                                                                                       |
-| ------------- | ------ | ------------------- | ---------------------------------------------------------------------------------------------------------- |
-| id            | int64  | PK                  | 主键                                                                                                       |
-| domain        | string | NOT NULL, UNIQUE    | 完整域名（如 pg.yygl.beijing.k8s）                                                                         |
-| type          | string | NOT NULL, INDEX     | 类型：agent_ssh / agent_k8sapi / agent_k8s_service / endpoint_ssh / endpoint_k8sapi / endpoint_k8s_service |
-| agent_user_id | uint64 | NOT NULL, INDEX, FK | 所属 Agent 的 User ID                                                                                      |
-| endpoint_id   | string |                     | 关联的 Endpoint ID（Endpoint 类型时）                                                                      |
-| target_ip     | string |                     | 目标 IP（Agent 的 Tailscale IP 或 ClusterIP）                                                              |
-| target_port   | int    |                     | 目标端口                                                                                                   |
-| namespace     | string |                     | K8S 命名空间（K8S 类型时）                                                                                 |
-| service_name  | string |                     | K8S Service 名称（K8S 类型时）                                                                             |
-| status        | string | DEFAULT 'online'    | online/offline                                                                                             |
-| created_at    | time   |                     |                                                                                                            |
-| updated_at    | time   |                     |                                                                                                            |
+| 字段         | 类型   | 约束             | 说明                                               |
+| ------------ | ------ | ---------------- | -------------------------------------------------- |
+| id           | int64  | PK               | 主键                                               |
+| domain       | string | NOT NULL, INDEX  | 完整域名（如 beagle-242.beijing.beagle）           |
+| type         | string | NOT NULL, INDEX  | 能力类型：ssh / k8sapi / k8ssvc                    |
+| user_id      | uint64 | NOT NULL, INDEX  | 所属 User ID（Agent User 或 Client User）          |
+| node_id      | uint64 |                  | 关联的 Node ID（Agent Node 或 Client Node 注册时） |
+| endpoint_id  | string |                  | 关联的 Endpoint ID（Endpoint 注册时）              |
+| target_ip    | string |                  | 目标 IP（Node 的 Tailscale IP 或 ClusterIP）       |
+| target_port  | int    |                  | 目标端口                                           |
+| namespace    | string |                  | K8S 命名空间（k8ssvc 类型时）                      |
+| service_name | string |                  | K8S Service 名称（k8ssvc 类型时）                  |
+| status       | string | DEFAULT 'online' | online/offline                                     |
+| created_at   | time   |                  |                                                    |
+| updated_at   | time   |                  |                                                    |
 
-索引：domain（唯一）、agent_user_id、type。
+索引：(domain, node_id) 联合唯一、(domain, endpoint_id) 联合唯一、user_id、type。
+
+说明：
+
+- type 统一为三种能力：ssh / k8sapi / k8ssvc，不再区分 agent/endpoint 来源
+- 通过 node_id 或 endpoint_id 区分域名来源（二者互斥，一条记录只填一个）
+- 同一域名可以有多条记录（不同 node_id），表示负载均衡（如 api.beijing.beagle 对应多个 Node）
+- domain 不再是唯一索引，因为负载均衡场景下同一域名对应多个 Node
 
 ### 操作级审计日志（1 张）
 

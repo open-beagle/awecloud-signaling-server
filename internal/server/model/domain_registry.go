@@ -2,17 +2,13 @@ package model
 
 import "time"
 
-// DomainType 域名类型
+// DomainType 域名能力类型
 type DomainType string
 
 const (
-	DomainTypeAgentSSH          DomainType = "agent_ssh"           // Agent 本机 SSH
-	DomainTypeAgentK8SAPI       DomainType = "agent_k8sapi"        // Agent 本机 K8S API
-	DomainTypeAgentK8SService   DomainType = "agent_k8s_service"   // Agent 本机 K8S Service
-	DomainTypeAgentService      DomainType = "agent_service"       // Agent 手动端口映射
-	DomainTypeEndpointSSH       DomainType = "endpoint_ssh"        // Endpoint SSH 跳跃
-	DomainTypeEndpointK8SAPI    DomainType = "endpoint_k8sapi"     // Endpoint K8S API 跳跃
-	DomainTypeEndpointK8SService DomainType = "endpoint_k8s_service" // Endpoint K8S Service 跳跃
+	DomainTypeSSH    DomainType = "ssh"    // SSH 能力
+	DomainTypeK8SAPI DomainType = "k8sapi" // K8S API 能力
+	DomainTypeK8SSVC DomainType = "k8ssvc" // K8S Service 能力
 )
 
 // DomainStatus 域名状态
@@ -24,23 +20,25 @@ const (
 )
 
 // DomainRegistry 域名注册表
-// 记录域名到 Agent/Endpoint 的映射关系
+// 记录域名到 Node/Endpoint 的映射关系
+// 同一域名可有多条记录（不同 node_id），支持负载均衡
 type DomainRegistry struct {
 	ID          int64        `gorm:"primaryKey" json:"id"`
-	Domain      string       `gorm:"size:255;not null;uniqueIndex" json:"domain"`                // 完整域名（如 pg.yygl.beijing.k8s）
-	Type        DomainType   `gorm:"size:30;not null;index" json:"type"`                         // 域名类型
-	AgentUserID uint64       `gorm:"not null;index" json:"agent_user_id"`                        // 所属 Agent 的 User ID
-	EndpointID  string       `gorm:"size:36" json:"endpoint_id,omitempty"`                       // 关联的 Endpoint ID（Endpoint 类型时）
-	TargetIP    string       `gorm:"size:50" json:"target_ip,omitempty"`                         // 目标 IP
+	Domain      string       `gorm:"size:255;not null;index" json:"domain"`                      // 完整域名（如 beagle-242.beijing.beagle）
+	Type        DomainType   `gorm:"size:30;not null;index" json:"type"`                         // 能力类型：ssh / k8sapi / k8ssvc
+	UserID      uint64       `gorm:"not null;index" json:"user_id"`                              // 所属 User ID（Agent User 或 Client User）
+	NodeID      uint64       `gorm:"index" json:"node_id,omitempty"`                             // 关联的 Node ID（Node 注册时）
+	EndpointID  string       `gorm:"size:36" json:"endpoint_id,omitempty"`                       // 关联的 Endpoint ID（Endpoint 注册时）
+	TargetIP    string       `gorm:"size:50" json:"target_ip,omitempty"`                         // 目标 IP（Node 的 Tailscale IP 或 ClusterIP）
 	TargetPort  int          `json:"target_port,omitempty"`                                      // 目标端口
-	Namespace   string       `gorm:"size:100" json:"namespace,omitempty"`                        // K8S 命名空间（K8S 类型时）
-	ServiceName string       `gorm:"size:100" json:"service_name,omitempty"`                     // K8S Service 名称（K8S 类型时）
+	Namespace   string       `gorm:"size:100" json:"namespace,omitempty"`                        // K8S 命名空间（k8ssvc 类型时）
+	ServiceName string       `gorm:"size:100" json:"service_name,omitempty"`                     // K8S Service 名称（k8ssvc 类型时）
 	Status      DomainStatus `gorm:"size:20;not null;default:'online'" json:"status"`            // online/offline
 	CreatedAt   time.Time    `json:"created_at"`
 	UpdatedAt   time.Time    `json:"updated_at"`
 
 	// 关联
-	AgentUser *User `gorm:"foreignKey:AgentUserID" json:"agent_user,omitempty"`
+	User *User `gorm:"foreignKey:UserID" json:"user,omitempty"`
 }
 
 func (DomainRegistry) TableName() string {

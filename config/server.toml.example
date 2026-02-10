@@ -60,9 +60,9 @@ headscale_api_key = ""
 # 外网访问：https://otel.ali.example.com:443
 endpoint = ""
 
-# 服务名称（默认：signaling-server）
+# 服务名称（默认：signal_server）
 # 环境变量：OTEL_SERVICE_NAME
-name = "signaling-server"
+name = "signal_server"
 
 # 服务命名空间（默认：default）
 # 环境变量：OTEL_SERVICE_NAMESPACE

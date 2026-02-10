@@ -337,7 +337,7 @@ func (a *DownloadAPI) ListDesktopVersions(c *gin.Context) {
 // ============================================
 
 // GetAgentInstallScript 获取 Agent 安装脚本（公开接口）
-// GET /api/v1/download/install.sh
+// GET /api/v1/download/install_agent.sh
 // 重定向到 S3 上的安装脚本
 func (a *DownloadAPI) GetAgentInstallScript(c *gin.Context) {
 	// 获取系统配置中的 Agent 下载地址
@@ -355,7 +355,7 @@ func (a *DownloadAPI) GetAgentInstallScript(c *gin.Context) {
 	if !strings.HasSuffix(baseURL, "/") {
 		baseURL += "/"
 	}
-	c.Redirect(http.StatusFound, baseURL+"install.sh")
+	c.Redirect(http.StatusFound, baseURL+"install_agent.sh")
 }
 
 // GetAgentDownload 获取 Agent 二进制下载（公开接口）
@@ -383,8 +383,8 @@ func (a *DownloadAPI) GetAgentDownload(c *gin.Context) {
 	}
 
 	// 构建下载 URL
-	// 格式: baseURL/agent-v0.1.0-linux-amd64
-	filename := fmt.Sprintf("agent-%s-%s-%s", version, osType, arch)
+	// 格式: baseURL/signal_agent-v0.1.0-linux-amd64
+	filename := fmt.Sprintf("signal_agent-%s-%s-%s", version, osType, arch)
 	if !strings.HasSuffix(baseURL, "/") {
 		baseURL += "/"
 	}
@@ -441,7 +441,7 @@ func getAgentVersionInfo(baseURL string) *VersionInfo {
 	if !strings.HasSuffix(versionURL, "/") {
 		versionURL += "/"
 	}
-	versionURL += "agent-version.json"
+	versionURL += "signal_agent-version.json"
 
 	// 发起 HTTP 请求
 	client := &http.Client{

@@ -10,9 +10,6 @@ data:
     bind_port = 7000
     transport_protocol = "websocket"
     token = "change-this-to-a-secure-random-token"
-    # 公网访问地址（可选）
-    # 生产环境通过 Traefik 网关暴露时配置此项
-    # 示例: public_url = "wss://signaling.example.com/ws"
     public_url = ""
 
     [database]
@@ -31,4 +28,3 @@ data:
 
     [log]
     level = "info"
-    file = "./logs/server.log"

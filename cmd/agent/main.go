@@ -466,6 +466,7 @@ func registerWithToken(serverAddr, token, agentName, deviceName string) (*config
 		Data    struct {
 			Message      string                 `json:"message"`
 			UserRole     string                 `json:"user_role"`
+			UserID       uint64                 `json:"user_id"`
 			Config       map[string]interface{} `json:"config"`
 			HeadscaleURL string                 `json:"headscale_url"`
 			AuthKey      string                 `json:"auth_key"`
@@ -485,6 +486,7 @@ func registerWithToken(serverAddr, token, agentName, deviceName string) (*config
 	// 构建注册结果
 	regResult := &config.RegisterResult{
 		UserRole:     result.Data.UserRole,
+		UserID:       result.Data.UserID,
 		HeadscaleURL: result.Data.HeadscaleURL,
 		AuthKey:      result.Data.AuthKey,
 		UserName:     result.Data.UserName,
@@ -492,6 +494,7 @@ func registerWithToken(serverAddr, token, agentName, deviceName string) (*config
 
 	// 构建配置
 	// Agent 模式：从响应的 config 中提取 agent name/device
+	// Client 模式：用 UserName 作为 AgentName（用于域名构建等）
 	cfgAgentName := agentName
 	cfgDevice := deviceName
 	if result.Data.Config != nil {
@@ -503,6 +506,10 @@ func registerWithToken(serverAddr, token, agentName, deviceName string) (*config
 				cfgDevice = device
 			}
 		}
+	}
+	// Client 模式兜底：用 UserName 作为 AgentName
+	if cfgAgentName == "" && result.Data.UserName != "" {
+		cfgAgentName = result.Data.UserName
 	}
 
 	cfg := &config.AgentConfig{

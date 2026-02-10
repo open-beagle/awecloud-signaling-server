@@ -58,6 +58,7 @@ type CloudIDESection struct {
 // 由 cmd/agent/main.go 调用 HTTP /api/v1/register 后填充
 type RegisterResult struct {
 	UserRole     string // "agent" 或 "client"
+	UserID       uint64 // 用户 ID（Server 端 user.ID）
 	HeadscaleURL string // Headscale 控制服务器地址
 	AuthKey      string // Headscale 认证密钥
 	UserName     string // 用户名

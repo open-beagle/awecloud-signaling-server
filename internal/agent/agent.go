@@ -52,6 +52,9 @@ type Agent struct {
 	// 配置版本（用于增量同步）
 	configVersion int64
 
+	// 域名后缀（从 Server 心跳响应获取）
+	domainSuffix string
+
 	// 上下文
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -131,7 +134,7 @@ func (a *Agent) Run() error {
 }
 
 // RunClient 运行 Client 模式（CloudIDE 等场景）
-// 只启动 tsnet 连接网络 + SSH，不启动 gRPC 心跳/ProxyManager/VisitorManager
+// 启动 tsnet 连接网络 + SSH + gRPC 心跳（精简版，不需要 ProxyManager/VisitorManager）
 func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 	// 启动健康检查HTTP服务器
 	if err := a.startHealthServer(); err != nil {
@@ -143,7 +146,7 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 		return fmt.Errorf("注册结果缺少 Headscale 认证信息")
 	}
 
-	logger.Infof("Client 模式启动，用户: %s", regResult.UserName)
+	logger.Infof("Client 模式启动，用户: %s (ID: %d)", regResult.UserName, regResult.UserID)
 
 	// 启动 Tailscale（仅网络连接）
 	a.tsManager = NewTailscaleManager(a.config, nil, 0, "", a.ctx)
@@ -154,6 +157,17 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 
 	a.tailscaleIP = a.tsManager.GetIP()
 	logger.Infof("Tailscale 已连接，IP: %s", a.tailscaleIP)
+
+	// 连接 gRPC Server（用于心跳，让 Server 创建/更新 Node 记录）
+	if err := a.connectToServer(); err != nil {
+		logger.Warnf("连接 gRPC Server 失败: %v（Client 将无法在设备管理中显示）", err)
+	} else {
+		// 使用 HTTP 注册返回的 UserID 作为 agentID
+		a.agentID = regResult.UserID
+		// 启动精简心跳（只上报状态，不处理配置同步）
+		a.wg.Add(1)
+		go a.heartbeatLoop()
+	}
 
 	// 启动 Dial Socket 服务（供 dial 子命令使用）
 	dialSocketPath := a.config.CloudIDE.DialSocket
@@ -185,6 +199,11 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 	// 停止 Tailscale
 	if a.tsManager != nil {
 		a.tsManager.Stop()
+	}
+
+	// 关闭 gRPC 连接
+	if a.grpcConn != nil {
+		a.grpcConn.Close()
 	}
 
 	a.wg.Wait()
@@ -501,6 +520,11 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 
 // handleHeartbeatResponse 处理心跳响应（配置同步）
 func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
+	// 更新域名后缀
+	if resp.DomainSuffix != "" {
+		a.domainSuffix = resp.DomainSuffix
+	}
+
 	// 检查配置版本
 	if resp.ConfigVersion <= a.configVersion {
 		return
@@ -617,13 +641,24 @@ func (a *Agent) GetVisitorLANIP() string {
 // buildDomainRegistrations 构建域名注册列表
 // 根据 Agent 当前配置和状态，生成需要上报给 Server 的域名列表
 func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
+	// 域名后缀尚未从 Server 获取，跳过注册
+	if a.domainSuffix == "" {
+		return nil
+	}
+
 	var registrations []*pb.DomainRegistration
 
-	// 1. Agent SSH 域名：如果启用了 SSH，注册 agent_name 作为 SSH 域名
-	if a.config.Tunnel.EnableSSH && a.tsManager != nil && a.tsManager.IsConnected() {
+	// 获取设备名（优先使用配置的 device，否则使用自动检测的 hostname）
+	device := a.config.Agent.Device
+	if device == "" && a.networkInfo != nil {
+		device = a.networkInfo.Hostname
+	}
+
+	// 1. Agent SSH 域名：{device}.{agent_name}{domain_suffix}（如 beagle-242.beijing.beagle）
+	if a.config.Tunnel.EnableSSH && a.tsManager != nil && a.tsManager.IsConnected() && device != "" {
 		registrations = append(registrations, &pb.DomainRegistration{
-			Domain:     a.config.Agent.AgentName,
-			Type:       "agent_ssh",
+			Domain:     device + "." + a.config.Agent.AgentName + a.domainSuffix,
+			Type:       "ssh",
 			TargetPort: 22,
 		})
 	}
@@ -633,8 +668,8 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		for name, running := range a.proxyManager.GetStatus() {
 			if running {
 				registrations = append(registrations, &pb.DomainRegistration{
-					Domain: name + "." + a.config.Agent.AgentName,
-					Type:   "agent_service",
+					Domain: name + "." + a.config.Agent.AgentName + a.domainSuffix,
+					Type:   "k8ssvc",
 				})
 			}
 		}

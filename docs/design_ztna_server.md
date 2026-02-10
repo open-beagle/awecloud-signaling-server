@@ -15,7 +15,7 @@ Server 在 ZTNA 架构中承担控制面角色：身份管理、权限配置、�
 | 服务管理 | ProxyService（手动配置）  | 改名 AgentService，AgentK8SService 自动发现新增 |
 | 权限管理 | SSH ACL + 服务公开/私有   | 新增 K8SAPI/K8SService ACL + Endpoint 跳跃 ACL  |
 | Endpoint | 无                        | 新增 Endpoint 数据模型和管理 API                |
-| 域名管理 | 无                        | 域名注册表，.k8s 后缀映射                       |
+| 域名管理 | 无                        | 域名注册表，.beagle 后缀映射（可配置）          |
 | 审计日志 | 连接审计                  | 操作级审计（SSH/K8SAPI/K8SService 直连和跳跃）  |
 
 ## 身份传递
@@ -72,7 +72,7 @@ GET /api/v1/client/resources
   "resources": [
     {
       "id": "...",
-      "domain": "pg.yygl.beijing.k8s",
+      "domain": "pg.yygl.beijing.beagle",
       "type": "agent_k8s_service",
       "ports": [5432],
       "agent_id": 1,
@@ -88,14 +88,14 @@ GET /api/v1/client/resources
 
 ```
 Agent 本机：
-  <agent-name>.k8s:22                          → AgentSSH
-  api.<agent-name>.k8s:6443                    → AgentK8SAPI
-  <service>.<namespace>.<agent-name>.k8s       → AgentK8SService
+  <agent-name>.beagle:22                          → AgentSSH
+  api.<agent-name>.beagle:6443                    → AgentK8SAPI
+  <service>.<namespace>.<agent-name>.beagle       → AgentK8SService
 
 Endpoint 跳跃：
-  <endpoint>.<agent-name>.k8s:22               → EndpointSSH
-  api.<endpoint>.<agent-name>.k8s:6443         → EndpointK8SAPI
-  <service>.<namespace>.<endpoint>.<agent-name>.k8s → EndpointK8SService
+  <endpoint>.<agent-name>.beagle:22               → EndpointSSH
+  api.<endpoint>.<agent-name>.beagle:6443         → EndpointK8SAPI
+  <service>.<namespace>.<endpoint>.<agent-name>.beagle → EndpointK8SService
 
 ### 域名注册流程
 
@@ -104,16 +104,16 @@ Endpoint 跳跃：
 Agent 发现资源
 │
 ├── AgentK8SService：监听 K8S Service 变更，自动注册域名
-│ pg.yygl.beijing.k8s → agent_id:1, target:10.96.23.45:5432
+│ pg.yygl.beijing.beagle → agent_id:1, target:10.96.23.45:5432
 │
 ├── AgentSSH：注册 Agent 主机域名
-│ beijing.k8s → agent_id:1, target:100.64.x.x:22
+│ beijing.beagle → agent_id:1, target:100.64.x.x:22
 │
 ├── AgentK8SAPI：注册 K8S API 域名
-│ api.beijing.k8s → agent_id:1, target:localhost:6443
+│ api.beijing.beagle → agent_id:1, target:localhost:6443
 │
 └── Endpoint：Agent 转发 Endpoint 注册信息
-web-server-1.beijing.k8s → agent_id:1, endpoint:web-server-1
+web-server-1.beijing.beagle → agent_id:1, endpoint:web-server-1
 
 ```
 
@@ -124,9 +124,9 @@ Desktop DNS 劫持时查询域名对应的路由信息：
 ```
 
 GET /api/v1/client/dns/resolve
-参数: domain=pg.yygl.beijing.k8s
+参数: domain=pg.yygl.beijing.beagle
 响应: {
-"domain": "pg.yygl.beijing.k8s",
+"domain": "pg.yygl.beijing.beagle",
 "agent_ip": "100.64.0.1",
 "target_port": 5432,
 "agent_id": 1,

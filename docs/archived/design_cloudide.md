@@ -28,6 +28,24 @@ Token 已统一管理，Agent 和 Client 共用同一套 deploy_tokens 机制。
 
 详细数据模型和统一方案见 design_cloudide_upgrade.md。
 
+### 用户与角色关系
+
+CloudIDE 属于某个 client 用户的一个特殊部署节点。管理员为 client 用户（如 shucheng）创建 deploy token，CloudIDE 用该 token 注册后，以 Client 模式运行，自动继承该用户的所有权限（ACL、分组等）。
+
+```
+用户: shucheng (role=client)
+  ├── Desktop.Host: macbook（Logto 登录）
+  ├── Desktop.Pod:  ide-sc（Deploy Token 注册）  ← CloudIDE
+  └── 其他设备...
+```
+
+注意区分：
+
+- client 用户（如 shucheng）→ 创建 deploy token → CloudIDE 以 Client 模式运行
+- agent 用户（如 beijing）→ 创建 deploy token → Agent 以 Agent 模式运行
+
+两者使用同一套 deploy_tokens 机制，Server 根据 User.Role 返回不同的 user_role，signal_agent 二进制据此决定运行模式（RunClient 或 Run）。
+
 ### Token 生命周期
 
 ```

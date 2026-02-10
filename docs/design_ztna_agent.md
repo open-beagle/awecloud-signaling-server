@@ -92,8 +92,8 @@ AclK8sGroupPermission:
 ### 域名
 
 ```
-api.<agent-name>.k8s:6443
-api.beijing.k8s:6443
+api.<agent-name>.beagle:6443
+api.beijing.beagle:6443
 ```
 
 ## AgentK8SService — Agent 本机 K8S SVC 代理
@@ -140,7 +140,7 @@ K8S Service 变更事件
   ├── Add: postgresql.yygl (5432, tailscale=true)
   │     → tsnet 监听 :5432
   │     → 上报 Server（心跳）
-  │     → 域名注册: pg.yygl.beijing.k8s:5432
+  │     → 域名注册: pg.yygl.beijing.beagle:5432
   │
   ├── Update: 标签变更
   │     → 更新监听和上报
@@ -154,14 +154,14 @@ K8S Service 变更事件
 
 ```
 默认规则：
-  <service_name>.<namespace>.<agent-name>.k8s
+  <service_name>.<namespace>.<agent-name>.beagle
 
 使用 alias：
-  <tailscale/alias>.<namespace>.<agent-name>.k8s
+  <tailscale/alias>.<namespace>.<agent-name>.beagle
 
 示例：
-  postgresql.yygl.beijing.k8s:5432     （默认）
-  pg.yygl.beijing.k8s:5432             （alias=pg）
+  postgresql.yygl.beijing.beagle:5432     （默认）
+  pg.yygl.beijing.beagle:5432             （alias=pg）
 ```
 
 ### 端口冲突处理
@@ -177,8 +177,8 @@ K8S Service 变更事件
   AgentK8SService 走 gRPC 代理（SVCProxy RPC），不走独立端口
   通过 RPC 参数传递目标 Service 信息（namespace + service name）
   Desktop 侧用 VIP 隔离端口冲突：
-    pg.yygl.beijing.k8s:5432   → VIP 127.1.0.1:5432 → gRPC SVCProxy(pg, yygl)
-    pg.prod.beijing.k8s:5432   → VIP 127.1.0.2:5432 → gRPC SVCProxy(pg, prod)
+    pg.yygl.beijing.beagle:5432   → VIP 127.1.0.1:5432 → gRPC SVCProxy(pg, yygl)
+    pg.prod.beijing.beagle:5432   → VIP 127.1.0.2:5432 → gRPC SVCProxy(pg, prod)
 ```
 
 ### 部署要求（K8S Pod 场景）
@@ -256,7 +256,7 @@ Agent 进程
 ### Desktop 发起跳跃的完整流程
 
 ```
-Desktop 用户执行: ssh deploy@web-server-1.beijing.k8s
+Desktop 用户执行: ssh deploy@web-server-1.beijing.beagle
 
   1. DNS 劫持 → VIP → tsnet 隧道 → Agent
 

@@ -139,7 +139,7 @@ Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理�
 详情页面（点击"管理授权"进入）：
 
 ```
-Agent: beijing（api.beijing.k8s:6443）
+Agent: beijing（api.beijing.beagle:6443）
 
 用户级授权：
   ┌──────────┬──────────┬──────────┐
@@ -242,15 +242,15 @@ EndpointK8SService 列表（/endpoints/svc）：
 
 展示所有 AgentK8SService 和 EndpointK8SService 自动发现的 K8S Service。
 
-| 列       | 说明                                 |
-| -------- | ------------------------------------ |
-| 域名     | 完整域名（如 pg.yygl.beijing.k8s）   |
-| 来源     | AgentK8SService / EndpointK8SService |
-| Service  | K8S Service 名称                     |
-| 命名空间 | K8S 命名空间                         |
-| 端口     | 服务端口列表                         |
-| Agent    | 所属 Agent 名称                      |
-| 状态     | 在线/离线                            |
+| 列       | 说明                                  |
+| -------- | ------------------------------------- |
+| 域名     | 完整域名（如 pg.yygl.beijing.beagle） |
+| 来源     | AgentK8SService / EndpointK8SService  |
+| Service  | K8S Service 名称                      |
+| 命名空间 | K8S 命名空间                          |
+| 端口     | 服务端口列表                          |
+| Agent    | 所属 Agent 名称                       |
+| 状态     | 在线/离线                             |
 
 过滤条件：按 Agent、来源、命名空间、状态筛选，支持关键词搜索。
 

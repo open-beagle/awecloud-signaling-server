@@ -286,8 +286,9 @@ func (s *Server) setupRouter() *gin.Engine {
 	}
 
 	// 静态文件
-	router.Static("/assets", "./web/dist/assets")
-	router.StaticFile("/favicon.ico", "./web/dist/favicon.ico")
+	webRoot := s.config.Web.WebRoot
+	router.Static("/assets", webRoot+"/assets")
+	router.StaticFile("/favicon.ico", webRoot+"/favicon.ico")
 	router.Static("/downloads", "./bin")
 
 	// API 路由组
@@ -303,7 +304,7 @@ func (s *Server) setupRouter() *gin.Engine {
 			v1Group.GET("/public/download/desktop", downloadAPI.GetDesktopDownload)
 			v1Group.GET("/public/download/desktop/direct", downloadAPI.GetDesktopDownloadDirect)
 			v1Group.GET("/public/download/desktop/versions", downloadAPI.ListDesktopVersions)
-			v1Group.GET("/download/install.sh", downloadAPI.GetAgentInstallScript)
+			v1Group.GET("/download/install_agent.sh", downloadAPI.GetAgentInstallScript)
 			v1Group.GET("/download/agent", downloadAPI.GetAgentDownload)
 			v1Group.GET("/download/agent/version", downloadAPI.GetAgentVersion)
 
@@ -417,9 +418,8 @@ func (s *Server) setupRouter() *gin.Engine {
 					// 域名管理
 					domainAPI := api.NewDomainAPI()
 					adminAuthGroup.GET("/domains", domainAPI.List)
-					adminAuthGroup.POST("/domains/register", domainAPI.Register)
-					adminAuthGroup.POST("/domains/batch-register", domainAPI.BatchRegister)
-					adminAuthGroup.PUT("/domains/offline/:agent_id", domainAPI.SetOffline)
+					adminAuthGroup.DELETE("/domains/:id", domainAPI.Delete)
+					adminAuthGroup.PUT("/domains/offline/:user_id", domainAPI.SetOffline)
 
 					// 审计日志
 					auditAPI := api.NewAuditLogAPI()
@@ -473,12 +473,13 @@ func (s *Server) setupRouter() *gin.Engine {
 	}
 
 	// SPA 路由支持
+	indexFile := webRoot + "/index.html"
 	router.NoRoute(func(c *gin.Context) {
 		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api" {
 			c.JSON(404, gin.H{"error": "Not Found"})
 			return
 		}
-		c.File("./web/dist/index.html")
+		c.File(indexFile)
 	})
 
 	return router

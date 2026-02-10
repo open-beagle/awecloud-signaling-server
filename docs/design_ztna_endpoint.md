@@ -92,8 +92,8 @@ AclSSHJumpGroupPermission:
 ### 域名
 
 ```
-<endpoint-name>.<agent-name>.k8s:22
-web-server-1.beijing.k8s:22
+<endpoint-name>.<agent-name>.beagle:22
+web-server-1.beijing.beagle:22
 ```
 
 ## EndpointK8SAPI
@@ -150,8 +150,8 @@ AclK8SAPIJumpGroupPermission:
 ### 域名
 
 ```
-api.<endpoint-name>.<agent-name>.k8s:6443
-api.beijing-prod.beijing.k8s:6443
+api.<endpoint-name>.<agent-name>.beagle:6443
+api.beijing-prod.beijing.beagle:6443
 ```
 
 ## EndpointK8SService
@@ -161,7 +161,7 @@ EndpointK8SService 装在内网 K8S 集群节点上，提供 K8S Service 代理�
 ### 工作流程
 
 ```
-Desktop 访问 pg.yygl.remote.k8s:5432：
+Desktop 访问 pg.yygl.remote.beagle:5432：
   1. Desktop → tsnet → Agent gRPC Server → SVCProxy RPC
   2. Agent 从 tsnet 提取身份 → zhangsan
   3. Agent 查找目标 EndpointK8SService → remote-cluster
@@ -214,8 +214,8 @@ AclK8SServiceJumpGroupPermission:
 ### 域名
 
 ```
-<service>.<namespace>.<endpoint-name>.<agent-name>.k8s
-pg.yygl.remote-cluster.beijing.k8s:5432
+<service>.<namespace>.<endpoint-name>.<agent-name>.beagle
+pg.yygl.remote-cluster.beijing.beagle:5432
 ```
 
 ## Endpoint 部署模型

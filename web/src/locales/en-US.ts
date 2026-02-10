@@ -322,17 +322,15 @@ export default {
     title: 'Domain Management',
     domain: 'Domain',
     type: 'Type',
-    agent: 'Agent',
+    user: 'User',
+    targetIP: 'Target IP',
     targetPort: 'Target Port',
     namespace: 'Namespace',
     serviceName: 'Service Name',
+    updatedAt: 'Updated At',
     searchPlaceholder: 'Search domain',
-    typeAgentSSH: 'Agent SSH',
-    typeAgentK8SAPI: 'Agent K8S API',
-    typeAgentK8SService: 'Agent K8S Service',
-    typeAgentService: 'Agent Port Mapping',
-    typeEndpointSSH: 'Endpoint SSH',
-    typeEndpointK8SAPI: 'Endpoint K8S API',
-    typeEndpointK8SService: 'Endpoint K8S Service'
+    typeSSH: 'SSH',
+    typeK8SAPI: 'K8S API',
+    typeK8SSVC: 'K8S Service'
   }
 }

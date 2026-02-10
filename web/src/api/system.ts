@@ -8,6 +8,7 @@ export interface SystemConfig {
   stun_port?: number
   ip_prefix?: string
   auth_key_expiry_hours?: number
+  domain_suffix?: string
   created_at: string
   updated_at: string
 }
@@ -28,6 +29,7 @@ export function updateSystemConfig(data: {
   stun_port?: number
   ip_prefix?: string
   auth_key_expiry_hours?: number
+  domain_suffix?: string
 }) {
   return request<{ success: boolean; message: string; data: SystemConfig }>({
     url: '/api/v1/admin/system/config',

@@ -12,11 +12,11 @@ import (
 )
 
 // buildSSHConfigBlock 构建 SSH config 标记块
-// 生成 Host *.k8s 的 ProxyCommand 配置，使用 signal_agent dial 子命令
+// 生成 Host *.beagle 的 ProxyCommand 配置，使用 signal_agent dial 子命令
 func buildSSHConfigBlock(execPath, dialSocketPath string) string {
 	var sb strings.Builder
 	sb.WriteString(sshConfigMarkerBegin + "\n")
-	sb.WriteString("Host *.k8s\n")
+	sb.WriteString("Host *.beagle\n")
 	sb.WriteString(fmt.Sprintf("  ProxyCommand %s dial %%h %%p\n", execPath))
 	sb.WriteString("  StrictHostKeyChecking no\n")
 	sb.WriteString("  UserKnownHostsFile /dev/null\n")
@@ -57,8 +57,9 @@ const (
 	sshConfigMarkerEnd = "# <<< AWECloud Signaling <<<"
 )
 
-// MaintainSSHConfig 维护 ~/.ssh/config，添加 *.k8s 的 ProxyCommand 配置
+// MaintainSSHConfig 维护 ~/.ssh/config，添加 *.beagle 的 ProxyCommand 配置
 // 使用标记块包裹，避免影响用户已有配置
+// 注意：Agent 可能以 sudo 运行，需要获取真实用户的 home 目录
 func MaintainSSHConfig(dialSocketPath string) error {
 	// 获取当前二进制路径
 	execPath, err := os.Executable()
@@ -74,11 +75,8 @@ func MaintainSSHConfig(dialSocketPath string) error {
 	// 构建 SSH config 块
 	block := buildSSHConfigBlock(execPath, dialSocketPath)
 
-	// 获取 ~/.ssh/config 路径
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("获取用户主目录失败: %w", err)
-	}
+	// 获取真实用户的 home 目录（sudo 场景下用 SUDO_USER）
+	homeDir := getRealUserHomeDir()
 
 	sshDir := filepath.Join(homeDir, ".ssh")
 	sshConfigPath := filepath.Join(sshDir, "config")
@@ -104,4 +102,27 @@ func MaintainSSHConfig(dialSocketPath string) error {
 
 	logger.Infof("[SSHConfig] 已更新 ~/.ssh/config（ProxyCommand → %s）", dialSocketPath)
 	return nil
+}
+
+// getRealUserHomeDir 获取真实用户的 home 目录
+// sudo 运行时 os.UserHomeDir() 返回 /root，需要通过 SUDO_USER 获取原始用户的 home
+func getRealUserHomeDir() string {
+	// 优先检查 SUDO_USER（sudo 场景）
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		// 尝试从 /etc/passwd 或 HOME 环境变量推断
+		// SUDO_USER 存在时，原始用户的 home 通常是 /home/{user}
+		homeDir := "/home/" + sudoUser
+		if _, err := os.Stat(homeDir); err == nil {
+			logger.Infof("[SSHConfig] 检测到 sudo 运行，使用真实用户 home: %s", homeDir)
+			return homeDir
+		}
+	}
+
+	// 非 sudo 场景，使用标准方式
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		// 兜底
+		return os.Getenv("HOME")
+	}
+	return homeDir
 }

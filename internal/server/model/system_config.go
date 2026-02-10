@@ -23,7 +23,11 @@ const (
 	ConfigStunPort           = "stun_port"             // STUN 端口
 	ConfigIPPrefix           = "ip_prefix"             // IP 地址段
 	ConfigAuthKeyExpiryHours = "auth_key_expiry_hours" // 预认证密钥有效期（小时）
+	ConfigDomainSuffix       = "domain_suffix"         // 域名后缀（默认 .beagle）
 )
+
+// DefaultDomainSuffix 默认域名后缀
+const DefaultDomainSuffix = ".beagle"
 
 // GetConfigValue 获取配置值的辅助方法
 func GetConfigValue(key string, defaultValue string) string {

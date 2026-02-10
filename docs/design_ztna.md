@@ -11,7 +11,7 @@ ZTNA 不是推翻重来，而是在现有 Tailscale/Headscale 隧道基础上的
 | 维度     | 当前架构                          | ZTNA 架构                                 |
 | -------- | --------------------------------- | ----------------------------------------- |
 | Desktop  | tailscaled 系统级 VPN，注入路由表 | tsnet 用户态，DNS 劫持 + 本地 VIP         |
-| 访问方式 | ssh root@100.64.x.x               | ssh user@node-1.beijing.k8s               |
+| 访问方式 | ssh root@100.64.x.x               | ssh user@beagle-xx1.beijing.beagle        |
 | 端口冲突 | 靠 Tailscale IP 段隔离            | 靠 VIP（127.1.x.x）隔离，同端口不冲突     |
 | 凭据管理 | 用户自己管 SSH 密钥               | Endpoint 侧管理，凭据不落地               |
 | 身份传递 | 设备 Token + Logto 登录           | tsnet 连接携带身份，Agent 从连接提取      |
@@ -136,7 +136,7 @@ Endpoint 不在 Tailscale 网络中，不连 Server 或 Headscale，只反向连
 | User.Role | client                                 | client                               |
 | 网络接入  | tsnet 用户态                           | tsnet 用户态                         |
 | DNS 方案  | DNS 劫持 + VIP（127.1.x.x）            | DNS 劫持 + VIP（127.1.x.x）          |
-| DNS 配置  | /etc/resolver/k8s (macOS) 等           | /etc/resolv.conf 指向本地 DNS        |
+| DNS 配置  | /etc/resolver/beagle (macOS) 等        | /etc/resolv.conf 指向本地 DNS        |
 | 注册方式  | Logto 登录 → Device Token              | Deploy Token → auth_key              |
 | 权限      | Client 的一切权限                      | Client 的一切权限                    |
 | 二进制    | signal_desktop（Wails 应用，独立仓库） | signal_agent 二进制的 RunClient 模式 |
@@ -175,32 +175,200 @@ Endpoint 不在 Tailscale 网络中，不连 Server 或 Headscale，只反向连
 
 ## 域名体系
 
-统一使用 `.k8s` 后缀（可配置），Desktop DNS 劫持拦截：
+使用可配置的域名后缀（默认 `.beagle`），通过 Web 系统设置修改。Desktop DNS 劫持拦截该后缀的所有域名。
+
+域名后缀存储在 system_config 表中（key: domain_suffix），Agent 和 Desktop 通过心跳/API 获取当前后缀值。
+
+### 核心概念
+
+Agent User（如 beijing）代表一个环境/区域，不是单台机器。一个 Agent User 可以部署多个 Agent 实例（Node）。
+
+Endpoint 是"子环境/集群"的概念，有自己的域名前缀（可以为空）。一个 Endpoint 下面可以挂多种能力（K8SAPI、SSH 节点、K8SService）。
 
 ```
-Agent 本机（AgentSSH 直连）：
-  <agent-name>.k8s:22
-  beijing.k8s:22
+User: beijing (role=agent)
+  ├── Node: beagle-xx1（Agent 实例 1）
+  ├── Node: beagle-xx2（Agent 实例 2）
+  ├── Endpoint ""（域名为空，直接挂在 beijing.beagle 下）
+  │     └── SSH: web-server-1
+  ├── Endpoint "prod"
+  │     ├── K8SAPI
+  │     └── SSH: web-server-1
+  └── Endpoint "dev"
+        ├── K8SAPI
+        └── SSH: db-1
 
-Agent 本机（AgentK8SAPI 直连）：
-  api.<agent-name>.k8s:6443
-  api.beijing.k8s:6443
+User: zhangsan (role=client)
+  ├── Node: macbook（Desktop.Host）
+  └── Node: ide-sc（Desktop.Pod / CloudIDE）
+```
 
-Agent 本机（AgentK8SService 直连）：
-  <service>.<namespace>.<agent-name>.k8s
-  pg.yygl.beijing.k8s:5432
+### 域名规则
 
-EndpointSSH（跳跃）：
-  <endpoint-name>.<agent-name>.k8s:22
-  web-server-1.beijing.k8s:22
+域名分为 Agent 本机域名、Endpoint 域名、Client 节点域名三类。以下示例使用默认后缀 `.beagle`。
 
-EndpointK8SAPI（跳跃）：
-  api.<endpoint-name>.<agent-name>.k8s:6443
-  api.beijing-prod.beijing.k8s:6443
+Agent 本机域名（直接挂在 `<agent-name>.beagle` 下）：
 
-EndpointK8SService（跳跃）：
-  <service>.<namespace>.<endpoint-name>.<agent-name>.k8s
-  pg.yygl.remote-cluster.beijing.k8s:5432
+```
+AgentSSH（每个 Node 实例一个域名）：
+  <node-name>.<agent-name>.beagle:22
+  beagle-xx1.beijing.beagle:22
+  beagle-xx2.beijing.beagle:22
+
+AgentK8SAPI（Agent 本机 K8S API，默认域名为空）：
+  api.<agent-name>.beagle:6443
+  api.beijing.beagle:6443
+  多个 Node 都开启时，负载均衡到在线 Node
+
+AgentK8SService（Agent 本机 K8S Service）：
+  <service>.<namespace>.<agent-name>.beagle
+  pg.yygl.beijing.beagle:5432
+  多个 Node 都开启时，负载均衡到在线 Node
+```
+
+Endpoint 域名（Endpoint 域名前缀可以为空）：
+
+```
+Endpoint 域名为空时，直接挂在 <agent-name>.beagle 下：
+  EndpointSSH:
+    <ssh-name>.<agent-name>.beagle:22
+    web-server-1.beijing.beagle:22
+
+Endpoint 域名不为空时，挂在 <endpoint-domain>.<agent-name>.beagle 下：
+  EndpointK8SAPI:
+    api.<endpoint-domain>.<agent-name>.beagle:6443
+    api.prod.beijing.beagle:6443
+
+  EndpointSSH:
+    <ssh-name>.<endpoint-domain>.<agent-name>.beagle:22
+    web-server-1.prod.beijing.beagle:22
+
+  EndpointK8SService:
+    <service>.<namespace>.<endpoint-domain>.<agent-name>.beagle
+    pg.yygl.prod.beijing.beagle:5432
+```
+
+Client 节点域名（Desktop.Pod / Desktop.Host）：
+
+```
+<node-name>.<client-name>.beagle
+ide-sc.zhangsan.beagle:22          （CloudIDE）
+macbook.zhangsan.beagle:22         （Desktop.Host，可选）
+```
+
+### 完整示例
+
+```
+beijing（Agent User / 环境）
+  │
+  ├── Agent 本机能力（直接挂在 beijing.beagle 下）
+  │     beagle-xx1.beijing.beagle:22           → AgentSSH（Node 实例）
+  │     beagle-xx2.beijing.beagle:22           → AgentSSH（Node 实例）
+  │     api.beijing.beagle:6443                → AgentK8SAPI
+  │     pg.yygl.beijing.beagle:5432            → AgentK8SService
+  │
+  ├── Endpoint ""（域名为空，直接挂在 beijing.beagle 下）
+  │     web-server-1.beijing.beagle:22         → EndpointSSH
+  │
+  ├── Endpoint "prod"
+  │     api.prod.beijing.beagle:6443           → EndpointK8SAPI
+  │     web-server-1.prod.beijing.beagle:22    → EndpointSSH
+  │
+  └── Endpoint "dev"
+        api.dev.beijing.beagle:6443            → EndpointK8SAPI
+        db-1.dev.beijing.beagle:22             → EndpointSSH
+```
+
+### 域名与数据的关系
+
+域名类型统一为三种能力：ssh / k8sapi / k8ssvc。通过 node_id 或 endpoint_id 区分来源。
+
+```
+domain_registry 表中的域名来源：
+
+beagle-xx1 注册，上报能力 ssh + k8sapi + k8ssvc：
+  beagle-xx1.beijing.beagle:22        → type=ssh, node_id=xxx
+  api.beijing.beagle:6443             → type=k8sapi, node_id=xxx
+  pg.yygl.beijing.beagle:5432         → type=k8ssvc, node_id=xxx
+
+beagle-xx2 注册，上报能力 ssh + k8sapi：
+  beagle-xx2.beijing.beagle:22        → type=ssh, node_id=yyy
+  api.beijing.beagle:6443             → type=k8sapi, node_id=yyy（共享域名，负载均衡）
+
+Endpoint "" 注册，上报能力 ssh：
+  web-server-1.beijing.beagle:22      → type=ssh, endpoint_id=aaa
+
+Endpoint "prod" 注册，上报能力 k8sapi + ssh：
+  api.prod.beijing.beagle:6443        → type=k8sapi, endpoint_id=bbb
+  web-server-1.prod.beijing.beagle:22 → type=ssh, endpoint_id=bbb
+
+Client Node 注册：
+  ide-sc.zhangsan.beagle:22           → type=ssh, node_id=www
+```
+
+说明：
+
+- 同一域名可以有多条记录（不同 node_id），表示负载均衡
+- domain_registry.domain 不再是唯一索引，改为 (domain, node_id) 或 (domain, endpoint_id) 联合唯一
+- 查询域名时，找到所有在线记录，多条则负载均衡
+
+### 负载均衡
+
+仅 Agent 本机的 K8SAPI 和 K8SService 支持负载均衡。当同一 Agent User 的多个 Node 都开启了相同能力时，Desktop 连接时轮询分配到在线 Node。
+
+```
+场景：beijing 有两个 Node，都部署在同一个 K8S 集群
+
+  beagle-xx1 (online) → K8SAPI 已开启, K8SService 已开启
+  beagle-xx2 (online) → K8SAPI 已开启, K8SService 已开启
+
+  api.beijing.beagle:6443       → 轮询到 beagle-xx1 或 beagle-xx2
+  pg.yygl.beijing.beagle:5432   → 轮询到 beagle-xx1 或 beagle-xx2
+
+不参与负载均衡：
+  AgentSSH — 每个 Node 有独立域名（beagle-xx1.beijing.beagle）
+  Endpoint — 挂在 Agent User 下，不区分 Node
+```
+
+### 域名冲突处理
+
+同一 Agent User 下，Agent Node 名称、Endpoint 域名为空时的 SSH 名称不能重复：
+
+```
+冲突场景：
+  Agent User "beijing" 下同时有：
+    Node "beagle-xx1"                    → beagle-xx1.beijing.beagle
+    Endpoint "" 的 SSH "beagle-xx1"      → beagle-xx1.beijing.beagle  ← 冲突
+
+解决：
+  域名注册时校验唯一性（domain_registry.domain 唯一索引）
+  创建 Endpoint SSH 节点时校验不与同层级的 Node 名称重复
+```
+
+Agent 本机 K8SAPI 默认域名为空（`api.<agent-name>.beagle`），一般不会为同一个 Agent 设置两个 K8SAPI。如果有冲突，Agent 内部自行解决。
+
+### gRPC 多实例支持
+
+当前 gRPC 心跳连接以 User ID 为 key（一个 Agent User 只能有一个活跃连接）。多实例需要改为以 Node ID 为 key，支持同一 Agent User 的多个 Node 同时在线。
+
+```
+当前实现：
+  connections map[uint64]*AgentConnection    // key = User ID
+  → 同一 Agent User 新连接会踢掉旧连接
+
+多实例改造：
+  connections map[uint64]*AgentConnection    // key = Node ID
+  → 同一 Agent User 的多个 Node 各自维护独立连接
+
+影响范围：
+  1. Register/Authenticate — 需要识别具体 Node（通过 hostname）
+     不再假设一个 User 只有一个 Agent Node
+     查询条件从 WHERE user_id=? AND type=agent
+     改为 WHERE user_id=? AND type=agent AND name=hostname
+  2. Heartbeat — 连接 key 从 User ID 改为 Node ID
+  3. 断连处理 — 只将该 Node 的域名设为离线，不影响同 User 的其他 Node
+  4. IsAgentOnline — 需要区分"User 是否有在线 Node"和"某个 Node 是否在线"
+  5. 域名注册上报 — 每个 Node 上报自己的域名（带 node_id）
 ```
 
 ## 二进制和构建产物

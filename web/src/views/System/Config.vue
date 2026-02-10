@@ -42,6 +42,20 @@
               </div>
             </div>
           </el-form-item>
+
+          <el-form-item label="域名后缀">
+            <div class="form-item-content">
+              <el-input
+                v-model="form.domain_suffix"
+                placeholder="默认 .beagle"
+                clearable
+                style="width: 300px"
+              />
+              <div class="form-item-tip">
+                ZTNA 域名体系的根域名后缀，如 .beagle，域名示例：beagle-242.beijing.beagle
+              </div>
+            </div>
+          </el-form-item>
         </div>
 
         <!-- 隧道配置 -->
@@ -132,7 +146,8 @@ const form = ref({
   headscale_public_url: '',
   stun_port: 3479,
   ip_prefix: '100.64.0.0/10',
-  auth_key_expiry_hours: 24
+  auth_key_expiry_hours: 24,
+  domain_suffix: '.beagle'
 })
 
 const downloadPageUrl = computed(() => {
@@ -153,6 +168,7 @@ const loadConfig = async () => {
       form.value.stun_port = res.data.stun_port || 3479
       form.value.ip_prefix = res.data.ip_prefix || '100.64.0.0/10'
       form.value.auth_key_expiry_hours = res.data.auth_key_expiry_hours || 24
+      form.value.domain_suffix = res.data.domain_suffix || '.beagle'
     }
   } catch (error) {
     console.error('加载配置失败:', error)
@@ -221,7 +237,8 @@ const handleSave = async () => {
       headscale_public_url: form.value.headscale_public_url,
       stun_port: form.value.stun_port,
       ip_prefix: form.value.ip_prefix,
-      auth_key_expiry_hours: form.value.auth_key_expiry_hours
+      auth_key_expiry_hours: form.value.auth_key_expiry_hours,
+      domain_suffix: form.value.domain_suffix
     })
     if (res.success) {
       ElMessage.success('保存成功')

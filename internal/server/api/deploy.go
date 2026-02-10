@@ -86,6 +86,7 @@ type RegisterRequest struct {
 type RegisterResponse struct {
 	Message      string                 `json:"message"`
 	UserRole     string                 `json:"user_role"`               // 用户角色：agent / client
+	UserID       uint64                 `json:"user_id"`                 // 用户 ID
 	Config       map[string]interface{} `json:"config,omitempty"`        // 配置信息
 	HeadscaleURL string                 `json:"headscale_url,omitempty"` // Headscale 地址
 	AuthKey      string                 `json:"auth_key,omitempty"`      // Headscale 认证密钥
@@ -152,10 +153,7 @@ func (a *DeployAPI) CreateDeployToken(c *gin.Context) {
 	}
 
 	// 构建响应
-	serverAddr := a.config.Server.PublicURL
-	if serverAddr == "" {
-		serverAddr = fmt.Sprintf("http://localhost:%d", a.config.Web.ListenPort)
-	}
+	serverAddr := a.getServerAddr(c)
 
 	resp := CreateDeployTokenResponse{
 		Token: token,
@@ -170,7 +168,7 @@ func (a *DeployAPI) CreateDeployToken(c *gin.Context) {
 	// Agent 角色生成安装命令
 	if user.Role == model.UserRoleAgent {
 		resp.InstallCommand = fmt.Sprintf(
-			"curl -fsSL %s/api/v1/download/install.sh | sudo bash -s -- \\\n  --deploy \\\n  -t %s \\\n  -s %s",
+			"curl -fsSL %s/api/v1/download/install_agent.sh | sudo bash -s -- \\\n  --deploy \\\n  -t %s \\\n  -s %s",
 			serverAddr, token, serverAddr,
 		)
 	}
@@ -280,17 +278,14 @@ func (a *DeployAPI) GetDeployCommand(c *gin.Context) {
 		return
 	}
 
-	serverAddr := a.config.Server.PublicURL
-	if serverAddr == "" {
-		serverAddr = fmt.Sprintf("http://localhost:%d", a.config.Web.ListenPort)
-	}
+	serverAddr := a.getServerAddr(c)
 
 	result := map[string]string{}
 
 	if deployToken.User != nil && deployToken.User.Role == model.UserRoleAgent {
 		// Agent: 生成安装命令
 		result["install_command"] = fmt.Sprintf(
-			"curl -fsSL %s/api/v1/download/install.sh | sudo bash -s -- \\\n  --deploy \\\n  -t %s \\\n  -s %s",
+			"curl -fsSL %s/api/v1/download/install_agent.sh | sudo bash -s -- \\\n  --deploy \\\n  -t %s \\\n  -s %s",
 			serverAddr, deployToken.Token, serverAddr,
 		)
 	} else {
@@ -419,6 +414,7 @@ func (a *DeployAPI) Register(c *gin.Context) {
 	// 构建响应
 	resp := RegisterResponse{
 		UserRole:     string(user.Role),
+		UserID:       user.ID,
 		HeadscaleURL: headscaleURL,
 		AuthKey:      authKey,
 		UserName:     user.Name,
@@ -514,6 +510,31 @@ func (a *DeployAPI) createClientAuthKey(ctx context.Context, user *model.User) s
 	}
 
 	return authKey.Key
+}
+
+// getServerAddr 获取 Server 外部访问地址
+// 优先使用配置的 PublicURL，否则从请求 Header 推断
+func (a *DeployAPI) getServerAddr(c *gin.Context) string {
+	if a.config.Server.PublicURL != "" {
+		return a.config.Server.PublicURL
+	}
+
+	// 从请求推断：优先 X-Forwarded 系列 Header（反向代理场景）
+	scheme := c.GetHeader("X-Forwarded-Proto")
+	if scheme == "" {
+		if c.Request.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+
+	host := c.GetHeader("X-Forwarded-Host")
+	if host == "" {
+		host = c.Request.Host
+	}
+
+	return scheme + "://" + host
 }
 
 // generateDeployToken 生成部署 Token

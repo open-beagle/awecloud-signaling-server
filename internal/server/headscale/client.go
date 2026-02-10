@@ -328,6 +328,22 @@ func (c *Client) GetNodeByUser(ctx context.Context, userName string) (*v1.Node, 
 	return nodes[0], nil
 }
 
+// GetNodeByUserAndName 获取指定用户下匹配名称的节点
+// 一个 Headscale 用户下可能有多个节点（如多个 Desktop 设备），需要按 GivenName 匹配
+func (c *Client) GetNodeByUserAndName(ctx context.Context, userName string, nodeName string) (*v1.Node, error) {
+	nodes, err := c.ListNodesByUser(ctx, userName)
+	if err != nil {
+		return nil, err
+	}
+	for _, node := range nodes {
+		if node.GivenName == nodeName {
+			return node, nil
+		}
+	}
+	// 未找到精确匹配，返回 nil
+	return nil, nil
+}
+
 // DeleteNode 删除节点
 func (c *Client) DeleteNode(ctx context.Context, nodeID uint64) error {
 	_, err := c.client.DeleteNode(ctx, &v1.DeleteNodeRequest{

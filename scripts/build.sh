@@ -47,7 +47,7 @@ build_server() {
     local ARCH=$1
     echo "Building Server for ${GOOS}/${ARCH}..."
     
-    OUTPUT="${BIN_DIR}/server-${GOOS}-${ARCH}"
+    OUTPUT="${BIN_DIR}/signal_server-${GOOS}-${ARCH}"
     
     CGO_ENABLED=0 \
     GOOS=${GOOS} \
@@ -73,7 +73,7 @@ build_agent() {
     local ARCH=$1
     echo "Building Agent for ${GOOS}/${ARCH}..."
     
-    OUTPUT="${BIN_DIR}/agent-${GOOS}-${ARCH}"
+    OUTPUT="${BIN_DIR}/signal_agent-${GOOS}-${ARCH}"
     
     CGO_ENABLED=0 \
     GOOS=${GOOS} \
@@ -112,14 +112,14 @@ done
 
 # 创建当前平台的符号链接（方便本地开发）
 CURRENT_ARCH=$(go env GOARCH)
-if [ -f "${BIN_DIR}/server-${GOOS}-${CURRENT_ARCH}" ]; then
-    ln -sf "server-${GOOS}-${CURRENT_ARCH}" "${BIN_DIR}/server"
-    echo "✓ Created symlink: bin/server -> server-${GOOS}-${CURRENT_ARCH}"
+if [ -f "${BIN_DIR}/signal_server-${GOOS}-${CURRENT_ARCH}" ]; then
+    ln -sf "signal_server-${GOOS}-${CURRENT_ARCH}" "${BIN_DIR}/signal_server"
+    echo "✓ Created symlink: bin/signal_server -> signal_server-${GOOS}-${CURRENT_ARCH}"
 fi
 
-if [ -f "${BIN_DIR}/agent-${GOOS}-${CURRENT_ARCH}" ]; then
-    ln -sf "agent-${GOOS}-${CURRENT_ARCH}" "${BIN_DIR}/agent"
-    echo "✓ Created symlink: bin/agent -> agent-${GOOS}-${CURRENT_ARCH}"
+if [ -f "${BIN_DIR}/signal_agent-${GOOS}-${CURRENT_ARCH}" ]; then
+    ln -sf "signal_agent-${GOOS}-${CURRENT_ARCH}" "${BIN_DIR}/signal_agent"
+    echo "✓ Created symlink: bin/signal_agent -> signal_agent-${GOOS}-${CURRENT_ARCH}"
 fi
 
 echo ""
@@ -128,7 +128,7 @@ echo "Binaries are in: ${BIN_DIR}/"
 
 # 验证 Server 版本信息
 CURRENT_ARCH=$(go env GOARCH)
-SERVER_BIN="${BIN_DIR}/server-${GOOS}-${CURRENT_ARCH}"
+SERVER_BIN="${BIN_DIR}/signal_server-${GOOS}-${CURRENT_ARCH}"
 if [ -f "${SERVER_BIN}" ]; then
     echo ""
     echo "Server version:"

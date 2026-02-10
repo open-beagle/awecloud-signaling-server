@@ -73,6 +73,7 @@ type DatabaseSection struct {
 type WebSection struct {
 	ListenAddr           string `toml:"listen_addr"`
 	ListenPort           int    `toml:"listen_port"`
+	WebRoot              string `toml:"web_root"` // 前端静态文件根目录，默认 ./web/dist
 	DefaultAdminUsername string `toml:"default_admin_username"`
 	DefaultAdminPassword string `toml:"default_admin_password"`
 }
@@ -135,11 +136,17 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	if cfg.Security.JWTExpireHours == 0 {
 		cfg.Security.JWTExpireHours = 24
 	}
+	if cfg.Web.WebRoot == "" {
+		cfg.Web.WebRoot = "./web/dist"
+	}
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
 	}
 
 	// 环境变量覆盖（优先级最高）
+	if webRoot := os.Getenv("SIGNAL_WEB_ROOT"); webRoot != "" {
+		cfg.Web.WebRoot = webRoot
+	}
 	if publicURL := os.Getenv("PUBLIC_URL"); publicURL != "" {
 		cfg.Server.PublicURL = publicURL
 	}

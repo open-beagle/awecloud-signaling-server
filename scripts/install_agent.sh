@@ -20,10 +20,10 @@ UPGRADE_MODE="false"
 UNINSTALL_MODE="false"
 DEPLOY_MODE="false"  # 部署模式：使用 Token 自动注册
 
-# 安装路径（与现有部署保持一致）
+# 安装路径
 DOWNLOAD_DIR="/etc/kubernetes/downloads"
 INSTALL_DIR="/opt/bin"
-BINARY_NAME="signaling"
+BINARY_NAME="signal_agent"
 CONFIG_DIR="/etc/kubernetes/config"
 DATA_DIR="/etc/kubernetes/data/signaling"
 CONFIG_FILE="${CONFIG_DIR}/k8s-signaling.toml"
@@ -65,7 +65,7 @@ AWECloud Agent 安装脚本
 
   # 安装（指定设备名）
   curl -fsSL https://server/api/v1/download/install.sh | \\
-    sudo bash -s -- -n beijing -t <TOKEN> -s https://signal.example.com -d beagle-242
+    sudo bash -s -- -n beijing -t <TOKEN> -s https://signal.example.com -d beagle-xxx
 
   # 升级
   curl -fsSL https://server/api/v1/download/install.sh | \\
@@ -314,10 +314,13 @@ EOF
 # 升级 Agent
 upgrade_agent() {
     if [[ -z "$SERVER_ADDRESS" ]]; then
-        # 从现有配置读取 Server 地址
-        if [[ -f "$CONFIG_FILE" ]]; then
-            SERVER_ADDRESS=$(grep -E '^address\s*=' "$CONFIG_FILE" | head -1 | sed 's/.*=\s*"\(.*\)"/\1/')
-        fi
+        # 从现有配置读取 Server 地址（兼容新旧配置文件名）
+        for cfg in "$CONFIG_FILE" "${CONFIG_DIR}/k8s-signaling.toml"; do
+            if [[ -f "$cfg" ]]; then
+                SERVER_ADDRESS=$(grep -E '^address\s*=' "$cfg" | head -1 | sed 's/.*=\s*"\(.*\)"/\1/')
+                [[ -n "$SERVER_ADDRESS" ]] && break
+            fi
+        done
     fi
     
     if [[ -z "$SERVER_ADDRESS" ]]; then
@@ -327,13 +330,13 @@ upgrade_agent() {
     info "升级 Agent..."
     
     # 停止服务
-    systemctl stop "$SERVICE_NAME" || true
+    systemctl stop "$SERVICE_NAME" 2>/dev/null || true
     
     # 下载新版本（会自动更新软链接）
     download_agent
     
-    # 启动服务
-    systemctl start "$SERVICE_NAME"
+    # 安装新的 systemd 服务（覆盖旧的）
+    install_service
     
     info "升级完成"
 }
@@ -343,13 +346,15 @@ uninstall_agent() {
     info "卸载 Agent..."
     
     # 停止并禁用服务
-    systemctl stop "$SERVICE_NAME" || true
-    systemctl disable "$SERVICE_NAME" || true
+    systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+    systemctl disable "$SERVICE_NAME" 2>/dev/null || true
     
     # 删除文件
     rm -f "$SERVICE_FILE"
-    rm -f "${INSTALL_DIR}/${BINARY_NAME}"  # 删除软链接
-    rm -rf "${DOWNLOAD_DIR}/${BINARY_NAME}-"*  # 删除下载的二进制
+    rm -f "${INSTALL_DIR}/${BINARY_NAME}"
+    rm -f "${INSTALL_DIR}/signaling"  # 旧软链接
+    rm -rf "${DOWNLOAD_DIR}/${BINARY_NAME}-"*
+    rm -rf "${DOWNLOAD_DIR}/signaling-"*  # 旧二进制
     
     systemctl daemon-reload
     
@@ -399,20 +404,21 @@ EOF
         error "需要 curl 或 wget"
     fi
     
-    # 解析响应
+    # 解析响应（Server 返回格式: {"success":true,"data":{"user_role":"agent","config":{"agent":{"name":"..."}}}}）
     local success=$(echo "$response" | grep -o '"success":\s*true' || true)
     if [[ -z "$success" ]]; then
         local message=$(echo "$response" | grep -o '"message":"[^"]*"' | cut -d'"' -f4)
         error "注册失败: ${message:-$response}"
     fi
     
-    # 提取配置信息
-    AGENT_NAME=$(echo "$response" | grep -o '"agent_name":"[^"]*"' | cut -d'"' -f4)
-    AGENT_TOKEN=$(echo "$response" | grep -o '"agent_token":"[^"]*"' | cut -d'"' -f4)
+    # 从 data.config.agent.name 提取 Agent 名称
+    AGENT_NAME=$(echo "$response" | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4)
     
-    if [[ -z "$AGENT_NAME" ]] || [[ -z "$AGENT_TOKEN" ]]; then
-        error "注册响应缺少必要字段"
+    if [[ -z "$AGENT_NAME" ]]; then
+        error "注册响应缺少 Agent 名称"
     fi
+    
+    # Token 保持传入的值（注册接口不返回新 Token）
     
     info "注册成功！"
     info "  Agent 名称: ${AGENT_NAME}"

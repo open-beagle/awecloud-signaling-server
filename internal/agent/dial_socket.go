@@ -50,8 +50,8 @@ func (s *DialSocketServer) Start() error {
 		return fmt.Errorf("监听 Unix Socket 失败: %w", err)
 	}
 
-	// 设置权限（允许同用户访问）
-	if err := os.Chmod(s.socketPath, 0600); err != nil {
+	// 设置权限（允许所有用户访问，Agent 可能以 sudo 运行）
+	if err := os.Chmod(s.socketPath, 0666); err != nil {
 		listener.Close()
 		return fmt.Errorf("设置 Socket 权限失败: %w", err)
 	}

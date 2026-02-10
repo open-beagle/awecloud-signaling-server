@@ -286,8 +286,8 @@ tsnet 上不能用同一个端口区分不同 Service（TCP 没有域名信息�
 所以 AgentK8SService 走 gRPC 代理，通过 RPC 参数传递目标 Service 信息。
 
 Desktop 侧用 VIP 隔离端口冲突：
-  pg.yygl.beijing.k8s:5432   → VIP 127.1.0.1:5432 → gRPC SVCProxy(pg, yygl)
-  pg.devops.beijing.k8s:5432 → VIP 127.1.0.2:5432 → gRPC SVCProxy(pg, devops)
+  pg.yygl.beijing.beagle:5432   → VIP 127.1.0.1:5432 → gRPC SVCProxy(pg, yygl)
+  pg.devops.beijing.beagle:5432 → VIP 127.1.0.2:5432 → gRPC SVCProxy(pg, devops)
 
 用户始终用原始端口 5432，体验不变。
 ```

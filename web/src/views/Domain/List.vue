@@ -27,35 +27,30 @@
     <!-- 域名列表 -->
     <el-card shadow="never">
       <el-table v-loading="loading" :data="domains" stripe>
-        <el-table-column prop="domain" :label="$t('domain.domain')" min-width="200" />
-        <el-table-column prop="type" :label="$t('domain.type')" width="160">
+        <el-table-column prop="domain" :label="$t('domain.domain')" min-width="220" />
+        <el-table-column prop="type" :label="$t('domain.type')" width="130">
           <template #default="{ row }">
             <el-tag size="small" :type="getDomainTypeTag(row.type)">
               {{ getDomainTypeLabel(row.type) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('domain.agent')" min-width="120">
+        <el-table-column :label="$t('domain.user')" min-width="120">
           <template #default="{ row }">
-            <router-link v-if="row.agent_name" :to="`/users/${row.agent_user_id}`" class="agent-link">
-              {{ row.agent_name }}
+            <router-link v-if="row.user_name" :to="`/users/${row.user_id}`" class="user-link">
+              {{ row.user_name }}
             </router-link>
             <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="target_ip" :label="$t('domain.targetIP')" width="140">
+          <template #default="{ row }">
+            {{ row.target_ip || '-' }}
           </template>
         </el-table-column>
         <el-table-column prop="target_port" :label="$t('domain.targetPort')" width="100">
           <template #default="{ row }">
             {{ row.target_port || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="namespace" :label="$t('domain.namespace')" width="120">
-          <template #default="{ row }">
-            {{ row.namespace || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="service_name" :label="$t('domain.serviceName')" width="120">
-          <template #default="{ row }">
-            {{ row.service_name || '-' }}
           </template>
         </el-table-column>
         <el-table-column :label="$t('common.status')" width="100">
@@ -65,7 +60,16 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" :label="$t('common.createdAt')" width="180" />
+        <el-table-column prop="updated_at" :label="$t('domain.updatedAt')" width="180" />
+        <el-table-column :label="$t('common.action')" width="100" fixed="right">
+          <template #default="{ row }">
+            <el-popconfirm :title="$t('common.deleteConfirm')" @confirm="handleDelete(row)">
+              <template #reference>
+                <el-button type="danger" link size="small">{{ $t('common.delete') }}</el-button>
+              </template>
+            </el-popconfirm>
+          </template>
+        </el-table-column>
       </el-table>
 
       <!-- 分页 -->
@@ -87,7 +91,8 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getDomains, type DomainItem, type DomainType } from '@/api/domain'
+import { getDomains, deleteDomain, type DomainItem, type DomainType } from '@/api/domain'
+import { ElMessage } from 'element-plus'
 
 const { t } = useI18n()
 
@@ -108,25 +113,17 @@ const pagination = reactive({
 
 // 域名类型选项
 const domainTypes = computed(() => [
-  { value: 'agent_ssh', label: t('domain.typeAgentSSH') },
-  { value: 'agent_k8sapi', label: t('domain.typeAgentK8SAPI') },
-  { value: 'agent_k8s_service', label: t('domain.typeAgentK8SService') },
-  { value: 'agent_service', label: t('domain.typeAgentService') },
-  { value: 'endpoint_ssh', label: t('domain.typeEndpointSSH') },
-  { value: 'endpoint_k8sapi', label: t('domain.typeEndpointK8SAPI') },
-  { value: 'endpoint_k8s_service', label: t('domain.typeEndpointK8SService') }
+  { value: 'ssh', label: t('domain.typeSSH') },
+  { value: 'k8sapi', label: t('domain.typeK8SAPI') },
+  { value: 'k8ssvc', label: t('domain.typeK8SSVC') }
 ])
 
 // 域名类型标签颜色
 const getDomainTypeTag = (type: DomainType) => {
   const map: Record<string, string> = {
-    agent_ssh: 'success',
-    agent_k8sapi: 'warning',
-    agent_k8s_service: '',
-    agent_service: 'info',
-    endpoint_ssh: 'success',
-    endpoint_k8sapi: 'warning',
-    endpoint_k8s_service: ''
+    ssh: 'success',
+    k8sapi: 'warning',
+    k8ssvc: ''
   }
   return map[type] || 'info'
 }
@@ -134,13 +131,9 @@ const getDomainTypeTag = (type: DomainType) => {
 // 域名类型标签文字
 const getDomainTypeLabel = (type: DomainType) => {
   const map: Record<string, string> = {
-    agent_ssh: t('domain.typeAgentSSH'),
-    agent_k8sapi: t('domain.typeAgentK8SAPI'),
-    agent_k8s_service: t('domain.typeAgentK8SService'),
-    agent_service: t('domain.typeAgentService'),
-    endpoint_ssh: t('domain.typeEndpointSSH'),
-    endpoint_k8sapi: t('domain.typeEndpointK8SAPI'),
-    endpoint_k8s_service: t('domain.typeEndpointK8SService')
+    ssh: t('domain.typeSSH'),
+    k8sapi: t('domain.typeK8SAPI'),
+    k8ssvc: t('domain.typeK8SSVC')
   }
   return map[type] || type
 }
@@ -182,6 +175,19 @@ const handleReset = () => {
   fetchDomains()
 }
 
+// 删除域名
+const handleDelete = async (row: DomainItem) => {
+  try {
+    const res = await deleteDomain(row.id)
+    if (res.success) {
+      ElMessage.success(t('common.deleteSuccess'))
+      fetchDomains()
+    }
+  } catch (error) {
+    console.error('删除域名失败:', error)
+  }
+}
+
 onMounted(() => {
   fetchDomains()
 })
@@ -208,12 +214,12 @@ onMounted(() => {
   justify-content: flex-end;
 }
 
-.agent-link {
+.user-link {
   color: var(--el-color-primary);
   text-decoration: none;
 }
 
-.agent-link:hover {
+.user-link:hover {
   text-decoration: underline;
 }
 </style>

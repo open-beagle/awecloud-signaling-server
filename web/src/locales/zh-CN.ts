@@ -322,17 +322,15 @@ export default {
     title: '域名管理',
     domain: '域名',
     type: '类型',
-    agent: '所属 Agent',
+    user: '所属用户',
+    targetIP: '目标 IP',
     targetPort: '目标端口',
     namespace: '命名空间',
     serviceName: '服务名称',
+    updatedAt: '更新时间',
     searchPlaceholder: '搜索域名',
-    typeAgentSSH: 'Agent SSH',
-    typeAgentK8SAPI: 'Agent K8S API',
-    typeAgentK8SService: 'Agent K8S Service',
-    typeAgentService: 'Agent 端口映射',
-    typeEndpointSSH: 'Endpoint SSH',
-    typeEndpointK8SAPI: 'Endpoint K8S API',
-    typeEndpointK8SService: 'Endpoint K8S Service'
+    typeSSH: 'SSH',
+    typeK8SAPI: 'K8S API',
+    typeK8SSVC: 'K8S Service'
   }
 }

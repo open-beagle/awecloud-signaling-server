@@ -703,13 +703,14 @@ func (x *AgentHeartbeatRequest) GetDomainRegistrations() []*DomainRegistration {
 // DomainRegistration 域名注册信息（Agent 心跳上报）
 type DomainRegistration struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Domain        string                 `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"`                              // 完整域名（如 beijing.k8s）
-	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`                                  // 类型：agent_ssh / agent_k8sapi / agent_k8s_service / agent_service
-	TargetIp      string                 `protobuf:"bytes,3,opt,name=target_ip,json=targetIp,proto3" json:"target_ip,omitempty"`          // 目标 IP
+	Domain        string                 `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"`                              // 完整域名（如 beagle-242.beijing.beagle）
+	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`                                  // 能力类型：ssh / k8sapi / k8ssvc
+	TargetIp      string                 `protobuf:"bytes,3,opt,name=target_ip,json=targetIp,proto3" json:"target_ip,omitempty"`          // 目标 IP（Node 的 Tailscale IP 或 ClusterIP）
 	TargetPort    int32                  `protobuf:"varint,4,opt,name=target_port,json=targetPort,proto3" json:"target_port,omitempty"`   // 目标端口
-	Namespace     string                 `protobuf:"bytes,5,opt,name=namespace,proto3" json:"namespace,omitempty"`                        // K8S 命名空间（K8S 类型时）
-	ServiceName   string                 `protobuf:"bytes,6,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"` // K8S Service 名称（K8S 类型时）
+	Namespace     string                 `protobuf:"bytes,5,opt,name=namespace,proto3" json:"namespace,omitempty"`                        // K8S 命名空间（k8ssvc 类型时）
+	ServiceName   string                 `protobuf:"bytes,6,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"` // K8S Service 名称（k8ssvc 类型时）
 	EndpointId    string                 `protobuf:"bytes,7,opt,name=endpoint_id,json=endpointId,proto3" json:"endpoint_id,omitempty"`    // 关联的 Endpoint ID（Endpoint 类型时）
+	NodeId        uint64                 `protobuf:"varint,8,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`               // 关联的 Node ID（Node 注册时）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -791,6 +792,13 @@ func (x *DomainRegistration) GetEndpointId() string {
 		return x.EndpointId
 	}
 	return ""
+}
+
+func (x *DomainRegistration) GetNodeId() uint64 {
+	if x != nil {
+		return x.NodeId
+	}
+	return 0
 }
 
 // ServiceConfig 端口映射配置
@@ -961,6 +969,7 @@ type AgentHeartbeatResponse struct {
 	ConfigVersion int64                  `protobuf:"varint,1,opt,name=config_version,json=configVersion,proto3" json:"config_version,omitempty"` // 配置版本号
 	Services      []*ServiceConfig       `protobuf:"bytes,2,rep,name=services,proto3" json:"services,omitempty"`                                 // 端口映射配置（如有变更）
 	Forwards      []*ForwardConfig       `protobuf:"bytes,3,rep,name=forwards,proto3" json:"forwards,omitempty"`                                 // 端口访问配置（如有变更）
+	DomainSuffix  string                 `protobuf:"bytes,4,opt,name=domain_suffix,json=domainSuffix,proto3" json:"domain_suffix,omitempty"`     // 域名后缀（如 .beagle），由 Server 下发
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1014,6 +1023,13 @@ func (x *AgentHeartbeatResponse) GetForwards() []*ForwardConfig {
 		return x.Forwards
 	}
 	return nil
+}
+
+func (x *AgentHeartbeatResponse) GetDomainSuffix() string {
+	if x != nil {
+		return x.DomainSuffix
+	}
+	return ""
 }
 
 // GetRealtimeStatusRequest 获取实时状态请求
@@ -1698,7 +1714,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\bhostname\x18\x06 \x01(\tR\bhostname\x12\x18\n" +
 	"\aruntime\x18\a \x01(\tR\aruntime\x12@\n" +
 	"\bnetworks\x18\b \x03(\v2$.awecloud.signaling.NetworkInterfaceR\bnetworks\x12Y\n" +
-	"\x14domain_registrations\x18\t \x03(\v2&.awecloud.signaling.DomainRegistrationR\x13domainRegistrations\"\xe0\x01\n" +
+	"\x14domain_registrations\x18\t \x03(\v2&.awecloud.signaling.DomainRegistrationR\x13domainRegistrations\"\xf9\x01\n" +
 	"\x12DomainRegistration\x12\x16\n" +
 	"\x06domain\x18\x01 \x01(\tR\x06domain\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1b\n" +
@@ -1708,7 +1724,8 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\tnamespace\x18\x05 \x01(\tR\tnamespace\x12!\n" +
 	"\fservice_name\x18\x06 \x01(\tR\vserviceName\x12\x1f\n" +
 	"\vendpoint_id\x18\a \x01(\tR\n" +
-	"endpointId\"\x8f\x01\n" +
+	"endpointId\x12\x17\n" +
+	"\anode_id\x18\b \x01(\x04R\x06nodeId\"\x8f\x01\n" +
 	"\rServiceConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1f\n" +
@@ -1726,11 +1743,12 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"sourceAddr\x12\x1f\n" +
 	"\vtarget_addr\x18\x05 \x01(\tR\n" +
 	"targetAddr\x12\x18\n" +
-	"\aenabled\x18\x06 \x01(\bR\aenabled\"\xbd\x01\n" +
+	"\aenabled\x18\x06 \x01(\bR\aenabled\"\xe2\x01\n" +
 	"\x16AgentHeartbeatResponse\x12%\n" +
 	"\x0econfig_version\x18\x01 \x01(\x03R\rconfigVersion\x12=\n" +
 	"\bservices\x18\x02 \x03(\v2!.awecloud.signaling.ServiceConfigR\bservices\x12=\n" +
-	"\bforwards\x18\x03 \x03(\v2!.awecloud.signaling.ForwardConfigR\bforwards\"5\n" +
+	"\bforwards\x18\x03 \x03(\v2!.awecloud.signaling.ForwardConfigR\bforwards\x12#\n" +
+	"\rdomain_suffix\x18\x04 \x01(\tR\fdomainSuffix\"5\n" +
 	"\x18GetRealtimeStatusRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\x04R\aagentId\"\x8f\x02\n" +
 	"\x19GetRealtimeStatusResponse\x12\x1a\n" +
