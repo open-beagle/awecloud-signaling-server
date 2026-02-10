@@ -20,6 +20,7 @@
         <el-form-item>
           <el-button type="primary" @click="handleSearch">{{ $t('common.search') }}</el-button>
           <el-button @click="handleReset">{{ $t('common.reset') }}</el-button>
+          <el-button type="warning" :loading="refreshing" @click="handleRefresh">{{ $t('domain.refresh') }}</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -91,12 +92,13 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getDomains, deleteDomain, type DomainItem, type DomainType } from '@/api/domain'
+import { getDomains, deleteDomain, refreshDomains, type DomainItem, type DomainType } from '@/api/domain'
 import { ElMessage } from 'element-plus'
 
 const { t } = useI18n()
 
 const loading = ref(false)
+const refreshing = ref(false)
 const domains = ref<DomainItem[]>([])
 
 const searchForm = reactive({
@@ -173,6 +175,22 @@ const handleReset = () => {
   searchForm.search = ''
   pagination.page = 1
   fetchDomains()
+}
+
+// 刷新域名（回填 target_ip）
+const handleRefresh = async () => {
+  refreshing.value = true
+  try {
+    const res = await refreshDomains()
+    if (res.success) {
+      ElMessage.success(t('domain.refreshSuccess'))
+      fetchDomains()
+    }
+  } catch (error) {
+    console.error('刷新域名失败:', error)
+  } finally {
+    refreshing.value = false
+  }
 }
 
 // 删除域名

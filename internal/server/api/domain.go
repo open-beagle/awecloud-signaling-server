@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -165,6 +166,39 @@ func (a *DomainAPI) Delete(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
+}
+
+// Refresh 刷新域名记录的 target_ip
+// 从 Node 表中查找对应用户的 Agent 节点 IP，回填到域名记录
+func (a *DomainAPI) Refresh(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// 查询所有 target_ip 为空的在线域名记录
+	var domains []model.DomainRegistry
+	if err := db.DB.WithContext(ctx).
+		Where("target_ip = '' OR target_ip IS NULL").
+		Find(&domains).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询域名记录失败"))
+		return
+	}
+
+	updated := 0
+	for _, d := range domains {
+		// 通过 user_id 查找该用户的 Agent 类型 Node，获取 IP
+		var node model.Node
+		if err := db.DB.WithContext(ctx).
+			Where("user_id = ? AND type = ? AND ip != ''", d.UserID, model.NodeTypeAgent).
+			First(&node).Error; err != nil {
+			continue
+		}
+
+		if err := db.DB.WithContext(ctx).Model(&d).Update("target_ip", node.IP).Error; err != nil {
+			continue
+		}
+		updated++
+	}
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse(fmt.Sprintf("已更新 %d 条域名记录", updated), nil))
 }
 
 // SetOffline 将指定用户的所有域名设为离线

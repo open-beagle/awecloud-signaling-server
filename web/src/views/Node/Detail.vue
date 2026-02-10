@@ -187,6 +187,10 @@ onMounted(() => {
 </style>
 
 <style>
+.node-detail .el-descriptions__body .el-descriptions__table {
+  table-layout: fixed;
+}
+
 .node-detail .el-descriptions__label {
   width: 100px !important;
   min-width: 100px !important;

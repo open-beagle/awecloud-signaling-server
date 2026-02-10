@@ -338,6 +338,8 @@ export default {
     searchPlaceholder: 'Search domain',
     typeSSH: 'SSH',
     typeK8SAPI: 'K8S API',
-    typeK8SSVC: 'K8S Service'
+    typeK8SSVC: 'K8S Service',
+    refresh: 'Refresh',
+    refreshSuccess: 'Refresh successful'
   }
 }

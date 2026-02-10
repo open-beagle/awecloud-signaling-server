@@ -338,6 +338,8 @@ export default {
     searchPlaceholder: '搜索域名',
     typeSSH: 'SSH',
     typeK8SAPI: 'K8S API',
-    typeK8SSVC: 'K8S Service'
+    typeK8SSVC: 'K8S Service',
+    refresh: '更新',
+    refreshSuccess: '更新成功'
   }
 }

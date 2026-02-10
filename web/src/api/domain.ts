@@ -46,3 +46,8 @@ export const resolveDomain = (domain: string) => {
 export const deleteDomain = (id: number) => {
   return request.delete<any, ApiResponse>(`/api/v1/admin/domains/${id}`)
 }
+
+// 刷新域名记录（回填 target_ip）
+export const refreshDomains = () => {
+  return request.post<any, ApiResponse>('/api/v1/admin/domains/refresh')
+}

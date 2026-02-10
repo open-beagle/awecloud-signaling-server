@@ -675,8 +675,9 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		for name, running := range a.proxyManager.GetStatus() {
 			if running {
 				registrations = append(registrations, &pb.DomainRegistration{
-					Domain: name + "." + a.config.Agent.AgentName + a.domainSuffix,
-					Type:   "k8ssvc",
+					Domain:   name + "." + a.config.Agent.AgentName + a.domainSuffix,
+					Type:     "k8ssvc",
+					TargetIp: agentIP,
 				})
 			}
 		}

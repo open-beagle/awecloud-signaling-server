@@ -418,6 +418,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					// 域名管理
 					domainAPI := api.NewDomainAPI()
 					adminAuthGroup.GET("/domains", domainAPI.List)
+					adminAuthGroup.POST("/domains/refresh", domainAPI.Refresh)
 					adminAuthGroup.DELETE("/domains/:id", domainAPI.Delete)
 					adminAuthGroup.PUT("/domains/offline/:user_id", domainAPI.SetOffline)
 
