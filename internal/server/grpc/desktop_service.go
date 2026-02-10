@@ -1430,14 +1430,23 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 		return &pb.ResolveDomainResponse{Success: false, Message: "域名未注册或已离线"}, nil
 	}
 
-	// 查询注册该域名的用户的节点 IP（Agent 或 Client 模式的 Agent）
+	// 查询节点 IP：优先用域名记录关联的 NodeID，回退到按 UserID 查
 	var agentNode model.Node
 	agentIP := ""
-	if err := db.DB.WithContext(ctx).
-		Where("user_id = ? AND ip != ''", record.UserID).
-		Order("last_heartbeat DESC").
-		First(&agentNode).Error; err == nil {
-		agentIP = agentNode.IP
+	if record.NodeID > 0 {
+		// 精确匹配：域名注册时关联了具体的 Node
+		if err := db.DB.WithContext(ctx).First(&agentNode, record.NodeID).Error; err == nil {
+			agentIP = agentNode.IP
+		}
+	}
+	if agentIP == "" {
+		// 回退：按 UserID 查有 IP 的节点（兼容旧数据）
+		if err := db.DB.WithContext(ctx).
+			Where("user_id = ? AND ip != ''", record.UserID).
+			Order("last_heartbeat DESC").
+			First(&agentNode).Error; err == nil {
+			agentIP = agentNode.IP
+		}
 	}
 
 	if agentIP == "" {
