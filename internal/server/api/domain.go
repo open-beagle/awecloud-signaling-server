@@ -184,10 +184,10 @@ func (a *DomainAPI) Refresh(c *gin.Context) {
 
 	updated := 0
 	for _, d := range domains {
-		// 通过 user_id 查找该用户的 Agent 类型 Node，获取 IP
+		// 通过 user_id 查找该用户的 Node（Agent 或 Desktop），获取 IP
 		var node model.Node
 		if err := db.DB.WithContext(ctx).
-			Where("user_id = ? AND type = ? AND ip != ''", d.UserID, model.NodeTypeAgent).
+			Where("user_id = ? AND ip != ''", d.UserID).
 			First(&node).Error; err != nil {
 			continue
 		}

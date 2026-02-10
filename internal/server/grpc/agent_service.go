@@ -494,7 +494,7 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 
 	// 处理域名注册上报
 	if len(req.DomainRegistrations) > 0 {
-		s.handleDomainRegistrations(ctx, agentID, req.DomainRegistrations)
+		s.handleDomainRegistrations(ctx, agentID, req.DomainRegistrations, req.TunnelIp)
 	}
 }
 
@@ -692,7 +692,8 @@ func (s *AgentServiceServer) ReportNetworkChange(ctx context.Context, req *pb.Re
 // handleDomainRegistrations 处理 Agent 心跳中的域名注册上报
 // 逻辑：按 (domain, node_id) 或 (domain, endpoint_id) 联合唯一 upsert
 // 同一域名可有多条记录（不同 node_id），支持负载均衡
-func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agentID uint64, registrations []*pb.DomainRegistration) {
+// tunnelIp: Agent 的隧道 IP，当域名记录的 TargetIp 为空时自动填充
+func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agentID uint64, registrations []*pb.DomainRegistration, tunnelIp string) {
 	registered := 0
 	updated := 0
 
@@ -710,13 +711,19 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 			err = db.DB.WithContext(ctx).Where("domain = ? AND user_id = ? AND node_id = 0 AND endpoint_id = ''", reg.Domain, agentID).First(&existing).Error
 		}
 
+		// 当 TargetIp 为空时，使用 Agent 的隧道 IP 自动填充
+		targetIp := reg.TargetIp
+		if targetIp == "" && tunnelIp != "" {
+			targetIp = tunnelIp
+		}
+
 		record := model.DomainRegistry{
 			Domain:      reg.Domain,
 			Type:        model.DomainType(reg.Type),
 			UserID:      agentID,
 			NodeID:      reg.NodeId,
 			EndpointID:  reg.EndpointId,
-			TargetIP:    reg.TargetIp,
+			TargetIP:    targetIp,
 			TargetPort:  int(reg.TargetPort),
 			Namespace:   reg.Namespace,
 			ServiceName: reg.ServiceName,
@@ -737,7 +744,7 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 				"user_id":      agentID,
 				"node_id":      reg.NodeId,
 				"endpoint_id":  reg.EndpointId,
-				"target_ip":    reg.TargetIp,
+				"target_ip":    targetIp,
 				"target_port":  int(reg.TargetPort),
 				"namespace":    reg.Namespace,
 				"service_name": reg.ServiceName,
