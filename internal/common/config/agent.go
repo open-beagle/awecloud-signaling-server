@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -17,6 +18,8 @@ type AgentConfig struct {
 	Log       LogConfig        `toml:"log"`
 	Telemetry TelemetrySection `toml:"telemetry"`
 	CloudIDE  CloudIDESection  `toml:"cloudide"` // CloudIDE 专属配置
+	K8S       K8SSection       `toml:"k8s"`      // K8S API 代理配置
+	SVC       SVCSection       `toml:"svc"`      // K8S Service 发现配置
 }
 
 type HealthSection struct {
@@ -48,10 +51,27 @@ type VisitorSection struct {
 
 // CloudIDESection CloudIDE 专属配置
 type CloudIDESection struct {
-	SSHConfig  bool   `toml:"ssh_config"`   // 是否自动维护 ~/.ssh/config
-	Socks      bool   `toml:"socks"`        // 是否启用 SOCKS5 代理
-	SocksAddr  string `toml:"socks_addr"`   // SOCKS5 监听地址，默认 127.0.0.1:1080
-	DialSocket string `toml:"dial_socket"`  // dial 子命令的 Unix Socket 路径，默认 /tmp/signaling.sock
+	SSHConfig  bool   `toml:"ssh_config"`  // 是否自动维护 ~/.ssh/config
+	Socks      bool   `toml:"socks"`       // 是否启用 SOCKS5 代理
+	SocksAddr  string `toml:"socks_addr"`  // SOCKS5 监听地址，默认 127.0.0.1:1080
+	DialSocket string `toml:"dial_socket"` // dial 子命令的 Unix Socket 路径，默认 /tmp/signaling.sock
+}
+
+// K8SSection K8S API 代理配置
+type K8SSection struct {
+	Enabled    bool   `toml:"enabled"`     // 是否启用 K8S API 代理
+	Kubeconfig string `toml:"kubeconfig"`  // kubeconfig 路径（空则使用 InCluster）
+	APIServer  string `toml:"api_server"`  // K8S API Server 地址（可选覆盖）
+	ListenPort int    `toml:"listen_port"` // tsnet 监听端口，默认 6443
+}
+
+// SVCSection K8S Service 发现配置
+type SVCSection struct {
+	Enabled        bool     `toml:"enabled"`          // 是否启用 K8S Service 发现
+	Kubeconfig     string   `toml:"kubeconfig"`       // kubeconfig 路径（空则使用 InCluster）
+	LabelSelector  string   `toml:"label_selector"`   // Service 标签选择器（如 "signal.beagle.io/expose=true"）
+	Namespaces     []string `toml:"namespaces"`       // 监听的命名空间列表（空表示全部）
+	ListenPortBase int      `toml:"listen_port_base"` // tsnet gRPC 监听端口，默认 9090
 }
 
 // RegisterResult 统一注册接口的响应结果
@@ -181,6 +201,41 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 		cfg.CloudIDE.DialSocket = v
 	}
 
+	// K8S API 代理
+	if v := os.Getenv("SIGNAL_K8S_ENABLED"); v != "" {
+		cfg.K8S.Enabled = envBool(v)
+	}
+	if v := os.Getenv("SIGNAL_K8S_KUBECONFIG"); v != "" {
+		cfg.K8S.Kubeconfig = v
+	}
+	if v := os.Getenv("SIGNAL_K8S_API_SERVER"); v != "" {
+		cfg.K8S.APIServer = v
+	}
+	if v := os.Getenv("SIGNAL_K8S_LISTEN_PORT"); v != "" {
+		if port, err := strconv.Atoi(v); err == nil {
+			cfg.K8S.ListenPort = port
+		}
+	}
+
+	// K8S Service 发现
+	if v := os.Getenv("SIGNAL_SVC_ENABLED"); v != "" {
+		cfg.SVC.Enabled = envBool(v)
+	}
+	if v := os.Getenv("SIGNAL_SVC_KUBECONFIG"); v != "" {
+		cfg.SVC.Kubeconfig = v
+	}
+	if v := os.Getenv("SIGNAL_SVC_LABEL_SELECTOR"); v != "" {
+		cfg.SVC.LabelSelector = v
+	}
+	if v := os.Getenv("SIGNAL_SVC_NAMESPACES"); v != "" {
+		cfg.SVC.Namespaces = strings.Split(v, ",")
+	}
+	if v := os.Getenv("SIGNAL_SVC_LISTEN_PORT_BASE"); v != "" {
+		if port, err := strconv.Atoi(v); err == nil {
+			cfg.SVC.ListenPortBase = port
+		}
+	}
+
 	// 日志
 	if v := os.Getenv("SIGNAL_LOG_LEVEL"); v != "" {
 		cfg.Log.Level = v
@@ -228,6 +283,22 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 		cfg.CloudIDE.DialSocket = "/tmp/signaling.sock"
 	}
 
+	// K8S 默认值
+	if cfg.K8S.ListenPort == 0 {
+		cfg.K8S.ListenPort = 6443
+	}
+	if cfg.K8S.Kubeconfig == "" {
+		cfg.K8S.Kubeconfig = "~/.kube/config"
+	}
+
+	// SVC 默认值
+	if cfg.SVC.LabelSelector == "" {
+		cfg.SVC.LabelSelector = "signal.beagle.io/expose=true"
+	}
+	if cfg.SVC.ListenPortBase == 0 {
+		cfg.SVC.ListenPortBase = 9090
+	}
+
 	// Telemetry 默认值
 	if cfg.Telemetry.Name == "" {
 		cfg.Telemetry.Name = "signaling-agent"
@@ -262,6 +333,3 @@ func logDeprecation(oldKey, newKey string) {
 	// 注意：LoadAgentConfig 在 logger 初始化之前调用，所以先用 fmt
 	fmt.Fprintf(os.Stderr, "[WARN] 环境变量 %s 已弃用，请使用 %s\n", oldKey, newKey)
 }
-
-
-

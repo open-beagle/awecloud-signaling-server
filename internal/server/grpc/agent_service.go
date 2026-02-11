@@ -19,6 +19,18 @@ import (
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
+// parseJSONStringArray 解析 JSON 字符串数组
+func parseJSONStringArray(jsonStr string) []string {
+	if jsonStr == "" || jsonStr == "[]" {
+		return []string{}
+	}
+	var result []string
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return []string{}
+	}
+	return result
+}
+
 // AgentConnection Agent 连接信息
 type AgentConnection struct {
 	AgentID   uint64
@@ -416,6 +428,30 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 
 // handleHeartbeat 处理心跳请求
 func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64, req *pb.AgentHeartbeatRequest) {
+	// 处理 K8S Service 发现数据上报
+	if len(req.DiscoveredServices) > 0 {
+		discoveredServices := make([]cache.DiscoveredService, 0, len(req.DiscoveredServices))
+		for _, ds := range req.DiscoveredServices {
+			ports := make([]cache.DiscoveredServicePort, 0, len(ds.Ports))
+			for _, p := range ds.Ports {
+				ports = append(ports, cache.DiscoveredServicePort{
+					Name:     p.Name,
+					Port:     p.Port,
+					Protocol: p.Protocol,
+				})
+			}
+			discoveredServices = append(discoveredServices, cache.DiscoveredService{
+				Namespace:   ds.Namespace,
+				ServiceName: ds.ServiceName,
+				ClusterIP:   ds.ClusterIp,
+				Ports:       ports,
+				Labels:      ds.Labels,
+			})
+		}
+		cache.UpdateK8SServiceDiscovery(agentID, discoveredServices)
+		logger.Infof("Agent K8S Service 发现数据已更新: agent_id=%d, count=%d", agentID, len(discoveredServices))
+	}
+
 	// 查询用户角色，确定 Node 类型
 	var user model.User
 	nodeType := model.NodeTypeAgent
@@ -548,7 +584,149 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		}
 	}
 
+	// 查询该 Agent 的 K8S 授权信息
+	k8sPerms := s.queryK8SPermissions(ctx, agentID)
+	if len(k8sPerms) > 0 {
+		resp.K8SPermissions = k8sPerms
+	}
+
+	// 查询该 Agent 的 K8SService 授权信息
+	k8sSvcPerms := s.queryK8SServicePermissions(ctx, agentID)
+	if len(k8sSvcPerms) > 0 {
+		resp.K8SServicePermissions = k8sSvcPerms
+	}
+
 	return stream.Send(resp)
+}
+
+// queryK8SPermissions 查询 Agent 的 K8S API 授权列表
+// 包含直接用户授权和分组授权（展开分组成员）
+func (s *AgentServiceServer) queryK8SPermissions(ctx context.Context, agentID uint64) []*pb.K8SPermission {
+	var result []*pb.K8SPermission
+
+	// 1. 查询直接用户授权
+	var userPerms []model.AclK8SUserPermission
+	if err := db.DB.WithContext(ctx).Preload("User").
+		Where("target_user_id = ? AND enabled = ?", agentID, true).
+		Find(&userPerms).Error; err != nil {
+		logger.Errorf("查询 K8S 用户授权失败: %v", err)
+		return nil
+	}
+
+	for _, p := range userPerms {
+		if p.User == nil {
+			continue
+		}
+		result = append(result, &pb.K8SPermission{
+			UserId:     p.UserID,
+			UserName:   p.User.Name,
+			K8SGroups:  parseJSONStringArray(p.K8SGroups),
+			Namespaces: parseJSONStringArray(p.Namespaces),
+			IsGroup:    false,
+		})
+	}
+
+	// 2. 查询分组授权，展开分组成员
+	var groupPerms []model.AclK8SGroupPermission
+	if err := db.DB.WithContext(ctx).
+		Where("target_user_id = ? AND enabled = ?", agentID, true).
+		Find(&groupPerms).Error; err != nil {
+		logger.Errorf("查询 K8S 分组授权失败: %v", err)
+		return result
+	}
+
+	for _, gp := range groupPerms {
+		k8sGroups := parseJSONStringArray(gp.K8SGroups)
+		namespaces := parseJSONStringArray(gp.Namespaces)
+
+		// 展开分组成员
+		var members []model.GroupMember
+		if err := db.DB.WithContext(ctx).Preload("User").
+			Where("group_id = ?", gp.GroupID).
+			Find(&members).Error; err != nil {
+			logger.Errorf("查询分组成员失败: group_id=%d, err=%v", gp.GroupID, err)
+			continue
+		}
+
+		for _, m := range members {
+			if m.User == nil {
+				continue
+			}
+			result = append(result, &pb.K8SPermission{
+				UserId:     m.UserID,
+				UserName:   m.User.Name,
+				K8SGroups:  k8sGroups,
+				Namespaces: namespaces,
+				IsGroup:    true,
+			})
+		}
+	}
+
+	return result
+}
+
+// queryK8SServicePermissions 查询 Agent 的 K8S Service 授权列表
+func (s *AgentServiceServer) queryK8SServicePermissions(ctx context.Context, agentID uint64) []*pb.K8SServicePermission {
+	var result []*pb.K8SServicePermission
+
+	// 1. 查询直接用户授权
+	var userPerms []model.AclK8SServiceUserPermission
+	if err := db.DB.WithContext(ctx).Preload("User").
+		Where("target_user_id = ? AND enabled = ?", agentID, true).
+		Find(&userPerms).Error; err != nil {
+		logger.Errorf("查询 K8SService 用户授权失败: %v", err)
+		return nil
+	}
+
+	for _, p := range userPerms {
+		if p.User == nil {
+			continue
+		}
+		result = append(result, &pb.K8SServicePermission{
+			UserId:       p.UserID,
+			UserName:     p.User.Name,
+			Namespaces:   parseJSONStringArray(p.Namespaces),
+			ServiceNames: parseJSONStringArray(p.ServiceNames),
+			IsGroup:      false,
+		})
+	}
+
+	// 2. 查询分组授权，展开分组成员
+	var groupPerms []model.AclK8SServiceGroupPermission
+	if err := db.DB.WithContext(ctx).
+		Where("target_user_id = ? AND enabled = ?", agentID, true).
+		Find(&groupPerms).Error; err != nil {
+		logger.Errorf("查询 K8SService 分组授权失败: %v", err)
+		return result
+	}
+
+	for _, gp := range groupPerms {
+		namespaces := parseJSONStringArray(gp.Namespaces)
+		serviceNames := parseJSONStringArray(gp.ServiceNames)
+
+		var members []model.GroupMember
+		if err := db.DB.WithContext(ctx).Preload("User").
+			Where("group_id = ?", gp.GroupID).
+			Find(&members).Error; err != nil {
+			logger.Errorf("查询分组成员失败: group_id=%d, err=%v", gp.GroupID, err)
+			continue
+		}
+
+		for _, m := range members {
+			if m.User == nil {
+				continue
+			}
+			result = append(result, &pb.K8SServicePermission{
+				UserId:       m.UserID,
+				UserName:     m.User.Name,
+				Namespaces:   namespaces,
+				ServiceNames: serviceNames,
+				IsGroup:      true,
+			})
+		}
+	}
+
+	return result
 }
 
 // GetRealtimeStatus 获取 Agent 实时状态

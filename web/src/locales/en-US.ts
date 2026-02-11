@@ -86,6 +86,13 @@ export default {
     aclUsers: 'User Auth',
     aclGroups: 'Group Auth',
     aclSSH: 'SSH Auth',
+    aclK8S: 'K8S Auth',
+    aclK8SService: 'K8S Service Auth',
+    endpoints: 'Endpoints',
+    endpointSSH: 'SSH',
+    endpointK8SAPI: 'K8S API',
+    endpointK8SService: 'K8S Service',
+    resources: 'Resources',
     tunnel: 'Tunnel',
     tunnelUsers: 'User Management',
     tunnelNodes: 'Node Management',
@@ -278,7 +285,27 @@ export default {
     sshUsersRequired: 'Please select at least one SSH user',
     searchSSHPlaceholder: 'Search agent name',
     addSSHUserAuth: 'Add SSH User Authorization',
-    addSSHGroupAuth: 'Add SSH Group Authorization'
+    addSSHGroupAuth: 'Add SSH Group Authorization',
+    // K8S Auth
+    k8sInfo: 'K8S Info',
+    k8sGroups: 'K8S Groups',
+    k8sGroupsPlaceholder: 'Select or enter K8S groups',
+    k8sGroupsTip: 'Controls K8S Impersonation groups for the user',
+    k8sGroupsRequired: 'Please enter at least one K8S group',
+    namespaces: 'Namespaces',
+    namespacesPlaceholder: 'Select or enter namespaces, leave empty for all',
+    namespacesTip: 'Controls which namespaces the user can access, leave empty for all',
+    searchK8SPlaceholder: 'Search agent name',
+    addK8SUserAuth: 'Add K8S User Authorization',
+    addK8SGroupAuth: 'Add K8S Group Authorization',
+    // K8SService Auth
+    k8sServiceInfo: 'K8S Service Info',
+    serviceNames: 'Service Names',
+    serviceNamesPlaceholder: 'Select or enter service names, leave empty for all',
+    serviceNamesTip: 'Controls which services the user can access, leave empty for all',
+    searchK8SServicePlaceholder: 'Search agent name',
+    addK8SServiceUserAuth: 'Add K8S Service User Authorization',
+    addK8SServiceGroupAuth: 'Add K8S Service Group Authorization'
   },
   audit: {
     title: 'Audit Logs',
@@ -351,5 +378,48 @@ export default {
     typeK8SSVC: 'K8S Service',
     refresh: 'Refresh',
     refreshSuccess: 'Refresh successful'
+  },
+  endpoint: {
+    name: 'Name',
+    alias: 'Alias',
+    ownerAgent: 'Owner Agent',
+    selectAgent: 'Please select an agent',
+    nameRequired: 'Name is required',
+    searchPlaceholder: 'Search endpoint',
+    // SSH
+    host: 'Host',
+    port: 'Port',
+    sshUsers: 'SSH Users',
+    hostRequired: 'Host is required',
+    portRequired: 'Port is required',
+    createSSH: 'Create SSH Endpoint',
+    editSSH: 'Edit SSH Endpoint',
+    // K8SAPI
+    apiServer: 'API Server',
+    apiServerPlaceholder: 'Leave empty to auto-detect from kubeconfig',
+    autoDetect: 'Auto Detect',
+    kubeconfigRef: 'Kubeconfig Ref',
+    kubeconfigRefPlaceholder: 'Kubeconfig path or Secret name',
+    createK8SAPI: 'Create K8S API Endpoint',
+    editK8SAPI: 'Edit K8S API Endpoint',
+    // K8SService
+    namespace: 'Namespace',
+    serviceName: 'Service Name',
+    targetPort: 'Target Port',
+    namespaceRequired: 'Namespace is required',
+    serviceNameRequired: 'Service name is required',
+    targetPortRequired: 'Target port is required',
+    createK8SService: 'Create K8S Service Endpoint',
+    editK8SService: 'Edit K8S Service Endpoint'
+  },
+  resource: {
+    title: 'Resource Discovery',
+    agentName: 'Agent Name',
+    namespace: 'Namespace',
+    serviceName: 'Service Name',
+    clusterIP: 'Cluster IP',
+    ports: 'Ports',
+    labels: 'Labels',
+    searchPlaceholder: 'Search agent, namespace or service name'
   }
 }

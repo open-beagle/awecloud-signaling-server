@@ -94,7 +94,46 @@ const items = computed(() => {
     breadcrumbs.push({ title: `授权详情: ${sshName}` })
   }
   
-  // 8. 隧道管理
+  // 8. 授权管理 - K8S 授权
+  else if (path === '/acl/k8s') {
+    breadcrumbs.push({ title: '授权管理' })
+    breadcrumbs.push({ path: '/acl/k8s', title: 'K8S 授权' })
+  } else if (path.match(/^\/acl\/k8s\/\d+$/)) {
+    const k8sName = (route.query.name as string) || `#${route.params.id}`
+    breadcrumbs.push({ title: '授权管理' })
+    breadcrumbs.push({ path: '/acl/k8s', title: 'K8S 授权' })
+    breadcrumbs.push({ title: `授权详情: ${k8sName}` })
+  }
+  
+  // 9. 授权管理 - K8S Service 授权
+  else if (path === '/acl/k8s-service') {
+    breadcrumbs.push({ title: '授权管理' })
+    breadcrumbs.push({ path: '/acl/k8s-service', title: 'K8S Service 授权' })
+  } else if (path.match(/^\/acl\/k8s-service\/\d+$/)) {
+    const k8sSvcName = (route.query.name as string) || `#${route.params.id}`
+    breadcrumbs.push({ title: '授权管理' })
+    breadcrumbs.push({ path: '/acl/k8s-service', title: 'K8S Service 授权' })
+    breadcrumbs.push({ title: `授权详情: ${k8sSvcName}` })
+  }
+  
+  // 10. Endpoint 管理
+  else if (path === '/endpoints/ssh') {
+    breadcrumbs.push({ title: 'Endpoint 管理' })
+    breadcrumbs.push({ path: '/endpoints/ssh', title: 'SSH' })
+  } else if (path === '/endpoints/k8sapi') {
+    breadcrumbs.push({ title: 'Endpoint 管理' })
+    breadcrumbs.push({ path: '/endpoints/k8sapi', title: 'K8S API' })
+  } else if (path === '/endpoints/k8sservice') {
+    breadcrumbs.push({ title: 'Endpoint 管理' })
+    breadcrumbs.push({ path: '/endpoints/k8sservice', title: 'K8S Service' })
+  }
+  
+  // 11. 资源发现
+  else if (path === '/resources') {
+    breadcrumbs.push({ path: '/resources', title: '资源发现' })
+  }
+  
+  // 12. 隧道管理
   else if (path === '/tunnel/users') {
     breadcrumbs.push({ title: '隧道管理' })
     breadcrumbs.push({ path: '/tunnel/users', title: 'User 管理' })
@@ -109,22 +148,22 @@ const items = computed(() => {
     breadcrumbs.push({ path: '/tunnel/ssh', title: 'SSH 策略' })
   }
   
-  // 9. 域名管理
+  // 13. 域名管理
   else if (path === '/domains') {
     breadcrumbs.push({ path: '/domains', title: '域名管理' })
   }
   
-  // 10. 审计日志
+  // 14. 审计日志
   else if (path === '/audit-logs') {
     breadcrumbs.push({ path: '/audit-logs', title: '审计日志' })
   }
   
-  // 11. 系统配置
+  // 15. 系统配置
   else if (path === '/system/config') {
     breadcrumbs.push({ path: '/system/config', title: '系统配置' })
   }
   
-  // 12. 下载页面
+  // 16. 下载页面
   else if (path === '/download') {
     breadcrumbs.push({ path: '/download', title: '客户端下载' })
   }

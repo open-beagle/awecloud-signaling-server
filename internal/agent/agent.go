@@ -45,6 +45,12 @@ type Agent struct {
 	visitorManager *VisitorManager
 	tailscaleIP    string
 
+	// K8S 能力（P1 新增）
+	permCache   *PermissionCache    // 权限缓存
+	k8sAPIProxy *K8SAPIProxy        // K8S API 反向代理
+	svcInformer *K8SServiceInformer // K8S Service Informer
+	svcProxy    *K8SSVCProxy        // K8S Service gRPC 代理
+
 	// 网络信息
 	networkInfo *NetworkInfo
 	lanDetector *LANDetector
@@ -100,6 +106,23 @@ func (a *Agent) Run() error {
 		return fmt.Errorf("注册失败: %w", err)
 	}
 
+	// 初始化权限缓存（K8S 模块共用）
+	a.permCache = NewPermissionCache()
+
+	// 启动 K8S API 代理（如果配置启用）
+	if a.config.K8S.Enabled {
+		if err := a.startK8SAPIProxy(); err != nil {
+			logger.Warnf("启动 K8S API 代理失败: %v", err)
+		}
+	}
+
+	// 启动 K8S Service 发现和代理（如果配置启用）
+	if a.config.SVC.Enabled {
+		if err := a.startK8SServiceModules(); err != nil {
+			logger.Warnf("启动 K8S Service 模块失败: %v", err)
+		}
+	}
+
 	// 启动心跳流（双向流，用于同步配置）
 	a.wg.Add(1)
 	go a.heartbeatLoop()
@@ -111,6 +134,17 @@ func (a *Agent) Run() error {
 
 	logger.Info("正在关闭Agent...")
 	a.cancel()
+
+	// 停止 K8S 模块
+	if a.k8sAPIProxy != nil {
+		a.k8sAPIProxy.Stop()
+	}
+	if a.svcProxy != nil {
+		a.svcProxy.Stop()
+	}
+	if a.svcInformer != nil {
+		a.svcInformer.Stop()
+	}
 
 	// 停止 Tailscale
 	if a.tsManager != nil {
@@ -512,6 +546,26 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 		}
 	}
 
+	// 添加 K8S Service 发现数据
+	if a.svcInformer != nil {
+		for _, svc := range a.svcInformer.GetDiscoveredServices() {
+			ds := &pb.DiscoveredK8SService{
+				Namespace:   svc.Namespace,
+				ServiceName: svc.Name,
+				ClusterIp:   svc.ClusterIP,
+				Labels:      svc.Labels,
+			}
+			for _, p := range svc.Ports {
+				ds.Ports = append(ds.Ports, &pb.ServicePort{
+					Name:     p.Name,
+					Port:     p.Port,
+					Protocol: p.Protocol,
+				})
+			}
+			req.DiscoveredServices = append(req.DiscoveredServices, ds)
+		}
+	}
+
 	// 构建域名注册列表
 	req.DomainRegistrations = a.buildDomainRegistrations()
 
@@ -523,6 +577,16 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 	// 更新域名后缀
 	if resp.DomainSuffix != "" {
 		a.domainSuffix = resp.DomainSuffix
+	}
+
+	// 同步 K8S 权限到本地缓存（每次心跳都更新，不受 configVersion 控制）
+	if a.permCache != nil {
+		if len(resp.K8SPermissions) > 0 {
+			a.permCache.UpdateK8SPermissions(resp.K8SPermissions)
+		}
+		if len(resp.K8SServicePermissions) > 0 {
+			a.permCache.UpdateK8SServicePermissions(resp.K8SServicePermissions)
+		}
 	}
 
 	// 检查配置版本
@@ -683,7 +747,88 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		}
 	}
 
+	// 3. K8S API 域名：api.{agent_name}{domain_suffix}:6443
+	if a.config.K8S.Enabled && a.k8sAPIProxy != nil && a.tsManager != nil && a.tsManager.IsConnected() {
+		registrations = append(registrations, &pb.DomainRegistration{
+			Domain:     "api." + a.config.Agent.AgentName + a.domainSuffix,
+			Type:       "k8sapi",
+			TargetIp:   agentIP,
+			TargetPort: int32(a.config.K8S.ListenPort),
+		})
+	}
+
+	// 4. K8S Service 域名：{service}.{namespace}.{agent_name}{domain_suffix}
+	if a.config.SVC.Enabled && a.svcInformer != nil && a.tsManager != nil && a.tsManager.IsConnected() {
+		for _, svc := range a.svcInformer.GetDiscoveredServices() {
+			// 使用 alias 或 service name 作为域名前缀
+			prefix := svc.Name
+			if svc.Alias != "" {
+				prefix = svc.Alias
+			}
+			domain := prefix + "." + svc.Namespace + "." + a.config.Agent.AgentName + a.domainSuffix
+
+			// 为每个端口注册一条域名
+			for range svc.Ports {
+				registrations = append(registrations, &pb.DomainRegistration{
+					Domain:      domain,
+					Type:        "k8ssvc",
+					TargetIp:    agentIP,
+					TargetPort:  int32(a.config.SVC.ListenPortBase),
+					Namespace:   svc.Namespace,
+					ServiceName: svc.Name,
+				})
+				// 只注册第一个端口的域名（避免重复域名）
+				break
+			}
+		}
+	}
+
 	return registrations
+}
+
+// startK8SAPIProxy 启动 K8S API 代理
+func (a *Agent) startK8SAPIProxy() error {
+	proxy, err := NewK8SAPIProxy(&a.config.K8S, a.tsManager, a.permCache, a.ctx)
+	if err != nil {
+		return fmt.Errorf("创建 K8S API 代理失败: %w", err)
+	}
+
+	if err := proxy.Start(); err != nil {
+		return fmt.Errorf("启动 K8S API 代理失败: %w", err)
+	}
+
+	a.k8sAPIProxy = proxy
+	logger.Infof("K8S API 代理已启用: 端口 %d", a.config.K8S.ListenPort)
+	return nil
+}
+
+// startK8SServiceModules 启动 K8S Service 发现和代理模块
+func (a *Agent) startK8SServiceModules() error {
+	// 启动 Informer
+	informer, err := NewK8SServiceInformer(&a.config.SVC, nil, a.ctx)
+	if err != nil {
+		return fmt.Errorf("创建 K8S Service Informer 失败: %w", err)
+	}
+
+	if err := informer.Start(); err != nil {
+		return fmt.Errorf("启动 K8S Service Informer 失败: %w", err)
+	}
+	a.svcInformer = informer
+
+	// 启动 SVCProxy gRPC 服务
+	svcProxy, err := NewK8SSVCProxy(&a.config.SVC, a.tsManager, a.permCache, informer, a.ctx)
+	if err != nil {
+		return fmt.Errorf("创建 K8S SVCProxy 失败: %w", err)
+	}
+
+	if err := svcProxy.Start(); err != nil {
+		return fmt.Errorf("启动 K8S SVCProxy 失败: %w", err)
+	}
+	a.svcProxy = svcProxy
+
+	logger.Infof("K8S Service 模块已启用: selector=%s, gRPC 端口=%d",
+		a.config.SVC.LabelSelector, a.config.SVC.ListenPortBase)
+	return nil
 }
 
 // startHealthServer 启动健康检查HTTP服务器

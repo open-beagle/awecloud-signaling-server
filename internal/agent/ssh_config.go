@@ -1,5 +1,5 @@
 // Package agent 提供 Agent 端功能
-// ssh_config.go 自动维护 ~/.ssh/config，添加 *.k8s 的 ProxyCommand 配置
+// ssh_config.go 自动维护 ~/.ssh/config，添加 *.beagle 的 ProxyCommand 配置
 package agent
 
 import (

@@ -135,7 +135,7 @@ const handleReset = () => {
 
 // 查看详情
 const handleView = (row: SSHACLItem) => {
-  router.push(`/acl/ssh/${row.id}`)
+  router.push({ path: `/acl/ssh/${row.id}`, query: { name: row.name } })
 }
 
 onMounted(() => {

@@ -35,6 +35,17 @@ const (
 	ActionRemoveGroupMember  = "remove_group_member"
 	ActionUpdateSystemConfig = "update_system_config"
 
+	// K8S ACL 操作
+	ActionGrantK8SACL         = "grant_k8s_acl"
+	ActionRevokeK8SACL        = "revoke_k8s_acl"
+	ActionGrantK8SServiceACL  = "grant_k8s_service_acl"
+	ActionRevokeK8SServiceACL = "revoke_k8s_service_acl"
+
+	// Endpoint 操作
+	ActionCreateEndpoint = "create_endpoint"
+	ActionUpdateEndpoint = "update_endpoint"
+	ActionDeleteEndpoint = "delete_endpoint"
+
 	// 隧道管理操作
 	ActionUpdateTunnelUser = "update_tunnel_user"
 	ActionDeleteTunnelUser = "delete_tunnel_user"

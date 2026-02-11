@@ -121,7 +121,7 @@ const handleReset = () => {
 
 // 查看详情
 const handleView = (row: GroupACLItem) => {
-  router.push(`/acl/groups/${row.id}`)
+  router.push({ path: `/acl/groups/${row.id}`, query: { name: row.name } })
 }
 
 onMounted(() => {

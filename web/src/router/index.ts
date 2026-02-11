@@ -116,6 +116,58 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ACL/SSHDetail.vue'),
         meta: { requiresAuth: true }
       },
+      // K8S 授权
+      {
+        path: 'acl/k8s',
+        name: 'ACLK8S',
+        component: () => import('@/views/ACL/K8SList.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'acl/k8s/:id',
+        name: 'ACLK8SDetail',
+        component: () => import('@/views/ACL/K8SDetail.vue'),
+        meta: { requiresAuth: true }
+      },
+      // K8SService 授权
+      {
+        path: 'acl/k8s-service',
+        name: 'ACLK8SService',
+        component: () => import('@/views/ACL/K8SServiceList.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'acl/k8s-service/:id',
+        name: 'ACLK8SServiceDetail',
+        component: () => import('@/views/ACL/K8SServiceDetail.vue'),
+        meta: { requiresAuth: true }
+      },
+      // Endpoint 管理
+      {
+        path: 'endpoints/ssh',
+        name: 'EndpointSSH',
+        component: () => import('@/views/Endpoint/SSHList.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'endpoints/k8sapi',
+        name: 'EndpointK8SAPI',
+        component: () => import('@/views/Endpoint/K8SAPIList.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'endpoints/k8sservice',
+        name: 'EndpointK8SService',
+        component: () => import('@/views/Endpoint/K8SServiceList.vue'),
+        meta: { requiresAuth: true }
+      },
+      // 资源发现
+      {
+        path: 'resources',
+        name: 'Resources',
+        component: () => import('@/views/Resource/List.vue'),
+        meta: { requiresAuth: true }
+      },
       // 隧道管理（保留旧路由）
       {
         path: 'tunnel/users',

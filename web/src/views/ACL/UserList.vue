@@ -123,7 +123,7 @@ const handleReset = () => {
 
 // 查看详情
 const handleView = (row: UserACLItem) => {
-  router.push(`/acl/users/${row.id}`)
+  router.push({ path: `/acl/users/${row.id}`, query: { name: row.name } })
 }
 
 onMounted(() => {

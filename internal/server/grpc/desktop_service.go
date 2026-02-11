@@ -17,6 +17,7 @@ import (
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/cache"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
@@ -1407,7 +1408,7 @@ func (s *DesktopServiceServer) NotifyAllDesktopsDataChange(dataType pb.DesktopDa
 	}
 }
 
-// ResolveDomain 域名解析 - Desktop 查询 .k8s 域名对应的 Agent 地址
+// ResolveDomain 域名解析 - Desktop 查询 .beagle 域名对应的 Agent 地址
 func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.ResolveDomainRequest) (*pb.ResolveDomainResponse, error) {
 	if req.Domain == "" {
 		return &pb.ResolveDomainResponse{Success: false, Message: "域名不能为空"}, nil
@@ -1463,12 +1464,224 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 	logger.Infof("Desktop %d 解析域名: %s → %s:%d (user=%s, target_ip=%s)", req.DesktopId, req.Domain, agentIP, record.TargetPort, userName, record.TargetIP)
 
 	return &pb.ResolveDomainResponse{
-		Success:    true,
-		Message:    "解析成功",
-		Domain:     record.Domain,
-		AgentIp:    agentIP,
-		TargetPort: int32(record.TargetPort),
-		AgentName:  userName,
-		DomainType: string(record.Type),
+		Success:      true,
+		Message:      "解析成功",
+		Domain:       record.Domain,
+		AgentIp:      agentIP,
+		TargetPort:   int32(record.TargetPort),
+		AgentName:    userName,
+		DomainType:   string(record.Type),
+		Namespace:    record.Namespace,
+		ServiceName:  record.ServiceName,
+		SvcProxyPort: 9090, // Agent SVCProxy 默认端口
 	}, nil
+}
+
+// GetResources 资源发现 - Desktop 查询可访问的资源列表
+func (s *DesktopServiceServer) GetResources(ctx context.Context, req *pb.GetResourcesRequest) (*pb.GetResourcesResponse, error) {
+	// 验证 Desktop 是否存在
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, req.DesktopId).Error; err != nil {
+		return nil, status.Errorf(codes.NotFound, "设备不存在")
+	}
+	if node.Type != model.NodeTypeDesktop {
+		return nil, status.Errorf(codes.InvalidArgument, "设备类型错误")
+	}
+
+	clientID := node.UserID
+
+	// 查询用户所属分组
+	var groupIDs []int64
+	var groupMembers []model.GroupMember
+	if err := db.DB.WithContext(ctx).Where("user_id = ?", clientID).Find(&groupMembers).Error; err == nil {
+		for _, gm := range groupMembers {
+			groupIDs = append(groupIDs, gm.GroupID)
+		}
+	}
+
+	resp := &pb.GetResourcesResponse{}
+
+	// 1. 查询 SSH 资源
+	resp.Ssh = s.querySSHResourcesGRPC(ctx, clientID, groupIDs)
+
+	// 2. 查询 K8S API 资源
+	resp.K8SApi = s.queryK8SAPIResourcesGRPC(ctx, clientID, groupIDs)
+
+	// 3. 查询 K8S Service 资源
+	resp.K8SService = s.queryK8SServiceResourcesGRPC(ctx, clientID, groupIDs)
+
+	logger.Infof("Desktop %d 资源发现: SSH=%d, K8SAPI=%d, K8SService=%d",
+		req.DesktopId, len(resp.Ssh), len(resp.K8SApi), len(resp.K8SService))
+
+	return resp, nil
+}
+
+// querySSHResourcesGRPC 查询 SSH 资源（gRPC 版本）
+func (s *DesktopServiceServer) querySSHResourcesGRPC(ctx context.Context, clientID uint64, groupIDs []int64) []*pb.SSHResource {
+	var resources []*pb.SSHResource
+	userCache := make(map[uint64]*model.User)
+
+	// 直接用户授权
+	var userPerms []model.AclSSHUserPermission
+	db.DB.WithContext(ctx).Preload("TargetUser").Where("user_id = ? AND enabled = ?", clientID, true).Find(&userPerms)
+	for _, p := range userPerms {
+		if p.TargetUser == nil {
+			continue
+		}
+		userCache[p.TargetUserID] = p.TargetUser
+		domain := s.findDomainForResource(ctx, p.TargetUserID, model.DomainTypeSSH)
+		resources = append(resources, &pb.SSHResource{
+			AgentId:   p.TargetUserID,
+			AgentName: p.TargetUser.Name,
+			Domain:    domain,
+			SshUsers:  parseJSONStringArrayGRPC(p.SSHUsers),
+		})
+	}
+
+	// 分组授权
+	if len(groupIDs) > 0 {
+		var groupPerms []model.AclSSHGroupPermission
+		db.DB.WithContext(ctx).Preload("TargetUser").Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&groupPerms)
+		for _, p := range groupPerms {
+			if p.TargetUser == nil {
+				continue
+			}
+			if _, exists := userCache[p.TargetUserID]; exists {
+				continue
+			}
+			userCache[p.TargetUserID] = p.TargetUser
+			domain := s.findDomainForResource(ctx, p.TargetUserID, model.DomainTypeSSH)
+			resources = append(resources, &pb.SSHResource{
+				AgentId:   p.TargetUserID,
+				AgentName: p.TargetUser.Name,
+				Domain:    domain,
+				SshUsers:  parseJSONStringArrayGRPC(p.SSHUsers),
+			})
+		}
+	}
+
+	return resources
+}
+
+// queryK8SAPIResourcesGRPC 查询 K8S API 资源（gRPC 版本）
+func (s *DesktopServiceServer) queryK8SAPIResourcesGRPC(ctx context.Context, clientID uint64, groupIDs []int64) []*pb.K8SAPIResource {
+	var resources []*pb.K8SAPIResource
+	userCache := make(map[uint64]*model.User)
+
+	var userPerms []model.AclK8SUserPermission
+	db.DB.WithContext(ctx).Preload("TargetUser").Where("user_id = ? AND enabled = ?", clientID, true).Find(&userPerms)
+	for _, p := range userPerms {
+		if p.TargetUser == nil {
+			continue
+		}
+		userCache[p.TargetUserID] = p.TargetUser
+		domain := s.findDomainForResource(ctx, p.TargetUserID, model.DomainTypeK8SAPI)
+		resources = append(resources, &pb.K8SAPIResource{
+			AgentId:    p.TargetUserID,
+			AgentName:  p.TargetUser.Name,
+			Domain:     domain,
+			K8SGroups:  parseJSONStringArrayGRPC(p.K8SGroups),
+			Namespaces: parseJSONStringArrayGRPC(p.Namespaces),
+		})
+	}
+
+	if len(groupIDs) > 0 {
+		var groupPerms []model.AclK8SGroupPermission
+		db.DB.WithContext(ctx).Preload("TargetUser").Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&groupPerms)
+		for _, p := range groupPerms {
+			if p.TargetUser == nil {
+				continue
+			}
+			if _, exists := userCache[p.TargetUserID]; exists {
+				continue
+			}
+			userCache[p.TargetUserID] = p.TargetUser
+			domain := s.findDomainForResource(ctx, p.TargetUserID, model.DomainTypeK8SAPI)
+			resources = append(resources, &pb.K8SAPIResource{
+				AgentId:    p.TargetUserID,
+				AgentName:  p.TargetUser.Name,
+				Domain:     domain,
+				K8SGroups:  parseJSONStringArrayGRPC(p.K8SGroups),
+				Namespaces: parseJSONStringArrayGRPC(p.Namespaces),
+			})
+		}
+	}
+
+	return resources
+}
+
+// queryK8SServiceResourcesGRPC 查询 K8S Service 资源（gRPC 版本）
+func (s *DesktopServiceServer) queryK8SServiceResourcesGRPC(ctx context.Context, clientID uint64, groupIDs []int64) []*pb.K8SServiceResource {
+	var resources []*pb.K8SServiceResource
+	agentIDs := make(map[uint64]*model.User)
+
+	var userPerms []model.AclK8SServiceUserPermission
+	db.DB.WithContext(ctx).Preload("TargetUser").Where("user_id = ? AND enabled = ?", clientID, true).Find(&userPerms)
+	for _, p := range userPerms {
+		if p.TargetUser != nil {
+			agentIDs[p.TargetUserID] = p.TargetUser
+		}
+	}
+
+	if len(groupIDs) > 0 {
+		var groupPerms []model.AclK8SServiceGroupPermission
+		db.DB.WithContext(ctx).Preload("TargetUser").Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&groupPerms)
+		for _, p := range groupPerms {
+			if p.TargetUser != nil {
+				agentIDs[p.TargetUserID] = p.TargetUser
+			}
+		}
+	}
+
+	for agentID, agentUser := range agentIDs {
+		discoveredServices := cache.GetK8SServiceDiscovery(agentID)
+		for _, ds := range discoveredServices {
+			var domainReg model.DomainRegistry
+			domain := ""
+			if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ? AND namespace = ? AND service_name = ?",
+				agentID, model.DomainTypeK8SSVC, ds.Namespace, ds.ServiceName).
+				First(&domainReg).Error; err == nil {
+				domain = domainReg.Domain
+			}
+
+			var port int32
+			if len(ds.Ports) > 0 {
+				port = ds.Ports[0].Port
+			}
+
+			resources = append(resources, &pb.K8SServiceResource{
+				AgentId:     agentID,
+				AgentName:   agentUser.Name,
+				Namespace:   ds.Namespace,
+				ServiceName: ds.ServiceName,
+				Domain:      domain,
+				Port:        port,
+			})
+		}
+	}
+
+	return resources
+}
+
+// findDomainForResource 查找指定 Agent 和类型的域名
+func (s *DesktopServiceServer) findDomainForResource(ctx context.Context, agentUserID uint64, domainType model.DomainType) string {
+	var domainReg model.DomainRegistry
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ? AND status = ?",
+		agentUserID, domainType, model.DomainStatusOnline).
+		First(&domainReg).Error; err == nil {
+		return domainReg.Domain
+	}
+	return ""
+}
+
+// parseJSONStringArrayGRPC 解析 JSON 字符串数组
+func parseJSONStringArrayGRPC(jsonStr string) []string {
+	if jsonStr == "" || jsonStr == "[]" {
+		return nil
+	}
+	var result []string
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil
+	}
+	return result
 }

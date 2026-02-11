@@ -86,6 +86,13 @@ export default {
     aclUsers: '用户授权',
     aclGroups: '分组授权',
     aclSSH: 'SSH 授权',
+    aclK8S: 'K8S 授权',
+    aclK8SService: 'K8S Service 授权',
+    endpoints: 'Endpoint 管理',
+    endpointSSH: 'SSH',
+    endpointK8SAPI: 'K8S API',
+    endpointK8SService: 'K8S Service',
+    resources: '资源发现',
     tunnel: '隧道管理',
     tunnelUsers: 'User 管理',
     tunnelNodes: 'Node 管理',
@@ -278,7 +285,27 @@ export default {
     sshUsersRequired: '请至少选择一个 SSH 用户',
     searchSSHPlaceholder: '搜索代理名称',
     addSSHUserAuth: '添加 SSH 用户授权',
-    addSSHGroupAuth: '添加 SSH 分组授权'
+    addSSHGroupAuth: '添加 SSH 分组授权',
+    // K8S 授权
+    k8sInfo: 'K8S 信息',
+    k8sGroups: 'K8S 分组',
+    k8sGroupsPlaceholder: '选择或输入 K8S 分组',
+    k8sGroupsTip: '控制用户在 K8S 中的 Impersonation 分组',
+    k8sGroupsRequired: '请至少输入一个 K8S 分组',
+    namespaces: '命名空间',
+    namespacesPlaceholder: '选择或输入命名空间，留空表示全部',
+    namespacesTip: '控制用户可访问的命名空间，留空表示全部',
+    searchK8SPlaceholder: '搜索代理名称',
+    addK8SUserAuth: '添加 K8S 用户授权',
+    addK8SGroupAuth: '添加 K8S 分组授权',
+    // K8SService 授权
+    k8sServiceInfo: 'K8S Service 信息',
+    serviceNames: '服务名称',
+    serviceNamesPlaceholder: '选择或输入服务名称，留空表示全部',
+    serviceNamesTip: '控制用户可访问的 Service，留空表示全部',
+    searchK8SServicePlaceholder: '搜索代理名称',
+    addK8SServiceUserAuth: '添加 K8S Service 用户授权',
+    addK8SServiceGroupAuth: '添加 K8S Service 分组授权'
   },
   audit: {
     title: '审计日志',
@@ -351,5 +378,48 @@ export default {
     typeK8SSVC: 'K8S Service',
     refresh: '更新',
     refreshSuccess: '更新成功'
+  },
+  endpoint: {
+    name: '名称',
+    alias: '别名',
+    ownerAgent: '所属代理',
+    selectAgent: '请选择代理',
+    nameRequired: '请输入名称',
+    searchPlaceholder: '搜索 Endpoint',
+    // SSH
+    host: '主机地址',
+    port: '端口',
+    sshUsers: 'SSH 用户',
+    hostRequired: '请输入主机地址',
+    portRequired: '请输入端口',
+    createSSH: '创建 SSH Endpoint',
+    editSSH: '编辑 SSH Endpoint',
+    // K8SAPI
+    apiServer: 'API Server',
+    apiServerPlaceholder: '留空从 kubeconfig 自动获取',
+    autoDetect: '自动检测',
+    kubeconfigRef: 'Kubeconfig 引用',
+    kubeconfigRefPlaceholder: 'kubeconfig 路径或 Secret 名称',
+    createK8SAPI: '创建 K8S API Endpoint',
+    editK8SAPI: '编辑 K8S API Endpoint',
+    // K8SService
+    namespace: '命名空间',
+    serviceName: '服务名称',
+    targetPort: '目标端口',
+    namespaceRequired: '请输入命名空间',
+    serviceNameRequired: '请输入服务名称',
+    targetPortRequired: '请输入目标端口',
+    createK8SService: '创建 K8S Service Endpoint',
+    editK8SService: '编辑 K8S Service Endpoint'
+  },
+  resource: {
+    title: '资源发现',
+    agentName: '代理名称',
+    namespace: '命名空间',
+    serviceName: '服务名称',
+    clusterIP: 'Cluster IP',
+    ports: '端口',
+    labels: '标签',
+    searchPlaceholder: '搜索代理、命名空间或服务名称'
   }
 }

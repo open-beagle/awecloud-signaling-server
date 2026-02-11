@@ -414,6 +414,41 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.POST("/acl/ssh/:id/groups", aclAPI.AddSSHACLGroups)
 					adminAuthGroup.DELETE("/acl/ssh/:id/users/:uid", aclAPI.RemoveSSHACLUser)
 					adminAuthGroup.DELETE("/acl/ssh/:id/groups/:gid", aclAPI.RemoveSSHACLGroup)
+					// K8S 授权
+					adminAuthGroup.GET("/acl/k8s", aclAPI.ListK8SACL)
+					adminAuthGroup.GET("/acl/k8s/:id", aclAPI.GetK8SACL)
+					adminAuthGroup.POST("/acl/k8s/:id/users", aclAPI.AddK8SACLUsers)
+					adminAuthGroup.POST("/acl/k8s/:id/groups", aclAPI.AddK8SACLGroups)
+					adminAuthGroup.DELETE("/acl/k8s/:id/users/:uid", aclAPI.RemoveK8SACLUser)
+					adminAuthGroup.DELETE("/acl/k8s/:id/groups/:gid", aclAPI.RemoveK8SACLGroup)
+					// K8SService 授权
+					adminAuthGroup.GET("/acl/k8s-service", aclAPI.ListK8SServiceACL)
+					adminAuthGroup.GET("/acl/k8s-service/:id", aclAPI.GetK8SServiceACL)
+					adminAuthGroup.POST("/acl/k8s-service/:id/users", aclAPI.AddK8SServiceACLUsers)
+					adminAuthGroup.POST("/acl/k8s-service/:id/groups", aclAPI.AddK8SServiceACLGroups)
+					adminAuthGroup.DELETE("/acl/k8s-service/:id/users/:uid", aclAPI.RemoveK8SServiceACLUser)
+					adminAuthGroup.DELETE("/acl/k8s-service/:id/groups/:gid", aclAPI.RemoveK8SServiceACLGroup)
+
+					// Endpoint 管理
+					endpointAPI := api.NewEndpointAPI(s.config)
+					// SSH Endpoint
+					adminAuthGroup.GET("/endpoints/ssh", endpointAPI.ListEndpointSSH)
+					adminAuthGroup.GET("/endpoints/ssh/:id", endpointAPI.GetEndpointSSH)
+					adminAuthGroup.POST("/endpoints/ssh", endpointAPI.CreateEndpointSSH)
+					adminAuthGroup.PUT("/endpoints/ssh/:id", endpointAPI.UpdateEndpointSSH)
+					adminAuthGroup.DELETE("/endpoints/ssh/:id", endpointAPI.DeleteEndpointSSH)
+					// K8SAPI Endpoint
+					adminAuthGroup.GET("/endpoints/k8sapi", endpointAPI.ListEndpointK8SAPI)
+					adminAuthGroup.GET("/endpoints/k8sapi/:id", endpointAPI.GetEndpointK8SAPI)
+					adminAuthGroup.POST("/endpoints/k8sapi", endpointAPI.CreateEndpointK8SAPI)
+					adminAuthGroup.PUT("/endpoints/k8sapi/:id", endpointAPI.UpdateEndpointK8SAPI)
+					adminAuthGroup.DELETE("/endpoints/k8sapi/:id", endpointAPI.DeleteEndpointK8SAPI)
+					// K8SService Endpoint
+					adminAuthGroup.GET("/endpoints/k8sservice", endpointAPI.ListEndpointK8SService)
+					adminAuthGroup.GET("/endpoints/k8sservice/:id", endpointAPI.GetEndpointK8SService)
+					adminAuthGroup.POST("/endpoints/k8sservice", endpointAPI.CreateEndpointK8SService)
+					adminAuthGroup.PUT("/endpoints/k8sservice/:id", endpointAPI.UpdateEndpointK8SService)
+					adminAuthGroup.DELETE("/endpoints/k8sservice/:id", endpointAPI.DeleteEndpointK8SService)
 
 					// 域名管理
 					domainAPI := api.NewDomainAPI()
@@ -421,6 +456,10 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.POST("/domains/refresh", domainAPI.Refresh)
 					adminAuthGroup.DELETE("/domains/:id", domainAPI.Delete)
 					adminAuthGroup.PUT("/domains/offline/:user_id", domainAPI.SetOffline)
+
+					// 资源发现（管理员查看 K8S Service 发现数据）
+					resourceAPI := api.NewResourceAPI(s.config)
+					adminAuthGroup.GET("/resources/k8s-services", resourceAPI.GetK8SServiceDiscoveries)
 
 					// 审计日志
 					auditAPI := api.NewAuditLogAPI()
@@ -468,6 +507,10 @@ func (s *Server) setupRouter() *gin.Engine {
 					// 域名解析（Desktop 查询）
 					clientDomainAPI := api.NewDomainAPI()
 					clientAuthGroup.GET("/dns/resolve", clientDomainAPI.Resolve)
+
+					// 资源发现（Desktop 查询可访问的资源）
+					clientResourceAPI := api.NewResourceAPI(s.config)
+					clientAuthGroup.GET("/resources", clientResourceAPI.GetResources)
 				}
 			}
 		}

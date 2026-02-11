@@ -43,9 +43,9 @@ Agent 部署在 K8S 主节点时，直接访问本机 K8S API Server，做 Imper
 agent.toml:
   [k8s]
   enabled = true
-  kubeconfig = "/etc/kubernetes/admin.conf"
-  api_server = "https://localhost:6443"
 ```
+
+kubeconfig 默认读取 `~/.kube/config`，也可通过环境变量 `SIGNAL_K8S_KUBECONFIG` 覆盖。api_server 留空时从 kubeconfig 自动获取，无需手动指定。
 
 ### 工作流程
 
@@ -108,7 +108,7 @@ AgentK8SService 和 AgentService（原 ProxyService）共存不冲突。AgentSer
 agent.toml:
   [svc]
   enabled = true
-  label_selector = "tailscale=true"
+  label_selector = "signal.beagle.io/expose=true"
   namespaces = []                     # 空 = 所有命名空间
 ```
 
@@ -126,18 +126,18 @@ Agent 启动时：
 
 ### 标签约定
 
-K8S 管理员通过给 Service 添加标签来控制暴露：
+K8S 管理员通过给 Service 添加标签来控制暴露。标签使用 `signal.beagle.io` 域名前缀，符合 K8S 标签规范，避免与其他项目冲突：
 
-| 标签            | 值     | 说明                   |
-| --------------- | ------ | ---------------------- |
-| tailscale       | "true" | 标记为可通过隧道访问   |
-| tailscale/alias | 自定义 | 自定义域名前缀（可选） |
+| 标签                        | 值     | 说明                   |
+| --------------------------- | ------ | ---------------------- |
+| signal.beagle.io/expose     | "true" | 标记为可通过隧道访问   |
+| signal.beagle.io/alias      | 自定义 | 自定义域名前缀（可选） |
 
 ### 发现流程
 
 ```
 K8S Service 变更事件
-  ├── Add: postgresql.yygl (5432, tailscale=true)
+  ├── Add: postgresql.yygl (5432, signal.beagle.io/expose=true)
   │     → tsnet 监听 :5432
   │     → 上报 Server（心跳）
   │     → 域名注册: pg.yygl.beijing.beagle:5432
@@ -157,11 +157,11 @@ K8S Service 变更事件
   <service_name>.<namespace>.<agent-name>.beagle
 
 使用 alias：
-  <tailscale/alias>.<namespace>.<agent-name>.beagle
+  <signal.beagle.io/alias>.<namespace>.<agent-name>.beagle
 
 示例：
   postgresql.yygl.beijing.beagle:5432     （默认）
-  pg.yygl.beijing.beagle:5432             （alias=pg）
+  pg.yygl.beijing.beagle:5432             （signal.beagle.io/alias=pg）
 ```
 
 ### 端口冲突处理
@@ -357,12 +357,10 @@ Agent 在现有配置基础上新增能力相关配置：
 
 [k8s]
 enabled = true
-kubeconfig = "/etc/kubernetes/admin.conf"
-api_server = "https://localhost:6443"
 
 [svc]
 enabled = true
-label_selector = "tailscale=true"
+label_selector = "signal.beagle.io/expose=true"
 namespaces = []
 
 [endpoint_server]

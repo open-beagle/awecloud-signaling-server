@@ -5,7 +5,6 @@
       <template #header>
         <div class="card-header">
           <span>{{ $t('acl.sshInfo') }}</span>
-          <el-button type="primary" link @click="router.back()">{{ $t('common.back') }}</el-button>
         </div>
       </template>
       <el-descriptions :column="2" border>
@@ -108,32 +107,69 @@
     </el-card>
 
     <!-- 添加用户授权弹窗 -->
-    <AddSSHUserDialog v-model="showAddUserDialog" :agent-id="sshId" @success="fetchSSH" />
+    <AuthGrantDialog
+      ref="addUserDialogRef"
+      v-model="showAddUserDialog"
+      :title="$t('acl.addSSHUserAuth')"
+      mode="user"
+      @confirm="handleConfirmUser"
+    >
+      <template #extra>
+        <el-form-item :label="$t('acl.sshUsers')" required>
+          <el-select v-model="extraForm.sshUsers" multiple filterable allow-create default-first-option :placeholder="$t('acl.sshUsersPlaceholder')" style="width: 100%">
+            <el-option label="root" value="root" />
+            <el-option label="autogroup:nonroot" value="autogroup:nonroot" />
+          </el-select>
+          <div class="form-tip">{{ $t('acl.sshUsersTip') }}</div>
+        </el-form-item>
+      </template>
+    </AuthGrantDialog>
     
     <!-- 添加分组授权弹窗 -->
-    <AddSSHGroupDialog v-model="showAddGroupDialog" :agent-id="sshId" @success="fetchSSH" />
+    <AuthGrantDialog
+      ref="addGroupDialogRef"
+      v-model="showAddGroupDialog"
+      :title="$t('acl.addSSHGroupAuth')"
+      mode="group"
+      @confirm="handleConfirmGroup"
+    >
+      <template #extra>
+        <el-form-item :label="$t('acl.sshUsers')" required>
+          <el-select v-model="extraForm.sshUsers" multiple filterable allow-create default-first-option :placeholder="$t('acl.sshUsersPlaceholder')" style="width: 100%">
+            <el-option label="root" value="root" />
+            <el-option label="autogroup:nonroot" value="autogroup:nonroot" />
+          </el-select>
+          <div class="form-tip">{{ $t('acl.sshUsersTip') }}</div>
+        </el-form-item>
+      </template>
+    </AuthGrantDialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, reactive, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
-import { getSSHACL, removeSSHACLUser, removeSSHACLGroup, type SSHACLDetail, type SSHACLPermissionItem } from '@/api/acl'
+import { getSSHACL, removeSSHACLUser, removeSSHACLGroup, addSSHACLUsers, addSSHACLGroups, type SSHACLDetail, type SSHACLPermissionItem } from '@/api/acl'
 import { formatTime } from '@/utils/time'
-import AddSSHUserDialog from './components/AddSSHUserDialog.vue'
-import AddSSHGroupDialog from './components/AddSSHGroupDialog.vue'
+import AuthGrantDialog from '@/components/Common/AuthGrantDialog.vue'
 
 const { t } = useI18n()
 const route = useRoute()
-const router = useRouter()
 
 const sshId = Number(route.params.id)
 const ssh = ref<SSHACLDetail | null>(null)
 const showAddUserDialog = ref(false)
 const showAddGroupDialog = ref(false)
+const addUserDialogRef = ref<InstanceType<typeof AuthGrantDialog>>()
+const addGroupDialogRef = ref<InstanceType<typeof AuthGrantDialog>>()
+
+// 额外参数表单
+const extraForm = reactive({
+  sshUsers: ['root'] as string[]
+})
 
 // 获取 SSH 详情
 const fetchSSH = async () => {
@@ -144,6 +180,46 @@ const fetchSSH = async () => {
     }
   } catch (error) {
     console.error('获取 SSH 详情失败:', error)
+  }
+}
+
+// 确认用户授权
+const handleConfirmUser = async (userIds: number[]) => {
+  addUserDialogRef.value?.setSubmitting(true)
+  try {
+    const res = await addSSHACLUsers(sshId, userIds, extraForm.sshUsers)
+    if (res?.success) {
+      ElMessage.success(t('acl.authSuccess'))
+      addUserDialogRef.value?.close()
+      extraForm.sshUsers = ['root']
+      fetchSSH()
+    } else {
+      ElMessage.error(res?.message || t('acl.authFailed'))
+    }
+  } catch {
+    ElMessage.error(t('acl.authFailed'))
+  } finally {
+    addUserDialogRef.value?.setSubmitting(false)
+  }
+}
+
+// 确认分组授权
+const handleConfirmGroup = async (groupIds: number[]) => {
+  addGroupDialogRef.value?.setSubmitting(true)
+  try {
+    const res = await addSSHACLGroups(sshId, groupIds, extraForm.sshUsers)
+    if (res?.success) {
+      ElMessage.success(t('acl.authSuccess'))
+      addGroupDialogRef.value?.close()
+      extraForm.sshUsers = ['root']
+      fetchSSH()
+    } else {
+      ElMessage.error(res?.message || t('acl.authFailed'))
+    }
+  } catch {
+    ElMessage.error(t('acl.authFailed'))
+  } finally {
+    addGroupDialogRef.value?.setSubmitting(false)
   }
 }
 

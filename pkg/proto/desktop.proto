@@ -48,8 +48,11 @@ service DesktopService {
   // 注销 - Desktop 安全离场
   rpc Logout(DesktopLogoutRequest) returns (DesktopLogoutResponse);
 
-  // 域名解析 - Desktop 查询 .k8s 域名对应的 Agent 地址
+  // 域名解析 - Desktop 查询域名对应的 Agent 地址（域名后缀可配置，默认 .beagle）
   rpc ResolveDomain(ResolveDomainRequest) returns (ResolveDomainResponse);
+
+  // 资源发现 - Desktop 查询可访问的资源列表
+  rpc GetResources(GetResourcesRequest) returns (GetResourcesResponse);
 }
 
 // ============================================
@@ -368,7 +371,7 @@ enum WaitForLoginResultStatus {
 // ResolveDomainRequest 域名解析请求
 message ResolveDomainRequest {
   uint64 desktop_id = 1; // Desktop ID
-  string domain = 2; // 要解析的域名（如 pg.yygl.beijing.k8s）
+  string domain = 2; // 要解析的域名（如 pg.yygl.beijing.beagle）
 }
 
 // ResolveDomainResponse 域名解析响应
@@ -380,4 +383,50 @@ message ResolveDomainResponse {
   int32 target_port = 5; // 目标端口
   string agent_name = 6; // Agent 名称
   string domain_type = 7; // 域名类型
+  string namespace = 8; // K8S 命名空间（k8ssvc 类型时）
+  string service_name = 9; // K8S Service 名称（k8ssvc 类型时）
+  int32 svc_proxy_port = 10; // Agent SVCProxy gRPC 端口（k8ssvc 类型时，默认 9090）
+}
+
+// ============================================
+// 资源发现
+// ============================================
+
+// GetResourcesRequest 资源发现请求
+message GetResourcesRequest {
+  uint64 desktop_id = 1; // Desktop ID
+}
+
+// SSHResource SSH 资源
+message SSHResource {
+  uint64 agent_id = 1;
+  string agent_name = 2;
+  string domain = 3;
+  repeated string ssh_users = 4;
+}
+
+// K8SAPIResource K8S API 资源
+message K8SAPIResource {
+  uint64 agent_id = 1;
+  string agent_name = 2;
+  string domain = 3;
+  repeated string k8s_groups = 4;
+  repeated string namespaces = 5;
+}
+
+// K8SServiceResource K8S Service 资源
+message K8SServiceResource {
+  uint64 agent_id = 1;
+  string agent_name = 2;
+  string namespace = 3;
+  string service_name = 4;
+  string domain = 5;
+  int32 port = 6;
+}
+
+// GetResourcesResponse 资源发现响应
+message GetResourcesResponse {
+  repeated SSHResource ssh = 1;
+  repeated K8SAPIResource k8s_api = 2;
+  repeated K8SServiceResource k8s_service = 3;
 }

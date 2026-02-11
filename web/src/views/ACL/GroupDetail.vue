@@ -5,7 +5,6 @@
       <template #header>
         <div class="card-header">
           <span>{{ $t('acl.groupInfo') }}</span>
-          <el-button type="primary" link @click="router.back()">{{ $t('common.back') }}</el-button>
         </div>
       </template>
       <el-descriptions :column="2" border>
@@ -69,32 +68,45 @@
     </el-card>
 
     <!-- 添加用户授权弹窗 -->
-    <AddUserDialog v-model="showAddUserDialog" type="group" :target-id="groupId" @success="fetchGroup" />
+    <AuthGrantDialog
+      ref="addUserDialogRef"
+      v-model="showAddUserDialog"
+      :title="$t('acl.addUserAuth')"
+      mode="user"
+      :client-only="false"
+      @confirm="handleConfirmUser"
+    />
     
     <!-- 添加分组授权弹窗 -->
-    <AddGroupDialog v-model="showAddGroupDialog" type="group" :target-id="groupId" @success="fetchGroup" />
+    <AuthGrantDialog
+      ref="addGroupDialogRef"
+      v-model="showAddGroupDialog"
+      :title="$t('acl.addGroupAuth')"
+      mode="group"
+      @confirm="handleConfirmGroup"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
-import { getGroupACL, removeGroupACLUser, removeGroupACLGroup, type GroupACLDetail, type ACLPermissionItem } from '@/api/acl'
+import { getGroupACL, removeGroupACLUser, removeGroupACLGroup, addGroupACLUsers, addGroupACLGroups, type GroupACLDetail, type ACLPermissionItem } from '@/api/acl'
 import { formatTime } from '@/utils/time'
-import AddUserDialog from './components/AddUserDialog.vue'
-import AddGroupDialog from './components/AddGroupDialog.vue'
+import AuthGrantDialog from '@/components/Common/AuthGrantDialog.vue'
 
 const { t } = useI18n()
 const route = useRoute()
-const router = useRouter()
 
 const groupId = Number(route.params.id)
 const group = ref<GroupACLDetail | null>(null)
 const showAddUserDialog = ref(false)
 const showAddGroupDialog = ref(false)
+const addUserDialogRef = ref<InstanceType<typeof AuthGrantDialog>>()
+const addGroupDialogRef = ref<InstanceType<typeof AuthGrantDialog>>()
 
 // 获取分组详情
 const fetchGroup = async () => {
@@ -106,6 +118,28 @@ const fetchGroup = async () => {
   } catch (error) {
     console.error('获取分组详情失败:', error)
   }
+}
+
+// 确认用户授权
+const handleConfirmUser = async (userIds: number[]) => {
+  addUserDialogRef.value?.setSubmitting(true)
+  try {
+    const res = await addGroupACLUsers(groupId, userIds)
+    if (res?.success) { ElMessage.success(t('acl.authSuccess')); addUserDialogRef.value?.close(); fetchGroup() }
+    else { ElMessage.error(res?.message || t('acl.authFailed')) }
+  } catch { ElMessage.error(t('acl.authFailed')) }
+  finally { addUserDialogRef.value?.setSubmitting(false) }
+}
+
+// 确认分组授权
+const handleConfirmGroup = async (groupIds: number[]) => {
+  addGroupDialogRef.value?.setSubmitting(true)
+  try {
+    const res = await addGroupACLGroups(groupId, groupIds)
+    if (res?.success) { ElMessage.success(t('acl.authSuccess')); addGroupDialogRef.value?.close(); fetchGroup() }
+    else { ElMessage.error(res?.message || t('acl.authFailed')) }
+  } catch { ElMessage.error(t('acl.authFailed')) }
+  finally { addGroupDialogRef.value?.setSubmitting(false) }
 }
 
 // 撤销用户授权

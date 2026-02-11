@@ -4,7 +4,7 @@
     <el-card class="search-card" shadow="never">
       <el-form :inline="true" :model="searchForm" class="search-form">
         <el-form-item :label="$t('domain.type')">
-          <el-select v-model="searchForm.type" :placeholder="$t('common.all')" clearable style="width: 160px">
+          <el-select v-model="searchForm.type" :placeholder="$t('common.all')" clearable style="width: 120px">
             <el-option v-for="item in domainTypes" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
@@ -15,7 +15,7 @@
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('common.search')">
-          <el-input v-model="searchForm.search" :placeholder="$t('domain.searchPlaceholder')" clearable style="width: 200px" @keyup.enter="handleSearch" />
+          <el-input v-model="searchForm.search" :placeholder="$t('domain.searchPlaceholder')" clearable style="width: 240px" @keyup.enter="handleSearch" />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="handleSearch">{{ $t('common.search') }}</el-button>

@@ -104,7 +104,7 @@ P0（基础设施）──▶ P1（K8S 能力）──▶ P2（Endpoint 体系�
 | K8S API 代理          | tsnet 监听 K8SAPI 端口，Impersonation 转发      | 3d   |
 | 身份提取              | 从 tsnet 连接提取对端身份                       | 1d   |
 | 权限缓存              | 心跳同步 k8s_permissions，本地缓存 + 鉴权       | 1.5d |
-| 域名注册              | 心跳上报 api.<agent-name>.k8s 域名              | 0.5d |
+| 域名注册              | 心跳上报 api.<agent-name>.beagle 域名           | 0.5d |
 
 小计：6.5d
 
@@ -116,7 +116,7 @@ P0（基础设施）──▶ P1（K8S 能力）──▶ P2（Endpoint 体系�
 | K8S Service Informer  | Watch 带标签的 Service，自动发现                            | 2d   |
 | gRPC SVCProxy         | tsnet gRPC 代理，通过 RPC 参数传递 namespace + service name | 2.5d |
 | 心跳上报              | discovered_services 字段上报 Server                         | 1d   |
-| 域名注册              | 心跳上报 <service>.<namespace>.<agent-name>.k8s 域名        | 0.5d |
+| 域名注册              | 心跳上报 <service>.<namespace>.<agent-name>.beagle 域名     | 0.5d |
 | 权限缓存              | 心跳同步 k8s_service_permissions，本地鉴权                  | 1d   |
 
 小计：7.5d
@@ -125,7 +125,7 @@ P0（基础设施）──▶ P1（K8S 能力）──▶ P2（Endpoint 体系�
 
 | 任务                 | 说明                                                         | 估算 |
 | -------------------- | ------------------------------------------------------------ | ---- |
-| K8SAPI 域名解析      | api.<agent>.k8s → VIP → tsnet → Agent K8SAPI 端口            | 1d   |
+| K8SAPI 域名解析      | api.<agent>.beagle → VIP → tsnet → Agent K8SAPI 端口         | 1d   |
 | K8SService gRPC 代理 | VIP → tsnet → Agent SVCProxy RPC（传递 namespace + service） | 2d   |
 | 资源发现 UI（.Host） | 资源浏览页面，展示可访问资源，复制连接命令                   | 2d   |
 

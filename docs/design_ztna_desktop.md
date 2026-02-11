@@ -63,24 +63,24 @@ tsnet.Server 初始化参数：
 
 ### DNS 劫持 + VIP
 
-两者都使用 DNS 劫持拦截 `.k8s` 后缀域名，返回本地 VIP 地址（127.1.x.x）：
+两者都使用 DNS 劫持拦截域名（后缀可配置，默认 `.beagle`），返回本地 VIP 地址（127.1.x.x）：
 
 ```
 DNS 劫持流程：
 
   1. 启动本地 DNS 服务器
-  2. 配置系统 DNS，将 .k8s 域名指向本地 DNS
+  2. 配置系统 DNS，将 .beagle 域名指向本地 DNS
   3. 本地 DNS 处理逻辑：
-     ├── .k8s 后缀 → 查询 VIP 映射表，返回 127.1.x.x
+     ├── .beagle 后缀 → 查询 VIP 映射表，返回 127.1.x.x
      └── 其他域名 → 转发到上游 DNS
 ```
 
 区别仅在于 DNS 配置方式：
 
-| 形态         | DNS 配置方式                                                              |
-| ------------ | ------------------------------------------------------------------------- |
-| Desktop.Host | /etc/resolver/k8s (macOS)、systemd-resolved (Linux)、网络适配器 (Windows) |
-| Desktop.Pod  | /etc/resolv.conf 指向本地 DNS（容器内有 root 权限）                       |
+| 形态         | DNS 配置方式                                                                  |
+| ------------ | ----------------------------------------------------------------------------- |
+| Desktop.Host | /etc/resolver/beagle (macOS)、systemd-resolved (Linux)、网络适配器 (Windows)  |
+| Desktop.Pod  | /etc/resolv.conf 指向本地 DNS（容器内有 root 权限）                           |
 
 ### VIP 分配
 
@@ -99,8 +99,8 @@ DNS 劫持流程：
 
 ```
 VIP 方式（无冲突）：
-  127.1.0.1:5432 → pg.yygl.beijing.k8s:5432    ✓
-  127.1.0.2:5432 → pg.prod.shanghai.k8s:5432   ✓ 不冲突
+  127.1.0.1:5432 → pg.yygl.beijing.beagle:5432    ✓
+  127.1.0.2:5432 → pg.prod.shanghai.beagle:5432   ✓ 不冲突
 ```
 
 ### 本地代理
@@ -128,22 +128,22 @@ Desktop 在每个 VIP 地址上启动本地 TCP 代理，将流量通过 tsnet �
 
 ```
 SSH 直连 Agent：
-  ssh user@beijing.k8s
+  ssh user@beijing.beagle
 
 SSH 跳跃到 Endpoint：
-  ssh deploy@web-server-1.beijing.k8s
+  ssh deploy@web-server-1.beijing.beagle
 
 SVC 直连 Agent：
-  psql -h pg.yygl.beijing.k8s -p 5432
+  psql -h pg.yygl.beijing.beagle -p 5432
 
 SVC 跳跃到 Endpoint：
-  psql -h pg.yygl.remote-cluster.beijing.k8s -p 5432
+  psql -h pg.yygl.remote-cluster.beijing.beagle -p 5432
 
 K8S API 直连 Agent：
-  kubectl --server=https://api.beijing.k8s:6443 get pods
+  kubectl --server=https://api.beijing.beagle:6443 get pods
 
 K8S API 跳跃到 Endpoint：
-  kubectl --server=https://api.beijing-prod.beijing.k8s:6443 get pods
+  kubectl --server=https://api.beijing-prod.beijing.beagle:6443 get pods
 ```
 
 ## 身份传递

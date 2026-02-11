@@ -26,6 +26,7 @@ const (
 	AgentService_ReportProxyStatus_FullMethodName   = "/awecloud.signaling.AgentService/ReportProxyStatus"
 	AgentService_ReportVisitorStatus_FullMethodName = "/awecloud.signaling.AgentService/ReportVisitorStatus"
 	AgentService_ReportNetworkChange_FullMethodName = "/awecloud.signaling.AgentService/ReportNetworkChange"
+	AgentService_SVCProxy_FullMethodName            = "/awecloud.signaling.AgentService/SVCProxy"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -48,6 +49,8 @@ type AgentServiceClient interface {
 	ReportVisitorStatus(ctx context.Context, in *ReportVisitorStatusRequest, opts ...grpc.CallOption) (*ReportVisitorStatusResponse, error)
 	// 上报网络变化
 	ReportNetworkChange(ctx context.Context, in *ReportNetworkChangeRequest, opts ...grpc.CallOption) (*ReportNetworkChangeResponse, error)
+	// SVCProxy - K8S Service 代理（双向流，Desktop → Agent → K8S ClusterIP）
+	SVCProxy(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SVCProxyData, SVCProxyData], error)
 }
 
 type agentServiceClient struct {
@@ -131,6 +134,19 @@ func (c *agentServiceClient) ReportNetworkChange(ctx context.Context, in *Report
 	return out, nil
 }
 
+func (c *agentServiceClient) SVCProxy(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SVCProxyData, SVCProxyData], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[1], AgentService_SVCProxy_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SVCProxyData, SVCProxyData]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_SVCProxyClient = grpc.BidiStreamingClient[SVCProxyData, SVCProxyData]
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -151,6 +167,8 @@ type AgentServiceServer interface {
 	ReportVisitorStatus(context.Context, *ReportVisitorStatusRequest) (*ReportVisitorStatusResponse, error)
 	// 上报网络变化
 	ReportNetworkChange(context.Context, *ReportNetworkChangeRequest) (*ReportNetworkChangeResponse, error)
+	// SVCProxy - K8S Service 代理（双向流，Desktop → Agent → K8S ClusterIP）
+	SVCProxy(grpc.BidiStreamingServer[SVCProxyData, SVCProxyData]) error
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -181,6 +199,9 @@ func (UnimplementedAgentServiceServer) ReportVisitorStatus(context.Context, *Rep
 }
 func (UnimplementedAgentServiceServer) ReportNetworkChange(context.Context, *ReportNetworkChangeRequest) (*ReportNetworkChangeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReportNetworkChange not implemented")
+}
+func (UnimplementedAgentServiceServer) SVCProxy(grpc.BidiStreamingServer[SVCProxyData, SVCProxyData]) error {
+	return status.Error(codes.Unimplemented, "method SVCProxy not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -318,6 +339,13 @@ func _AgentService_ReportNetworkChange_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentService_SVCProxy_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AgentServiceServer).SVCProxy(&grpc.GenericServerStream[SVCProxyData, SVCProxyData]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_SVCProxyServer = grpc.BidiStreamingServer[SVCProxyData, SVCProxyData]
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -354,6 +382,12 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Heartbeat",
 			Handler:       _AgentService_Heartbeat_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "SVCProxy",
+			Handler:       _AgentService_SVCProxy_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

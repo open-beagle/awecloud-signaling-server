@@ -123,3 +123,41 @@ socks_addr = "127.0.0.1:1080"
 
 # dial 子命令的 Unix Socket 路径
 dial_socket = "/tmp/signaling.sock"
+
+# K8S API 代理配置
+# 启用后，Agent 在 tsnet 网络上监听 K8S API 端口，
+# 通过 Impersonation 机制代理 Desktop 用户访问 K8S 集群
+# 环境变量：SIGNAL_K8S_ENABLED, SIGNAL_K8S_KUBECONFIG, SIGNAL_K8S_API_SERVER, SIGNAL_K8S_LISTEN_PORT
+[k8s]
+# 是否启用 K8S API 代理
+enabled = false
+
+# kubeconfig 路径（默认 ~/.kube/config，InCluster 环境自动检测）
+kubeconfig = ""
+
+# K8S API Server 地址（留空则从 kubeconfig 自动获取）
+api_server = ""
+
+# tsnet 监听端口（默认 6443）
+listen_port = 6443
+
+# K8S Service 发现配置
+# 启用后，Agent 使用 Informer 机制 Watch 带指定标签的 K8S Service，
+# 并通过心跳上报给 Server，Desktop 用户可通过 gRPC 代理访问这些 Service
+# 环境变量：SIGNAL_SVC_ENABLED, SIGNAL_SVC_KUBECONFIG, SIGNAL_SVC_LABEL_SELECTOR, SIGNAL_SVC_NAMESPACES, SIGNAL_SVC_LISTEN_PORT_BASE
+[svc]
+# 是否启用 K8S Service 发现
+enabled = false
+
+# kubeconfig 路径（空则使用 InCluster 配置）
+kubeconfig = ""
+
+# Service 标签选择器（只发现带此标签的 Service）
+label_selector = "signal.beagle.io/expose=true"
+
+# 监听的命名空间列表（空表示全部命名空间）
+# 环境变量 SIGNAL_SVC_NAMESPACES 使用逗号分隔
+namespaces = []
+
+# tsnet gRPC 监听端口（默认 9090）
+listen_port_base = 9090

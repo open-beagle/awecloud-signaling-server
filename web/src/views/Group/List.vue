@@ -4,7 +4,7 @@
     <el-card class="search-card" shadow="never">
       <el-form :inline="true" :model="searchForm" class="search-form">
         <el-form-item :label="$t('common.search')">
-          <el-input v-model="searchForm.search" :placeholder="$t('group.searchPlaceholder')" clearable style="width: 200px" @keyup.enter="handleSearch" />
+          <el-input v-model="searchForm.search" :placeholder="$t('group.searchPlaceholder')" clearable style="width: 240px" @keyup.enter="handleSearch" />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="handleSearch">{{ $t('common.search') }}</el-button>

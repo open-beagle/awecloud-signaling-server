@@ -56,7 +56,36 @@
         <el-menu-item index="/acl/ssh">
           {{ t('menu.aclSSH') }}
         </el-menu-item>
+        <el-menu-item index="/acl/k8s">
+          {{ t('menu.aclK8S') }}
+        </el-menu-item>
+        <el-menu-item index="/acl/k8s-service">
+          {{ t('menu.aclK8SService') }}
+        </el-menu-item>
       </el-sub-menu>
+      <!-- Endpoint 管理 -->
+      <el-sub-menu index="endpoints">
+        <template #title>
+          <el-icon><Connection /></el-icon>
+          <span>{{ t('menu.endpoints') }}</span>
+        </template>
+        <el-menu-item index="/endpoints/ssh">
+          {{ t('menu.endpointSSH') }}
+        </el-menu-item>
+        <el-menu-item index="/endpoints/k8sapi">
+          {{ t('menu.endpointK8SAPI') }}
+        </el-menu-item>
+        <el-menu-item index="/endpoints/k8sservice">
+          {{ t('menu.endpointK8SService') }}
+        </el-menu-item>
+      </el-sub-menu>
+      <!-- 资源发现 -->
+      <el-menu-item index="/resources">
+        <el-icon><Search /></el-icon>
+        <template #title>
+          <span>{{ t('menu.resources') }}</span>
+        </template>
+      </el-menu-item>
       <!-- 隧道管理 -->
       <el-sub-menu index="tunnel">
         <template #title>

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"tailscale.com/client/tailscale"
 	"tailscale.com/ipn"
 	"tailscale.com/tsnet"
 
@@ -233,6 +234,14 @@ func (m *TailscaleManager) Dial(ctx context.Context, network, addr string) (net.
 		return nil, fmt.Errorf("Tailscale 未启动")
 	}
 	return m.tsServer.Dial(ctx, network, addr)
+}
+
+// LocalClient 获取 Tailscale 本地客户端（用于 WhoIs 等操作）
+func (m *TailscaleManager) LocalClient() (*tailscale.LocalClient, error) {
+	if m.tsServer == nil {
+		return nil, fmt.Errorf("Tailscale 未启动")
+	}
+	return m.tsServer.LocalClient()
 }
 
 // expandHomeDir 展开 ~ 为用户主目录

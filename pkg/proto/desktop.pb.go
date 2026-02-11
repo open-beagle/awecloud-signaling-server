@@ -2075,7 +2075,7 @@ func (x *DesktopLogoutResponse) GetLogoutUrl() string {
 type ResolveDomainRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DesktopId     uint64                 `protobuf:"varint,1,opt,name=desktop_id,json=desktopId,proto3" json:"desktop_id,omitempty"` // Desktop ID
-	Domain        string                 `protobuf:"bytes,2,opt,name=domain,proto3" json:"domain,omitempty"`                         // 要解析的域名（如 pg.yygl.beijing.k8s）
+	Domain        string                 `protobuf:"bytes,2,opt,name=domain,proto3" json:"domain,omitempty"`                         // 要解析的域名（如 pg.yygl.beijing.beagle）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2127,13 +2127,16 @@ func (x *ResolveDomainRequest) GetDomain() string {
 // ResolveDomainResponse 域名解析响应
 type ResolveDomainResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`                         // 是否成功
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`                          // 响应消息
-	Domain        string                 `protobuf:"bytes,3,opt,name=domain,proto3" json:"domain,omitempty"`                            // 域名
-	AgentIp       string                 `protobuf:"bytes,4,opt,name=agent_ip,json=agentIp,proto3" json:"agent_ip,omitempty"`           // Agent 的 Tailscale IP
-	TargetPort    int32                  `protobuf:"varint,5,opt,name=target_port,json=targetPort,proto3" json:"target_port,omitempty"` // 目标端口
-	AgentName     string                 `protobuf:"bytes,6,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`     // Agent 名称
-	DomainType    string                 `protobuf:"bytes,7,opt,name=domain_type,json=domainType,proto3" json:"domain_type,omitempty"`  // 域名类型
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`                                  // 是否成功
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`                                   // 响应消息
+	Domain        string                 `protobuf:"bytes,3,opt,name=domain,proto3" json:"domain,omitempty"`                                     // 域名
+	AgentIp       string                 `protobuf:"bytes,4,opt,name=agent_ip,json=agentIp,proto3" json:"agent_ip,omitempty"`                    // Agent 的 Tailscale IP
+	TargetPort    int32                  `protobuf:"varint,5,opt,name=target_port,json=targetPort,proto3" json:"target_port,omitempty"`          // 目标端口
+	AgentName     string                 `protobuf:"bytes,6,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`              // Agent 名称
+	DomainType    string                 `protobuf:"bytes,7,opt,name=domain_type,json=domainType,proto3" json:"domain_type,omitempty"`           // 域名类型
+	Namespace     string                 `protobuf:"bytes,8,opt,name=namespace,proto3" json:"namespace,omitempty"`                               // K8S 命名空间（k8ssvc 类型时）
+	ServiceName   string                 `protobuf:"bytes,9,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`        // K8S Service 名称（k8ssvc 类型时）
+	SvcProxyPort  int32                  `protobuf:"varint,10,opt,name=svc_proxy_port,json=svcProxyPort,proto3" json:"svc_proxy_port,omitempty"` // Agent SVCProxy gRPC 端口（k8ssvc 类型时，默认 9090）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2215,6 +2218,364 @@ func (x *ResolveDomainResponse) GetDomainType() string {
 		return x.DomainType
 	}
 	return ""
+}
+
+func (x *ResolveDomainResponse) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+func (x *ResolveDomainResponse) GetServiceName() string {
+	if x != nil {
+		return x.ServiceName
+	}
+	return ""
+}
+
+func (x *ResolveDomainResponse) GetSvcProxyPort() int32 {
+	if x != nil {
+		return x.SvcProxyPort
+	}
+	return 0
+}
+
+// GetResourcesRequest 资源发现请求
+type GetResourcesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DesktopId     uint64                 `protobuf:"varint,1,opt,name=desktop_id,json=desktopId,proto3" json:"desktop_id,omitempty"` // Desktop ID
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetResourcesRequest) Reset() {
+	*x = GetResourcesRequest{}
+	mi := &file_pkg_proto_desktop_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetResourcesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetResourcesRequest) ProtoMessage() {}
+
+func (x *GetResourcesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_desktop_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetResourcesRequest.ProtoReflect.Descriptor instead.
+func (*GetResourcesRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *GetResourcesRequest) GetDesktopId() uint64 {
+	if x != nil {
+		return x.DesktopId
+	}
+	return 0
+}
+
+// SSHResource SSH 资源
+type SSHResource struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AgentId       uint64                 `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	AgentName     string                 `protobuf:"bytes,2,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
+	Domain        string                 `protobuf:"bytes,3,opt,name=domain,proto3" json:"domain,omitempty"`
+	SshUsers      []string               `protobuf:"bytes,4,rep,name=ssh_users,json=sshUsers,proto3" json:"ssh_users,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SSHResource) Reset() {
+	*x = SSHResource{}
+	mi := &file_pkg_proto_desktop_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SSHResource) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SSHResource) ProtoMessage() {}
+
+func (x *SSHResource) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_desktop_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SSHResource.ProtoReflect.Descriptor instead.
+func (*SSHResource) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *SSHResource) GetAgentId() uint64 {
+	if x != nil {
+		return x.AgentId
+	}
+	return 0
+}
+
+func (x *SSHResource) GetAgentName() string {
+	if x != nil {
+		return x.AgentName
+	}
+	return ""
+}
+
+func (x *SSHResource) GetDomain() string {
+	if x != nil {
+		return x.Domain
+	}
+	return ""
+}
+
+func (x *SSHResource) GetSshUsers() []string {
+	if x != nil {
+		return x.SshUsers
+	}
+	return nil
+}
+
+// K8SAPIResource K8S API 资源
+type K8SAPIResource struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AgentId       uint64                 `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	AgentName     string                 `protobuf:"bytes,2,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
+	Domain        string                 `protobuf:"bytes,3,opt,name=domain,proto3" json:"domain,omitempty"`
+	K8SGroups     []string               `protobuf:"bytes,4,rep,name=k8s_groups,json=k8sGroups,proto3" json:"k8s_groups,omitempty"`
+	Namespaces    []string               `protobuf:"bytes,5,rep,name=namespaces,proto3" json:"namespaces,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *K8SAPIResource) Reset() {
+	*x = K8SAPIResource{}
+	mi := &file_pkg_proto_desktop_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *K8SAPIResource) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*K8SAPIResource) ProtoMessage() {}
+
+func (x *K8SAPIResource) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_desktop_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use K8SAPIResource.ProtoReflect.Descriptor instead.
+func (*K8SAPIResource) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *K8SAPIResource) GetAgentId() uint64 {
+	if x != nil {
+		return x.AgentId
+	}
+	return 0
+}
+
+func (x *K8SAPIResource) GetAgentName() string {
+	if x != nil {
+		return x.AgentName
+	}
+	return ""
+}
+
+func (x *K8SAPIResource) GetDomain() string {
+	if x != nil {
+		return x.Domain
+	}
+	return ""
+}
+
+func (x *K8SAPIResource) GetK8SGroups() []string {
+	if x != nil {
+		return x.K8SGroups
+	}
+	return nil
+}
+
+func (x *K8SAPIResource) GetNamespaces() []string {
+	if x != nil {
+		return x.Namespaces
+	}
+	return nil
+}
+
+// K8SServiceResource K8S Service 资源
+type K8SServiceResource struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AgentId       uint64                 `protobuf:"varint,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	AgentName     string                 `protobuf:"bytes,2,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
+	Namespace     string                 `protobuf:"bytes,3,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	ServiceName   string                 `protobuf:"bytes,4,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
+	Domain        string                 `protobuf:"bytes,5,opt,name=domain,proto3" json:"domain,omitempty"`
+	Port          int32                  `protobuf:"varint,6,opt,name=port,proto3" json:"port,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *K8SServiceResource) Reset() {
+	*x = K8SServiceResource{}
+	mi := &file_pkg_proto_desktop_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *K8SServiceResource) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*K8SServiceResource) ProtoMessage() {}
+
+func (x *K8SServiceResource) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_desktop_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use K8SServiceResource.ProtoReflect.Descriptor instead.
+func (*K8SServiceResource) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *K8SServiceResource) GetAgentId() uint64 {
+	if x != nil {
+		return x.AgentId
+	}
+	return 0
+}
+
+func (x *K8SServiceResource) GetAgentName() string {
+	if x != nil {
+		return x.AgentName
+	}
+	return ""
+}
+
+func (x *K8SServiceResource) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+func (x *K8SServiceResource) GetServiceName() string {
+	if x != nil {
+		return x.ServiceName
+	}
+	return ""
+}
+
+func (x *K8SServiceResource) GetDomain() string {
+	if x != nil {
+		return x.Domain
+	}
+	return ""
+}
+
+func (x *K8SServiceResource) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+// GetResourcesResponse 资源发现响应
+type GetResourcesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ssh           []*SSHResource         `protobuf:"bytes,1,rep,name=ssh,proto3" json:"ssh,omitempty"`
+	K8SApi        []*K8SAPIResource      `protobuf:"bytes,2,rep,name=k8s_api,json=k8sApi,proto3" json:"k8s_api,omitempty"`
+	K8SService    []*K8SServiceResource  `protobuf:"bytes,3,rep,name=k8s_service,json=k8sService,proto3" json:"k8s_service,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetResourcesResponse) Reset() {
+	*x = GetResourcesResponse{}
+	mi := &file_pkg_proto_desktop_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetResourcesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetResourcesResponse) ProtoMessage() {}
+
+func (x *GetResourcesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_desktop_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetResourcesResponse.ProtoReflect.Descriptor instead.
+func (*GetResourcesResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *GetResourcesResponse) GetSsh() []*SSHResource {
+	if x != nil {
+		return x.Ssh
+	}
+	return nil
+}
+
+func (x *GetResourcesResponse) GetK8SApi() []*K8SAPIResource {
+	if x != nil {
+		return x.K8SApi
+	}
+	return nil
+}
+
+func (x *GetResourcesResponse) GetK8SService() []*K8SServiceResource {
+	if x != nil {
+		return x.K8SService
+	}
+	return nil
 }
 
 var File_pkg_proto_desktop_proto protoreflect.FileDescriptor
@@ -2384,7 +2745,7 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\x14ResolveDomainRequest\x12\x1d\n" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12\x16\n" +
-	"\x06domain\x18\x02 \x01(\tR\x06domain\"\xdf\x01\n" +
+	"\x06domain\x18\x02 \x01(\tR\x06domain\"\xc6\x02\n" +
 	"\x15ResolveDomainResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
@@ -2395,7 +2756,43 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\n" +
 	"agent_name\x18\x06 \x01(\tR\tagentName\x12\x1f\n" +
 	"\vdomain_type\x18\a \x01(\tR\n" +
-	"domainType*\xcc\x01\n" +
+	"domainType\x12\x1c\n" +
+	"\tnamespace\x18\b \x01(\tR\tnamespace\x12!\n" +
+	"\fservice_name\x18\t \x01(\tR\vserviceName\x12$\n" +
+	"\x0esvc_proxy_port\x18\n" +
+	" \x01(\x05R\fsvcProxyPort\"4\n" +
+	"\x13GetResourcesRequest\x12\x1d\n" +
+	"\n" +
+	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\"|\n" +
+	"\vSSHResource\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\x04R\aagentId\x12\x1d\n" +
+	"\n" +
+	"agent_name\x18\x02 \x01(\tR\tagentName\x12\x16\n" +
+	"\x06domain\x18\x03 \x01(\tR\x06domain\x12\x1b\n" +
+	"\tssh_users\x18\x04 \x03(\tR\bsshUsers\"\xa1\x01\n" +
+	"\x0eK8SAPIResource\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\x04R\aagentId\x12\x1d\n" +
+	"\n" +
+	"agent_name\x18\x02 \x01(\tR\tagentName\x12\x16\n" +
+	"\x06domain\x18\x03 \x01(\tR\x06domain\x12\x1d\n" +
+	"\n" +
+	"k8s_groups\x18\x04 \x03(\tR\tk8sGroups\x12\x1e\n" +
+	"\n" +
+	"namespaces\x18\x05 \x03(\tR\n" +
+	"namespaces\"\xbb\x01\n" +
+	"\x12K8SServiceResource\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\x04R\aagentId\x12\x1d\n" +
+	"\n" +
+	"agent_name\x18\x02 \x01(\tR\tagentName\x12\x1c\n" +
+	"\tnamespace\x18\x03 \x01(\tR\tnamespace\x12!\n" +
+	"\fservice_name\x18\x04 \x01(\tR\vserviceName\x12\x16\n" +
+	"\x06domain\x18\x05 \x01(\tR\x06domain\x12\x12\n" +
+	"\x04port\x18\x06 \x01(\x05R\x04port\"\xcf\x01\n" +
+	"\x14GetResourcesResponse\x121\n" +
+	"\x03ssh\x18\x01 \x03(\v2\x1f.awecloud.signaling.SSHResourceR\x03ssh\x12;\n" +
+	"\ak8s_api\x18\x02 \x03(\v2\".awecloud.signaling.K8SAPIResourceR\x06k8sApi\x12G\n" +
+	"\vk8s_service\x18\x03 \x03(\v2&.awecloud.signaling.K8SServiceResourceR\n" +
+	"k8sService*\xcc\x01\n" +
 	"\x0fDesktopDataType\x12!\n" +
 	"\x1dDESKTOP_DATA_TYPE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15DESKTOP_DATA_TYPE_ALL\x10\x01\x12\x1e\n" +
@@ -2410,7 +2807,7 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"#WAIT_FOR_LOGIN_RESULT_STATUS_FAILED\x10\x03\x12(\n" +
 	"$WAIT_FOR_LOGIN_RESULT_STATUS_TIMEOUT\x10\x04\x12*\n" +
 	"&WAIT_FOR_LOGIN_RESULT_STATUS_CANCELLED\x10\x05\x12)\n" +
-	"%WAIT_FOR_LOGIN_RESULT_STATUS_DISABLED\x10\x062\xef\f\n" +
+	"%WAIT_FOR_LOGIN_RESULT_STATUS_DISABLED\x10\x062\xd2\r\n" +
 	"\x0eDesktopService\x12o\n" +
 	"\fAuthenticate\x12..awecloud.signaling.DesktopAuthenticateRequest\x1a/.awecloud.signaling.DesktopAuthenticateResponse\x12j\n" +
 	"\tHeartbeat\x12+.awecloud.signaling.DesktopHeartbeatRequest\x1a,.awecloud.signaling.DesktopHeartbeatResponse(\x010\x01\x12a\n" +
@@ -2427,7 +2824,8 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\x12CreateLoginSession\x12-.awecloud.signaling.CreateLoginSessionRequest\x1a..awecloud.signaling.CreateLoginSessionResponse\x12w\n" +
 	"\x12WaitForLoginResult\x12-.awecloud.signaling.WaitForLoginResultRequest\x1a..awecloud.signaling.WaitForLoginResultResponse(\x010\x01\x12]\n" +
 	"\x06Logout\x12(.awecloud.signaling.DesktopLogoutRequest\x1a).awecloud.signaling.DesktopLogoutResponse\x12d\n" +
-	"\rResolveDomain\x12(.awecloud.signaling.ResolveDomainRequest\x1a).awecloud.signaling.ResolveDomainResponseB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
+	"\rResolveDomain\x12(.awecloud.signaling.ResolveDomainRequest\x1a).awecloud.signaling.ResolveDomainResponse\x12a\n" +
+	"\fGetResources\x12'.awecloud.signaling.GetResourcesRequest\x1a(.awecloud.signaling.GetResourcesResponseB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
 
 var (
 	file_pkg_proto_desktop_proto_rawDescOnce sync.Once
@@ -2442,7 +2840,7 @@ func file_pkg_proto_desktop_proto_rawDescGZIP() []byte {
 }
 
 var file_pkg_proto_desktop_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_pkg_proto_desktop_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
+var file_pkg_proto_desktop_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
 var file_pkg_proto_desktop_proto_goTypes = []any{
 	(DesktopDataType)(0),                  // 0: awecloud.signaling.DesktopDataType
 	(WaitForLoginResultStatus)(0),         // 1: awecloud.signaling.WaitForLoginResultStatus
@@ -2480,6 +2878,11 @@ var file_pkg_proto_desktop_proto_goTypes = []any{
 	(*DesktopLogoutResponse)(nil),         // 33: awecloud.signaling.DesktopLogoutResponse
 	(*ResolveDomainRequest)(nil),          // 34: awecloud.signaling.ResolveDomainRequest
 	(*ResolveDomainResponse)(nil),         // 35: awecloud.signaling.ResolveDomainResponse
+	(*GetResourcesRequest)(nil),           // 36: awecloud.signaling.GetResourcesRequest
+	(*SSHResource)(nil),                   // 37: awecloud.signaling.SSHResource
+	(*K8SAPIResource)(nil),                // 38: awecloud.signaling.K8SAPIResource
+	(*K8SServiceResource)(nil),            // 39: awecloud.signaling.K8SServiceResource
+	(*GetResourcesResponse)(nil),          // 40: awecloud.signaling.GetResourcesResponse
 }
 var file_pkg_proto_desktop_proto_depIdxs = []int32{
 	2,  // 0: awecloud.signaling.DesktopAuthenticateRequest.system_info:type_name -> awecloud.signaling.DesktopSystemInfo
@@ -2492,41 +2895,46 @@ var file_pkg_proto_desktop_proto_depIdxs = []int32{
 	6,  // 7: awecloud.signaling.GetHostServicesResponse.services:type_name -> awecloud.signaling.AuthorizedService
 	16, // 8: awecloud.signaling.GetMyDevicesResponse.devices:type_name -> awecloud.signaling.DeviceInfo
 	1,  // 9: awecloud.signaling.WaitForLoginResultResponse.status:type_name -> awecloud.signaling.WaitForLoginResultStatus
-	3,  // 10: awecloud.signaling.DesktopService.Authenticate:input_type -> awecloud.signaling.DesktopAuthenticateRequest
-	5,  // 11: awecloud.signaling.DesktopService.Heartbeat:input_type -> awecloud.signaling.DesktopHeartbeatRequest
-	8,  // 12: awecloud.signaling.DesktopService.DataStream:input_type -> awecloud.signaling.DesktopDataRequest
-	10, // 13: awecloud.signaling.DesktopService.GetAuthorizedHosts:input_type -> awecloud.signaling.GetAuthorizedHostsRequest
-	13, // 14: awecloud.signaling.DesktopService.GetHostServices:input_type -> awecloud.signaling.GetHostServicesRequest
-	15, // 15: awecloud.signaling.DesktopService.GetMyDevices:input_type -> awecloud.signaling.GetMyDevicesRequest
-	18, // 16: awecloud.signaling.DesktopService.OfflineDevice:input_type -> awecloud.signaling.OfflineDeviceRequest
-	20, // 17: awecloud.signaling.DesktopService.DeleteDevice:input_type -> awecloud.signaling.DeleteDeviceRequest
-	22, // 18: awecloud.signaling.DesktopService.ToggleFavorite:input_type -> awecloud.signaling.ToggleFavoriteRequest
-	24, // 19: awecloud.signaling.DesktopService.GetFavoriteServices:input_type -> awecloud.signaling.GetFavoriteServicesRequest
-	28, // 20: awecloud.signaling.DesktopService.CheckSavedCredentials:input_type -> awecloud.signaling.CheckSavedCredentialsRequest
-	26, // 21: awecloud.signaling.DesktopService.CreateLoginSession:input_type -> awecloud.signaling.CreateLoginSessionRequest
-	30, // 22: awecloud.signaling.DesktopService.WaitForLoginResult:input_type -> awecloud.signaling.WaitForLoginResultRequest
-	32, // 23: awecloud.signaling.DesktopService.Logout:input_type -> awecloud.signaling.DesktopLogoutRequest
-	34, // 24: awecloud.signaling.DesktopService.ResolveDomain:input_type -> awecloud.signaling.ResolveDomainRequest
-	4,  // 25: awecloud.signaling.DesktopService.Authenticate:output_type -> awecloud.signaling.DesktopAuthenticateResponse
-	7,  // 26: awecloud.signaling.DesktopService.Heartbeat:output_type -> awecloud.signaling.DesktopHeartbeatResponse
-	9,  // 27: awecloud.signaling.DesktopService.DataStream:output_type -> awecloud.signaling.DesktopDataResponse
-	12, // 28: awecloud.signaling.DesktopService.GetAuthorizedHosts:output_type -> awecloud.signaling.GetAuthorizedHostsResponse
-	14, // 29: awecloud.signaling.DesktopService.GetHostServices:output_type -> awecloud.signaling.GetHostServicesResponse
-	17, // 30: awecloud.signaling.DesktopService.GetMyDevices:output_type -> awecloud.signaling.GetMyDevicesResponse
-	19, // 31: awecloud.signaling.DesktopService.OfflineDevice:output_type -> awecloud.signaling.OfflineDeviceResponse
-	21, // 32: awecloud.signaling.DesktopService.DeleteDevice:output_type -> awecloud.signaling.DeleteDeviceResponse
-	23, // 33: awecloud.signaling.DesktopService.ToggleFavorite:output_type -> awecloud.signaling.ToggleFavoriteResponse
-	25, // 34: awecloud.signaling.DesktopService.GetFavoriteServices:output_type -> awecloud.signaling.GetFavoriteServicesResponse
-	29, // 35: awecloud.signaling.DesktopService.CheckSavedCredentials:output_type -> awecloud.signaling.CheckSavedCredentialsResponse
-	27, // 36: awecloud.signaling.DesktopService.CreateLoginSession:output_type -> awecloud.signaling.CreateLoginSessionResponse
-	31, // 37: awecloud.signaling.DesktopService.WaitForLoginResult:output_type -> awecloud.signaling.WaitForLoginResultResponse
-	33, // 38: awecloud.signaling.DesktopService.Logout:output_type -> awecloud.signaling.DesktopLogoutResponse
-	35, // 39: awecloud.signaling.DesktopService.ResolveDomain:output_type -> awecloud.signaling.ResolveDomainResponse
-	25, // [25:40] is the sub-list for method output_type
-	10, // [10:25] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	37, // 10: awecloud.signaling.GetResourcesResponse.ssh:type_name -> awecloud.signaling.SSHResource
+	38, // 11: awecloud.signaling.GetResourcesResponse.k8s_api:type_name -> awecloud.signaling.K8SAPIResource
+	39, // 12: awecloud.signaling.GetResourcesResponse.k8s_service:type_name -> awecloud.signaling.K8SServiceResource
+	3,  // 13: awecloud.signaling.DesktopService.Authenticate:input_type -> awecloud.signaling.DesktopAuthenticateRequest
+	5,  // 14: awecloud.signaling.DesktopService.Heartbeat:input_type -> awecloud.signaling.DesktopHeartbeatRequest
+	8,  // 15: awecloud.signaling.DesktopService.DataStream:input_type -> awecloud.signaling.DesktopDataRequest
+	10, // 16: awecloud.signaling.DesktopService.GetAuthorizedHosts:input_type -> awecloud.signaling.GetAuthorizedHostsRequest
+	13, // 17: awecloud.signaling.DesktopService.GetHostServices:input_type -> awecloud.signaling.GetHostServicesRequest
+	15, // 18: awecloud.signaling.DesktopService.GetMyDevices:input_type -> awecloud.signaling.GetMyDevicesRequest
+	18, // 19: awecloud.signaling.DesktopService.OfflineDevice:input_type -> awecloud.signaling.OfflineDeviceRequest
+	20, // 20: awecloud.signaling.DesktopService.DeleteDevice:input_type -> awecloud.signaling.DeleteDeviceRequest
+	22, // 21: awecloud.signaling.DesktopService.ToggleFavorite:input_type -> awecloud.signaling.ToggleFavoriteRequest
+	24, // 22: awecloud.signaling.DesktopService.GetFavoriteServices:input_type -> awecloud.signaling.GetFavoriteServicesRequest
+	28, // 23: awecloud.signaling.DesktopService.CheckSavedCredentials:input_type -> awecloud.signaling.CheckSavedCredentialsRequest
+	26, // 24: awecloud.signaling.DesktopService.CreateLoginSession:input_type -> awecloud.signaling.CreateLoginSessionRequest
+	30, // 25: awecloud.signaling.DesktopService.WaitForLoginResult:input_type -> awecloud.signaling.WaitForLoginResultRequest
+	32, // 26: awecloud.signaling.DesktopService.Logout:input_type -> awecloud.signaling.DesktopLogoutRequest
+	34, // 27: awecloud.signaling.DesktopService.ResolveDomain:input_type -> awecloud.signaling.ResolveDomainRequest
+	36, // 28: awecloud.signaling.DesktopService.GetResources:input_type -> awecloud.signaling.GetResourcesRequest
+	4,  // 29: awecloud.signaling.DesktopService.Authenticate:output_type -> awecloud.signaling.DesktopAuthenticateResponse
+	7,  // 30: awecloud.signaling.DesktopService.Heartbeat:output_type -> awecloud.signaling.DesktopHeartbeatResponse
+	9,  // 31: awecloud.signaling.DesktopService.DataStream:output_type -> awecloud.signaling.DesktopDataResponse
+	12, // 32: awecloud.signaling.DesktopService.GetAuthorizedHosts:output_type -> awecloud.signaling.GetAuthorizedHostsResponse
+	14, // 33: awecloud.signaling.DesktopService.GetHostServices:output_type -> awecloud.signaling.GetHostServicesResponse
+	17, // 34: awecloud.signaling.DesktopService.GetMyDevices:output_type -> awecloud.signaling.GetMyDevicesResponse
+	19, // 35: awecloud.signaling.DesktopService.OfflineDevice:output_type -> awecloud.signaling.OfflineDeviceResponse
+	21, // 36: awecloud.signaling.DesktopService.DeleteDevice:output_type -> awecloud.signaling.DeleteDeviceResponse
+	23, // 37: awecloud.signaling.DesktopService.ToggleFavorite:output_type -> awecloud.signaling.ToggleFavoriteResponse
+	25, // 38: awecloud.signaling.DesktopService.GetFavoriteServices:output_type -> awecloud.signaling.GetFavoriteServicesResponse
+	29, // 39: awecloud.signaling.DesktopService.CheckSavedCredentials:output_type -> awecloud.signaling.CheckSavedCredentialsResponse
+	27, // 40: awecloud.signaling.DesktopService.CreateLoginSession:output_type -> awecloud.signaling.CreateLoginSessionResponse
+	31, // 41: awecloud.signaling.DesktopService.WaitForLoginResult:output_type -> awecloud.signaling.WaitForLoginResultResponse
+	33, // 42: awecloud.signaling.DesktopService.Logout:output_type -> awecloud.signaling.DesktopLogoutResponse
+	35, // 43: awecloud.signaling.DesktopService.ResolveDomain:output_type -> awecloud.signaling.ResolveDomainResponse
+	40, // 44: awecloud.signaling.DesktopService.GetResources:output_type -> awecloud.signaling.GetResourcesResponse
+	29, // [29:45] is the sub-list for method output_type
+	13, // [13:29] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_pkg_proto_desktop_proto_init() }
@@ -2540,7 +2948,7 @@ func file_pkg_proto_desktop_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_desktop_proto_rawDesc), len(file_pkg_proto_desktop_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   34,
+			NumMessages:   39,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

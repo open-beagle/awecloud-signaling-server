@@ -34,6 +34,7 @@ const (
 	DesktopService_WaitForLoginResult_FullMethodName    = "/awecloud.signaling.DesktopService/WaitForLoginResult"
 	DesktopService_Logout_FullMethodName                = "/awecloud.signaling.DesktopService/Logout"
 	DesktopService_ResolveDomain_FullMethodName         = "/awecloud.signaling.DesktopService/ResolveDomain"
+	DesktopService_GetResources_FullMethodName          = "/awecloud.signaling.DesktopService/GetResources"
 )
 
 // DesktopServiceClient is the client API for DesktopService service.
@@ -70,8 +71,10 @@ type DesktopServiceClient interface {
 	WaitForLoginResult(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[WaitForLoginResultRequest, WaitForLoginResultResponse], error)
 	// 注销 - Desktop 安全离场
 	Logout(ctx context.Context, in *DesktopLogoutRequest, opts ...grpc.CallOption) (*DesktopLogoutResponse, error)
-	// 域名解析 - Desktop 查询 .k8s 域名对应的 Agent 地址
+	// 域名解析 - Desktop 查询域名对应的 Agent 地址（域名后缀可配置，默认 .beagle）
 	ResolveDomain(ctx context.Context, in *ResolveDomainRequest, opts ...grpc.CallOption) (*ResolveDomainResponse, error)
+	// 资源发现 - Desktop 查询可访问的资源列表
+	GetResources(ctx context.Context, in *GetResourcesRequest, opts ...grpc.CallOption) (*GetResourcesResponse, error)
 }
 
 type desktopServiceClient struct {
@@ -241,6 +244,16 @@ func (c *desktopServiceClient) ResolveDomain(ctx context.Context, in *ResolveDom
 	return out, nil
 }
 
+func (c *desktopServiceClient) GetResources(ctx context.Context, in *GetResourcesRequest, opts ...grpc.CallOption) (*GetResourcesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetResourcesResponse)
+	err := c.cc.Invoke(ctx, DesktopService_GetResources_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DesktopServiceServer is the server API for DesktopService service.
 // All implementations must embed UnimplementedDesktopServiceServer
 // for forward compatibility.
@@ -275,8 +288,10 @@ type DesktopServiceServer interface {
 	WaitForLoginResult(grpc.BidiStreamingServer[WaitForLoginResultRequest, WaitForLoginResultResponse]) error
 	// 注销 - Desktop 安全离场
 	Logout(context.Context, *DesktopLogoutRequest) (*DesktopLogoutResponse, error)
-	// 域名解析 - Desktop 查询 .k8s 域名对应的 Agent 地址
+	// 域名解析 - Desktop 查询域名对应的 Agent 地址（域名后缀可配置，默认 .beagle）
 	ResolveDomain(context.Context, *ResolveDomainRequest) (*ResolveDomainResponse, error)
+	// 资源发现 - Desktop 查询可访问的资源列表
+	GetResources(context.Context, *GetResourcesRequest) (*GetResourcesResponse, error)
 	mustEmbedUnimplementedDesktopServiceServer()
 }
 
@@ -331,6 +346,9 @@ func (UnimplementedDesktopServiceServer) Logout(context.Context, *DesktopLogoutR
 }
 func (UnimplementedDesktopServiceServer) ResolveDomain(context.Context, *ResolveDomainRequest) (*ResolveDomainResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResolveDomain not implemented")
+}
+func (UnimplementedDesktopServiceServer) GetResources(context.Context, *GetResourcesRequest) (*GetResourcesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetResources not implemented")
 }
 func (UnimplementedDesktopServiceServer) mustEmbedUnimplementedDesktopServiceServer() {}
 func (UnimplementedDesktopServiceServer) testEmbeddedByValue()                        {}
@@ -590,6 +608,24 @@ func _DesktopService_ResolveDomain_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DesktopService_GetResources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetResourcesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DesktopServiceServer).GetResources(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DesktopService_GetResources_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DesktopServiceServer).GetResources(ctx, req.(*GetResourcesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DesktopService_ServiceDesc is the grpc.ServiceDesc for DesktopService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -644,6 +680,10 @@ var DesktopService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResolveDomain",
 			Handler:    _DesktopService_ResolveDomain_Handler,
+		},
+		{
+			MethodName: "GetResources",
+			Handler:    _DesktopService_GetResources_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

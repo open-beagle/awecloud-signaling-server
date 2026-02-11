@@ -7,13 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/glebarez/sqlite" // 纯 Go SQLite 驱动
+	"github.com/uptrace/opentelemetry-go-extra/otelgorm"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
-	"github.com/glebarez/sqlite" // 纯 Go SQLite 驱动
-	"github.com/uptrace/opentelemetry-go-extra/otelgorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -130,6 +130,19 @@ func autoMigrate() error {
 
 		// ZTNA 域名注册表
 		&model.DomainRegistry{},
+
+		// ACL K8S 授权模型
+		&model.AclK8SUserPermission{},
+		&model.AclK8SGroupPermission{},
+
+		// ACL K8SService 授权模型
+		&model.AclK8SServiceUserPermission{},
+		&model.AclK8SServiceGroupPermission{},
+
+		// Endpoint 模型
+		&model.EndpointSSH{},
+		&model.EndpointK8SAPI{},
+		&model.EndpointK8SService{},
 	)
 	if err != nil {
 		// 忽略"索引已存在"的错误（SQLite 在某些情况下会报这个错误）

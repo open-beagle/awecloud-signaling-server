@@ -26,6 +26,9 @@ service AgentService {
 
   // 上报网络变化
   rpc ReportNetworkChange(ReportNetworkChangeRequest) returns (ReportNetworkChangeResponse);
+
+  // SVCProxy - K8S Service 代理（双向流，Desktop → Agent → K8S ClusterIP）
+  rpc SVCProxy(stream SVCProxyData) returns (stream SVCProxyData);
 }
 
 // ============================================
@@ -123,6 +126,24 @@ message AgentHeartbeatRequest {
   repeated NetworkInterface networks = 8; // 网络接口列表
   // ZTNA 域名注册（首次心跳或变更时上报）
   repeated DomainRegistration domain_registrations = 9; // 域名注册列表
+  // K8S Service 发现数据（Agent 上报）
+  repeated DiscoveredK8SService discovered_services = 10; // 发现的 K8S Service 列表
+}
+
+// DiscoveredK8SService Agent 发现的 K8S Service（心跳上报）
+message DiscoveredK8SService {
+  string namespace = 1;          // 命名空间
+  string service_name = 2;      // Service 名称
+  string cluster_ip = 3;        // ClusterIP
+  repeated ServicePort ports = 4; // 端口列表
+  map<string, string> labels = 5; // 标签
+}
+
+// ServicePort K8S Service 端口
+message ServicePort {
+  string name = 1;     // 端口名称
+  int32 port = 2;      // 端口号
+  string protocol = 3; // 协议（TCP/UDP）
 }
 
 // DomainRegistration 域名注册信息（Agent 心跳上报）
@@ -162,6 +183,26 @@ message AgentHeartbeatResponse {
   repeated ServiceConfig services = 2; // 端口映射配置（如有变更）
   repeated ForwardConfig forwards = 3; // 端口访问配置（如有变更）
   string domain_suffix = 4; // 域名后缀（如 .beagle），由 Server 下发
+  repeated K8SPermission k8s_permissions = 5; // K8S API 授权列表
+  repeated K8SServicePermission k8s_service_permissions = 6; // K8S Service 授权列表
+}
+
+// K8SPermission K8S API 授权信息（心跳响应下发给 Agent）
+message K8SPermission {
+  uint64 user_id = 1;            // 被授权用户 ID
+  string user_name = 2;          // 被授权用户名
+  repeated string k8s_groups = 3; // K8S Impersonation 分组
+  repeated string namespaces = 4; // 允许的命名空间（空表示全部）
+  bool is_group = 5;             // 是否来自分组授权
+}
+
+// K8SServicePermission K8S Service 授权信息（心跳响应下发给 Agent）
+message K8SServicePermission {
+  uint64 user_id = 1;              // 被授权用户 ID
+  string user_name = 2;            // 被授权用户名
+  repeated string namespaces = 3;   // 允许的命名空间（空表示全部）
+  repeated string service_names = 4; // 允许的 Service 名称（空表示全部）
+  bool is_group = 5;               // 是否来自分组授权
 }
 
 // ============================================
@@ -241,4 +282,20 @@ message ReportNetworkChangeRequest {
 message ReportNetworkChangeResponse {
   bool success = 1; // 是否成功
   string message = 2; // 响应消息
+}
+
+// ============================================
+// SVCProxy（K8S Service 代理）
+// ============================================
+
+// SVCProxyData K8S Service 代理数据帧
+// 首包携带连接参数（is_connect=true），后续包携带数据
+message SVCProxyData {
+  string namespace = 1;      // 目标命名空间（首包携带）
+  string service_name = 2;   // 目标 Service 名称（首包携带）
+  int32 port = 3;            // 目标端口（首包携带）
+  bytes data = 4;            // 数据载荷
+  bool is_connect = 5;       // 是否为连接请求（首包 true）
+  bool is_close = 6;         // 是否为关闭通知
+  string error = 7;          // 错误信息（如有）
 }

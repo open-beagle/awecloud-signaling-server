@@ -243,7 +243,7 @@ signal_endpoint 二进制
 
     [svc]
     enabled = true
-    label_selector = "tailscale=true"
+    label_selector = "signal.beagle.io/expose=true"
     namespaces = []
 
   一台机器可以同时是 SSH 端点、K8SAPI 端点和 K8SService 端点
@@ -304,7 +304,7 @@ K8S 集群节点上安装 EndpointK8SService：
 
     [svc]
     enabled = true
-    label_selector = "tailscale=true"
+    label_selector = "signal.beagle.io/expose=true"
     namespaces = []
 
   启动后：

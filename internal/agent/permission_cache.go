@@ -1,0 +1,173 @@
+package agent
+
+import (
+	"sync"
+
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
+	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
+)
+
+// K8SUserPermission 单个用户的 K8S API 权限
+type K8SUserPermission struct {
+	K8SGroups  []string // Impersonation 分组
+	Namespaces []string // 允许的命名空间（空表示全部）
+}
+
+// K8SServiceUserPermission 单个用户的 K8S Service 权限
+type K8SServiceUserPermission struct {
+	Namespaces   []string // 允许的命名空间（空表示全部）
+	ServiceNames []string // 允许的 Service 名称（空表示全部）
+}
+
+// PermissionCache Agent 本地权限缓存
+// 从心跳响应中同步，供 K8SAPI 代理和 SVCProxy 鉴权使用
+type PermissionCache struct {
+	// K8S API 权限：key = user_name
+	k8sPermissions map[string]*K8SUserPermission
+	k8sMutex       sync.RWMutex
+
+	// K8S Service 权限：key = user_name
+	k8sSvcPermissions map[string]*K8SServiceUserPermission
+	k8sSvcMutex       sync.RWMutex
+}
+
+// NewPermissionCache 创建权限缓存
+func NewPermissionCache() *PermissionCache {
+	return &PermissionCache{
+		k8sPermissions:    make(map[string]*K8SUserPermission),
+		k8sSvcPermissions: make(map[string]*K8SServiceUserPermission),
+	}
+}
+
+// UpdateK8SPermissions 从心跳响应更新 K8S API 权限
+func (c *PermissionCache) UpdateK8SPermissions(perms []*pb.K8SPermission) {
+	c.k8sMutex.Lock()
+	defer c.k8sMutex.Unlock()
+
+	// 全量替换
+	newPerms := make(map[string]*K8SUserPermission)
+	for _, p := range perms {
+		existing, ok := newPerms[p.UserName]
+		if ok {
+			// 合并同一用户的多条权限（来自不同分组）
+			existing.K8SGroups = mergeStringSlice(existing.K8SGroups, p.K8SGroups)
+			existing.Namespaces = mergeStringSlice(existing.Namespaces, p.Namespaces)
+		} else {
+			newPerms[p.UserName] = &K8SUserPermission{
+				K8SGroups:  p.K8SGroups,
+				Namespaces: p.Namespaces,
+			}
+		}
+	}
+
+	c.k8sPermissions = newPerms
+	logger.Debugf("K8S 权限缓存已更新: %d 个用户", len(newPerms))
+}
+
+// CheckK8SAccess 检查用户的 K8S API 访问权限
+// 返回: k8sGroups（Impersonation 分组）, allowed（是否允许）
+func (c *PermissionCache) CheckK8SAccess(userName, namespace string) ([]string, bool) {
+	c.k8sMutex.RLock()
+	defer c.k8sMutex.RUnlock()
+
+	perm, ok := c.k8sPermissions[userName]
+	if !ok {
+		return nil, false
+	}
+
+	// 检查命名空间权限
+	if len(perm.Namespaces) > 0 && namespace != "" {
+		allowed := false
+		for _, ns := range perm.Namespaces {
+			if ns == "*" || ns == namespace {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return nil, false
+		}
+	}
+
+	return perm.K8SGroups, true
+}
+
+// UpdateK8SServicePermissions 从心跳响应更新 K8S Service 权限
+func (c *PermissionCache) UpdateK8SServicePermissions(perms []*pb.K8SServicePermission) {
+	c.k8sSvcMutex.Lock()
+	defer c.k8sSvcMutex.Unlock()
+
+	newPerms := make(map[string]*K8SServiceUserPermission)
+	for _, p := range perms {
+		existing, ok := newPerms[p.UserName]
+		if ok {
+			existing.Namespaces = mergeStringSlice(existing.Namespaces, p.Namespaces)
+			existing.ServiceNames = mergeStringSlice(existing.ServiceNames, p.ServiceNames)
+		} else {
+			newPerms[p.UserName] = &K8SServiceUserPermission{
+				Namespaces:   p.Namespaces,
+				ServiceNames: p.ServiceNames,
+			}
+		}
+	}
+
+	c.k8sSvcPermissions = newPerms
+	logger.Debugf("K8SService 权限缓存已更新: %d 个用户", len(newPerms))
+}
+
+// CheckK8SServiceAccess 检查用户的 K8S Service 访问权限
+func (c *PermissionCache) CheckK8SServiceAccess(userName, namespace, serviceName string) bool {
+	c.k8sSvcMutex.RLock()
+	defer c.k8sSvcMutex.RUnlock()
+
+	perm, ok := c.k8sSvcPermissions[userName]
+	if !ok {
+		return false
+	}
+
+	// 检查命名空间
+	if len(perm.Namespaces) > 0 {
+		nsAllowed := false
+		for _, ns := range perm.Namespaces {
+			if ns == "*" || ns == namespace {
+				nsAllowed = true
+				break
+			}
+		}
+		if !nsAllowed {
+			return false
+		}
+	}
+
+	// 检查 Service 名称
+	if len(perm.ServiceNames) > 0 {
+		svcAllowed := false
+		for _, sn := range perm.ServiceNames {
+			if sn == "*" || sn == serviceName {
+				svcAllowed = true
+				break
+			}
+		}
+		if !svcAllowed {
+			return false
+		}
+	}
+
+	return true
+}
+
+// mergeStringSlice 合并两个字符串切片，去重
+func mergeStringSlice(a, b []string) []string {
+	seen := make(map[string]bool)
+	for _, s := range a {
+		seen[s] = true
+	}
+	for _, s := range b {
+		seen[s] = true
+	}
+	result := make([]string, 0, len(seen))
+	for s := range seen {
+		result = append(result, s)
+	}
+	return result
+}
