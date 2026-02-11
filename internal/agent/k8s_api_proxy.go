@@ -83,7 +83,8 @@ func (p *K8SAPIProxy) Start() error {
 		},
 	}
 
-	// 创建 HTTP Server
+	// 创建 HTTP Server（明文 HTTP，TLS 由 Desktop 端本地终止）
+	// tsnet 本身是 WireGuard 加密的，无需在应用层再加 TLS
 	p.httpServer = &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			p.handleRequest(w, r, proxy)
@@ -92,7 +93,7 @@ func (p *K8SAPIProxy) Start() error {
 
 	// 启动服务
 	go func() {
-		logger.Infof("K8S API 代理已启动: tsnet%s -> %s", listenAddr, p.apiServerURL.String())
+		logger.Infof("K8S API 代理已启动（HTTP）: tsnet%s -> %s", listenAddr, p.apiServerURL.String())
 		if err := p.httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 			logger.Errorf("K8S API 代理服务错误: %v", err)
 		}
@@ -115,13 +116,18 @@ func (p *K8SAPIProxy) Stop() {
 
 // handleRequest 处理请求：身份提取 → 权限检查 → Impersonation → 转发
 func (p *K8SAPIProxy) handleRequest(w http.ResponseWriter, r *http.Request, proxy *httputil.ReverseProxy) {
+	logger.Infof("K8SAPI 收到请求: remote=%s, method=%s, path=%s", r.RemoteAddr, r.Method, r.URL.Path)
+
 	// 1. 从 tsnet 连接提取对端身份
 	peerIdentity, err := p.identity.ExtractFromConn(r.Context(), &remoteAddrWrapper{addr: r.RemoteAddr})
 	if err != nil {
-		logger.Warnf("K8SAPI 身份提取失败: %v", err)
-		http.Error(w, "身份验证失败", http.StatusUnauthorized)
+		logger.Warnf("K8SAPI 身份提取失败: remote=%s, err=%v", r.RemoteAddr, err)
+		// 返回 403 而非 401，避免 kubectl 提示输入用户名密码
+		http.Error(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","message":"身份验证失败","reason":"Forbidden","code":403}`, http.StatusForbidden)
 		return
 	}
+
+	logger.Infof("K8SAPI 身份提取成功: user=%s, role=%s, node=%s", peerIdentity.UserName, peerIdentity.Role, peerIdentity.NodeName)
 
 	// 2. 从 URL 路径提取命名空间（如 /api/v1/namespaces/default/pods）
 	namespace := extractNamespaceFromPath(r.URL.Path)
@@ -130,7 +136,8 @@ func (p *K8SAPIProxy) handleRequest(w http.ResponseWriter, r *http.Request, prox
 	k8sGroups, allowed := p.permCache.CheckK8SAccess(peerIdentity.UserName, namespace)
 	if !allowed {
 		logger.Warnf("K8SAPI 权限拒绝: user=%s, namespace=%s", peerIdentity.UserName, namespace)
-		http.Error(w, "权限不足", http.StatusForbidden)
+		// 返回 403，使用 K8S 风格的 JSON 响应
+		http.Error(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","message":"权限不足","reason":"Forbidden","code":403}`, http.StatusForbidden)
 		return
 	}
 
@@ -142,7 +149,7 @@ func (p *K8SAPIProxy) handleRequest(w http.ResponseWriter, r *http.Request, prox
 		r.Header.Add("Impersonate-Group", group)
 	}
 
-	logger.Debugf("K8SAPI 转发: user=%s, groups=%v, namespace=%s, path=%s",
+	logger.Infof("K8SAPI 转发: user=%s, groups=%v, namespace=%s, path=%s",
 		peerIdentity.UserName, k8sGroups, namespace, r.URL.Path)
 
 	// 5. 反向代理到 K8S API Server
@@ -232,3 +239,4 @@ func parseKubeconfigServer(path string) (string, error) {
 
 	return "", fmt.Errorf("kubeconfig 中未找到 server 字段")
 }
+

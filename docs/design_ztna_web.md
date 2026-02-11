@@ -87,7 +87,7 @@ Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理�
 | 终端管理(Endpoint) | 无                                     | 新增 Endpoint 管理（SSH/K8SAPI/K8SService）          |
 | 资源发现           | 无                                     | 新增 AgentK8SService/EndpointK8SService 自动发现视图 |
 | 域名管理           | 无                                     | 新增域名注册表查看                                   |
-| 授权管理           | 服务授权、用户授权、分组授权、SSH 授权 | 新增 K8S 授权 + K8SService 授权                      |
+| 授权管理           | 服务授权、用户授权、分组授权、SSH 授权 | 新增 K8S API 授权 + K8S Service 授权                 |
 | 隧道管理           | Headscale User/Node/ACL/SSH            | 不变                                                 |
 | 审计日志           | 连接审计                               | 增强为操作级审计（直连 + 跳跃）                      |
 | 系统配置           | 系统参数                               | 不变                                                 |
@@ -109,8 +109,8 @@ Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理�
 │     ├── 用户授权    /acl/users                （不变）
 │     ├── 分组授权    /acl/groups               （不变）
 │     ├── SSH 授权    /acl/ssh                  （增强，包含 Agent SSH + Endpoint SSH）
-│     ├── K8S 授权    /acl/k8s                  （新增，包含 Agent K8SAPI + Endpoint K8SAPI）
-│     └── K8SService 授权 /acl/k8s-service      （新增，包含 Agent K8SService + Endpoint K8SService）
+│     ├── K8S API 授权    /acl/k8s                  （新增，包含 Agent K8SAPI + Endpoint K8SAPI）
+│     └── K8S Service 授权 /acl/k8s-service      （新增，包含 Agent K8SService + Endpoint K8SService）
 ├── 隧道管理                                    （不变）
 │     ├── User 管理   /tunnel/users
 │     ├── Node 管理   /tunnel/nodes
@@ -139,7 +139,7 @@ Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理�
 详情页面（点击"管理授权"进入）：
 
 ```
-Agent: beijing（api.beijing.beagle:6443）
+Agent: beijing（kubernetes.beijing.beagle:6443）
 
 用户级授权：
   ┌──────────┬──────────┬──────────┐
@@ -160,7 +160,7 @@ Agent: beijing（api.beijing.beagle:6443）
 
 页面结构与现有 SSH 授权页面（/acl/ssh）类似：列表页 + 详情页模式。
 
-### K8SService 授权页面（/acl/k8s-service）
+### K8S Service 授权页面（/acl/k8s-service）
 
 管理 AgentK8SService 的访问权限（第 3 层）。以 Agent 为维度，配置哪些用户/分组可以访问哪个 Agent 自动发现的 K8S Service，按命名空间和 Service 名称控制。
 
@@ -254,6 +254,8 @@ EndpointK8SService 列表（/endpoints/svc）：
 
 过滤条件：按 Agent、来源、命名空间、状态筛选，支持关键词搜索。
 
+"更新"按钮：通知所有在线 Agent 立即上报 K8S Service 发现数据（POST /api/v1/resources/sync），无需等待心跳周期。具体机制见 `design_ztna_server_heartbeat.md`「立即上报机制」。
+
 ### 域名管理页面（/domains）
 
 查看域名注册表，展示域名到 Agent/Endpoint 的映射关系。
@@ -298,8 +300,8 @@ menu.endpointK8SAPI     — EndpointK8SAPI
 menu.endpointK8SService — EndpointK8SService
 menu.resources          — 资源发现
 menu.domains            — 域名管理
-acl.k8s                 — K8S 授权
-acl.k8sService          — K8SService 授权
+acl.k8s                 — K8S API 授权
+acl.k8sService          — K8S Service 授权
 endpoint.ssh            — Endpoint SSH
 endpoint.k8s            — Endpoint K8SAPI
 endpoint.svc            — Endpoint K8SService
@@ -307,11 +309,11 @@ endpoint.svc            — Endpoint K8SService
 
 ## 实现优先级
 
-| 阶段 | 内容                | 依赖                        |
-| ---- | ------------------- | --------------------------- |
-| P1   | K8S 授权页面        | AclK8sPermission API        |
-| P1   | K8SService 授权页面 | AclK8SServicePermission API |
-| P1   | Endpoint 管理页面   | Endpoint 模型 API           |
-| P1   | 资源发现页面        | 资源发现 API                |
-| P1   | 域名管理页面        | 域名注册表 API              |
-| P2   | 审计日志增强        | 操作审计 API                |
+| 阶段 | 内容                 | 依赖                        |
+| ---- | -------------------- | --------------------------- |
+| P1   | K8S API 授权页面     | AclK8sPermission API        |
+| P1   | K8S Service 授权页面 | AclK8SServicePermission API |
+| P1   | Endpoint 管理页面    | Endpoint 模型 API           |
+| P1   | 资源发现页面         | 资源发现 API                |
+| P1   | 域名管理页面         | 域名注册表 API              |
+| P2   | 审计日志增强         | 操作审计 API                |

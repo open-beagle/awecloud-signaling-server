@@ -169,7 +169,7 @@ const fetchDetail = async () => {
   try {
     const res = await getK8SServiceACL(agentId)
     if (res.success && res.data) { detail.value = res.data }
-  } catch (error) { console.error('获取 K8SService 授权详情失败:', error) }
+  } catch (error) { console.error('获取 K8S Service 授权详情失败:', error) }
 }
 
 const handleConfirmUser = async (userIds: number[]) => {

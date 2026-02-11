@@ -77,10 +77,10 @@ DNS 劫持流程：
 
 区别仅在于 DNS 配置方式：
 
-| 形态         | DNS 配置方式                                                                  |
-| ------------ | ----------------------------------------------------------------------------- |
-| Desktop.Host | /etc/resolver/beagle (macOS)、systemd-resolved (Linux)、网络适配器 (Windows)  |
-| Desktop.Pod  | /etc/resolv.conf 指向本地 DNS（容器内有 root 权限）                           |
+| 形态         | DNS 配置方式                                                                 |
+| ------------ | ---------------------------------------------------------------------------- |
+| Desktop.Host | /etc/resolver/beagle (macOS)、systemd-resolved (Linux)、网络适配器 (Windows) |
+| Desktop.Pod  | /etc/resolv.conf 指向本地 DNS（容器内有 root 权限）                          |
 
 ### VIP 分配
 
@@ -140,10 +140,10 @@ SVC 跳跃到 Endpoint：
   psql -h pg.yygl.remote-cluster.beijing.beagle -p 5432
 
 K8S API 直连 Agent：
-  kubectl --server=https://api.beijing.beagle:6443 get pods
+  kubectl --server=https://kubernetes.beijing.beagle:6443 get pods
 
 K8S API 跳跃到 Endpoint：
-  kubectl --server=https://api.beijing-prod.beijing.beagle:6443 get pods
+  kubectl --server=https://kubernetes.beijing-prod.beijing.beagle:6443 get pods
 ```
 
 ## 身份传递

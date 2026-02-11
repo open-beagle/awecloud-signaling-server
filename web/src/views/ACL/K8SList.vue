@@ -87,7 +87,7 @@ const fetchList = async () => {
       pagination.total = res.total
     }
   } catch (error) {
-    console.error('获取 K8S 授权列表失败:', error)
+    console.error('获取 K8S API 授权列表失败:', error)
   } finally {
     loading.value = false
   }

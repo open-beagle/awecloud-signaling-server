@@ -33,6 +33,9 @@ type User struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 
+	// Agent 远程能力配置（Server 远程控制，nil=未设置，由 Agent 本地配置决定）
+	// 注意：SSHEnabled 保留在 User 表（bool 类型，始终有值），K8S/SVC 配置已迁移到 Node 表
+
 	// 关联
 	Nodes []*Node `gorm:"foreignKey:UserID" json:"nodes,omitempty"`
 }

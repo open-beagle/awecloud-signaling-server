@@ -76,8 +76,8 @@ P0（基础设施）──▶ P1（K8S 能力）──▶ P2（Endpoint 体系�
 | ---------------------------------------- | ---------------------------------------------------------- | ---- |
 | acl*k8s*\*\_permission 表（2张）         | AgentK8SAPI 用户/分组授权表                                | 0.5d |
 | acl*k8s_service*\*\_permission 表（2张） | AgentK8SService 用户/分组授权表                            | 0.5d |
-| K8S 授权 API                             | /api/v1/acl/k8s CRUD（列表、详情、添加、撤销）             | 2d   |
-| K8SService 授权 API                      | /api/v1/acl/k8s-service CRUD                               | 2d   |
+| K8S API 授权 API                         | /api/v1/acl/k8s CRUD（列表、详情、添加、撤销）             | 2d   |
+| K8S Service 授权 API                     | /api/v1/acl/k8s-service CRUD                               | 2d   |
 | 心跳响应扩展                             | 心跳响应新增 k8s_permissions、k8s_service_permissions 字段 | 1.5d |
 | 资源发现 API                             | GET /api/v1/client/resources，查询可访问资源               | 1.5d |
 | K8SServiceDiscoveryCache                 | Server 内存缓存，Agent 心跳上报 K8S Service 发现数据       | 1d   |
@@ -104,7 +104,7 @@ P0（基础设施）──▶ P1（K8S 能力）──▶ P2（Endpoint 体系�
 | K8S API 代理          | tsnet 监听 K8SAPI 端口，Impersonation 转发      | 3d   |
 | 身份提取              | 从 tsnet 连接提取对端身份                       | 1d   |
 | 权限缓存              | 心跳同步 k8s_permissions，本地缓存 + 鉴权       | 1.5d |
-| 域名注册              | 心跳上报 api.<agent-name>.beagle 域名           | 0.5d |
+| 域名注册              | 心跳上报 kubernetes.<agent-name>.beagle 域名    | 0.5d |
 
 小计：6.5d
 
@@ -125,7 +125,7 @@ P0（基础设施）──▶ P1（K8S 能力）──▶ P2（Endpoint 体系�
 
 | 任务                 | 说明                                                         | 估算 |
 | -------------------- | ------------------------------------------------------------ | ---- |
-| K8SAPI 域名解析      | api.<agent>.beagle → VIP → tsnet → Agent K8SAPI 端口         | 1d   |
+| K8SAPI 域名解析      | kubernetes.<agent>.beagle → VIP → tsnet → Agent K8SAPI 端口  | 1d   |
 | K8SService gRPC 代理 | VIP → tsnet → Agent SVCProxy RPC（传递 namespace + service） | 2d   |
 | 资源发现 UI（.Host） | 资源浏览页面，展示可访问资源，复制连接命令                   | 2d   |
 
@@ -136,10 +136,10 @@ P0（基础设施）──▶ P1（K8S 能力）──▶ P2（Endpoint 体系�
 | 任务                     | 说明                                           | 估算 |
 | ------------------------ | ---------------------------------------------- | ---- |
 | AuthGrantDialog 通用组件 | 穿梭框模式授权弹窗（用户/分组 + 授权参数）     | 3d   |
-| K8S 授权列表页           | /acl/k8s，Agent 列表 + 授权数统计              | 1.5d |
-| K8S 授权详情页           | /acl/k8s/:id，基本信息 + 用户/分组授权表       | 2d   |
-| K8SService 授权列表页    | /acl/k8s-service                               | 1.5d |
-| K8SService 授权详情页    | /acl/k8s-service/:id                           | 2d   |
+| K8S API 授权列表页       | /acl/k8s，Agent 列表 + 授权数统计              | 1.5d |
+| K8S API 授权详情页       | /acl/k8s/:id，基本信息 + 用户/分组授权表       | 2d   |
+| K8S Service 授权列表页   | /acl/k8s-service                               | 1.5d |
+| K8S Service 授权详情页   | /acl/k8s-service/:id                           | 2d   |
 | Endpoint 管理页面（3个） | /endpoints/ssh、/endpoints/k8s、/endpoints/svc | 3d   |
 | 资源发现页面             | /resources，K8S Service 汇总视图               | 2d   |
 | 域名管理页面             | /domains，域名注册表查看                       | 1.5d |
@@ -160,14 +160,14 @@ P0（基础设施）──▶ P1（K8S 能力）──▶ P2（Endpoint 体系�
 
 ### P2-1. Server：Endpoint ACL
 
-| 任务                         | 说明                                                   | 估算 |
-| ---------------------------- | ------------------------------------------------------ | ---- |
-| Endpoint 跳跃 ACL 表（6张）  | ssh_jump / k8sapi_jump / k8sservice_jump × user/group  | 1d   |
-| Endpoint SSH 授权 API        | /api/v1/acl/ssh 增强（Agent SSH + Endpoint SSH）       | 2d   |
-| Endpoint K8S 授权 API        | /api/v1/acl/k8s 增强（Agent K8SAPI + Endpoint K8SAPI） | 1.5d |
-| Endpoint K8SService 授权 API | /api/v1/acl/k8s-service 增强                           | 1.5d |
-| 心跳响应扩展                 | 新增 ssh/k8sapi/k8sservice_endpoint_permissions 字段   | 1d   |
-| EndpointK8SServiceCache      | Endpoint 发现的 K8S Service 缓存                       | 1d   |
+| 任务                          | 说明                                                   | 估算 |
+| ----------------------------- | ------------------------------------------------------ | ---- |
+| Endpoint 跳跃 ACL 表（6张）   | ssh_jump / k8sapi_jump / k8sservice_jump × user/group  | 1d   |
+| Endpoint SSH 授权 API         | /api/v1/acl/ssh 增强（Agent SSH + Endpoint SSH）       | 2d   |
+| Endpoint K8S API 授权 API     | /api/v1/acl/k8s 增强（Agent K8SAPI + Endpoint K8SAPI） | 1.5d |
+| Endpoint K8S Service 授权 API | /api/v1/acl/k8s-service 增强                           | 1.5d |
+| 心跳响应扩展                  | 新增 ssh/k8sapi/k8sservice_endpoint_permissions 字段   | 1d   |
+| EndpointK8SServiceCache       | Endpoint 发现的 K8S Service 缓存                       | 1d   |
 
 小计：8d
 
@@ -242,13 +242,13 @@ P0（基础设施）──▶ P1（K8S 能力）──▶ P2（Endpoint 体系�
 
 ### P2-8. Web：Endpoint 授权 + 审计增强
 
-| 任务                    | 说明                                               | 估算 |
-| ----------------------- | -------------------------------------------------- | ---- |
-| SSH 授权页面增强        | /acl/ssh 增加 Endpoint SSH 授权 Tab                | 2d   |
-| K8S 授权页面增强        | /acl/k8s 增加 Endpoint K8SAPI 授权 Tab             | 2d   |
-| K8SService 授权页面增强 | /acl/k8s-service 增加 Endpoint K8SService 授权 Tab | 2d   |
-| 审计日志增强            | 操作类型筛选、Agent/Endpoint 列、详情列            | 2d   |
-| 国际化补充              | Endpoint 授权 + 审计相关翻译                       | 0.5d |
+| 任务                     | 说明                                                | 估算 |
+| ------------------------ | --------------------------------------------------- | ---- |
+| SSH 授权页面增强         | /acl/ssh 增加 Endpoint SSH 授权 Tab                 | 2d   |
+| K8S API 授权页面增强     | /acl/k8s 增加 Endpoint K8SAPI 授权 Tab              | 2d   |
+| K8S Service 授权页面增强 | /acl/k8s-service 增加 Endpoint K8S Service 授权 Tab | 2d   |
+| 审计日志增强             | 操作类型筛选、Agent/Endpoint 列、详情列             | 2d   |
+| 国际化补充               | Endpoint 授权 + 审计相关翻译                        | 0.5d |
 
 小计：8.5d
 
@@ -277,14 +277,14 @@ P0（基础设施）──▶ P1（K8S 能力）──▶ P2（Endpoint 体系�
 
 ## 里程碑
 
-| 里程碑 | 完成标志                                                  | 累计      | 状态          |
-| ------ | --------------------------------------------------------- | --------- | ------------- |
-| M1     | Desktop.Host 可通过域名 SSH 到 Agent（tsnet + DNS + VIP） | P0 完成   | ✅ 2026-02-11 |
-| M2     | kubectl 可通过域名访问 Agent K8S API（Impersonation）     | P1-3 完成 | ⏳            |
-| M3     | psql 可通过域名访问 Agent 自动发现的 K8S Service          | P1-4 完成 | ⏳            |
-| M4     | Web 管理界面 K8S 授权 + Endpoint 管理 + 资源发现页面上线  | P1 完成   | ⏳            |
-| M5     | ssh 可通过 Agent 跳跃到内网 Endpoint                      | P2-4 完成 | ⏳            |
-| M6     | 全链路操作审计可查                                        | P2 完成   | ⏳            |
+| 里程碑 | 完成标志                                                     | 累计      | 状态          |
+| ------ | ------------------------------------------------------------ | --------- | ------------- |
+| M1     | Desktop.Host 可通过域名 SSH 到 Agent（tsnet + DNS + VIP）    | P0 完成   | ✅ 2026-02-11 |
+| M2     | kubectl 可通过域名访问 Agent K8S API（Impersonation）        | P1-3 完成 | ⏳            |
+| M3     | psql 可通过域名访问 Agent 自动发现的 K8S Service             | P1-4 完成 | ⏳            |
+| M4     | Web 管理界面 K8S API 授权 + Endpoint 管理 + 资源发现页面上线 | P1 完成   | ⏳            |
+| M5     | ssh 可通过 Agent 跳跃到内网 Endpoint                         | P2-4 完成 | ⏳            |
+| M6     | 全链路操作审计可查                                           | P2 完成   | ⏳            |
 
 ## 关键技术风险
 

@@ -351,6 +351,9 @@ func (s *Server) setupRouter() *gin.Engine {
 					nodeAPI := api.NewNodeAPI(s.config)
 					adminAuthGroup.GET("/nodes", nodeAPI.List)
 					adminAuthGroup.GET("/nodes/:id", nodeAPI.Get)
+					adminAuthGroup.GET("/nodes/:id/capabilities", nodeAPI.GetCapabilities)
+					adminAuthGroup.PUT("/nodes/:id/capabilities", nodeAPI.UpdateCapabilities)
+					adminAuthGroup.DELETE("/nodes/:id/capabilities", nodeAPI.ResetCapabilities)
 					adminAuthGroup.DELETE("/nodes/:id", nodeAPI.Delete)
 
 					// 分组管理
@@ -414,14 +417,14 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.POST("/acl/ssh/:id/groups", aclAPI.AddSSHACLGroups)
 					adminAuthGroup.DELETE("/acl/ssh/:id/users/:uid", aclAPI.RemoveSSHACLUser)
 					adminAuthGroup.DELETE("/acl/ssh/:id/groups/:gid", aclAPI.RemoveSSHACLGroup)
-					// K8S 授权
+					// K8S API 授权
 					adminAuthGroup.GET("/acl/k8s", aclAPI.ListK8SACL)
 					adminAuthGroup.GET("/acl/k8s/:id", aclAPI.GetK8SACL)
 					adminAuthGroup.POST("/acl/k8s/:id/users", aclAPI.AddK8SACLUsers)
 					adminAuthGroup.POST("/acl/k8s/:id/groups", aclAPI.AddK8SACLGroups)
 					adminAuthGroup.DELETE("/acl/k8s/:id/users/:uid", aclAPI.RemoveK8SACLUser)
 					adminAuthGroup.DELETE("/acl/k8s/:id/groups/:gid", aclAPI.RemoveK8SACLGroup)
-					// K8SService 授权
+					// K8S Service 授权
 					adminAuthGroup.GET("/acl/k8s-service", aclAPI.ListK8SServiceACL)
 					adminAuthGroup.GET("/acl/k8s-service/:id", aclAPI.GetK8SServiceACL)
 					adminAuthGroup.POST("/acl/k8s-service/:id/users", aclAPI.AddK8SServiceACLUsers)
@@ -459,7 +462,9 @@ func (s *Server) setupRouter() *gin.Engine {
 
 					// 资源发现（管理员查看 K8S Service 发现数据）
 					resourceAPI := api.NewResourceAPI(s.config)
+					resourceAPI.SetImmediateReportNotifier(s.agentService)
 					adminAuthGroup.GET("/resources/k8s-services", resourceAPI.GetK8SServiceDiscoveries)
+					adminAuthGroup.POST("/resources/sync", resourceAPI.SyncK8SServiceDiscovery)
 
 					// 审计日志
 					auditAPI := api.NewAuditLogAPI()

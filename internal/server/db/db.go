@@ -131,11 +131,11 @@ func autoMigrate() error {
 		// ZTNA 域名注册表
 		&model.DomainRegistry{},
 
-		// ACL K8S 授权模型
+		// ACL K8S API 授权模型
 		&model.AclK8SUserPermission{},
 		&model.AclK8SGroupPermission{},
 
-		// ACL K8SService 授权模型
+		// ACL K8S Service 授权模型
 		&model.AclK8SServiceUserPermission{},
 		&model.AclK8SServiceGroupPermission{},
 

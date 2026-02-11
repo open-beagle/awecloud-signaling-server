@@ -182,7 +182,7 @@ const fetchDetail = async () => {
   try {
     const res = await getK8SACL(agentId)
     if (res.success && res.data) { detail.value = res.data }
-  } catch (error) { console.error('获取 K8S 授权详情失败:', error) }
+  } catch (error) { console.error('获取 K8S API 授权详情失败:', error) }
 }
 
 const handleConfirmUser = async (userIds: number[]) => {

@@ -339,3 +339,99 @@ NodeCache 使用 sync.RWMutex 保护：
 - 然后从数据库重新加载
 - 心跳在 Invalidate 期间的更新可能被覆盖
 - 但下次心跳会重新更新，影响极小（最多丢一次心跳时间）
+
+## 立即上报机制
+
+### 背景
+
+Agent 的 K8S Service Informer 实时监听变更，但只在心跳时上报（默认 30 秒周期）。Web 管理员在资源发现页面需要立即看到最新数据时，30 秒等待体验不佳。
+
+### 设计方案
+
+通过心跳响应流中新增 `request_immediate_report` 标志位，Server 通知 Agent 立即发送一次心跳（携带最新的 K8S Service 数据）。
+
+### 触发流程
+
+```
+Web 管理员点击"更新"按钮
+    │
+    ▼
+POST /api/v1/resources/sync
+    │
+    ▼
+Server 设置全局标志 requestImmediateReport = true
+    │
+    ▼
+下一次心跳响应时，Server 在 AgentHeartbeatResponse 中
+设置 request_immediate_report = true，然后清除标志
+    │
+    ▼
+Agent 收到 request_immediate_report = true
+    │
+    ▼
+Agent 立即发送一次心跳请求（携带最新 discovered_services）
+    │
+    ▼
+Server 收到心跳，更新 K8S Service 缓存
+    │
+    ▼
+Web 前端等待 3 秒后刷新列表，展示最新数据
+```
+
+### Proto 变更
+
+AgentHeartbeatResponse 新增字段：
+
+| 字段                     | 类型 | 说明                                   |
+| ------------------------ | ---- | -------------------------------------- |
+| request_immediate_report | bool | Server 请求 Agent 立即上报一次心跳数据 |
+
+### REST API
+
+POST /api/v1/resources/sync
+
+- 无请求参数
+- 响应：标准成功响应
+- 作用：设置全局标志，通知所有在线 Agent 在下一次心跳响应时立即上报
+
+### Agent 端处理
+
+Agent 在收到心跳响应后检查 `request_immediate_report` 字段：
+
+```
+收到 AgentHeartbeatResponse
+    │
+    ├─ request_immediate_report == true？
+    │   └─ 是 → 立即发送一次完整心跳（不等待下一个心跳周期）
+    │
+    └─ 继续正常处理其他响应字段（config_version、services 等）
+```
+
+### 时序图
+
+```
+Web管理员        Server API       心跳响应流        Agent
+    │                │                │               │
+    │── POST sync ──▶│                │               │
+    │◀── 200 OK ─────│                │               │
+    │                │── 设置标志 ────▶│               │
+    │                │                │               │
+    │                │                │  (下次心跳响应) │
+    │                │                │── resp ───────▶│
+    │                │                │  (immediate    │
+    │                │                │   =true)       │
+    │                │                │               │
+    │                │                │◀── 立即心跳 ──│
+    │                │                │  (携带最新     │
+    │                │                │   services)    │
+    │                │                │               │
+    │  (3秒后刷新)    │                │               │
+    │── GET resources▶│                │               │
+    │◀── 最新数据 ───│                │               │
+```
+
+### 边界情况
+
+- 没有在线 Agent 时：sync API 正常返回，但无 Agent 收到通知，前端刷新后数据不变
+- 多次快速点击：标志位是布尔值，多次设置效果等同一次
+- Agent 心跳间隔内：最坏情况等待一个心跳周期（30 秒）后 Agent 才收到通知，前端 3 秒后刷新可能还没拿到最新数据，用户可再次点击

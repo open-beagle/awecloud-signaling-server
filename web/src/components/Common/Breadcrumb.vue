@@ -94,14 +94,14 @@ const items = computed(() => {
     breadcrumbs.push({ title: `授权详情: ${sshName}` })
   }
   
-  // 8. 授权管理 - K8S 授权
+  // 8. 授权管理 - K8S API 授权
   else if (path === '/acl/k8s') {
     breadcrumbs.push({ title: '授权管理' })
-    breadcrumbs.push({ path: '/acl/k8s', title: 'K8S 授权' })
+    breadcrumbs.push({ path: '/acl/k8s', title: 'K8S API 授权' })
   } else if (path.match(/^\/acl\/k8s\/\d+$/)) {
     const k8sName = (route.query.name as string) || `#${route.params.id}`
     breadcrumbs.push({ title: '授权管理' })
-    breadcrumbs.push({ path: '/acl/k8s', title: 'K8S 授权' })
+    breadcrumbs.push({ path: '/acl/k8s', title: 'K8S API 授权' })
     breadcrumbs.push({ title: `授权详情: ${k8sName}` })
   }
   

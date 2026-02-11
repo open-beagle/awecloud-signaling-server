@@ -13,9 +13,9 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
-// ========== K8S 授权 ==========
+// ========== K8S API 授权 ==========
 
-// K8SACLListItem K8S 授权列表项
+// K8SACLListItem K8S API 授权列表项
 type K8SACLListItem struct {
 	ID         uint64    `json:"id"`
 	Name       string    `json:"name"`
@@ -26,7 +26,7 @@ type K8SACLListItem struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-// ListK8SACL 获取 K8S 授权列表（仅 Agent 角色）
+// ListK8SACL 获取 K8S API 授权列表（仅 Agent 角色）
 func (a *ACLAPI) ListK8SACL(c *gin.Context) {
 	ctx := c.Request.Context()
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -98,7 +98,7 @@ func (a *ACLAPI) ListK8SACL(c *gin.Context) {
 	c.JSON(http.StatusOK, NewPagedResponse(result, total, page, size))
 }
 
-// K8SACLPermissionItem K8S 授权项
+// K8SACLPermissionItem K8S API 授权项
 type K8SACLPermissionItem struct {
 	ID         uint64    `json:"id"`
 	Name       string    `json:"name"`
@@ -109,7 +109,7 @@ type K8SACLPermissionItem struct {
 	GrantedAt  time.Time `json:"granted_at"`
 }
 
-// K8SACLDetail K8S 授权详情
+// K8SACLDetail K8S API 授权详情
 type K8SACLDetail struct {
 	ID     uint64                 `json:"id"`
 	Name   string                 `json:"name"`
@@ -119,7 +119,7 @@ type K8SACLDetail struct {
 	Groups []K8SACLPermissionItem `json:"groups"`
 }
 
-// GetK8SACL 获取 K8S 授权详情
+// GetK8SACL 获取 K8S API 授权详情
 func (a *ACLAPI) GetK8SACL(c *gin.Context) {
 	ctx := c.Request.Context()
 	targetUserID, err := strconv.ParseUint(c.Param("id"), 10, 64)

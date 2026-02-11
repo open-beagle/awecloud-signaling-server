@@ -2,7 +2,7 @@ package model
 
 import "time"
 
-// AclK8SUserPermission K8S 授权 - 用户级别
+// AclK8SUserPermission K8S API 授权 - 用户级别
 // 授权某个用户通过 K8S API 访问某个 Agent 的 K8S 集群
 type AclK8SUserPermission struct {
 	ID           int64     `gorm:"primaryKey" json:"id"`
@@ -22,7 +22,7 @@ func (AclK8SUserPermission) TableName() string {
 	return "acl_k8s_user_permission"
 }
 
-// AclK8SGroupPermission K8S 授权 - 分组级别
+// AclK8SGroupPermission K8S API 授权 - 分组级别
 // 授权某个分组通过 K8S API 访问某个 Agent 的 K8S 集群
 type AclK8SGroupPermission struct {
 	ID           int64     `gorm:"primaryKey" json:"id"`

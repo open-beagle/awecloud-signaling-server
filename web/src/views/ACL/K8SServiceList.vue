@@ -67,7 +67,7 @@ const fetchList = async () => {
   try {
     const res = await getK8SServiceACLList({ search: searchForm.search || undefined, page: pagination.page, size: pagination.size })
     if (res.success && res.data) { list.value = res.data; pagination.total = res.total }
-  } catch (error) { console.error('获取 K8SService 授权列表失败:', error) }
+  } catch (error) { console.error('获取 K8S Service 授权列表失败:', error) }
   finally { loading.value = false }
 }
 

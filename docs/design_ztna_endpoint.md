@@ -150,8 +150,8 @@ AclK8SAPIJumpGroupPermission:
 ### 域名
 
 ```
-api.<endpoint-name>.<agent-name>.beagle:6443
-api.beijing-prod.beijing.beagle:6443
+kubernetes.<endpoint-name>.<agent-name>.beagle:6443
+kubernetes.beijing-prod.beijing.beagle:6443
 ```
 
 ## EndpointK8SService

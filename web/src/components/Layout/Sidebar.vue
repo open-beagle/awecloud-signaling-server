@@ -31,6 +31,29 @@
           <span>{{ t('menu.groups') }}</span>
         </template>
       </el-menu-item>
+      <!-- 终端管理 -->
+      <el-sub-menu index="endpoints">
+        <template #title>
+          <el-icon><Connection /></el-icon>
+          <span>{{ t('menu.endpoints') }}</span>
+        </template>
+        <el-menu-item index="/endpoints/ssh">
+          {{ t('menu.endpointSSH') }}
+        </el-menu-item>
+        <el-menu-item index="/endpoints/k8s">
+          {{ t('menu.endpointK8SAPI') }}
+        </el-menu-item>
+        <el-menu-item index="/endpoints/svc">
+          {{ t('menu.endpointK8SService') }}
+        </el-menu-item>
+      </el-sub-menu>
+      <!-- 资源发现 -->
+      <el-menu-item index="/resources">
+        <el-icon><Search /></el-icon>
+        <template #title>
+          <span>{{ t('menu.resources') }}</span>
+        </template>
+      </el-menu-item>
       <!-- 域名管理 -->
       <el-menu-item index="/domains">
         <el-icon><Link /></el-icon>
@@ -38,7 +61,7 @@
           <span>{{ t('menu.domains') }}</span>
         </template>
       </el-menu-item>
-      <!-- ACL 授权管理 -->
+      <!-- 授权管理 -->
       <el-sub-menu index="acl">
         <template #title>
           <el-icon><Key /></el-icon>
@@ -63,29 +86,6 @@
           {{ t('menu.aclK8SService') }}
         </el-menu-item>
       </el-sub-menu>
-      <!-- Endpoint 管理 -->
-      <el-sub-menu index="endpoints">
-        <template #title>
-          <el-icon><Connection /></el-icon>
-          <span>{{ t('menu.endpoints') }}</span>
-        </template>
-        <el-menu-item index="/endpoints/ssh">
-          {{ t('menu.endpointSSH') }}
-        </el-menu-item>
-        <el-menu-item index="/endpoints/k8sapi">
-          {{ t('menu.endpointK8SAPI') }}
-        </el-menu-item>
-        <el-menu-item index="/endpoints/k8sservice">
-          {{ t('menu.endpointK8SService') }}
-        </el-menu-item>
-      </el-sub-menu>
-      <!-- 资源发现 -->
-      <el-menu-item index="/resources">
-        <el-icon><Search /></el-icon>
-        <template #title>
-          <span>{{ t('menu.resources') }}</span>
-        </template>
-      </el-menu-item>
       <!-- 隧道管理 -->
       <el-sub-menu index="tunnel">
         <template #title>

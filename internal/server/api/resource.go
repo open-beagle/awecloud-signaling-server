@@ -11,14 +11,36 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
+// ImmediateReportNotifier 立即上报通知接口
+type ImmediateReportNotifier interface {
+	SetRequestImmediateReport()
+}
+
 // ResourceAPI 资源发现 API
 type ResourceAPI struct {
-	config *config.ServerConfig
+	config   *config.ServerConfig
+	notifier ImmediateReportNotifier
 }
 
 // NewResourceAPI 创建资源发现 API
 func NewResourceAPI(cfg *config.ServerConfig) *ResourceAPI {
 	return &ResourceAPI{config: cfg}
+}
+
+// SetImmediateReportNotifier 设置立即上报通知器
+func (a *ResourceAPI) SetImmediateReportNotifier(n ImmediateReportNotifier) {
+	a.notifier = n
+}
+
+// SyncK8SServiceDiscovery 触发 Agent 立即上报 K8S Service 发现数据
+// POST /api/v1/admin/resources/sync
+func (a *ResourceAPI) SyncK8SServiceDiscovery(c *gin.Context) {
+	if a.notifier == nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("通知器未初始化"))
+		return
+	}
+	a.notifier.SetRequestImmediateReport()
+	c.JSON(http.StatusOK, NewSuccessResponse(nil))
 }
 
 // SSHResource SSH 资源
@@ -274,13 +296,18 @@ func (a *ResourceAPI) findDomain(agentUserID uint64, domainType model.DomainType
 func (a *ResourceAPI) GetK8SServiceDiscoveries(c *gin.Context) {
 	allDiscoveries := cache.GetAllK8SServiceDiscovery()
 
-	type AgentDiscovery struct {
-		AgentID   uint64                    `json:"agent_id"`
-		AgentName string                    `json:"agent_name"`
-		Services  []cache.DiscoveredService `json:"services"`
+	// 展平为扁平列表，每条记录包含 agent 信息
+	type FlatDiscovery struct {
+		AgentID     uint64                       `json:"agent_id"`
+		AgentName   string                       `json:"agent_name"`
+		Namespace   string                       `json:"namespace"`
+		ServiceName string                       `json:"service_name"`
+		ClusterIP   string                       `json:"cluster_ip"`
+		Ports       []cache.DiscoveredServicePort `json:"ports"`
+		Labels      map[string]string            `json:"labels"`
 	}
 
-	var result []AgentDiscovery
+	var result []FlatDiscovery
 	for agentID, services := range allDiscoveries {
 		// 查询 Agent 名称
 		var user model.User
@@ -288,11 +315,17 @@ func (a *ResourceAPI) GetK8SServiceDiscoveries(c *gin.Context) {
 		if err := db.DB.First(&user, agentID).Error; err == nil {
 			agentName = user.Name
 		}
-		result = append(result, AgentDiscovery{
-			AgentID:   agentID,
-			AgentName: agentName,
-			Services:  services,
-		})
+		for _, svc := range services {
+			result = append(result, FlatDiscovery{
+				AgentID:     agentID,
+				AgentName:   agentName,
+				Namespace:   svc.Namespace,
+				ServiceName: svc.ServiceName,
+				ClusterIP:   svc.ClusterIP,
+				Ports:       svc.Ports,
+				Labels:      svc.Labels,
+			})
+		}
 	}
 
 	c.JSON(http.StatusOK, NewSuccessResponse(result))

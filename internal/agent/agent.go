@@ -457,6 +457,9 @@ func (a *Agent) runHeartbeatStream(stream pb.AgentService_HeartbeatClient) {
 		return
 	}
 
+	// 立即上报通知通道
+	immediateReport := make(chan struct{}, 1)
+
 	// 启动接收协程
 	recvDone := make(chan struct{})
 	go func() {
@@ -470,6 +473,15 @@ func (a *Agent) runHeartbeatStream(stream pb.AgentService_HeartbeatClient) {
 
 			// 处理配置更新
 			a.handleHeartbeatResponse(resp)
+
+			// 检查是否需要立即上报
+			if resp.RequestImmediateReport {
+				logger.Infof("收到 Server 立即上报请求，准备发送心跳")
+				select {
+				case immediateReport <- struct{}{}:
+				default:
+				}
+			}
 		}
 	}()
 
@@ -481,6 +493,13 @@ func (a *Agent) runHeartbeatStream(stream pb.AgentService_HeartbeatClient) {
 				logger.Warnf("发送心跳失败: %v", err)
 				return
 			}
+
+		case <-immediateReport:
+			if err := a.sendHeartbeat(stream); err != nil {
+				logger.Warnf("发送立即上报心跳失败: %v", err)
+				return
+			}
+			logger.Infof("立即上报心跳已发送")
 
 		case <-recvDone:
 			logger.Debug("心跳接收协程退出")
@@ -587,6 +606,11 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 		if len(resp.K8SServicePermissions) > 0 {
 			a.permCache.UpdateK8SServicePermissions(resp.K8SServicePermissions)
 		}
+	}
+
+	// 处理 Server 远程能力配置（每次心跳都检查，不受 configVersion 控制）
+	if resp.CapabilityConfig != nil {
+		a.applyCapabilityConfig(resp.CapabilityConfig)
 	}
 
 	// 检查配置版本
@@ -750,7 +774,7 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 	// 3. K8S API 域名：api.{agent_name}{domain_suffix}:6443
 	if a.config.K8S.Enabled && a.k8sAPIProxy != nil && a.tsManager != nil && a.tsManager.IsConnected() {
 		registrations = append(registrations, &pb.DomainRegistration{
-			Domain:     "api." + a.config.Agent.AgentName + a.domainSuffix,
+			Domain:     "kubernetes." + a.config.Agent.AgentName + a.domainSuffix,
 			Type:       "k8sapi",
 			TargetIp:   agentIP,
 			TargetPort: int32(a.config.K8S.ListenPort),
@@ -879,4 +903,177 @@ func (a *Agent) startHealthServer() error {
 	}()
 
 	return nil
+}
+
+
+// applyCapabilityConfig 应用 Server 远程能力配置
+// 根据 xxx_set 标志位决定是否使用 Server 下发的值，否则使用本地配置
+func (a *Agent) applyCapabilityConfig(cap *pb.AgentCapabilityConfig) {
+	// === SSH ===
+	if cap.SshEnabledSet {
+		oldSSH := a.config.Tunnel.EnableSSH
+		if cap.SshEnabled != oldSSH {
+			a.config.Tunnel.EnableSSH = cap.SshEnabled
+			logger.Infof("远程配置: SSH %s -> %s", boolStr(oldSSH), boolStr(cap.SshEnabled))
+			// 动态开关 SSH
+			if a.tsManager != nil {
+				if cap.SshEnabled {
+					if err := a.tsManager.EnableSSHRemote(); err != nil {
+						logger.Warnf("远程启用 SSH 失败: %v", err)
+					}
+				} else {
+					if err := a.tsManager.DisableSSHRemote(); err != nil {
+						logger.Warnf("远程禁用 SSH 失败: %v", err)
+					}
+				}
+			}
+		}
+	}
+
+	// === K8S API ===
+	if cap.K8SEnabledSet {
+		oldEnabled := a.config.K8S.Enabled
+		needRestart := false
+
+		// 检查开关变化
+		if cap.K8SEnabled != oldEnabled {
+			a.config.K8S.Enabled = cap.K8SEnabled
+			logger.Infof("远程配置: K8S API %s -> %s", boolStr(oldEnabled), boolStr(cap.K8SEnabled))
+			needRestart = true
+		}
+
+		// 检查参数变化（仅在启用时有意义）
+		if cap.K8SEnabled {
+			if cap.K8SListenPortSet && int(cap.K8SListenPort) != a.config.K8S.ListenPort {
+				logger.Infof("远程配置: K8S ListenPort %d -> %d", a.config.K8S.ListenPort, cap.K8SListenPort)
+				a.config.K8S.ListenPort = int(cap.K8SListenPort)
+				needRestart = true
+			}
+			if cap.K8SApiServerSet && cap.K8SApiServer != a.config.K8S.APIServer {
+				logger.Infof("远程配置: K8S APIServer %s -> %s", a.config.K8S.APIServer, cap.K8SApiServer)
+				a.config.K8S.APIServer = cap.K8SApiServer
+				needRestart = true
+			}
+		}
+
+		if needRestart {
+			a.applyK8SAPIConfig()
+		}
+	}
+
+	// === K8S Service ===
+	if cap.SvcEnabledSet {
+		oldEnabled := a.config.SVC.Enabled
+		needRestart := false
+
+		// 检查开关变化
+		if cap.SvcEnabled != oldEnabled {
+			a.config.SVC.Enabled = cap.SvcEnabled
+			logger.Infof("远程配置: K8S Service %s -> %s", boolStr(oldEnabled), boolStr(cap.SvcEnabled))
+			needRestart = true
+		}
+
+		// 检查参数变化（仅在启用时有意义）
+		if cap.SvcEnabled {
+			if cap.SvcLabelSelectorSet && cap.SvcLabelSelector != a.config.SVC.LabelSelector {
+				logger.Infof("远程配置: SVC LabelSelector %s -> %s", a.config.SVC.LabelSelector, cap.SvcLabelSelector)
+				a.config.SVC.LabelSelector = cap.SvcLabelSelector
+				needRestart = true
+			}
+			if cap.SvcNamespacesSet {
+				newNS := parseNamespaces(cap.SvcNamespaces)
+				if !stringSliceEqual(newNS, a.config.SVC.Namespaces) {
+					logger.Infof("远程配置: SVC Namespaces %v -> %v", a.config.SVC.Namespaces, newNS)
+					a.config.SVC.Namespaces = newNS
+					needRestart = true
+				}
+			}
+			if cap.SvcListenPortBaseSet && int(cap.SvcListenPortBase) != a.config.SVC.ListenPortBase {
+				logger.Infof("远程配置: SVC ListenPortBase %d -> %d", a.config.SVC.ListenPortBase, cap.SvcListenPortBase)
+				a.config.SVC.ListenPortBase = int(cap.SvcListenPortBase)
+				needRestart = true
+			}
+		}
+
+		if needRestart {
+			a.applySVCConfig()
+		}
+	}
+}
+
+// applyK8SAPIConfig 应用 K8S API 配置变更（启停模块）
+func (a *Agent) applyK8SAPIConfig() {
+	// 先停止现有模块
+	if a.k8sAPIProxy != nil {
+		a.k8sAPIProxy.Stop()
+		a.k8sAPIProxy = nil
+	}
+
+	// 如果启用，重新启动
+	if a.config.K8S.Enabled {
+		if err := a.startK8SAPIProxy(); err != nil {
+			logger.Warnf("远程启动 K8S API 代理失败: %v", err)
+		}
+	} else {
+		logger.Info("K8S API 代理已通过远程配置关闭")
+	}
+}
+
+// applySVCConfig 应用 K8S Service 配置变更（启停模块）
+func (a *Agent) applySVCConfig() {
+	// 先停止现有模块
+	if a.svcProxy != nil {
+		a.svcProxy.Stop()
+		a.svcProxy = nil
+	}
+	if a.svcInformer != nil {
+		a.svcInformer.Stop()
+		a.svcInformer = nil
+	}
+
+	// 如果启用，重新启动
+	if a.config.SVC.Enabled {
+		if err := a.startK8SServiceModules(); err != nil {
+			logger.Warnf("远程启动 K8S Service 模块失败: %v", err)
+		}
+	} else {
+		logger.Info("K8S Service 模块已通过远程配置关闭")
+	}
+}
+
+// boolStr 布尔值转字符串（用于日志）
+func boolStr(b bool) string {
+	if b {
+		return "启用"
+	}
+	return "禁用"
+}
+
+// parseNamespaces 解析逗号分隔的命名空间列表
+func parseNamespaces(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+// stringSliceEqual 比较两个字符串切片是否相等
+func stringSliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

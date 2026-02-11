@@ -98,7 +98,7 @@ Agent 实体（页面上的一行）
 | ACL.UserList            | 用户授权列表     | DB(AclUserPermission,User)                     |
 | ACL.GroupList           | 分组授权列表     | DB(AclGroupPermission,Group)                   |
 | ACL.SSHList             | SSH 授权列表     | DB(AclSSHPermission,User)                      |
-| ACL.K8SList（新增）     | K8S 授权列表     | DB(AclK8sPermission,User)                      |
+| ACL.K8SList（新增）     | K8S API 授权列表 | DB(AclK8sPermission,User)                      |
 | ACL.K8SSvcList（新增）  | K8S 服务授权列表 | DB(AclK8SServicePermission,User)               |
 | ACL.JumpList（新增）    | 跳跃授权列表     | DB(Endpoint\*) + Cache(EndpointStatus)         |
 | Resource.List（新增）   | 资源发现         | Cache(K8SService+EndpointK8SService) + DB      |

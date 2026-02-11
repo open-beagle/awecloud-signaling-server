@@ -86,7 +86,7 @@ export default {
     aclUsers: '用户授权',
     aclGroups: '分组授权',
     aclSSH: 'SSH 授权',
-    aclK8S: 'K8S 授权',
+    aclK8S: 'K8S API 授权',
     aclK8SService: 'K8S Service 授权',
     endpoints: 'Endpoint 管理',
     endpointSSH: 'SSH',
@@ -173,6 +173,35 @@ export default {
     forcedTags: '强制标签',
     lastSeen: '最后在线',
     expiry: '过期时间'
+  },
+  capability: {
+    title: '能力配置',
+    titleTip: '远程控制 Agent 能力开关和参数，优先级高于 Agent 本地配置。未设置的参数由 Agent 本地配置决定。',
+    ssh: 'SSH',
+    sshEnabled: 'SSH 开关',
+    k8s: 'K8S API',
+    k8sEnabled: 'K8S API 开关',
+    k8sListenPort: '监听端口',
+    k8sApiServer: 'API Server 地址',
+    svc: 'K8S Service',
+    svcEnabled: 'K8S Service 开关',
+    svcLabelSelector: '标签选择器',
+    svcNamespaces: '命名空间',
+    svcListenPortBase: 'gRPC 监听端口',
+    sourceRemote: '远程',
+    sourceLocal: '本地',
+    notSet: '未设置',
+    reset: '重置为本地配置',
+    resetConfirm: '确认重置所有远程能力配置吗？重置后 Agent 将使用本地配置。',
+    resetSuccess: '重置成功',
+    saveSuccess: '保存成功',
+    saveFailed: '保存失败',
+    onlyAgent: '仅 Agent 类型设备支持能力配置',
+    k8sListenPortPlaceholder: '如 6443',
+    k8sApiServerPlaceholder: '如 https://kubernetes.default.svc',
+    svcLabelSelectorPlaceholder: '如 app=myapp',
+    svcNamespacesPlaceholder: '如 default,kube-system',
+    svcListenPortBasePlaceholder: '如 50051'
   },
   agent: {
     deploy: '部署',
@@ -286,7 +315,7 @@ export default {
     searchSSHPlaceholder: '搜索代理名称',
     addSSHUserAuth: '添加 SSH 用户授权',
     addSSHGroupAuth: '添加 SSH 分组授权',
-    // K8S 授权
+    // K8S API 授权
     k8sInfo: 'K8S 信息',
     k8sGroups: 'K8S 分组',
     k8sGroupsPlaceholder: '选择或输入 K8S 分组',
@@ -298,7 +327,7 @@ export default {
     searchK8SPlaceholder: '搜索代理名称',
     addK8SUserAuth: '添加 K8S 用户授权',
     addK8SGroupAuth: '添加 K8S 分组授权',
-    // K8SService 授权
+    // K8S Service 授权
     k8sServiceInfo: 'K8S Service 信息',
     serviceNames: '服务名称',
     serviceNamesPlaceholder: '选择或输入服务名称，留空表示全部',
@@ -420,6 +449,8 @@ export default {
     clusterIP: 'Cluster IP',
     ports: '端口',
     labels: '标签',
-    searchPlaceholder: '搜索代理、命名空间或服务名称'
+    searchPlaceholder: '搜索代理、命名空间或服务名称',
+    sync: '更新',
+    syncing: '同步中...'
   }
 }

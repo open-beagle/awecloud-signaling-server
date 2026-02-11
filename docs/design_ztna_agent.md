@@ -92,8 +92,8 @@ AclK8sGroupPermission:
 ### 域名
 
 ```
-api.<agent-name>.beagle:6443
-api.beijing.beagle:6443
+kubernetes.<agent-name>.beagle:6443
+kubernetes.beijing.beagle:6443
 ```
 
 ## AgentK8SService — Agent 本机 K8S SVC 代理
@@ -128,10 +128,10 @@ Agent 启动时：
 
 K8S 管理员通过给 Service 添加标签来控制暴露。标签使用 `signal.beagle.io` 域名前缀，符合 K8S 标签规范，避免与其他项目冲突：
 
-| 标签                        | 值     | 说明                   |
-| --------------------------- | ------ | ---------------------- |
-| signal.beagle.io/expose     | "true" | 标记为可通过隧道访问   |
-| signal.beagle.io/alias      | 自定义 | 自定义域名前缀（可选） |
+| 标签                    | 值     | 说明                   |
+| ----------------------- | ------ | ---------------------- |
+| signal.beagle.io/expose | "true" | 标记为可通过隧道访问   |
+| signal.beagle.io/alias  | 自定义 | 自定义域名前缀（可选） |
 
 ### 发现流程
 
@@ -313,7 +313,7 @@ Agent 通过 gRPC 心跳从 Server 获取权限数据：
   k8s_service_permissions:  → 第 3 层，AgentK8SService 权限
   ssh_endpoint_permissions: → Endpoint SSH 授权
   k8sapi_endpoint_permissions: → Endpoint K8SAPI 授权
-  k8sservice_endpoint_permissions: → Endpoint K8SService 授权
+  k8sservice_endpoint_permissions: → Endpoint K8S Service 授权
 
 Agent 本地缓存，随心跳刷新（30 秒一次）。
 ```

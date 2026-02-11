@@ -145,6 +145,8 @@ func main() {
 				cfg.Health = envCfg.Health
 				cfg.Log = envCfg.Log
 				cfg.Telemetry = envCfg.Telemetry
+				cfg.K8S = envCfg.K8S
+				cfg.SVC = envCfg.SVC
 			}
 		}
 	}

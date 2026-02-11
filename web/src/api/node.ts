@@ -80,3 +80,30 @@ export const deleteNode = (id: number) => {
 export const getNodesByUser = (userId: number) => {
   return request.get<any, ApiResponse<Node[]>>(`/api/v1/admin/users/${userId}/nodes`)
 }
+
+// Agent 能力配置
+export interface CapabilityConfig {
+  ssh_enabled: boolean
+  k8s_enabled: boolean | null
+  k8s_listen_port: number | null
+  k8s_api_server: string
+  svc_enabled: boolean | null
+  svc_label_selector: string
+  svc_namespaces: string
+  svc_listen_port_base: number | null
+}
+
+// 获取 Agent 能力配置
+export const getNodeCapabilities = (id: number) => {
+  return request.get<any, ApiResponse<CapabilityConfig>>(`/api/v1/admin/nodes/${id}/capabilities`)
+}
+
+// 更新 Agent 能力配置
+export const updateNodeCapabilities = (id: number, data: Partial<CapabilityConfig>) => {
+  return request.put<any, ApiResponse>(`/api/v1/admin/nodes/${id}/capabilities`, data)
+}
+
+// 重置 Agent 能力配置
+export const resetNodeCapabilities = (id: number) => {
+  return request.delete<any, ApiResponse>(`/api/v1/admin/nodes/${id}/capabilities`)
+}

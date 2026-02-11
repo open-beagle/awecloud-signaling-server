@@ -139,7 +139,7 @@ acl_k8s_group_permission:
 | k8s_role      | string | NOT NULL                     | K8S 角色                    |
 | granted_at    | time   |                              | 授权时间                    |
 
-第 3 层 — AgentK8SService 授权（2 张）：
+第 3 层 — AgentK8S Service 授权（2 张）：
 
 acl_k8s_service_user_permission:
 
@@ -224,7 +224,7 @@ domain_registry:
 
 - type 统一为三种能力：ssh / k8sapi / k8ssvc，不再区分 agent/endpoint 来源
 - 通过 node_id 或 endpoint_id 区分域名来源（二者互斥，一条记录只填一个）
-- 同一域名可以有多条记录（不同 node_id），表示负载均衡（如 api.beijing.beagle 对应多个 Node）
+- 同一域名可以有多条记录（不同 node_id），表示负载均衡（如 kubernetes.beijing.beagle 对应多个 Node）
 - domain 不再是唯一索引，因为负载均衡场景下同一域名对应多个 Node
 
 ### 操作级审计日志（1 张）
@@ -267,5 +267,5 @@ GORM AutoMigrate 自动创建新表，现有表不做结构变更。
 迁移顺序：
 
 1. P0 — domain_registry（域名体系依赖）
-2. P1 — acl*k8s*\*\_permission（4 张，AgentK8SAPI/K8SService 授权）
+2. P1 — acl*k8s*\*\_permission（4 张，AgentK8SAPI/K8S Service 授权）
 3. P2 — endpoint*\*（3 张）+ acl*_*jump*_\_permission（6 张）+ operation_audit_log

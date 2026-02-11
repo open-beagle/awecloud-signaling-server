@@ -18,3 +18,8 @@ export interface DiscoveredK8SService {
 export const getDiscoveredK8SServices = (params?: { search?: string; agent_id?: number }) => {
   return request.get<any, ApiResponse<DiscoveredK8SService[]>>('/api/v1/admin/resources/k8s-services', { params })
 }
+
+// 触发 Agent 立即上报 K8S Service 发现数据
+export const syncK8SServiceDiscovery = () => {
+  return request.post<any, ApiResponse<null>>('/api/v1/admin/resources/sync')
+}

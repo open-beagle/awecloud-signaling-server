@@ -280,6 +280,193 @@ func (a *NodeAPI) Expire(c *gin.Context) {
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("注销成功", nil))
 }
 
+// CapabilityResponse 能力配置响应
+type CapabilityResponse struct {
+	SSHEnabled       bool   `json:"ssh_enabled"`                    // SSH 开关（User.SSHEnabled，始终有值）
+	K8SEnabled       *bool  `json:"k8s_enabled"`                    // K8S API 开关（nil=未设置）
+	K8SListenPort    *int   `json:"k8s_listen_port"`                // K8S API 监听端口
+	K8SApiServer     string `json:"k8s_api_server"`                 // K8S API Server 地址
+	SVCEnabled       *bool  `json:"svc_enabled"`                    // K8S Service 开关
+	SVCLabelSelector string `json:"svc_label_selector"`             // 标签选择器
+	SVCNamespaces    string `json:"svc_namespaces"`                 // 命名空间列表 JSON
+	SVCListenPortBase *int  `json:"svc_listen_port_base"`           // gRPC 监听端口
+}
+
+// CapabilityUpdateRequest 能力配置更新请求
+type CapabilityUpdateRequest struct {
+	SSHEnabled       *bool   `json:"ssh_enabled"`
+	K8SEnabled       *bool   `json:"k8s_enabled"`
+	K8SListenPort    *int    `json:"k8s_listen_port"`
+	K8SApiServer     *string `json:"k8s_api_server"`
+	SVCEnabled       *bool   `json:"svc_enabled"`
+	SVCLabelSelector *string `json:"svc_label_selector"`
+	SVCNamespaces    *string `json:"svc_namespaces"`
+	SVCListenPortBase *int   `json:"svc_listen_port_base"`
+}
+
+// GetCapabilities 获取 Agent 能力配置
+func (a *NodeAPI) GetCapabilities(c *gin.Context) {
+	ctx := c.Request.Context()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
+		return
+	}
+
+	var node model.Node
+	if err := db.DB.WithContext(ctx).Preload("User").First(&node, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("设备不存在"))
+		return
+	}
+
+	// 只有 Agent 类型设备支持能力配置
+	if node.Type != model.NodeTypeAgent {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("仅 Agent 类型设备支持能力配置"))
+		return
+	}
+
+	// SSH 从 User 表读取（User 级别共享），K8S/SVC 从 Node 表读取（Node 级别独立）
+	sshEnabled := false
+	if node.User != nil {
+		sshEnabled = node.User.SSHEnabled
+	}
+
+	resp := CapabilityResponse{
+		SSHEnabled:        sshEnabled,
+		K8SEnabled:        node.K8SEnabled,
+		K8SListenPort:     node.K8SListenPort,
+		K8SApiServer:      node.K8SApiServer,
+		SVCEnabled:        node.SVCEnabled,
+		SVCLabelSelector:  node.SVCLabelSelector,
+		SVCNamespaces:     node.SVCNamespaces,
+		SVCListenPortBase: node.SVCListenPortBase,
+	}
+
+	c.JSON(http.StatusOK, NewSuccessResponse(resp))
+}
+
+// UpdateCapabilities 更新 Agent 能力配置
+func (a *NodeAPI) UpdateCapabilities(c *gin.Context) {
+	ctx := c.Request.Context()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
+		return
+	}
+
+	var req CapabilityUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
+		return
+	}
+
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("设备不存在"))
+		return
+	}
+
+	if node.Type != model.NodeTypeAgent {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("仅 Agent 类型设备支持能力配置"))
+		return
+	}
+
+	// SSH 更新到 User 表（User 级别共享）
+	if req.SSHEnabled != nil {
+		if err := db.DB.WithContext(ctx).Model(&model.User{}).Where("id = ?", node.UserID).
+			Update("ssh_enabled", *req.SSHEnabled).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, NewErrorResponse("更新 SSH 配置失败"))
+			return
+		}
+	}
+
+	// K8S/SVC 更新到 Node 表（Node 级别独立）
+	updates := map[string]interface{}{}
+	if req.K8SEnabled != nil {
+		updates["k8s_enabled"] = *req.K8SEnabled
+	}
+	if req.K8SListenPort != nil {
+		updates["k8s_listen_port"] = *req.K8SListenPort
+	}
+	if req.K8SApiServer != nil {
+		updates["k8s_api_server"] = *req.K8SApiServer
+	}
+	if req.SVCEnabled != nil {
+		updates["svc_enabled"] = *req.SVCEnabled
+	}
+	if req.SVCLabelSelector != nil {
+		updates["svc_label_selector"] = *req.SVCLabelSelector
+	}
+	if req.SVCNamespaces != nil {
+		updates["svc_namespaces"] = *req.SVCNamespaces
+	}
+	if req.SVCListenPortBase != nil {
+		updates["svc_listen_port_base"] = *req.SVCListenPortBase
+	}
+
+	if len(updates) > 0 {
+		if err := db.DB.WithContext(ctx).Model(&node).Updates(updates).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, NewErrorResponse("更新失败"))
+			return
+		}
+	}
+
+	if len(updates) == 0 && req.SSHEnabled == nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("没有需要更新的字段"))
+		return
+	}
+
+	logger.Infof("更新 Agent 能力配置: node_id=%d, updates=%v, ssh=%v", id, updates, req.SSHEnabled)
+
+	// 记录审计日志
+	recordAuditLog(ctx, c, "update_capability", "node", strconv.FormatUint(id, 10), node.Name, updates)
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("更新成功", nil))
+}
+
+// ResetCapabilities 重置 Agent 能力配置（清除所有 Server 远程配置）
+func (a *NodeAPI) ResetCapabilities(c *gin.Context) {
+	ctx := c.Request.Context()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
+		return
+	}
+
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("设备不存在"))
+		return
+	}
+
+	if node.Type != model.NodeTypeAgent {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("仅 Agent 类型设备支持能力配置"))
+		return
+	}
+
+	// 清除 Node 上的所有远程能力配置（K8S/SVC 字段设为 nil/空）
+	updates := map[string]interface{}{
+		"k8s_enabled":         nil,
+		"k8s_listen_port":     nil,
+		"k8s_api_server":      "",
+		"svc_enabled":         nil,
+		"svc_label_selector":  "",
+		"svc_namespaces":      "",
+		"svc_listen_port_base": nil,
+	}
+
+	if err := db.DB.WithContext(ctx).Model(&node).Updates(updates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("重置失败"))
+		return
+	}
+
+	logger.Infof("重置 Agent 能力配置: node_id=%d", id)
+
+	recordAuditLog(ctx, c, "reset_capability", "node", strconv.FormatUint(id, 10), node.Name, nil)
+
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("重置成功", nil))
+}
+
 // Delete 删除设备
 func (a *NodeAPI) Delete(c *gin.Context) {
 	ctx := c.Request.Context()

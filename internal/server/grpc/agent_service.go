@@ -34,6 +34,7 @@ func parseJSONStringArray(jsonStr string) []string {
 // AgentConnection Agent 连接信息
 type AgentConnection struct {
 	AgentID   uint64
+	NodeID    uint64 // 当前心跳流对应的 Node ID（用于查询 Node 级别的能力配置）
 	Stream    pb.AgentService_HeartbeatServer
 	TunnelIP  string
 	Connected bool
@@ -50,6 +51,10 @@ type AgentServiceServer struct {
 
 	configVersion int64
 	versionMutex  sync.RWMutex
+
+	// 立即上报标志：当为 true 时，下一次心跳响应会携带 request_immediate_report=true
+	requestImmediateReport bool
+	immediateReportMutex   sync.Mutex
 
 	headscaleClient *headscale.Client
 	config          *config.ServerConfig
@@ -389,11 +394,11 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 		}
 	}()
 
-	// 处理第一个心跳
-	s.handleHeartbeat(ctx, agentID, firstReq)
+	// 处理第一个心跳（使用独立 context，避免 stream 断开导致数据库操作失败）
+	conn.NodeID = s.handleHeartbeat(context.Background(), agentID, firstReq)
 
 	// 发送首次响应
-	if err := s.sendHeartbeatResponse(ctx, stream, agentID); err != nil {
+	if err := s.sendHeartbeatResponse(context.Background(), stream, agentID, conn.NodeID); err != nil {
 		logger.Errorf("发送首次心跳响应失败: %v", err)
 		return err
 	}
@@ -414,11 +419,11 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 			conn.Connected = req.TunnelConnected
 			conn.LastSeen = time.Now()
 
-			// 处理心跳
-			s.handleHeartbeat(ctx, agentID, req)
+			// 处理心跳（使用独立 context）
+			conn.NodeID = s.handleHeartbeat(context.Background(), agentID, req)
 
 			// 发送响应
-			if err := s.sendHeartbeatResponse(ctx, stream, agentID); err != nil {
+			if err := s.sendHeartbeatResponse(context.Background(), stream, agentID, conn.NodeID); err != nil {
 				logger.Errorf("发送心跳响应失败: %v", err)
 				return err
 			}
@@ -426,8 +431,8 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 	}
 }
 
-// handleHeartbeat 处理心跳请求
-func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64, req *pb.AgentHeartbeatRequest) {
+// handleHeartbeat 处理心跳请求，返回对应的 Node ID
+func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64, req *pb.AgentHeartbeatRequest) uint64 {
 	// 处理 K8S Service 发现数据上报
 	if len(req.DiscoveredServices) > 0 {
 		discoveredServices := make([]cache.DiscoveredService, 0, len(req.DiscoveredServices))
@@ -532,10 +537,12 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	if len(req.DomainRegistrations) > 0 {
 		s.handleDomainRegistrations(ctx, agentID, req.DomainRegistrations, req.TunnelIp)
 	}
+
+	return node.ID
 }
 
 // sendHeartbeatResponse 发送心跳响应
-func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream pb.AgentService_HeartbeatServer, agentID uint64) error {
+func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream pb.AgentService_HeartbeatServer, agentID uint64, nodeID uint64) error {
 	s.versionMutex.RLock()
 	configVersion := s.configVersion
 	s.versionMutex.RUnlock()
@@ -550,8 +557,60 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 	}
 
 	resp := &pb.AgentHeartbeatResponse{
-		ConfigVersion: configVersion,
-		DomainSuffix:  domainSuffix,
+		ConfigVersion:          configVersion,
+		DomainSuffix:           domainSuffix,
+		RequestImmediateReport: s.consumeImmediateReport(),
+	}
+
+	// 构建 Agent 能力配置
+	// SSH：从 User 表读取（User 级别共享）
+	// K8S/SVC：从 Node 表读取（Node 级别独立）
+	var capUser model.User
+	if err := db.DB.WithContext(ctx).First(&capUser, agentID).Error; err == nil {
+		capConfig := &pb.AgentCapabilityConfig{
+			// SSH：User.SSHEnabled 是 bool 非指针，始终有值，始终下发
+			SshEnabled:    capUser.SSHEnabled,
+			SshEnabledSet: true,
+		}
+
+		// K8S/SVC：从 Node 表读取
+		if nodeID > 0 {
+			var capNode model.Node
+			if err := db.DB.WithContext(ctx).First(&capNode, nodeID).Error; err == nil {
+				// K8S API
+				if capNode.K8SEnabled != nil {
+					capConfig.K8SEnabled = *capNode.K8SEnabled
+					capConfig.K8SEnabledSet = true
+				}
+				if capNode.K8SListenPort != nil {
+					capConfig.K8SListenPort = int32(*capNode.K8SListenPort)
+					capConfig.K8SListenPortSet = true
+				}
+				if capNode.K8SApiServer != "" {
+					capConfig.K8SApiServer = capNode.K8SApiServer
+					capConfig.K8SApiServerSet = true
+				}
+				// K8S Service
+				if capNode.SVCEnabled != nil {
+					capConfig.SvcEnabled = *capNode.SVCEnabled
+					capConfig.SvcEnabledSet = true
+				}
+				if capNode.SVCLabelSelector != "" {
+					capConfig.SvcLabelSelector = capNode.SVCLabelSelector
+					capConfig.SvcLabelSelectorSet = true
+				}
+				if capNode.SVCNamespaces != "" {
+					capConfig.SvcNamespaces = capNode.SVCNamespaces
+					capConfig.SvcNamespacesSet = true
+				}
+				if capNode.SVCListenPortBase != nil {
+					capConfig.SvcListenPortBase = int32(*capNode.SVCListenPortBase)
+					capConfig.SvcListenPortBaseSet = true
+				}
+			}
+		}
+
+		resp.CapabilityConfig = capConfig
 	}
 
 	// 查询该 Agent 的服务配置
@@ -584,13 +643,13 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		}
 	}
 
-	// 查询该 Agent 的 K8S 授权信息
+	// 查询该 Agent 的 K8S API 授权信息
 	k8sPerms := s.queryK8SPermissions(ctx, agentID)
 	if len(k8sPerms) > 0 {
 		resp.K8SPermissions = k8sPerms
 	}
 
-	// 查询该 Agent 的 K8SService 授权信息
+	// 查询该 Agent 的 K8S Service 授权信息
 	k8sSvcPerms := s.queryK8SServicePermissions(ctx, agentID)
 	if len(k8sSvcPerms) > 0 {
 		resp.K8SServicePermissions = k8sSvcPerms
@@ -833,6 +892,25 @@ func (s *AgentServiceServer) NotifyConfigChange() {
 	s.versionMutex.Lock()
 	s.configVersion = time.Now().Unix()
 	s.versionMutex.Unlock()
+}
+
+// SetRequestImmediateReport 设置立即上报标志（由 REST API 调用）
+func (s *AgentServiceServer) SetRequestImmediateReport() {
+	s.immediateReportMutex.Lock()
+	s.requestImmediateReport = true
+	s.immediateReportMutex.Unlock()
+	logger.Info("已设置立即上报标志，等待下一次心跳响应通知 Agent")
+}
+
+// consumeImmediateReport 消费立即上报标志（读取并清除）
+func (s *AgentServiceServer) consumeImmediateReport() bool {
+	s.immediateReportMutex.Lock()
+	defer s.immediateReportMutex.Unlock()
+	if s.requestImmediateReport {
+		s.requestImmediateReport = false
+		return true
+	}
+	return false
 }
 
 // ReportProxyStatus 上报代理服务状态

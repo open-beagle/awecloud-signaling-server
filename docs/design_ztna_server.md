@@ -89,12 +89,12 @@ GET /api/v1/client/resources
 ```
 Agent 本机：
   <agent-name>.beagle:22                          → AgentSSH
-  api.<agent-name>.beagle:6443                    → AgentK8SAPI
+  kubernetes.<agent-name>.beagle:6443                    → AgentK8SAPI
   <service>.<namespace>.<agent-name>.beagle       → AgentK8SService
 
 Endpoint 跳跃：
   <endpoint>.<agent-name>.beagle:22               → EndpointSSH
-  api.<endpoint>.<agent-name>.beagle:6443         → EndpointK8SAPI
+  kubernetes.<endpoint>.<agent-name>.beagle:6443         → EndpointK8SAPI
   <service>.<namespace>.<endpoint>.<agent-name>.beagle → EndpointK8SService
 
 ### 域名注册流程
@@ -110,7 +110,7 @@ Agent 发现资源
 │ beijing.beagle → agent_id:1, target:100.64.x.x:22
 │
 ├── AgentK8SAPI：注册 K8S API 域名
-│ api.beijing.beagle → agent_id:1, target:localhost:6443
+│ kubernetes.beijing.beagle → agent_id:1, target:localhost:6443
 │
 └── Endpoint：Agent 转发 Endpoint 注册信息
 web-server-1.beijing.beagle → agent_id:1, endpoint:web-server-1
@@ -159,8 +159,8 @@ GET /api/v1/client/dns/resolve
 | AclSSHJumpGroupPermission        | Endpoint SSH | EndpointSSH 授权（分组）        |
 | AclK8SAPIJumpUserPermission      | Endpoint K8S | EndpointK8SAPI 授权（用户）     |
 | AclK8SAPIJumpGroupPermission     | Endpoint K8S | EndpointK8SAPI 授权（分组）     |
-| AclK8SServiceJumpUserPermission  | Endpoint K8S | EndpointK8SService 授权（用户） |
-| AclK8SServiceJumpGroupPermission | Endpoint K8S | EndpointK8SService 授权（分组） |
+| AclK8SServiceJumpUserPermission  | Endpoint K8S | EndpointK8S Service 授权（用户） |
+| AclK8SServiceJumpGroupPermission | Endpoint K8S | EndpointK8S Service 授权（分组） |
 
 ### ACL 字段说明
 
@@ -238,7 +238,7 @@ k8s_permissions: → 第 3 层，AgentK8SAPI 权限
 k8s_service_permissions: → 第 3 层，AgentK8SService 权限
 ssh_endpoint_permissions: → Endpoint SSH 授权
 k8sapi_endpoint_permissions: → Endpoint K8SAPI 授权
-k8sservice_endpoint_permissions: → Endpoint K8SService 授权
+k8sservice_endpoint_permissions: → Endpoint K8S Service 授权
 
 Agent 本地缓存，随心跳刷新（30 秒一次）。
 
@@ -298,8 +298,8 @@ updated_at time
 | acl_ssh_jump_group_permission        | EndpointSSH 授权（分组）        |
 | acl_k8sapi_jump_user_permission      | EndpointK8SAPI 授权（用户）     |
 | acl_k8sapi_jump_group_permission     | EndpointK8SAPI 授权（分组）     |
-| acl_k8sservice_jump_user_permission  | EndpointK8SService 授权（用户） |
-| acl_k8sservice_jump_group_permission | EndpointK8SService 授权（分组） |
+| acl_k8sservice_jump_user_permission  | EndpointK8S Service 授权（用户） |
+| acl_k8sservice_jump_group_permission | EndpointK8S Service 授权（分组） |
 
 ### 其他新增表
 

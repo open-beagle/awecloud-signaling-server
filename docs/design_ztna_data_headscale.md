@@ -84,11 +84,11 @@ SSH 规则来源（DB → Headscale SSH）：
 
 不同步到 Headscale 的授权（第 3 层 + 第 4 层）：
 
-| 授权类型        | 原因                                   | 替代方案         |
-| --------------- | -------------------------------------- | ---------------- |
-| K8SAPI 授权     | 需要 namespace + role 级别控制         | 心跳下发到 Agent |
-| K8SService 授权 | 需要 namespace + service name 级别控制 | 心跳下发到 Agent |
-| Endpoint 授权   | Endpoint 不在 Tailscale 网络中         | 心跳下发到 Agent |
+| 授权类型         | 原因                                   | 替代方案         |
+| ---------------- | -------------------------------------- | ---------------- |
+| K8SAPI 授权      | 需要 namespace + role 级别控制         | 心跳下发到 Agent |
+| K8S Service 授权 | 需要 namespace + service name 级别控制 | 心跳下发到 Agent |
+| Endpoint 授权    | Endpoint 不在 Tailscale 网络中         | 心跳下发到 Agent |
 
 同步时机：
 

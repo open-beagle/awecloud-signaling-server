@@ -1,9 +1,9 @@
 import request from '@/utils/request'
 import type { ApiResponse, PagedResponse } from '@/types/models'
 
-// ========== K8S 授权 ==========
+// ========== K8S API 授权 ==========
 
-// K8S 授权列表项
+// K8S API 授权列表项
 export interface K8SACLItem {
   id: number
   name: string
@@ -15,7 +15,7 @@ export interface K8SACLItem {
   created_at: string
 }
 
-// K8S 授权项
+// K8S API 授权项
 export interface K8SACLPermissionItem {
   id: number
   name: string
@@ -26,7 +26,7 @@ export interface K8SACLPermissionItem {
   granted_at: string
 }
 
-// K8S 授权详情
+// K8S API 授权详情
 export interface K8SACLDetail {
   id: number
   name: string
@@ -37,12 +37,12 @@ export interface K8SACLDetail {
   groups: K8SACLPermissionItem[]
 }
 
-// 获取 K8S 授权列表
+// 获取 K8S API 授权列表
 export const getK8SACLList = (params?: { search?: string; page?: number; size?: number }) => {
   return request.get<any, PagedResponse<K8SACLItem[]>>('/api/v1/admin/acl/k8s', { params })
 }
 
-// 获取 K8S 授权详情
+// 获取 K8S API 授权详情
 export const getK8SACL = (id: number) => {
   return request.get<any, ApiResponse<K8SACLDetail>>(`/api/v1/admin/acl/k8s/${id}`)
 }

@@ -185,6 +185,31 @@ message AgentHeartbeatResponse {
   string domain_suffix = 4; // 域名后缀（如 .beagle），由 Server 下发
   repeated K8SPermission k8s_permissions = 5; // K8S API 授权列表
   repeated K8SServicePermission k8s_service_permissions = 6; // K8S Service 授权列表
+  bool request_immediate_report = 7; // Server 请求 Agent 立即上报一次心跳数据
+  AgentCapabilityConfig capability_config = 8; // Agent 能力配置（Server 远程控制）
+}
+
+// AgentCapabilityConfig Agent 能力配置（Server 远程控制）
+// 通过 xxx_set 标志位区分"Server 设置为 false/0"和"Server 未设置"
+message AgentCapabilityConfig {
+  bool ssh_enabled = 1;              // SSH 开关
+  bool ssh_enabled_set = 2;         // SSH 开关是否由 Server 设置（始终为 true）
+
+  bool k8s_enabled = 3;             // K8S API 开关
+  bool k8s_enabled_set = 4;         // K8S API 开关是否由 Server 设置
+  int32 k8s_listen_port = 5;        // K8S API 监听端口
+  bool k8s_listen_port_set = 6;     // K8S API 监听端口是否由 Server 设置
+  string k8s_api_server = 7;        // K8S API Server 地址
+  bool k8s_api_server_set = 8;      // K8S API Server 地址是否由 Server 设置
+
+  bool svc_enabled = 9;             // K8S Service 开关
+  bool svc_enabled_set = 10;        // K8S Service 开关是否由 Server 设置
+  string svc_label_selector = 11;   // 标签选择器
+  bool svc_label_selector_set = 12; // 标签选择器是否由 Server 设置
+  string svc_namespaces = 13;       // 命名空间列表（逗号分隔）
+  bool svc_namespaces_set = 14;     // 命名空间列表是否由 Server 设置
+  int32 svc_listen_port_base = 15;  // gRPC 监听端口
+  bool svc_listen_port_base_set = 16; // gRPC 监听端口是否由 Server 设置
 }
 
 // K8SPermission K8S API 授权信息（心跳响应下发给 Agent）

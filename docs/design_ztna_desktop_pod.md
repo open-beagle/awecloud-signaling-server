@@ -101,7 +101,7 @@ Desktop.Pod 启动时：
   1. 从 Server 获取可访问的 K8S 集群列表
   2. 生成 kubeconfig
        每个集群一个 context
-       server 指向域名（如 api.beijing.beagle:6443）
+       server 指向域名（如 kubernetes.beijing.beagle:6443）
   3. 写入 ~/.kube/config
 ```
 

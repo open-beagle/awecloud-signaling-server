@@ -138,8 +138,8 @@ ZTNA 新页面搜索区域设计：
 
 | 页面                    | 筛选条件                              | 布局     |
 | ----------------------- | ------------------------------------- | -------- |
-| K8S 授权列表            | Agent 筛选 + 搜索                     | 简单搜索 |
-| K8SService 授权列表     | Agent 筛选 + 搜索                     | 简单搜索 |
+| K8S API 授权列表        | Agent 筛选 + 搜索                     | 简单搜索 |
+| K8S Service 授权列表    | Agent 筛选 + 搜索                     | 简单搜索 |
 | EndpointSSH 列表        | Agent 筛选 + 状态筛选 + 搜索          | 简单搜索 |
 | EndpointK8SAPI 列表     | Agent 筛选 + 状态筛选 + 搜索          | 简单搜索 |
 | EndpointK8SService 列表 | Agent 筛选 + 状态筛选 + 搜索          | 简单搜索 |
@@ -280,16 +280,16 @@ ZTNA 新页面搜索区域设计：
 
 各授权类型的"授权参数"区域：
 
-| 授权类型                       | 授权参数区域                                             |
-| ------------------------------ | -------------------------------------------------------- |
-| 服务授权 / 用户授权 / 分组授权 | 无额外参数（弹窗更紧凑）                                 |
-| SSH 授权（Agent + Endpoint）   | Linux 用户：el-select multiple, filterable, allow-create |
-|                                | 预设选项: root, autogroup:nonroot，支持自定义输入        |
-| K8S 授权（Agent + Endpoint）   | 命名空间：el-select multiple, filterable, allow-create   |
-|                                | K8S 角色：el-select filterable, allow-create             |
-|                                | 预设选项: admin, developer, viewer                       |
-| K8SService 授权 / SVC 跳跃授权 | 命名空间：el-select multiple, filterable, allow-create   |
-|                                | Service 模式：el-input，提示: _ 全部，pg_ 前缀匹配       |
+| 授权类型                         | 授权参数区域                                             |
+| -------------------------------- | -------------------------------------------------------- |
+| 服务授权 / 用户授权 / 分组授权   | 无额外参数（弹窗更紧凑）                                 |
+| SSH 授权（Agent + Endpoint）     | Linux 用户：el-select multiple, filterable, allow-create |
+|                                  | 预设选项: root, autogroup:nonroot，支持自定义输入        |
+| K8S API 授权（Agent + Endpoint） | 命名空间：el-select multiple, filterable, allow-create   |
+|                                  | K8S 角色：el-select filterable, allow-create             |
+|                                  | 预设选项: admin, developer, viewer                       |
+| K8S Service 授权 / SVC 跳跃授权  | 命名空间：el-select multiple, filterable, allow-create   |
+|                                  | Service 模式：el-input，提示: _ 全部，pg_ 前缀匹配       |
 
 通用授权弹窗组件 AuthGrantDialog：
 
@@ -347,8 +347,8 @@ ZTNA 新页面搜索区域设计：
 │     ├── 用户授权    /acl/users                （不变）
 │     ├── 分组授权    /acl/groups               （不变）
 │     ├── SSH 授权    /acl/ssh                  （增强，包含 Agent SSH + Endpoint SSH）
-│     ├── K8S 授权    /acl/k8s                  （新增，包含 Agent K8SAPI + Endpoint K8SAPI）
-│     └── K8SService 授权 /acl/k8s-service      （新增，包含 Agent K8SService + Endpoint K8SService）
+│     ├── K8S API 授权    /acl/k8s                  （新增，包含 Agent K8SAPI + Endpoint K8SAPI）
+│     └── K8S Service 授权 /acl/k8s-service      （新增，包含 Agent K8SService + Endpoint K8SService）
 ├── 隧道管理（el-sub-menu，不变）
 │     ├── User 管理   /tunnel/users
 │     ├── Node 管理   /tunnel/nodes
@@ -388,21 +388,21 @@ Sidebar 新增菜单项的图标选择：
 
 ### 面包屑映射
 
-| 路径                 | 面包屑                                        |
-| -------------------- | --------------------------------------------- |
-| /acl/k8s             | 授权管理 > K8SAPI 授权                        |
-| /acl/k8s/:id         | 授权管理 > K8SAPI 授权 > 授权详情: {name}     |
-| /acl/k8s-service     | 授权管理 > K8SService 授权                    |
-| /acl/k8s-service/:id | 授权管理 > K8SService 授权 > 授权详情: {name} |
-| /acl/jump            | 授权管理 > 跳跃授权                           |
-| /acl/jump/ssh/:id    | 授权管理 > 跳跃授权 > SSH 跳跃: {name}        |
-| /acl/jump/k8s/:id    | 授权管理 > 跳跃授权 > K8S 跳跃: {name}        |
-| /acl/jump/svc/:id    | 授权管理 > 跳跃授权 > SVC 跳跃: {name}        |
-| /endpoints/ssh       | Endpoint 管理 > EndpointSSH                   |
-| /endpoints/k8s       | Endpoint 管理 > EndpointK8SAPI                |
-| /endpoints/svc       | Endpoint 管理 > EndpointK8SService            |
-| /resources           | 资源发现                                      |
-| /domains             | 域名管理                                      |
+| 路径                 | 面包屑                                         |
+| -------------------- | ---------------------------------------------- |
+| /acl/k8s             | 授权管理 > K8SAPI 授权                         |
+| /acl/k8s/:id         | 授权管理 > K8SAPI 授权 > 授权详情: {name}      |
+| /acl/k8s-service     | 授权管理 > K8S Service 授权                    |
+| /acl/k8s-service/:id | 授权管理 > K8S Service 授权 > 授权详情: {name} |
+| /acl/jump            | 授权管理 > 跳跃授权                            |
+| /acl/jump/ssh/:id    | 授权管理 > 跳跃授权 > SSH 跳跃: {name}         |
+| /acl/jump/k8s/:id    | 授权管理 > 跳跃授权 > K8S 跳跃: {name}         |
+| /acl/jump/svc/:id    | 授权管理 > 跳跃授权 > SVC 跳跃: {name}         |
+| /endpoints/ssh       | Endpoint 管理 > EndpointSSH                    |
+| /endpoints/k8s       | Endpoint 管理 > EndpointK8SAPI                 |
+| /endpoints/svc       | Endpoint 管理 > EndpointK8SService             |
+| /resources           | 资源发现                                       |
+| /domains             | 域名管理                                       |
 
 ---
 
@@ -500,7 +500,7 @@ Sidebar 新增菜单项的图标选择：
 │  ├──────────────┼──────────────────────────────────────────┤    │
 │  │ K8S API 地址 │ https://localhost:6443                   │    │
 │  ├──────────────┼──────────────────────────────────────────┤    │
-│  │ 域名         │ api.beijing.beagle:6443                  │    │
+│  │ 域名         │ kubernetes.beijing.beagle:6443                  │    │
 │  └──────────────┴──────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
 
@@ -603,12 +603,12 @@ Sidebar 新增菜单项的图标选择：
 
 ---
 
-### 3. K8SService 授权列表页（/acl/k8s-service）
+### 3. K8S Service 授权列表页（/acl/k8s-service）
 
 #### 原型图
 
 ```
-面包屑：授权管理 > K8SService 授权
+面包屑：授权管理 > K8S Service 授权
 
 ┌─────────────────────────────────────────────────────────────────┐
 │ el-card 搜索区                                                   │
@@ -661,12 +661,12 @@ Sidebar 新增菜单项的图标选择：
 
 ---
 
-### 4. K8SService 授权详情页（/acl/k8s-service/:id）
+### 4. K8S Service 授权详情页（/acl/k8s-service/:id）
 
 #### 原型图
 
 ```
-面包屑：授权管理 > K8SService 授权 > 授权详情: beijing
+面包屑：授权管理 > K8S Service 授权 > 授权详情: beijing
 
 ┌─────────────────────────────────────────────────────────────────┐
 │ el-card 基本信息                                                 │
@@ -734,7 +734,7 @@ Sidebar 新增菜单项的图标选择：
 
 #### 核心业务
 
-展示某个 Agent 的 K8SService 授权详情。与 K8SAPI 授权详情的区别：
+展示某个 Agent 的 K8S Service 授权详情。与 K8SAPI 授权详情的区别：
 
 - 多一个"已发现的 Service"卡片，展示 Agent 自动发现的 K8S Service 列表（只读，不可编辑）
 - 授权字段是"命名空间 + Service 模式"（而非"命名空间 + K8S 角色"）
@@ -1030,7 +1030,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 │  ├──────────────┼──────────────────────────────────────────┤    │
 │  │ API 地址     │ 192.168.1.10:6443                        │    │
 │  ├──────────────┼──────────────────────────────────────────┤    │
-│  │ 域名         │ api.beijing-prod.beijing.beagle:6443     │    │
+│  │ 域名         │ kubernetes.beijing-prod.beijing.beagle:6443     │    │
 │  ├──────────────┼──────────────────────────────────────────┤    │
 │  │ 状态         │ [● 在线]                                 │    │
 │  └──────────────┴──────────────────────────────────────────┘    │
@@ -1097,7 +1097,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 
 ┌─────────────────────────────────────────────────────────────────┐
 │ el-card 已发现的 Service (8)                                     │
-│  （结构同 K8SService 授权详情页的已发现 Service 卡片）           │
+│  （结构同 K8S Service 授权详情页的已发现 Service 卡片）           │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
@@ -1118,7 +1118,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 
 #### 核心业务
 
-管理某个 EndpointK8SService 的跳跃授权。授权字段与 K8SService 授权详情页（/acl/k8s-service/:id）一致（命名空间 + Service 模式），区别在于对象是 Endpoint 而非 Agent。
+管理某个 EndpointK8SService 的跳跃授权。授权字段与 K8S Service 授权详情页（/acl/k8s-service/:id）一致（命名空间 + Service 模式），区别在于对象是 Endpoint 而非 Agent。
 
 同样包含"已发现的 Service"只读卡片，数据来自 Endpoint 通过 Agent 上报。
 
@@ -1128,7 +1128,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 
 基本信息字段：id, name, alias, agent_name, agent_id, service_count, status
 
-已发现 Service 列表：与 K8SService 授权详情页一致
+已发现 Service 列表：与 K8S Service 授权详情页一致
 
 用户/分组授权字段：namespaces + service_pattern
 
@@ -1136,7 +1136,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 
 #### 组件设计
 
-与 K8SService 授权详情页（/acl/k8s-service/:id）结构一致，基本信息区多了"所属 Agent"、"状态"字段。
+与 K8S Service 授权详情页（/acl/k8s-service/:id）结构一致，基本信息区多了"所属 Agent"、"状态"字段。
 
 ---
 
@@ -1268,7 +1268,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 展示所有 EndpointK8SAPI 列表。与 EndpointSSH 列表页结构一致，区别：
 
 - "内网地址"列替换为"API 地址"列
-- 域名格式不同（api.{endpoint}.{agent}.beagle:6443）
+- 域名格式不同（kubernetes.{endpoint}.{agent}.beagle:6443）
 
 #### 核心数据
 
@@ -1398,7 +1398,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 ┌─────────────────────────────────────────────────────────────────┐
 │ el-card 搜索区                                                   │
 │  [Agent ▼ 全部] [来源 ▼ 全部] [命名空间 ▼ 全部] [状态 ▼ 全部]  │
-│  [搜索框________________] [搜索] [重置]                          │
+│  [搜索框________________] [搜索] [重置]  [🔄 更新]              │
 └─────────────────────────────────────────────────────────────────┘
 ┌─────────────────────────────────────────────────────────────────┐
 │ el-card 数据区                                                   │
@@ -1433,9 +1433,17 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 
 "来源"列区分是 Agent 直接发现的还是 Endpoint 跳跃发现的，帮助管理员理解数据链路。
 
+"更新"按钮：点击后通知所有在线 Agent 立即上报 K8S Service 发现数据，无需等待下一次心跳周期（默认 30 秒）。按钮点击后进入 loading 状态，3 秒后自动刷新列表数据。具体机制见 `design_ztna_server_heartbeat.md`「立即上报机制」。
+
 #### 核心数据
 
 数据来源：GET /api/v1/resources
+
+触发同步：POST /api/v1/resources/sync
+
+- 调用后 Server 通过心跳响应流通知所有在线 Agent 立即上报 K8S Service 数据
+- 响应立即返回（不等待 Agent 上报完成）
+- 前端在调用后等待 3 秒再刷新列表
 
 请求参数：
 
@@ -1471,6 +1479,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 | 来源筛选   | el-select(clearable, 选项: AgentK8SService / EndpointK8SService) |
 | 命名空间   | el-select(filterable, clearable, 动态加载)                       |
 | 状态筛选   | el-select(clearable)                                             |
+| 更新按钮   | el-button(type="primary", icon=Refresh, loading 状态 3 秒)       |
 | 域名列     | CopyButton（点击复制完整域名）                                   |
 | 来源列     | el-tag(type 区分来源)                                            |
 | 状态列     | StatusTag                                                        |
@@ -1689,6 +1698,208 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 
 ---
 
+### 15. 设备详情页增强（/nodes/:id）
+
+#### 概述
+
+在现有设备详情页（Node/Detail.vue）基础上，为 Agent 类型设备新增"能力配置"卡片，管理员可以远程控制 Agent 的 SSH、K8S API、K8S Service 三项能力的开关和参数。
+
+能力配置是 User 级别的（同一 Agent User 下所有 Node 共享），通过心跳响应下发给 Agent，最多 30 秒内生效，无需重启 Agent。
+
+详细设计见 `design_ztna_agent_remote.md`。
+
+#### 原型图
+
+现有卡片保持不变（基本信息、Headscale 信息、系统信息），在系统信息卡片下方新增"能力配置"卡片。仅当设备类型为 agent 时显示。
+
+```
+面包屑：设备管理 > 设备详情: beagle-242
+
+┌─────────────────────────────────────────────────────────────────┐
+│ el-card 基本信息                                    [● 在线]     │
+│  （现有，不变）                                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ el-card Headscale 节点信息                          [● 在线]     │
+│  （现有，不变）                                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ el-card 系统信息                                                 │
+│  （现有，不变）                                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ el-card 能力配置                                    [保存] [重置]│
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ── SSH ──────────────────────────────────────────────────────── │
+│                                                                  │
+│  启用 SSH        [开关 ●]                                        │
+│                                                                  │
+│  ── K8S API ─────────────────────────────────────────────────── │
+│                                                                  │
+│  启用 K8S API    [开关 ○]    ← 灰色表示 Server 未设置           │
+│  监听端口        [6443    ]  ← placeholder 显示默认值            │
+│  API Server 地址 [        ]  ← placeholder: 留空自动获取         │
+│                                                                  │
+│  ── K8S Service ─────────────────────────────────────────────── │
+│                                                                  │
+│  启用 K8S Service [开关 ○]                                       │
+│  标签选择器       [signal.beagle.io/expose=true]                 │
+│  命名空间         [全部命名空间              ▼]  ← 多选下拉      │
+│  监听端口         [9090    ]                                     │
+│                                                                  │
+│  ── 配置来源说明 ────────────────────────────────────────────── │
+│                                                                  │
+│  ℹ️ 配置优先级：Server 远程配置 > 环境变量 > 配置文件            │
+│  未设置的参数（灰色）将使用 Agent 本地配置                       │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### 能力配置卡片详细设计
+
+卡片标题栏：
+
+| 元素     | 组件                                    | 说明                                 |
+| -------- | --------------------------------------- | ------------------------------------ |
+| 标题     | 文本"能力配置"                          | 卡片标题                             |
+| 保存按钮 | el-button(type="primary", size="small") | 提交修改到 Server                    |
+| 重置按钮 | el-button(size="small")                 | 清除所有 Server 配置，回退到本地配置 |
+
+卡片内容分为三个区域，每个区域用 el-divider 分隔：
+
+SSH 区域：
+
+| 字段    | 组件      | 说明                                          |
+| ------- | --------- | --------------------------------------------- |
+| 启用SSH | el-switch | 绑定 ssh_enabled，始终有值（User.SSHEnabled） |
+
+K8S API 区域：
+
+| 字段            | 组件                              | 说明                                          |
+| --------------- | --------------------------------- | --------------------------------------------- |
+| 启用 K8S API    | el-switch                         | 绑定 k8s_enabled，null 时显示为关闭灰色       |
+| 监听端口        | el-input-number(min=1, max=65535) | 绑定 k8s_listen_port，placeholder=6443        |
+| API Server 地址 | el-input                          | 绑定 k8s_api_server，placeholder=留空自动获取 |
+
+K8S Service 区域：
+
+| 字段         | 组件                                          | 说明                                                              |
+| ------------ | --------------------------------------------- | ----------------------------------------------------------------- |
+| 启用 K8S SVC | el-switch                                     | 绑定 svc_enabled，null 时显示为关闭灰色                           |
+| 标签选择器   | el-input                                      | 绑定 svc_label_selector，placeholder=signal.beagle.io/expose=true |
+| 命名空间     | el-select(multiple, filterable, allow-create) | 绑定 svc_namespaces，空=全部命名空间                              |
+| 监听端口     | el-input-number(min=1, max=65535)             | 绑定 svc_listen_port_base，placeholder=9090                       |
+
+配置来源说明：
+
+卡片底部用 el-alert(type="info", :closable="false") 显示配置优先级说明。
+
+#### 开关的三态显示
+
+能力开关（K8S API、K8S Service）有三种状态：
+
+| 状态                | 显示                        | 说明               |
+| ------------------- | --------------------------- | ------------------ |
+| Server 设置为开启   | 开关打开（蓝色）            | Server 远程开启    |
+| Server 设置为关闭   | 开关关闭（灰色）            | Server 远程关闭    |
+| Server 未设置(null) | 开关关闭 + 旁边显示"未设置" | Agent 使用本地配置 |
+
+SSH 开关没有"未设置"状态（User.SSHEnabled 是 bool 非指针，始终有值）。
+
+K8S API 和 K8S Service 的开关旁边显示一个小标签：
+
+- Server 已设置时：el-tag(type="primary", size="small") 显示"远程"
+- Server 未设置时：el-tag(type="info", size="small") 显示"本地"
+
+#### 保存和重置行为
+
+保存按钮：
+
+```
+点击保存
+    │
+    ├─ 收集表单数据
+    │   ├─ ssh_enabled: bool（始终传）
+    │   ├─ k8s_enabled: bool 或 null（开关被操作过则传值，否则传 null）
+    │   ├─ k8s_listen_port: int 或 null
+    │   ├─ k8s_api_server: string 或 null（空字符串=清除）
+    │   ├─ svc_enabled: bool 或 null
+    │   ├─ svc_label_selector: string 或 null
+    │   ├─ svc_namespaces: string 或 null
+    │   └─ svc_listen_port_base: int 或 null
+    │
+    ├─ PUT /api/v1/nodes/:id/capabilities
+    │
+    ├─ 成功 → ElMessage.success("保存成功")
+    │
+    └─ 刷新数据
+```
+
+重置按钮：
+
+```
+点击重置
+    │
+    ├─ ElMessageBox.confirm("确认重置？重置后 Agent 将使用本地配置")
+    │
+    ├─ DELETE /api/v1/nodes/:id/capabilities
+    │
+    ├─ 成功 → ElMessage.success("已重置为本地配置")
+    │
+    └─ 刷新数据
+```
+
+#### 核心数据
+
+获取能力配置：GET /api/v1/nodes/:id/capabilities
+
+响应字段：
+
+| 字段                 | 类型   | 说明                             |
+| -------------------- | ------ | -------------------------------- |
+| ssh_enabled          | bool   | SSH 开关                         |
+| k8s_enabled          | \*bool | K8S API 开关（null=未设置）      |
+| k8s_listen_port      | \*int  | K8S API 监听端口（null=未设置）  |
+| k8s_api_server       | string | K8S API Server 地址（空=未设置） |
+| svc_enabled          | \*bool | K8S Service 开关（null=未设置）  |
+| svc_label_selector   | string | 标签选择器（空=未设置）          |
+| svc_namespaces       | string | 命名空间列表 JSON（空=未设置）   |
+| svc_listen_port_base | \*int  | gRPC 监听端口（null=未设置）     |
+
+更新能力配置：PUT /api/v1/nodes/:id/capabilities
+重置能力配置：DELETE /api/v1/nodes/:id/capabilities
+
+#### 组件设计
+
+| 区域         | 组件                                          |
+| ------------ | --------------------------------------------- |
+| 能力配置卡片 | el-card(shadow="never")                       |
+| 卡片标题     | #header 插槽，标题 + 保存/重置按钮            |
+| 分区标题     | el-divider(content-position="left")           |
+| 表单         | el-form(label-width="120px")                  |
+| 开关         | el-switch                                     |
+| 端口输入     | el-input-number(:min="1", :max="65535")       |
+| 文本输入     | el-input                                      |
+| 命名空间     | el-select(multiple, filterable, allow-create) |
+| 配置来源标签 | el-tag(size="small") 显示"远程"/"本地"        |
+| 说明区域     | el-alert(type="info", :closable="false")      |
+| 保存确认     | ElMessage.success                             |
+| 重置确认     | ElMessageBox.confirm                          |
+
+#### 条件显示
+
+能力配置卡片仅在以下条件满足时显示：
+
+- node.type === 'agent'
+
+Desktop 和 Pod 类型设备不显示能力配置卡片（它们没有 SSH/K8S/SVC 能力控制需求）。
+
+---
+
 ## 国际化
 
 所有新增页面和组件需要同步更新中英文翻译文件：
@@ -1709,7 +1920,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 | menu.resources          | 资源发现           | Resources          |
 | menu.domains            | 域名管理           | Domains            |
 | menu.aclK8S             | K8SAPI 授权        | K8SAPI ACL         |
-| menu.aclK8SService      | K8SService 授权    | K8SService ACL     |
+| menu.aclK8SService      | K8S Service 授权   | K8SService ACL     |
 | menu.aclJump            | 跳跃授权           | Jump ACL           |
 
 授权管理相关：
@@ -1751,6 +1962,8 @@ Endpoint 管理相关：
 | resource.namespace          | 命名空间           | Namespace          |
 | resource.agentK8SService    | AgentK8SService    | AgentK8SService    |
 | resource.endpointK8SService | EndpointK8SService | EndpointK8SService |
+| resource.sync               | 更新               | Sync               |
+| resource.syncing            | 同步中...          | Syncing...         |
 
 域名管理相关：
 
@@ -1781,6 +1994,31 @@ Endpoint 管理相关：
 | audit.denied    | 拒绝     | Denied         |
 | audit.timeRange | 时间范围 | Time Range     |
 
+能力配置相关：
+
+| key                          | 中文                                                                                 | 英文                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| capability.title             | 能力配置                                                                             | Capability Config                                                                            |
+| capability.save              | 保存                                                                                 | Save                                                                                         |
+| capability.reset             | 重置                                                                                 | Reset                                                                                        |
+| capability.resetConfirm      | 确认重置？重置后 Agent 将使用本地配置                                                | Confirm reset? Agent will use local config after reset                                       |
+| capability.saveSuccess       | 保存成功                                                                             | Saved successfully                                                                           |
+| capability.resetSuccess      | 已重置为本地配置                                                                     | Reset to local config                                                                        |
+| capability.ssh               | SSH                                                                                  | SSH                                                                                          |
+| capability.sshEnabled        | 启用 SSH                                                                             | Enable SSH                                                                                   |
+| capability.k8s               | K8S API                                                                              | K8S API                                                                                      |
+| capability.k8sEnabled        | 启用 K8S API                                                                         | Enable K8S API                                                                               |
+| capability.k8sListenPort     | 监听端口                                                                             | Listen Port                                                                                  |
+| capability.k8sApiServer      | API Server 地址                                                                      | API Server Address                                                                           |
+| capability.svc               | K8S Service                                                                          | K8S Service                                                                                  |
+| capability.svcEnabled        | 启用 K8S Service                                                                     | Enable K8S Service                                                                           |
+| capability.svcLabelSelector  | 标签选择器                                                                           | Label Selector                                                                               |
+| capability.svcNamespaces     | 命名空间                                                                             | Namespaces                                                                                   |
+| capability.svcListenPortBase | 监听端口                                                                             | Listen Port Base                                                                             |
+| capability.sourceRemote      | 远程                                                                                 | Remote                                                                                       |
+| capability.sourceLocal       | 本地                                                                                 | Local                                                                                        |
+| capability.priorityHint      | 配置优先级：Server 远程配置 > 环境变量 > 配置文件。未设置的参数将使用 Agent 本地配置 | Config priority: Server remote > env vars > config file. Unset params use Agent local config |
+
 ---
 
 ## 前端文件结构
@@ -1789,7 +2027,7 @@ Endpoint 管理相关：
 web/src/
 ├── api/
 │     ├── aclK8s.ts              （新增）K8SAPI 授权 API
-│     ├── aclK8sService.ts       （新增）K8SService 授权 API
+│     ├── aclK8sService.ts       （新增）K8S Service 授权 API
 │     ├── aclJump.ts             （新增）跳跃授权 API
 │     ├── endpoint.ts            （新增）Endpoint 管理 API
 │     ├── resource.ts            （新增）资源发现 API
@@ -1832,9 +2070,10 @@ web/src/
 | P0   | AuthGrantDialog 通用授权弹窗组件                 | 无                          |
 | P0   | 现有授权弹窗迁移（4 个弹窗改用 AuthGrantDialog） | AuthGrantDialog             |
 | P1   | K8SAPI 授权页面（列表 + 详情）                   | AclK8sPermission API        |
-| P1   | K8SService 授权页面（列表 + 详情）               | AclK8SServicePermission API |
+| P1   | K8S Service 授权页面（列表 + 详情）              | AclK8SServicePermission API |
 | P1   | Endpoint 管理页面（SSH/K8S/SVC 三个）            | Endpoint 模型 API           |
 | P1   | 跳跃授权页面（列表 + 三种详情）                  | 跳跃 ACL 模型 API           |
 | P1   | 资源发现页面                                     | 资源发现 API                |
 | P1   | 域名管理页面                                     | 域名注册表 API              |
+| P1   | 设备详情页能力配置卡片（Agent 远程控制）         | 能力配置 API                |
 | P2   | 审计日志增强                                     | 操作审计 API                |

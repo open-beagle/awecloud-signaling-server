@@ -27,6 +27,16 @@ type Node struct {
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 
+	// Agent 远程能力配置（Server 远程控制，nil=未设置，由 Agent 本地配置决定）
+	// 每个 Node 独立配置，互不影响
+	K8SEnabled        *bool  `gorm:"column:k8s_enabled" json:"k8s_enabled,omitempty"`                         // K8S API 能力开关
+	K8SListenPort     *int   `gorm:"column:k8s_listen_port" json:"k8s_listen_port,omitempty"`                 // K8S API tsnet 监听端口
+	K8SApiServer      string `gorm:"column:k8s_api_server;size:255" json:"k8s_api_server,omitempty"`          // K8S API Server 地址
+	SVCEnabled        *bool  `gorm:"column:svc_enabled" json:"svc_enabled,omitempty"`                         // K8S Service 能力开关
+	SVCLabelSelector  string `gorm:"column:svc_label_selector;size:255" json:"svc_label_selector,omitempty"`  // K8S Service 标签选择器
+	SVCNamespaces     string `gorm:"column:svc_namespaces;size:1024" json:"svc_namespaces,omitempty"`         // K8S Service 命名空间列表 JSON
+	SVCListenPortBase *int   `gorm:"column:svc_listen_port_base" json:"svc_listen_port_base,omitempty"`       // K8S Service gRPC 监听端口
+
 	// 关联
 	User *User `gorm:"foreignKey:UserID" json:"user,omitempty"`
 }

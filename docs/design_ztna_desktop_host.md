@@ -125,7 +125,7 @@ Desktop.Host 特有的 GUI 功能，展示用户可访问的所有资源：
 │  │   │     PostgreSQL (5432)  ● 在线            │    │
 │  │   ├── 🖥 web-server-1.beijing.beagle            │    │
 │  │   │     EndpointSSH (22)  ● 在线             │    │
-│  │   └── 🔧 api.beijing-prod.beijing.beagle        │    │
+│  │   └── 🔧 kubernetes.beijing-prod.beijing.beagle        │    │
 │  │         EndpointK8SAPI (6443)  ● 在线        │    │
 │  └─────────────────────────────────────────────┘    │
 │                                                     │

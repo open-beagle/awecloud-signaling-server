@@ -684,8 +684,23 @@ func (m *TailscaleManager) tailscaleLogf(format string, args ...interface{}) {
 	logger.Infof("[tunnel] %s", msg)
 }
 
-// enableSSH 启用 Tailscale SSH 功能
+// enableSSH 启用 Tailscale SSH 功能（内部使用，启动时调用）
 func (m *TailscaleManager) enableSSH() error {
+	return m.setSSH(true)
+}
+
+// EnableSSHRemote 远程启用 Tailscale SSH（由 Server 远程配置触发）
+func (m *TailscaleManager) EnableSSHRemote() error {
+	return m.setSSH(true)
+}
+
+// DisableSSHRemote 远程禁用 Tailscale SSH（由 Server 远程配置触发）
+func (m *TailscaleManager) DisableSSHRemote() error {
+	return m.setSSH(false)
+}
+
+// setSSH 设置 Tailscale SSH 开关
+func (m *TailscaleManager) setSSH(enabled bool) error {
 	if m.tsServer == nil {
 		return fmt.Errorf("Tailscale 未启动")
 	}
@@ -696,15 +711,15 @@ func (m *TailscaleManager) enableSSH() error {
 		return fmt.Errorf("获取 LocalClient 失败: %w", err)
 	}
 
-	// 通过 EditPrefs 设置 RunSSH = true
+	// 通过 EditPrefs 设置 RunSSH
 	_, err = lc.EditPrefs(m.ctx, &ipn.MaskedPrefs{
 		Prefs: ipn.Prefs{
-			RunSSH: true,
+			RunSSH: enabled,
 		},
 		RunSSHSet: true,
 	})
 	if err != nil {
-		return fmt.Errorf("设置 RunSSH 失败: %w", err)
+		return fmt.Errorf("设置 RunSSH=%v 失败: %w", enabled, err)
 	}
 
 	return nil

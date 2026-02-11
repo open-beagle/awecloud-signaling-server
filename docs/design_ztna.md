@@ -216,8 +216,8 @@ AgentSSH（每个 Node 实例一个域名）：
   beagle-xx2.beijing.beagle:22
 
 AgentK8SAPI（Agent 本机 K8S API，默认域名为空）：
-  api.<agent-name>.beagle:6443
-  api.beijing.beagle:6443
+  kubernetes.<agent-name>.beagle:6443
+  kubernetes.beijing.beagle:6443
   多个 Node 都开启时，负载均衡到在线 Node
 
 AgentK8SService（Agent 本机 K8S Service）：
@@ -236,8 +236,8 @@ Endpoint 域名为空时，直接挂在 <agent-name>.beagle 下：
 
 Endpoint 域名不为空时，挂在 <endpoint-domain>.<agent-name>.beagle 下：
   EndpointK8SAPI:
-    api.<endpoint-domain>.<agent-name>.beagle:6443
-    api.prod.beijing.beagle:6443
+    kubernetes.<endpoint-domain>.<agent-name>.beagle:6443
+    kubernetes.prod.beijing.beagle:6443
 
   EndpointSSH:
     <ssh-name>.<endpoint-domain>.<agent-name>.beagle:22
@@ -264,18 +264,18 @@ beijing（Agent User / 环境）
   ├── Agent 本机能力（直接挂在 beijing.beagle 下）
   │     beagle-xx1.beijing.beagle:22           → AgentSSH（Node 实例）
   │     beagle-xx2.beijing.beagle:22           → AgentSSH（Node 实例）
-  │     api.beijing.beagle:6443                → AgentK8SAPI
+  │     kubernetes.beijing.beagle:6443                → AgentK8SAPI
   │     pg.yygl.beijing.beagle:5432            → AgentK8SService
   │
   ├── Endpoint ""（域名为空，直接挂在 beijing.beagle 下）
   │     web-server-1.beijing.beagle:22         → EndpointSSH
   │
   ├── Endpoint "prod"
-  │     api.prod.beijing.beagle:6443           → EndpointK8SAPI
+  │     kubernetes.prod.beijing.beagle:6443           → EndpointK8SAPI
   │     web-server-1.prod.beijing.beagle:22    → EndpointSSH
   │
   └── Endpoint "dev"
-        api.dev.beijing.beagle:6443            → EndpointK8SAPI
+        kubernetes.dev.beijing.beagle:6443            → EndpointK8SAPI
         db-1.dev.beijing.beagle:22             → EndpointSSH
 ```
 
@@ -288,18 +288,18 @@ domain_registry 表中的域名来源：
 
 beagle-xx1 注册，上报能力 ssh + k8sapi + k8ssvc：
   beagle-xx1.beijing.beagle:22        → type=ssh, node_id=xxx
-  api.beijing.beagle:6443             → type=k8sapi, node_id=xxx
+  kubernetes.beijing.beagle:6443             → type=k8sapi, node_id=xxx
   pg.yygl.beijing.beagle:5432         → type=k8ssvc, node_id=xxx
 
 beagle-xx2 注册，上报能力 ssh + k8sapi：
   beagle-xx2.beijing.beagle:22        → type=ssh, node_id=yyy
-  api.beijing.beagle:6443             → type=k8sapi, node_id=yyy（共享域名，负载均衡）
+  kubernetes.beijing.beagle:6443             → type=k8sapi, node_id=yyy（共享域名，负载均衡）
 
 Endpoint "" 注册，上报能力 ssh：
   web-server-1.beijing.beagle:22      → type=ssh, endpoint_id=aaa
 
 Endpoint "prod" 注册，上报能力 k8sapi + ssh：
-  api.prod.beijing.beagle:6443        → type=k8sapi, endpoint_id=bbb
+  kubernetes.prod.beijing.beagle:6443        → type=k8sapi, endpoint_id=bbb
   web-server-1.prod.beijing.beagle:22 → type=ssh, endpoint_id=bbb
 
 Client Node 注册：
@@ -322,7 +322,7 @@ Client Node 注册：
   beagle-xx1 (online) → K8SAPI 已开启, K8SService 已开启
   beagle-xx2 (online) → K8SAPI 已开启, K8SService 已开启
 
-  api.beijing.beagle:6443       → 轮询到 beagle-xx1 或 beagle-xx2
+  kubernetes.beijing.beagle:6443       → 轮询到 beagle-xx1 或 beagle-xx2
   pg.yygl.beijing.beagle:5432   → 轮询到 beagle-xx1 或 beagle-xx2
 
 不参与负载均衡：
@@ -345,7 +345,7 @@ Client Node 注册：
   创建 Endpoint SSH 节点时校验不与同层级的 Node 名称重复
 ```
 
-Agent 本机 K8SAPI 默认域名为空（`api.<agent-name>.beagle`），一般不会为同一个 Agent 设置两个 K8SAPI。如果有冲突，Agent 内部自行解决。
+Agent 本机 K8SAPI 默认域名为空（`kubernetes.<agent-name>.beagle`），一般不会为同一个 Agent 设置两个 K8SAPI。如果有冲突，Agent 内部自行解决。
 
 ### gRPC 多实例支持
 

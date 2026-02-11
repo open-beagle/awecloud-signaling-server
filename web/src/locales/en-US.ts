@@ -174,6 +174,35 @@ export default {
     lastSeen: 'Last Seen',
     expiry: 'Expiry'
   },
+  capability: {
+    title: 'Capability Config',
+    titleTip: 'Remotely control Agent capability switches and parameters. Takes priority over Agent local config. Unset parameters fall back to Agent local config.',
+    ssh: 'SSH',
+    sshEnabled: 'SSH Switch',
+    k8s: 'K8S API',
+    k8sEnabled: 'K8S API Switch',
+    k8sListenPort: 'Listen Port',
+    k8sApiServer: 'API Server Address',
+    svc: 'K8S Service',
+    svcEnabled: 'K8S Service Switch',
+    svcLabelSelector: 'Label Selector',
+    svcNamespaces: 'Namespaces',
+    svcListenPortBase: 'gRPC Listen Port',
+    sourceRemote: 'Remote',
+    sourceLocal: 'Local',
+    notSet: 'Not Set',
+    reset: 'Reset to Local Config',
+    resetConfirm: 'Are you sure to reset all remote capability config? Agent will use local config after reset.',
+    resetSuccess: 'Reset successful',
+    saveSuccess: 'Saved successfully',
+    saveFailed: 'Save failed',
+    onlyAgent: 'Only Agent type devices support capability config',
+    k8sListenPortPlaceholder: 'e.g. 6443',
+    k8sApiServerPlaceholder: 'e.g. https://kubernetes.default.svc',
+    svcLabelSelectorPlaceholder: 'e.g. app=myapp',
+    svcNamespacesPlaceholder: 'e.g. default,kube-system',
+    svcListenPortBasePlaceholder: 'e.g. 50051'
+  },
   agent: {
     deploy: 'Deploy',
     generateCommand: 'Generate Command',
@@ -420,6 +449,8 @@ export default {
     clusterIP: 'Cluster IP',
     ports: 'Ports',
     labels: 'Labels',
-    searchPlaceholder: 'Search agent, namespace or service name'
+    searchPlaceholder: 'Search agent, namespace or service name',
+    sync: 'Sync',
+    syncing: 'Syncing...'
   }
 }

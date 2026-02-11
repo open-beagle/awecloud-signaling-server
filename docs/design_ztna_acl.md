@@ -180,11 +180,11 @@ group:*:*         agent:*           agent:port
 
 ## ZTNA 新增授权（3 种，不同步 Headscale）
 
-### 5. K8S 授权（/acl/k8s）— 新增
+### 5. K8S API 授权（/acl/k8s）— 新增
 
 业务含义：控制谁能访问 K8S API，以及命名空间和角色。包含 Agent K8S 和 Endpoint K8S。
 
-ZTNA 增强：K8S 授权现在包含两种目标：
+ZTNA 增强：K8S API 授权现在包含两种目标：
 
 - AgentK8SAPI：Agent 直接提供 K8S API 访问（Agent 有 kubeconfig）
 - EndpointK8SAPI：通过 Agent 跳跃到 Endpoint 访问 K8S API（Endpoint 有 kubeconfig）
@@ -218,11 +218,11 @@ AclK8SAPIJumpUserPermission:
 
 权限数据通过心跳同步到 Agent 本地缓存。
 
-### 6. K8SService 授权（/acl/k8s-service）— 新增
+### 6. K8S Service 授权（/acl/k8s-service）— 新增
 
 业务含义：控制谁能访问自动发现的 K8S Service，按命名空间和 Service 名称控制。包含 Agent K8SService 和 Endpoint K8SService。
 
-ZTNA 增强：K8SService 授权现在包含两种目标：
+ZTNA 增强：K8S Service 授权现在包含两种目标：
 
 - AgentK8SService：Agent 自动发现的 K8S Service（Agent 在 K8S 集群内）
 - EndpointK8SService：Endpoint 自动发现的 K8S Service（Endpoint 在 K8S 集群内）
@@ -232,7 +232,7 @@ ZTNA 增强：K8SService 授权现在包含两种目标：
 - AclK8SServiceUserPermission、AclK8SServiceGroupPermission（AgentK8SService，新增）
 - AclK8SServiceJumpUserPermission、AclK8SServiceJumpGroupPermission（EndpointK8SService，新增）
 
-AgentK8SService 授权结构：
+AgentK8S Service 授权结构：
 
 ```
 AclK8SServiceUserPermission:
@@ -242,7 +242,7 @@ AclK8SServiceUserPermission:
   service_pattern → 允许的 Service 名称模式（"*" = 全部，"pg*" = pg 开头）
 ```
 
-EndpointK8SService 授权结构：
+EndpointK8S Service 授权结构：
 
 ```
 AclK8SServiceJumpUserPermission:
@@ -302,8 +302,8 @@ Desktop 侧用 VIP 隔离端口冲突：
 │ 用户授权         │ Headscale ACL│ 是           │ Agent 所有端口           │ 通用             │
 │ 分组授权         │ Headscale ACL│ 是           │ 分组所有节点所有端口     │ 通用             │
 │ SSH 授权         │ 混合         │ 部分         │ Agent/Endpoint SSH       │ Agent + Endpoint │
-│ K8S 授权         │ Agent 本地   │ 否           │ Agent/Endpoint K8S + NS  │ Agent + Endpoint │
-│ K8SService 授权  │ Agent 本地   │ 否           │ Agent/Endpoint SVC + NS  │ Agent + Endpoint │
+│ K8S API 授权         │ Agent 本地   │ 否           │ Agent/Endpoint K8S + NS  │ Agent + Endpoint │
+│ K8S Service 授权  │ Agent 本地   │ 否           │ Agent/Endpoint SVC + NS  │ Agent + Endpoint │
 └──────────────────┴──────────────┴──────────────┴──────────────────────────┴──────────────────┘
 ```
 
@@ -333,8 +333,8 @@ Desktop 侧用 VIP 隔离端口冲突：
 | 阶段 | 内容                                 | 依赖                 |
 | ---- | ------------------------------------ | -------------------- |
 | P0   | 现有 4 种授权不变                    | 已实现               |
-| P1   | K8S 授权模型和 API                   | AgentK8SAPI 实现     |
-| P1   | K8SService 授权模型和 API            | AgentK8SService 实现 |
+| P1   | K8S API 授权模型和 API               | AgentK8SAPI 实现     |
+| P1   | K8S Service 授权模型和 API           | AgentK8SService 实现 |
 | P2   | Endpoint 授权模型和 API              | Endpoint 体系        |
 | P2   | Web 授权管理页面（K8S + K8SService） | 授权 API             |
 | P2   | Web Endpoint 授权增强                | Endpoint 授权 API    |

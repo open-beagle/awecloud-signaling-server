@@ -3,7 +3,7 @@ import type { ApiResponse, PagedResponse } from '@/types/models'
 
 // ========== K8S Service 授权 ==========
 
-// K8SService 授权列表项
+// K8S Service 授权列表项
 export interface K8SServiceACLItem {
   id: number
   name: string
@@ -15,7 +15,7 @@ export interface K8SServiceACLItem {
   created_at: string
 }
 
-// K8SService 授权项
+// K8S Service 授权项
 export interface K8SServiceACLPermissionItem {
   id: number
   name: string
@@ -26,7 +26,7 @@ export interface K8SServiceACLPermissionItem {
   granted_at: string
 }
 
-// K8SService 授权详情
+// K8S Service 授权详情
 export interface K8SServiceACLDetail {
   id: number
   name: string
@@ -37,12 +37,12 @@ export interface K8SServiceACLDetail {
   groups: K8SServiceACLPermissionItem[]
 }
 
-// 获取 K8SService 授权列表
+// 获取 K8S Service 授权列表
 export const getK8SServiceACLList = (params?: { search?: string; page?: number; size?: number }) => {
   return request.get<any, PagedResponse<K8SServiceACLItem[]>>('/api/v1/admin/acl/k8s-service', { params })
 }
 
-// 获取 K8SService 授权详情
+// 获取 K8S Service 授权详情
 export const getK8SServiceACL = (id: number) => {
   return request.get<any, ApiResponse<K8SServiceACLDetail>>(`/api/v1/admin/acl/k8s-service/${id}`)
 }

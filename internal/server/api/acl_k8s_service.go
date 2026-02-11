@@ -12,9 +12,9 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
-// ========== K8SService 授权 ==========
+// ========== K8S Service 授权 ==========
 
-// K8SServiceACLListItem K8SService 授权列表项
+// K8SServiceACLListItem K8S Service 授权列表项
 type K8SServiceACLListItem struct {
 	ID         uint64    `json:"id"`
 	Name       string    `json:"name"`
@@ -25,7 +25,7 @@ type K8SServiceACLListItem struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-// ListK8SServiceACL 获取 K8SService 授权列表（仅 Agent 角色）
+// ListK8SServiceACL 获取 K8S Service 授权列表（仅 Agent 角色）
 func (a *ACLAPI) ListK8SServiceACL(c *gin.Context) {
 	ctx := c.Request.Context()
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -97,7 +97,7 @@ func (a *ACLAPI) ListK8SServiceACL(c *gin.Context) {
 	c.JSON(http.StatusOK, NewPagedResponse(result, total, page, size))
 }
 
-// K8SServiceACLPermissionItem K8SService 授权项
+// K8SServiceACLPermissionItem K8S Service 授权项
 type K8SServiceACLPermissionItem struct {
 	ID           uint64    `json:"id"`
 	Name         string    `json:"name"`
@@ -108,7 +108,7 @@ type K8SServiceACLPermissionItem struct {
 	GrantedAt    time.Time `json:"granted_at"`
 }
 
-// K8SServiceACLDetail K8SService 授权详情
+// K8SServiceACLDetail K8S Service 授权详情
 type K8SServiceACLDetail struct {
 	ID     uint64                        `json:"id"`
 	Name   string                        `json:"name"`
@@ -118,7 +118,7 @@ type K8SServiceACLDetail struct {
 	Groups []K8SServiceACLPermissionItem `json:"groups"`
 }
 
-// GetK8SServiceACL 获取 K8SService 授权详情
+// GetK8SServiceACL 获取 K8S Service 授权详情
 func (a *ACLAPI) GetK8SServiceACL(c *gin.Context) {
 	ctx := c.Request.Context()
 	targetUserID, err := strconv.ParseUint(c.Param("id"), 10, 64)
