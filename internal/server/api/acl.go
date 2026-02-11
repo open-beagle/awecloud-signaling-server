@@ -1029,6 +1029,7 @@ type SSHACLListItem struct {
 	ID         uint64    `json:"id"`
 	Name       string    `json:"name"`
 	Alias      string    `json:"alias"`
+	Role       string    `json:"role"`
 	SSHEnabled bool      `json:"ssh_enabled"`
 	UserCount  int64     `json:"user_count"`
 	GroupCount int64     `json:"group_count"`
@@ -1049,8 +1050,11 @@ func (a *ACLAPI) ListSSHACL(c *gin.Context) {
 		size = 20
 	}
 
-	// 只查询启用 SSH 的 Agent 用户
-	query := db.DB.WithContext(ctx).Model(&model.User{}).Where("role = ? AND ssh_enabled = ?", model.UserRoleAgent, true)
+	// 查询启用 SSH 的 Agent 用户 + 所有 Client 用户
+	query := db.DB.WithContext(ctx).Model(&model.User{}).Where(
+		"(role = ? AND ssh_enabled = ?) OR role = ?",
+		model.UserRoleAgent, true, model.UserRoleClient,
+	)
 	if search != "" {
 		query = query.Where("name LIKE ? OR alias LIKE ?", "%"+search+"%", "%"+search+"%")
 	}
@@ -1098,6 +1102,7 @@ func (a *ACLAPI) ListSSHACL(c *gin.Context) {
 			ID:         user.ID,
 			Name:       user.Name,
 			Alias:      user.Alias,
+			Role:       string(user.Role),
 			SSHEnabled: user.SSHEnabled,
 			UserCount:  userCountMap[user.ID],
 			GroupCount: groupCountMap[user.ID],
@@ -1123,6 +1128,7 @@ type SSHACLDetail struct {
 	ID         uint64                 `json:"id"`
 	Name       string                 `json:"name"`
 	Alias      string                 `json:"alias"`
+	Role       string                 `json:"role"`
 	SSHEnabled bool                   `json:"ssh_enabled"`
 	Users      []SSHACLPermissionItem `json:"users"`
 	Groups     []SSHACLPermissionItem `json:"groups"`
@@ -1183,6 +1189,7 @@ func (a *ACLAPI) GetSSHACL(c *gin.Context) {
 		ID:         targetUser.ID,
 		Name:       targetUser.Name,
 		Alias:      targetUser.Alias,
+		Role:       string(targetUser.Role),
 		SSHEnabled: targetUser.SSHEnabled,
 		Users:      users,
 		Groups:     groups,
@@ -1218,7 +1225,8 @@ func (a *ACLAPI) AddSSHACLUsers(c *gin.Context) {
 		return
 	}
 
-	if !targetUser.SSHEnabled {
+	// Agent 用户需要启用 SSH，Client 用户无需检查
+	if targetUser.Role == model.UserRoleAgent && !targetUser.SSHEnabled {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("该用户未启用 SSH"))
 		return
 	}
@@ -1285,7 +1293,8 @@ func (a *ACLAPI) AddSSHACLGroups(c *gin.Context) {
 		return
 	}
 
-	if !targetUser.SSHEnabled {
+	// Agent 用户需要启用 SSH，Client 用户无需检查
+	if targetUser.Role == model.UserRoleAgent && !targetUser.SSHEnabled {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("该用户未启用 SSH"))
 		return
 	}

@@ -27,7 +27,7 @@ type User struct {
 	Alias        string     `gorm:"size:100" json:"alias"`                     // 别名（显示名称）
 	Role         UserRole   `gorm:"size:20;not null;index" json:"role"`        // 角色：agent / client
 	SecretHash   string     `gorm:"size:255;not null" json:"-"`                // 密钥哈希（不序列化）
-	SSHEnabled   bool       `gorm:"default:false" json:"ssh_enabled"`          // 是否启用 SSH（仅 Agent）
+	SSHEnabled   bool       `gorm:"default:false" json:"ssh_enabled"`          // 是否启用 SSH（Agent 和 Client 都支持）
 	Enabled      bool       `gorm:"default:true" json:"enabled"`               // 是否启用（Logto 注册默认 false，需管理员审批）
 	Source       UserSource `gorm:"size:20;default:'manual'" json:"source"`    // 来源：manual / logto
 	CreatedAt    time.Time  `json:"created_at"`

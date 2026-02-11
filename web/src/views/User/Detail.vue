@@ -20,7 +20,7 @@
             {{ user?.role === 'agent' ? $t('user.roleAgent') : $t('user.roleClient') }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item v-if="user?.role === 'agent'" :label="$t('user.sshEnabled')">
+        <el-descriptions-item :label="$t('user.sshEnabled')">
           <el-tag :type="user?.ssh_enabled ? 'success' : 'info'" size="small">
             {{ user?.ssh_enabled ? $t('common.enabled') : $t('common.disabled') }}
           </el-tag>
@@ -85,6 +85,7 @@
 
       <!-- Agent 部署历史 -->
       <el-table v-if="user?.role === 'agent'" v-loading="deployLoading" :data="deployTokens" stripe>
+        <el-table-column prop="device_name" :label="$t('agent.deviceName')" min-width="120" />
         <el-table-column :label="$t('common.status')" width="100">
           <template #default="{ row }">
             <el-tag :type="getDeployStatusType(row.status)" size="small">
@@ -92,7 +93,6 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="device_name" :label="$t('agent.deviceName')" min-width="120" />
         <el-table-column prop="created_by_name" :label="$t('common.createdBy')" width="100" />
         <el-table-column :label="$t('common.createdAt')" width="180">
           <template #default="{ row }">
@@ -160,7 +160,7 @@
         <el-form-item :label="$t('user.alias')">
           <el-input v-model="editForm.alias" :placeholder="$t('user.aliasPlaceholder')" />
         </el-form-item>
-        <el-form-item v-if="user?.role === 'agent'" :label="$t('user.sshEnabled')">
+        <el-form-item :label="$t('user.sshEnabled')">
           <el-switch v-model="editForm.ssh_enabled" />
         </el-form-item>
       </el-form>
@@ -337,7 +337,7 @@ const loadDeployHistory = async () => {
 const handleRevokeDeployToken = async (token: DeployToken) => {
   try {
     await ElMessageBox.confirm(
-      t('agent.revokeDeployTokenConfirm'),
+      t('agent.revokeConfirm'),
       t('common.warning'),
       { type: 'warning' }
     )
@@ -362,6 +362,7 @@ const getDeployStatusType = (status: string) => {
     case 'pending': return 'warning'
     case 'bound': return 'success'
     case 'expired': return 'info'
+    case 'revoked': return 'danger'
     default: return 'info'
   }
 }
@@ -369,9 +370,10 @@ const getDeployStatusType = (status: string) => {
 // 部署状态文本
 const getDeployStatusText = (status: string) => {
   switch (status) {
-    case 'pending': return t('agent.deployStatusPending')
-    case 'bound': return t('agent.deployStatusBound')
-    case 'expired': return t('agent.deployStatusExpired')
+    case 'pending': return t('agent.statusPending')
+    case 'bound': return t('agent.statusBound')
+    case 'expired': return t('agent.statusExpired')
+    case 'revoked': return t('agent.statusRevoked')
     default: return status
   }
 }

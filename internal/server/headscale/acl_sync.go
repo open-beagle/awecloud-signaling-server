@@ -351,27 +351,26 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 		return err
 	}
 
-	// 建立 User 名称 -> Node 的映射
-	userNodeMap := make(map[string]*struct {
+	// 建立 Headscale User 名称 -> Node 列表的映射（一个 User 下可能有多个 Node）
+	type hsNodeInfo struct {
 		HeadscaleNodeID uint64
+		GivenName       string
 		IP              string
 		Tags            []string
-	})
+	}
+	userNodesMap := make(map[string][]hsNodeInfo)
 	for _, node := range nodes {
 		if node.User != nil {
 			ip := ""
 			if len(node.IpAddresses) > 0 {
 				ip = node.IpAddresses[0]
 			}
-			userNodeMap[node.User.Name] = &struct {
-				HeadscaleNodeID uint64
-				IP              string
-				Tags            []string
-			}{
+			userNodesMap[node.User.Name] = append(userNodesMap[node.User.Name], hsNodeInfo{
 				HeadscaleNodeID: node.Id,
+				GivenName:       node.GivenName,
 				IP:              ip,
 				Tags:            node.ForcedTags,
-			}
+			})
 		}
 	}
 
@@ -385,21 +384,57 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 			continue
 		}
 
-		// 通过 User 名称查找 Headscale Node
+		// 通过 User 名称查找 Headscale Node 列表
 		userName := fmt.Sprintf("%s-%s", dbNode.User.Role, dbNode.User.Name)
-		nodeInfo, found := userNodeMap[userName]
+		hsNodes, found := userNodesMap[userName]
 
-		if !found {
+		if !found || len(hsNodes) == 0 {
 			logger.Warnf("Node %s 在 Headscale 中没有对应的 Node (User: %s)", dbNode.Name, userName)
+			// 清空离线设备的 IP 和 HeadscaleNodeID
+			if dbNode.HeadscaleNodeID != 0 || dbNode.IP != "" {
+				dbNode.HeadscaleNodeID = 0
+				dbNode.IP = ""
+				if err := db.DB.WithContext(ctx).Save(&dbNode).Error; err != nil {
+					logger.Warnf("清空 Node %s IP 失败: %v", dbNode.Name, err)
+				} else {
+					logger.Infof("Node %s 在 Headscale 中不存在，已清空 IP", dbNode.Name)
+				}
+			}
 			continue
 		}
 
-		// 更新数据库中的 Headscale Node ID 和 IP
+		// 在同一 User 的多个 Headscale Node 中，按 GivenName 精确匹配
+		var nodeInfo *hsNodeInfo
+		for i := range hsNodes {
+			if hsNodes[i].GivenName == dbNode.Name {
+				nodeInfo = &hsNodes[i]
+				break
+			}
+		}
+
+		if nodeInfo == nil {
+			logger.Warnf("Node %s 在 Headscale User %s 下未找到匹配的 Node（共 %d 个 Node）", dbNode.Name, userName, len(hsNodes))
+			// 未找到匹配设备，清空 IP 和 HeadscaleNodeID
+			if dbNode.HeadscaleNodeID != 0 || dbNode.IP != "" {
+				dbNode.HeadscaleNodeID = 0
+				dbNode.IP = ""
+				if err := db.DB.WithContext(ctx).Save(&dbNode).Error; err != nil {
+					logger.Warnf("清空 Node %s IP 失败: %v", dbNode.Name, err)
+				} else {
+					logger.Infof("Node %s 未匹配到 Headscale Node，已清空 IP", dbNode.Name)
+				}
+			}
+			continue
+		}
+
+		// 用户匹配 + 设备名匹配，更新 HeadscaleNodeID 和 IP
 		if dbNode.HeadscaleNodeID != nodeInfo.HeadscaleNodeID || dbNode.IP != nodeInfo.IP {
 			dbNode.HeadscaleNodeID = nodeInfo.HeadscaleNodeID
 			dbNode.IP = nodeInfo.IP
 			if err := db.DB.WithContext(ctx).Save(&dbNode).Error; err != nil {
 				logger.Warnf("更新 Node %s 失败: %v", dbNode.Name, err)
+			} else {
+				logger.Infof("Node %s IP 已更新: %s", dbNode.Name, nodeInfo.IP)
 			}
 		}
 
@@ -512,8 +547,60 @@ func (s *ACLSyncService) generateSSHRules(ctx context.Context, usedTags map[stri
 		rules = append(rules, rule)
 	}
 
+	// 3. 同用户 Client SSH 互访规则
+	// Client 用户（如 CloudIDE）的多个节点之间可以 SSH 互访，无需 ssh_enabled 开关
+	var clientUsers []model.User
+	if err := db.DB.WithContext(ctx).Where("role = ?", model.UserRoleClient).Find(&clientUsers).Error; err != nil {
+		logger.Warnf("查询 Client 用户失败: %v", err)
+	} else {
+		for _, user := range clientUsers {
+			tagName := fmt.Sprintf("tag:client-%s", user.Name)
+			usedTags[tagName] = true
+
+			// 解析 deploy token 中配置的 SSH 用户名列表
+			sshUsers := s.getClientSSHUsers(ctx, user.ID)
+			if len(sshUsers) == 0 {
+				sshUsers = []string{"root"} // 默认允许 root
+			}
+
+			rule := SSHRule{
+				Action: "accept",
+				Src:    []string{tagName},
+				Dst:    []string{tagName},
+				Users:  sshUsers,
+			}
+			rules = append(rules, rule)
+		}
+	}
+
 	logger.Infof("生成 %d 条 SSH 规则", len(rules))
 	return rules, nil
+}
+
+// getClientSSHUsers 获取 Client 用户的 SSH 用户名列表（从 deploy token 中读取）
+func (s *ACLSyncService) getClientSSHUsers(ctx context.Context, userID uint64) []string {
+	var tokens []model.DeployToken
+	db.DB.WithContext(ctx).Where("user_id = ? AND ssh_enabled = ? AND status != ?",
+		userID, true, model.DeployTokenStatusRevoked).Find(&tokens)
+
+	// 合并所有 token 的 SSH 用户名
+	userSet := make(map[string]bool)
+	for _, t := range tokens {
+		users := parseSSHUsers(t.SSHUsers)
+		for _, u := range users {
+			userSet[u] = true
+		}
+	}
+
+	if len(userSet) == 0 {
+		return nil
+	}
+
+	result := make([]string, 0, len(userSet))
+	for u := range userSet {
+		result = append(result, u)
+	}
+	return result
 }
 
 // parseSSHUsers 解析 SSHUsers JSON 数组

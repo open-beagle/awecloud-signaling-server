@@ -6,6 +6,12 @@
 
 数据库：SQLite，ORM：GORM。
 
+相关业务设计文档：
+
+- `design_ztna_server_user.md` — User 表的业务逻辑（创建/删除/编辑/查询流程）
+- `design_ztna_server_device.md` — Node 表的业务逻辑（创建/删除/心跳/生命周期）
+- `design_ztna_server_heartbeat.md` — Node 表心跳写入优化（NodeCache 内存缓存）
+
 ## 现有表（23 张，不变）
 
 以下表结构在 ZTNA 中不做修改，仅列出供参考。

@@ -181,6 +181,7 @@ export interface SSHACLItem {
   id: number
   name: string
   alias?: string
+  role: string
   ssh_enabled: boolean
   user_count: number
   group_count: number
@@ -202,6 +203,7 @@ export interface SSHACLDetail {
   id: number
   name: string
   alias?: string
+  role: string
   ssh_enabled: boolean
   users: SSHACLPermissionItem[]
   groups: SSHACLPermissionItem[]

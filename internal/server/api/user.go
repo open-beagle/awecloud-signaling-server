@@ -441,8 +441,8 @@ func (a *UserAPI) Update(c *gin.Context) {
 
 	user.Alias = req.Alias
 
-	// 更新 SSH 配置（仅 Agent 用户）
-	if req.SSHEnabled != nil && user.Role == model.UserRoleAgent {
+	// 更新 SSH 配置（Agent 和 Client 用户都支持）
+	if req.SSHEnabled != nil {
 		user.SSHEnabled = *req.SSHEnabled
 	}
 
@@ -490,11 +490,6 @@ func (a *UserAPI) UpdateSSH(c *gin.Context) {
 
 	if err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
-		return
-	}
-
-	if user.Role != model.UserRoleAgent {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("仅 Agent 用户支持 SSH 配置"))
 		return
 	}
 

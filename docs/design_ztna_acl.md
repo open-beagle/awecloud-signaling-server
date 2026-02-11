@@ -338,3 +338,83 @@ Desktop 侧用 VIP 隔离端口冲突：
 | P2   | Endpoint 授权模型和 API              | Endpoint 体系        |
 | P2   | Web 授权管理页面（K8S + K8SService） | 授权 API             |
 | P2   | Web Endpoint 授权增强                | Endpoint 授权 API    |
+
+## 用户删除时的授权清理
+
+用户删除时，由用户管理编排调用授权清理。详见 `design_ztna_server_user.md`「删除用户」的子任务 2。
+
+授权清理需要处理两个维度：该用户作为「目标方」的授权，以及该用户作为「被授权方」的授权。
+
+### Agent 用户删除
+
+Agent 用户同时是授权目标方（别人访问它）和服务/端口转发的拥有者。
+
+```
+清理 Agent 用户授权（user_id）
+    │
+    ├─ 1. 清理该 Agent 作为目标方的授权
+    │      ├─ AclServiceUserPermission / AclServiceGroupPermission
+    │      │   WHERE service_id IN (该用户的 ProxyService)
+    │      ├─ AclUserUserPermission / AclUserGroupPermission
+    │      │   WHERE target_user_id = user_id
+    │      ├─ AclSSHUserPermission / AclSSHGroupPermission
+    │      │   WHERE target_user_id = user_id
+    │      ├─ AclK8sUserPermission / AclK8sGroupPermission（新增）
+    │      │   WHERE agent_user_id = user_id
+    │      └─ AclK8SServiceUserPermission / AclK8SServiceGroupPermission（新增）
+    │          WHERE agent_user_id = user_id
+    │
+    ├─ 2. 清理该 Agent 关联的业务数据
+    │      ├─ ProxyService 表 WHERE user_id = ?
+    │      ├─ PortForward 表 WHERE user_id = ?
+    │      ├─ Endpoint 表（三种）WHERE user_id = ?（新增）
+    │      └─ DomainRegistry 表 WHERE user_id = ?（新增）
+    │
+    ├─ 3. 清理分组成员关系
+    │      └─ GroupMember 表 WHERE user_id = ?
+    │
+    └─ 4. 触发 ACL 同步（Headscale Policy 更新）
+```
+
+### Client 用户删除
+
+Client 用户是被授权方（它访问别人）。
+
+```
+清理 Client 用户授权（user_id）
+    │
+    ├─ 1. 清理该 Client 作为被授权方的授权
+    │      ├─ AclServiceUserPermission WHERE user_id = ?
+    │      ├─ AclUserUserPermission WHERE user_id = ?
+    │      ├─ AclGroupUserPermission WHERE user_id = ?
+    │      ├─ AclSSHUserPermission WHERE user_id = ?
+    │      ├─ AclK8sUserPermission WHERE user_id = ?（新增）
+    │      ├─ AclK8SServiceUserPermission WHERE user_id = ?（新增）
+    │      └─ Endpoint Jump 授权（三种 _user_permission）WHERE user_id = ?（新增）
+    │
+    ├─ 2. 清理分组成员关系
+    │      └─ GroupMember 表 WHERE user_id = ?
+    │
+    └─ 3. 触发 ACL 同步（Headscale Policy 更新）
+```
+
+### 清理顺序
+
+授权清理在设备删除之后、用户删除之前执行。因为：
+
+- 设备已删除 → gRPC 连接已断开，不会有新的授权检查请求
+- 用户还在 → 外键关系完整，可以正确查询关联数据
+- 清理完成后触发 ACL 同步 → Headscale Policy 立即移除该用户的所有规则
+
+### 分组删除时的授权清理
+
+分组删除也需要清理授权，逻辑类似但维度不同：
+
+```
+清理分组授权（group_id）
+    │
+    ├─ 清理该分组作为被授权方的所有 _group_permission 记录
+    ├─ 清理该分组作为目标方的 AclGroupUserPermission / AclGroupGroupPermission
+    ├─ 清理 GroupMember 表 WHERE group_id = ?
+    └─ 触发 ACL 同步
+```

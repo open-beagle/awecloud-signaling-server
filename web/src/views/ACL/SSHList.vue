@@ -22,11 +22,23 @@
           </template>
         </el-table-column>
         <el-table-column prop="alias" :label="$t('user.alias')" min-width="120" />
+        <el-table-column prop="role" :label="$t('user.role')" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.role === 'agent' ? 'success' : 'primary'" size="small">
+              {{ row.role === 'agent' ? $t('user.roleAgent') : $t('user.roleClient') }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="ssh_enabled" :label="$t('acl.sshEnabled')" width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.ssh_enabled ? 'success' : 'info'" size="small">
-              {{ row.ssh_enabled ? $t('common.enabled') : $t('common.disabled') }}
-            </el-tag>
+            <template v-if="row.role === 'client'">
+              <el-tag type="success" size="small">{{ $t('acl.autoEnabled') }}</el-tag>
+            </template>
+            <template v-else>
+              <el-tag :type="row.ssh_enabled ? 'success' : 'info'" size="small">
+                {{ row.ssh_enabled ? $t('common.enabled') : $t('common.disabled') }}
+              </el-tag>
+            </template>
           </template>
         </el-table-column>
         <el-table-column prop="user_count" :label="$t('acl.userCount')" width="100" align="center">

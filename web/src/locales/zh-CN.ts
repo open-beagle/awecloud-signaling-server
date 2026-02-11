@@ -43,6 +43,12 @@ export default {
     createdAt: '创建时间',
     createdBy: '创建人',
     revoke: '撤销',
+    close: '关闭',
+    saveSuccess: '保存成功',
+    saveFailed: '保存失败',
+    revokeSuccess: '撤销成功',
+    revokeFailed: '撤销失败',
+    operationFailed: '操作失败',
     // 网络错误
     networkError: '网络错误',
     networkTimeout: '请求超时，请检查网络连接后重试',
@@ -124,6 +130,7 @@ export default {
     secretTip: '请妥善保存此密钥，它只会显示一次！',
     regenerateConfirm: '重新生成密钥后，旧的密钥将失效，确定继续吗？',
     basicInfo: '基本信息',
+    edit: '编辑用户',
     nodes: '设备列表',
     regenerateSecret: '重新生成密钥',
     newSecret: '新密钥',
@@ -139,6 +146,7 @@ export default {
     version: '版本',
     hostname: '主机名',
     lastHeartbeat: '最后心跳',
+    status: '状态',
     searchPlaceholder: '搜索设备名称',
     deleteConfirm: '确认删除设备 {name} 吗？',
     user: '所属用户',
@@ -171,6 +179,7 @@ export default {
     statusPending: '待使用',
     statusBound: '已绑定',
     statusExpired: '已过期',
+    statusRevoked: '已撤销',
     revokeConfirm: '确认撤销此部署 Token 吗？'
   },
   clientToken: {
@@ -261,6 +270,7 @@ export default {
     // SSH 授权
     agentName: '代理名称',
     sshEnabled: 'SSH 状态',
+    autoEnabled: '自动启用',
     sshInfo: 'SSH 信息',
     sshUsers: 'SSH 用户',
     sshUsersPlaceholder: '选择或输入 SSH 用户名',

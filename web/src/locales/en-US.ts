@@ -43,6 +43,12 @@ export default {
     createdAt: 'Created At',
     createdBy: 'Created By',
     revoke: 'Revoke',
+    close: 'Close',
+    saveSuccess: 'Saved successfully',
+    saveFailed: 'Save failed',
+    revokeSuccess: 'Revoked successfully',
+    revokeFailed: 'Revoke failed',
+    operationFailed: 'Operation failed',
     // Network errors
     networkError: 'Network Error',
     networkTimeout: 'Request timeout, please check your network connection',
@@ -124,6 +130,7 @@ export default {
     secretTip: 'Please save this secret carefully, it will only be displayed once!',
     regenerateConfirm: 'Are you sure to regenerate secret? The old secret will be invalid',
     basicInfo: 'Basic Info',
+    edit: 'Edit User',
     nodes: 'Nodes',
     regenerateSecret: 'Regenerate Secret',
     newSecret: 'New Secret',
@@ -139,6 +146,7 @@ export default {
     version: 'Version',
     hostname: 'Hostname',
     lastHeartbeat: 'Last Heartbeat',
+    status: 'Status',
     searchPlaceholder: 'Search node name',
     deleteConfirm: 'Are you sure to delete node {name}?',
     user: 'Owner User',
@@ -171,6 +179,7 @@ export default {
     statusPending: 'Pending',
     statusBound: 'Bound',
     statusExpired: 'Expired',
+    statusRevoked: 'Revoked',
     revokeConfirm: 'Are you sure to revoke this deploy token?'
   },
   clientToken: {
@@ -261,6 +270,7 @@ export default {
     // SSH auth
     agentName: 'Agent Name',
     sshEnabled: 'SSH Status',
+    autoEnabled: 'Auto Enabled',
     sshInfo: 'SSH Info',
     sshUsers: 'SSH Users',
     sshUsersPlaceholder: 'Select or enter SSH username',

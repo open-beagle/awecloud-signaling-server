@@ -6,6 +6,11 @@ Headscale 是 Server 的外部数据源之一。Server 通过 gRPC 与 Headscale
 
 本文档定义 Server 与 Headscale 之间的数据交互方式，以及 Headscale 数据如何参与业务实体组装。
 
+相关业务设计文档：
+
+- `design_ztna_server_user.md` — 用户管理中的 Headscale User 创建/删除、HeadscaleUID 关联
+- `design_ztna_server_device.md` — 设备管理中的 HeadscaleNodeID 写入、Tag 同步、IP 来源
+
 ## Headscale 提供的数据
 
 | 数据       | 获取方式         | 用途                             |

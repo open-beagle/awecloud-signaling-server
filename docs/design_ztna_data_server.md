@@ -8,6 +8,12 @@
 
 业务实体的命名严格对齐 Web 页面路由和视图文件。
 
+相关业务设计文档：
+
+- `design_ztna_server_user.md` — User 实体的业务逻辑（创建/删除/编辑/注册流程，数据一致性）
+- `design_ztna_server_device.md` — Node 实体的业务逻辑（创建/删除/心跳/生命周期）
+- `design_ztna_server_heartbeat.md` — Node 心跳优化（NodeCache 减少 DB 读写，影响 Node.List 数据时效性）
+
 ## 数据源分类
 
 | 缩写 | 数据源     | 说明                            |

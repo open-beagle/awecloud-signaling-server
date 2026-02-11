@@ -11,10 +11,20 @@
       <el-descriptions :column="2" border>
         <el-descriptions-item :label="$t('acl.agentName')">{{ ssh?.name }}</el-descriptions-item>
         <el-descriptions-item :label="$t('user.alias')">{{ ssh?.alias || '-' }}</el-descriptions-item>
-        <el-descriptions-item :label="$t('acl.sshEnabled')">
-          <el-tag :type="ssh?.ssh_enabled ? 'success' : 'info'" size="small">
-            {{ ssh?.ssh_enabled ? $t('common.enabled') : $t('common.disabled') }}
+        <el-descriptions-item :label="$t('user.role')">
+          <el-tag :type="ssh?.role === 'agent' ? 'success' : 'primary'" size="small">
+            {{ ssh?.role === 'agent' ? $t('user.roleAgent') : $t('user.roleClient') }}
           </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item :label="$t('acl.sshEnabled')">
+          <template v-if="ssh?.role === 'client'">
+            <el-tag type="success" size="small">{{ $t('acl.autoEnabled') }}</el-tag>
+          </template>
+          <template v-else>
+            <el-tag :type="ssh?.ssh_enabled ? 'success' : 'info'" size="small">
+              {{ ssh?.ssh_enabled ? $t('common.enabled') : $t('common.disabled') }}
+            </el-tag>
+          </template>
         </el-descriptions-item>
       </el-descriptions>
     </el-card>

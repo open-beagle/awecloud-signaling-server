@@ -15,6 +15,14 @@
 | design_ztna_data_endpoint.md  | Endpoint 运行时数据 — 注册、会话、Service 发现             |
 | design_ztna_data_headscale.md | Headscale 数据交互 — Tag/ACL 同步、节点管理                |
 
+## 相关业务设计文档
+
+| 文档                            | 职责                                                    |
+| ------------------------------- | ------------------------------------------------------- |
+| design_ztna_server_user.md      | 用户管理业务 — 创建/删除/编辑/查询/注册流程，数据一致性 |
+| design_ztna_server_device.md    | 设备管理业务 — 创建/删除/注销/下线/心跳，设备生命周期   |
+| design_ztna_server_heartbeat.md | 心跳业务优化 — NodeCache 内存缓存，减少数据库读写       |
+
 ## 设计原则
 
 ### 原则一：业务实体驱动

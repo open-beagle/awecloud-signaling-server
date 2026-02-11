@@ -58,10 +58,9 @@
         <el-table-column prop="service_count" :label="$t('user.serviceCount')" width="100" align="center" />
         <el-table-column prop="ssh_enabled" :label="$t('user.sshEnabled')" width="100" align="center">
           <template #default="{ row }">
-            <el-tag v-if="row.role === 'agent'" :type="row.ssh_enabled ? 'success' : 'info'" size="small">
+            <el-tag :type="row.ssh_enabled ? 'success' : 'info'" size="small">
               {{ row.ssh_enabled ? $t('common.enabled') : $t('common.disabled') }}
             </el-tag>
-            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column prop="enabled" :label="$t('user.enabled')" width="100" align="center">
