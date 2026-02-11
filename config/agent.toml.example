@@ -5,9 +5,9 @@
 # 环境变量：SIGNAL_NAME, SIGNAL_DEVICE, SIGNAL_TOKEN
 # 旧变量（过渡期兼容）：AGENT_NAME, AGENT_DEVICE, AGENT_TOKEN
 [agent]
-name = "beijing.beagle"           # Agent 名称（区域），如 beijing.beagle
-device = "beagle-241"             # 设备名，用于标识同一 Agent 下的不同设备
-token = "your-agent-token-from-server"
+name = ""                         # Agent 名称（区域），如 beijing.beagle
+device = ""                       # 设备名，用于标识同一 Agent 下的不同设备
+token = ""                        # Agent Token，从 Server 管理界面获取
 
 # Server 连接配置
 # Server 地址配置优先级：
@@ -33,7 +33,7 @@ token = "your-agent-token-from-server"
 #   - 如果URL中指定了端口，使用指定的端口
 #   - 如果URL中没有端口，https 使用 443，http 使用 80
 [server]
-address = "http://localhost:8080"
+address = ""
 
 # Tunnel 配置（隧道）
 # Agent 通过隧道连接到控制平面
@@ -44,7 +44,7 @@ address = "http://localhost:8080"
 # - 如果为空：使用临时目录，完全依赖 Server（适合临时容器）
 # - 支持 ~ 扩展为用户主目录
 # - 容器环境建议挂载此目录为持久卷
-state_dir = "~/.config/awecloud-signaling/"
+state_dir = "~/.config/signaling/"
 
 # 状态同步到 Server 的间隔（分钟）
 state_sync_interval = 5
@@ -52,7 +52,7 @@ state_sync_interval = 5
 # 是否启用 SSH
 # 启用后，Desktop 用户可以通过隧道网络直接 SSH 到此 Agent
 # 需要配合 Server 端的 SSH 授权策略使用
-# 注意：启用 SSH 需要 Agent 以 root 权限运行，或具有 CAP_NET_ADMIN 能力
+# 注意：SSH 基于 tsnet 用户态实现，不需要 root 权限
 enable_ssh = false
 
 # Visitor 配置（服务访问）

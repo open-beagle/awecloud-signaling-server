@@ -1,46 +1,82 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: signal-agent
+  namespace: beagle-access
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: signal-agent
+rules:
+  # K8SService 发现：list/watch Service
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: signal-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: signal-agent
+subjects:
+  - kind: ServiceAccount
+    name: signal-agent
+    namespace: beagle-access
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: awecloud-signaling-agent
+  name: signal-agent
   namespace: beagle-access
   labels:
-    app: awecloud-signaling-agent
+    app: signal-agent
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: awecloud-signaling-agent
+      app: signal-agent
   template:
     metadata:
       labels:
-        app: awecloud-signaling-agent
+        app: signal-agent
     spec:
+      serviceAccountName: signal-agent
+      hostname: signal-agent
       containers:
         - name: agent
-          image: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.1.2
+          image: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.2.3
           imagePullPolicy: Always
           env:
-            # Agent 名称（必需）
-            - name: SIGNAL_NAME
-              value: "agent-k8s-001"
             # Agent 认证 Token（必需，从 Secret 获取）
             - name: SIGNAL_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: awecloud-signaling-agent
-                  key: agent-token
-            # Server 地址（可选）
-            # 格式: http://host:port 或 https://host:port
+                  name: signal-agent
+                  key: token
+            # Server 地址
             - name: SIGNAL_SERVER
               value: "https://signaling.example.com"
-          volumeMounts:
-            - name: logs
-              mountPath: /home/code/logs
+            # 启用 SSH
+            - name: SIGNAL_SSH
+              value: "true"
+            # 启用 K8S Service 发现
+            - name: SIGNAL_SVC_ENABLED
+              value: "true"
+            # Service 标签选择器（只发现带此标签的 Service）
+            # - name: SIGNAL_SVC_LABEL_SELECTOR
+            #   value: "signal.beagle.io/expose=true"
+            # K8S Service gRPC 监听端口（默认 9090）
+            # - name: SIGNAL_SVC_LISTEN_PORT_BASE
+            #   value: "9090"
           ports:
             - name: health
               containerPort: 8090
               protocol: TCP
-          # 存活性探测 - 检查进程是否存活
+          # 存活性探测
           livenessProbe:
             httpGet:
               path: /health
@@ -49,7 +85,7 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
-          # 就绪性探测 - 检查连接是否正常
+          # 就绪性探测
           readinessProbe:
             httpGet:
               path: /health/ready
@@ -65,6 +101,3 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "200m"
-      volumes:
-        - name: logs
-          emptyDir: {}

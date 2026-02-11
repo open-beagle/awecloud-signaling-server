@@ -269,7 +269,7 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	}
 	// 注意：Server.Address 的默认值由 cmd/agent/main.go 处理（需要考虑 BUILD_URL）
 	if cfg.Tunnel.StateDir == "" {
-		cfg.Tunnel.StateDir = "/etc/kubernetes/data/signaling/tunnel"
+		cfg.Tunnel.StateDir = "./"
 	}
 	if cfg.Tunnel.StateSyncInterval == 0 {
 		cfg.Tunnel.StateSyncInterval = 5
