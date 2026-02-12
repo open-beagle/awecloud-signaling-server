@@ -17,8 +17,14 @@ bash scripts/generate_proto.sh
 # 生成 Desktop Protocol Buffers 代码
 protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative desktop/pkg/proto/desktop.proto
 
-# Server&Agent编译
+# Server&Agent&Endpoint 全量编译
 BUILD_VERSION=$(cat version) bash scripts/build.sh
+
+# 单独编译 Endpoint
+BUILD_VERSION=$(cat version) bash scripts/build.sh endpoint
+
+# Endpoint 多架构编译
+GOARCHS=amd64,arm64 BUILD_VERSION=$(cat version) bash scripts/build.sh endpoint
 
 # Web编译
 BUILD_VERSION=$(cat version) bash scripts/build_frontend.sh
@@ -88,13 +94,23 @@ sleep 3 && kubectl --context beagle --namespace beagle-access rollout restart de
 # 1. 构建 Agent（多架构，Agent 不需要 CGO 可直接交叉编译）
 GOARCHS=amd64,arm64 BUILD_VERSION=$(cat version) bash scripts/build.sh agent
 
-# 2. 发布到 S3
-BUILD_VERSION=$(cat version) bash scripts/publish_agent_s3.sh
+# 2. 发布到 S3（只上传 Agent 二进制及安装脚本）
+BUILD_VERSION=$(cat version) bash scripts/push_to_s3.sh agent
 ```
 
-## 容器调试
+### Endpoint
 
-### 进入容器
+```bash
+# 1. 构建 Endpoint（多架构）
+GOARCHS=amd64,arm64 BUILD_VERSION=$(cat version) bash scripts/build.sh endpoint
+
+# 2. 发布到 S3（只上传 Endpoint 二进制及安装脚本）
+BUILD_VERSION=$(cat version) bash scripts/push_to_s3.sh endpoint
+```
+
+## 调试命令
+
+### Server 与 Agent容器
 
 ```bash
 # Server
@@ -104,18 +120,20 @@ kubectl --context aliyun -n beagle-access exec -it deployment/awecloud-signal-se
 kubectl --context beagle -n beagle-access exec -it deployment/signal-agent -- /bin/sh
 ```
 
-### 查看日志
+### Agent - beagle-242
 
 ```bash
-# Server
-kubectl --context aliyun -n beagle-access logs -f deployment/awecloud-signal-server
+ssh root@192.168.1.242 -p 2222
+```
 
-# Client k8ssvc
-kubectl --context beagle -n beagle-access logs -f deployment/signal-agent
+### Endpoint - beagle-241
+
+```bash
+ssh root@192.168.1.241 -p 2222
 ```
 
 ## 数据库位置
 
 ### Server 数据库
 
-- Kubernetes：`~/data/server.db`
+- Kubernetes：`/app/data/server.db`

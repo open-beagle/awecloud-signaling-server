@@ -487,3 +487,58 @@ func getAgentVersionInfo(baseURL string) *VersionInfo {
 func getAgentDownloadURL(c *gin.Context) (string, error) {
 	return getClientDownloadURL(c)
 }
+
+// ============================================
+// Endpoint 下载相关 API
+// ============================================
+
+// GetEndpointInstallScript 获取 Endpoint 安装脚本（公开接口）
+// GET /api/v1/download/install_endpoint.sh
+func (a *DownloadAPI) GetEndpointInstallScript(c *gin.Context) {
+	baseURL, err := getAgentDownloadURL(c)
+	if err != nil || baseURL == "" {
+		logger.Warnf("[Download] 获取下载地址失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "下载服务未配置",
+		})
+		return
+	}
+
+	if !strings.HasSuffix(baseURL, "/") {
+		baseURL += "/"
+	}
+	c.Redirect(http.StatusFound, baseURL+"install_endpoint.sh")
+}
+
+// GetEndpointDownload 获取 Endpoint 二进制下载（公开接口）
+// GET /api/v1/download/endpoint?os=linux&arch=amd64&version=v0.2.3
+func (a *DownloadAPI) GetEndpointDownload(c *gin.Context) {
+	osType := c.DefaultQuery("os", "linux")
+	arch := c.DefaultQuery("arch", "amd64")
+	version := c.Query("version")
+
+	baseURL, err := getAgentDownloadURL(c)
+	if err != nil || baseURL == "" {
+		logger.Warnf("[Download] 获取下载地址失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "下载服务未配置",
+		})
+		return
+	}
+
+	// 如果没有指定版本，获取最新版本（和 Agent 同版本）
+	if version == "" {
+		versionInfo := getAgentVersionInfo(baseURL)
+		version = versionInfo.Version
+	}
+
+	// 格式: baseURL/signal_endpoint-v0.2.3-linux-amd64
+	filename := fmt.Sprintf("signal_endpoint-%s-%s-%s", version, osType, arch)
+	if !strings.HasSuffix(baseURL, "/") {
+		baseURL += "/"
+	}
+
+	c.Redirect(http.StatusFound, baseURL+filename)
+}

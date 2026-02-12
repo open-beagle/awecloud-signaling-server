@@ -2,7 +2,7 @@
 
 ## 概述
 
-Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理功能基础上，新增 Endpoint 管理、K8S 权限、域名管理、操作审计等功能模块。
+Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理功能基础上，新增终端管理、K8S 权限、域名管理、操作审计等功能模块。
 
 ## 现有导航结构
 
@@ -80,28 +80,25 @@ Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理�
 
 ## ZTNA 变更总览
 
-| 模块               | 当前状态                               | ZTNA 新增/变更                                       |
-| ------------------ | -------------------------------------- | ---------------------------------------------------- |
-| 用户管理           | 用户列表（agent/client），Deploy Token | 不变                                                 |
-| 设备管理           | 设备列表（代理/桌面），IP/状态/心跳    | 不变                                                 |
-| 终端管理(Endpoint) | 无                                     | 新增 Endpoint 管理（SSH/K8SAPI/K8SService）          |
-| 资源发现           | 无                                     | 新增 AgentK8SService/EndpointK8SService 自动发现视图 |
-| 域名管理           | 无                                     | 新增域名注册表查看                                   |
-| 授权管理           | 服务授权、用户授权、分组授权、SSH 授权 | 新增 K8S API 授权 + K8S Service 授权                 |
-| 隧道管理           | Headscale User/Node/ACL/SSH            | 不变                                                 |
-| 审计日志           | 连接审计                               | 增强为操作级审计（直连 + 跳跃）                      |
-| 系统配置           | 系统参数                               | 不变                                                 |
+| 模块               | 当前状态                               | ZTNA 新增/变更                                            |
+| ------------------ | -------------------------------------- | --------------------------------------------------------- |
+| 用户管理           | 用户列表（agent/client），Deploy Token | 不变                                                      |
+| 设备管理           | 设备列表（代理/桌面），IP/状态/心跳    | 增强：Agent 详情页新增能力配置 + Endpoint 功能管理        |
+| 终端管理(Endpoint) | 无                                     | 新增终端管理（SSH/K8SAPI/K8SService，自动发现，支持注销） |
+| 资源发现           | 无                                     | 新增 AgentK8SService/EndpointK8SService 自动发现视图      |
+| 域名管理           | 无                                     | 新增域名注册表查看                                        |
+| 授权管理           | 服务授权、用户授权、分组授权、SSH 授权 | 新增 K8S API 授权 + K8S Service 授权                      |
+| 隧道管理           | Headscale User/Node/ACL/SSH            | 不变                                                      |
+| 审计日志           | 连接审计                               | 增强为操作级审计（直连 + 跳跃）                           |
+| 系统配置           | 系统参数                               | 不变                                                      |
 
 ## ZTNA 导航结构
 
 ```
 ├── 用户管理          /users                    （不变）
 ├── 设备管理          /nodes                    （不变）
+├── 终端管理（新增）    /endpoints                （新增，List+Detail 模式）
 ├── 分组管理          /groups                   （不变）
-├── 终端管理（新增）
-│     ├── EndpointSSH        /endpoints/ssh     （新增）
-│     ├── EndpointK8SAPI     /endpoints/k8s     （新增）
-│     └── EndpointK8SService /endpoints/svc     （新增）
 ├── 资源发现（新增）    /resources               （新增）
 ├── 域名管理（新增）    /domains                 （新增）
 ├── 授权管理（增强）
@@ -139,7 +136,7 @@ Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理�
 详情页面（点击"管理授权"进入）：
 
 ```
-Agent: beijing（kubernetes.beijing.beagle:6443）
+Agent: beijing（kubernetes.beijing.beagle:50050）
 
 用户级授权：
   ┌──────────┬──────────┬──────────┐
@@ -198,45 +195,57 @@ Agent: beijing
 
 页面结构与 K8SAPI 授权页面类似。
 
-### Endpoint 管理页面（/endpoints/\*）
+### 终端管理页面（/endpoints）
 
-管理连接到 Agent 的 Endpoint（轻量 daemon）。按类型分三个子页面。
+管理连接到 Agent 的 Endpoint（轻量 daemon）。采用 List+Detail 模式，与设备管理（/nodes）一致。
 
-EndpointSSH 列表（/endpoints/ssh）：
+Endpoint 不在 Web 上手动创建，而是通过安装 signal_endpoint 二进制自动注册（Endpoint 反向连接 Agent → Agent 心跳上报 Server → Server 自动发现）。管理员只能查看、编辑别名、启用/禁用、注销。
 
-| 列        | 说明                             |
-| --------- | -------------------------------- |
-| 名称      | Endpoint 名称（如 web-server-1） |
-| 别名      | 显示名称                         |
-| 所属Agent | 连接的 Agent 名称                |
-| 内网地址  | Endpoint 上报的内网 IP           |
-| 域名      | 自动生成的域名                   |
-| 状态      | online/offline                   |
-| 启用      | 是否启用                         |
-| 操作      | 编辑、禁用                       |
+Endpoint 列表（/endpoints）：
 
-EndpointK8SAPI 列表（/endpoints/k8s）：
+| 列        | 说明                            |
+| --------- | ------------------------------- |
+| 名称      | Endpoint 名称（可点击进入详情） |
+| 别名      | 显示名称                        |
+| 类型      | SSH / K8S API / K8S Service     |
+| 所属Agent | 连接的 Agent 名称               |
+| 状态      | online/offline                  |
+| 启用      | 是否启用                        |
+| 创建时间  | 首次发现时间                    |
+| 操作      | 编辑、启用/禁用、注销           |
 
-| 列        | 说明                |
-| --------- | ------------------- |
-| 集群名    | K8S 集群名称        |
-| 别名      | 显示名称            |
-| 所属Agent | 连接的 Agent 名称   |
-| API 地址  | K8S API Server 地址 |
-| 域名      | 自动生成的域名      |
-| 状态      | online/offline      |
-| 操作      | 编辑、禁用          |
+筛选条件：Agent 筛选 + 类型筛选 + 状态筛选 + 搜索。
 
-EndpointK8SService 列表（/endpoints/svc）：
+Endpoint 详情（/endpoints/:type/:id）：
 
-| 列        | 说明                     |
-| --------- | ------------------------ |
-| 集群名    | 远程集群名称             |
-| 别名      | 显示名称                 |
-| 所属Agent | 连接的 Agent 名称        |
-| Service数 | 发现的 Service 数量      |
-| 状态      | online/offline           |
-| 操作      | 编辑、禁用、查看 Service |
+详情页按能力分区展示，包含：
+
+- 基本信息卡片：名称、别名、类型、所属 Agent、状态、启用状态、创建时间
+- 能力卡片（根据类型显示）：
+  - SSH 类型：主机地址、端口、域名、SSH 用户列表
+  - K8SAPI 类型：API Server 地址、域名
+  - K8SService 类型：域名
+- 操作卡片：编辑别名、启用/禁用、注销
+
+### 设备详情页 Endpoint 功能管理
+
+在现有设备详情页（/nodes/:id）的能力配置卡片中，为 Agent 类型设备新增 Endpoint 功能区域。
+
+Endpoint 功能区域：
+
+| 字段           | 说明                                                       |
+| -------------- | ---------------------------------------------------------- |
+| 启用 Endpoint  | 开关，开启后 Agent 启动内网 gRPC Server 接受 Endpoint 连接 |
+| 监听端口       | 内网 gRPC 监听端口（默认 50052）                           |
+| Endpoint Token | Server 自动生成的注册令牌，管理员复制到 Endpoint 配置文件  |
+| Token 操作     | 查看/复制/重新生成                                         |
+
+Token 管理规则：
+
+- 开启 Endpoint 功能时自动生成 token
+- 管理员可查看、复制 token（用于配置 Endpoint）
+- 可重新生成 token（旧 token 立即失效，已连接的 Endpoint 下次重连需新 token）
+- 关闭 Endpoint 功能时 token 清空，Agent 关闭内网 gRPC Server，所有 Endpoint 断开
 
 ### 资源发现页面（/resources）
 
@@ -294,26 +303,26 @@ EndpointK8SService 列表（/endpoints/svc）：
 翻译 key 命名规范：
 
 ```
-menu.endpoints          — Endpoint 管理
-menu.endpointSSH        — EndpointSSH
-menu.endpointK8SAPI     — EndpointK8SAPI
-menu.endpointK8SService — EndpointK8SService
+menu.endpoints          — 终端管理
 menu.resources          — 资源发现
 menu.domains            — 域名管理
 acl.k8s                 — K8S API 授权
 acl.k8sService          — K8S Service 授权
-endpoint.ssh            — Endpoint SSH
-endpoint.k8s            — Endpoint K8SAPI
-endpoint.svc            — Endpoint K8SService
+endpoint.type           — Endpoint 类型
+endpoint.basicInfo      — 基本信息
+endpoint.sshCapability  — SSH 能力
+endpoint.k8sapiCapability    — K8S API 能力
+endpoint.k8sserviceCapability — K8S Service 能力
 ```
 
 ## 实现优先级
 
-| 阶段 | 内容                 | 依赖                        |
-| ---- | -------------------- | --------------------------- |
-| P1   | K8S API 授权页面     | AclK8sPermission API        |
-| P1   | K8S Service 授权页面 | AclK8SServicePermission API |
-| P1   | Endpoint 管理页面    | Endpoint 模型 API           |
-| P1   | 资源发现页面         | 资源发现 API                |
-| P1   | 域名管理页面         | 域名注册表 API              |
-| P2   | 审计日志增强         | 操作审计 API                |
+| 阶段 | 内容                            | 依赖                        |
+| ---- | ------------------------------- | --------------------------- |
+| P1   | K8S API 授权页面                | AclK8sPermission API        |
+| P1   | K8S Service 授权页面            | AclK8SServicePermission API |
+| P1   | 终端管理页面（自动发现 + 注销） | Endpoint 模型 API           |
+| P1   | 设备详情页 Endpoint 功能管理    | 能力配置 API + Endpoint API |
+| P1   | 资源发现页面                    | 资源发现 API                |
+| P1   | 域名管理页面                    | 域名注册表 API              |
+| P2   | 审计日志增强                    | 操作审计 API                |

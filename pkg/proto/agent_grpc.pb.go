@@ -394,3 +394,146 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 	},
 	Metadata: "pkg/proto/agent.proto",
 }
+
+const (
+	EndpointService_Register_FullMethodName  = "/awecloud.signaling.EndpointService/Register"
+	EndpointService_Heartbeat_FullMethodName = "/awecloud.signaling.EndpointService/Heartbeat"
+)
+
+// EndpointServiceClient is the client API for EndpointService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// EndpointService Endpoint 管理服务（Agent 端实现，监听内网 50052 端口）
+type EndpointServiceClient interface {
+	// 注册 - Endpoint 连接 Agent 时调用，用 token 认证并注册自己
+	Register(ctx context.Context, in *EndpointRegisterRequest, opts ...grpc.CallOption) (*EndpointRegisterResponse, error)
+	// 心跳 - Endpoint 定期上报状态，Agent 下发配置
+	Heartbeat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[EndpointHeartbeatRequest, EndpointHeartbeatResponse], error)
+}
+
+type endpointServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewEndpointServiceClient(cc grpc.ClientConnInterface) EndpointServiceClient {
+	return &endpointServiceClient{cc}
+}
+
+func (c *endpointServiceClient) Register(ctx context.Context, in *EndpointRegisterRequest, opts ...grpc.CallOption) (*EndpointRegisterResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EndpointRegisterResponse)
+	err := c.cc.Invoke(ctx, EndpointService_Register_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *endpointServiceClient) Heartbeat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[EndpointHeartbeatRequest, EndpointHeartbeatResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &EndpointService_ServiceDesc.Streams[0], EndpointService_Heartbeat_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[EndpointHeartbeatRequest, EndpointHeartbeatResponse]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EndpointService_HeartbeatClient = grpc.BidiStreamingClient[EndpointHeartbeatRequest, EndpointHeartbeatResponse]
+
+// EndpointServiceServer is the server API for EndpointService service.
+// All implementations must embed UnimplementedEndpointServiceServer
+// for forward compatibility.
+//
+// EndpointService Endpoint 管理服务（Agent 端实现，监听内网 50052 端口）
+type EndpointServiceServer interface {
+	// 注册 - Endpoint 连接 Agent 时调用，用 token 认证并注册自己
+	Register(context.Context, *EndpointRegisterRequest) (*EndpointRegisterResponse, error)
+	// 心跳 - Endpoint 定期上报状态，Agent 下发配置
+	Heartbeat(grpc.BidiStreamingServer[EndpointHeartbeatRequest, EndpointHeartbeatResponse]) error
+	mustEmbedUnimplementedEndpointServiceServer()
+}
+
+// UnimplementedEndpointServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedEndpointServiceServer struct{}
+
+func (UnimplementedEndpointServiceServer) Register(context.Context, *EndpointRegisterRequest) (*EndpointRegisterResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Register not implemented")
+}
+func (UnimplementedEndpointServiceServer) Heartbeat(grpc.BidiStreamingServer[EndpointHeartbeatRequest, EndpointHeartbeatResponse]) error {
+	return status.Error(codes.Unimplemented, "method Heartbeat not implemented")
+}
+func (UnimplementedEndpointServiceServer) mustEmbedUnimplementedEndpointServiceServer() {}
+func (UnimplementedEndpointServiceServer) testEmbeddedByValue()                         {}
+
+// UnsafeEndpointServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to EndpointServiceServer will
+// result in compilation errors.
+type UnsafeEndpointServiceServer interface {
+	mustEmbedUnimplementedEndpointServiceServer()
+}
+
+func RegisterEndpointServiceServer(s grpc.ServiceRegistrar, srv EndpointServiceServer) {
+	// If the following call panics, it indicates UnimplementedEndpointServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&EndpointService_ServiceDesc, srv)
+}
+
+func _EndpointService_Register_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EndpointRegisterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EndpointServiceServer).Register(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EndpointService_Register_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EndpointServiceServer).Register(ctx, req.(*EndpointRegisterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EndpointService_Heartbeat_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(EndpointServiceServer).Heartbeat(&grpc.GenericServerStream[EndpointHeartbeatRequest, EndpointHeartbeatResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EndpointService_HeartbeatServer = grpc.BidiStreamingServer[EndpointHeartbeatRequest, EndpointHeartbeatResponse]
+
+// EndpointService_ServiceDesc is the grpc.ServiceDesc for EndpointService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var EndpointService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "awecloud.signaling.EndpointService",
+	HandlerType: (*EndpointServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Register",
+			Handler:    _EndpointService_Register_Handler,
+		},
+	},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Heartbeat",
+			Handler:       _EndpointService_Heartbeat_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
+	Metadata: "pkg/proto/agent.proto",
+}

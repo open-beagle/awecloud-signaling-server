@@ -165,6 +165,29 @@
             <el-input-number v-model="capForm.svc_listen_port_base" :min="1" :max="65535"
               :placeholder="$t('capability.svcListenPortBasePlaceholder')" controls-position="right" />
           </el-form-item>
+
+          <!-- Endpoint -->
+          <el-divider content-position="left">{{ $t('capability.endpoint') }}</el-divider>
+          <el-form-item :label="$t('capability.endpointEnabled')">
+            <el-switch v-model="capForm.endpoint_enabled" />
+            <el-tag :type="capOriginal.endpoint_enabled !== null ? 'primary' : 'info'" size="small" class="source-tag">
+              {{ capOriginal.endpoint_enabled !== null ? $t('capability.sourceRemote') : $t('capability.sourceLocal') }}
+            </el-tag>
+          </el-form-item>
+          <el-form-item :label="$t('capability.endpointListenPort')">
+            <el-input-number v-model="capForm.endpoint_listen_port" :min="1" :max="65535"
+              :placeholder="$t('capability.endpointListenPortPlaceholder')" controls-position="right" />
+          </el-form-item>
+          <el-form-item :label="$t('capability.endpointToken')">
+            <div class="token-row">
+              <template v-if="capOriginal.endpoint_token">
+                <el-input :model-value="capOriginal.endpoint_token" readonly class="token-input" />
+                <el-button size="small" @click="copyToken">{{ $t('common.copy') }}</el-button>
+                <el-button size="small" type="warning" @click="regenerateToken">{{ $t('capability.regenerateToken') }}</el-button>
+              </template>
+              <span v-else class="token-empty">{{ $t('capability.tokenEmpty') }}</span>
+            </div>
+          </el-form-item>
         </el-form>
 
         <el-alert type="info" :closable="false" show-icon>
@@ -179,7 +202,7 @@
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getNode, getNodeCapabilities, updateNodeCapabilities, resetNodeCapabilities, type NodeDetail, type NodeSystemInfo } from '@/api/node'
+import { getNode, getNodeCapabilities, updateNodeCapabilities, resetNodeCapabilities, regenerateEndpointToken, type NodeDetail, type NodeSystemInfo } from '@/api/node'
 import { formatTime } from '@/utils/time'
 import { useI18n } from 'vue-i18n'
 
@@ -200,11 +223,15 @@ const capForm = reactive({
   svc_label_selector: '',
   svc_namespaces: '',
   svc_listen_port_base: undefined as number | undefined,
+  endpoint_enabled: false,
+  endpoint_listen_port: undefined as number | undefined,
 })
 // 保存原始值用于判断来源（远程/本地）
 const capOriginal = reactive({
   k8s_enabled: null as boolean | null,
   svc_enabled: null as boolean | null,
+  endpoint_enabled: null as boolean | null,
+  endpoint_token: '',
 })
 
 // 解析系统信息
@@ -257,9 +284,13 @@ const fetchCapabilities = async () => {
       capForm.svc_label_selector = data.svc_label_selector || ''
       capForm.svc_namespaces = data.svc_namespaces || ''
       capForm.svc_listen_port_base = data.svc_listen_port_base ?? undefined
+      capForm.endpoint_enabled = data.endpoint_enabled ?? false
+      capForm.endpoint_listen_port = data.endpoint_listen_port ?? undefined
       // 记录原始值
       capOriginal.k8s_enabled = data.k8s_enabled
       capOriginal.svc_enabled = data.svc_enabled
+      capOriginal.endpoint_enabled = data.endpoint_enabled
+      capOriginal.endpoint_token = data.endpoint_token || ''
     }
   } catch (error) {
     console.error('获取能力配置失败:', error)
@@ -279,6 +310,7 @@ const saveCapabilities = async () => {
       ssh_enabled: capForm.ssh_enabled,
       k8s_enabled: capForm.k8s_enabled,
       svc_enabled: capForm.svc_enabled,
+      endpoint_enabled: capForm.endpoint_enabled,
     }
     if (capForm.k8s_listen_port !== undefined) {
       data.k8s_listen_port = capForm.k8s_listen_port
@@ -294,6 +326,9 @@ const saveCapabilities = async () => {
     }
     if (capForm.svc_listen_port_base !== undefined) {
       data.svc_listen_port_base = capForm.svc_listen_port_base
+    }
+    if (capForm.endpoint_listen_port !== undefined) {
+      data.endpoint_listen_port = capForm.endpoint_listen_port
     }
     const res = await updateNodeCapabilities(id, data)
     if (res.success) {
@@ -332,6 +367,37 @@ const resetCapabilities = () => {
     type: 'warning',
   }).then(() => {
     resetCapabilitiesAction()
+  }).catch(() => {})
+}
+
+// 复制 Endpoint Token
+const copyToken = async () => {
+  try {
+    await navigator.clipboard.writeText(capOriginal.endpoint_token)
+    ElMessage.success(t('common.copySuccess'))
+  } catch {
+    ElMessage.error(t('common.copyFailed'))
+  }
+}
+
+// 重新生成 Endpoint Token
+const regenerateToken = () => {
+  ElMessageBox.confirm(t('capability.regenerateTokenConfirm'), t('common.warning'), {
+    confirmButtonText: t('common.confirm'),
+    cancelButtonText: t('common.cancel'),
+    type: 'warning',
+  }).then(async () => {
+    const id = Number(route.params.id)
+    if (!id) return
+    try {
+      const res = await regenerateEndpointToken(id)
+      if (res.success) {
+        ElMessage.success(t('capability.regenerateTokenSuccess'))
+        await fetchCapabilities()
+      }
+    } catch {
+      ElMessage.error(t('common.operationFailed'))
+    }
   }).catch(() => {})
 }
 
@@ -376,6 +442,22 @@ onMounted(() => {
 
 .source-tag {
   margin-left: 8px;
+}
+
+.token-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.token-input {
+  flex: 1;
+}
+
+.token-empty {
+  color: var(--el-text-color-placeholder);
+  font-size: 13px;
 }
 </style>
 

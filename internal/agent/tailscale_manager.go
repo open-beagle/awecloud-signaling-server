@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -221,11 +222,25 @@ func (m *TailscaleManager) GetConnectedAt() int64 {
 }
 
 // Listen 在 Tailscale 网络上监听端口
+// 注意：tsnet.Listen 存在已知 bug（https://github.com/tailscale/tailscale/issues/18517），
+// 对于 K8S API / SVCProxy / ProxyManager 等场景，请使用 RegisterFallbackTCPHandler 代替。
 func (m *TailscaleManager) Listen(network, addr string) (net.Listener, error) {
 	if m.tsServer == nil {
 		return nil, fmt.Errorf("Tailscale 未启动")
 	}
 	return m.tsServer.Listen(network, addr)
+}
+
+// RegisterFallbackTCPHandler 注册 TCP 回退处理器
+// 当 tsnet.Listen 的 listener 查找失败时，fallback handler 会被调用。
+// 这是绕过 tsnet.Listen bug（https://github.com/tailscale/tailscale/issues/18517）的可靠方案。
+// 返回取消注册函数。
+func (m *TailscaleManager) RegisterFallbackTCPHandler(handler func(src, dst netip.AddrPort) (func(net.Conn), bool)) func() {
+	if m.tsServer == nil {
+		logger.Warn("Tailscale 未启动，无法注册 FallbackTCPHandler")
+		return func() {}
+	}
+	return m.tsServer.RegisterFallbackTCPHandler(handler)
 }
 
 // Dial 通过 Tailscale 网络拨号
@@ -682,6 +697,69 @@ func (m *TailscaleManager) tailscaleLogf(format string, args ...interface{}) {
 
 	// 使用 logrus 输出，保持格式一致
 	logger.Infof("[tunnel] %s", msg)
+}
+
+// DiagnoseTsnet 诊断 tsnet 连通性
+// 打印 listener 信息、packet filter 状态，并尝试自检端口
+func (m *TailscaleManager) DiagnoseTsnet(ports []int) {
+	logger.Info("========== tsnet 诊断开始 ==========")
+
+	// 1. 打印基本状态
+	logger.Infof("诊断: Tailscale IP=%s, Connected=%v", m.GetIP(), m.IsConnected())
+
+	// 2. 获取 LocalClient 并打印详细状态
+	lc, err := m.LocalClient()
+	if err != nil {
+		logger.Warnf("诊断: 获取 LocalClient 失败: %v", err)
+		return
+	}
+
+	status, err := lc.Status(m.ctx)
+	if err != nil {
+		logger.Warnf("诊断: 获取状态失败: %v", err)
+	} else {
+		logger.Infof("诊断: BackendState=%s, Self=%s, Peers=%d",
+			status.BackendState, status.Self.DNSName, len(status.Peer))
+		for _, peer := range status.Peer {
+			logger.Infof("诊断: Peer: %s (%s) relay=%s curAddr=%s online=%v",
+				peer.DNSName, peer.TailscaleIPs, peer.Relay, peer.CurAddr, peer.Online)
+		}
+	}
+
+	// 3. 获取当前 Prefs（查看 RunSSH 等配置）
+	prefs, err := lc.GetPrefs(m.ctx)
+	if err != nil {
+		logger.Warnf("诊断: 获取 Prefs 失败: %v", err)
+	} else {
+		logger.Infof("诊断: RunSSH=%v, ShieldsUp=%v, AllowSingleHosts=%v",
+			prefs.RunSSH, prefs.ShieldsUp, prefs.AllowSingleHosts)
+	}
+
+	// 4. 打印 tsnet listeners 信息
+	m.mutex.RLock()
+	if m.tsServer != nil {
+		logger.Infof("诊断: tsnet.Server Hostname=%s, Dir=%s", m.tsServer.Hostname, m.tsServer.Dir)
+	}
+	m.mutex.RUnlock()
+
+	// 5. 自检：尝试 Dial 自己的端口
+	for _, port := range ports {
+		addr := fmt.Sprintf("%s:%d", m.GetIP(), port)
+		logger.Infof("诊断: 自检 Dial %s ...", addr)
+
+		dialCtx, cancel := context.WithTimeout(m.ctx, 5*time.Second)
+		conn, err := m.Dial(dialCtx, "tcp", addr)
+		cancel()
+
+		if err != nil {
+			logger.Warnf("诊断: 自检 Dial %s 失败: %v", addr, err)
+		} else {
+			logger.Infof("诊断: 自检 Dial %s 成功！LocalAddr=%s", addr, conn.LocalAddr())
+			conn.Close()
+		}
+	}
+
+	logger.Info("========== tsnet 诊断结束 ==========")
 }
 
 // enableSSH 启用 Tailscale SSH 功能（内部使用，启动时调用）

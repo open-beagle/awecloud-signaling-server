@@ -2,7 +2,7 @@
 
 set -e
 
-# 构建目标：all（默认）、server、agent
+# 构建目标：all（默认）、server、agent、endpoint
 BUILD_TARGET="${1:-all}"
 
 # 参数配置
@@ -94,6 +94,32 @@ build_agent() {
     echo "---"
 }
 
+# 构建 Endpoint
+build_endpoint() {
+    local ARCH=$1
+    echo "Building Endpoint for ${GOOS}/${ARCH}..."
+    
+    OUTPUT="${BIN_DIR}/signal_endpoint-${GOOS}-${ARCH}"
+    
+    CGO_ENABLED=0 \
+    GOOS=${GOOS} \
+    GOARCH=${ARCH} \
+    go build \
+        -buildvcs=false \
+        -ldflags="${LDFLAGS}" \
+        -o ${OUTPUT} \
+        ./cmd/endpoint
+    
+    if [ -f "${OUTPUT}" ]; then
+        echo "✓ Successfully built: ${OUTPUT}"
+        ls -lh ${OUTPUT}
+    else
+        echo "✗ Failed to build: ${OUTPUT}"
+        exit 1
+    fi
+    echo "---"
+}
+
 # 遍历每个架构进行编译
 for ARCH in "${ARCH_ARRAY[@]}"; do
     case ${BUILD_TARGET} in
@@ -103,9 +129,13 @@ for ARCH in "${ARCH_ARRAY[@]}"; do
         agent)
             build_agent ${ARCH}
             ;;
+        endpoint)
+            build_endpoint ${ARCH}
+            ;;
         all|*)
             build_server ${ARCH}
             build_agent ${ARCH}
+            build_endpoint ${ARCH}
             ;;
     esac
 done
@@ -120,6 +150,11 @@ fi
 if [ -f "${BIN_DIR}/signal_agent-${GOOS}-${CURRENT_ARCH}" ]; then
     ln -sf "signal_agent-${GOOS}-${CURRENT_ARCH}" "${BIN_DIR}/signal_agent"
     echo "✓ Created symlink: bin/signal_agent -> signal_agent-${GOOS}-${CURRENT_ARCH}"
+fi
+
+if [ -f "${BIN_DIR}/signal_endpoint-${GOOS}-${CURRENT_ARCH}" ]; then
+    ln -sf "signal_endpoint-${GOOS}-${CURRENT_ARCH}" "${BIN_DIR}/signal_endpoint"
+    echo "✓ Created symlink: bin/signal_endpoint -> signal_endpoint-${GOOS}-${CURRENT_ARCH}"
 fi
 
 echo ""

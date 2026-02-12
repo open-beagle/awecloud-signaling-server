@@ -1473,7 +1473,7 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 		DomainType:   string(record.Type),
 		Namespace:    record.Namespace,
 		ServiceName:  record.ServiceName,
-		SvcProxyPort: 9090, // Agent SVCProxy 默认端口
+		SvcProxyPort: 50051, // Agent SVCProxy 默认端口
 	}, nil
 }
 

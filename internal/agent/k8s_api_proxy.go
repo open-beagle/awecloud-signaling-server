@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -26,8 +28,12 @@ type K8SAPIProxy struct {
 	identity  *IdentityExtractor
 
 	apiServerURL *url.URL // K8S API Server 地址
+	saToken      string   // ServiceAccount token（InCluster 认证）
 	listener     net.Listener
 	httpServer   *http.Server
+
+	// fallback handler 取消注册函数
+	deregisterFallback func()
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -51,27 +57,47 @@ func NewK8SAPIProxy(cfg *config.K8SSection, tsManager *TailscaleManager, permCac
 		return nil, fmt.Errorf("解析 K8S API Server 地址失败: %w", err)
 	}
 
+	// 加载 ServiceAccount token（InCluster 认证）
+	saToken := loadServiceAccountToken()
+
 	return &K8SAPIProxy{
 		config:       cfg,
 		tsManager:    tsManager,
 		permCache:    permCache,
 		identity:     identity,
 		apiServerURL: apiServerURL,
+		saToken:      saToken,
 		ctx:          ctx,
 		cancel:       cancel,
 	}, nil
 }
 
 // Start 启动 K8S API 代理
+// 使用 RegisterFallbackTCPHandler 绕过 tsnet.Listen 的已知 bug。
+// Agent 端使用纯 HTTP 监听（不做 TLS），TLS 终止由 Desktop 本地完成。
+// tsnet 隧道本身是 WireGuard 加密的，中间无需再套 TLS。
 func (p *K8SAPIProxy) Start() error {
-	listenAddr := fmt.Sprintf(":%d", p.config.ListenPort)
-
-	// 在 tsnet 网络上监听
-	listener, err := p.tsManager.Listen("tcp", listenAddr)
-	if err != nil {
-		return fmt.Errorf("tsnet 监听 %s 失败: %w", listenAddr, err)
+	tailscaleIP := p.tsManager.GetIP()
+	if tailscaleIP == "" {
+		return fmt.Errorf("Tailscale IP 未就绪，无法启动 K8S API 代理")
 	}
-	p.listener = listener
+	listenPort := uint16(p.config.ListenPort)
+
+	// 创建 channel-based listener，用于桥接 fallback handler 和 http.Server
+	chanListener := newChannelListener()
+	p.listener = chanListener
+
+	// 注册 fallback TCP handler，按目标端口分发连接
+	deregister := p.tsManager.RegisterFallbackTCPHandler(func(src, dst netip.AddrPort) (func(net.Conn), bool) {
+		if dst.Port() == listenPort {
+			// 拦截此端口的连接，交给 chanListener
+			return func(conn net.Conn) {
+				chanListener.Enqueue(conn)
+			}, true
+		}
+		return nil, false // 不拦截，交给下一个 handler
+	})
+	p.deregisterFallback = deregister
 
 	// 创建反向代理
 	proxy := &httputil.ReverseProxy{
@@ -83,8 +109,7 @@ func (p *K8SAPIProxy) Start() error {
 		},
 	}
 
-	// 创建 HTTP Server（明文 HTTP，TLS 由 Desktop 端本地终止）
-	// tsnet 本身是 WireGuard 加密的，无需在应用层再加 TLS
+	// 创建 HTTP Server（纯 HTTP，Desktop 通过 tsnet 发来的是明文 HTTP）
 	p.httpServer = &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			p.handleRequest(w, r, proxy)
@@ -93,8 +118,8 @@ func (p *K8SAPIProxy) Start() error {
 
 	// 启动服务
 	go func() {
-		logger.Infof("K8S API 代理已启动（HTTP）: tsnet%s -> %s", listenAddr, p.apiServerURL.String())
-		if err := p.httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
+		logger.Infof("K8S API 代理已启动（FallbackTCPHandler, HTTP）: port=%d -> %s", listenPort, p.apiServerURL.String())
+		if err := p.httpServer.Serve(chanListener); err != nil && err != http.ErrServerClosed {
 			logger.Errorf("K8S API 代理服务错误: %v", err)
 		}
 	}()
@@ -105,6 +130,10 @@ func (p *K8SAPIProxy) Start() error {
 // Stop 停止 K8S API 代理
 func (p *K8SAPIProxy) Stop() {
 	p.cancel()
+	// 取消注册 fallback handler
+	if p.deregisterFallback != nil {
+		p.deregisterFallback()
+	}
 	if p.httpServer != nil {
 		p.httpServer.Close()
 	}
@@ -115,6 +144,7 @@ func (p *K8SAPIProxy) Stop() {
 }
 
 // handleRequest 处理请求：身份提取 → 权限检查 → Impersonation → 转发
+// 支持普通 HTTP 请求和 SPDY/WebSocket 协议升级（kubectl exec/logs/cp）
 func (p *K8SAPIProxy) handleRequest(w http.ResponseWriter, r *http.Request, proxy *httputil.ReverseProxy) {
 	logger.Infof("K8SAPI 收到请求: remote=%s, method=%s, path=%s", r.RemoteAddr, r.Method, r.URL.Path)
 
@@ -152,15 +182,28 @@ func (p *K8SAPIProxy) handleRequest(w http.ResponseWriter, r *http.Request, prox
 	logger.Infof("K8SAPI 转发: user=%s, groups=%v, namespace=%s, path=%s",
 		peerIdentity.UserName, k8sGroups, namespace, r.URL.Path)
 
-	// 5. 反向代理到 K8S API Server
+	// 5. 检查是否为协议升级请求（SPDY/WebSocket，用于 kubectl exec/logs/cp/attach/port-forward）
+	if isUpgradeRequest(r) {
+		logger.Infof("K8SAPI 协议升级: %s, upgrade=%s", r.URL.Path, r.Header.Get("Upgrade"))
+		p.handleUpgrade(w, r)
+		return
+	}
+
+	// 6. 普通 HTTP 请求，使用反向代理
 	proxy.ServeHTTP(w, r)
 }
 
-// director 修改请求目标
+// director 修改请求目标，并设置 Agent ServiceAccount 认证
 func (p *K8SAPIProxy) director(req *http.Request) {
 	req.URL.Scheme = p.apiServerURL.Scheme
 	req.URL.Host = p.apiServerURL.Host
 	req.Host = p.apiServerURL.Host
+
+	// 设置 Agent 自身的 ServiceAccount token 认证
+	// K8S API Server 需要先认证调用者（Agent），然后才处理 Impersonation 头
+	if p.saToken != "" {
+		req.Header.Set("Authorization", "Bearer "+p.saToken)
+	}
 }
 
 // RemoteAddr 实现从 http.Request 获取远程地址的辅助方法
@@ -184,13 +227,14 @@ func extractNamespaceFromPath(path string) string {
 }
 
 // resolveAPIServerURL 解析 K8S API Server 地址
-// 优先使用配置的 api_server，否则从 kubeconfig 自动获取
+// 优先级：1. 配置的 api_server  2. kubeconfig  3. InCluster 环境变量  4. 默认 localhost
 func resolveAPIServerURL(cfg *config.K8SSection) (*url.URL, error) {
+	// 1. 优先使用配置的 api_server
 	if cfg.APIServer != "" {
 		return url.Parse(cfg.APIServer)
 	}
 
-	// 从 kubeconfig 读取
+	// 2. 从 kubeconfig 读取
 	kubeconfigPath := cfg.Kubeconfig
 	if kubeconfigPath == "" {
 		kubeconfigPath = "~/.kube/config"
@@ -199,21 +243,28 @@ func resolveAPIServerURL(cfg *config.K8SSection) (*url.URL, error) {
 	// 展开 ~
 	if strings.HasPrefix(kubeconfigPath, "~/") {
 		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("获取用户主目录失败: %w", err)
+		if err == nil {
+			kubeconfigPath = filepath.Join(homeDir, kubeconfigPath[2:])
 		}
-		kubeconfigPath = filepath.Join(homeDir, kubeconfigPath[2:])
 	}
 
-	// 简单解析 kubeconfig 获取 server 地址
 	apiServer, err := parseKubeconfigServer(kubeconfigPath)
-	if err != nil {
-		// 回退到默认地址
-		logger.Warnf("从 kubeconfig 解析 API Server 失败: %v，使用默认 https://localhost:6443", err)
-		return url.Parse("https://localhost:6443")
+	if err == nil && apiServer != "" {
+		return url.Parse(apiServer)
 	}
 
-	return url.Parse(apiServer)
+	// 3. InCluster 环境：从环境变量获取
+	host := os.Getenv("KUBERNETES_SERVICE_HOST")
+	port := os.Getenv("KUBERNETES_SERVICE_PORT")
+	if host != "" && port != "" {
+		inClusterURL := fmt.Sprintf("https://%s:%s", host, port)
+		logger.Infof("使用 InCluster K8S API Server: %s", inClusterURL)
+		return url.Parse(inClusterURL)
+	}
+
+	// 4. 回退到默认地址
+	logger.Warnf("无法确定 K8S API Server 地址，使用默认 https://localhost:6443")
+	return url.Parse("https://localhost:6443")
 }
 
 // parseKubeconfigServer 从 kubeconfig 文件中解析当前 context 的 server 地址
@@ -238,5 +289,113 @@ func parseKubeconfigServer(path string) (string, error) {
 	}
 
 	return "", fmt.Errorf("kubeconfig 中未找到 server 字段")
+}
+
+// loadServiceAccountToken 加载 InCluster ServiceAccount token
+// K8S 会自动挂载 token 到 /var/run/secrets/kubernetes.io/serviceaccount/token
+func loadServiceAccountToken() string {
+	const tokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	data, err := os.ReadFile(tokenPath)
+	if err != nil {
+		logger.Debugf("未找到 ServiceAccount token: %v（非 InCluster 环境）", err)
+		return ""
+	}
+	token := strings.TrimSpace(string(data))
+	if token != "" {
+		logger.Info("已加载 InCluster ServiceAccount token")
+	}
+	return token
+}
+
+// isUpgradeRequest 检查是否为协议升级请求（SPDY/WebSocket）
+// kubectl exec/attach/port-forward 使用 SPDY，kubectl logs -f 可能使用 chunked 或 WebSocket
+func isUpgradeRequest(r *http.Request) bool {
+	return strings.EqualFold(r.Header.Get("Connection"), "Upgrade") ||
+		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
+}
+
+// handleUpgrade 处理协议升级请求（SPDY/WebSocket 隧道）
+// 直接建立到 K8S API Server 的 TCP 连接，双向透传数据
+func (p *K8SAPIProxy) handleUpgrade(w http.ResponseWriter, r *http.Request) {
+	// 构建到 K8S API Server 的请求 URL
+	targetURL := *r.URL
+	targetURL.Scheme = p.apiServerURL.Scheme
+	targetURL.Host = p.apiServerURL.Host
+
+	// 建立到 K8S API Server 的 TLS 连接
+	backendConn, err := tls.Dial("tcp", p.apiServerURL.Host, &tls.Config{
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		logger.Errorf("K8SAPI 升级: 连接后端失败: %v", err)
+		http.Error(w, "连接后端失败", http.StatusBadGateway)
+		return
+	}
+	defer backendConn.Close()
+
+	// 修改请求头：设置 Host 和 Authorization
+	r.Host = p.apiServerURL.Host
+	r.URL = &targetURL
+	if p.saToken != "" {
+		r.Header.Set("Authorization", "Bearer "+p.saToken)
+	}
+	// 确保请求 URL 使用正确的路径（去掉 scheme 和 host，只保留 path+query）
+	r.RequestURI = r.URL.RequestURI()
+
+	// 将原始请求写入后端连接
+	if err := r.Write(backendConn); err != nil {
+		logger.Errorf("K8SAPI 升级: 写入请求失败: %v", err)
+		http.Error(w, "写入请求失败", http.StatusBadGateway)
+		return
+	}
+
+	// 劫持客户端连接
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		logger.Error("K8SAPI 升级: ResponseWriter 不支持 Hijack")
+		http.Error(w, "不支持协议升级", http.StatusInternalServerError)
+		return
+	}
+
+	clientConn, clientBuf, err := hijacker.Hijack()
+	if err != nil {
+		logger.Errorf("K8SAPI 升级: Hijack 失败: %v", err)
+		return
+	}
+	defer clientConn.Close()
+
+	// 双向透传数据，等待两个方向都结束
+	done := make(chan struct{}, 2)
+
+	// 后端 → 客户端
+	go func() {
+		io.Copy(clientConn, backendConn)
+		// 后端读完，关闭客户端写方向（如果支持半关闭）
+		if tc, ok := clientConn.(closeWriter); ok {
+			tc.CloseWrite()
+		}
+		done <- struct{}{}
+	}()
+
+	// 客户端 → 后端（先刷 hijack 缓冲区中的残留数据）
+	go func() {
+		if clientBuf != nil && clientBuf.Reader.Buffered() > 0 {
+			io.CopyN(backendConn, clientBuf, int64(clientBuf.Reader.Buffered()))
+		}
+		io.Copy(backendConn, clientConn)
+		// 客户端读完，关闭后端 TLS 连接的写方向
+		backendConn.CloseWrite()
+		done <- struct{}{}
+	}()
+
+	// 等待两个方向都结束
+	<-done
+	<-done
+	logger.Debugf("K8SAPI 升级连接关闭: %s", r.URL.Path)
+}
+
+// closeWriter 半关闭写方向接口（TCP 和 TLS 连接都支持）
+type closeWriter interface {
+	CloseWrite() error
 }
 

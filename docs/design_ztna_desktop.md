@@ -140,10 +140,10 @@ SVC 跳跃到 Endpoint：
   psql -h pg.yygl.remote-cluster.beijing.beagle -p 5432
 
 K8S API 直连 Agent：
-  kubectl --server=https://kubernetes.beijing.beagle:6443 get pods
+  kubectl --server=https://kubernetes.beijing.beagle:50050 get pods
 
 K8S API 跳跃到 Endpoint：
-  kubectl --server=https://kubernetes.beijing-prod.beijing.beagle:6443 get pods
+  kubectl --server=https://kubernetes.beijing-prod.beijing.beagle:50050 get pods
 ```
 
 ## 身份传递

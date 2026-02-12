@@ -138,8 +138,8 @@ kubeconfig = ""
 # K8S API Server 地址（留空则从 kubeconfig 自动获取）
 api_server = ""
 
-# tsnet 监听端口（默认 6443）
-listen_port = 6443
+# tsnet 监听端口（默认 50050）
+listen_port = 50050
 
 # K8S Service 发现配置
 # 启用后，Agent 使用 Informer 机制 Watch 带指定标签的 K8S Service，
@@ -159,5 +159,5 @@ label_selector = "signal.beagle.io/expose=true"
 # 环境变量 SIGNAL_SVC_NAMESPACES 使用逗号分隔
 namespaces = []
 
-# tsnet gRPC 监听端口（默认 9090）
-listen_port_base = 9090
+# tsnet gRPC 监听端口（默认 50051）
+listen_port_base = 50051

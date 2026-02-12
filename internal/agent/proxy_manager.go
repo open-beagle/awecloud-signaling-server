@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -52,10 +53,11 @@ type TCPProxyService struct {
 	StartedAt   time.Time
 
 	// 内部管理
-	ctx    context.Context
-	cancel context.CancelFunc
-	conns  []net.Conn
-	mutex  sync.Mutex
+	deregisterFallback func() // fallback handler 取消注册函数
+	ctx                context.Context
+	cancel             context.CancelFunc
+	conns              []net.Conn
+	mutex              sync.Mutex
 }
 
 // ProxyStatus 代理状态
@@ -110,6 +112,7 @@ func (m *ProxyManager) Start(config ServiceConfig) error {
 }
 
 // startService 启动服务（内部方法，调用前需持有锁）
+// 使用 RegisterFallbackTCPHandler 绕过 tsnet.Listen 的已知 bug。
 func (m *ProxyManager) startService(config ServiceConfig) error {
 	// 解析源地址，提取端口
 	_, port, err := net.SplitHostPort(config.SourceAddr)
@@ -119,7 +122,7 @@ func (m *ProxyManager) startService(config ServiceConfig) error {
 		return err
 	}
 
-	// 在 VPN IP 上监听
+	// 获取 VPN IP
 	vpnIP := m.tsManager.GetIP()
 	if vpnIP == "" {
 		logger.Errorf("无法获取 VPN IP")
@@ -128,26 +131,39 @@ func (m *ProxyManager) startService(config ServiceConfig) error {
 	}
 
 	listenAddr := fmt.Sprintf("%s:%s", vpnIP, port)
-	listener, err := m.tsManager.Listen("tcp", listenAddr)
-	if err != nil {
-		logger.Errorf("监听地址 %s 失败: %v", listenAddr, err)
-		go m.reportStatus(config.ID, "error", fmt.Sprintf("监听失败: %v", err), "PORT_IN_USE")
-		return err
-	}
+
+	// 解析端口号为 uint16
+	var portNum int
+	fmt.Sscanf(port, "%d", &portNum)
+	listenPort := uint16(portNum)
+
+	// 创建 channel-based listener
+	chanListener := newChannelListener()
+
+	// 注册 fallback TCP handler
+	deregister := m.tsManager.RegisterFallbackTCPHandler(func(src, dst netip.AddrPort) (func(net.Conn), bool) {
+		if dst.Port() == listenPort {
+			return func(conn net.Conn) {
+				chanListener.Enqueue(conn)
+			}, true
+		}
+		return nil, false
+	})
 
 	ctx, cancel := context.WithCancel(m.ctx)
 
 	proxy := &TCPProxyService{
-		ID:         config.ID,
-		Name:       config.Name,
-		SourceAddr: listenAddr,
-		TargetAddr: config.TargetAddr,
-		Listener:   listener,
-		Status:     "running",
-		StartedAt:  time.Now(),
-		ctx:        ctx,
-		cancel:     cancel,
-		conns:      make([]net.Conn, 0),
+		ID:                 config.ID,
+		Name:               config.Name,
+		SourceAddr:         listenAddr,
+		TargetAddr:         config.TargetAddr,
+		Listener:           chanListener,
+		Status:             "running",
+		StartedAt:          time.Now(),
+		deregisterFallback: deregister,
+		ctx:                ctx,
+		cancel:             cancel,
+		conns:              make([]net.Conn, 0),
 	}
 
 	m.proxies[config.ID] = proxy
@@ -155,7 +171,7 @@ func (m *ProxyManager) startService(config ServiceConfig) error {
 	// 启动代理协程
 	go m.runProxy(proxy)
 
-	logger.Infof("端口代理已启动: %s (%s -> %s)", config.Name, listenAddr, config.TargetAddr)
+	logger.Infof("端口代理已启动（FallbackTCPHandler）: %s (port=%d -> %s)", config.Name, listenPort, config.TargetAddr)
 
 	// 上报 running 状态
 	go m.reportStatus(config.ID, "running", "", "")
@@ -196,6 +212,11 @@ func (m *ProxyManager) Stop(id string) error {
 
 	// 取消上下文
 	proxy.cancel()
+
+	// 取消注册 fallback handler
+	if proxy.deregisterFallback != nil {
+		proxy.deregisterFallback()
+	}
 
 	// 关闭监听器
 	if proxy.Listener != nil {
@@ -361,6 +382,11 @@ func (m *ProxyManager) stopServiceLocked(id string) {
 
 	// 取消上下文
 	proxy.cancel()
+
+	// 取消注册 fallback handler
+	if proxy.deregisterFallback != nil {
+		proxy.deregisterFallback()
+	}
 
 	// 关闭监听器
 	if proxy.Listener != nil {

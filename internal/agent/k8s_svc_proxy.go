@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -16,7 +17,7 @@ import (
 )
 
 // K8SSVCProxy K8S Service gRPC 代理
-// 在 tsnet 网络上监听 gRPC 端口，接收 Desktop 的 SVCProxy 请求，
+// 使用 RegisterFallbackTCPHandler 在 tsnet 网络上接收 Desktop 的 SVCProxy 请求，
 // 根据权限检查后透明转发到 K8S ClusterIP
 type K8SSVCProxy struct {
 	pb.UnimplementedAgentServiceServer
@@ -29,6 +30,9 @@ type K8SSVCProxy struct {
 
 	listener   net.Listener
 	grpcServer *grpc.Server
+
+	// fallback handler 取消注册函数
+	deregisterFallback func()
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -56,15 +60,28 @@ func NewK8SSVCProxy(cfg *config.SVCSection, tsManager *TailscaleManager, permCac
 }
 
 // Start 启动 SVCProxy gRPC 服务
+// 使用 RegisterFallbackTCPHandler 绕过 tsnet.Listen 的已知 bug。
 func (p *K8SSVCProxy) Start() error {
-	listenAddr := fmt.Sprintf(":%d", p.config.ListenPortBase)
-
-	// 在 tsnet 网络上监听
-	listener, err := p.tsManager.Listen("tcp", listenAddr)
-	if err != nil {
-		return fmt.Errorf("tsnet 监听 %s 失败: %w", listenAddr, err)
+	tailscaleIP := p.tsManager.GetIP()
+	if tailscaleIP == "" {
+		return fmt.Errorf("Tailscale IP 未就绪，无法启动 SVCProxy")
 	}
-	p.listener = listener
+	listenPort := uint16(p.config.ListenPortBase)
+
+	// 创建 channel-based listener
+	chanListener := newChannelListener()
+	p.listener = chanListener
+
+	// 注册 fallback TCP handler
+	deregister := p.tsManager.RegisterFallbackTCPHandler(func(src, dst netip.AddrPort) (func(net.Conn), bool) {
+		if dst.Port() == listenPort {
+			return func(conn net.Conn) {
+				chanListener.Enqueue(conn)
+			}, true
+		}
+		return nil, false
+	})
+	p.deregisterFallback = deregister
 
 	// 创建 gRPC Server
 	p.grpcServer = grpc.NewServer()
@@ -72,8 +89,8 @@ func (p *K8SSVCProxy) Start() error {
 
 	// 启动服务
 	go func() {
-		logger.Infof("K8S SVCProxy gRPC 已启动: tsnet%s", listenAddr)
-		if err := p.grpcServer.Serve(listener); err != nil {
+		logger.Infof("K8S SVCProxy gRPC 已启动（FallbackTCPHandler）: port=%d", listenPort)
+		if err := p.grpcServer.Serve(chanListener); err != nil {
 			logger.Errorf("K8S SVCProxy gRPC 服务错误: %v", err)
 		}
 	}()
@@ -84,6 +101,10 @@ func (p *K8SSVCProxy) Start() error {
 // Stop 停止 SVCProxy
 func (p *K8SSVCProxy) Stop() {
 	p.cancel()
+	// 取消注册 fallback handler
+	if p.deregisterFallback != nil {
+		p.deregisterFallback()
+	}
 	if p.grpcServer != nil {
 		p.grpcServer.GracefulStop()
 	}
@@ -146,6 +167,14 @@ func (p *K8SSVCProxy) SVCProxy(stream pb.AgentService_SVCProxyServer) error {
 
 	logger.Infof("SVCProxy 连接建立: user=%s, %s/%s:%d -> %s",
 		peerIdentity.UserName, namespace, serviceName, port, targetAddr)
+
+	// 5.5 发送连接确认（空数据包），让 Desktop 立即进入桥接阶段
+	// 这是必要的：PostgreSQL 等协议需要客户端先发数据，
+	// 如果 Desktop 还在等首响应就不会转发客户端数据，导致死锁
+	if err := stream.Send(&pb.SVCProxyData{}); err != nil {
+		logger.Errorf("SVCProxy 发送连接确认失败: %v", err)
+		return err
+	}
 
 	// 6. 双向流桥接（gRPC stream ↔ TCP conn）
 	var wg sync.WaitGroup

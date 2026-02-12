@@ -605,6 +605,8 @@ type AgentHeartbeatRequest struct {
 	DomainRegistrations []*DomainRegistration `protobuf:"bytes,9,rep,name=domain_registrations,json=domainRegistrations,proto3" json:"domain_registrations,omitempty"` // 域名注册列表
 	// K8S Service 发现数据（Agent 上报）
 	DiscoveredServices []*DiscoveredK8SService `protobuf:"bytes,10,rep,name=discovered_services,json=discoveredServices,proto3" json:"discovered_services,omitempty"` // 发现的 K8S Service 列表
+	// 已连接的 Endpoint 列表（Agent 上报）
+	ConnectedEndpoints []*ConnectedEndpoint `protobuf:"bytes,11,rep,name=connected_endpoints,json=connectedEndpoints,proto3" json:"connected_endpoints,omitempty"` // 已连接的 Endpoint 列表
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -709,6 +711,74 @@ func (x *AgentHeartbeatRequest) GetDiscoveredServices() []*DiscoveredK8SService 
 	return nil
 }
 
+func (x *AgentHeartbeatRequest) GetConnectedEndpoints() []*ConnectedEndpoint {
+	if x != nil {
+		return x.ConnectedEndpoints
+	}
+	return nil
+}
+
+// ConnectedEndpoint Agent 上报的已连接 Endpoint 信息
+type ConnectedEndpoint struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Name          string                    `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                 // Endpoint 名称
+	Status        string                    `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`             // 状态：online
+	Capabilities  []*EndpointCapabilityInfo `protobuf:"bytes,3,rep,name=capabilities,proto3" json:"capabilities,omitempty"` // 启用的能力列表
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConnectedEndpoint) Reset() {
+	*x = ConnectedEndpoint{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConnectedEndpoint) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConnectedEndpoint) ProtoMessage() {}
+
+func (x *ConnectedEndpoint) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConnectedEndpoint.ProtoReflect.Descriptor instead.
+func (*ConnectedEndpoint) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ConnectedEndpoint) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ConnectedEndpoint) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ConnectedEndpoint) GetCapabilities() []*EndpointCapabilityInfo {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
 // DiscoveredK8SService Agent 发现的 K8S Service（心跳上报）
 type DiscoveredK8SService struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -723,7 +793,7 @@ type DiscoveredK8SService struct {
 
 func (x *DiscoveredK8SService) Reset() {
 	*x = DiscoveredK8SService{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[9]
+	mi := &file_pkg_proto_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -735,7 +805,7 @@ func (x *DiscoveredK8SService) String() string {
 func (*DiscoveredK8SService) ProtoMessage() {}
 
 func (x *DiscoveredK8SService) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[9]
+	mi := &file_pkg_proto_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -748,7 +818,7 @@ func (x *DiscoveredK8SService) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiscoveredK8SService.ProtoReflect.Descriptor instead.
 func (*DiscoveredK8SService) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{9}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DiscoveredK8SService) GetNamespace() string {
@@ -798,7 +868,7 @@ type ServicePort struct {
 
 func (x *ServicePort) Reset() {
 	*x = ServicePort{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[10]
+	mi := &file_pkg_proto_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -810,7 +880,7 @@ func (x *ServicePort) String() string {
 func (*ServicePort) ProtoMessage() {}
 
 func (x *ServicePort) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[10]
+	mi := &file_pkg_proto_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -823,7 +893,7 @@ func (x *ServicePort) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServicePort.ProtoReflect.Descriptor instead.
 func (*ServicePort) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{10}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ServicePort) GetName() string {
@@ -864,7 +934,7 @@ type DomainRegistration struct {
 
 func (x *DomainRegistration) Reset() {
 	*x = DomainRegistration{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[11]
+	mi := &file_pkg_proto_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -876,7 +946,7 @@ func (x *DomainRegistration) String() string {
 func (*DomainRegistration) ProtoMessage() {}
 
 func (x *DomainRegistration) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[11]
+	mi := &file_pkg_proto_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -889,7 +959,7 @@ func (x *DomainRegistration) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DomainRegistration.ProtoReflect.Descriptor instead.
 func (*DomainRegistration) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{11}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DomainRegistration) GetDomain() string {
@@ -962,7 +1032,7 @@ type ServiceConfig struct {
 
 func (x *ServiceConfig) Reset() {
 	*x = ServiceConfig{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[12]
+	mi := &file_pkg_proto_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -974,7 +1044,7 @@ func (x *ServiceConfig) String() string {
 func (*ServiceConfig) ProtoMessage() {}
 
 func (x *ServiceConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[12]
+	mi := &file_pkg_proto_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -987,7 +1057,7 @@ func (x *ServiceConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceConfig.ProtoReflect.Descriptor instead.
 func (*ServiceConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{12}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ServiceConfig) GetId() string {
@@ -1040,7 +1110,7 @@ type ForwardConfig struct {
 
 func (x *ForwardConfig) Reset() {
 	*x = ForwardConfig{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[13]
+	mi := &file_pkg_proto_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1052,7 +1122,7 @@ func (x *ForwardConfig) String() string {
 func (*ForwardConfig) ProtoMessage() {}
 
 func (x *ForwardConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[13]
+	mi := &file_pkg_proto_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1065,7 +1135,7 @@ func (x *ForwardConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardConfig.ProtoReflect.Descriptor instead.
 func (*ForwardConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{13}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ForwardConfig) GetId() string {
@@ -1127,7 +1197,7 @@ type AgentHeartbeatResponse struct {
 
 func (x *AgentHeartbeatResponse) Reset() {
 	*x = AgentHeartbeatResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[14]
+	mi := &file_pkg_proto_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1139,7 +1209,7 @@ func (x *AgentHeartbeatResponse) String() string {
 func (*AgentHeartbeatResponse) ProtoMessage() {}
 
 func (x *AgentHeartbeatResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[14]
+	mi := &file_pkg_proto_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1152,7 +1222,7 @@ func (x *AgentHeartbeatResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentHeartbeatResponse.ProtoReflect.Descriptor instead.
 func (*AgentHeartbeatResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{14}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *AgentHeartbeatResponse) GetConfigVersion() int64 {
@@ -1214,30 +1284,36 @@ func (x *AgentHeartbeatResponse) GetCapabilityConfig() *AgentCapabilityConfig {
 // AgentCapabilityConfig Agent 能力配置（Server 远程控制）
 // 通过 xxx_set 标志位区分"Server 设置为 false/0"和"Server 未设置"
 type AgentCapabilityConfig struct {
-	state                protoimpl.MessageState `protogen:"open.v1"`
-	SshEnabled           bool                   `protobuf:"varint,1,opt,name=ssh_enabled,json=sshEnabled,proto3" json:"ssh_enabled,omitempty"`                                      // SSH 开关
-	SshEnabledSet        bool                   `protobuf:"varint,2,opt,name=ssh_enabled_set,json=sshEnabledSet,proto3" json:"ssh_enabled_set,omitempty"`                           // SSH 开关是否由 Server 设置（始终为 true）
-	K8SEnabled           bool                   `protobuf:"varint,3,opt,name=k8s_enabled,json=k8sEnabled,proto3" json:"k8s_enabled,omitempty"`                                      // K8S API 开关
-	K8SEnabledSet        bool                   `protobuf:"varint,4,opt,name=k8s_enabled_set,json=k8sEnabledSet,proto3" json:"k8s_enabled_set,omitempty"`                           // K8S API 开关是否由 Server 设置
-	K8SListenPort        int32                  `protobuf:"varint,5,opt,name=k8s_listen_port,json=k8sListenPort,proto3" json:"k8s_listen_port,omitempty"`                           // K8S API 监听端口
-	K8SListenPortSet     bool                   `protobuf:"varint,6,opt,name=k8s_listen_port_set,json=k8sListenPortSet,proto3" json:"k8s_listen_port_set,omitempty"`                // K8S API 监听端口是否由 Server 设置
-	K8SApiServer         string                 `protobuf:"bytes,7,opt,name=k8s_api_server,json=k8sApiServer,proto3" json:"k8s_api_server,omitempty"`                               // K8S API Server 地址
-	K8SApiServerSet      bool                   `protobuf:"varint,8,opt,name=k8s_api_server_set,json=k8sApiServerSet,proto3" json:"k8s_api_server_set,omitempty"`                   // K8S API Server 地址是否由 Server 设置
-	SvcEnabled           bool                   `protobuf:"varint,9,opt,name=svc_enabled,json=svcEnabled,proto3" json:"svc_enabled,omitempty"`                                      // K8S Service 开关
-	SvcEnabledSet        bool                   `protobuf:"varint,10,opt,name=svc_enabled_set,json=svcEnabledSet,proto3" json:"svc_enabled_set,omitempty"`                          // K8S Service 开关是否由 Server 设置
-	SvcLabelSelector     string                 `protobuf:"bytes,11,opt,name=svc_label_selector,json=svcLabelSelector,proto3" json:"svc_label_selector,omitempty"`                  // 标签选择器
-	SvcLabelSelectorSet  bool                   `protobuf:"varint,12,opt,name=svc_label_selector_set,json=svcLabelSelectorSet,proto3" json:"svc_label_selector_set,omitempty"`      // 标签选择器是否由 Server 设置
-	SvcNamespaces        string                 `protobuf:"bytes,13,opt,name=svc_namespaces,json=svcNamespaces,proto3" json:"svc_namespaces,omitempty"`                             // 命名空间列表（逗号分隔）
-	SvcNamespacesSet     bool                   `protobuf:"varint,14,opt,name=svc_namespaces_set,json=svcNamespacesSet,proto3" json:"svc_namespaces_set,omitempty"`                 // 命名空间列表是否由 Server 设置
-	SvcListenPortBase    int32                  `protobuf:"varint,15,opt,name=svc_listen_port_base,json=svcListenPortBase,proto3" json:"svc_listen_port_base,omitempty"`            // gRPC 监听端口
-	SvcListenPortBaseSet bool                   `protobuf:"varint,16,opt,name=svc_listen_port_base_set,json=svcListenPortBaseSet,proto3" json:"svc_listen_port_base_set,omitempty"` // gRPC 监听端口是否由 Server 设置
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	SshEnabled            bool                   `protobuf:"varint,1,opt,name=ssh_enabled,json=sshEnabled,proto3" json:"ssh_enabled,omitempty"`                                       // SSH 开关
+	SshEnabledSet         bool                   `protobuf:"varint,2,opt,name=ssh_enabled_set,json=sshEnabledSet,proto3" json:"ssh_enabled_set,omitempty"`                            // SSH 开关是否由 Server 设置（始终为 true）
+	K8SEnabled            bool                   `protobuf:"varint,3,opt,name=k8s_enabled,json=k8sEnabled,proto3" json:"k8s_enabled,omitempty"`                                       // K8S API 开关
+	K8SEnabledSet         bool                   `protobuf:"varint,4,opt,name=k8s_enabled_set,json=k8sEnabledSet,proto3" json:"k8s_enabled_set,omitempty"`                            // K8S API 开关是否由 Server 设置
+	K8SListenPort         int32                  `protobuf:"varint,5,opt,name=k8s_listen_port,json=k8sListenPort,proto3" json:"k8s_listen_port,omitempty"`                            // K8S API 监听端口
+	K8SListenPortSet      bool                   `protobuf:"varint,6,opt,name=k8s_listen_port_set,json=k8sListenPortSet,proto3" json:"k8s_listen_port_set,omitempty"`                 // K8S API 监听端口是否由 Server 设置
+	K8SApiServer          string                 `protobuf:"bytes,7,opt,name=k8s_api_server,json=k8sApiServer,proto3" json:"k8s_api_server,omitempty"`                                // K8S API Server 地址
+	K8SApiServerSet       bool                   `protobuf:"varint,8,opt,name=k8s_api_server_set,json=k8sApiServerSet,proto3" json:"k8s_api_server_set,omitempty"`                    // K8S API Server 地址是否由 Server 设置
+	SvcEnabled            bool                   `protobuf:"varint,9,opt,name=svc_enabled,json=svcEnabled,proto3" json:"svc_enabled,omitempty"`                                       // K8S Service 开关
+	SvcEnabledSet         bool                   `protobuf:"varint,10,opt,name=svc_enabled_set,json=svcEnabledSet,proto3" json:"svc_enabled_set,omitempty"`                           // K8S Service 开关是否由 Server 设置
+	SvcLabelSelector      string                 `protobuf:"bytes,11,opt,name=svc_label_selector,json=svcLabelSelector,proto3" json:"svc_label_selector,omitempty"`                   // 标签选择器
+	SvcLabelSelectorSet   bool                   `protobuf:"varint,12,opt,name=svc_label_selector_set,json=svcLabelSelectorSet,proto3" json:"svc_label_selector_set,omitempty"`       // 标签选择器是否由 Server 设置
+	SvcNamespaces         string                 `protobuf:"bytes,13,opt,name=svc_namespaces,json=svcNamespaces,proto3" json:"svc_namespaces,omitempty"`                              // 命名空间列表（逗号分隔）
+	SvcNamespacesSet      bool                   `protobuf:"varint,14,opt,name=svc_namespaces_set,json=svcNamespacesSet,proto3" json:"svc_namespaces_set,omitempty"`                  // 命名空间列表是否由 Server 设置
+	SvcListenPortBase     int32                  `protobuf:"varint,15,opt,name=svc_listen_port_base,json=svcListenPortBase,proto3" json:"svc_listen_port_base,omitempty"`             // gRPC 监听端口
+	SvcListenPortBaseSet  bool                   `protobuf:"varint,16,opt,name=svc_listen_port_base_set,json=svcListenPortBaseSet,proto3" json:"svc_listen_port_base_set,omitempty"`  // gRPC 监听端口是否由 Server 设置
+	EndpointEnabled       bool                   `protobuf:"varint,17,opt,name=endpoint_enabled,json=endpointEnabled,proto3" json:"endpoint_enabled,omitempty"`                       // Endpoint 功能开关
+	EndpointEnabledSet    bool                   `protobuf:"varint,18,opt,name=endpoint_enabled_set,json=endpointEnabledSet,proto3" json:"endpoint_enabled_set,omitempty"`            // Endpoint 功能开关是否由 Server 设置
+	EndpointListenPort    int32                  `protobuf:"varint,19,opt,name=endpoint_listen_port,json=endpointListenPort,proto3" json:"endpoint_listen_port,omitempty"`            // Endpoint 内网 gRPC 监听端口（默认 50052）
+	EndpointListenPortSet bool                   `protobuf:"varint,20,opt,name=endpoint_listen_port_set,json=endpointListenPortSet,proto3" json:"endpoint_listen_port_set,omitempty"` // Endpoint 监听端口是否由 Server 设置
+	EndpointToken         string                 `protobuf:"bytes,21,opt,name=endpoint_token,json=endpointToken,proto3" json:"endpoint_token,omitempty"`                              // Endpoint 注册令牌（ep_ 前缀）
+	EndpointTokenSet      bool                   `protobuf:"varint,22,opt,name=endpoint_token_set,json=endpointTokenSet,proto3" json:"endpoint_token_set,omitempty"`                  // Endpoint 令牌是否由 Server 设置
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *AgentCapabilityConfig) Reset() {
 	*x = AgentCapabilityConfig{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[15]
+	mi := &file_pkg_proto_agent_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1249,7 +1325,7 @@ func (x *AgentCapabilityConfig) String() string {
 func (*AgentCapabilityConfig) ProtoMessage() {}
 
 func (x *AgentCapabilityConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[15]
+	mi := &file_pkg_proto_agent_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1262,7 +1338,7 @@ func (x *AgentCapabilityConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentCapabilityConfig.ProtoReflect.Descriptor instead.
 func (*AgentCapabilityConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{15}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *AgentCapabilityConfig) GetSshEnabled() bool {
@@ -1377,6 +1453,48 @@ func (x *AgentCapabilityConfig) GetSvcListenPortBaseSet() bool {
 	return false
 }
 
+func (x *AgentCapabilityConfig) GetEndpointEnabled() bool {
+	if x != nil {
+		return x.EndpointEnabled
+	}
+	return false
+}
+
+func (x *AgentCapabilityConfig) GetEndpointEnabledSet() bool {
+	if x != nil {
+		return x.EndpointEnabledSet
+	}
+	return false
+}
+
+func (x *AgentCapabilityConfig) GetEndpointListenPort() int32 {
+	if x != nil {
+		return x.EndpointListenPort
+	}
+	return 0
+}
+
+func (x *AgentCapabilityConfig) GetEndpointListenPortSet() bool {
+	if x != nil {
+		return x.EndpointListenPortSet
+	}
+	return false
+}
+
+func (x *AgentCapabilityConfig) GetEndpointToken() string {
+	if x != nil {
+		return x.EndpointToken
+	}
+	return ""
+}
+
+func (x *AgentCapabilityConfig) GetEndpointTokenSet() bool {
+	if x != nil {
+		return x.EndpointTokenSet
+	}
+	return false
+}
+
 // K8SPermission K8S API 授权信息（心跳响应下发给 Agent）
 type K8SPermission struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1391,7 +1509,7 @@ type K8SPermission struct {
 
 func (x *K8SPermission) Reset() {
 	*x = K8SPermission{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[16]
+	mi := &file_pkg_proto_agent_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1403,7 +1521,7 @@ func (x *K8SPermission) String() string {
 func (*K8SPermission) ProtoMessage() {}
 
 func (x *K8SPermission) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[16]
+	mi := &file_pkg_proto_agent_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1416,7 +1534,7 @@ func (x *K8SPermission) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use K8SPermission.ProtoReflect.Descriptor instead.
 func (*K8SPermission) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{16}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *K8SPermission) GetUserId() uint64 {
@@ -1468,7 +1586,7 @@ type K8SServicePermission struct {
 
 func (x *K8SServicePermission) Reset() {
 	*x = K8SServicePermission{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[17]
+	mi := &file_pkg_proto_agent_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1480,7 +1598,7 @@ func (x *K8SServicePermission) String() string {
 func (*K8SServicePermission) ProtoMessage() {}
 
 func (x *K8SServicePermission) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[17]
+	mi := &file_pkg_proto_agent_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1493,7 +1611,7 @@ func (x *K8SServicePermission) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use K8SServicePermission.ProtoReflect.Descriptor instead.
 func (*K8SServicePermission) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{17}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *K8SServicePermission) GetUserId() uint64 {
@@ -1541,7 +1659,7 @@ type GetRealtimeStatusRequest struct {
 
 func (x *GetRealtimeStatusRequest) Reset() {
 	*x = GetRealtimeStatusRequest{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[18]
+	mi := &file_pkg_proto_agent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1553,7 +1671,7 @@ func (x *GetRealtimeStatusRequest) String() string {
 func (*GetRealtimeStatusRequest) ProtoMessage() {}
 
 func (x *GetRealtimeStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[18]
+	mi := &file_pkg_proto_agent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1566,7 +1684,7 @@ func (x *GetRealtimeStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRealtimeStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetRealtimeStatusRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{18}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *GetRealtimeStatusRequest) GetAgentId() uint64 {
@@ -1591,7 +1709,7 @@ type GetRealtimeStatusResponse struct {
 
 func (x *GetRealtimeStatusResponse) Reset() {
 	*x = GetRealtimeStatusResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[19]
+	mi := &file_pkg_proto_agent_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1603,7 +1721,7 @@ func (x *GetRealtimeStatusResponse) String() string {
 func (*GetRealtimeStatusResponse) ProtoMessage() {}
 
 func (x *GetRealtimeStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[19]
+	mi := &file_pkg_proto_agent_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1616,7 +1734,7 @@ func (x *GetRealtimeStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRealtimeStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetRealtimeStatusResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{19}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *GetRealtimeStatusResponse) GetHostname() string {
@@ -1674,7 +1792,7 @@ type ProxyStatus struct {
 
 func (x *ProxyStatus) Reset() {
 	*x = ProxyStatus{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[20]
+	mi := &file_pkg_proto_agent_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1686,7 +1804,7 @@ func (x *ProxyStatus) String() string {
 func (*ProxyStatus) ProtoMessage() {}
 
 func (x *ProxyStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[20]
+	mi := &file_pkg_proto_agent_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1699,7 +1817,7 @@ func (x *ProxyStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProxyStatus.ProtoReflect.Descriptor instead.
 func (*ProxyStatus) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{20}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ProxyStatus) GetServiceId() string {
@@ -1741,7 +1859,7 @@ type ReportProxyStatusRequest struct {
 
 func (x *ReportProxyStatusRequest) Reset() {
 	*x = ReportProxyStatusRequest{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[21]
+	mi := &file_pkg_proto_agent_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1753,7 +1871,7 @@ func (x *ReportProxyStatusRequest) String() string {
 func (*ReportProxyStatusRequest) ProtoMessage() {}
 
 func (x *ReportProxyStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[21]
+	mi := &file_pkg_proto_agent_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1766,7 +1884,7 @@ func (x *ReportProxyStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportProxyStatusRequest.ProtoReflect.Descriptor instead.
 func (*ReportProxyStatusRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{21}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ReportProxyStatusRequest) GetAgentId() uint64 {
@@ -1794,7 +1912,7 @@ type ReportProxyStatusResponse struct {
 
 func (x *ReportProxyStatusResponse) Reset() {
 	*x = ReportProxyStatusResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[22]
+	mi := &file_pkg_proto_agent_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1806,7 +1924,7 @@ func (x *ReportProxyStatusResponse) String() string {
 func (*ReportProxyStatusResponse) ProtoMessage() {}
 
 func (x *ReportProxyStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[22]
+	mi := &file_pkg_proto_agent_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1819,7 +1937,7 @@ func (x *ReportProxyStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportProxyStatusResponse.ProtoReflect.Descriptor instead.
 func (*ReportProxyStatusResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{22}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ReportProxyStatusResponse) GetSuccess() bool {
@@ -1853,7 +1971,7 @@ type VisitorStatus struct {
 
 func (x *VisitorStatus) Reset() {
 	*x = VisitorStatus{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[23]
+	mi := &file_pkg_proto_agent_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1865,7 +1983,7 @@ func (x *VisitorStatus) String() string {
 func (*VisitorStatus) ProtoMessage() {}
 
 func (x *VisitorStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[23]
+	mi := &file_pkg_proto_agent_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1878,7 +1996,7 @@ func (x *VisitorStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VisitorStatus.ProtoReflect.Descriptor instead.
 func (*VisitorStatus) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{23}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *VisitorStatus) GetForwardId() string {
@@ -1948,7 +2066,7 @@ type ReportVisitorStatusRequest struct {
 
 func (x *ReportVisitorStatusRequest) Reset() {
 	*x = ReportVisitorStatusRequest{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[24]
+	mi := &file_pkg_proto_agent_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1960,7 +2078,7 @@ func (x *ReportVisitorStatusRequest) String() string {
 func (*ReportVisitorStatusRequest) ProtoMessage() {}
 
 func (x *ReportVisitorStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[24]
+	mi := &file_pkg_proto_agent_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1973,7 +2091,7 @@ func (x *ReportVisitorStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportVisitorStatusRequest.ProtoReflect.Descriptor instead.
 func (*ReportVisitorStatusRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{24}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ReportVisitorStatusRequest) GetAgentId() uint64 {
@@ -2001,7 +2119,7 @@ type ReportVisitorStatusResponse struct {
 
 func (x *ReportVisitorStatusResponse) Reset() {
 	*x = ReportVisitorStatusResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[25]
+	mi := &file_pkg_proto_agent_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2013,7 +2131,7 @@ func (x *ReportVisitorStatusResponse) String() string {
 func (*ReportVisitorStatusResponse) ProtoMessage() {}
 
 func (x *ReportVisitorStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[25]
+	mi := &file_pkg_proto_agent_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2026,7 +2144,7 @@ func (x *ReportVisitorStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportVisitorStatusResponse.ProtoReflect.Descriptor instead.
 func (*ReportVisitorStatusResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{25}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ReportVisitorStatusResponse) GetSuccess() bool {
@@ -2054,7 +2172,7 @@ type ReportNetworkChangeRequest struct {
 
 func (x *ReportNetworkChangeRequest) Reset() {
 	*x = ReportNetworkChangeRequest{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[26]
+	mi := &file_pkg_proto_agent_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2066,7 +2184,7 @@ func (x *ReportNetworkChangeRequest) String() string {
 func (*ReportNetworkChangeRequest) ProtoMessage() {}
 
 func (x *ReportNetworkChangeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[26]
+	mi := &file_pkg_proto_agent_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2079,7 +2197,7 @@ func (x *ReportNetworkChangeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportNetworkChangeRequest.ProtoReflect.Descriptor instead.
 func (*ReportNetworkChangeRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{26}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ReportNetworkChangeRequest) GetAgentId() uint64 {
@@ -2107,7 +2225,7 @@ type ReportNetworkChangeResponse struct {
 
 func (x *ReportNetworkChangeResponse) Reset() {
 	*x = ReportNetworkChangeResponse{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[27]
+	mi := &file_pkg_proto_agent_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2119,7 +2237,7 @@ func (x *ReportNetworkChangeResponse) String() string {
 func (*ReportNetworkChangeResponse) ProtoMessage() {}
 
 func (x *ReportNetworkChangeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[27]
+	mi := &file_pkg_proto_agent_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2132,7 +2250,7 @@ func (x *ReportNetworkChangeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportNetworkChangeResponse.ProtoReflect.Descriptor instead.
 func (*ReportNetworkChangeResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{27}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ReportNetworkChangeResponse) GetSuccess() bool {
@@ -2166,7 +2284,7 @@ type SVCProxyData struct {
 
 func (x *SVCProxyData) Reset() {
 	*x = SVCProxyData{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[28]
+	mi := &file_pkg_proto_agent_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2178,7 +2296,7 @@ func (x *SVCProxyData) String() string {
 func (*SVCProxyData) ProtoMessage() {}
 
 func (x *SVCProxyData) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[28]
+	mi := &file_pkg_proto_agent_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2191,7 +2309,7 @@ func (x *SVCProxyData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SVCProxyData.ProtoReflect.Descriptor instead.
 func (*SVCProxyData) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{28}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *SVCProxyData) GetNamespace() string {
@@ -2239,6 +2357,319 @@ func (x *SVCProxyData) GetIsClose() bool {
 func (x *SVCProxyData) GetError() string {
 	if x != nil {
 		return x.Error
+	}
+	return ""
+}
+
+// EndpointRegisterRequest Endpoint 注册请求
+type EndpointRegisterRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`                             // 注册令牌（ep_ 前缀，Server 生成）
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                               // Endpoint 名称（如 hostname）
+	Version       string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`                         // Endpoint 版本号
+	SystemInfo    *SystemInfo            `protobuf:"bytes,4,opt,name=system_info,json=systemInfo,proto3" json:"system_info,omitempty"` // 系统信息
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EndpointRegisterRequest) Reset() {
+	*x = EndpointRegisterRequest{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EndpointRegisterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EndpointRegisterRequest) ProtoMessage() {}
+
+func (x *EndpointRegisterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EndpointRegisterRequest.ProtoReflect.Descriptor instead.
+func (*EndpointRegisterRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *EndpointRegisterRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *EndpointRegisterRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *EndpointRegisterRequest) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *EndpointRegisterRequest) GetSystemInfo() *SystemInfo {
+	if x != nil {
+		return x.SystemInfo
+	}
+	return nil
+}
+
+// EndpointRegisterResponse Endpoint 注册响应
+type EndpointRegisterResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`                        // 是否成功
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`                         // 响应消息
+	EndpointId    string                 `protobuf:"bytes,3,opt,name=endpoint_id,json=endpointId,proto3" json:"endpoint_id,omitempty"` // Endpoint ID（Agent 分配）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EndpointRegisterResponse) Reset() {
+	*x = EndpointRegisterResponse{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EndpointRegisterResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EndpointRegisterResponse) ProtoMessage() {}
+
+func (x *EndpointRegisterResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EndpointRegisterResponse.ProtoReflect.Descriptor instead.
+func (*EndpointRegisterResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *EndpointRegisterResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *EndpointRegisterResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *EndpointRegisterResponse) GetEndpointId() string {
+	if x != nil {
+		return x.EndpointId
+	}
+	return ""
+}
+
+// EndpointHeartbeatRequest Endpoint 心跳请求
+type EndpointHeartbeatRequest struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Token         string                    `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`               // 注册令牌（用于身份验证）
+	Name          string                    `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                 // Endpoint 名称
+	Capabilities  []*EndpointCapabilityInfo `protobuf:"bytes,3,rep,name=capabilities,proto3" json:"capabilities,omitempty"` // 启用的能力列表
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EndpointHeartbeatRequest) Reset() {
+	*x = EndpointHeartbeatRequest{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EndpointHeartbeatRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EndpointHeartbeatRequest) ProtoMessage() {}
+
+func (x *EndpointHeartbeatRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EndpointHeartbeatRequest.ProtoReflect.Descriptor instead.
+func (*EndpointHeartbeatRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *EndpointHeartbeatRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *EndpointHeartbeatRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *EndpointHeartbeatRequest) GetCapabilities() []*EndpointCapabilityInfo {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
+}
+
+// EndpointCapabilityInfo Endpoint 单项能力信息
+type EndpointCapabilityInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`                            // 能力类型：ssh / k8sapi / k8sservice
+	Host          string                 `protobuf:"bytes,2,opt,name=host,proto3" json:"host,omitempty"`                            // SSH 内网地址（SSH 类型时）
+	Port          int32                  `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`                           // SSH 端口（SSH 类型时，默认 22）
+	ApiServer     string                 `protobuf:"bytes,4,opt,name=api_server,json=apiServer,proto3" json:"api_server,omitempty"` // K8S API Server 地址（K8SAPI 类型时）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EndpointCapabilityInfo) Reset() {
+	*x = EndpointCapabilityInfo{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EndpointCapabilityInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EndpointCapabilityInfo) ProtoMessage() {}
+
+func (x *EndpointCapabilityInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EndpointCapabilityInfo.ProtoReflect.Descriptor instead.
+func (*EndpointCapabilityInfo) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *EndpointCapabilityInfo) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *EndpointCapabilityInfo) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *EndpointCapabilityInfo) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *EndpointCapabilityInfo) GetApiServer() string {
+	if x != nil {
+		return x.ApiServer
+	}
+	return ""
+}
+
+// EndpointHeartbeatResponse Endpoint 心跳响应
+type EndpointHeartbeatResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"` // 是否成功
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`  // 响应消息
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EndpointHeartbeatResponse) Reset() {
+	*x = EndpointHeartbeatResponse{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EndpointHeartbeatResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EndpointHeartbeatResponse) ProtoMessage() {}
+
+func (x *EndpointHeartbeatResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EndpointHeartbeatResponse.ProtoReflect.Descriptor instead.
+func (*EndpointHeartbeatResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *EndpointHeartbeatResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *EndpointHeartbeatResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
 	}
 	return ""
 }
@@ -2297,7 +2728,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\n" +
 	"forward_id\x18\x01 \x01(\tR\tforwardId\x12\x18\n" +
 	"\arunning\x18\x02 \x01(\bR\arunning\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\xbc\x04\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\x94\x05\n" +
 	"\x15AgentHeartbeatRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\x04R\aagentId\x12\x1b\n" +
 	"\ttunnel_ip\x18\x02 \x01(\tR\btunnelIp\x12)\n" +
@@ -2309,7 +2740,12 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\bnetworks\x18\b \x03(\v2$.awecloud.signaling.NetworkInterfaceR\bnetworks\x12Y\n" +
 	"\x14domain_registrations\x18\t \x03(\v2&.awecloud.signaling.DomainRegistrationR\x13domainRegistrations\x12Y\n" +
 	"\x13discovered_services\x18\n" +
-	" \x03(\v2(.awecloud.signaling.DiscoveredK8SServiceR\x12discoveredServices\"\xb6\x02\n" +
+	" \x03(\v2(.awecloud.signaling.DiscoveredK8SServiceR\x12discoveredServices\x12V\n" +
+	"\x13connected_endpoints\x18\v \x03(\v2%.awecloud.signaling.ConnectedEndpointR\x12connectedEndpoints\"\x8f\x01\n" +
+	"\x11ConnectedEndpoint\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12N\n" +
+	"\fcapabilities\x18\x03 \x03(\v2*.awecloud.signaling.EndpointCapabilityInfoR\fcapabilities\"\xb6\x02\n" +
 	"\x14DiscoveredK8SService\x12\x1c\n" +
 	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12!\n" +
 	"\fservice_name\x18\x02 \x01(\tR\vserviceName\x12\x1d\n" +
@@ -2361,7 +2797,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\x0fk8s_permissions\x18\x05 \x03(\v2!.awecloud.signaling.K8SPermissionR\x0ek8sPermissions\x12`\n" +
 	"\x17k8s_service_permissions\x18\x06 \x03(\v2(.awecloud.signaling.K8SServicePermissionR\x15k8sServicePermissions\x128\n" +
 	"\x18request_immediate_report\x18\a \x01(\bR\x16requestImmediateReport\x12V\n" +
-	"\x11capability_config\x18\b \x01(\v2).awecloud.signaling.AgentCapabilityConfigR\x10capabilityConfig\"\xbd\x05\n" +
+	"\x11capability_config\x18\b \x01(\v2).awecloud.signaling.AgentCapabilityConfigR\x10capabilityConfig\"\xda\a\n" +
 	"\x15AgentCapabilityConfig\x12\x1f\n" +
 	"\vssh_enabled\x18\x01 \x01(\bR\n" +
 	"sshEnabled\x12&\n" +
@@ -2382,7 +2818,13 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\x0esvc_namespaces\x18\r \x01(\tR\rsvcNamespaces\x12,\n" +
 	"\x12svc_namespaces_set\x18\x0e \x01(\bR\x10svcNamespacesSet\x12/\n" +
 	"\x14svc_listen_port_base\x18\x0f \x01(\x05R\x11svcListenPortBase\x126\n" +
-	"\x18svc_listen_port_base_set\x18\x10 \x01(\bR\x14svcListenPortBaseSet\"\x9f\x01\n" +
+	"\x18svc_listen_port_base_set\x18\x10 \x01(\bR\x14svcListenPortBaseSet\x12)\n" +
+	"\x10endpoint_enabled\x18\x11 \x01(\bR\x0fendpointEnabled\x120\n" +
+	"\x14endpoint_enabled_set\x18\x12 \x01(\bR\x12endpointEnabledSet\x120\n" +
+	"\x14endpoint_listen_port\x18\x13 \x01(\x05R\x12endpointListenPort\x127\n" +
+	"\x18endpoint_listen_port_set\x18\x14 \x01(\bR\x15endpointListenPortSet\x12%\n" +
+	"\x0eendpoint_token\x18\x15 \x01(\tR\rendpointToken\x12,\n" +
+	"\x12endpoint_token_set\x18\x16 \x01(\bR\x10endpointTokenSet\"\x9f\x01\n" +
 	"\rK8SPermission\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\x04R\x06userId\x12\x1b\n" +
 	"\tuser_name\x18\x02 \x01(\tR\buserName\x12\x1d\n" +
@@ -2455,7 +2897,31 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\n" +
 	"is_connect\x18\x05 \x01(\bR\tisConnect\x12\x19\n" +
 	"\bis_close\x18\x06 \x01(\bR\aisClose\x12\x14\n" +
-	"\x05error\x18\a \x01(\tR\x05error2\xec\x06\n" +
+	"\x05error\x18\a \x01(\tR\x05error\"\x9e\x01\n" +
+	"\x17EndpointRegisterRequest\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\tR\aversion\x12?\n" +
+	"\vsystem_info\x18\x04 \x01(\v2\x1e.awecloud.signaling.SystemInfoR\n" +
+	"systemInfo\"o\n" +
+	"\x18EndpointRegisterResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1f\n" +
+	"\vendpoint_id\x18\x03 \x01(\tR\n" +
+	"endpointId\"\x94\x01\n" +
+	"\x18EndpointHeartbeatRequest\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12N\n" +
+	"\fcapabilities\x18\x03 \x03(\v2*.awecloud.signaling.EndpointCapabilityInfoR\fcapabilities\"s\n" +
+	"\x16EndpointCapabilityInfo\x12\x12\n" +
+	"\x04type\x18\x01 \x01(\tR\x04type\x12\x12\n" +
+	"\x04host\x18\x02 \x01(\tR\x04host\x12\x12\n" +
+	"\x04port\x18\x03 \x01(\x05R\x04port\x12\x1d\n" +
+	"\n" +
+	"api_server\x18\x04 \x01(\tR\tapiServer\"O\n" +
+	"\x19EndpointHeartbeatResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage2\xec\x06\n" +
 	"\fAgentService\x12_\n" +
 	"\bRegister\x12(.awecloud.signaling.AgentRegisterRequest\x1a).awecloud.signaling.AgentRegisterResponse\x12k\n" +
 	"\fAuthenticate\x12,.awecloud.signaling.AgentAuthenticateRequest\x1a-.awecloud.signaling.AgentAuthenticateResponse\x12f\n" +
@@ -2464,7 +2930,10 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\x11ReportProxyStatus\x12,.awecloud.signaling.ReportProxyStatusRequest\x1a-.awecloud.signaling.ReportProxyStatusResponse\x12v\n" +
 	"\x13ReportVisitorStatus\x12..awecloud.signaling.ReportVisitorStatusRequest\x1a/.awecloud.signaling.ReportVisitorStatusResponse\x12v\n" +
 	"\x13ReportNetworkChange\x12..awecloud.signaling.ReportNetworkChangeRequest\x1a/.awecloud.signaling.ReportNetworkChangeResponse\x12R\n" +
-	"\bSVCProxy\x12 .awecloud.signaling.SVCProxyData\x1a .awecloud.signaling.SVCProxyData(\x010\x01B<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
+	"\bSVCProxy\x12 .awecloud.signaling.SVCProxyData\x1a .awecloud.signaling.SVCProxyData(\x010\x012\xe6\x01\n" +
+	"\x0fEndpointService\x12e\n" +
+	"\bRegister\x12+.awecloud.signaling.EndpointRegisterRequest\x1a,.awecloud.signaling.EndpointRegisterResponse\x12l\n" +
+	"\tHeartbeat\x12,.awecloud.signaling.EndpointHeartbeatRequest\x1a-.awecloud.signaling.EndpointHeartbeatResponse(\x010\x01B<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
 
 var (
 	file_pkg_proto_agent_proto_rawDescOnce sync.Once
@@ -2478,7 +2947,7 @@ func file_pkg_proto_agent_proto_rawDescGZIP() []byte {
 	return file_pkg_proto_agent_proto_rawDescData
 }
 
-var file_pkg_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_pkg_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_pkg_proto_agent_proto_goTypes = []any{
 	(*SystemInfo)(nil),                  // 0: awecloud.signaling.SystemInfo
 	(*NetworkInterface)(nil),            // 1: awecloud.signaling.NetworkInterface
@@ -2489,27 +2958,33 @@ var file_pkg_proto_agent_proto_goTypes = []any{
 	(*ServiceStatus)(nil),               // 6: awecloud.signaling.ServiceStatus
 	(*ForwardStatus)(nil),               // 7: awecloud.signaling.ForwardStatus
 	(*AgentHeartbeatRequest)(nil),       // 8: awecloud.signaling.AgentHeartbeatRequest
-	(*DiscoveredK8SService)(nil),        // 9: awecloud.signaling.DiscoveredK8SService
-	(*ServicePort)(nil),                 // 10: awecloud.signaling.ServicePort
-	(*DomainRegistration)(nil),          // 11: awecloud.signaling.DomainRegistration
-	(*ServiceConfig)(nil),               // 12: awecloud.signaling.ServiceConfig
-	(*ForwardConfig)(nil),               // 13: awecloud.signaling.ForwardConfig
-	(*AgentHeartbeatResponse)(nil),      // 14: awecloud.signaling.AgentHeartbeatResponse
-	(*AgentCapabilityConfig)(nil),       // 15: awecloud.signaling.AgentCapabilityConfig
-	(*K8SPermission)(nil),               // 16: awecloud.signaling.K8SPermission
-	(*K8SServicePermission)(nil),        // 17: awecloud.signaling.K8SServicePermission
-	(*GetRealtimeStatusRequest)(nil),    // 18: awecloud.signaling.GetRealtimeStatusRequest
-	(*GetRealtimeStatusResponse)(nil),   // 19: awecloud.signaling.GetRealtimeStatusResponse
-	(*ProxyStatus)(nil),                 // 20: awecloud.signaling.ProxyStatus
-	(*ReportProxyStatusRequest)(nil),    // 21: awecloud.signaling.ReportProxyStatusRequest
-	(*ReportProxyStatusResponse)(nil),   // 22: awecloud.signaling.ReportProxyStatusResponse
-	(*VisitorStatus)(nil),               // 23: awecloud.signaling.VisitorStatus
-	(*ReportVisitorStatusRequest)(nil),  // 24: awecloud.signaling.ReportVisitorStatusRequest
-	(*ReportVisitorStatusResponse)(nil), // 25: awecloud.signaling.ReportVisitorStatusResponse
-	(*ReportNetworkChangeRequest)(nil),  // 26: awecloud.signaling.ReportNetworkChangeRequest
-	(*ReportNetworkChangeResponse)(nil), // 27: awecloud.signaling.ReportNetworkChangeResponse
-	(*SVCProxyData)(nil),                // 28: awecloud.signaling.SVCProxyData
-	nil,                                 // 29: awecloud.signaling.DiscoveredK8SService.LabelsEntry
+	(*ConnectedEndpoint)(nil),           // 9: awecloud.signaling.ConnectedEndpoint
+	(*DiscoveredK8SService)(nil),        // 10: awecloud.signaling.DiscoveredK8SService
+	(*ServicePort)(nil),                 // 11: awecloud.signaling.ServicePort
+	(*DomainRegistration)(nil),          // 12: awecloud.signaling.DomainRegistration
+	(*ServiceConfig)(nil),               // 13: awecloud.signaling.ServiceConfig
+	(*ForwardConfig)(nil),               // 14: awecloud.signaling.ForwardConfig
+	(*AgentHeartbeatResponse)(nil),      // 15: awecloud.signaling.AgentHeartbeatResponse
+	(*AgentCapabilityConfig)(nil),       // 16: awecloud.signaling.AgentCapabilityConfig
+	(*K8SPermission)(nil),               // 17: awecloud.signaling.K8SPermission
+	(*K8SServicePermission)(nil),        // 18: awecloud.signaling.K8SServicePermission
+	(*GetRealtimeStatusRequest)(nil),    // 19: awecloud.signaling.GetRealtimeStatusRequest
+	(*GetRealtimeStatusResponse)(nil),   // 20: awecloud.signaling.GetRealtimeStatusResponse
+	(*ProxyStatus)(nil),                 // 21: awecloud.signaling.ProxyStatus
+	(*ReportProxyStatusRequest)(nil),    // 22: awecloud.signaling.ReportProxyStatusRequest
+	(*ReportProxyStatusResponse)(nil),   // 23: awecloud.signaling.ReportProxyStatusResponse
+	(*VisitorStatus)(nil),               // 24: awecloud.signaling.VisitorStatus
+	(*ReportVisitorStatusRequest)(nil),  // 25: awecloud.signaling.ReportVisitorStatusRequest
+	(*ReportVisitorStatusResponse)(nil), // 26: awecloud.signaling.ReportVisitorStatusResponse
+	(*ReportNetworkChangeRequest)(nil),  // 27: awecloud.signaling.ReportNetworkChangeRequest
+	(*ReportNetworkChangeResponse)(nil), // 28: awecloud.signaling.ReportNetworkChangeResponse
+	(*SVCProxyData)(nil),                // 29: awecloud.signaling.SVCProxyData
+	(*EndpointRegisterRequest)(nil),     // 30: awecloud.signaling.EndpointRegisterRequest
+	(*EndpointRegisterResponse)(nil),    // 31: awecloud.signaling.EndpointRegisterResponse
+	(*EndpointHeartbeatRequest)(nil),    // 32: awecloud.signaling.EndpointHeartbeatRequest
+	(*EndpointCapabilityInfo)(nil),      // 33: awecloud.signaling.EndpointCapabilityInfo
+	(*EndpointHeartbeatResponse)(nil),   // 34: awecloud.signaling.EndpointHeartbeatResponse
+	nil,                                 // 35: awecloud.signaling.DiscoveredK8SService.LabelsEntry
 }
 var file_pkg_proto_agent_proto_depIdxs = []int32{
 	0,  // 0: awecloud.signaling.AgentRegisterRequest.system_info:type_name -> awecloud.signaling.SystemInfo
@@ -2517,40 +2992,48 @@ var file_pkg_proto_agent_proto_depIdxs = []int32{
 	6,  // 2: awecloud.signaling.AgentHeartbeatRequest.service_status:type_name -> awecloud.signaling.ServiceStatus
 	7,  // 3: awecloud.signaling.AgentHeartbeatRequest.forward_status:type_name -> awecloud.signaling.ForwardStatus
 	1,  // 4: awecloud.signaling.AgentHeartbeatRequest.networks:type_name -> awecloud.signaling.NetworkInterface
-	11, // 5: awecloud.signaling.AgentHeartbeatRequest.domain_registrations:type_name -> awecloud.signaling.DomainRegistration
-	9,  // 6: awecloud.signaling.AgentHeartbeatRequest.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
-	10, // 7: awecloud.signaling.DiscoveredK8SService.ports:type_name -> awecloud.signaling.ServicePort
-	29, // 8: awecloud.signaling.DiscoveredK8SService.labels:type_name -> awecloud.signaling.DiscoveredK8SService.LabelsEntry
-	12, // 9: awecloud.signaling.AgentHeartbeatResponse.services:type_name -> awecloud.signaling.ServiceConfig
-	13, // 10: awecloud.signaling.AgentHeartbeatResponse.forwards:type_name -> awecloud.signaling.ForwardConfig
-	16, // 11: awecloud.signaling.AgentHeartbeatResponse.k8s_permissions:type_name -> awecloud.signaling.K8SPermission
-	17, // 12: awecloud.signaling.AgentHeartbeatResponse.k8s_service_permissions:type_name -> awecloud.signaling.K8SServicePermission
-	15, // 13: awecloud.signaling.AgentHeartbeatResponse.capability_config:type_name -> awecloud.signaling.AgentCapabilityConfig
-	1,  // 14: awecloud.signaling.GetRealtimeStatusResponse.networks:type_name -> awecloud.signaling.NetworkInterface
-	20, // 15: awecloud.signaling.ReportProxyStatusRequest.statuses:type_name -> awecloud.signaling.ProxyStatus
-	23, // 16: awecloud.signaling.ReportVisitorStatusRequest.statuses:type_name -> awecloud.signaling.VisitorStatus
-	1,  // 17: awecloud.signaling.ReportNetworkChangeRequest.networks:type_name -> awecloud.signaling.NetworkInterface
-	2,  // 18: awecloud.signaling.AgentService.Register:input_type -> awecloud.signaling.AgentRegisterRequest
-	4,  // 19: awecloud.signaling.AgentService.Authenticate:input_type -> awecloud.signaling.AgentAuthenticateRequest
-	8,  // 20: awecloud.signaling.AgentService.Heartbeat:input_type -> awecloud.signaling.AgentHeartbeatRequest
-	18, // 21: awecloud.signaling.AgentService.GetRealtimeStatus:input_type -> awecloud.signaling.GetRealtimeStatusRequest
-	21, // 22: awecloud.signaling.AgentService.ReportProxyStatus:input_type -> awecloud.signaling.ReportProxyStatusRequest
-	24, // 23: awecloud.signaling.AgentService.ReportVisitorStatus:input_type -> awecloud.signaling.ReportVisitorStatusRequest
-	26, // 24: awecloud.signaling.AgentService.ReportNetworkChange:input_type -> awecloud.signaling.ReportNetworkChangeRequest
-	28, // 25: awecloud.signaling.AgentService.SVCProxy:input_type -> awecloud.signaling.SVCProxyData
-	3,  // 26: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.AgentRegisterResponse
-	5,  // 27: awecloud.signaling.AgentService.Authenticate:output_type -> awecloud.signaling.AgentAuthenticateResponse
-	14, // 28: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.AgentHeartbeatResponse
-	19, // 29: awecloud.signaling.AgentService.GetRealtimeStatus:output_type -> awecloud.signaling.GetRealtimeStatusResponse
-	22, // 30: awecloud.signaling.AgentService.ReportProxyStatus:output_type -> awecloud.signaling.ReportProxyStatusResponse
-	25, // 31: awecloud.signaling.AgentService.ReportVisitorStatus:output_type -> awecloud.signaling.ReportVisitorStatusResponse
-	27, // 32: awecloud.signaling.AgentService.ReportNetworkChange:output_type -> awecloud.signaling.ReportNetworkChangeResponse
-	28, // 33: awecloud.signaling.AgentService.SVCProxy:output_type -> awecloud.signaling.SVCProxyData
-	26, // [26:34] is the sub-list for method output_type
-	18, // [18:26] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	12, // 5: awecloud.signaling.AgentHeartbeatRequest.domain_registrations:type_name -> awecloud.signaling.DomainRegistration
+	10, // 6: awecloud.signaling.AgentHeartbeatRequest.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
+	9,  // 7: awecloud.signaling.AgentHeartbeatRequest.connected_endpoints:type_name -> awecloud.signaling.ConnectedEndpoint
+	33, // 8: awecloud.signaling.ConnectedEndpoint.capabilities:type_name -> awecloud.signaling.EndpointCapabilityInfo
+	11, // 9: awecloud.signaling.DiscoveredK8SService.ports:type_name -> awecloud.signaling.ServicePort
+	35, // 10: awecloud.signaling.DiscoveredK8SService.labels:type_name -> awecloud.signaling.DiscoveredK8SService.LabelsEntry
+	13, // 11: awecloud.signaling.AgentHeartbeatResponse.services:type_name -> awecloud.signaling.ServiceConfig
+	14, // 12: awecloud.signaling.AgentHeartbeatResponse.forwards:type_name -> awecloud.signaling.ForwardConfig
+	17, // 13: awecloud.signaling.AgentHeartbeatResponse.k8s_permissions:type_name -> awecloud.signaling.K8SPermission
+	18, // 14: awecloud.signaling.AgentHeartbeatResponse.k8s_service_permissions:type_name -> awecloud.signaling.K8SServicePermission
+	16, // 15: awecloud.signaling.AgentHeartbeatResponse.capability_config:type_name -> awecloud.signaling.AgentCapabilityConfig
+	1,  // 16: awecloud.signaling.GetRealtimeStatusResponse.networks:type_name -> awecloud.signaling.NetworkInterface
+	21, // 17: awecloud.signaling.ReportProxyStatusRequest.statuses:type_name -> awecloud.signaling.ProxyStatus
+	24, // 18: awecloud.signaling.ReportVisitorStatusRequest.statuses:type_name -> awecloud.signaling.VisitorStatus
+	1,  // 19: awecloud.signaling.ReportNetworkChangeRequest.networks:type_name -> awecloud.signaling.NetworkInterface
+	0,  // 20: awecloud.signaling.EndpointRegisterRequest.system_info:type_name -> awecloud.signaling.SystemInfo
+	33, // 21: awecloud.signaling.EndpointHeartbeatRequest.capabilities:type_name -> awecloud.signaling.EndpointCapabilityInfo
+	2,  // 22: awecloud.signaling.AgentService.Register:input_type -> awecloud.signaling.AgentRegisterRequest
+	4,  // 23: awecloud.signaling.AgentService.Authenticate:input_type -> awecloud.signaling.AgentAuthenticateRequest
+	8,  // 24: awecloud.signaling.AgentService.Heartbeat:input_type -> awecloud.signaling.AgentHeartbeatRequest
+	19, // 25: awecloud.signaling.AgentService.GetRealtimeStatus:input_type -> awecloud.signaling.GetRealtimeStatusRequest
+	22, // 26: awecloud.signaling.AgentService.ReportProxyStatus:input_type -> awecloud.signaling.ReportProxyStatusRequest
+	25, // 27: awecloud.signaling.AgentService.ReportVisitorStatus:input_type -> awecloud.signaling.ReportVisitorStatusRequest
+	27, // 28: awecloud.signaling.AgentService.ReportNetworkChange:input_type -> awecloud.signaling.ReportNetworkChangeRequest
+	29, // 29: awecloud.signaling.AgentService.SVCProxy:input_type -> awecloud.signaling.SVCProxyData
+	30, // 30: awecloud.signaling.EndpointService.Register:input_type -> awecloud.signaling.EndpointRegisterRequest
+	32, // 31: awecloud.signaling.EndpointService.Heartbeat:input_type -> awecloud.signaling.EndpointHeartbeatRequest
+	3,  // 32: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.AgentRegisterResponse
+	5,  // 33: awecloud.signaling.AgentService.Authenticate:output_type -> awecloud.signaling.AgentAuthenticateResponse
+	15, // 34: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.AgentHeartbeatResponse
+	20, // 35: awecloud.signaling.AgentService.GetRealtimeStatus:output_type -> awecloud.signaling.GetRealtimeStatusResponse
+	23, // 36: awecloud.signaling.AgentService.ReportProxyStatus:output_type -> awecloud.signaling.ReportProxyStatusResponse
+	26, // 37: awecloud.signaling.AgentService.ReportVisitorStatus:output_type -> awecloud.signaling.ReportVisitorStatusResponse
+	28, // 38: awecloud.signaling.AgentService.ReportNetworkChange:output_type -> awecloud.signaling.ReportNetworkChangeResponse
+	29, // 39: awecloud.signaling.AgentService.SVCProxy:output_type -> awecloud.signaling.SVCProxyData
+	31, // 40: awecloud.signaling.EndpointService.Register:output_type -> awecloud.signaling.EndpointRegisterResponse
+	34, // 41: awecloud.signaling.EndpointService.Heartbeat:output_type -> awecloud.signaling.EndpointHeartbeatResponse
+	32, // [32:42] is the sub-list for method output_type
+	22, // [22:32] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_pkg_proto_agent_proto_init() }
@@ -2564,9 +3047,9 @@ func file_pkg_proto_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_agent_proto_rawDesc), len(file_pkg_proto_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   30,
+			NumMessages:   36,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_pkg_proto_agent_proto_goTypes,
 		DependencyIndexes: file_pkg_proto_agent_proto_depIdxs,

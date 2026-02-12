@@ -51,6 +51,9 @@ type Agent struct {
 	svcInformer *K8SServiceInformer // K8S Service Informer
 	svcProxy    *K8SSVCProxy        // K8S Service gRPC 代理
 
+	// Endpoint 能力（P2 新增）
+	endpointServer *EndpointServer // Endpoint 内网 gRPC Server
+
 	// 网络信息
 	networkInfo *NetworkInfo
 	lanDetector *LANDetector
@@ -123,6 +126,24 @@ func (a *Agent) Run() error {
 		}
 	}
 
+	// 启动 tsnet 诊断（异步，不阻塞启动流程）
+	if a.tsManager != nil {
+		go func() {
+			// 等待 3 秒让 listener 完全就绪
+			time.Sleep(3 * time.Second)
+			var diagPorts []int
+			if a.config.K8S.Enabled && a.k8sAPIProxy != nil {
+				diagPorts = append(diagPorts, a.config.K8S.ListenPort)
+			}
+			if a.config.SVC.Enabled && a.svcProxy != nil {
+				diagPorts = append(diagPorts, a.config.SVC.ListenPortBase)
+			}
+			if len(diagPorts) > 0 {
+				a.tsManager.DiagnoseTsnet(diagPorts)
+			}
+		}()
+	}
+
 	// 启动心跳流（双向流，用于同步配置）
 	a.wg.Add(1)
 	go a.heartbeatLoop()
@@ -144,6 +165,11 @@ func (a *Agent) Run() error {
 	}
 	if a.svcInformer != nil {
 		a.svcInformer.Stop()
+	}
+
+	// 停止 Endpoint Server
+	if a.endpointServer != nil {
+		a.endpointServer.Stop()
 	}
 
 	// 停止 Tailscale
@@ -588,6 +614,25 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 	// 构建域名注册列表
 	req.DomainRegistrations = a.buildDomainRegistrations()
 
+	// 添加已连接的 Endpoint 列表
+	if a.endpointServer != nil {
+		for _, ep := range a.endpointServer.GetConnectedEndpointDetails() {
+			connEp := &pb.ConnectedEndpoint{
+				Name:   ep.Name,
+				Status: "online",
+			}
+			for _, cap := range ep.Capabilities {
+				connEp.Capabilities = append(connEp.Capabilities, &pb.EndpointCapabilityInfo{
+					Type:      cap.Type,
+					Host:      cap.Host,
+					Port:      cap.Port,
+					ApiServer: cap.APIServer,
+				})
+			}
+			req.ConnectedEndpoints = append(req.ConnectedEndpoints, connEp)
+		}
+	}
+
 	return stream.Send(req)
 }
 
@@ -771,7 +816,7 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		}
 	}
 
-	// 3. K8S API 域名：api.{agent_name}{domain_suffix}:6443
+	// 3. K8S API 域名：api.{agent_name}{domain_suffix}:50050
 	if a.config.K8S.Enabled && a.k8sAPIProxy != nil && a.tsManager != nil && a.tsManager.IsConnected() {
 		registrations = append(registrations, &pb.DomainRegistration{
 			Domain:     "kubernetes." + a.config.Agent.AgentName + a.domainSuffix,
@@ -791,18 +836,17 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 			}
 			domain := prefix + "." + svc.Namespace + "." + a.config.Agent.AgentName + a.domainSuffix
 
-			// 为每个端口注册一条域名
-			for range svc.Ports {
+			// 注册第一个端口的域名，TargetPort 使用 K8S Service 的实际端口（如 5432）
+			// Agent SVCProxy gRPC 端口（50051）由 Server 在 ResolveDomain 响应中通过 svc_proxy_port 字段返回
+			if len(svc.Ports) > 0 {
 				registrations = append(registrations, &pb.DomainRegistration{
 					Domain:      domain,
 					Type:        "k8ssvc",
 					TargetIp:    agentIP,
-					TargetPort:  int32(a.config.SVC.ListenPortBase),
+					TargetPort:  svc.Ports[0].Port, // K8S Service 实际端口
 					Namespace:   svc.Namespace,
 					ServiceName: svc.Name,
 				})
-				// 只注册第一个端口的域名（避免重复域名）
-				break
 			}
 		}
 	}
@@ -999,6 +1043,11 @@ func (a *Agent) applyCapabilityConfig(cap *pb.AgentCapabilityConfig) {
 			a.applySVCConfig()
 		}
 	}
+
+	// === Endpoint ===
+	if cap.EndpointEnabledSet {
+		a.applyEndpointConfig(cap)
+	}
 }
 
 // applyK8SAPIConfig 应用 K8S API 配置变更（启停模块）
@@ -1038,6 +1087,47 @@ func (a *Agent) applySVCConfig() {
 		}
 	} else {
 		logger.Info("K8S Service 模块已通过远程配置关闭")
+	}
+}
+
+// applyEndpointConfig 应用 Endpoint 配置变更（启停 Endpoint gRPC Server）
+func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
+	enabled := cap.EndpointEnabled
+
+	// 确定监听端口
+	listenPort := 50052
+	if cap.EndpointListenPortSet && cap.EndpointListenPort > 0 {
+		listenPort = int(cap.EndpointListenPort)
+	}
+
+	// 确定 token
+	token := ""
+	if cap.EndpointTokenSet {
+		token = cap.EndpointToken
+	}
+
+	if enabled {
+		if a.endpointServer == nil {
+			// 首次启动
+			logger.Infof("远程配置: Endpoint 功能启用，端口=%d", listenPort)
+			a.endpointServer = NewEndpointServer(listenPort, token, a.ctx)
+			if err := a.endpointServer.Start(); err != nil {
+				logger.Warnf("启动 Endpoint gRPC Server 失败: %v", err)
+				a.endpointServer = nil
+			}
+		} else {
+			// 已运行，更新 token
+			if cap.EndpointTokenSet {
+				a.endpointServer.UpdateToken(token)
+			}
+		}
+	} else {
+		// 关闭
+		if a.endpointServer != nil {
+			logger.Info("远程配置: Endpoint 功能关闭")
+			a.endpointServer.Stop()
+			a.endpointServer = nil
+		}
 	}
 }
 

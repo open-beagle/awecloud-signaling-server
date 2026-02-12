@@ -62,7 +62,7 @@ type K8SSection struct {
 	Enabled    bool   `toml:"enabled"`     // 是否启用 K8S API 代理
 	Kubeconfig string `toml:"kubeconfig"`  // kubeconfig 路径（空则使用 InCluster）
 	APIServer  string `toml:"api_server"`  // K8S API Server 地址（可选覆盖）
-	ListenPort int    `toml:"listen_port"` // tsnet 监听端口，默认 6443
+	ListenPort int    `toml:"listen_port"` // tsnet 监听端口，默认 50050
 }
 
 // SVCSection K8S Service 发现配置
@@ -71,7 +71,7 @@ type SVCSection struct {
 	Kubeconfig     string   `toml:"kubeconfig"`       // kubeconfig 路径（空则使用 InCluster）
 	LabelSelector  string   `toml:"label_selector"`   // Service 标签选择器（如 "signal.beagle.io/expose=true"）
 	Namespaces     []string `toml:"namespaces"`       // 监听的命名空间列表（空表示全部）
-	ListenPortBase int      `toml:"listen_port_base"` // tsnet gRPC 监听端口，默认 9090
+	ListenPortBase int      `toml:"listen_port_base"` // tsnet gRPC 监听端口，默认 50051
 }
 
 // RegisterResult 统一注册接口的响应结果
@@ -285,7 +285,7 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 
 	// K8S 默认值
 	if cfg.K8S.ListenPort == 0 {
-		cfg.K8S.ListenPort = 6443
+		cfg.K8S.ListenPort = 50050
 	}
 	if cfg.K8S.Kubeconfig == "" {
 		cfg.K8S.Kubeconfig = "~/.kube/config"
@@ -296,7 +296,7 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 		cfg.SVC.LabelSelector = "signal.beagle.io/expose=true"
 	}
 	if cfg.SVC.ListenPortBase == 0 {
-		cfg.SVC.ListenPortBase = 9090
+		cfg.SVC.ListenPortBase = 50051
 	}
 
 	// Telemetry 默认值

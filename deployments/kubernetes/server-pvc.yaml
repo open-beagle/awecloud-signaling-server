@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: awecloud-signaling-server
+  name: signal-server
   namespace: beagle-access
 spec:
   accessModes:

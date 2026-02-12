@@ -307,6 +307,8 @@ func (s *Server) setupRouter() *gin.Engine {
 			v1Group.GET("/download/install_agent.sh", downloadAPI.GetAgentInstallScript)
 			v1Group.GET("/download/agent", downloadAPI.GetAgentDownload)
 			v1Group.GET("/download/agent/version", downloadAPI.GetAgentVersion)
+			v1Group.GET("/download/install_endpoint.sh", downloadAPI.GetEndpointInstallScript)
+			v1Group.GET("/download/endpoint", downloadAPI.GetEndpointDownload)
 
 			// 统一注册 API（公开，Agent 和 Client 共用）
 			deployPublicAPI := api.NewDeployAPI(s.config)
@@ -432,26 +434,20 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.DELETE("/acl/k8s-service/:id/users/:uid", aclAPI.RemoveK8SServiceACLUser)
 					adminAuthGroup.DELETE("/acl/k8s-service/:id/groups/:gid", aclAPI.RemoveK8SServiceACLGroup)
 
-					// Endpoint 管理
+					// Endpoint 管理（Endpoint 由 Agent 自动发现上报，不支持手动创建）
 					endpointAPI := api.NewEndpointAPI(s.config)
-					// SSH Endpoint
+					// 统一 Endpoint API（List+Detail 模式）
+					adminAuthGroup.GET("/endpoints", endpointAPI.ListEndpoints)
+					adminAuthGroup.GET("/endpoints/:type/:id", endpointAPI.GetEndpointDetail)
+					adminAuthGroup.PUT("/endpoints/:type/:id", endpointAPI.UpdateEndpointByType)
+					adminAuthGroup.DELETE("/endpoints/:type/:id", endpointAPI.RevokeEndpointByType)
+					// 兼容旧分类型 API
 					adminAuthGroup.GET("/endpoints/ssh", endpointAPI.ListEndpointSSH)
-					adminAuthGroup.GET("/endpoints/ssh/:id", endpointAPI.GetEndpointSSH)
-					adminAuthGroup.POST("/endpoints/ssh", endpointAPI.CreateEndpointSSH)
-					adminAuthGroup.PUT("/endpoints/ssh/:id", endpointAPI.UpdateEndpointSSH)
-					adminAuthGroup.DELETE("/endpoints/ssh/:id", endpointAPI.DeleteEndpointSSH)
-					// K8SAPI Endpoint
 					adminAuthGroup.GET("/endpoints/k8sapi", endpointAPI.ListEndpointK8SAPI)
-					adminAuthGroup.GET("/endpoints/k8sapi/:id", endpointAPI.GetEndpointK8SAPI)
-					adminAuthGroup.POST("/endpoints/k8sapi", endpointAPI.CreateEndpointK8SAPI)
-					adminAuthGroup.PUT("/endpoints/k8sapi/:id", endpointAPI.UpdateEndpointK8SAPI)
-					adminAuthGroup.DELETE("/endpoints/k8sapi/:id", endpointAPI.DeleteEndpointK8SAPI)
-					// K8SService Endpoint
 					adminAuthGroup.GET("/endpoints/k8sservice", endpointAPI.ListEndpointK8SService)
-					adminAuthGroup.GET("/endpoints/k8sservice/:id", endpointAPI.GetEndpointK8SService)
-					adminAuthGroup.POST("/endpoints/k8sservice", endpointAPI.CreateEndpointK8SService)
-					adminAuthGroup.PUT("/endpoints/k8sservice/:id", endpointAPI.UpdateEndpointK8SService)
-					adminAuthGroup.DELETE("/endpoints/k8sservice/:id", endpointAPI.DeleteEndpointK8SService)
+
+					// Node Endpoint Token 重新生成
+					adminAuthGroup.POST("/nodes/:id/capabilities/endpoint-token/regenerate", nodeAPI.RegenerateEndpointToken)
 
 					// 域名管理
 					domainAPI := api.NewDomainAPI()

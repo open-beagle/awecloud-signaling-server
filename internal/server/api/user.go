@@ -66,7 +66,7 @@ type UserListItem struct {
 	SSHEnabled   bool             `json:"ssh_enabled"` // SSH 是否启用（仅 Agent）
 	Enabled      bool             `json:"enabled"`     // 是否启用
 	Source       model.UserSource `json:"source"`      // 来源：manual / logto
-	LastOnline   *time.Time       `json:"last_online"`
+	LastOnline   string           `json:"last_online"`
 	CreatedAt    time.Time        `json:"created_at"`
 }
 
@@ -115,10 +115,10 @@ func (a *UserAPI) List(c *gin.Context) {
 
 	// 查询每个用户的设备数量和在线数量
 	type NodeStats struct {
-		UserID      uint64     `gorm:"column:user_id"`
-		Count       int64      `gorm:"column:count"`
-		OnlineCount int64      `gorm:"column:online_count"`
-		LastOnline  *time.Time `gorm:"column:last_online"`
+		UserID      uint64 `gorm:"column:user_id"`
+		Count       int64  `gorm:"column:count"`
+		OnlineCount int64  `gorm:"column:online_count"`
+		LastOnline  string `gorm:"column:last_online"` // SQLite 返回 string，手动解析
 	}
 	var nodeStats []NodeStats
 	db.DB.WithContext(ctx).Model(&model.Node{}).

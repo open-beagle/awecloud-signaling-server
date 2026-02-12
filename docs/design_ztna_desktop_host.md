@@ -126,7 +126,7 @@ Desktop.Host 特有的 GUI 功能，展示用户可访问的所有资源：
 │  │   ├── 🖥 web-server-1.beijing.beagle            │    │
 │  │   │     EndpointSSH (22)  ● 在线             │    │
 │  │   └── 🔧 kubernetes.beijing-prod.beijing.beagle        │    │
-│  │         EndpointK8SAPI (6443)  ● 在线        │    │
+│  │         EndpointK8SAPI (50050)  ● 在线       │    │
 │  └─────────────────────────────────────────────┘    │
 │                                                     │
 │  点击资源可复制连接命令                              │

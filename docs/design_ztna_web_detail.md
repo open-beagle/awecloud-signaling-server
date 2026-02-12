@@ -136,16 +136,14 @@
 
 ZTNA 新页面搜索区域设计：
 
-| 页面                    | 筛选条件                              | 布局     |
-| ----------------------- | ------------------------------------- | -------- |
-| K8S API 授权列表        | Agent 筛选 + 搜索                     | 简单搜索 |
-| K8S Service 授权列表    | Agent 筛选 + 搜索                     | 简单搜索 |
-| EndpointSSH 列表        | Agent 筛选 + 状态筛选 + 搜索          | 简单搜索 |
-| EndpointK8SAPI 列表     | Agent 筛选 + 状态筛选 + 搜索          | 简单搜索 |
-| EndpointK8SService 列表 | Agent 筛选 + 状态筛选 + 搜索          | 简单搜索 |
-| 资源发现                | Agent + 来源 + 命名空间 + 状态 + 搜索 | 复杂搜索 |
-| 域名管理                | 类型 + Agent + 状态 + 搜索            | 复杂搜索 |
-| 审计日志增强            | 操作类型 + Agent + 用户 + 时间 + 搜索 | 复杂搜索 |
+| 页面                 | 筛选条件                                | 布局     |
+| -------------------- | --------------------------------------- | -------- |
+| K8S API 授权列表     | Agent 筛选 + 搜索                       | 简单搜索 |
+| K8S Service 授权列表 | Agent 筛选 + 搜索                       | 简单搜索 |
+| Endpoint 列表        | Agent 筛选 + 类型筛选 + 状态筛选 + 搜索 | 复杂搜索 |
+| 资源发现             | Agent + 来源 + 命名空间 + 状态 + 搜索   | 复杂搜索 |
+| 域名管理             | 类型 + Agent + 状态 + 搜索              | 复杂搜索 |
+| 审计日志增强         | 操作类型 + Agent + 用户 + 时间 + 搜索   | 复杂搜索 |
 
 ### 页面模式规范
 
@@ -335,11 +333,8 @@ ZTNA 新页面搜索区域设计：
 ```
 ├── 用户管理          /users                    （不变）
 ├── 设备管理          /nodes                    （不变）
+├── 终端管理（el-menu-item，新增）  /endpoints              （新增，List+Detail 模式）
 ├── 分组管理          /groups                   （不变）
-├── 终端管理（el-sub-menu，新增）
-│     ├── EndpointSSH        /endpoints/ssh     （新增）
-│     ├── EndpointK8SAPI     /endpoints/k8s     （新增）
-│     └── EndpointK8SService /endpoints/svc     （新增）
 ├── 资源发现          /resources                 （新增）
 ├── 域名管理          /domains                   （新增）
 ├── 授权管理（el-sub-menu，增强）
@@ -360,11 +355,11 @@ ZTNA 新页面搜索区域设计：
 
 Sidebar 新增菜单项的图标选择：
 
-| 菜单          | el-icon 组件 | 说明     |
-| ------------- | ------------ | -------- |
-| Endpoint 管理 | Connection   | 连接端点 |
-| 资源发现      | Search       | 搜索发现 |
-| 域名管理      | Link         | 链接域名 |
+| 菜单     | el-icon 组件 | 说明                   |
+| -------- | ------------ | ---------------------- |
+| 终端管理 | Connection   | 连接端点（单个菜单项） |
+| 资源发现 | Search       | 搜索发现               |
+| 域名管理 | Link         | 链接域名               |
 
 ## 路由设计
 
@@ -380,9 +375,8 @@ Sidebar 新增菜单项的图标选择：
 | /acl/jump/ssh/:id    | ACLJumpSSHDetail    | views/ACL/JumpSSHDetail.vue    |
 | /acl/jump/k8s/:id    | ACLJumpK8SDetail    | views/ACL/JumpK8SDetail.vue    |
 | /acl/jump/svc/:id    | ACLJumpSVCDetail    | views/ACL/JumpSVCDetail.vue    |
-| /endpoints/ssh       | EndpointSSH         | views/Endpoint/SSHList.vue     |
-| /endpoints/k8s       | EndpointK8S         | views/Endpoint/K8SList.vue     |
-| /endpoints/svc       | EndpointSVC         | views/Endpoint/SVCList.vue     |
+| /endpoints           | Endpoints           | views/Endpoint/List.vue        |
+| /endpoints/:type/:id | EndpointDetail      | views/Endpoint/Detail.vue      |
 | /resources           | Resources           | views/Resource/List.vue        |
 | /domains             | Domains             | views/Domain/List.vue          |
 
@@ -398,9 +392,8 @@ Sidebar 新增菜单项的图标选择：
 | /acl/jump/ssh/:id    | 授权管理 > 跳跃授权 > SSH 跳跃: {name}         |
 | /acl/jump/k8s/:id    | 授权管理 > 跳跃授权 > K8S 跳跃: {name}         |
 | /acl/jump/svc/:id    | 授权管理 > 跳跃授权 > SVC 跳跃: {name}         |
-| /endpoints/ssh       | Endpoint 管理 > EndpointSSH                    |
-| /endpoints/k8s       | Endpoint 管理 > EndpointK8SAPI                 |
-| /endpoints/svc       | Endpoint 管理 > EndpointK8SService             |
+| /endpoints           | 终端管理                                       |
+| /endpoints/:type/:id | 终端管理 > 终端详情: {name}                    |
 | /resources           | 资源发现                                       |
 | /domains             | 域名管理                                       |
 
@@ -500,7 +493,7 @@ Sidebar 新增菜单项的图标选择：
 │  ├──────────────┼──────────────────────────────────────────┤    │
 │  │ K8S API 地址 │ https://localhost:6443                   │    │
 │  ├──────────────┼──────────────────────────────────────────┤    │
-│  │ 域名         │ kubernetes.beijing.beagle:6443                  │    │
+│  │ 域名         │ kubernetes.beijing.beagle:50050                 │    │
 │  └──────────────┴──────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
 
@@ -1030,7 +1023,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 │  ├──────────────┼──────────────────────────────────────────┤    │
 │  │ API 地址     │ 192.168.1.10:6443                        │    │
 │  ├──────────────┼──────────────────────────────────────────┤    │
-│  │ 域名         │ kubernetes.beijing-prod.beijing.beagle:6443     │    │
+│  │ 域名         │ kubernetes.beijing-prod.beijing.beagle:50050    │    │
 │  ├──────────────┼──────────────────────────────────────────┤    │
 │  │ 状态         │ [● 在线]                                 │    │
 │  └──────────────┴──────────────────────────────────────────┘    │
@@ -1145,7 +1138,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 #### 原型图
 
 ```
-面包屑：Endpoint 管理 > EndpointSSH
+面包屑：终端管理 > EndpointSSH
 
 ┌─────────────────────────────────────────────────────────────────┐
 │ el-card 搜索区                                                   │
@@ -1179,11 +1172,12 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 
 展示所有 EndpointSSH 列表。Endpoint 由 Agent 上报（Endpoint 反向连接 Agent，Agent 通过心跳上报给 Server）。
 
-此页面是只读管理页面，不支持创建 Endpoint（Endpoint 通过安装 signal_endpoint 二进制自动注册）。管理员可以：
+此页面是只读管理页面，不支持创建 Endpoint（Endpoint 通过安装 signal_endpoint 二进制自动注册，Agent 心跳上报 Server 自动发现）。管理员可以：
 
 - 查看 Endpoint 状态（在线/离线）
 - 编辑别名
 - 启用/禁用 Endpoint
+- 注销 Endpoint（标记为已注销，Agent 心跳同步后断开该 Endpoint 的 gRPC 连接）
 
 #### 核心数据
 
@@ -1213,23 +1207,25 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 | domain     | string | 自动生成的域名     |
 | status     | string | online/offline     |
 | enabled    | bool   | 是否启用           |
-| created_at | time   | 创建时间           |
+| created_at | time   | 首次发现时间       |
 
 编辑别名：PUT /api/v1/endpoints/ssh/:id（body: alias）
 启用/禁用：PUT /api/v1/endpoints/ssh/:id/enabled（body: enabled）
+注销：DELETE /api/v1/endpoints/ssh/:id（Server 标记注销 → Agent 心跳同步 → Agent 断开 Endpoint）
 
 #### 组件设计
 
-| 区域       | 组件                                              |
-| ---------- | ------------------------------------------------- |
-| Agent 筛选 | el-select(filterable, clearable, 加载 Agent 列表) |
-| 状态筛选   | el-select(clearable, 选项: 在线/离线)             |
-| 表格       | el-card > el-table                                |
-| 域名列     | CopyButton（点击复制）                            |
-| 状态列     | StatusTag                                         |
-| 操作列     | el-button(link) 编辑 + el-button(link) 启用/禁用  |
-| 编辑弹窗   | el-dialog > el-form（仅编辑别名）                 |
-| 启用/禁用  | ElMessageBox.confirm                              |
+| 区域       | 组件                                                                    |
+| ---------- | ----------------------------------------------------------------------- |
+| Agent 筛选 | el-select(filterable, clearable, 加载 Agent 列表)                       |
+| 状态筛选   | el-select(clearable, 选项: 在线/离线)                                   |
+| 表格       | el-card > el-table                                                      |
+| 域名列     | CopyButton（点击复制）                                                  |
+| 状态列     | StatusTag                                                               |
+| 操作列     | el-button(link) 编辑 + el-button(link) 启用/禁用 + el-button(link) 注销 |
+| 编辑弹窗   | el-dialog > el-form（仅编辑别名）                                       |
+| 启用/禁用  | ElMessageBox.confirm                                                    |
+| 注销确认   | ElMessageBox.confirm（警告样式，提示注销后 Endpoint 需重新注册）        |
 
 ---
 
@@ -1238,7 +1234,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 #### 原型图
 
 ```
-面包屑：Endpoint 管理 > EndpointK8SAPI
+面包屑：终端管理 > EndpointK8SAPI
 
 ┌─────────────────────────────────────────────────────────────────┐
 │ el-card 搜索区                                                   │
@@ -1256,7 +1252,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 │  │          │        │        │ 6443     │ -prod. │      │禁 │  │
 │  │          │        │        │          │ beijing│      │用 │  │
 │  │          │        │        │          │ .beagle:  │      │   │  │
-│  │          │        │        │          │ 6443   │      │   │  │
+│  │          │        │        │          │ 50050  │      │   │  │
 │  └──────────┴────────┴────────┴──────────┴────────┴──────┴───┘  │
 │                                                                  │
 │  共 1 条  [10 ▼] [< 1 >]                                        │
@@ -1268,13 +1264,16 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 展示所有 EndpointK8SAPI 列表。与 EndpointSSH 列表页结构一致，区别：
 
 - "内网地址"列替换为"API 地址"列
-- 域名格式不同（kubernetes.{endpoint}.{agent}.beagle:6443）
+- 域名格式不同（kubernetes.{endpoint}.{agent}.beagle:50050）
+- 操作列同样包含：编辑、启用/禁用、注销
 
 #### 核心数据
 
 数据来源：GET /api/v1/endpoints/k8s
 
 响应字段与 EndpointSSH 类似，host/port 替换为 api_server。
+
+注销：DELETE /api/v1/endpoints/k8s/:id
 
 #### 组件设计
 
@@ -1287,7 +1286,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 #### 原型图
 
 ```
-面包屑：Endpoint 管理 > EndpointK8SService
+面包屑：终端管理 > EndpointK8SService
 
 ┌─────────────────────────────────────────────────────────────────┐
 │ el-card 搜索区                                                   │
@@ -1345,6 +1344,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 
 - 没有"内网地址"或"API 地址"列，改为"Service 数"列
 - 操作列多一个"查看 Service"按钮，点击弹窗展示该 Endpoint 发现的 K8S Service 列表
+- 操作列同样包含：编辑、启用/禁用、注销
 
 #### 核心数据
 
@@ -1362,7 +1362,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 | service_count | int    | 发现的 Service 数  |
 | status        | string | online/offline     |
 | enabled       | bool   | 是否启用           |
-| created_at    | time   | 创建时间           |
+| created_at    | time   | 首次发现时间       |
 
 查看 Service 列表：GET /api/v1/endpoints/svc/:id/services
 
@@ -1375,16 +1375,19 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 | domain     | string | 自动生成的域名   |
 | status     | string | online/offline   |
 
+注销：DELETE /api/v1/endpoints/svc/:id
+
 #### 组件设计
 
-| 区域         | 组件                          |
-| ------------ | ----------------------------- |
-| 列表页       | 与 EndpointSSH 列表页结构一致 |
-| Service 数列 | el-tag(type="primary")        |
-| 查看 Service | el-button(link) → el-dialog   |
-| 弹窗内表格   | el-table（只读）              |
-| 域名列       | CopyButton                    |
-| 状态列       | StatusTag                     |
+| 区域         | 组件                             |
+| ------------ | -------------------------------- |
+| 列表页       | 与 EndpointSSH 列表页结构一致    |
+| Service 数列 | el-tag(type="primary")           |
+| 查看 Service | el-button(link) → el-dialog      |
+| 弹窗内表格   | el-table（只读）                 |
+| 域名列       | CopyButton                       |
+| 状态列       | StatusTag                        |
+| 注销确认     | ElMessageBox.confirm（警告样式） |
 
 ---
 
@@ -1507,7 +1510,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 │  │ beijing.beagle  │ Agent    │ beijing│ 22   │● 活跃│ 2026-... │  │
 │  │              │ SSH      │        │      │      │          │  │
 │  ├──────────────┼──────────┼────────┼──────┼──────┼──────────┤  │
-│  │ api.beijing  │ Agent    │ beijing│ 6443 │● 活跃│ 2026-... │  │
+│  │ api.beijing  │ Agent    │ beijing│ 50050│● 活跃│ 2026-... │  │
 │  │ .beagle      │ K8SAPI   │        │      │      │          │  │
 │  ├──────────────┼──────────┼────────┼──────┼──────┼──────────┤  │
 │  │ pg.yygl.     │ Agent    │ beijing│ 5432 │● 活跃│ 2026-... │  │
@@ -1741,7 +1744,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 │  ── K8S API ─────────────────────────────────────────────────── │
 │                                                                  │
 │  启用 K8S API    [开关 ○]    ← 灰色表示 Server 未设置           │
-│  监听端口        [6443    ]  ← placeholder 显示默认值            │
+│  监听端口        [50050   ]  ← placeholder 显示默认值            │
 │  API Server 地址 [        ]  ← placeholder: 留空自动获取         │
 │                                                                  │
 │  ── K8S Service ─────────────────────────────────────────────── │
@@ -1749,7 +1752,7 @@ Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 s
 │  启用 K8S Service [开关 ○]                                       │
 │  标签选择器       [signal.beagle.io/expose=true]                 │
 │  命名空间         [全部命名空间              ▼]  ← 多选下拉      │
-│  监听端口         [9090    ]                                     │
+│  监听端口         [50051   ]                                     │
 │                                                                  │
 │  ── 配置来源说明 ────────────────────────────────────────────── │
 │                                                                  │
@@ -1782,7 +1785,7 @@ K8S API 区域：
 | 字段            | 组件                              | 说明                                          |
 | --------------- | --------------------------------- | --------------------------------------------- |
 | 启用 K8S API    | el-switch                         | 绑定 k8s_enabled，null 时显示为关闭灰色       |
-| 监听端口        | el-input-number(min=1, max=65535) | 绑定 k8s_listen_port，placeholder=6443        |
+| 监听端口        | el-input-number(min=1, max=65535) | 绑定 k8s_listen_port，placeholder=50050       |
 | API Server 地址 | el-input                          | 绑定 k8s_api_server，placeholder=留空自动获取 |
 
 K8S Service 区域：
@@ -1792,7 +1795,7 @@ K8S Service 区域：
 | 启用 K8S SVC | el-switch                                     | 绑定 svc_enabled，null 时显示为关闭灰色                           |
 | 标签选择器   | el-input                                      | 绑定 svc_label_selector，placeholder=signal.beagle.io/expose=true |
 | 命名空间     | el-select(multiple, filterable, allow-create) | 绑定 svc_namespaces，空=全部命名空间                              |
-| 监听端口     | el-input-number(min=1, max=65535)             | 绑定 svc_listen_port_base，placeholder=9090                       |
+| 监听端口     | el-input-number(min=1, max=65535)             | 绑定 svc_listen_port_base，placeholder=50051                      |
 
 配置来源说明：
 
@@ -1900,6 +1903,117 @@ Desktop 和 Pod 类型设备不显示能力配置卡片（它们没有 SSH/K8S/S
 
 ---
 
+### 16. 设备详情页 Endpoint 功能管理
+
+#### 概述
+
+在第 15 节能力配置卡片中，新增 Endpoint 功能区域。管理员可以为 Agent 开启/关闭 Endpoint 功能，管理 Endpoint 注册令牌。
+
+Endpoint 功能开启后，Agent 启动内网 gRPC Server（监听 0.0.0.0:50052），接受内网 Endpoint 的反向连接。
+
+#### 原型图
+
+在能力配置卡片的 K8S Service 区域下方，新增 Endpoint 区域：
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ el-card 能力配置                                    [保存] [重置]│
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ── SSH ──────────────────────────────────────────────────────── │
+│  （同第 15 节，不变）                                            │
+│                                                                  │
+│  ── K8S API ─────────────────────────────────────────────────── │
+│  （同第 15 节，不变）                                            │
+│                                                                  │
+│  ── K8S Service ─────────────────────────────────────────────── │
+│  （同第 15 节，不变）                                            │
+│                                                                  │
+│  ── Endpoint ────────────────────────────────────────────────── │
+│                                                                  │
+│  启用 Endpoint    [开关 ●]                                       │
+│  监听端口         [50052  ]                                      │
+│                                                                  │
+│  Endpoint Token                                                  │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ ep_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6                    │    │
+│  │                                    [复制] [重新生成]     │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                  │
+│  ℹ️ 将此 Token 配置到内网机器的 endpoint.toml 文件中             │
+│                                                                  │
+│  ── 配置来源说明 ────────────────────────────────────────────── │
+│  ℹ️ 配置优先级：Server 远程配置 > 环境变量 > 配置文件            │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Endpoint 区域详细设计
+
+| 字段           | 组件                              | 说明                                         |
+| -------------- | --------------------------------- | -------------------------------------------- |
+| 启用 Endpoint  | el-switch                         | 绑定 endpoint_enabled                        |
+| 监听端口       | el-input-number(min=1, max=65535) | 绑定 endpoint_listen_port，placeholder=50052 |
+| Endpoint Token | el-input(readonly) + 按钮组       | 只读显示 token，开关关闭时隐藏               |
+| 复制按钮       | el-button(icon=CopyDocument)      | 复制 token 到剪贴板                          |
+| 重新生成按钮   | el-button(type="warning")         | 重新生成 token，旧 token 立即失效            |
+
+#### Token 显示逻辑
+
+```
+Endpoint 开关状态：
+  ├─ 关闭 → Token 区域隐藏（v-if="endpointEnabled"）
+  └─ 开启
+       ├─ 已有 token → 显示 token + 复制 + 重新生成
+       └─ 无 token（首次开启）→ 保存后自动生成，刷新后显示
+```
+
+#### 重新生成 Token 流程
+
+```
+点击「重新生成」
+    │
+    ├─ ElMessageBox.confirm("确认重新生成？旧 Token 将立即失效，
+    │   已连接的 Endpoint 下次重连时需要新 Token")
+    │
+    ├─ POST /api/v1/nodes/:id/capabilities/endpoint-token/regenerate
+    │
+    ├─ 成功 → ElMessage.success("Token 已重新生成")
+    │
+    └─ 刷新数据（显示新 token）
+```
+
+#### 核心数据
+
+在第 15 节的能力配置 API 基础上，新增 Endpoint 相关字段：
+
+获取能力配置响应新增字段：
+
+| 字段                 | 类型   | 说明                              |
+| -------------------- | ------ | --------------------------------- |
+| endpoint_enabled     | \*bool | Endpoint 开关（null=未设置）      |
+| endpoint_listen_port | \*int  | 内网 gRPC 监听端口（null=未设置） |
+| endpoint_token       | string | Endpoint 注册令牌（空=未生成）    |
+
+更新能力配置请求新增字段：endpoint_enabled, endpoint_listen_port（token 不通过此接口修改）
+
+重新生成 Token：POST /api/v1/nodes/:id/capabilities/endpoint-token/regenerate
+
+#### 组件设计
+
+| 区域         | 组件                                           |
+| ------------ | ---------------------------------------------- |
+| 分区标题     | el-divider(content-position="left") "Endpoint" |
+| 开关         | el-switch                                      |
+| 端口输入     | el-input-number(:min="1", :max="65535")        |
+| Token 显示区 | el-input(readonly) + el-button-group           |
+| 复制按钮     | el-button(icon=CopyDocument, @click 复制)      |
+| 重新生成按钮 | el-button(type="warning", @click 重新生成)     |
+| Token 提示   | el-alert(type="info", :closable="false")       |
+| 重新生成确认 | ElMessageBox.confirm                           |
+
+---
+
 ## 国际化
 
 所有新增页面和组件需要同步更新中英文翻译文件：
@@ -1913,7 +2027,7 @@ Desktop 和 Pod 类型设备不显示能力配置卡片（它们没有 SSH/K8S/S
 
 | key                     | 中文               | 英文               |
 | ----------------------- | ------------------ | ------------------ |
-| menu.endpoints          | Endpoint 管理      | Endpoints          |
+| menu.endpoints          | 终端管理           | Endpoints          |
 | menu.endpointSSH        | EndpointSSH        | EndpointSSH        |
 | menu.endpointK8SAPI     | EndpointK8SAPI     | EndpointK8SAPI     |
 | menu.endpointK8SService | EndpointK8SService | EndpointK8SService |
@@ -1939,7 +2053,7 @@ Desktop 和 Pod 类型设备不显示能力配置卡片（它们没有 SSH/K8S/S
 | acl.labelSelector      | 标签选择器       | Label Selector      |
 | acl.discoveredServices | 已发现的 Service | Discovered Services |
 
-Endpoint 管理相关：
+终端管理相关：
 
 | key                   | 中文         | 英文             |
 | --------------------- | ------------ | ---------------- |
@@ -2018,6 +2132,23 @@ Endpoint 管理相关：
 | capability.sourceRemote      | 远程                                                                                 | Remote                                                                                       |
 | capability.sourceLocal       | 本地                                                                                 | Local                                                                                        |
 | capability.priorityHint      | 配置优先级：Server 远程配置 > 环境变量 > 配置文件。未设置的参数将使用 Agent 本地配置 | Config priority: Server remote > env vars > config file. Unset params use Agent local config |
+| capability.endpoint          | Endpoint                                                                             | Endpoint                                                                                     |
+| capability.endpointEnabled   | 启用 Endpoint                                                                        | Enable Endpoint                                                                              |
+| capability.endpointPort      | 监听端口                                                                             | Listen Port                                                                                  |
+| capability.endpointToken     | Endpoint Token                                                                       | Endpoint Token                                                                               |
+| capability.copyToken         | 复制                                                                                 | Copy                                                                                         |
+| capability.regenerateToken   | 重新生成                                                                             | Regenerate                                                                                   |
+| capability.regenerateConfirm | 确认重新生成？旧 Token 将立即失效，已连接的 Endpoint 下次重连时需要新 Token          | Confirm regenerate? Old token will be invalidated immediately                                |
+| capability.tokenRegenerated  | Token 已重新生成                                                                     | Token regenerated                                                                            |
+| capability.tokenHint         | 将此 Token 配置到内网机器的 endpoint.toml 文件中                                     | Configure this token in endpoint.toml on internal network machines                           |
+
+终端管理相关（注销操作）：
+
+| key                    | 中文                                              | 英文                                                       |
+| ---------------------- | ------------------------------------------------- | ---------------------------------------------------------- |
+| endpoint.revoke        | 注销                                              | Revoke                                                     |
+| endpoint.revokeConfirm | 确认注销此 Endpoint？注销后需重新注册才能恢复连接 | Confirm revoke? Re-registration required to restore access |
+| endpoint.revokeSuccess | Endpoint 已注销                                   | Endpoint revoked                                           |
 
 ---
 
@@ -2029,7 +2160,7 @@ web/src/
 │     ├── aclK8s.ts              （新增）K8SAPI 授权 API
 │     ├── aclK8sService.ts       （新增）K8S Service 授权 API
 │     ├── aclJump.ts             （新增）跳跃授权 API
-│     ├── endpoint.ts            （新增）Endpoint 管理 API
+│     ├── endpoint.ts            （新增）终端管理 API
 │     ├── resource.ts            （新增）资源发现 API
 │     └── domain.ts              （新增）域名管理 API
 ├── views/
@@ -2071,9 +2202,10 @@ web/src/
 | P0   | 现有授权弹窗迁移（4 个弹窗改用 AuthGrantDialog） | AuthGrantDialog             |
 | P1   | K8SAPI 授权页面（列表 + 详情）                   | AclK8sPermission API        |
 | P1   | K8S Service 授权页面（列表 + 详情）              | AclK8SServicePermission API |
-| P1   | Endpoint 管理页面（SSH/K8S/SVC 三个）            | Endpoint 模型 API           |
+| P1   | 终端管理页面（SSH/K8S/SVC 三个）                 | Endpoint 模型 API           |
 | P1   | 跳跃授权页面（列表 + 三种详情）                  | 跳跃 ACL 模型 API           |
 | P1   | 资源发现页面                                     | 资源发现 API                |
 | P1   | 域名管理页面                                     | 域名注册表 API              |
 | P1   | 设备详情页能力配置卡片（Agent 远程控制）         | 能力配置 API                |
+| P1   | 设备详情页 Endpoint 功能管理（Token 管理）       | 能力配置 API + Endpoint API |
 | P2   | 审计日志增强                                     | 操作审计 API                |

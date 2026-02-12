@@ -1,23 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: awecloud-signaling-server
+  name: signal-server
   namespace: beagle-access
   labels:
-    app: awecloud-signaling-server
+    app: signal-server
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: awecloud-signaling-server
+      app: signal-server
   template:
     metadata:
       labels:
-        app: awecloud-signaling-server
+        app: signal-server
     spec:
       containers:
         - name: server
-          image: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.2.2
+          image: registry.cn-qingdao.aliyuncs.com/wod/signal-server:v0.2.2
           imagePullPolicy: Always
           ports:
             - name: frp
@@ -31,13 +31,13 @@ spec:
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: awecloud-signaling-server
+                  name: signal-server
                   key: jwt-secret
             # FRP Auth Token（必需）
             - name: TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: awecloud-signaling-server
+                  name: signal-server
                   key: token
             # FRP 公网访问地址（可选）
             # 如果配置，Agent/Desktop 将使用此地址连接 FRP 服务
@@ -88,9 +88,9 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: awecloud-signaling-server
+            claimName: signal-server
         - name: logs
           emptyDir: {}
         - name: config
           configMap:
-            name: awecloud-signaling-server
+            name: signal-server

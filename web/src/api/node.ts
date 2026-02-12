@@ -91,6 +91,9 @@ export interface CapabilityConfig {
   svc_label_selector: string
   svc_namespaces: string
   svc_listen_port_base: number | null
+  endpoint_enabled: boolean | null
+  endpoint_listen_port: number | null
+  endpoint_token: string
 }
 
 // 获取 Agent 能力配置
@@ -106,4 +109,9 @@ export const updateNodeCapabilities = (id: number, data: Partial<CapabilityConfi
 // 重置 Agent 能力配置
 export const resetNodeCapabilities = (id: number) => {
   return request.delete<any, ApiResponse>(`/api/v1/admin/nodes/${id}/capabilities`)
+}
+
+// 重新生成 Endpoint Token
+export const regenerateEndpointToken = (id: number) => {
+  return request.post<any, ApiResponse<{ endpoint_token: string }>>(`/api/v1/admin/nodes/${id}/capabilities/endpoint-token/regenerate`)
 }

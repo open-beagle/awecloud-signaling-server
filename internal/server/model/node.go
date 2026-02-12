@@ -37,6 +37,11 @@ type Node struct {
 	SVCNamespaces     string `gorm:"column:svc_namespaces;size:1024" json:"svc_namespaces,omitempty"`         // K8S Service 命名空间列表 JSON
 	SVCListenPortBase *int   `gorm:"column:svc_listen_port_base" json:"svc_listen_port_base,omitempty"`       // K8S Service gRPC 监听端口
 
+	// Endpoint 功能配置（Server 远程控制）
+	EndpointEnabled   *bool  `gorm:"column:endpoint_enabled" json:"endpoint_enabled,omitempty"`              // Endpoint 功能开关
+	EndpointListenPort *int  `gorm:"column:endpoint_listen_port" json:"endpoint_listen_port,omitempty"`     // Endpoint 内网 gRPC 监听端口（默认 50052）
+	EndpointToken     string `gorm:"column:endpoint_token;size:255" json:"-"`                                // Endpoint 注册令牌（不序列化到 JSON）
+
 	// 关联
 	User *User `gorm:"foreignKey:UserID" json:"user,omitempty"`
 }

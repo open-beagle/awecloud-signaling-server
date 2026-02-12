@@ -2,7 +2,8 @@
 # AWECloud Agent 一键安装脚本
 # 用法: curl -fsSL https://server/api/v1/download/install.sh | sudo bash -s -- -n <name> -t <token> -s <server>
 
-set -e
+# 注意：不使用 set -e，因为管道命令（curl | grep | cut）在 set -e 下
+# 任何一步失败都会导致脚本静默退出，无法输出错误信息
 
 # 颜色定义
 RED='\033[0;31m'
@@ -161,16 +162,22 @@ download_agent() {
     
     # 获取版本信息
     local version_url="${SERVER_ADDRESS}/api/v1/download/agent/version"
+    local version_response=""
     local version=""
     
+    # 先获取完整响应，再解析，避免管道失败导致脚本退出
     if command -v curl &> /dev/null; then
-        version=$(curl -fsSL "$version_url" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+        version_response=$(curl -fsSL "$version_url" 2>&1) || true
     elif command -v wget &> /dev/null; then
-        version=$(wget -qO- "$version_url" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+        version_response=$(wget -qO- "$version_url" 2>&1) || true
+    fi
+    
+    if [[ -n "$version_response" ]]; then
+        version=$(echo "$version_response" | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || true)
     fi
     
     if [[ -z "$version" ]]; then
-        error "无法获取 Agent 版本信息"
+        error "无法获取 Agent 版本信息（URL: ${version_url}，响应: ${version_response:-空}）"
     fi
     
     info "最新版本: ${version}"
@@ -186,16 +193,23 @@ download_agent() {
     info "下载 Agent..."
     
     # 创建下载目录
-    mkdir -p "$DOWNLOAD_DIR"
-    mkdir -p "$INSTALL_DIR"
+    mkdir -p "$DOWNLOAD_DIR" || error "创建目录失败: $DOWNLOAD_DIR"
+    mkdir -p "$INSTALL_DIR" || error "创建目录失败: $INSTALL_DIR"
     
     # 下载到临时文件
-    local tmp_file=$(mktemp)
+    local tmp_file
+    tmp_file=$(mktemp)
     
     if command -v curl &> /dev/null; then
-        curl -fsSL -o "$tmp_file" "$download_url" || error "下载失败"
+        if ! curl -fsSL -o "$tmp_file" "$download_url"; then
+            rm -f "$tmp_file"
+            error "下载失败（URL: ${download_url}）"
+        fi
     elif command -v wget &> /dev/null; then
-        wget -q -O "$tmp_file" "$download_url" || error "下载失败"
+        if ! wget -q -O "$tmp_file" "$download_url"; then
+            rm -f "$tmp_file"
+            error "下载失败（URL: ${download_url}）"
+        fi
     else
         error "需要 curl 或 wget"
     fi

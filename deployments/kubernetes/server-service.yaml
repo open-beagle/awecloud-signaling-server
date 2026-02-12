@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: awecloud-signaling-server
+  name: signal-server
   namespace: beagle-access
   labels:
-    app: awecloud-signaling-server
+    app: signal-server
 spec:
   type: ClusterIP
   ports:
@@ -19,4 +19,4 @@ spec:
     protocol: TCP
     appProtocol: http2
   selector:
-    app: awecloud-signaling-server
+    app: signal-server

@@ -1,0 +1,47 @@
+# AWECloud Signaling Endpoint 配置文件
+#
+# 本地只需要 Agent 连接信息和能力开关，其余设置从 Server 通过 Agent 下发。
+# 一个 Endpoint 进程可以同时启用多种能力。
+#
+# 环境变量：
+#   SIGNAL_ENDPOINT_AGENT_ADDRESS       Agent 内网 gRPC 地址
+#   SIGNAL_ENDPOINT_TOKEN               注册令牌
+#   SIGNAL_ENDPOINT_NAME                Endpoint 名称
+#   SIGNAL_ENDPOINT_SSH_ENABLED         SSH 能力开关（true/false）
+#   SIGNAL_ENDPOINT_SSH_HOST            SSH 目标地址
+#   SIGNAL_ENDPOINT_SSH_PORT            SSH 端口
+#   SIGNAL_ENDPOINT_K8S_ENABLED         K8S API 能力开关
+#   SIGNAL_ENDPOINT_K8S_API_SERVER      K8S API Server 地址
+#   SIGNAL_ENDPOINT_SVC_ENABLED         K8S Service 能力开关
+#   SIGNAL_ENDPOINT_SVC_LABEL_SELECTOR  标签选择器
+
+# Agent 连接配置
+[agent]
+# Agent 内网 gRPC 地址（必填）
+address = "192.168.1.1:50052"
+
+# 注册令牌（必填，从 Web 管理界面的 Agent 详情页复制）
+token = "ep_xxxxxxxxxxxxxxxx"
+
+# Endpoint 名称（可选，默认使用 hostname）
+# name = ""
+
+# SSH 能力
+[ssh]
+enabled = true
+# SSH 目标地址（默认 127.0.0.1）
+# host = "127.0.0.1"
+# SSH 端口（默认 22）
+# port = 22
+
+# K8S API 能力
+[k8s]
+enabled = false
+# K8S API Server 地址（默认自动检测集群内地址）
+# api_server = "https://10.0.0.1:6443"
+
+# K8S Service 能力
+[svc]
+enabled = false
+# 标签选择器（可选）
+# label_selector = "signal.beagle.io/expose=true"

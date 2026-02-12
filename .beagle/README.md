@@ -178,7 +178,7 @@ kubectl --context aliyun --namespace beagle-access logs -f deployment/awecloud-s
 GOARCHS=amd64,arm64 BUILD_VERSION=$(cat version) bash scripts/build.sh agent
 
 # 2. 发布到 S3
-BUILD_VERSION=$(cat version) bash scripts/publish_agent_s3.sh
+BUILD_VERSION=$(cat version) bash scripts/push_to_s3.sh
 ```
 
 发布内容：

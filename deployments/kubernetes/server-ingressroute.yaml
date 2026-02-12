@@ -17,10 +17,10 @@
 apiVersion: bcc.bd-apaas.com/v1alpha1
 kind: IngressRoute
 metadata:
-  name: awecloud-signaling-server
+  name: signal-server
   namespace: beagle-access
   labels:
-    app: awecloud-signaling-server
+    app: signal-server
 spec:
   entryPoints:
     - websecure
@@ -30,38 +30,19 @@ spec:
     - kind: Rule
       match: Host(`signaling.example.com`) && PathPrefix(`/ws`)
       services:
-        - name: awecloud-signaling-server
+        - name: signal-server
           port: 7000
       middlewares:
-        - name: awecloud-signaling-server
-
-    # FRP WebSocket 路由 - 原生路径
-    # 匹配 /~!frp 路径，直接转发到 FRP Server（不重写）
-    - kind: Rule
-      match: Host(`signaling.example.com`) && PathPrefix(`/~!frp`)
-      services:
-        - name: awecloud-signaling-server
-          port: 7000
+        - name: signal-server
 
     # HTTP/gRPC 统一路由
     # 使用 h2c (HTTP/2 Cleartext) 同时支持 Web 和 gRPC
     - kind: Rule
       match: Host(`signaling.example.com`)
       services:
-        - name: awecloud-signaling-server
+        - name: signal-server
           port: 8080
           scheme: h2c  # 关键：使用 HTTP/2 协议
   tls: {}
 
----
-apiVersion: bcc.bd-apaas.com/v1alpha1
-kind: Middleware
-metadata:
-  name: awecloud-signaling-server
-  namespace: beagle-access
-  labels:
-    app: awecloud-signaling-server
-spec:
-  replacePathRegex:
-    regex: ^/ws$
-    replacement: /~!frp
+

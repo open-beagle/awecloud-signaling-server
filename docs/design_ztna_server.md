@@ -89,12 +89,12 @@ GET /api/v1/client/resources
 ```
 Agent 本机：
   <agent-name>.beagle:22                          → AgentSSH
-  kubernetes.<agent-name>.beagle:6443                    → AgentK8SAPI
+  kubernetes.<agent-name>.beagle:50050                    → AgentK8SAPI
   <service>.<namespace>.<agent-name>.beagle       → AgentK8SService
 
 Endpoint 跳跃：
   <endpoint>.<agent-name>.beagle:22               → EndpointSSH
-  kubernetes.<endpoint>.<agent-name>.beagle:6443         → EndpointK8SAPI
+  kubernetes.<endpoint>.<agent-name>.beagle:50050         → EndpointK8SAPI
   <service>.<namespace>.<endpoint>.<agent-name>.beagle → EndpointK8SService
 
 ### 域名注册流程
@@ -110,7 +110,7 @@ Agent 发现资源
 │ beijing.beagle → agent_id:1, target:100.64.x.x:22
 │
 ├── AgentK8SAPI：注册 K8S API 域名
-│ kubernetes.beijing.beagle → agent_id:1, target:localhost:6443
+│ kubernetes.beijing.beagle → agent_id:1, target:localhost:50050
 │
 └── Endpoint：Agent 转发 Endpoint 注册信息
 web-server-1.beijing.beagle → agent_id:1, endpoint:web-server-1

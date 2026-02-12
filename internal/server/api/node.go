@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"net/http"
 	"strconv"
 	"time"
@@ -282,26 +284,31 @@ func (a *NodeAPI) Expire(c *gin.Context) {
 
 // CapabilityResponse 能力配置响应
 type CapabilityResponse struct {
-	SSHEnabled       bool   `json:"ssh_enabled"`                    // SSH 开关（User.SSHEnabled，始终有值）
-	K8SEnabled       *bool  `json:"k8s_enabled"`                    // K8S API 开关（nil=未设置）
-	K8SListenPort    *int   `json:"k8s_listen_port"`                // K8S API 监听端口
-	K8SApiServer     string `json:"k8s_api_server"`                 // K8S API Server 地址
-	SVCEnabled       *bool  `json:"svc_enabled"`                    // K8S Service 开关
-	SVCLabelSelector string `json:"svc_label_selector"`             // 标签选择器
-	SVCNamespaces    string `json:"svc_namespaces"`                 // 命名空间列表 JSON
-	SVCListenPortBase *int  `json:"svc_listen_port_base"`           // gRPC 监听端口
+	SSHEnabled         bool   `json:"ssh_enabled"`                    // SSH 开关（User.SSHEnabled，始终有值）
+	K8SEnabled         *bool  `json:"k8s_enabled"`                    // K8S API 开关（nil=未设置）
+	K8SListenPort      *int   `json:"k8s_listen_port"`                // K8S API 监听端口
+	K8SApiServer       string `json:"k8s_api_server"`                 // K8S API Server 地址
+	SVCEnabled         *bool  `json:"svc_enabled"`                    // K8S Service 开关
+	SVCLabelSelector   string `json:"svc_label_selector"`             // 标签选择器
+	SVCNamespaces      string `json:"svc_namespaces"`                 // 命名空间列表 JSON
+	SVCListenPortBase  *int   `json:"svc_listen_port_base"`           // gRPC 监听端口
+	EndpointEnabled    *bool  `json:"endpoint_enabled"`               // Endpoint 功能开关
+	EndpointListenPort *int   `json:"endpoint_listen_port"`           // Endpoint 内网 gRPC 监听端口
+	EndpointToken      string `json:"endpoint_token"`                 // Endpoint 注册令牌
 }
 
 // CapabilityUpdateRequest 能力配置更新请求
 type CapabilityUpdateRequest struct {
-	SSHEnabled       *bool   `json:"ssh_enabled"`
-	K8SEnabled       *bool   `json:"k8s_enabled"`
-	K8SListenPort    *int    `json:"k8s_listen_port"`
-	K8SApiServer     *string `json:"k8s_api_server"`
-	SVCEnabled       *bool   `json:"svc_enabled"`
-	SVCLabelSelector *string `json:"svc_label_selector"`
-	SVCNamespaces    *string `json:"svc_namespaces"`
-	SVCListenPortBase *int   `json:"svc_listen_port_base"`
+	SSHEnabled         *bool   `json:"ssh_enabled"`
+	K8SEnabled         *bool   `json:"k8s_enabled"`
+	K8SListenPort      *int    `json:"k8s_listen_port"`
+	K8SApiServer       *string `json:"k8s_api_server"`
+	SVCEnabled         *bool   `json:"svc_enabled"`
+	SVCLabelSelector   *string `json:"svc_label_selector"`
+	SVCNamespaces      *string `json:"svc_namespaces"`
+	SVCListenPortBase  *int    `json:"svc_listen_port_base"`
+	EndpointEnabled    *bool   `json:"endpoint_enabled"`
+	EndpointListenPort *int    `json:"endpoint_listen_port"`
 }
 
 // GetCapabilities 获取 Agent 能力配置
@@ -332,14 +339,17 @@ func (a *NodeAPI) GetCapabilities(c *gin.Context) {
 	}
 
 	resp := CapabilityResponse{
-		SSHEnabled:        sshEnabled,
-		K8SEnabled:        node.K8SEnabled,
-		K8SListenPort:     node.K8SListenPort,
-		K8SApiServer:      node.K8SApiServer,
-		SVCEnabled:        node.SVCEnabled,
-		SVCLabelSelector:  node.SVCLabelSelector,
-		SVCNamespaces:     node.SVCNamespaces,
-		SVCListenPortBase: node.SVCListenPortBase,
+		SSHEnabled:         sshEnabled,
+		K8SEnabled:         node.K8SEnabled,
+		K8SListenPort:      node.K8SListenPort,
+		K8SApiServer:       node.K8SApiServer,
+		SVCEnabled:         node.SVCEnabled,
+		SVCLabelSelector:   node.SVCLabelSelector,
+		SVCNamespaces:      node.SVCNamespaces,
+		SVCListenPortBase:  node.SVCListenPortBase,
+		EndpointEnabled:    node.EndpointEnabled,
+		EndpointListenPort: node.EndpointListenPort,
+		EndpointToken:      node.EndpointToken,
 	}
 
 	c.JSON(http.StatusOK, NewSuccessResponse(resp))
@@ -403,6 +413,21 @@ func (a *NodeAPI) UpdateCapabilities(c *gin.Context) {
 	if req.SVCListenPortBase != nil {
 		updates["svc_listen_port_base"] = *req.SVCListenPortBase
 	}
+	if req.EndpointEnabled != nil {
+		updates["endpoint_enabled"] = *req.EndpointEnabled
+		// 首次开启 Endpoint 时自动生成 token
+		if *req.EndpointEnabled && node.EndpointToken == "" {
+			token, err := generateEndpointToken()
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, NewErrorResponse("生成 Endpoint Token 失败"))
+				return
+			}
+			updates["endpoint_token"] = token
+		}
+	}
+	if req.EndpointListenPort != nil {
+		updates["endpoint_listen_port"] = *req.EndpointListenPort
+	}
 
 	if len(updates) > 0 {
 		if err := db.DB.WithContext(ctx).Model(&node).Updates(updates).Error; err != nil {
@@ -444,15 +469,18 @@ func (a *NodeAPI) ResetCapabilities(c *gin.Context) {
 		return
 	}
 
-	// 清除 Node 上的所有远程能力配置（K8S/SVC 字段设为 nil/空）
-	updates := map[string]interface{}{
-		"k8s_enabled":         nil,
-		"k8s_listen_port":     nil,
-		"k8s_api_server":      "",
-		"svc_enabled":         nil,
-		"svc_label_selector":  "",
-		"svc_namespaces":      "",
+	// 清除 Node 上的所有远程能力配置（K8S/SVC/Endpoint 字段设为 nil/空）
+	updates := map[string]any{
+		"k8s_enabled":          nil,
+		"k8s_listen_port":      nil,
+		"k8s_api_server":       "",
+		"svc_enabled":          nil,
+		"svc_label_selector":   "",
+		"svc_namespaces":       "",
 		"svc_listen_port_base": nil,
+		"endpoint_enabled":     nil,
+		"endpoint_listen_port": nil,
+		"endpoint_token":       "",
 	}
 
 	if err := db.DB.WithContext(ctx).Model(&node).Updates(updates).Error; err != nil {
@@ -506,4 +534,50 @@ func (a *NodeAPI) Delete(c *gin.Context) {
 	recordAuditLog(ctx, c, actionType, "node", strconv.FormatUint(id, 10), node.Name, nil)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
+}
+
+// generateEndpointToken 生成 Endpoint 注册令牌（ep_ 前缀 + 32 字节随机 hex）
+func generateEndpointToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return "ep_" + hex.EncodeToString(b), nil
+}
+
+// RegenerateEndpointToken 重新生成 Endpoint Token
+func (a *NodeAPI) RegenerateEndpointToken(c *gin.Context) {
+	ctx := c.Request.Context()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
+		return
+	}
+
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("设备不存在"))
+		return
+	}
+
+	if node.Type != model.NodeTypeAgent {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("仅 Agent 类型设备支持此操作"))
+		return
+	}
+
+	token, err := generateEndpointToken()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("生成 Token 失败"))
+		return
+	}
+
+	if err := db.DB.WithContext(ctx).Model(&node).Update("endpoint_token", token).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新 Token 失败"))
+		return
+	}
+
+	logger.Infof("重新生成 Endpoint Token: node_id=%d", id)
+	recordAuditLog(ctx, c, "regenerate_endpoint_token", "node", strconv.FormatUint(id, 10), node.Name, nil)
+
+	c.JSON(http.StatusOK, NewSuccessResponse(map[string]string{"endpoint_token": token}))
 }

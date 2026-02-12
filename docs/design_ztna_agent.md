@@ -92,8 +92,8 @@ AclK8sGroupPermission:
 ### 域名
 
 ```
-kubernetes.<agent-name>.beagle:6443
-kubernetes.beijing.beagle:6443
+kubernetes.<agent-name>.beagle:50050
+kubernetes.beijing.beagle:50050
 ```
 
 ## AgentK8SService — Agent 本机 K8S SVC 代理
@@ -340,7 +340,7 @@ User (agent-beijing)
   │     通过 AclSSHJumpPermission 控制
   │
   ├── EndpointK8SAPI（新增对象）— 内网 K8S API 跳跃端点
-  │     └── beijing-prod  → 192.168.1.10:6443 (online)
+  │     └── beijing-prod  → 192.168.1.10 (online)
   │     通过 AclK8SAPIJumpPermission 控制
   │
   └── EndpointK8SService（新增对象）— 内网 K8S SVC 跳跃端点

@@ -47,6 +47,32 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Node/Detail.vue'),
         meta: { requiresAuth: true }
       },
+      // 终端管理
+      {
+        path: 'endpoints',
+        name: 'Endpoints',
+        component: () => import('@/views/Endpoint/List.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'endpoints/:type/:id',
+        name: 'EndpointDetail',
+        component: () => import('@/views/Endpoint/Detail.vue'),
+        meta: { requiresAuth: true }
+      },
+      // 兼容旧路由
+      {
+        path: 'endpoints/ssh',
+        redirect: '/endpoints?type=ssh'
+      },
+      {
+        path: 'endpoints/k8s',
+        redirect: '/endpoints?type=k8sapi'
+      },
+      {
+        path: 'endpoints/svc',
+        redirect: '/endpoints?type=k8sservice'
+      },
       // 分组管理
       {
         path: 'groups',
@@ -58,25 +84,6 @@ const routes: RouteRecordRaw[] = [
         path: 'groups/:id/members',
         name: 'GroupMembers',
         component: () => import('@/views/Group/Members.vue'),
-        meta: { requiresAuth: true }
-      },
-      // 终端管理
-      {
-        path: 'endpoints/ssh',
-        name: 'EndpointSSH',
-        component: () => import('@/views/Endpoint/SSHList.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
-        path: 'endpoints/k8s',
-        name: 'EndpointK8SAPI',
-        component: () => import('@/views/Endpoint/K8SAPIList.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
-        path: 'endpoints/svc',
-        name: 'EndpointK8SService',
-        component: () => import('@/views/Endpoint/K8SServiceList.vue'),
         meta: { requiresAuth: true }
       },
       // 资源发现

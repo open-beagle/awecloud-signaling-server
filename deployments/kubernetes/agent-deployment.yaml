@@ -101,3 +101,22 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "200m"
+          volumeMounts:
+            - name: state
+              mountPath: /home/code/.config/signaling
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: signal-agent-state
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: signal-agent-state
+  namespace: beagle-access
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi

@@ -128,6 +128,15 @@ message AgentHeartbeatRequest {
   repeated DomainRegistration domain_registrations = 9; // 域名注册列表
   // K8S Service 发现数据（Agent 上报）
   repeated DiscoveredK8SService discovered_services = 10; // 发现的 K8S Service 列表
+  // 已连接的 Endpoint 列表（Agent 上报）
+  repeated ConnectedEndpoint connected_endpoints = 11; // 已连接的 Endpoint 列表
+}
+
+// ConnectedEndpoint Agent 上报的已连接 Endpoint 信息
+message ConnectedEndpoint {
+  string name = 1;           // Endpoint 名称
+  string status = 2;         // 状态：online
+  repeated EndpointCapabilityInfo capabilities = 3; // 启用的能力列表
 }
 
 // DiscoveredK8SService Agent 发现的 K8S Service（心跳上报）
@@ -210,6 +219,13 @@ message AgentCapabilityConfig {
   bool svc_namespaces_set = 14;     // 命名空间列表是否由 Server 设置
   int32 svc_listen_port_base = 15;  // gRPC 监听端口
   bool svc_listen_port_base_set = 16; // gRPC 监听端口是否由 Server 设置
+
+  bool endpoint_enabled = 17;          // Endpoint 功能开关
+  bool endpoint_enabled_set = 18;      // Endpoint 功能开关是否由 Server 设置
+  int32 endpoint_listen_port = 19;     // Endpoint 内网 gRPC 监听端口（默认 50052）
+  bool endpoint_listen_port_set = 20;  // Endpoint 监听端口是否由 Server 设置
+  string endpoint_token = 21;          // Endpoint 注册令牌（ep_ 前缀）
+  bool endpoint_token_set = 22;        // Endpoint 令牌是否由 Server 设置
 }
 
 // K8SPermission K8S API 授权信息（心跳响应下发给 Agent）
@@ -323,4 +339,53 @@ message SVCProxyData {
   bool is_connect = 5;       // 是否为连接请求（首包 true）
   bool is_close = 6;         // 是否为关闭通知
   string error = 7;          // 错误信息（如有）
+}
+
+// ============================================
+// EndpointService（Agent 内网 gRPC Server，Endpoint 作为 Client 连接）
+// ============================================
+
+// EndpointService Endpoint 管理服务（Agent 端实现，监听内网 50052 端口）
+service EndpointService {
+  // 注册 - Endpoint 连接 Agent 时调用，用 token 认证并注册自己
+  rpc Register(EndpointRegisterRequest) returns (EndpointRegisterResponse);
+
+  // 心跳 - Endpoint 定期上报状态，Agent 下发配置
+  rpc Heartbeat(stream EndpointHeartbeatRequest) returns (stream EndpointHeartbeatResponse);
+}
+
+// EndpointRegisterRequest Endpoint 注册请求
+message EndpointRegisterRequest {
+  string token = 1;          // 注册令牌（ep_ 前缀，Server 生成）
+  string name = 2;           // Endpoint 名称（如 hostname）
+  string version = 3;        // Endpoint 版本号
+  SystemInfo system_info = 4; // 系统信息
+}
+
+// EndpointRegisterResponse Endpoint 注册响应
+message EndpointRegisterResponse {
+  bool success = 1;          // 是否成功
+  string message = 2;        // 响应消息
+  string endpoint_id = 3;    // Endpoint ID（Agent 分配）
+}
+
+// EndpointHeartbeatRequest Endpoint 心跳请求
+message EndpointHeartbeatRequest {
+  string token = 1;          // 注册令牌（用于身份验证）
+  string name = 2;           // Endpoint 名称
+  repeated EndpointCapabilityInfo capabilities = 3; // 启用的能力列表
+}
+
+// EndpointCapabilityInfo Endpoint 单项能力信息
+message EndpointCapabilityInfo {
+  string type = 1;           // 能力类型：ssh / k8sapi / k8sservice
+  string host = 2;           // SSH 内网地址（SSH 类型时）
+  int32 port = 3;            // SSH 端口（SSH 类型时，默认 22）
+  string api_server = 4;     // K8S API Server 地址（K8SAPI 类型时）
+}
+
+// EndpointHeartbeatResponse Endpoint 心跳响应
+message EndpointHeartbeatResponse {
+  bool success = 1;          // 是否成功
+  string message = 2;        // 响应消息
 }
