@@ -52,7 +52,8 @@ type Agent struct {
 	svcProxy    *K8SSVCProxy        // K8S Service gRPC 代理
 
 	// Endpoint 能力（P2 新增）
-	endpointServer *EndpointServer // Endpoint 内网 gRPC Server
+	endpointServer   *EndpointServer   // Endpoint 内网 gRPC Server
+	endpointSSHProxy *EndpointSSHProxy // Endpoint SSH 代理（tsnet 端口）
 
 	// 网络信息
 	networkInfo *NetworkInfo
@@ -165,6 +166,11 @@ func (a *Agent) Run() error {
 	}
 	if a.svcInformer != nil {
 		a.svcInformer.Stop()
+	}
+
+	// 停止 Endpoint SSH 代理
+	if a.endpointSSHProxy != nil {
+		a.endpointSSHProxy.Stop()
 	}
 
 	// 停止 Endpoint Server
@@ -851,6 +857,33 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		}
 	}
 
+	// 5. Endpoint SSH 域名：{endpoint-name}.{agent-name}{domain_suffix}:分配端口
+	if a.endpointServer != nil && a.endpointSSHProxy != nil && a.tsManager != nil && a.tsManager.IsConnected() {
+		for _, ep := range a.endpointServer.GetConnectedEndpointDetails() {
+			// 检查 Endpoint 是否有 SSH 能力
+			hasSSH := false
+			for _, cap := range ep.Capabilities {
+				if cap.Type == "ssh" {
+					hasSSH = true
+					break
+				}
+			}
+			if !hasSSH {
+				continue
+			}
+
+			// 为 Endpoint 分配端口（幂等，已分配则返回已有端口）
+			port := a.endpointSSHProxy.AllocatePort(ep.Name)
+
+			registrations = append(registrations, &pb.DomainRegistration{
+				Domain:     ep.Name + "." + a.config.Agent.AgentName + a.domainSuffix,
+				Type:       "ssh",
+				TargetIp:   agentIP,
+				TargetPort: int32(port),
+			})
+		}
+	}
+
 	return registrations
 }
 
@@ -948,7 +981,6 @@ func (a *Agent) startHealthServer() error {
 
 	return nil
 }
-
 
 // applyCapabilityConfig 应用 Server 远程能力配置
 // 根据 xxx_set 标志位决定是否使用 Server 下发的值，否则使用本地配置
@@ -1114,6 +1146,18 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 			if err := a.endpointServer.Start(); err != nil {
 				logger.Warnf("启动 Endpoint gRPC Server 失败: %v", err)
 				a.endpointServer = nil
+			} else {
+				// 启动 Endpoint SSH 代理（在 tsnet 上监听，接收 Desktop SSH 连接）
+				if a.tsManager != nil && a.tsManager.IsConnected() {
+					sshProxy, err := NewEndpointSSHProxy(a.endpointServer, a.tsManager, a.ctx)
+					if err != nil {
+						logger.Warnf("创建 Endpoint SSH 代理失败: %v", err)
+					} else if err := sshProxy.Start(); err != nil {
+						logger.Warnf("启动 Endpoint SSH 代理失败: %v", err)
+					} else {
+						a.endpointSSHProxy = sshProxy
+					}
+				}
 			}
 		} else {
 			// 已运行，更新 token
@@ -1123,6 +1167,10 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 		}
 	} else {
 		// 关闭
+		if a.endpointSSHProxy != nil {
+			a.endpointSSHProxy.Stop()
+			a.endpointSSHProxy = nil
+		}
 		if a.endpointServer != nil {
 			logger.Info("远程配置: Endpoint 功能关闭")
 			a.endpointServer.Stop()

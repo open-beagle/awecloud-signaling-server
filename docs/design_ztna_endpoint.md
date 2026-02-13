@@ -88,7 +88,72 @@ Endpoint 的作用是让 Desktop 通过 Agent 中转，访问内网中没有安�
 
 ## EndpointSSH
 
-EndpointSSH 装在内网机器上，提供 SSH 会话桥接。
+EndpointSSH 装在内网机器上，通过 gRPC 双向流提供 shell 会话，实现与 tailssh 等价的零信任 SSH 体验。
+
+### 设计理念
+
+tailssh 做了三件事：身份认证（WhoIs）、授权（ACL）、SSH Server（spawn shell）。
+EndpointSSH 实现同样的事情，只是职责分离：
+
+```
+  tailssh (Agent SSH):
+    Desktop → Tailscale → Agent tsnet SSH Server
+                            ↓
+                          WhoIs 确认身份 → ACL 授权 → spawn shell
+
+  EndpointSSH (本方案):
+    Desktop → Tailscale → Agent(WhoIs + 授权) → gRPC OpenShell → Endpoint spawn shell
+                                                    ↑
+                                              复用已有 gRPC 连接
+                                              不需要额外端口
+                                              不需要内置 SSH Server
+                                              不需要签名密钥
+```
+
+Agent 负责身份认证和授权，Endpoint 只负责执行 shell。
+信任基础是 Endpoint 与 Agent 之间已经过 endpoint_token 认证的 gRPC 长连接。
+
+### 与 tailssh 的对比
+
+```
+  维度          tailssh (Agent SSH)              EndpointSSH (本方案)
+  ──────────────────────────────────────────────────────────────────────
+  身份认证      Tailscale WhoIs                  Agent WhoIs（Agent 侧完成）
+  授权          Headscale ACL                    Server ACL（Agent 查询）
+  会话通道      tsnet 内置 SSH Server            gRPC 双向流（复用已有连接）
+  额外端口      不需要                           不需要
+  额外依赖      tailssh 模块                     仅 os/exec + PTY
+  网络要求      需要 Tailscale 网络              仅需内网连通 Agent
+  用户体验      ssh user@host.beagle             ssh user@ep.agent.beagle（一致）
+  密码/密钥     不需要                           不需要
+```
+
+### OpenShell gRPC 流
+
+Agent 通过已有的 Endpoint gRPC 连接发送 OpenShell 指令，Endpoint 在 gRPC 双向流中桥接 shell I/O：
+
+```
+OpenShell RPC（gRPC 双向流）：
+
+  Agent → Endpoint（首条消息，开启会话）：
+    login:   "deploy"          → 要登录的系统用户名
+    rows:    24                → 终端行数
+    cols:    80                → 终端列数
+
+  Endpoint 收到后：
+    1. 检查 login 用户在系统中存在
+    2. 检查 login 用户在允许列表中（ssh_users，Agent 下发的配置）
+    3. 创建 PTY（伪终端）
+    4. 以 login 用户身份 spawn shell（如 /bin/bash）
+    5. 通过 gRPC 双向流传输 shell I/O
+
+  后续消息（双向）：
+    Agent → Endpoint:  stdin 数据、窗口大小变更
+    Endpoint → Agent:  stdout/stderr 数据、退出码
+
+  会话结束：
+    shell 退出 → Endpoint 发送退出码 → 关闭 gRPC 流
+```
 
 ### 工作流程
 
@@ -97,16 +162,17 @@ EndpointSSH 启动：
   1. 读取配置：Agent 地址、自身名称、认证 token
   2. 连接 Agent 的内网 gRPC 端口（普通 TCP，不走 Tailscale）
   3. 注册自己：我是 web-server-1，提供 SSH 能力
-  4. Agent 下发来自 Server 的配置（如果有）
-  5. 保持长连接，等待 Agent 下发指令
+  4. Agent 下发来自 Server 的配置（ssh_users 等）
+  5. 保持 gRPC 长连接（心跳保活）
+  6. 等待 Agent 的 OpenShell 指令
 
-Agent 收到 Desktop 的跳跃请求：
-  1. 从 tsnet 提取身份 → zhangsan
-  2. 查找目标 EndpointSSH → web-server-1
-  3. 检查 EndpointSSH 是否在线（有没有活跃的 gRPC 连接）
-  4. 查询 AclSSHJumpPermission → zhangsan 能不能跳到 web-server-1
-  5. 通过 gRPC 流告诉 EndpointSSH：开一个 deploy 用户的 shell
-  6. 双向桥接：Desktop ←tsnet→ Agent ←gRPC stream→ EndpointSSH ←shell
+Desktop 用户 SSH 到 Endpoint：
+  1. ssh deploy@web-server-1.beijing.beagle
+  2. ProxyCommand → DialSocket → tsnet → 到达 Agent
+  3. Agent WhoIs 确认身份 → 查权限 → 放行
+  4. Agent 通过 gRPC 连接发送 OpenShell(login=deploy)
+  5. Endpoint spawn shell → gRPC 双向流传输 I/O
+  6. 双向桥接: Desktop SSH ↔ Agent ↔ gRPC stream ↔ Endpoint PTY
 ```
 
 ### 数据模型
@@ -119,14 +185,16 @@ EndpointSSH（Server 数据库，自动发现 + 远程设置）:
   user_id           uint64    所属 Agent 的 User ID
   name              string    名称（Endpoint 上报，如 "web-server-1"）
   alias             string    别名（Server 可修改的显示名称）
-  host              string    内网地址（Endpoint 自己上报）
-  port              int       SSH 端口（默认 22，Endpoint 上报）
-  ssh_users         string    允许的 SSH 用户列表（Server 可修改）
+  host              string    内网地址（Endpoint 自己上报，仅用于展示）
+  ssh_users         string    允许的 SSH 用户列表（Server 可修改，下发给 Endpoint）
   status            string    online/offline（Agent 上报）
   enabled           bool      是否启用（Server 可修改，下发给 Agent/Endpoint）
   revoked           bool      是否已注销（Server 注销后为 true）
   created_at        time      首次发现时间
   updated_at        time
+
+注意：不需要 port 字段。SSH 会话通过 gRPC 双向流传输，
+不需要 Endpoint 监听额外端口。
 ```
 
 ### ACL
@@ -298,6 +366,7 @@ signal_endpoint 二进制
     label_selector = "signal.beagle.io/expose=true"
 
   一台机器可以同时是 SSH 端点、K8SAPI 端点和 K8SService 端点
+  SSH 能力不需要额外端口，shell 会话通过 gRPC 双向流传输
 ```
 
 本地配置只需要 Agent 地址和 token，其余设置（alias、ssh_users、enabled 等）重启后从 Server 通过 Agent 下发恢复。
@@ -307,7 +376,7 @@ signal_endpoint 二进制
 ```
 内网机器上安装 EndpointSSH：
 
-  安装方式：单个二进制，无依赖
+  安装方式：单个二进制，无依赖，不需要额外端口
     [agent]
     address = "192.168.1.1:50052"
     token = "ep_xxxxxxxxxxxxxxxx"
@@ -318,10 +387,10 @@ signal_endpoint 二进制
   启动后：
     1. 连接 Agent 内网 gRPC Server（50052）
     2. 用 token 认证（Agent 比对 Server 下发的 endpoint_token）
-    3. 注册自己（名称、IP、能力）
-    4. Agent 下发来自 Server 的配置（alias、ssh_users、enabled 等）
-    5. 保持长连接，等待指令
-    6. 收到 OpenShell 指令 → 启动 shell → 桥接到 gRPC 流
+    3. 注册自己（名称、IP、SSH 能力）
+    4. Agent 下发来自 Server 的配置（ssh_users、enabled 等）
+    5. 保持 gRPC 长连接（心跳保活）
+    6. 收到 OpenShell 指令 → 创建 PTY → spawn shell → gRPC 双向流传输 I/O
 ```
 
 ### EndpointK8SAPI 部署

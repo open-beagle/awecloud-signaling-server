@@ -257,14 +257,19 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	// 启动接收协程
+	// 启动接收协程（处理心跳响应和 Shell 请求通知）
 	recvDone := make(chan error, 1)
 	go func() {
 		for {
-			_, err := stream.Recv()
+			resp, err := stream.Recv()
 			if err != nil {
 				recvDone <- err
 				return
+			}
+
+			// 处理 Shell 请求通知
+			for _, shellReq := range resp.ShellRequests {
+				go handleShellRequest(ctx, client, cfg, shellReq)
 			}
 		}
 	}()

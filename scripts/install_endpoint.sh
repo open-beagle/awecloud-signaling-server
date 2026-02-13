@@ -31,6 +31,12 @@ AGENT_ADDRESS=""       # Agent 内网 gRPC 地址
 ENDPOINT_TOKEN=""      # 注册令牌（ep_ 前缀）
 ENDPOINT_NAME=""       # Endpoint 名称（默认 hostname）
 SERVER_ADDRESS=""      # Server 地址（用于下载二进制）
+SSH_ENABLED="true"     # 默认启用 SSH 能力
+SSH_HOST="127.0.0.1"   # SSH 目标地址
+SSH_PORT="22"          # SSH 端口
+K8S_ENABLED="false"    # K8S API 能力
+K8S_API_SERVER=""      # K8S API Server 地址
+SVC_ENABLED="false"    # K8S Service 能力
 UPGRADE_MODE="false"
 UNINSTALL_MODE="false"
 
@@ -55,14 +61,28 @@ AWECloud Endpoint 安装脚本
   -t, --token <token>     注册令牌（必填，从 Web Agent 详情页复制）
   -s, --server <url>      Server 地址（必填，用于下载二进制）
   -n, --name <name>       Endpoint 名称（可选，默认 hostname）
+  --ssh-host <host>       SSH 目标地址（默认 127.0.0.1）
+  --ssh-port <port>       SSH 端口（默认 22）
+  --no-ssh                禁用 SSH 能力
+  --k8s                   启用 K8S API 能力
+  --k8s-api-server <url>  K8S API Server 地址（默认自动检测）
+  --svc                   启用 K8S Service 能力
   -u, --upgrade           升级模式，保留现有配置
   -U, --uninstall         卸载 Endpoint
   -h, --help              显示帮助
 
 示例:
-  # 安装
+  # 安装（默认启用 SSH）
   curl -fsSL https://server/api/v1/download/install_endpoint.sh | \
     sudo bash -s -- -a 192.168.1.1:50052 -t ep_xxxx -s https://signal.example.com
+
+  # 安装并指定 SSH 端口
+  curl -fsSL https://server/api/v1/download/install_endpoint.sh | \
+    sudo bash -s -- -a 192.168.1.1:50052 -t ep_xxxx -s https://signal.example.com --ssh-port 2222
+
+  # 安装并启用 K8S API 能力
+  curl -fsSL https://server/api/v1/download/install_endpoint.sh | \
+    sudo bash -s -- -a 192.168.1.1:50052 -t ep_xxxx -s https://signal.example.com --k8s
 
   # 升级
   curl -fsSL https://server/api/v1/download/install_endpoint.sh | \
@@ -81,6 +101,12 @@ parse_args() {
             -t|--token)    ENDPOINT_TOKEN="$2"; shift 2 ;;
             -s|--server)   SERVER_ADDRESS="$2"; shift 2 ;;
             -n|--name)     ENDPOINT_NAME="$2"; shift 2 ;;
+            --ssh-host)    SSH_HOST="$2"; shift 2 ;;
+            --ssh-port)    SSH_PORT="$2"; shift 2 ;;
+            --no-ssh)      SSH_ENABLED="false"; shift ;;
+            --k8s)         K8S_ENABLED="true"; shift ;;
+            --k8s-api-server) K8S_API_SERVER="$2"; shift 2 ;;
+            --svc)         SVC_ENABLED="true"; shift ;;
             -u|--upgrade)  UPGRADE_MODE="true"; shift ;;
             -U|--uninstall) UNINSTALL_MODE="true"; shift ;;
             -h|--help)     show_help; exit 0 ;;
@@ -192,6 +218,18 @@ generate_config() {
 address = "${AGENT_ADDRESS}"
 token = "${ENDPOINT_TOKEN}"
 name = "${ENDPOINT_NAME}"
+
+[ssh]
+enabled = ${SSH_ENABLED}
+host = "${SSH_HOST}"
+port = ${SSH_PORT}
+
+[k8s]
+enabled = ${K8S_ENABLED}
+api_server = "${K8S_API_SERVER}"
+
+[svc]
+enabled = ${SVC_ENABLED}
 EOF
 
     chmod 600 "$CONFIG_FILE"

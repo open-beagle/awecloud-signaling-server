@@ -398,6 +398,7 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 const (
 	EndpointService_Register_FullMethodName  = "/awecloud.signaling.EndpointService/Register"
 	EndpointService_Heartbeat_FullMethodName = "/awecloud.signaling.EndpointService/Heartbeat"
+	EndpointService_OpenShell_FullMethodName = "/awecloud.signaling.EndpointService/OpenShell"
 )
 
 // EndpointServiceClient is the client API for EndpointService service.
@@ -410,6 +411,9 @@ type EndpointServiceClient interface {
 	Register(ctx context.Context, in *EndpointRegisterRequest, opts ...grpc.CallOption) (*EndpointRegisterResponse, error)
 	// 心跳 - Endpoint 定期上报状态，Agent 下发配置
 	Heartbeat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[EndpointHeartbeatRequest, EndpointHeartbeatResponse], error)
+	// OpenShell - Agent 指令 Endpoint 开启 shell 会话（gRPC 双向流）
+	// Agent 发送首条消息指定 login 用户和终端大小，Endpoint spawn shell 后双向传输 I/O
+	OpenShell(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ShellData, ShellData], error)
 }
 
 type endpointServiceClient struct {
@@ -443,6 +447,19 @@ func (c *endpointServiceClient) Heartbeat(ctx context.Context, opts ...grpc.Call
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type EndpointService_HeartbeatClient = grpc.BidiStreamingClient[EndpointHeartbeatRequest, EndpointHeartbeatResponse]
 
+func (c *endpointServiceClient) OpenShell(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ShellData, ShellData], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &EndpointService_ServiceDesc.Streams[1], EndpointService_OpenShell_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ShellData, ShellData]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EndpointService_OpenShellClient = grpc.BidiStreamingClient[ShellData, ShellData]
+
 // EndpointServiceServer is the server API for EndpointService service.
 // All implementations must embed UnimplementedEndpointServiceServer
 // for forward compatibility.
@@ -453,6 +470,9 @@ type EndpointServiceServer interface {
 	Register(context.Context, *EndpointRegisterRequest) (*EndpointRegisterResponse, error)
 	// 心跳 - Endpoint 定期上报状态，Agent 下发配置
 	Heartbeat(grpc.BidiStreamingServer[EndpointHeartbeatRequest, EndpointHeartbeatResponse]) error
+	// OpenShell - Agent 指令 Endpoint 开启 shell 会话（gRPC 双向流）
+	// Agent 发送首条消息指定 login 用户和终端大小，Endpoint spawn shell 后双向传输 I/O
+	OpenShell(grpc.BidiStreamingServer[ShellData, ShellData]) error
 	mustEmbedUnimplementedEndpointServiceServer()
 }
 
@@ -468,6 +488,9 @@ func (UnimplementedEndpointServiceServer) Register(context.Context, *EndpointReg
 }
 func (UnimplementedEndpointServiceServer) Heartbeat(grpc.BidiStreamingServer[EndpointHeartbeatRequest, EndpointHeartbeatResponse]) error {
 	return status.Error(codes.Unimplemented, "method Heartbeat not implemented")
+}
+func (UnimplementedEndpointServiceServer) OpenShell(grpc.BidiStreamingServer[ShellData, ShellData]) error {
+	return status.Error(codes.Unimplemented, "method OpenShell not implemented")
 }
 func (UnimplementedEndpointServiceServer) mustEmbedUnimplementedEndpointServiceServer() {}
 func (UnimplementedEndpointServiceServer) testEmbeddedByValue()                         {}
@@ -515,6 +538,13 @@ func _EndpointService_Heartbeat_Handler(srv interface{}, stream grpc.ServerStrea
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type EndpointService_HeartbeatServer = grpc.BidiStreamingServer[EndpointHeartbeatRequest, EndpointHeartbeatResponse]
 
+func _EndpointService_OpenShell_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(EndpointServiceServer).OpenShell(&grpc.GenericServerStream[ShellData, ShellData]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EndpointService_OpenShellServer = grpc.BidiStreamingServer[ShellData, ShellData]
+
 // EndpointService_ServiceDesc is the grpc.ServiceDesc for EndpointService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -531,6 +561,12 @@ var EndpointService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Heartbeat",
 			Handler:       _EndpointService_Heartbeat_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "OpenShell",
+			Handler:       _EndpointService_OpenShell_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

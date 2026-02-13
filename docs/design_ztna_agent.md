@@ -250,7 +250,57 @@ Agent 进程
         │
         ├── RegisterEndpoint RPC  → Endpoint 注册自己
         ├── Heartbeat RPC         → Endpoint 心跳保活
-        └── 反向指令流             → Agent 下发 OpenShell / K8sAPIProxy / SVCProxy 等
+        └── OpenShell RPC         → Agent 指令 Endpoint 开启 shell 会话（gRPC 双向流）
+```
+
+### Endpoint SSH 身份中继机制
+
+Agent 作为 Endpoint SSH 的身份中继，实现与 tailssh 等价的零信任体验。
+
+核心思路：tailssh 通过 Tailscale WhoIs 确认身份 + ACL 授权 + 内置 SSH Server。
+Endpoint 无法加入 Tailscale 网络，因此由 Agent 完成身份确认和授权，
+然后通过已有的 gRPC 连接直接指令 Endpoint 开启 shell 会话。
+
+不需要额外端口、不需要内置 SSH Server、不需要签名密钥——
+Endpoint 与 Agent 之间已有经过 token 认证的 gRPC 长连接，这就是信任通道。
+
+```
+身份中继流程：
+
+  Desktop SSH 请求到达 Agent（通过 Tailscale 隧道）
+    │
+    ├── 1. Agent 通过 tsnet WhoIs 确认来源身份
+    │       对端 IP: 100.64.1.1
+    │       用户: zhangsan
+    │       节点: desktop-zhangsan-macbook
+    │
+    ├── 2. Agent 查询权限（本地缓存）
+    │       zhangsan 能否访问 EndpointSSH "web-server-1"？
+    │       允许的 ssh_users: ["root", "deploy"]
+    │       请求的 login: deploy → 在允许列表中 → 放行
+    │
+    ├── 3. Agent 通过已有 gRPC 连接向 Endpoint 发送 OpenShell 指令
+    │       参数: login=deploy
+    │       Endpoint 收到后以 deploy 用户 spawn shell（PTY）
+    │
+    └── 4. 双向桥接
+            Desktop SSH 客户端 ←tsnet→ Agent ←gRPC stream→ Endpoint shell
+```
+
+### 信任模型
+
+```
+不需要签名密钥或身份 Token，原因：
+
+  Endpoint → Agent 的 gRPC 连接已经过 endpoint_token 认证
+  Agent 是唯一能向 Endpoint 发送 OpenShell 指令的实体
+  Agent 在发送指令前已完成 WhoIs 身份确认 + ACL 权限检查
+  Endpoint 只需信任来自 Agent 的指令即可
+
+  信任链：
+    Desktop 身份 → Tailscale WhoIs（Agent 验证）
+    Agent → Endpoint 指令 → gRPC 认证连接（endpoint_token）
+    整条链路不需要额外的密钥或证书
 ```
 
 ### Desktop 发起跳跃的完整流程
@@ -258,11 +308,12 @@ Agent 进程
 ```
 Desktop 用户执行: ssh deploy@web-server-1.beijing.beagle
 
-  1. DNS 劫持 → VIP → tsnet 隧道 → Agent
+  1. ProxyCommand 拦截 *.beagle 域名
+     → DialSocket → tsnet 隧道 → 到达 Agent
 
-  2. Agent tsnet gRPC Server 收到 SSHJump 请求
-       目标: web-server-1
-       用户: deploy
+  2. Agent 根据域名判断请求类型
+       web-server-1 匹配某个 Endpoint 名称 → Endpoint SSH 代理
+       （如果匹配 Agent 自身设备名 → 走 tailssh）
 
   3. Agent 从 tsnet 连接提取身份 → zhangsan
 
@@ -274,14 +325,18 @@ Desktop 用户执行: ssh deploy@web-server-1.beijing.beagle
        → 允许，ssh_users: ["root", "deploy"]
        → deploy ∈ 允许列表 → 放行
 
-  6. Agent 通过内网 gRPC 连接告诉 EndpointSSH
-       → OpenShell(user: "deploy")
-       → EndpointSSH 启动 shell
+  6. Agent 通过 gRPC 连接向 Endpoint 发送 OpenShell 指令
+       → OpenShell(login: "deploy", rows: 24, cols: 80)
 
-  7. 双向桥接
-       Desktop ←tsnet gRPC stream→ Agent ←内网 gRPC stream→ EndpointSSH
+  7. Endpoint 收到指令
+       → 检查 deploy 用户存在
+       → 创建 PTY，以 deploy 用户 spawn shell
+       → 通过 gRPC 双向流传输 shell I/O
 
-  8. 审计记录
+  8. 双向桥接
+       Desktop SSH 客户端 ←tsnet→ Agent ←gRPC stream→ Endpoint PTY
+
+  9. 审计记录
        zhangsan → agent-beijing → web-server-1 → deploy → 成功
 ```
 
@@ -302,6 +357,10 @@ Agent 从 tsnet 连接中提取对端身份，不需要 Identity Token：
   │
   └── 根据身份查询权限（心跳同步的本地缓存）
 ```
+
+对于 Endpoint SSH 场景，Agent 在确认身份和权限后，直接通过 gRPC 连接
+向 Endpoint 发送 OpenShell 指令。Endpoint 不需要做身份验证，
+因为 gRPC 连接本身已经过 endpoint_token 认证，Agent 是唯一的指令来源。
 
 ## 权限数据来源
 
