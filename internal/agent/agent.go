@@ -650,13 +650,10 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 	}
 
 	// 同步 K8S 权限到本地缓存（每次心跳都更新，不受 configVersion 控制）
+	// 注意：必须无条件调用 Update，空列表表示权限已全部撤销，需要清空缓存
 	if a.permCache != nil {
-		if len(resp.K8SPermissions) > 0 {
-			a.permCache.UpdateK8SPermissions(resp.K8SPermissions)
-		}
-		if len(resp.K8SServicePermissions) > 0 {
-			a.permCache.UpdateK8SServicePermissions(resp.K8SServicePermissions)
-		}
+		a.permCache.UpdateK8SPermissions(resp.K8SPermissions)
+		a.permCache.UpdateK8SServicePermissions(resp.K8SServicePermissions)
 	}
 
 	// 处理 Server 远程能力配置（每次心跳都检查，不受 configVersion 控制）
