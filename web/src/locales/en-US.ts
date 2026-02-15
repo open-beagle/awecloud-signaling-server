@@ -88,6 +88,9 @@ export default {
     aclSSH: 'SSH Auth',
     aclK8S: 'K8S Auth',
     aclK8SService: 'K8S Service Auth',
+    aclEndpointSSH: 'Endpoint SSH Auth',
+    aclEndpointK8S: 'Endpoint K8S Auth',
+    aclEndpointK8SService: 'Endpoint SVC Auth',
     endpoints: 'Endpoints',
     endpointSSH: 'SSH',
     endpointK8SAPI: 'K8S API',
@@ -100,6 +103,8 @@ export default {
     tunnelSSH: 'SSH Policy',
     domains: 'Domains',
     auditLogs: 'Audit Logs',
+    adminAudit: 'Admin Audit',
+    operationAudit: 'Operation Audit',
     systemConfig: 'System Config'
   },
   user: {
@@ -344,6 +349,31 @@ export default {
     searchK8SServicePlaceholder: 'Search agent name',
     addK8SServiceUserAuth: 'Add K8S Service User Authorization',
     addK8SServiceGroupAuth: 'Add K8S Service Group Authorization'
+  },
+  aclEndpoint: {
+    searchPlaceholder: 'Search endpoint name',
+    sshInfo: 'Endpoint SSH Info',
+    k8sapiInfo: 'Endpoint K8S API Info',
+    k8sserviceInfo: 'Endpoint K8S Service Info',
+    addSSHUserAuth: 'Add Endpoint SSH User Authorization',
+    addSSHGroupAuth: 'Add Endpoint SSH Group Authorization',
+    addK8SUserAuth: 'Add Endpoint K8S User Authorization',
+    addK8SGroupAuth: 'Add Endpoint K8S Group Authorization',
+    addK8SServiceUserAuth: 'Add Endpoint K8S Service User Authorization',
+    addK8SServiceGroupAuth: 'Add Endpoint K8S Service Group Authorization'
+  },
+  operationAudit: {
+    title: 'Operation Audit',
+    operationType: 'Operation Type',
+    operationTypePlaceholder: 'Select operation type',
+    agentName: 'Agent',
+    clientName: 'Client',
+    endpointName: 'Endpoint',
+    endpointNamePlaceholder: 'Search endpoint name',
+    target: 'Target',
+    detail: 'Detail',
+    duration: 'Duration',
+    startedAt: 'Started At'
   },
   audit: {
     title: 'Audit Logs',

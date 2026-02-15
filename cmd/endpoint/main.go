@@ -271,6 +271,16 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 			for _, shellReq := range resp.ShellRequests {
 				go handleShellRequest(ctx, client, cfg, shellReq)
 			}
+
+			// 处理 K8S API 代理请求通知
+			for _, k8sapiReq := range resp.K8SapiProxyRequests {
+				go handleK8SAPIProxyRequest(ctx, client, cfg, k8sapiReq)
+			}
+
+			// 处理 K8S Service 代理请求通知
+			for _, svcReq := range resp.SvcProxyRequests {
+				go handleSVCProxyRequest(ctx, client, cfg, svcReq)
+			}
 		}
 	}()
 

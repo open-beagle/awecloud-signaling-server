@@ -59,7 +59,7 @@ docker build --no-cache -f .beagle/server.dockerfile \
 docker push ${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION}
 
 # 重启部署
-sleep 3 && kubectl --context aliyun --namespace beagle-access rollout restart deployment/awecloud-signal-server
+sleep 3 && kubectl --context aliyun --namespace beagle-access rollout restart deployment/signal-server
 ```
 
 ### 查看版本信息
@@ -107,13 +107,13 @@ docker push ${REGISTRY}/awecloud-signaling-agent:${BUILD_VERSION}
 
 ```bash
 # 重启部署
-kubectl --context aliyun --namespace beagle-access rollout restart deployment/awecloud-signal-server
+kubectl --context aliyun --namespace beagle-access rollout restart deployment/signal-server
 
 # 更新镜像
-kubectl --context aliyun --namespace beagle-access set image deployment/awecloud-signal-server server=${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION}
+kubectl --context aliyun --namespace beagle-access set image deployment/signal-server server=${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION}
 
 # 查看日志
-kubectl --context aliyun --namespace beagle-access logs -f deployment/awecloud-signal-server
+kubectl --context aliyun --namespace beagle-access logs -f deployment/signal-server
 ```
 
 ## GitHub Actions 自动构建

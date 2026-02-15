@@ -59,7 +59,7 @@ docker build --no-cache -f .beagle/server.dockerfile \
 docker push ${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION}
 
 # 重启部署
-sleep 3 && kubectl --context aliyun --namespace beagle-access rollout restart deployment/awecloud-signal-server
+sleep 3 && kubectl --context aliyun --namespace beagle-access rollout restart deployment/signal-server
 ```
 
 ### Agent
@@ -114,7 +114,7 @@ BUILD_VERSION=$(cat version) bash scripts/push_to_s3.sh endpoint
 
 ```bash
 # Server
-kubectl --context aliyun -n beagle-access exec -it deployment/awecloud-signal-server -- /bin/sh
+kubectl --context aliyun -n beagle-access exec -it deployment/signal-server -- /bin/sh
 
 # Client k8ssvc
 kubectl --context beagle -n beagle-access exec -it deployment/signal-agent -- /bin/sh

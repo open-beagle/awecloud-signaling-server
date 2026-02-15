@@ -130,6 +130,8 @@ message AgentHeartbeatRequest {
   repeated DiscoveredK8SService discovered_services = 10; // 发现的 K8S Service 列表
   // 已连接的 Endpoint 列表（Agent 上报）
   repeated ConnectedEndpoint connected_endpoints = 11; // 已连接的 Endpoint 列表
+  // 操作审计记录（Agent 上报）
+  repeated OperationAuditRecord audit_records = 12; // 操作审计记录
 }
 
 // ConnectedEndpoint Agent 上报的已连接 Endpoint 信息
@@ -137,6 +139,7 @@ message ConnectedEndpoint {
   string name = 1;           // Endpoint 名称
   string status = 2;         // 状态：online
   repeated EndpointCapabilityInfo capabilities = 3; // 启用的能力列表
+  repeated DiscoveredK8SService discovered_services = 4; // Endpoint 发现的 K8S Service（K8SService 能力时上报）
 }
 
 // DiscoveredK8SService Agent 发现的 K8S Service（心跳上报）
@@ -196,6 +199,9 @@ message AgentHeartbeatResponse {
   repeated K8SServicePermission k8s_service_permissions = 6; // K8S Service 授权列表
   bool request_immediate_report = 7; // Server 请求 Agent 立即上报一次心跳数据
   AgentCapabilityConfig capability_config = 8; // Agent 能力配置（Server 远程控制）
+  repeated EndpointSSHPermission endpoint_ssh_permissions = 9; // Endpoint SSH 授权列表
+  repeated EndpointK8SAPIPermission endpoint_k8sapi_permissions = 10; // Endpoint K8SAPI 授权列表
+  repeated EndpointK8SServicePermission endpoint_k8sservice_permissions = 11; // Endpoint K8SService 授权列表
 }
 
 // AgentCapabilityConfig Agent 能力配置（Server 远程控制）
@@ -244,6 +250,49 @@ message K8SServicePermission {
   repeated string namespaces = 3;   // 允许的命名空间（空表示全部）
   repeated string service_names = 4; // 允许的 Service 名称（空表示全部）
   bool is_group = 5;               // 是否来自分组授权
+}
+
+// EndpointSSHPermission Endpoint SSH 授权信息（心跳响应下发给 Agent）
+message EndpointSSHPermission {
+  string endpoint_id = 1;          // Endpoint ID
+  string endpoint_name = 2;        // Endpoint 名称
+  uint64 user_id = 3;              // 被授权用户 ID
+  string user_name = 4;            // 被授权用户名
+  repeated string ssh_users = 5;   // 允许的 SSH 登录用户名
+  bool is_group = 6;               // 是否来自分组授权
+}
+
+// EndpointK8SAPIPermission Endpoint K8SAPI 授权信息（心跳响应下发给 Agent）
+message EndpointK8SAPIPermission {
+  string endpoint_id = 1;          // Endpoint ID
+  string endpoint_name = 2;        // Endpoint 名称
+  uint64 user_id = 3;              // 被授权用户 ID
+  string user_name = 4;            // 被授权用户名
+  repeated string k8s_groups = 5;  // K8S Impersonation 分组
+  repeated string namespaces = 6;  // 允许的命名空间（空表示全部）
+  bool is_group = 7;               // 是否来自分组授权
+}
+
+// EndpointK8SServicePermission Endpoint K8SService 授权信息（心跳响应下发给 Agent）
+message EndpointK8SServicePermission {
+  string endpoint_id = 1;            // Endpoint ID
+  string endpoint_name = 2;          // Endpoint 名称
+  uint64 user_id = 3;                // 被授权用户 ID
+  string user_name = 4;              // 被授权用户名
+  repeated string namespaces = 5;    // 允许的命名空间（空表示全部）
+  repeated string service_names = 6; // 允许的 Service 名称（空表示全部）
+  bool is_group = 7;                 // 是否来自分组授权
+}
+
+// OperationAuditRecord 操作审计记录（Agent 心跳上报）
+message OperationAuditRecord {
+  string client_user_name = 1;     // Client 用户名
+  string endpoint_name = 2;        // Endpoint 名称（Endpoint 跳跃时填写）
+  string operation_type = 3;       // 操作类型：ssh_session / k8s_api_request / k8s_service_connect
+  string target = 4;               // 操作目标（如 "root@beagle-241"）
+  string detail = 5;               // 操作详情（JSON）
+  int64 started_at = 6;            // 开始时间（Unix 时间戳秒）
+  int64 ended_at = 7;              // 结束时间（Unix 时间戳秒）
 }
 
 // ============================================
@@ -339,6 +388,7 @@ message SVCProxyData {
   bool is_connect = 5;       // 是否为连接请求（首包 true）
   bool is_close = 6;         // 是否为关闭通知
   string error = 7;          // 错误信息（如有）
+  string endpoint_name = 8;  // Endpoint 名称（首包携带，非空时走 Endpoint 跳跃路径）
 }
 
 // ============================================
@@ -356,6 +406,14 @@ service EndpointService {
   // OpenShell - Agent 指令 Endpoint 开启 shell 会话（gRPC 双向流）
   // Agent 发送首条消息指定 login 用户和终端大小，Endpoint spawn shell 后双向传输 I/O
   rpc OpenShell(stream ShellData) returns (stream ShellData);
+
+  // OpenK8SAPIProxy - Agent 指令 Endpoint 开启 K8S API 代理（gRPC 双向流）
+  // Endpoint 连接本地 K8S API Server，双向桥接 HTTP 请求
+  rpc OpenK8SAPIProxy(stream K8SAPIProxyData) returns (stream K8SAPIProxyData);
+
+  // OpenSVCProxy - Agent 指令 Endpoint 开启 K8S Service 代理（gRPC 双向流）
+  // Endpoint 连接本地 K8S Service ClusterIP，双向桥接 TCP 数据
+  rpc OpenSVCProxy(stream EndpointSVCProxyData) returns (stream EndpointSVCProxyData);
 }
 
 // EndpointRegisterRequest Endpoint 注册请求
@@ -378,6 +436,7 @@ message EndpointHeartbeatRequest {
   string token = 1;          // 注册令牌（用于身份验证）
   string name = 2;           // Endpoint 名称
   repeated EndpointCapabilityInfo capabilities = 3; // 启用的能力列表
+  repeated DiscoveredK8SService discovered_services = 4; // Endpoint 发现的 K8S Service（K8SService 能力时上报）
 }
 
 // EndpointCapabilityInfo Endpoint 单项能力信息
@@ -394,6 +453,10 @@ message EndpointHeartbeatResponse {
   string message = 2;        // 响应消息
   // Shell 请求通知（Agent → Endpoint，通知有 SSH 会话待处理）
   repeated ShellRequest shell_requests = 3;
+  // K8S API 代理请求通知（Agent → Endpoint）
+  repeated K8SAPIProxyRequest k8sapi_proxy_requests = 4;
+  // K8S Service 代理请求通知（Agent → Endpoint）
+  repeated SVCProxyRequest svc_proxy_requests = 5;
 }
 
 // ShellRequest Agent 通知 Endpoint 的 Shell 请求
@@ -424,4 +487,52 @@ message ShellData {
   bool is_close = 8;         // 是否为关闭通知
   int32 exit_code = 9;       // 退出码（Endpoint → Agent，会话结束时）
   string error = 10;         // 错误信息（如用户不存在、权限拒绝等）
+}
+
+
+// ============================================
+// K8S API 代理请求通知（Agent → Endpoint，通过心跳下发）
+// ============================================
+
+// K8SAPIProxyRequest Agent 通知 Endpoint 的 K8S API 代理请求
+message K8SAPIProxyRequest {
+  string session_id = 1;     // 会话 ID（Agent 生成，Endpoint 回调时携带）
+}
+
+// K8SAPIProxyData Endpoint K8S API 代理数据帧
+// Endpoint 调用 OpenK8SAPIProxy 时，首包携带 session_id 和 token（is_open=true）
+// Agent 根据 session_id 匹配等待中的 Desktop HTTP 请求
+// 后续包双向传输 HTTP 请求/响应数据
+message K8SAPIProxyData {
+  bool is_open = 1;          // 是否为开启会话请求（首包 true，Endpoint → Agent）
+  string session_id = 2;     // 会话 ID（首包携带）
+  string token = 3;          // 注册令牌（首包携带，用于身份验证）
+  bytes data = 4;            // 数据载荷（HTTP 请求/响应原始字节）
+  bool is_close = 5;         // 是否为关闭通知
+  string error = 6;          // 错误信息
+}
+
+// ============================================
+// K8S Service 代理请求通知（Agent → Endpoint，通过心跳下发）
+// ============================================
+
+// SVCProxyRequest Agent 通知 Endpoint 的 K8S Service 代理请求
+message SVCProxyRequest {
+  string session_id = 1;     // 会话 ID（Agent 生成，Endpoint 回调时携带）
+  string namespace = 2;      // 目标命名空间
+  string service_name = 3;   // 目标 Service 名称
+  int32 port = 4;            // 目标端口
+}
+
+// EndpointSVCProxyData Endpoint K8S Service 代理数据帧
+// Endpoint 调用 OpenSVCProxy 时，首包携带 session_id 和 token（is_open=true）
+// Agent 根据 session_id 匹配等待中的 Desktop TCP 连接
+// 后续包双向传输 TCP 数据
+message EndpointSVCProxyData {
+  bool is_open = 1;          // 是否为开启会话请求（首包 true，Endpoint → Agent）
+  string session_id = 2;     // 会话 ID（首包携带）
+  string token = 3;          // 注册令牌（首包携带，用于身份验证）
+  bytes data = 4;            // 数据载荷（TCP 数据）
+  bool is_close = 5;         // 是否为关闭通知
+  string error = 6;          // 错误信息
 }

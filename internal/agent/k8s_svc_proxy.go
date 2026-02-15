@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	grpcpeer "google.golang.org/grpc/peer"
@@ -22,11 +23,15 @@ import (
 type K8SSVCProxy struct {
 	pb.UnimplementedAgentServiceServer
 
-	config    *config.SVCSection
-	tsManager *TailscaleManager
-	permCache *PermissionCache
-	identity  *IdentityExtractor
-	informer  *K8SServiceInformer
+	config         *config.SVCSection
+	tsManager      *TailscaleManager
+	permCache      *PermissionCache
+	identity       *IdentityExtractor
+	informer       *K8SServiceInformer
+	auditCollector *AuditCollector
+
+	// Endpoint Server（用于 Endpoint 跳跃路径）
+	endpointServer *EndpointServer
 
 	listener   net.Listener
 	grpcServer *grpc.Server
@@ -39,7 +44,7 @@ type K8SSVCProxy struct {
 }
 
 // NewK8SSVCProxy 创建 K8S Service gRPC 代理
-func NewK8SSVCProxy(cfg *config.SVCSection, tsManager *TailscaleManager, permCache *PermissionCache, informer *K8SServiceInformer, parentCtx context.Context) (*K8SSVCProxy, error) {
+func NewK8SSVCProxy(cfg *config.SVCSection, tsManager *TailscaleManager, permCache *PermissionCache, informer *K8SServiceInformer, auditCollector *AuditCollector, parentCtx context.Context) (*K8SSVCProxy, error) {
 	ctx, cancel := context.WithCancel(parentCtx)
 
 	identity, err := NewIdentityExtractor(tsManager)
@@ -49,13 +54,14 @@ func NewK8SSVCProxy(cfg *config.SVCSection, tsManager *TailscaleManager, permCac
 	}
 
 	return &K8SSVCProxy{
-		config:    cfg,
-		tsManager: tsManager,
-		permCache: permCache,
-		identity:  identity,
-		informer:  informer,
-		ctx:       ctx,
-		cancel:    cancel,
+		config:         cfg,
+		tsManager:      tsManager,
+		permCache:      permCache,
+		identity:       identity,
+		informer:       informer,
+		auditCollector: auditCollector,
+		ctx:            ctx,
+		cancel:         cancel,
 	}, nil
 }
 
@@ -129,6 +135,7 @@ func (p *K8SSVCProxy) SVCProxy(stream pb.AgentService_SVCProxyServer) error {
 	namespace := firstMsg.Namespace
 	serviceName := firstMsg.ServiceName
 	port := firstMsg.Port
+	endpointName := firstMsg.EndpointName
 
 	// 2. 从 gRPC peer 提取身份
 	peerIdentity, err := p.extractIdentityFromStream(stream)
@@ -138,7 +145,12 @@ func (p *K8SSVCProxy) SVCProxy(stream pb.AgentService_SVCProxyServer) error {
 		return err
 	}
 
-	// 3. 检查权限
+	// 如果 endpoint_name 非空，走 Endpoint 跳跃路径
+	if endpointName != "" {
+		return p.handleEndpointSVCProxy(stream, peerIdentity, endpointName, namespace, serviceName, port)
+	}
+
+	// 3. 检查权限（Agent 直连路径）
 	if !p.permCache.CheckK8SServiceAccess(peerIdentity.UserName, namespace, serviceName) {
 		logger.Warnf("SVCProxy 权限拒绝: user=%s, ns=%s, svc=%s",
 			peerIdentity.UserName, namespace, serviceName)
@@ -168,9 +180,10 @@ func (p *K8SSVCProxy) SVCProxy(stream pb.AgentService_SVCProxyServer) error {
 	logger.Infof("SVCProxy 连接建立: user=%s, %s/%s:%d -> %s",
 		peerIdentity.UserName, namespace, serviceName, port, targetAddr)
 
+	// 记录审计开始时间
+	startedAt := time.Now()
+
 	// 5.5 发送连接确认（空数据包），让 Desktop 立即进入桥接阶段
-	// 这是必要的：PostgreSQL 等协议需要客户端先发数据，
-	// 如果 Desktop 还在等首响应就不会转发客户端数据，导致死锁
 	if err := stream.Send(&pb.SVCProxyData{}); err != nil {
 		logger.Errorf("SVCProxy 发送连接确认失败: %v", err)
 		return err
@@ -221,7 +234,6 @@ func (p *K8SSVCProxy) SVCProxy(stream pb.AgentService_SVCProxyServer) error {
 				if err != io.EOF {
 					logger.Debugf("SVCProxy TCP 读取结束: %v", err)
 				}
-				// 发送关闭通知
 				_ = stream.Send(&pb.SVCProxyData{IsClose: true})
 				return
 			}
@@ -229,7 +241,115 @@ func (p *K8SSVCProxy) SVCProxy(stream pb.AgentService_SVCProxyServer) error {
 	}()
 
 	wg.Wait()
+
+	// 记录审计
+	if p.auditCollector != nil {
+		target := fmt.Sprintf("%s.%s:%d", serviceName, namespace, port)
+		p.auditCollector.Record(peerIdentity.UserName, "", "k8s_service_connect", target, "", startedAt, time.Now())
+	}
+
 	return nil
+}
+
+// handleEndpointSVCProxy 处理 Endpoint 跳跃路径的 SVCProxy
+// Desktop → Agent SVCProxy(endpoint_name=xxx) → Agent RequestSVCProxy → Endpoint OpenSVCProxy → K8S ClusterIP
+func (p *K8SSVCProxy) handleEndpointSVCProxy(stream pb.AgentService_SVCProxyServer, peerIdentity *PeerIdentity, endpointName, namespace, serviceName string, port int32) error {
+	// 检查 Endpoint K8SService 权限
+	if !p.permCache.CheckEndpointK8SServiceAccess(peerIdentity.UserName, endpointName, namespace, serviceName) {
+		logger.Warnf("SVCProxy Endpoint 权限拒绝: user=%s, endpoint=%s, ns=%s, svc=%s",
+			peerIdentity.UserName, endpointName, namespace, serviceName)
+		_ = stream.Send(&pb.SVCProxyData{Error: "权限不足"})
+		return fmt.Errorf("权限不足")
+	}
+
+	// 检查 EndpointServer 是否可用
+	if p.endpointServer == nil {
+		_ = stream.Send(&pb.SVCProxyData{Error: "Endpoint 功能未启用"})
+		return fmt.Errorf("Endpoint 功能未启用")
+	}
+
+	// 请求 Endpoint 开启 SVC 代理
+	epStream, err := p.endpointServer.RequestSVCProxy(stream.Context(), endpointName, namespace, serviceName, port)
+	if err != nil {
+		logger.Warnf("SVCProxy Endpoint 请求失败: %v", err)
+		_ = stream.Send(&pb.SVCProxyData{Error: fmt.Sprintf("Endpoint 连接失败: %v", err)})
+		return err
+	}
+
+	logger.Infof("SVCProxy Endpoint 跳跃: user=%s, endpoint=%s, %s/%s:%d",
+		peerIdentity.UserName, endpointName, namespace, serviceName, port)
+
+	startedAt := time.Now()
+
+	// 发送连接确认
+	if err := stream.Send(&pb.SVCProxyData{}); err != nil {
+		return err
+	}
+
+	// 双向桥接：Desktop gRPC stream ↔ Endpoint gRPC stream
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Desktop → Endpoint
+	go func() {
+		defer wg.Done()
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				_ = epStream.Send(&pb.EndpointSVCProxyData{IsClose: true})
+				return
+			}
+			if msg.IsClose {
+				_ = epStream.Send(&pb.EndpointSVCProxyData{IsClose: true})
+				return
+			}
+			if len(msg.Data) > 0 {
+				if sendErr := epStream.Send(&pb.EndpointSVCProxyData{Data: msg.Data}); sendErr != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	// Endpoint → Desktop
+	go func() {
+		defer wg.Done()
+		for {
+			msg, err := epStream.Recv()
+			if err != nil {
+				_ = stream.Send(&pb.SVCProxyData{IsClose: true})
+				return
+			}
+			if msg.IsClose {
+				_ = stream.Send(&pb.SVCProxyData{IsClose: true})
+				return
+			}
+			if msg.Error != "" {
+				_ = stream.Send(&pb.SVCProxyData{Error: msg.Error})
+				return
+			}
+			if len(msg.Data) > 0 {
+				if sendErr := stream.Send(&pb.SVCProxyData{Data: msg.Data}); sendErr != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	// 记录审计
+	if p.auditCollector != nil {
+		target := fmt.Sprintf("%s.%s:%d@%s", serviceName, namespace, port, endpointName)
+		p.auditCollector.Record(peerIdentity.UserName, endpointName, "k8s_service_connect", target, "", startedAt, time.Now())
+	}
+
+	return nil
+}
+
+// SetEndpointServer 设置 EndpointServer 引用（用于 Endpoint 跳跃路径）
+func (p *K8SSVCProxy) SetEndpointServer(es *EndpointServer) {
+	p.endpointServer = es
 }
 
 // extractIdentityFromStream 从 gRPC stream 中提取对端身份

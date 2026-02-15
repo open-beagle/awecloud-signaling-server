@@ -76,6 +76,15 @@
         <el-menu-item index="/acl/k8s-service">
           {{ t('menu.aclK8SService') }}
         </el-menu-item>
+        <el-menu-item index="/acl/endpoint-ssh">
+          {{ t('menu.aclEndpointSSH') }}
+        </el-menu-item>
+        <el-menu-item index="/acl/endpoint-k8sapi">
+          {{ t('menu.aclEndpointK8S') }}
+        </el-menu-item>
+        <el-menu-item index="/acl/endpoint-k8sservice">
+          {{ t('menu.aclEndpointK8SService') }}
+        </el-menu-item>
       </el-sub-menu>
       <!-- 隧道管理 -->
       <el-sub-menu index="tunnel">
@@ -97,12 +106,18 @@
         </el-menu-item>
       </el-sub-menu>
       <!-- 审计日志 -->
-      <el-menu-item index="/audit-logs">
-        <el-icon><Document /></el-icon>
+      <el-sub-menu index="audit">
         <template #title>
+          <el-icon><Document /></el-icon>
           <span>{{ t('menu.auditLogs') }}</span>
         </template>
-      </el-menu-item>
+        <el-menu-item index="/audit-logs">
+          {{ t('menu.adminAudit') }}
+        </el-menu-item>
+        <el-menu-item index="/operation-audit">
+          {{ t('menu.operationAudit') }}
+        </el-menu-item>
+      </el-sub-menu>
       <!-- 系统配置 -->
       <el-menu-item index="/system/config">
         <el-icon><Setting /></el-icon>

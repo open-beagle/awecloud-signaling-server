@@ -175,6 +175,45 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ACL/K8SServiceDetail.vue'),
         meta: { requiresAuth: true }
       },
+      // Endpoint SSH 授权
+      {
+        path: 'acl/endpoint-ssh',
+        name: 'ACLEndpointSSH',
+        component: () => import('@/views/ACL/EndpointSSHList.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'acl/endpoint-ssh/:id',
+        name: 'ACLEndpointSSHDetail',
+        component: () => import('@/views/ACL/EndpointSSHDetail.vue'),
+        meta: { requiresAuth: true }
+      },
+      // Endpoint K8SAPI 授权
+      {
+        path: 'acl/endpoint-k8sapi',
+        name: 'ACLEndpointK8S',
+        component: () => import('@/views/ACL/EndpointK8SList.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'acl/endpoint-k8sapi/:id',
+        name: 'ACLEndpointK8SDetail',
+        component: () => import('@/views/ACL/EndpointK8SDetail.vue'),
+        meta: { requiresAuth: true }
+      },
+      // Endpoint K8SService 授权
+      {
+        path: 'acl/endpoint-k8sservice',
+        name: 'ACLEndpointK8SService',
+        component: () => import('@/views/ACL/EndpointK8SServiceList.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'acl/endpoint-k8sservice/:id',
+        name: 'ACLEndpointK8SServiceDetail',
+        component: () => import('@/views/ACL/EndpointK8SServiceDetail.vue'),
+        meta: { requiresAuth: true }
+      },
       // 隧道管理（保留旧路由）
       {
         path: 'tunnel/users',
@@ -205,6 +244,13 @@ const routes: RouteRecordRaw[] = [
         path: 'audit-logs',
         name: 'AuditLogs',
         component: () => import('@/views/Audit/AuditLogs.vue'),
+        meta: { requiresAuth: true }
+      },
+      // 操作审计
+      {
+        path: 'operation-audit',
+        name: 'OperationAudit',
+        component: () => import('@/views/Audit/OperationAuditLogs.vue'),
         meta: { requiresAuth: true }
       },
       // 系统配置

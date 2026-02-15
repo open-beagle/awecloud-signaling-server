@@ -576,6 +576,11 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		s.handleConnectedEndpoints(ctx, agentID, req.ConnectedEndpoints)
 	}
 
+	// 处理操作审计记录上报
+	if len(req.AuditRecords) > 0 {
+		s.handleAuditRecords(ctx, agentID, req.AuditRecords)
+	}
+
 	return node.ID
 }
 
@@ -729,6 +734,18 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 	if len(k8sSvcPerms) > 0 {
 		resp.K8SServicePermissions = k8sSvcPerms
 	}
+
+	// 查询该 Agent 关联的 Endpoint SSH 授权信息
+	epSSHPerms := s.queryEndpointSSHPermissions(ctx, agentID)
+	resp.EndpointSshPermissions = epSSHPerms
+
+	// 查询该 Agent 关联的 Endpoint K8SAPI 授权信息
+	epK8SAPIPerms := s.queryEndpointK8SAPIPermissions(ctx, agentID)
+	resp.EndpointK8SapiPermissions = epK8SAPIPerms
+
+	// 查询该 Agent 关联的 Endpoint K8SService 授权信息
+	epK8SSvcPerms := s.queryEndpointK8SServicePermissions(ctx, agentID)
+	resp.EndpointK8SservicePermissions = epK8SSvcPerms
 
 	return stream.Send(resp)
 }
@@ -1140,6 +1157,28 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 				logger.Warnf("未知的 Endpoint 能力类型: type=%s, name=%s", cap.Type, ep.Name)
 			}
 		}
+
+		// 更新 Endpoint K8S Service 发现缓存
+		if len(ep.DiscoveredServices) > 0 {
+			discoveredServices := make([]cache.EndpointDiscoveredService, 0, len(ep.DiscoveredServices))
+			for _, ds := range ep.DiscoveredServices {
+				ports := make([]cache.DiscoveredServicePort, 0, len(ds.Ports))
+				for _, p := range ds.Ports {
+					ports = append(ports, cache.DiscoveredServicePort{
+						Name:     p.Name,
+						Port:     p.Port,
+						Protocol: p.Protocol,
+					})
+				}
+				discoveredServices = append(discoveredServices, cache.EndpointDiscoveredService{
+					Namespace:   ds.Namespace,
+					ServiceName: ds.ServiceName,
+					ClusterIP:   ds.ClusterIp,
+					Ports:       ports,
+				})
+			}
+			cache.UpdateEndpointK8SServiceDiscovery(ep.Name, discoveredServices)
+		}
 	}
 
 	// 将不在列表中的 Endpoint 标记为 offline
@@ -1265,4 +1304,240 @@ func (s *AgentServiceServer) upsertEndpointK8SService(ctx context.Context, agent
 		}
 		db.DB.WithContext(ctx).Model(&existing).Updates(updates)
 	}
+}
+
+// queryEndpointSSHPermissions 查询 Agent 关联的 Endpoint SSH 授权列表
+func (s *AgentServiceServer) queryEndpointSSHPermissions(ctx context.Context, agentID uint64) []*pb.EndpointSSHPermission {
+	var result []*pb.EndpointSSHPermission
+
+	// 查询该 Agent 下的所有 Endpoint SSH
+	var endpoints []model.EndpointSSH
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ? AND status = ?", agentID, false, "online").Find(&endpoints).Error; err != nil {
+		return nil
+	}
+
+	for _, ep := range endpoints {
+		// 查询用户授权
+		var userPerms []model.AclEndpointSSHUserPermission
+		if err := db.DB.WithContext(ctx).Preload("User").
+			Where("endpoint_id = ? AND enabled = ?", ep.ID, true).
+			Find(&userPerms).Error; err != nil {
+			continue
+		}
+		for _, p := range userPerms {
+			if p.User == nil {
+				continue
+			}
+			result = append(result, &pb.EndpointSSHPermission{
+				EndpointId:   ep.ID,
+				EndpointName: ep.Name,
+				UserId:       p.UserID,
+				UserName:     p.User.Name,
+				SshUsers:     parseJSONStringArray(p.SSHUsers),
+				IsGroup:      false,
+			})
+		}
+
+		// 查询分组授权，展开成员
+		var groupPerms []model.AclEndpointSSHGroupPermission
+		if err := db.DB.WithContext(ctx).
+			Where("endpoint_id = ? AND enabled = ?", ep.ID, true).
+			Find(&groupPerms).Error; err != nil {
+			continue
+		}
+		for _, gp := range groupPerms {
+			sshUsers := parseJSONStringArray(gp.SSHUsers)
+			var members []model.GroupMember
+			if err := db.DB.WithContext(ctx).Preload("User").
+				Where("group_id = ?", gp.GroupID).Find(&members).Error; err != nil {
+				continue
+			}
+			for _, m := range members {
+				if m.User == nil {
+					continue
+				}
+				result = append(result, &pb.EndpointSSHPermission{
+					EndpointId:   ep.ID,
+					EndpointName: ep.Name,
+					UserId:       m.UserID,
+					UserName:     m.User.Name,
+					SshUsers:     sshUsers,
+					IsGroup:      true,
+				})
+			}
+		}
+	}
+
+	return result
+}
+
+// queryEndpointK8SAPIPermissions 查询 Agent 关联的 Endpoint K8SAPI 授权列表
+func (s *AgentServiceServer) queryEndpointK8SAPIPermissions(ctx context.Context, agentID uint64) []*pb.EndpointK8SAPIPermission {
+	var result []*pb.EndpointK8SAPIPermission
+
+	var endpoints []model.EndpointK8SAPI
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ? AND status = ?", agentID, false, "online").Find(&endpoints).Error; err != nil {
+		return nil
+	}
+
+	for _, ep := range endpoints {
+		var userPerms []model.AclEndpointK8SAPIUserPermission
+		if err := db.DB.WithContext(ctx).Preload("User").
+			Where("endpoint_id = ? AND enabled = ?", ep.ID, true).
+			Find(&userPerms).Error; err != nil {
+			continue
+		}
+		for _, p := range userPerms {
+			if p.User == nil {
+				continue
+			}
+			result = append(result, &pb.EndpointK8SAPIPermission{
+				EndpointId:   ep.ID,
+				EndpointName: ep.Name,
+				UserId:       p.UserID,
+				UserName:     p.User.Name,
+				K8SGroups:    parseJSONStringArray(p.K8SGroups),
+				Namespaces:   parseJSONStringArray(p.Namespaces),
+				IsGroup:      false,
+			})
+		}
+
+		var groupPerms []model.AclEndpointK8SAPIGroupPermission
+		if err := db.DB.WithContext(ctx).
+			Where("endpoint_id = ? AND enabled = ?", ep.ID, true).
+			Find(&groupPerms).Error; err != nil {
+			continue
+		}
+		for _, gp := range groupPerms {
+			k8sGroups := parseJSONStringArray(gp.K8SGroups)
+			namespaces := parseJSONStringArray(gp.Namespaces)
+			var members []model.GroupMember
+			if err := db.DB.WithContext(ctx).Preload("User").
+				Where("group_id = ?", gp.GroupID).Find(&members).Error; err != nil {
+				continue
+			}
+			for _, m := range members {
+				if m.User == nil {
+					continue
+				}
+				result = append(result, &pb.EndpointK8SAPIPermission{
+					EndpointId:   ep.ID,
+					EndpointName: ep.Name,
+					UserId:       m.UserID,
+					UserName:     m.User.Name,
+					K8SGroups:    k8sGroups,
+					Namespaces:   namespaces,
+					IsGroup:      true,
+				})
+			}
+		}
+	}
+
+	return result
+}
+
+// queryEndpointK8SServicePermissions 查询 Agent 关联的 Endpoint K8SService 授权列表
+func (s *AgentServiceServer) queryEndpointK8SServicePermissions(ctx context.Context, agentID uint64) []*pb.EndpointK8SServicePermission {
+	var result []*pb.EndpointK8SServicePermission
+
+	var endpoints []model.EndpointK8SService
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ? AND status = ?", agentID, false, "online").Find(&endpoints).Error; err != nil {
+		return nil
+	}
+
+	for _, ep := range endpoints {
+		var userPerms []model.AclEndpointK8SServiceUserPermission
+		if err := db.DB.WithContext(ctx).Preload("User").
+			Where("endpoint_id = ? AND enabled = ?", ep.ID, true).
+			Find(&userPerms).Error; err != nil {
+			continue
+		}
+		for _, p := range userPerms {
+			if p.User == nil {
+				continue
+			}
+			result = append(result, &pb.EndpointK8SServicePermission{
+				EndpointId:   ep.ID,
+				EndpointName: ep.Name,
+				UserId:       p.UserID,
+				UserName:     p.User.Name,
+				Namespaces:   parseJSONStringArray(p.Namespaces),
+				ServiceNames: parseJSONStringArray(p.ServiceNames),
+				IsGroup:      false,
+			})
+		}
+
+		var groupPerms []model.AclEndpointK8SServiceGroupPermission
+		if err := db.DB.WithContext(ctx).
+			Where("endpoint_id = ? AND enabled = ?", ep.ID, true).
+			Find(&groupPerms).Error; err != nil {
+			continue
+		}
+		for _, gp := range groupPerms {
+			namespaces := parseJSONStringArray(gp.Namespaces)
+			serviceNames := parseJSONStringArray(gp.ServiceNames)
+			var members []model.GroupMember
+			if err := db.DB.WithContext(ctx).Preload("User").
+				Where("group_id = ?", gp.GroupID).Find(&members).Error; err != nil {
+				continue
+			}
+			for _, m := range members {
+				if m.User == nil {
+					continue
+				}
+				result = append(result, &pb.EndpointK8SServicePermission{
+					EndpointId:   ep.ID,
+					EndpointName: ep.Name,
+					UserId:       m.UserID,
+					UserName:     m.User.Name,
+					Namespaces:   namespaces,
+					ServiceNames: serviceNames,
+					IsGroup:      true,
+				})
+			}
+		}
+	}
+
+	return result
+}
+
+// handleAuditRecords 处理 Agent 上报的操作审计记录
+func (s *AgentServiceServer) handleAuditRecords(ctx context.Context, agentID uint64, records []*pb.OperationAuditRecord) {
+	// 查询 Agent 名称
+	var agentUser model.User
+	agentName := ""
+	if err := db.DB.WithContext(ctx).First(&agentUser, agentID).Error; err == nil {
+		agentName = agentUser.Name
+	}
+
+	for _, r := range records {
+		// 查询 Client 用户 ID
+		var clientUserID uint64
+		if r.ClientUserName != "" {
+			var clientUser model.User
+			if err := db.DB.WithContext(ctx).Where("name = ?", r.ClientUserName).First(&clientUser).Error; err == nil {
+				clientUserID = clientUser.ID
+			}
+		}
+
+		log := &model.OperationAuditLog{
+			AgentUserID:   agentID,
+			AgentName:     agentName,
+			ClientUserID:  clientUserID,
+			ClientName:    r.ClientUserName,
+			EndpointName:  r.EndpointName,
+			OperationType: r.OperationType,
+			Target:        r.Target,
+			Detail:        r.Detail,
+			StartedAt:     time.Unix(r.StartedAt, 0),
+			EndedAt:       time.Unix(r.EndedAt, 0),
+			DurationMs:    (r.EndedAt - r.StartedAt) * 1000,
+		}
+
+		if err := db.DB.WithContext(ctx).Create(log).Error; err != nil {
+			logger.Errorf("保存操作审计记录失败: %v", err)
+		}
+	}
+
+	logger.Infof("保存操作审计记录: agent_id=%d, count=%d", agentID, len(records))
 }

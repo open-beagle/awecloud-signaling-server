@@ -386,6 +386,7 @@ message ResolveDomainResponse {
   string namespace = 8; // K8S 命名空间（k8ssvc 类型时）
   string service_name = 9; // K8S Service 名称（k8ssvc 类型时）
   int32 svc_proxy_port = 10; // Agent SVCProxy gRPC 端口（k8ssvc 类型时，默认 9090）
+  string endpoint_name = 11; // Endpoint 名称（Endpoint 跳跃时，非空表示需要走 Endpoint 路径）
 }
 
 // ============================================

@@ -24,13 +24,14 @@ type EndpointCapability struct {
 
 // EndpointConnection Endpoint 连接信息
 type EndpointConnection struct {
-	Name         string
-	Token        string
-	Version      string
-	Capabilities []EndpointCapability // 多能力列表
-	RemoteIP     string
-	LastSeen     time.Time
-	Cancel       context.CancelFunc
+	Name               string
+	Token              string
+	Version            string
+	Capabilities       []EndpointCapability       // 多能力列表
+	DiscoveredServices []*pb.DiscoveredK8SService // Endpoint 发现的 K8S Service
+	RemoteIP           string
+	LastSeen           time.Time
+	Cancel             context.CancelFunc
 }
 
 // shellSession 等待中的 shell 会话（Agent 创建，等待 Endpoint 回调）
@@ -43,6 +44,23 @@ type shellSession struct {
 	streamCh chan pb.EndpointService_OpenShellServer
 	// 创建时间，用于超时清理
 	createdAt time.Time
+}
+
+// k8sapiSession 等待中的 K8S API 代理会话
+type k8sapiSession struct {
+	sessionID string
+	streamCh  chan pb.EndpointService_OpenK8SAPIProxyServer
+	createdAt time.Time
+}
+
+// svcProxySession 等待中的 K8S Service 代理会话
+type svcProxySession struct {
+	sessionID   string
+	namespace   string
+	serviceName string
+	port        int32
+	streamCh    chan pb.EndpointService_OpenSVCProxyServer
+	createdAt   time.Time
 }
 
 // EndpointServer Agent 内网 gRPC Server，接受 Endpoint 连接
@@ -60,9 +78,21 @@ type EndpointServer struct {
 	shellSessions map[string]*shellSession
 	shellMutex    sync.Mutex
 
+	// 等待中的 K8S API 代理会话（session_id → k8sapiSession）
+	k8sapiSessions map[string]*k8sapiSession
+	k8sapiMutex    sync.Mutex
+
+	// 等待中的 K8S Service 代理会话（session_id → svcProxySession）
+	svcProxySessions map[string]*svcProxySession
+	svcProxyMutex    sync.Mutex
+
 	// 待下发的 shell 请求（endpoint name → []*ShellRequest）
 	pendingShellReqs map[string][]*pb.ShellRequest
-	pendingMutex     sync.Mutex
+	// 待下发的 K8S API 代理请求（endpoint name → []*K8SAPIProxyRequest）
+	pendingK8SAPIReqs map[string][]*pb.K8SAPIProxyRequest
+	// 待下发的 K8S Service 代理请求（endpoint name → []*SVCProxyRequest）
+	pendingSVCReqs map[string][]*pb.SVCProxyRequest
+	pendingMutex   sync.Mutex
 
 	grpcServer *net.Listener
 	server     *grpc.Server
@@ -74,13 +104,17 @@ type EndpointServer struct {
 func NewEndpointServer(listenPort int, token string, parentCtx context.Context) *EndpointServer {
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &EndpointServer{
-		listenPort:       listenPort,
-		token:            token,
-		connections:      make(map[string]*EndpointConnection),
-		shellSessions:    make(map[string]*shellSession),
-		pendingShellReqs: make(map[string][]*pb.ShellRequest),
-		ctx:              ctx,
-		cancel:           cancel,
+		listenPort:        listenPort,
+		token:             token,
+		connections:       make(map[string]*EndpointConnection),
+		shellSessions:     make(map[string]*shellSession),
+		k8sapiSessions:    make(map[string]*k8sapiSession),
+		svcProxySessions:  make(map[string]*svcProxySession),
+		pendingShellReqs:  make(map[string][]*pb.ShellRequest),
+		pendingK8SAPIReqs: make(map[string][]*pb.K8SAPIProxyRequest),
+		pendingSVCReqs:    make(map[string][]*pb.SVCProxyRequest),
+		ctx:               ctx,
+		cancel:            cancel,
 	}
 }
 
@@ -203,11 +237,12 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 
 	// 注册连接（解析能力信息）
 	conn := &EndpointConnection{
-		Name:         name,
-		Token:        firstReq.Token,
-		Capabilities: parseCapabilities(firstReq.Capabilities),
-		LastSeen:     time.Now(),
-		Cancel:       cancel,
+		Name:               name,
+		Token:              firstReq.Token,
+		Capabilities:       parseCapabilities(firstReq.Capabilities),
+		DiscoveredServices: firstReq.DiscoveredServices,
+		LastSeen:           time.Now(),
+		Cancel:             cancel,
 	}
 
 	s.connMutex.Lock()
@@ -250,17 +285,25 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 			if len(req.Capabilities) > 0 {
 				conn.Capabilities = parseCapabilities(req.Capabilities)
 			}
+			// 更新 K8S Service 发现数据
+			conn.DiscoveredServices = req.DiscoveredServices
 
-			// 取出待下发的 shell 请求
+			// 取出待下发的请求
 			s.pendingMutex.Lock()
 			shellReqs := s.pendingShellReqs[name]
 			delete(s.pendingShellReqs, name)
+			k8sapiReqs := s.pendingK8SAPIReqs[name]
+			delete(s.pendingK8SAPIReqs, name)
+			svcReqs := s.pendingSVCReqs[name]
+			delete(s.pendingSVCReqs, name)
 			s.pendingMutex.Unlock()
 
-			// 发送响应（携带 shell 请求通知）
+			// 发送响应（携带各类请求通知）
 			if err := stream.Send(&pb.EndpointHeartbeatResponse{
-				Success:       true,
-				ShellRequests: shellReqs,
+				Success:             true,
+				ShellRequests:       shellReqs,
+				K8SapiProxyRequests: k8sapiReqs,
+				SvcProxyRequests:    svcReqs,
 			}); err != nil {
 				return err
 			}
@@ -401,4 +444,202 @@ func (s *EndpointServer) IsEndpointConnected(name string) bool {
 	defer s.connMutex.RUnlock()
 	_, exists := s.connections[name]
 	return exists
+}
+
+// OpenK8SAPIProxy Endpoint 回调的 K8S API 代理会话（gRPC 双向流）
+// Endpoint 收到心跳中的 K8SAPIProxyRequest 通知后，主动调用此 RPC
+func (s *EndpointServer) OpenK8SAPIProxy(stream pb.EndpointService_OpenK8SAPIProxyServer) error {
+	// 接收首包（Endpoint 发送 session_id + token）
+	firstMsg, err := stream.Recv()
+	if err != nil {
+		return fmt.Errorf("接收 OpenK8SAPIProxy 首包失败: %w", err)
+	}
+
+	if !firstMsg.IsOpen {
+		return fmt.Errorf("OpenK8SAPIProxy 首包缺少 is_open 标志")
+	}
+
+	// 验证 token
+	if firstMsg.Token != s.token {
+		logger.Warnf("OpenK8SAPIProxy 拒绝: token 不匹配, session_id=%s", firstMsg.SessionId)
+		return fmt.Errorf("认证失败")
+	}
+
+	sessionID := firstMsg.SessionId
+	logger.Infof("OpenK8SAPIProxy 回调: session_id=%s", sessionID)
+
+	// 查找等待中的 session
+	s.k8sapiMutex.Lock()
+	session, exists := s.k8sapiSessions[sessionID]
+	if !exists {
+		s.k8sapiMutex.Unlock()
+		logger.Warnf("OpenK8SAPIProxy 找不到 session: session_id=%s（可能已超时）", sessionID)
+		return fmt.Errorf("session 不存在或已超时")
+	}
+	s.k8sapiMutex.Unlock()
+
+	// 通知等待方：Endpoint 已回调，传递 gRPC 流
+	select {
+	case session.streamCh <- stream:
+	default:
+		logger.Warnf("OpenK8SAPIProxy session channel 已满: session_id=%s", sessionID)
+		return fmt.Errorf("session channel 已满")
+	}
+
+	// 保持流存活，直到流关闭
+	<-stream.Context().Done()
+	return nil
+}
+
+// RequestK8SAPIProxy 请求 Endpoint 开启 K8S API 代理会话
+// 创建 session → 通知 Endpoint → 等待回调 → 返回 gRPC 流
+func (s *EndpointServer) RequestK8SAPIProxy(ctx context.Context, endpointName string) (pb.EndpointService_OpenK8SAPIProxyServer, error) {
+	// 检查 Endpoint 是否在线
+	s.connMutex.RLock()
+	_, connected := s.connections[endpointName]
+	s.connMutex.RUnlock()
+	if !connected {
+		return nil, fmt.Errorf("Endpoint %s 不在线", endpointName)
+	}
+
+	// 创建 session
+	sessionID := uuid.New().String()
+	session := &k8sapiSession{
+		sessionID: sessionID,
+		streamCh:  make(chan pb.EndpointService_OpenK8SAPIProxyServer, 1),
+		createdAt: time.Now(),
+	}
+
+	s.k8sapiMutex.Lock()
+	s.k8sapiSessions[sessionID] = session
+	s.k8sapiMutex.Unlock()
+
+	defer func() {
+		s.k8sapiMutex.Lock()
+		delete(s.k8sapiSessions, sessionID)
+		s.k8sapiMutex.Unlock()
+	}()
+
+	// 将请求加入待下发队列
+	req := &pb.K8SAPIProxyRequest{
+		SessionId: sessionID,
+	}
+	s.pendingMutex.Lock()
+	s.pendingK8SAPIReqs[endpointName] = append(s.pendingK8SAPIReqs[endpointName], req)
+	s.pendingMutex.Unlock()
+
+	logger.Infof("K8SAPI 代理请求已排队: session_id=%s, endpoint=%s", sessionID, endpointName)
+
+	// 等待 Endpoint 回调（超时 30 秒）
+	select {
+	case stream := <-session.streamCh:
+		logger.Infof("K8SAPI 代理会话已建立: session_id=%s, endpoint=%s", sessionID, endpointName)
+		return stream, nil
+	case <-time.After(30 * time.Second):
+		return nil, fmt.Errorf("等待 Endpoint %s 回调超时（30s）", endpointName)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// OpenSVCProxy Endpoint 回调的 K8S Service 代理会话（gRPC 双向流）
+// Endpoint 收到心跳中的 SVCProxyRequest 通知后，主动调用此 RPC
+func (s *EndpointServer) OpenSVCProxy(stream pb.EndpointService_OpenSVCProxyServer) error {
+	// 接收首包（Endpoint 发送 session_id + token）
+	firstMsg, err := stream.Recv()
+	if err != nil {
+		return fmt.Errorf("接收 OpenSVCProxy 首包失败: %w", err)
+	}
+
+	if !firstMsg.IsOpen {
+		return fmt.Errorf("OpenSVCProxy 首包缺少 is_open 标志")
+	}
+
+	// 验证 token
+	if firstMsg.Token != s.token {
+		logger.Warnf("OpenSVCProxy 拒绝: token 不匹配, session_id=%s", firstMsg.SessionId)
+		return fmt.Errorf("认证失败")
+	}
+
+	sessionID := firstMsg.SessionId
+	logger.Infof("OpenSVCProxy 回调: session_id=%s", sessionID)
+
+	// 查找等待中的 session
+	s.svcProxyMutex.Lock()
+	session, exists := s.svcProxySessions[sessionID]
+	if !exists {
+		s.svcProxyMutex.Unlock()
+		logger.Warnf("OpenSVCProxy 找不到 session: session_id=%s（可能已超时）", sessionID)
+		return fmt.Errorf("session 不存在或已超时")
+	}
+	s.svcProxyMutex.Unlock()
+
+	// 通知等待方
+	select {
+	case session.streamCh <- stream:
+	default:
+		logger.Warnf("OpenSVCProxy session channel 已满: session_id=%s", sessionID)
+		return fmt.Errorf("session channel 已满")
+	}
+
+	// 保持流存活
+	<-stream.Context().Done()
+	return nil
+}
+
+// RequestSVCProxy 请求 Endpoint 开启 K8S Service 代理会话
+// 创建 session → 通知 Endpoint → 等待回调 → 返回 gRPC 流
+func (s *EndpointServer) RequestSVCProxy(ctx context.Context, endpointName, namespace, serviceName string, port int32) (pb.EndpointService_OpenSVCProxyServer, error) {
+	// 检查 Endpoint 是否在线
+	s.connMutex.RLock()
+	_, connected := s.connections[endpointName]
+	s.connMutex.RUnlock()
+	if !connected {
+		return nil, fmt.Errorf("Endpoint %s 不在线", endpointName)
+	}
+
+	// 创建 session
+	sessionID := uuid.New().String()
+	session := &svcProxySession{
+		sessionID:   sessionID,
+		namespace:   namespace,
+		serviceName: serviceName,
+		port:        port,
+		streamCh:    make(chan pb.EndpointService_OpenSVCProxyServer, 1),
+		createdAt:   time.Now(),
+	}
+
+	s.svcProxyMutex.Lock()
+	s.svcProxySessions[sessionID] = session
+	s.svcProxyMutex.Unlock()
+
+	defer func() {
+		s.svcProxyMutex.Lock()
+		delete(s.svcProxySessions, sessionID)
+		s.svcProxyMutex.Unlock()
+	}()
+
+	// 将请求加入待下发队列
+	req := &pb.SVCProxyRequest{
+		SessionId:   sessionID,
+		Namespace:   namespace,
+		ServiceName: serviceName,
+		Port:        port,
+	}
+	s.pendingMutex.Lock()
+	s.pendingSVCReqs[endpointName] = append(s.pendingSVCReqs[endpointName], req)
+	s.pendingMutex.Unlock()
+
+	logger.Infof("SVC 代理请求已排队: session_id=%s, endpoint=%s, %s/%s:%d", sessionID, endpointName, namespace, serviceName, port)
+
+	// 等待 Endpoint 回调（超时 30 秒）
+	select {
+	case stream := <-session.streamCh:
+		logger.Infof("SVC 代理会话已建立: session_id=%s, endpoint=%s", sessionID, endpointName)
+		return stream, nil
+	case <-time.After(30 * time.Second):
+		return nil, fmt.Errorf("等待 Endpoint %s 回调超时（30s）", endpointName)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }

@@ -36,6 +36,8 @@ metadata:
     app: signal-agent
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: signal-agent
@@ -46,6 +48,10 @@ spec:
     spec:
       serviceAccountName: signal-agent
       hostname: signal-agent
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        kubernetes.io/hostname: beagle-242
       containers:
         - name: agent
           image: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.2.3
@@ -56,10 +62,10 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: signal-agent
-                  key: token
+                  key: agent-token
             # Server 地址
             - name: SIGNAL_SERVER
-              value: "https://signaling.example.com"
+              value: "https://signal.wodcloud.com"
             # 启用 SSH
             - name: SIGNAL_SSH
               value: "true"
@@ -75,6 +81,9 @@ spec:
           ports:
             - name: health
               containerPort: 8090
+              protocol: TCP
+            - name: endpoint-grpc
+              containerPort: 50052
               protocol: TCP
           # 存活性探测
           livenessProbe:

@@ -396,9 +396,11 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	EndpointService_Register_FullMethodName  = "/awecloud.signaling.EndpointService/Register"
-	EndpointService_Heartbeat_FullMethodName = "/awecloud.signaling.EndpointService/Heartbeat"
-	EndpointService_OpenShell_FullMethodName = "/awecloud.signaling.EndpointService/OpenShell"
+	EndpointService_Register_FullMethodName        = "/awecloud.signaling.EndpointService/Register"
+	EndpointService_Heartbeat_FullMethodName       = "/awecloud.signaling.EndpointService/Heartbeat"
+	EndpointService_OpenShell_FullMethodName       = "/awecloud.signaling.EndpointService/OpenShell"
+	EndpointService_OpenK8SAPIProxy_FullMethodName = "/awecloud.signaling.EndpointService/OpenK8SAPIProxy"
+	EndpointService_OpenSVCProxy_FullMethodName    = "/awecloud.signaling.EndpointService/OpenSVCProxy"
 )
 
 // EndpointServiceClient is the client API for EndpointService service.
@@ -414,6 +416,12 @@ type EndpointServiceClient interface {
 	// OpenShell - Agent 指令 Endpoint 开启 shell 会话（gRPC 双向流）
 	// Agent 发送首条消息指定 login 用户和终端大小，Endpoint spawn shell 后双向传输 I/O
 	OpenShell(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ShellData, ShellData], error)
+	// OpenK8SAPIProxy - Agent 指令 Endpoint 开启 K8S API 代理（gRPC 双向流）
+	// Endpoint 连接本地 K8S API Server，双向桥接 HTTP 请求
+	OpenK8SAPIProxy(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[K8SAPIProxyData, K8SAPIProxyData], error)
+	// OpenSVCProxy - Agent 指令 Endpoint 开启 K8S Service 代理（gRPC 双向流）
+	// Endpoint 连接本地 K8S Service ClusterIP，双向桥接 TCP 数据
+	OpenSVCProxy(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[EndpointSVCProxyData, EndpointSVCProxyData], error)
 }
 
 type endpointServiceClient struct {
@@ -460,6 +468,32 @@ func (c *endpointServiceClient) OpenShell(ctx context.Context, opts ...grpc.Call
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type EndpointService_OpenShellClient = grpc.BidiStreamingClient[ShellData, ShellData]
 
+func (c *endpointServiceClient) OpenK8SAPIProxy(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[K8SAPIProxyData, K8SAPIProxyData], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &EndpointService_ServiceDesc.Streams[2], EndpointService_OpenK8SAPIProxy_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[K8SAPIProxyData, K8SAPIProxyData]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EndpointService_OpenK8SAPIProxyClient = grpc.BidiStreamingClient[K8SAPIProxyData, K8SAPIProxyData]
+
+func (c *endpointServiceClient) OpenSVCProxy(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[EndpointSVCProxyData, EndpointSVCProxyData], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &EndpointService_ServiceDesc.Streams[3], EndpointService_OpenSVCProxy_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[EndpointSVCProxyData, EndpointSVCProxyData]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EndpointService_OpenSVCProxyClient = grpc.BidiStreamingClient[EndpointSVCProxyData, EndpointSVCProxyData]
+
 // EndpointServiceServer is the server API for EndpointService service.
 // All implementations must embed UnimplementedEndpointServiceServer
 // for forward compatibility.
@@ -473,6 +507,12 @@ type EndpointServiceServer interface {
 	// OpenShell - Agent 指令 Endpoint 开启 shell 会话（gRPC 双向流）
 	// Agent 发送首条消息指定 login 用户和终端大小，Endpoint spawn shell 后双向传输 I/O
 	OpenShell(grpc.BidiStreamingServer[ShellData, ShellData]) error
+	// OpenK8SAPIProxy - Agent 指令 Endpoint 开启 K8S API 代理（gRPC 双向流）
+	// Endpoint 连接本地 K8S API Server，双向桥接 HTTP 请求
+	OpenK8SAPIProxy(grpc.BidiStreamingServer[K8SAPIProxyData, K8SAPIProxyData]) error
+	// OpenSVCProxy - Agent 指令 Endpoint 开启 K8S Service 代理（gRPC 双向流）
+	// Endpoint 连接本地 K8S Service ClusterIP，双向桥接 TCP 数据
+	OpenSVCProxy(grpc.BidiStreamingServer[EndpointSVCProxyData, EndpointSVCProxyData]) error
 	mustEmbedUnimplementedEndpointServiceServer()
 }
 
@@ -491,6 +531,12 @@ func (UnimplementedEndpointServiceServer) Heartbeat(grpc.BidiStreamingServer[End
 }
 func (UnimplementedEndpointServiceServer) OpenShell(grpc.BidiStreamingServer[ShellData, ShellData]) error {
 	return status.Error(codes.Unimplemented, "method OpenShell not implemented")
+}
+func (UnimplementedEndpointServiceServer) OpenK8SAPIProxy(grpc.BidiStreamingServer[K8SAPIProxyData, K8SAPIProxyData]) error {
+	return status.Error(codes.Unimplemented, "method OpenK8SAPIProxy not implemented")
+}
+func (UnimplementedEndpointServiceServer) OpenSVCProxy(grpc.BidiStreamingServer[EndpointSVCProxyData, EndpointSVCProxyData]) error {
+	return status.Error(codes.Unimplemented, "method OpenSVCProxy not implemented")
 }
 func (UnimplementedEndpointServiceServer) mustEmbedUnimplementedEndpointServiceServer() {}
 func (UnimplementedEndpointServiceServer) testEmbeddedByValue()                         {}
@@ -545,6 +591,20 @@ func _EndpointService_OpenShell_Handler(srv interface{}, stream grpc.ServerStrea
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type EndpointService_OpenShellServer = grpc.BidiStreamingServer[ShellData, ShellData]
 
+func _EndpointService_OpenK8SAPIProxy_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(EndpointServiceServer).OpenK8SAPIProxy(&grpc.GenericServerStream[K8SAPIProxyData, K8SAPIProxyData]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EndpointService_OpenK8SAPIProxyServer = grpc.BidiStreamingServer[K8SAPIProxyData, K8SAPIProxyData]
+
+func _EndpointService_OpenSVCProxy_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(EndpointServiceServer).OpenSVCProxy(&grpc.GenericServerStream[EndpointSVCProxyData, EndpointSVCProxyData]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EndpointService_OpenSVCProxyServer = grpc.BidiStreamingServer[EndpointSVCProxyData, EndpointSVCProxyData]
+
 // EndpointService_ServiceDesc is the grpc.ServiceDesc for EndpointService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -567,6 +627,18 @@ var EndpointService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "OpenShell",
 			Handler:       _EndpointService_OpenShell_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "OpenK8SAPIProxy",
+			Handler:       _EndpointService_OpenK8SAPIProxy_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "OpenSVCProxy",
+			Handler:       _EndpointService_OpenSVCProxy_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

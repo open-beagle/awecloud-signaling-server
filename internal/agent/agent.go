@@ -52,8 +52,12 @@ type Agent struct {
 	svcProxy    *K8SSVCProxy        // K8S Service gRPC 代理
 
 	// Endpoint 能力（P2 新增）
-	endpointServer   *EndpointServer   // Endpoint 内网 gRPC Server
-	endpointSSHProxy *EndpointSSHProxy // Endpoint SSH 代理（tsnet 端口）
+	endpointServer      *EndpointServer      // Endpoint 内网 gRPC Server
+	endpointSSHProxy    *EndpointSSHProxy    // Endpoint SSH 代理（tsnet 端口）
+	endpointK8SAPIProxy *EndpointK8SAPIProxy // Endpoint K8SAPI 代理（tsnet 端口）
+
+	// 审计收集器（P2-3.9）
+	auditCollector *AuditCollector
 
 	// 网络信息
 	networkInfo *NetworkInfo
@@ -83,12 +87,13 @@ func NewAgent(cfg *config.AgentConfig, version string) (*Agent, error) {
 		networkInfo.RuntimeEnv, networkInfo.Hostname)
 
 	return &Agent{
-		config:      cfg,
-		version:     version,
-		lanDetector: lanDetector,
-		networkInfo: networkInfo,
-		ctx:         ctx,
-		cancel:      cancel,
+		config:         cfg,
+		version:        version,
+		lanDetector:    lanDetector,
+		networkInfo:    networkInfo,
+		auditCollector: NewAuditCollector(),
+		ctx:            ctx,
+		cancel:         cancel,
 	}, nil
 }
 
@@ -166,6 +171,11 @@ func (a *Agent) Run() error {
 	}
 	if a.svcInformer != nil {
 		a.svcInformer.Stop()
+	}
+
+	// 停止 Endpoint K8SAPI 代理
+	if a.endpointK8SAPIProxy != nil {
+		a.endpointK8SAPIProxy.Stop()
 	}
 
 	// 停止 Endpoint SSH 代理
@@ -624,8 +634,9 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 	if a.endpointServer != nil {
 		for _, ep := range a.endpointServer.GetConnectedEndpointDetails() {
 			connEp := &pb.ConnectedEndpoint{
-				Name:   ep.Name,
-				Status: "online",
+				Name:               ep.Name,
+				Status:             "online",
+				DiscoveredServices: ep.DiscoveredServices,
 			}
 			for _, cap := range ep.Capabilities {
 				connEp.Capabilities = append(connEp.Capabilities, &pb.EndpointCapabilityInfo{
@@ -637,6 +648,11 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 			}
 			req.ConnectedEndpoints = append(req.ConnectedEndpoints, connEp)
 		}
+	}
+
+	// 上报操作审计记录
+	if a.auditCollector != nil {
+		req.AuditRecords = a.auditCollector.Flush()
 	}
 
 	return stream.Send(req)
@@ -654,6 +670,9 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 	if a.permCache != nil {
 		a.permCache.UpdateK8SPermissions(resp.K8SPermissions)
 		a.permCache.UpdateK8SServicePermissions(resp.K8SServicePermissions)
+		a.permCache.UpdateEndpointSSHPermissions(resp.EndpointSshPermissions)
+		a.permCache.UpdateEndpointK8SAPIPermissions(resp.EndpointK8SapiPermissions)
+		a.permCache.UpdateEndpointK8SServicePermissions(resp.EndpointK8SservicePermissions)
 	}
 
 	// 处理 Server 远程能力配置（每次心跳都检查，不受 configVersion 控制）
@@ -881,12 +900,74 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		}
 	}
 
+	// 6. Endpoint K8SAPI 域名：kubernetes.{endpoint-name}.{agent-name}{domain_suffix}:分配端口
+	if a.endpointServer != nil && a.endpointK8SAPIProxy != nil && a.tsManager != nil && a.tsManager.IsConnected() {
+		for _, ep := range a.endpointServer.GetConnectedEndpointDetails() {
+			hasK8SAPI := false
+			for _, cap := range ep.Capabilities {
+				if cap.Type == "k8sapi" {
+					hasK8SAPI = true
+					break
+				}
+			}
+			if !hasK8SAPI {
+				continue
+			}
+
+			port := a.endpointK8SAPIProxy.AllocatePort(ep.Name)
+
+			registrations = append(registrations, &pb.DomainRegistration{
+				Domain:     "kubernetes." + ep.Name + "." + a.config.Agent.AgentName + a.domainSuffix,
+				Type:       "k8sapi",
+				TargetIp:   agentIP,
+				TargetPort: int32(port),
+				EndpointId: ep.Name,
+			})
+		}
+	}
+
+	// 7. Endpoint K8SService 域名：{service}.{namespace}.{endpoint-name}.{agent-name}{domain_suffix}
+	// Endpoint K8SService 通过 SVCProxy endpoint_name 字段路由，不需要独立端口
+	// 使用 Agent SVCProxy gRPC 端口（50051），Desktop 首包携带 endpoint_name
+	if a.endpointServer != nil && a.svcProxy != nil && a.tsManager != nil && a.tsManager.IsConnected() {
+		for _, ep := range a.endpointServer.GetConnectedEndpointDetails() {
+			// 检查 Endpoint 是否有 K8SService 能力
+			hasK8SService := false
+			for _, cap := range ep.Capabilities {
+				if cap.Type == "k8sservice" {
+					hasK8SService = true
+					break
+				}
+			}
+			if !hasK8SService {
+				continue
+			}
+
+			// 遍历 Endpoint 发现的 K8S Service
+			for _, svc := range ep.DiscoveredServices {
+				if len(svc.Ports) == 0 {
+					continue
+				}
+				domain := svc.ServiceName + "." + svc.Namespace + "." + ep.Name + "." + a.config.Agent.AgentName + a.domainSuffix
+				registrations = append(registrations, &pb.DomainRegistration{
+					Domain:      domain,
+					Type:        "k8ssvc",
+					TargetIp:    agentIP,
+					TargetPort:  svc.Ports[0].Port,
+					Namespace:   svc.Namespace,
+					ServiceName: svc.ServiceName,
+					EndpointId:  ep.Name,
+				})
+			}
+		}
+	}
+
 	return registrations
 }
 
 // startK8SAPIProxy 启动 K8S API 代理
 func (a *Agent) startK8SAPIProxy() error {
-	proxy, err := NewK8SAPIProxy(&a.config.K8S, a.tsManager, a.permCache, a.ctx)
+	proxy, err := NewK8SAPIProxy(&a.config.K8S, a.tsManager, a.permCache, a.auditCollector, a.ctx)
 	if err != nil {
 		return fmt.Errorf("创建 K8S API 代理失败: %w", err)
 	}
@@ -914,7 +995,7 @@ func (a *Agent) startK8SServiceModules() error {
 	a.svcInformer = informer
 
 	// 启动 SVCProxy gRPC 服务
-	svcProxy, err := NewK8SSVCProxy(&a.config.SVC, a.tsManager, a.permCache, informer, a.ctx)
+	svcProxy, err := NewK8SSVCProxy(&a.config.SVC, a.tsManager, a.permCache, informer, a.auditCollector, a.ctx)
 	if err != nil {
 		return fmt.Errorf("创建 K8S SVCProxy 失败: %w", err)
 	}
@@ -1146,13 +1227,26 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 			} else {
 				// 启动 Endpoint SSH 代理（在 tsnet 上监听，接收 Desktop SSH 连接）
 				if a.tsManager != nil && a.tsManager.IsConnected() {
-					sshProxy, err := NewEndpointSSHProxy(a.endpointServer, a.tsManager, a.ctx)
+					sshProxy, err := NewEndpointSSHProxy(a.endpointServer, a.tsManager, a.auditCollector, a.ctx)
 					if err != nil {
 						logger.Warnf("创建 Endpoint SSH 代理失败: %v", err)
 					} else if err := sshProxy.Start(); err != nil {
 						logger.Warnf("启动 Endpoint SSH 代理失败: %v", err)
 					} else {
 						a.endpointSSHProxy = sshProxy
+					}
+
+					// 启动 Endpoint K8SAPI 代理（在 tsnet 上监听，接收 Desktop K8SAPI 连接）
+					k8sapiProxy := NewEndpointK8SAPIProxy(a.endpointServer, a.tsManager, a.permCache, a.auditCollector, a.ctx)
+					if err := k8sapiProxy.Start(); err != nil {
+						logger.Warnf("启动 Endpoint K8SAPI 代理失败: %v", err)
+					} else {
+						a.endpointK8SAPIProxy = k8sapiProxy
+					}
+
+					// 设置 SVCProxy 的 EndpointServer 引用（用于 Endpoint 跳跃路径）
+					if a.svcProxy != nil {
+						a.svcProxy.SetEndpointServer(a.endpointServer)
 					}
 				}
 			}
@@ -1164,6 +1258,10 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 		}
 	} else {
 		// 关闭
+		if a.endpointK8SAPIProxy != nil {
+			a.endpointK8SAPIProxy.Stop()
+			a.endpointK8SAPIProxy = nil
+		}
 		if a.endpointSSHProxy != nil {
 			a.endpointSSHProxy.Stop()
 			a.endpointSSHProxy = nil
@@ -1172,6 +1270,10 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 			logger.Info("远程配置: Endpoint 功能关闭")
 			a.endpointServer.Stop()
 			a.endpointServer = nil
+		}
+		// 清除 SVCProxy 的 EndpointServer 引用
+		if a.svcProxy != nil {
+			a.svcProxy.SetEndpointServer(nil)
 		}
 	}
 }

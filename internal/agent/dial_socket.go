@@ -1,6 +1,3 @@
-// Package agent 提供 Agent 端功能
-// dial_socket.go 实现 Unix Socket 代理服务
-// Agent/Client 进程监听 Unix Socket，dial 子命令连接后请求 tsnet 代理转发
 package agent
 
 import (
@@ -11,25 +8,23 @@ import (
 	"net"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 )
 
-// DialSocketServer Unix Socket 代理服务
-// 监听 Unix Socket，接受 dial 子命令的连接请求
-// 协议：客户端发送 [2字节长度][目标地址]，服务端通过 tsnet Dial 连接后双向转发
+// DialSocketServer Unix Socket 代理服务器
+// 供 Desktop.Pod（CloudIDE）模式下的 dial 子命令使用
+// 监听 Unix Socket，接受连接后通过 tsnet 拨号到目标地址，桥接数据
 type DialSocketServer struct {
 	socketPath string
 	tsManager  *TailscaleManager
 	listener   net.Listener
-
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx        context.Context
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
 }
 
-// NewDialSocketServer 创建 Unix Socket 代理服务
+// NewDialSocketServer 创建 DialSocketServer
 func NewDialSocketServer(socketPath string, tsManager *TailscaleManager) *DialSocketServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &DialSocketServer{
@@ -47,25 +42,21 @@ func (s *DialSocketServer) Start() error {
 
 	listener, err := net.Listen("unix", s.socketPath)
 	if err != nil {
-		return fmt.Errorf("监听 Unix Socket 失败: %w", err)
+		return fmt.Errorf("监听 Unix Socket 失败 (%s): %w", s.socketPath, err)
 	}
-
-	// 设置权限（允许所有用户访问，Agent 可能以 sudo 运行）
-	if err := os.Chmod(s.socketPath, 0666); err != nil {
-		listener.Close()
-		return fmt.Errorf("设置 Socket 权限失败: %w", err)
-	}
-
 	s.listener = listener
-	logger.Infof("[DialSocket] 已启动: %s", s.socketPath)
+
+	// 设置 socket 文件权限（允许同 Pod 内其他容器访问）
+	os.Chmod(s.socketPath, 0666)
 
 	s.wg.Add(1)
 	go s.acceptLoop()
 
+	logger.Infof("DialSocket 已启动: %s", s.socketPath)
 	return nil
 }
 
-// Stop 停止 Unix Socket 服务
+// Stop 停止 DialSocketServer
 func (s *DialSocketServer) Stop() {
 	s.cancel()
 	if s.listener != nil {
@@ -73,7 +64,7 @@ func (s *DialSocketServer) Stop() {
 	}
 	s.wg.Wait()
 	os.Remove(s.socketPath)
-	logger.Infof("[DialSocket] 已停止")
+	logger.Info("DialSocket 已停止")
 }
 
 // acceptLoop 接受连接循环
@@ -81,86 +72,75 @@ func (s *DialSocketServer) acceptLoop() {
 	defer s.wg.Done()
 
 	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		default:
-		}
-
 		conn, err := s.listener.Accept()
 		if err != nil {
 			select {
 			case <-s.ctx.Done():
 				return
 			default:
-				logger.Warnf("[DialSocket] Accept 失败: %v", err)
+				logger.Errorf("DialSocket Accept 失败: %v", err)
 				continue
 			}
 		}
-
 		go s.handleConn(conn)
 	}
 }
 
-// handleConn 处理单个连接
-// 协议：客户端发送 [2字节大端长度][目标地址字符串]
-// 服务端通过 tsnet Dial 连接目标后，双向转发数据
+// handleConn 处理单个 dial 连接
+// 协议：客户端发送 [2字节大端长度][host:port]，服务端回复 [1字节状态码]，然后桥接
 func (s *DialSocketServer) handleConn(conn net.Conn) {
 	defer conn.Close()
 
-	// 读取目标地址（2字节长度 + 地址字符串）
-	var addrLen uint16
-	if err := binary.Read(conn, binary.BigEndian, &addrLen); err != nil {
-		logger.Warnf("[DialSocket] 读取地址长度失败: %v", err)
+	// 1. 读取目标地址长度（2字节大端）
+	lenBuf := make([]byte, 2)
+	if _, err := io.ReadFull(conn, lenBuf); err != nil {
+		logger.Debugf("DialSocket 读取地址长度失败: %v", err)
 		return
 	}
-
+	addrLen := binary.BigEndian.Uint16(lenBuf)
 	if addrLen == 0 || addrLen > 512 {
-		logger.Warnf("[DialSocket] 地址长度无效: %d", addrLen)
+		conn.Write([]byte{0x01}) // 失败
 		return
 	}
 
+	// 2. 读取目标地址
 	addrBuf := make([]byte, addrLen)
 	if _, err := io.ReadFull(conn, addrBuf); err != nil {
-		logger.Warnf("[DialSocket] 读取地址失败: %v", err)
-		return
-	}
-
-	targetAddr := string(addrBuf)
-	logger.Infof("[DialSocket] 代理请求: %s", targetAddr)
-
-	// 通过 tsnet Dial 连接目标
-	dialCtx, dialCancel := context.WithTimeout(s.ctx, 10*time.Second)
-	defer dialCancel()
-
-	remoteConn, err := s.tsManager.Dial(dialCtx, "tcp", targetAddr)
-	if err != nil {
-		logger.Warnf("[DialSocket] 连接目标失败 (%s): %v", targetAddr, err)
-		// 发送错误标记（1字节 0x01 表示失败）
+		logger.Debugf("DialSocket 读取地址失败: %v", err)
 		conn.Write([]byte{0x01})
 		return
 	}
-	defer remoteConn.Close()
+	targetAddr := string(addrBuf)
 
-	// 发送成功标记（1字节 0x00 表示成功）
+	// 3. 通过 tsnet 拨号到目标地址
+	targetConn, err := s.tsManager.Dial(s.ctx, "tcp", targetAddr)
+	if err != nil {
+		logger.Warnf("DialSocket tsnet 拨号失败 (%s): %v", targetAddr, err)
+		conn.Write([]byte{0x01}) // 失败
+		return
+	}
+	defer targetConn.Close()
+
+	// 4. 回复成功状态码
 	if _, err := conn.Write([]byte{0x00}); err != nil {
 		return
 	}
 
-	// 双向转发
-	done := make(chan struct{}, 2)
+	logger.Debugf("DialSocket 连接建立: %s", targetAddr)
+
+	// 5. 双向桥接
+	var wg sync.WaitGroup
+	wg.Add(2)
+
 	go func() {
-		io.Copy(remoteConn, conn)
-		done <- struct{}{}
-	}()
-	go func() {
-		io.Copy(conn, remoteConn)
-		done <- struct{}{}
+		defer wg.Done()
+		io.Copy(targetConn, conn)
 	}()
 
-	// 等待任一方向完成
-	select {
-	case <-done:
-	case <-s.ctx.Done():
-	}
+	go func() {
+		defer wg.Done()
+		io.Copy(conn, targetConn)
+	}()
+
+	wg.Wait()
 }

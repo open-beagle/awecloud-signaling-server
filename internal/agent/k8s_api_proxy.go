@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -22,10 +23,11 @@ import (
 // 在 tsnet 网络上监听，接收 Desktop 的 kubectl 请求，
 // 通过 Impersonation 转发到本机 K8S API Server
 type K8SAPIProxy struct {
-	config    *config.K8SSection
-	tsManager *TailscaleManager
-	permCache *PermissionCache
-	identity  *IdentityExtractor
+	config         *config.K8SSection
+	tsManager      *TailscaleManager
+	permCache      *PermissionCache
+	identity       *IdentityExtractor
+	auditCollector *AuditCollector
 
 	apiServerURL *url.URL // K8S API Server 地址
 	saToken      string   // ServiceAccount token（InCluster 认证）
@@ -40,7 +42,7 @@ type K8SAPIProxy struct {
 }
 
 // NewK8SAPIProxy 创建 K8S API 代理
-func NewK8SAPIProxy(cfg *config.K8SSection, tsManager *TailscaleManager, permCache *PermissionCache, parentCtx context.Context) (*K8SAPIProxy, error) {
+func NewK8SAPIProxy(cfg *config.K8SSection, tsManager *TailscaleManager, permCache *PermissionCache, auditCollector *AuditCollector, parentCtx context.Context) (*K8SAPIProxy, error) {
 	ctx, cancel := context.WithCancel(parentCtx)
 
 	// 创建身份提取器
@@ -61,14 +63,15 @@ func NewK8SAPIProxy(cfg *config.K8SSection, tsManager *TailscaleManager, permCac
 	saToken := loadServiceAccountToken()
 
 	return &K8SAPIProxy{
-		config:       cfg,
-		tsManager:    tsManager,
-		permCache:    permCache,
-		identity:     identity,
-		apiServerURL: apiServerURL,
-		saToken:      saToken,
-		ctx:          ctx,
-		cancel:       cancel,
+		config:         cfg,
+		tsManager:      tsManager,
+		permCache:      permCache,
+		identity:       identity,
+		auditCollector: auditCollector,
+		apiServerURL:   apiServerURL,
+		saToken:        saToken,
+		ctx:            ctx,
+		cancel:         cancel,
 	}, nil
 }
 
@@ -182,15 +185,28 @@ func (p *K8SAPIProxy) handleRequest(w http.ResponseWriter, r *http.Request, prox
 	logger.Infof("K8SAPI 转发: user=%s, groups=%v, namespace=%s, path=%s",
 		peerIdentity.UserName, k8sGroups, namespace, r.URL.Path)
 
+	// 记录审计
+	startedAt := time.Now()
+	target := fmt.Sprintf("%s %s", r.Method, r.URL.Path)
+
 	// 5. 检查是否为协议升级请求（SPDY/WebSocket，用于 kubectl exec/logs/cp/attach/port-forward）
 	if isUpgradeRequest(r) {
 		logger.Infof("K8SAPI 协议升级: %s, upgrade=%s", r.URL.Path, r.Header.Get("Upgrade"))
 		p.handleUpgrade(w, r)
+		// 记录审计（升级请求）
+		if p.auditCollector != nil {
+			p.auditCollector.Record(peerIdentity.UserName, "", "k8s_api_request", target, r.Header.Get("Upgrade"), startedAt, time.Now())
+		}
 		return
 	}
 
 	// 6. 普通 HTTP 请求，使用反向代理
 	proxy.ServeHTTP(w, r)
+
+	// 记录审计（普通请求）
+	if p.auditCollector != nil {
+		p.auditCollector.Record(peerIdentity.UserName, "", "k8s_api_request", target, "", startedAt, time.Now())
+	}
 }
 
 // director 修改请求目标，并设置 Agent ServiceAccount 认证
@@ -398,4 +414,3 @@ func (p *K8SAPIProxy) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 type closeWriter interface {
 	CloseWrite() error
 }
-

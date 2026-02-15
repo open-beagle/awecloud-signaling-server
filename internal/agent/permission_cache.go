@@ -19,6 +19,29 @@ type K8SServiceUserPermission struct {
 	ServiceNames []string // 允许的 Service 名称（空表示全部）
 }
 
+// EndpointSSHUserPermission 单个用户对某 Endpoint 的 SSH 权限
+type EndpointSSHUserPermission struct {
+	EndpointID   string   // Endpoint ID
+	EndpointName string   // Endpoint 名称
+	SSHUsers     []string // 允许的 SSH 登录用户名
+}
+
+// EndpointK8SAPIUserPermission 单个用户对某 Endpoint 的 K8SAPI 权限
+type EndpointK8SAPIUserPermission struct {
+	EndpointID   string   // Endpoint ID
+	EndpointName string   // Endpoint 名称
+	K8SGroups    []string // Impersonation 分组
+	Namespaces   []string // 允许的命名空间（空表示全部）
+}
+
+// EndpointK8SServiceUserPermission 单个用户对某 Endpoint 的 K8SService 权限
+type EndpointK8SServiceUserPermission struct {
+	EndpointID   string   // Endpoint ID
+	EndpointName string   // Endpoint 名称
+	Namespaces   []string // 允许的命名空间（空表示全部）
+	ServiceNames []string // 允许的 Service 名称（空表示全部）
+}
+
 // PermissionCache Agent 本地权限缓存
 // 从心跳响应中同步，供 K8SAPI 代理和 SVCProxy 鉴权使用
 type PermissionCache struct {
@@ -29,13 +52,28 @@ type PermissionCache struct {
 	// K8S Service 权限：key = user_name
 	k8sSvcPermissions map[string]*K8SServiceUserPermission
 	k8sSvcMutex       sync.RWMutex
+
+	// Endpoint SSH 权限：key = user_name, value = 按 endpoint_name 索引的权限列表
+	epSSHPermissions map[string][]*EndpointSSHUserPermission
+	epSSHMutex       sync.RWMutex
+
+	// Endpoint K8SAPI 权限：key = user_name
+	epK8SAPIPermissions map[string][]*EndpointK8SAPIUserPermission
+	epK8SAPIMutex       sync.RWMutex
+
+	// Endpoint K8SService 权限：key = user_name
+	epK8SSvcPermissions map[string][]*EndpointK8SServiceUserPermission
+	epK8SSvcMutex       sync.RWMutex
 }
 
 // NewPermissionCache 创建权限缓存
 func NewPermissionCache() *PermissionCache {
 	return &PermissionCache{
-		k8sPermissions:    make(map[string]*K8SUserPermission),
-		k8sSvcPermissions: make(map[string]*K8SServiceUserPermission),
+		k8sPermissions:      make(map[string]*K8SUserPermission),
+		k8sSvcPermissions:   make(map[string]*K8SServiceUserPermission),
+		epSSHPermissions:    make(map[string][]*EndpointSSHUserPermission),
+		epK8SAPIPermissions: make(map[string][]*EndpointK8SAPIUserPermission),
+		epK8SSvcPermissions: make(map[string][]*EndpointK8SServiceUserPermission),
 	}
 }
 
@@ -154,6 +192,167 @@ func (c *PermissionCache) CheckK8SServiceAccess(userName, namespace, serviceName
 	}
 
 	return true
+}
+
+// UpdateEndpointSSHPermissions 从心跳响应更新 Endpoint SSH 权限
+func (c *PermissionCache) UpdateEndpointSSHPermissions(perms []*pb.EndpointSSHPermission) {
+	c.epSSHMutex.Lock()
+	defer c.epSSHMutex.Unlock()
+
+	// 全量替换：key = user_name
+	newPerms := make(map[string][]*EndpointSSHUserPermission)
+	for _, p := range perms {
+		newPerms[p.UserName] = append(newPerms[p.UserName], &EndpointSSHUserPermission{
+			EndpointID:   p.EndpointId,
+			EndpointName: p.EndpointName,
+			SSHUsers:     p.SshUsers,
+		})
+	}
+
+	c.epSSHPermissions = newPerms
+	logger.Debugf("Endpoint SSH 权限缓存已更新: %d 个用户", len(newPerms))
+}
+
+// CheckEndpointSSHAccess 检查用户对某 Endpoint 的 SSH 访问权限
+// 返回: sshUsers（允许的登录用户名列表）, allowed（是否允许）
+func (c *PermissionCache) CheckEndpointSSHAccess(userName, endpointName string) ([]string, bool) {
+	c.epSSHMutex.RLock()
+	defer c.epSSHMutex.RUnlock()
+
+	perms, ok := c.epSSHPermissions[userName]
+	if !ok {
+		return nil, false
+	}
+
+	// 合并该用户对该 Endpoint 的所有权限（可能来自多条授权记录）
+	var allSSHUsers []string
+	found := false
+	for _, p := range perms {
+		if p.EndpointName == endpointName {
+			found = true
+			allSSHUsers = mergeStringSlice(allSSHUsers, p.SSHUsers)
+		}
+	}
+
+	if !found {
+		return nil, false
+	}
+
+	return allSSHUsers, true
+}
+
+// UpdateEndpointK8SAPIPermissions 从心跳响应更新 Endpoint K8SAPI 权限
+func (c *PermissionCache) UpdateEndpointK8SAPIPermissions(perms []*pb.EndpointK8SAPIPermission) {
+	c.epK8SAPIMutex.Lock()
+	defer c.epK8SAPIMutex.Unlock()
+
+	newPerms := make(map[string][]*EndpointK8SAPIUserPermission)
+	for _, p := range perms {
+		newPerms[p.UserName] = append(newPerms[p.UserName], &EndpointK8SAPIUserPermission{
+			EndpointID:   p.EndpointId,
+			EndpointName: p.EndpointName,
+			K8SGroups:    p.K8SGroups,
+			Namespaces:   p.Namespaces,
+		})
+	}
+
+	c.epK8SAPIPermissions = newPerms
+	logger.Debugf("Endpoint K8SAPI 权限缓存已更新: %d 个用户", len(newPerms))
+}
+
+// CheckEndpointK8SAPIAccess 检查用户对某 Endpoint 的 K8SAPI 访问权限
+// 返回: k8sGroups（Impersonation 分组）, allowed（是否允许）
+func (c *PermissionCache) CheckEndpointK8SAPIAccess(userName, endpointName string) ([]string, bool) {
+	c.epK8SAPIMutex.RLock()
+	defer c.epK8SAPIMutex.RUnlock()
+
+	perms, ok := c.epK8SAPIPermissions[userName]
+	if !ok {
+		return nil, false
+	}
+
+	var allK8SGroups []string
+	found := false
+	for _, p := range perms {
+		if p.EndpointName == endpointName {
+			found = true
+			allK8SGroups = mergeStringSlice(allK8SGroups, p.K8SGroups)
+		}
+	}
+
+	if !found {
+		return nil, false
+	}
+
+	return allK8SGroups, true
+}
+
+// UpdateEndpointK8SServicePermissions 从心跳响应更新 Endpoint K8SService 权限
+func (c *PermissionCache) UpdateEndpointK8SServicePermissions(perms []*pb.EndpointK8SServicePermission) {
+	c.epK8SSvcMutex.Lock()
+	defer c.epK8SSvcMutex.Unlock()
+
+	newPerms := make(map[string][]*EndpointK8SServiceUserPermission)
+	for _, p := range perms {
+		newPerms[p.UserName] = append(newPerms[p.UserName], &EndpointK8SServiceUserPermission{
+			EndpointID:   p.EndpointId,
+			EndpointName: p.EndpointName,
+			Namespaces:   p.Namespaces,
+			ServiceNames: p.ServiceNames,
+		})
+	}
+
+	c.epK8SSvcPermissions = newPerms
+	logger.Debugf("Endpoint K8SService 权限缓存已更新: %d 个用户", len(newPerms))
+}
+
+// CheckEndpointK8SServiceAccess 检查用户对某 Endpoint 的 K8SService 访问权限
+func (c *PermissionCache) CheckEndpointK8SServiceAccess(userName, endpointName, namespace, serviceName string) bool {
+	c.epK8SSvcMutex.RLock()
+	defer c.epK8SSvcMutex.RUnlock()
+
+	perms, ok := c.epK8SSvcPermissions[userName]
+	if !ok {
+		return false
+	}
+
+	for _, p := range perms {
+		if p.EndpointName != endpointName {
+			continue
+		}
+
+		// 检查命名空间
+		if len(p.Namespaces) > 0 {
+			nsAllowed := false
+			for _, ns := range p.Namespaces {
+				if ns == "*" || ns == namespace {
+					nsAllowed = true
+					break
+				}
+			}
+			if !nsAllowed {
+				continue
+			}
+		}
+
+		// 检查 Service 名称
+		if len(p.ServiceNames) > 0 {
+			svcAllowed := false
+			for _, sn := range p.ServiceNames {
+				if sn == "*" || sn == serviceName {
+					svcAllowed = true
+					break
+				}
+			}
+			if !svcAllowed {
+				continue
+			}
+		}
+
+		return true
+	}
+
+	return false
 }
 
 // mergeStringSlice 合并两个字符串切片，去重

@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -34,6 +35,7 @@ const EndpointSSHPortBase = 50053
 type EndpointSSHProxy struct {
 	endpointServer *EndpointServer
 	tsManager      *TailscaleManager
+	auditCollector *AuditCollector
 	sshConfig      *ssh.ServerConfig
 	hostKey        ssh.Signer
 
@@ -54,7 +56,7 @@ type EndpointSSHProxy struct {
 }
 
 // NewEndpointSSHProxy 创建 Endpoint SSH 代理
-func NewEndpointSSHProxy(endpointServer *EndpointServer, tsManager *TailscaleManager, parentCtx context.Context) (*EndpointSSHProxy, error) {
+func NewEndpointSSHProxy(endpointServer *EndpointServer, tsManager *TailscaleManager, auditCollector *AuditCollector, parentCtx context.Context) (*EndpointSSHProxy, error) {
 	// 生成临时 Ed25519 主机密钥（每次启动重新生成，不需要持久化）
 	_, privKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -71,6 +73,7 @@ func NewEndpointSSHProxy(endpointServer *EndpointServer, tsManager *TailscaleMan
 	proxy := &EndpointSSHProxy{
 		endpointServer: endpointServer,
 		tsManager:      tsManager,
+		auditCollector: auditCollector,
 		hostKey:        hostKey,
 		portMap:        make(map[uint16]string),
 		nameMap:        make(map[string]uint16),
@@ -169,6 +172,17 @@ func (p *EndpointSSHProxy) GetPort(endpointName string) uint16 {
 // 运行 SSH 握手，提取用户名，请求 Endpoint 开启 shell，桥接 I/O
 func (p *EndpointSSHProxy) HandleConn(ctx context.Context, conn net.Conn, endpointName string) {
 	defer conn.Close()
+	startedAt := time.Now()
+
+	// 尝试通过 tsnet WhoIs 提取 Desktop 用户身份
+	clientUserName := ""
+	if p.tsManager != nil {
+		if lc, err := p.tsManager.LocalClient(); err == nil {
+			if whois, err := lc.WhoIs(ctx, conn.RemoteAddr().String()); err == nil && whois.UserProfile != nil {
+				clientUserName, _ = parseHeadscaleUserName(whois.UserProfile.LoginName)
+			}
+		}
+	}
 
 	// 检查 Endpoint 是否在线
 	if !p.endpointServer.IsEndpointConnected(endpointName) {
@@ -186,7 +200,7 @@ func (p *EndpointSSHProxy) HandleConn(ctx context.Context, conn net.Conn, endpoi
 
 	// 提取登录用户名
 	login := sshConn.User()
-	logger.Infof("[EndpointSSH] SSH 连接: endpoint=%s, login=%s", endpointName, login)
+	logger.Infof("[EndpointSSH] SSH 连接: endpoint=%s, login=%s, client=%s", endpointName, login, clientUserName)
 
 	// 丢弃全局请求
 	go ssh.DiscardRequests(reqs)
@@ -206,6 +220,21 @@ func (p *EndpointSSHProxy) HandleConn(ctx context.Context, conn net.Conn, endpoi
 
 		// 处理 session（只处理第一个）
 		p.handleSession(ctx, channel, requests, endpointName, login)
+
+		// 会话结束，记录审计
+		if p.auditCollector != nil {
+			endedAt := time.Now()
+			target := fmt.Sprintf("%s@%s", login, endpointName)
+			p.auditCollector.Record(
+				clientUserName,
+				endpointName,
+				"ssh_session",
+				target,
+				"",
+				startedAt,
+				endedAt,
+			)
+		}
 		return
 	}
 }

@@ -88,6 +88,9 @@ export default {
     aclSSH: 'SSH 授权',
     aclK8S: 'K8S API 授权',
     aclK8SService: 'K8S Service 授权',
+    aclEndpointSSH: 'Endpoint SSH 授权',
+    aclEndpointK8S: 'Endpoint K8S 授权',
+    aclEndpointK8SService: 'Endpoint SVC 授权',
     endpoints: '终端管理',
     endpointSSH: 'SSH',
     endpointK8SAPI: 'K8S API',
@@ -100,6 +103,8 @@ export default {
     tunnelSSH: 'SSH 策略',
     domains: '域名管理',
     auditLogs: '审计日志',
+    adminAudit: '管理审计',
+    operationAudit: '操作审计',
     systemConfig: '系统配置'
   },
   user: {
@@ -344,6 +349,31 @@ export default {
     searchK8SServicePlaceholder: '搜索代理名称',
     addK8SServiceUserAuth: '添加 K8S Service 用户授权',
     addK8SServiceGroupAuth: '添加 K8S Service 分组授权'
+  },
+  aclEndpoint: {
+    searchPlaceholder: '搜索 Endpoint 名称',
+    sshInfo: 'Endpoint SSH 信息',
+    k8sapiInfo: 'Endpoint K8S API 信息',
+    k8sserviceInfo: 'Endpoint K8S Service 信息',
+    addSSHUserAuth: '添加 Endpoint SSH 用户授权',
+    addSSHGroupAuth: '添加 Endpoint SSH 分组授权',
+    addK8SUserAuth: '添加 Endpoint K8S 用户授权',
+    addK8SGroupAuth: '添加 Endpoint K8S 分组授权',
+    addK8SServiceUserAuth: '添加 Endpoint K8S Service 用户授权',
+    addK8SServiceGroupAuth: '添加 Endpoint K8S Service 分组授权'
+  },
+  operationAudit: {
+    title: '操作审计',
+    operationType: '操作类型',
+    operationTypePlaceholder: '选择操作类型',
+    agentName: '代理',
+    clientName: '客户',
+    endpointName: 'Endpoint',
+    endpointNamePlaceholder: '搜索 Endpoint 名称',
+    target: '目标',
+    detail: '详情',
+    duration: '耗时',
+    startedAt: '开始时间'
   },
   audit: {
     title: '审计日志',

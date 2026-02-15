@@ -143,6 +143,21 @@ func autoMigrate() error {
 		&model.EndpointSSH{},
 		&model.EndpointK8SAPI{},
 		&model.EndpointK8SService{},
+
+		// ACL Endpoint SSH 授权模型
+		&model.AclEndpointSSHUserPermission{},
+		&model.AclEndpointSSHGroupPermission{},
+
+		// ACL Endpoint K8SAPI 授权模型
+		&model.AclEndpointK8SAPIUserPermission{},
+		&model.AclEndpointK8SAPIGroupPermission{},
+
+		// ACL Endpoint K8SService 授权模型
+		&model.AclEndpointK8SServiceUserPermission{},
+		&model.AclEndpointK8SServiceGroupPermission{},
+
+		// 操作级审计日志
+		&model.OperationAuditLog{},
 	)
 	if err != nil {
 		// 忽略"索引已存在"的错误（SQLite 在某些情况下会报这个错误）
