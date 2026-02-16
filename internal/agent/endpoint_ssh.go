@@ -13,9 +13,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -56,11 +60,11 @@ type EndpointSSHProxy struct {
 }
 
 // NewEndpointSSHProxy 创建 Endpoint SSH 代理
-func NewEndpointSSHProxy(endpointServer *EndpointServer, tsManager *TailscaleManager, auditCollector *AuditCollector, parentCtx context.Context) (*EndpointSSHProxy, error) {
-	// 生成临时 Ed25519 主机密钥（每次启动重新生成，不需要持久化）
-	_, privKey, err := ed25519.GenerateKey(rand.Reader)
+func NewEndpointSSHProxy(endpointServer *EndpointServer, tsManager *TailscaleManager, auditCollector *AuditCollector, stateDir string, parentCtx context.Context) (*EndpointSSHProxy, error) {
+	// 加载或生成 Ed25519 主机密钥（持久化到 stateDir，避免重启后 Host Key 变化）
+	privKey, err := loadOrGenerateHostKey(stateDir)
 	if err != nil {
-		return nil, fmt.Errorf("生成主机密钥失败: %w", err)
+		return nil, fmt.Errorf("加载主机密钥失败: %w", err)
 	}
 
 	hostKey, err := ssh.NewSignerFromKey(privKey)
@@ -357,6 +361,8 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 			if msg.IsClose {
 				exitMsg := ssh.Marshal(struct{ Status uint32 }{uint32(msg.ExitCode)})
 				channel.SendRequest("exit-status", false, exitMsg)
+				// 关闭 SSH channel，解除 SSH→gRPC 协程的 Read 阻塞
+				channel.Close()
 				return
 			}
 			if len(msg.Data) > 0 {
@@ -368,4 +374,59 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 	}()
 
 	wg.Wait()
+}
+
+// loadOrGenerateHostKey 从文件加载或生成 SSH Host Key
+// 密钥保存在 stateDir/ssh_host_ed25519_key，重启后保持不变
+func loadOrGenerateHostKey(stateDir string) (ed25519.PrivateKey, error) {
+	keyPath := filepath.Join(stateDir, "ssh_host_ed25519_key")
+
+	// 尝试从文件加载
+	data, err := os.ReadFile(keyPath)
+	if err == nil {
+		block, _ := pem.Decode(data)
+		if block != nil {
+			key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+			if err == nil {
+				if privKey, ok := key.(ed25519.PrivateKey); ok {
+					logger.Infof("[EndpointSSH] 已加载持久化 Host Key: %s", keyPath)
+					return privKey, nil
+				}
+			}
+		}
+		// 文件存在但解析失败，重新生成
+		logger.Warnf("[EndpointSSH] Host Key 文件损坏，重新生成: %s", keyPath)
+	}
+
+	// 生成新密钥
+	_, privKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("生成 Host Key 失败: %w", err)
+	}
+
+	// 序列化为 PKCS8 PEM 格式并保存
+	pkcs8Bytes, err := x509.MarshalPKCS8PrivateKey(privKey)
+	if err != nil {
+		// 序列化失败不影响使用，只是无法持久化
+		logger.Warnf("[EndpointSSH] Host Key 序列化失败，使用临时密钥: %v", err)
+		return privKey, nil
+	}
+
+	pemBlock := &pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: pkcs8Bytes,
+	}
+
+	if err := os.MkdirAll(stateDir, 0700); err != nil {
+		logger.Warnf("[EndpointSSH] 创建目录失败，使用临时密钥: %v", err)
+		return privKey, nil
+	}
+
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(pemBlock), 0600); err != nil {
+		logger.Warnf("[EndpointSSH] 保存 Host Key 失败，使用临时密钥: %v", err)
+		return privKey, nil
+	}
+
+	logger.Infof("[EndpointSSH] 已生成并保存 Host Key: %s", keyPath)
+	return privKey, nil
 }

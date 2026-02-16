@@ -4,6 +4,16 @@
 
 **如果需要执行本文档未包含的编译、构建、测试相关命令，AI 必须先询问用户，获得批准后再将新命令添加到本文档。**
 
+## 节点与环境信息
+
+详细的节点信息（IP、域名注册表、端口分配、安装/升级命令、Token）见 `.tmp/debug.md`。
+
+### 关键架构速查
+
+- Agent（beijing）：beagle-242 节点，应使用 Service 部署（需要 SSH + Endpoint 全功能），Endpoint gRPC Server 监听 0.0.0.0:50052
+- Endpoint（beagle-241）：systemd 二进制部署，连接 beagle-242 的 Agent 50052 端口
+- Endpoint SSH/K8SAPI 代理使用 tsnet FallbackTCPHandler（不是物理端口监听，只在 Tailscale 网络可达）
+
 ## 编译命令
 
 使用 `version` 文件记录版本号。
@@ -110,27 +120,19 @@ BUILD_VERSION=$(cat version) bash scripts/push_to_s3.sh endpoint
 
 ## 调试命令
 
-### Server 与 Agent容器
+### Server 与 Agent 容器
 
 ```bash
 # Server
 kubectl --context aliyun -n beagle-access exec -it deployment/signal-server -- /bin/sh
 
-# Client k8ssvc
+# Agent
 kubectl --context beagle -n beagle-access exec -it deployment/signal-agent -- /bin/sh
 ```
 
-### Agent - beagle-242
+### 节点 SSH
 
-```bash
-ssh root@192.168.1.242 -p 2222
-```
-
-### Endpoint - beagle-241
-
-```bash
-ssh root@192.168.1.241 -p 2222
-```
+见 `.tmp/debug.md` 中的具体 IP 和端口。
 
 ## 数据库位置
 

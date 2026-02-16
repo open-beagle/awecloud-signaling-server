@@ -1227,7 +1227,7 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 			} else {
 				// 启动 Endpoint SSH 代理（在 tsnet 上监听，接收 Desktop SSH 连接）
 				if a.tsManager != nil && a.tsManager.IsConnected() {
-					sshProxy, err := NewEndpointSSHProxy(a.endpointServer, a.tsManager, a.auditCollector, a.ctx)
+					sshProxy, err := NewEndpointSSHProxy(a.endpointServer, a.tsManager, a.auditCollector, a.config.Tunnel.StateDir, a.ctx)
 					if err != nil {
 						logger.Warnf("创建 Endpoint SSH 代理失败: %v", err)
 					} else if err := sshProxy.Start(); err != nil {

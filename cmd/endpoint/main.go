@@ -254,7 +254,7 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 	logger.Info("心跳流已建立，保持连接中...")
 
 	// 心跳循环
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
 	// 启动接收协程（处理心跳响应和 Shell 请求通知）

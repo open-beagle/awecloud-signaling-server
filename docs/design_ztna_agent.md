@@ -4,7 +4,79 @@
 
 Agent 部署在内网环境，以 agent 角色加入 Tailscale 网络。Agent 不区分类型（没有 Host Agent / K8s Agent 的分类），通过配置和挂载的能力对象决定它能做什么。
 
-任何 Agent 都可以挂载任意能力，只要网络可达。部署在物理机上的 Agent 可以同时启用 SSH + K8S + SVC；部署在 K8S Pod 里的 Agent 也可以只启用 SVC。
+## Agent 部署方式
+
+Agent 有两种部署方式，能力范围不同：
+
+### 1. Service 部署（systemd 服务）
+
+通过 scripts/install_agent.sh 安装，以 root 用户运行 systemd 服务。
+
+```
+适用场景：物理机 / 虚拟机，需要全功能
+运行用户：root
+服务管理：systemctl（k8s-signaling.service）
+安装方式：scripts/install_agent.sh
+
+可用能力：
+  AgentSSH          ✅  需要 root 权限做 setuid 切换用户
+  AgentK8SAPI       ✅  需要 kubeconfig
+  AgentK8SService   ✅  需要 K8S API 访问
+  AgentService      ✅  手动端口映射
+  Endpoint Server   ✅  内网 gRPC Server（面向 Endpoint）
+
+特点：
+  以 root 运行，拥有 setuid 权限，SSH 可切换到任意系统用户
+  直接监听物理网卡端口（Endpoint gRPC 50052 等）
+  Tailscale 状态存储在本地磁盘
+```
+
+### 2. Pod 部署（K8S 容器）
+
+通过 K8S Deployment 部署，以非 root 用户（UID 1000）运行。
+
+```
+适用场景：K8S 集群内，主要做 SVC 转发
+运行用户：code（UID 1000），非 root
+服务管理：kubectl（Deployment）
+镜像构建：.beagle/agent.dockerfile
+
+可用能力：
+  AgentSSH          ⚠️  受限，无法 setuid，只能以容器用户身份运行
+  AgentK8SAPI       ✅  通过 ServiceAccount 访问 K8S API
+  AgentK8SService   ✅  通过 ServiceAccount 发现 Service
+  AgentService      ✅  手动端口映射
+  Endpoint Server   ✅  需要 hostNetwork 或 NodePort 暴露端口
+
+特点：
+  非 root 运行，不需要集群特权
+  不需要 NET_ADMIN（tsnet 用户态）
+  不需要特权容器
+  SSH 功能受限：Server 可以开启 SSH，但容器内无法 setuid 切换用户
+```
+
+### 两种部署方式对比
+
+```
+                    Service 部署              Pod 部署
+  运行用户          root                      code (UID 1000)
+  SSH setuid        ✅ 可切换任意用户          ❌ 无法切换用户
+  Endpoint gRPC     直接监听物理端口           需要 hostNetwork
+  K8S API 访问      kubeconfig                ServiceAccount
+  安装升级          install_agent.sh          镜像构建 + kubectl
+  服务管理          systemctl                 kubectl
+```
+
+### 同一节点不能同时运行两种部署
+
+同一台机器上 Service 部署和 Pod 部署不能同时运行，原因：
+
+- Tailscale 状态目录冲突（同一个 Agent 身份不能有两个实例）
+- 端口冲突（Endpoint gRPC 50052、健康检查 8090 等）
+- 域名注册冲突（同一个 Agent 名称注册两次）
+
+如果节点需要 SSH 全功能，必须用 Service 部署。
+如果节点只需要 SVC 转发，可以用 Pod 部署。
 
 ## 四种本机能力
 
@@ -179,20 +251,6 @@ K8S Service 变更事件
   Desktop 侧用 VIP 隔离端口冲突：
     pg.yygl.beijing.beagle:5432   → VIP 127.1.0.1:5432 → gRPC SVCProxy(pg, yygl)
     pg.prod.beijing.beagle:5432   → VIP 127.1.0.2:5432 → gRPC SVCProxy(pg, prod)
-```
-
-### 部署要求（K8S Pod 场景）
-
-```
-Agent 部署在 K8S Pod 中时需要：
-
-  ServiceAccount:
-    绑定 ClusterRole（service list/watch 权限）
-
-  不需要：
-    NET_ADMIN 权限（tsnet 用户态）
-    HostNetwork
-    特权容器
 ```
 
 ## AgentService — Agent 手动端口映射

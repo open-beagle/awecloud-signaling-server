@@ -79,7 +79,7 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 		})
 		return
 	}
-	defer ptmx.Close()
+	// 注意：ptmx 在 shell 退出后手动关闭（cmd.Wait 之后），不使用 defer
 
 	logger.Infof("Shell 已启动: session_id=%s, login=%s, shell=%s, pid=%d",
 		req.SessionId, req.Login, shell, cmd.Process.Pid)
@@ -146,14 +146,17 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 		}
 	}
 
-	// 等待 I/O 协程完成
-	wg.Wait()
+	// shell 已退出，关闭 PTY 以解除 PTY→gRPC 协程的 Read 阻塞
+	ptmx.Close()
 
-	// 发送退出码
+	// 发送退出码（在 wg.Wait 之前发送，确保 Agent 能收到 IsClose）
 	stream.Send(&pb.ShellData{
 		IsClose:  true,
 		ExitCode: int32(exitCode),
 	})
+
+	// 等待 I/O 协程完成
+	wg.Wait()
 
 	logger.Infof("Shell 已退出: session_id=%s, exit_code=%d", req.SessionId, exitCode)
 }
