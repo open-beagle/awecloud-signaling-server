@@ -14,8 +14,8 @@ type AclEndpointK8SAPIUserPermission struct {
 	GrantedAt  time.Time `json:"granted_at"`                                                        // 授权时间
 
 	// 关联
-	Endpoint *EndpointK8SAPI `gorm:"foreignKey:EndpointID" json:"endpoint,omitempty"`
-	User     *User           `gorm:"foreignKey:UserID" json:"user,omitempty"`
+	Endpoint *Endpoint `gorm:"foreignKey:EndpointID" json:"endpoint,omitempty"`
+	User     *User     `gorm:"foreignKey:UserID" json:"user,omitempty"`
 }
 
 func (AclEndpointK8SAPIUserPermission) TableName() string {
@@ -34,8 +34,8 @@ type AclEndpointK8SAPIGroupPermission struct {
 	GrantedAt  time.Time `json:"granted_at"`                                                        // 授权时间
 
 	// 关联
-	Endpoint *EndpointK8SAPI `gorm:"foreignKey:EndpointID" json:"endpoint,omitempty"`
-	Group    *Group          `gorm:"foreignKey:GroupID" json:"group,omitempty"`
+	Endpoint *Endpoint `gorm:"foreignKey:EndpointID" json:"endpoint,omitempty"`
+	Group    *Group    `gorm:"foreignKey:GroupID" json:"group,omitempty"`
 }
 
 func (AclEndpointK8SAPIGroupPermission) TableName() string {

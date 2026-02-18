@@ -56,13 +56,6 @@
         </el-table-column>
         <el-table-column prop="node_count" :label="$t('user.nodeCount')" width="100" align="center" />
         <el-table-column prop="service_count" :label="$t('user.serviceCount')" width="100" align="center" />
-        <el-table-column prop="ssh_enabled" :label="$t('user.sshEnabled')" width="100" align="center">
-          <template #default="{ row }">
-            <el-tag :type="row.ssh_enabled ? 'success' : 'info'" size="small">
-              {{ row.ssh_enabled ? $t('common.enabled') : $t('common.disabled') }}
-            </el-tag>
-          </template>
-        </el-table-column>
         <el-table-column prop="enabled" :label="$t('user.enabled')" width="100" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.enabled" type="success" size="small">{{ $t('user.enabledTrue') }}</el-tag>

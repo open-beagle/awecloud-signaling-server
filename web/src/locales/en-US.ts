@@ -468,14 +468,21 @@ export default {
     sshCapability: 'SSH Capability',
     k8sapiCapability: 'K8S API Capability',
     k8sserviceCapability: 'K8S Service Capability',
+    capabilities: 'Capabilities',
+    version: 'Version',
+    updatedAt: 'Updated At',
     // SSH
     host: 'Host',
     port: 'Port',
+    sshRunAs: 'Run As',
+    sshCanSwitchUser: 'Can Switch User',
     sshUsers: 'SSH Users',
     // K8SAPI
     apiServer: 'API Server',
     // K8SService
-    serviceCount: 'Service Count'
+    serviceCount: 'Service Count',
+    labelSelector: 'Label Selector',
+    namespaces: 'Namespaces'
   },
   resource: {
     title: 'Resource Discovery',

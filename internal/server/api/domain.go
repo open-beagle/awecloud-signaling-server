@@ -8,33 +8,41 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 )
 
 // DomainAPI 域名管理 API
-type DomainAPI struct{}
+type DomainAPI struct {
+	statusService *service.DomainStatusService
+}
 
 // NewDomainAPI 创建 DomainAPI
-func NewDomainAPI() *DomainAPI {
-	return &DomainAPI{}
+func NewDomainAPI(headscaleClient *headscale.Client) *DomainAPI {
+	return &DomainAPI{
+		statusService: service.NewDomainStatusService(headscaleClient),
+	}
 }
 
 // DomainListItem 域名列表项
 type DomainListItem struct {
-	ID          int64              `json:"id"`
-	Domain      string             `json:"domain"`
-	Type        model.DomainType   `json:"type"`
-	UserID      uint64             `json:"user_id"`
-	UserName    string             `json:"user_name"`
-	NodeID      uint64             `json:"node_id,omitempty"`
-	EndpointID  string             `json:"endpoint_id,omitempty"`
-	TargetIP    string             `json:"target_ip,omitempty"`
-	TargetPort  int                `json:"target_port,omitempty"`
-	Namespace   string             `json:"namespace,omitempty"`
-	ServiceName string             `json:"service_name,omitempty"`
-	Status      model.DomainStatus `json:"status"`
-	CreatedAt   string             `json:"created_at"`
-	UpdatedAt   string             `json:"updated_at"`
+	ID           int64              `json:"id"`
+	Domain       string             `json:"domain"`
+	Type         model.DomainType   `json:"type"`
+	UserID       uint64             `json:"user_id"`
+	UserName     string             `json:"user_name"`
+	NodeID       uint64             `json:"node_id,omitempty"`
+	NodeName     string             `json:"node_name,omitempty"`
+	EndpointID   string             `json:"endpoint_id,omitempty"`
+	EndpointName string             `json:"endpoint_name,omitempty"`
+	TargetIP     string             `json:"target_ip,omitempty"`
+	TargetPort   int                `json:"target_port,omitempty"`
+	Namespace    string             `json:"namespace,omitempty"`
+	ServiceName  string             `json:"service_name,omitempty"`
+	Status       model.DomainStatus `json:"status"`
+	CreatedAt    string             `json:"created_at"`
+	UpdatedAt    string             `json:"updated_at"`
 }
 
 // List 获取域名列表
@@ -45,7 +53,7 @@ func (a *DomainAPI) List(c *gin.Context) {
 	search := c.Query("search")
 	domainType := c.Query("type")
 	userID := c.Query("user_id")
-	status := c.Query("status")
+	statusFilter := c.Query("status")
 
 	if page < 1 {
 		page = 1
@@ -54,7 +62,10 @@ func (a *DomainAPI) List(c *gin.Context) {
 		size = 20
 	}
 
-	query := db.DB.WithContext(ctx).Model(&model.DomainRegistry{}).Preload("User")
+	query := db.DB.WithContext(ctx).Model(&model.DomainRegistry{}).
+		Preload("User").
+		Preload("Node").
+		Preload("Endpoint")
 
 	// 筛选条件
 	if search != "" {
@@ -67,9 +78,6 @@ func (a *DomainAPI) List(c *gin.Context) {
 		id, _ := strconv.ParseUint(userID, 10, 64)
 		query = query.Where("user_id = ?", id)
 	}
-	if status != "" {
-		query = query.Where("status = ?", status)
-	}
 
 	var total int64
 	query.Count(&total)
@@ -81,23 +89,48 @@ func (a *DomainAPI) List(c *gin.Context) {
 		return
 	}
 
-	// 组装列表
+	// 组装列表，使用状态服务动态判断状态
 	items := make([]DomainListItem, 0, len(domains))
 	for _, d := range domains {
+		// 使用状态服务判断域名状态
+		status := a.statusService.GetDomainStatus(ctx, &d)
+
+		// 状态筛选
+		if statusFilter != "" && string(status) != statusFilter {
+			continue
+		}
+
+		// 获取 Node 名称
+		nodeName := ""
+		if d.Node != nil {
+			nodeName = d.Node.Name
+		}
+
+		// 获取 Endpoint 名称
+		endpointName := ""
+		if d.Endpoint != nil {
+			endpointName = d.Endpoint.Name
+		} else if d.EndpointID != "" {
+			// Endpoint 可能未预加载，使用 endpoint_id
+			endpointName = d.EndpointID
+		}
+
 		item := DomainListItem{
-			ID:          d.ID,
-			Domain:      d.Domain,
-			Type:        d.Type,
-			UserID:      d.UserID,
-			NodeID:      d.NodeID,
-			EndpointID:  d.EndpointID,
-			TargetIP:    d.TargetIP,
-			TargetPort:  d.TargetPort,
-			Namespace:   d.Namespace,
-			ServiceName: d.ServiceName,
-			Status:      d.Status,
-			CreatedAt:   d.CreatedAt.Format("2006-01-02 15:04:05"),
-			UpdatedAt:   d.UpdatedAt.Format("2006-01-02 15:04:05"),
+			ID:           d.ID,
+			Domain:       d.Domain,
+			Type:         d.Type,
+			UserID:       d.UserID,
+			NodeID:       d.NodeID,
+			EndpointID:   d.EndpointID,
+			TargetIP:     d.TargetIP,
+			TargetPort:   d.TargetPort,
+			Namespace:    d.Namespace,
+			ServiceName:  d.ServiceName,
+			Status:       status,
+			NodeName:     nodeName,
+			EndpointName: endpointName,
+			CreatedAt:    d.CreatedAt.Format("2006-01-02 15:04:05"),
+			UpdatedAt:    d.UpdatedAt.Format("2006-01-02 15:04:05"),
 		}
 		if d.User != nil {
 			item.UserName = d.User.Name
@@ -118,17 +151,26 @@ func (a *DomainAPI) Resolve(c *gin.Context) {
 		return
 	}
 
+	// 查询所有匹配的域名记录
 	var records []model.DomainRegistry
 	if err := db.DB.WithContext(ctx).Preload("User").
-		Where("domain = ? AND status = ?", domain, model.DomainStatusOnline).
+		Where("domain = ?", domain).
 		Find(&records).Error; err != nil || len(records) == 0 {
-		c.JSON(http.StatusNotFound, NewErrorResponse("域名未注册或已离线"))
+		c.JSON(http.StatusNotFound, NewErrorResponse("域名未注册"))
 		return
 	}
 
-	// 返回所有在线记录，支持负载均衡
+	// 使用状态服务判断在线状态，只返回在线记录
 	results := make([]gin.H, 0, len(records))
 	for _, record := range records {
+		// 使用状态服务判断域名状态
+		status := a.statusService.GetDomainStatus(ctx, &record)
+
+		// 只返回在线记录
+		if status != model.DomainStatusOnline {
+			continue
+		}
+
 		userName := ""
 		if record.User != nil {
 			userName = record.User.Name
@@ -145,6 +187,12 @@ func (a *DomainAPI) Resolve(c *gin.Context) {
 			"namespace":    record.Namespace,
 			"service_name": record.ServiceName,
 		})
+	}
+
+	// 如果没有在线记录，返回 404
+	if len(results) == 0 {
+		c.JSON(http.StatusNotFound, NewErrorResponse("域名已离线"))
+		return
 	}
 
 	c.JSON(http.StatusOK, NewSuccessResponse(results))

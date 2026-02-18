@@ -34,6 +34,10 @@ enabled = true
 # SSH 端口（默认 22）
 # port = 22
 
+# SSH 用户列表会自动从 /etc/passwd 检测（UID >= 1000 或 root）
+# 如果需要覆盖自动检测的值，可以手动配置：
+# users = ["root", "ubuntu", "admin"]
+
 # K8S API 能力
 [k8s]
 enabled = false

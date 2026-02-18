@@ -41,7 +41,7 @@ func (a *ACLAPI) ListEndpointK8SServiceACL(c *gin.Context) {
 		size = 20
 	}
 
-	query := db.DB.WithContext(ctx).Model(&model.EndpointK8SService{}).Where("revoked = ?", false)
+	query := db.DB.WithContext(ctx).Model(&model.Endpoint{}).Where("revoked = ? AND k8sservice_enabled = ?", false, true)
 	if search != "" {
 		query = query.Where("name LIKE ? OR alias LIKE ?", "%"+search+"%", "%"+search+"%")
 	}
@@ -49,7 +49,7 @@ func (a *ACLAPI) ListEndpointK8SServiceACL(c *gin.Context) {
 	var total int64
 	query.Count(&total)
 
-	var endpoints []model.EndpointK8SService
+	var endpoints []model.Endpoint
 	offset := (page - 1) * size
 	if err := query.Preload("User").Order("created_at DESC").Offset(offset).Limit(size).Find(&endpoints).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
@@ -140,7 +140,7 @@ func (a *ACLAPI) GetEndpointK8SServiceACL(c *gin.Context) {
 	ctx := c.Request.Context()
 	endpointID := c.Param("id")
 
-	var endpoint model.EndpointK8SService
+	var endpoint model.Endpoint
 	if err := db.DB.WithContext(ctx).Preload("User").First(&endpoint, "id = ?", endpointID).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
 		return
@@ -221,7 +221,7 @@ func (a *ACLAPI) AddEndpointK8SServiceACLUsers(c *gin.Context) {
 		return
 	}
 
-	var endpoint model.EndpointK8SService
+	var endpoint model.Endpoint
 	if err := db.DB.WithContext(ctx).First(&endpoint, "id = ?", endpointID).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
 		return
@@ -274,7 +274,7 @@ func (a *ACLAPI) AddEndpointK8SServiceACLGroups(c *gin.Context) {
 		return
 	}
 
-	var endpoint model.EndpointK8SService
+	var endpoint model.Endpoint
 	if err := db.DB.WithContext(ctx).First(&endpoint, "id = ?", endpointID).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
 		return

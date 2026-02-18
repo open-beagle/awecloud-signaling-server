@@ -36,11 +36,13 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('domain.user')" min-width="120">
+        <el-table-column :label="$t('domain.user')" min-width="200">
           <template #default="{ row }">
-            <router-link v-if="row.user_name" :to="`/users/${row.user_id}`" class="user-link">
+            <span v-if="row.user_name">
               {{ row.user_name }}
-            </router-link>
+              <span v-if="row.node_name"> / {{ row.node_name }}</span>
+              <span v-if="row.endpoint_name"> / {{ row.endpoint_name }}</span>
+            </span>
             <span v-else>-</span>
           </template>
         </el-table-column>

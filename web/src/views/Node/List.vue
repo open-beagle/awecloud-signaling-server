@@ -25,9 +25,7 @@
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" :label="$t('node.name')" min-width="120">
           <template #default="{ row }">
-            <router-link :to="`/nodes/${row.id}`" class="node-link">
-              {{ row.name }}
-            </router-link>
+            <el-link type="primary" @click="goDetail(row)">{{ row.name }}</el-link>
           </template>
         </el-table-column>
         <el-table-column :label="$t('node.user')" min-width="120">
@@ -84,12 +82,14 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { getNodes, deleteNode, type Node } from '@/api/node'
 import { formatTime } from '@/utils/time'
 
 const { t } = useI18n()
+const router = useRouter()
 
 const loading = ref(false)
 const nodes = ref<Node[]>([])
@@ -148,6 +148,11 @@ const handleReset = () => {
   fetchNodes()
 }
 
+// 跳转到详情页
+const goDetail = (row: Node) => {
+  router.push({ path: `/nodes/${row.id}`, query: { name: row.name } })
+}
+
 // 删除
 const handleDelete = async (row: Node) => {
   try {
@@ -202,15 +207,6 @@ onMounted(() => {
 }
 
 .user-link:hover {
-  text-decoration: underline;
-}
-
-.node-link {
-  color: var(--el-color-primary);
-  text-decoration: none;
-}
-
-.node-link:hover {
   text-decoration: underline;
 }
 </style>

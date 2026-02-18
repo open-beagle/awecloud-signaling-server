@@ -54,6 +54,16 @@ message EndpointHeartbeatRequest {
   string name = 2;           // Endpoint 名称
   repeated EndpointCapabilityInfo capabilities = 3; // 启用的能力列表
   repeated DiscoveredK8SService discovered_services = 4; // Endpoint 发现的 K8S Service
+  
+  // SSH 能力配置（从 Endpoint 自动检测）
+  repeated string ssh_users = 7;      // 允许的 SSH 用户列表
+  
+  // K8S API 能力配置
+  string k8sapi_api_server = 8;       // K8S API Server 地址
+  
+  // K8S Service 能力配置
+  string k8sservice_label_selector = 9;    // 标签选择器
+  repeated string k8sservice_namespaces = 10; // 命名空间列表
 }
 
 // EndpointCapabilityInfo Endpoint 单项能力信息
@@ -71,6 +81,15 @@ message EndpointHeartbeatResponse {
   repeated ShellRequest shell_requests = 3;              // Shell 请求通知
   repeated K8SAPIProxyRequest k8sapi_proxy_requests = 4; // K8S API 代理请求通知
   repeated SVCProxyRequest svc_proxy_requests = 5;       // K8S Service 代理请求通知
+
+  // Server 下发的能力配置（由 Web 界面管理，Endpoint 应以此为准）
+  bool ssh_enabled = 10;           // SSH 能力是否启用
+  bool ssh_enabled_set = 11;       // ssh_enabled 是否有效（false 表示未下发）
+  bool k8sapi_enabled = 12;        // K8S API 能力是否启用
+  bool k8sapi_enabled_set = 13;    // k8sapi_enabled 是否有效
+  string k8sapi_api_server = 14;   // K8S API Server 地址（Server 存储的值）
+  bool k8sservice_enabled = 15;    // K8S Service 能力是否启用
+  bool k8sservice_enabled_set = 16; // k8sservice_enabled 是否有效
 }
 
 // ============================================

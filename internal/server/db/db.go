@@ -139,10 +139,8 @@ func autoMigrate() error {
 		&model.AclK8SServiceUserPermission{},
 		&model.AclK8SServiceGroupPermission{},
 
-		// Endpoint 模型
-		&model.EndpointSSH{},
-		&model.EndpointK8SAPI{},
-		&model.EndpointK8SService{},
+		// Endpoint 模型（统一表）
+		&model.Endpoint{},
 
 		// ACL Endpoint SSH 授权模型
 		&model.AclEndpointSSHUserPermission{},

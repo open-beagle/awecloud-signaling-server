@@ -55,12 +55,16 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true }
       },
       {
-        path: 'endpoints/:type/:id',
+        path: 'endpoints/:id',
         name: 'EndpointDetail',
         component: () => import('@/views/Endpoint/Detail.vue'),
         meta: { requiresAuth: true }
       },
       // 兼容旧路由
+      {
+        path: 'endpoints/:type/:id',
+        redirect: to => `/endpoints/${to.params.id}`
+      },
       {
         path: 'endpoints/ssh',
         redirect: '/endpoints?type=ssh'

@@ -15,17 +15,22 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 )
 
 // NodeAPI 设备管理 API
 type NodeAPI struct {
-	config   *config.ServerConfig
-	hsClient *headscale.Client
+	config        *config.ServerConfig
+	hsClient      *headscale.Client
+	domainService *service.DomainService
 }
 
 // NewNodeAPI 创建 NodeAPI
 func NewNodeAPI(cfg *config.ServerConfig) *NodeAPI {
-	api := &NodeAPI{config: cfg}
+	api := &NodeAPI{
+		config:        cfg,
+		domainService: service.NewDomainService(db.DB),
+	}
 
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
 		client, err := headscale.NewClient(headscale.Config{
@@ -284,17 +289,17 @@ func (a *NodeAPI) Expire(c *gin.Context) {
 
 // CapabilityResponse 能力配置响应
 type CapabilityResponse struct {
-	SSHEnabled         bool   `json:"ssh_enabled"`                    // SSH 开关（User.SSHEnabled，始终有值）
-	K8SEnabled         *bool  `json:"k8s_enabled"`                    // K8S API 开关（nil=未设置）
-	K8SListenPort      *int   `json:"k8s_listen_port"`                // K8S API 监听端口
-	K8SApiServer       string `json:"k8s_api_server"`                 // K8S API Server 地址
-	SVCEnabled         *bool  `json:"svc_enabled"`                    // K8S Service 开关
-	SVCLabelSelector   string `json:"svc_label_selector"`             // 标签选择器
-	SVCNamespaces      string `json:"svc_namespaces"`                 // 命名空间列表 JSON
-	SVCListenPortBase  *int   `json:"svc_listen_port_base"`           // gRPC 监听端口
-	EndpointEnabled    *bool  `json:"endpoint_enabled"`               // Endpoint 功能开关
-	EndpointListenPort *int   `json:"endpoint_listen_port"`           // Endpoint 内网 gRPC 监听端口
-	EndpointToken      string `json:"endpoint_token"`                 // Endpoint 注册令牌
+	SSHEnabled         bool   `json:"ssh_enabled"`          // SSH 开关（User.SSHEnabled，始终有值）
+	K8SEnabled         *bool  `json:"k8s_enabled"`          // K8S API 开关（nil=未设置）
+	K8SListenPort      *int   `json:"k8s_listen_port"`      // K8S API 监听端口
+	K8SApiServer       string `json:"k8s_api_server"`       // K8S API Server 地址
+	SVCEnabled         *bool  `json:"svc_enabled"`          // K8S Service 开关
+	SVCLabelSelector   string `json:"svc_label_selector"`   // 标签选择器
+	SVCNamespaces      string `json:"svc_namespaces"`       // 命名空间列表 JSON
+	SVCListenPortBase  *int   `json:"svc_listen_port_base"` // gRPC 监听端口
+	EndpointEnabled    *bool  `json:"endpoint_enabled"`     // Endpoint 功能开关
+	EndpointListenPort *int   `json:"endpoint_listen_port"` // Endpoint 内网 gRPC 监听端口
+	EndpointToken      string `json:"endpoint_token"`       // Endpoint 注册令牌
 }
 
 // CapabilityUpdateRequest 能力配置更新请求
@@ -443,6 +448,47 @@ func (a *NodeAPI) UpdateCapabilities(c *gin.Context) {
 
 	logger.Infof("更新 Agent 能力配置: node_id=%d, updates=%v, ssh=%v", id, updates, req.SSHEnabled)
 
+	// 查询 User 信息（用于域名生成）
+	var user model.User
+	if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err != nil {
+		logger.Warnf("查询 User 失败，跳过域名处理: user_id=%d, err=%v", node.UserID, err)
+	} else {
+		// 重新加载 Node 数据（获取最新的能力配置）
+		if err := db.DB.WithContext(ctx).First(&node, id).Error; err != nil {
+			logger.Warnf("重新加载 Node 失败，跳过域名处理: node_id=%d, err=%v", id, err)
+		} else {
+			// 处理 SSH 域名
+			if req.SSHEnabled != nil {
+				if *req.SSHEnabled {
+					// SSH 开启 → 创建域名
+					if err := a.domainService.CreateNodeSSHDomain(ctx, &node, &user); err != nil {
+						logger.Errorf("创建 Node SSH 域名失败: node_id=%d, err=%v", id, err)
+					}
+				} else {
+					// SSH 关闭 → 删除域名
+					if err := a.domainService.DeleteNodeSSHDomain(ctx, &node, &user); err != nil {
+						logger.Errorf("删除 Node SSH 域名失败: node_id=%d, err=%v", id, err)
+					}
+				}
+			}
+
+			// 处理 K8S API 域名
+			if req.K8SEnabled != nil {
+				if *req.K8SEnabled {
+					// K8S API 开启 → 创建域名
+					if err := a.domainService.CreateNodeK8SAPIDomain(ctx, &node, &user); err != nil {
+						logger.Errorf("创建 Node K8S API 域名失败: node_id=%d, err=%v", id, err)
+					}
+				} else {
+					// K8S API 关闭 → 删除域名
+					if err := a.domainService.DeleteNodeK8SAPIDomain(ctx, &node, &user); err != nil {
+						logger.Errorf("删除 Node K8S API 域名失败: node_id=%d, err=%v", id, err)
+					}
+				}
+			}
+		}
+	}
+
 	// 记录审计日志
 	recordAuditLog(ctx, c, "update_capability", "node", strconv.FormatUint(id, 10), node.Name, updates)
 
@@ -508,6 +554,12 @@ func (a *NodeAPI) Delete(c *gin.Context) {
 	if err := db.DB.WithContext(ctx).First(&node, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("设备不存在"))
 		return
+	}
+
+	// 删除该 Node 的所有域名
+	if err := a.domainService.DeleteNodeAllDomains(ctx, id); err != nil {
+		logger.Errorf("删除 Node 域名失败: node_id=%d, err=%v", id, err)
+		// 继续删除 Node，不因域名删除失败而中断
 	}
 
 	// 在 Headscale 删除节点（使用 HeadscaleNodeID）

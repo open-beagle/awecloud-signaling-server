@@ -43,7 +43,7 @@ func (a *ACLAPI) ListEndpointSSHACL(c *gin.Context) {
 		size = 20
 	}
 
-	query := db.DB.WithContext(ctx).Model(&model.EndpointSSH{}).Where("revoked = ?", false)
+	query := db.DB.WithContext(ctx).Model(&model.Endpoint{}).Where("revoked = ? AND ssh_enabled = ?", false, true)
 	if search != "" {
 		query = query.Where("name LIKE ? OR alias LIKE ?", "%"+search+"%", "%"+search+"%")
 	}
@@ -51,7 +51,7 @@ func (a *ACLAPI) ListEndpointSSHACL(c *gin.Context) {
 	var total int64
 	query.Count(&total)
 
-	var endpoints []model.EndpointSSH
+	var endpoints []model.Endpoint
 	offset := (page - 1) * size
 	if err := query.Preload("User").Order("created_at DESC").Offset(offset).Limit(size).Find(&endpoints).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
@@ -105,8 +105,8 @@ func (a *ACLAPI) ListEndpointSSHACL(c *gin.Context) {
 			Alias:      ep.Alias,
 			AgentID:    ep.UserID,
 			AgentName:  agentName,
-			Host:       ep.Host,
-			Port:       ep.Port,
+			Host:       "",
+			Port:       0,
 			Status:     ep.Status,
 			UserCount:  userCountMap[ep.ID],
 			GroupCount: groupCountMap[ep.ID],
@@ -146,7 +146,7 @@ func (a *ACLAPI) GetEndpointSSHACL(c *gin.Context) {
 	ctx := c.Request.Context()
 	endpointID := c.Param("id")
 
-	var endpoint model.EndpointSSH
+	var endpoint model.Endpoint
 	if err := db.DB.WithContext(ctx).Preload("User").First(&endpoint, "id = ?", endpointID).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
 		return
@@ -199,8 +199,8 @@ func (a *ACLAPI) GetEndpointSSHACL(c *gin.Context) {
 		Alias:     endpoint.Alias,
 		AgentID:   endpoint.UserID,
 		AgentName: agentName,
-		Host:      endpoint.Host,
-		Port:      endpoint.Port,
+		Host:      "",
+		Port:      0,
 		Status:    endpoint.Status,
 		Users:     users,
 		Groups:    groups,
@@ -226,7 +226,7 @@ func (a *ACLAPI) AddEndpointSSHACLUsers(c *gin.Context) {
 		return
 	}
 
-	var endpoint model.EndpointSSH
+	var endpoint model.Endpoint
 	if err := db.DB.WithContext(ctx).First(&endpoint, "id = ?", endpointID).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
 		return
@@ -275,7 +275,7 @@ func (a *ACLAPI) AddEndpointSSHACLGroups(c *gin.Context) {
 		return
 	}
 
-	var endpoint model.EndpointSSH
+	var endpoint model.Endpoint
 	if err := db.DB.WithContext(ctx).First(&endpoint, "id = ?", endpointID).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
 		return

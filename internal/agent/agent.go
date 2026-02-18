@@ -630,21 +630,20 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 	// 构建域名注册列表
 	req.DomainRegistrations = a.buildDomainRegistrations()
 
-	// 添加已连接的 Endpoint 列表
+	// 添加已连接的 Endpoint 列表（包含配置信息，供 Server 存储）
 	if a.endpointServer != nil {
 		for _, ep := range a.endpointServer.GetConnectedEndpointDetails() {
 			connEp := &pb.ConnectedEndpoint{
 				Name:               ep.Name,
 				Status:             "online",
 				DiscoveredServices: ep.DiscoveredServices,
-			}
-			for _, cap := range ep.Capabilities {
-				connEp.Capabilities = append(connEp.Capabilities, &pb.EndpointCapabilityInfo{
-					Type:      cap.Type,
-					Host:      cap.Host,
-					Port:      cap.Port,
-					ApiServer: cap.APIServer,
-				})
+				// SSH 配置
+				SshUsers: ep.SSHUsers,
+				// K8S API 配置
+				K8SapiApiServer: ep.K8SAPIApiServer,
+				// K8S Service 配置
+				K8SserviceLabelSelector: ep.K8SServiceLabelSelector,
+				K8SserviceNamespaces:    ep.K8SServiceNamespaces,
 			}
 			req.ConnectedEndpoints = append(req.ConnectedEndpoints, connEp)
 		}
@@ -675,6 +674,11 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 		a.permCache.UpdateEndpointK8SServicePermissions(resp.EndpointK8SservicePermissions)
 	}
 
+	// 同步 Endpoint 能力配置到 EndpointServer（让 Agent 能把 Server 配置下发给 Endpoint）
+	if a.endpointServer != nil {
+		a.syncEndpointServerConfigs(resp)
+	}
+
 	// 处理 Server 远程能力配置（每次心跳都检查，不受 configVersion 控制）
 	if resp.CapabilityConfig != nil {
 		a.applyCapabilityConfig(resp.CapabilityConfig)
@@ -696,6 +700,27 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 	// 同步端口访问服务
 	if len(resp.Forwards) > 0 {
 		a.syncForwards(resp.Forwards)
+	}
+}
+
+// syncEndpointServerConfigs 将 Server 下发的 Endpoint 能力配置同步到 EndpointServer
+// 这样 EndpointServer 在心跳响应里就能把配置下发给 Endpoint 进程
+func (a *Agent) syncEndpointServerConfigs(resp *pb.AgentHeartbeatResponse) {
+	// 直接从 EndpointCapabilityConfigs 读取（Server 直接下发每个 Endpoint 的 enabled 状态）
+	logger.Infof("收到 Server 下发的 Endpoint 配置，共 %d 个", len(resp.EndpointCapabilityConfigs))
+	for _, cfg := range resp.EndpointCapabilityConfigs {
+		serverCfg := &EndpointServerConfig{
+			SSHEnabled:       cfg.SshEnabled,
+			SSHEnabledSet:    true,
+			K8SAPIEnabled:    cfg.K8SapiEnabled,
+			K8SAPIEnabledSet: true,
+			K8SAPIApiServer:  cfg.K8SapiApiServer,
+			K8SSvcEnabled:    cfg.K8SserviceEnabled,
+			K8SSvcEnabledSet: true,
+		}
+		a.endpointServer.UpdateServerConfig(cfg.EndpointName, serverCfg)
+		logger.Infof("同步 Endpoint 配置: name=%s, ssh=%v, k8sapi=%v, api_server=%s, k8ssvc=%v",
+			cfg.EndpointName, serverCfg.SSHEnabled, serverCfg.K8SAPIEnabled, serverCfg.K8SAPIApiServer, serverCfg.K8SSvcEnabled)
 	}
 }
 
@@ -896,6 +921,7 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 				Type:       "ssh",
 				TargetIp:   agentIP,
 				TargetPort: int32(port),
+				EndpointId: ep.Name,
 			})
 		}
 	}

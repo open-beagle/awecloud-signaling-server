@@ -37,6 +37,8 @@ SSH_PORT="22"          # SSH 端口
 K8S_ENABLED="false"    # K8S API 能力
 K8S_API_SERVER=""      # K8S API Server 地址
 SVC_ENABLED="false"    # K8S Service 能力
+HTTP_PROXY=""          # HTTP 代理（可选）
+HTTPS_PROXY=""         # HTTPS 代理（可选）
 UPGRADE_MODE="false"
 UNINSTALL_MODE="false"
 
@@ -67,6 +69,8 @@ AWECloud Endpoint 安装脚本
   --k8s                   启用 K8S API 能力
   --k8s-api-server <url>  K8S API Server 地址（默认自动检测）
   --svc                   启用 K8S Service 能力
+  --http-proxy <url>      HTTP 代理（可选，如 http://proxy:3128）
+  --https-proxy <url>     HTTPS 代理（可选，如 http://proxy:3128）
   -u, --upgrade           升级模式，保留现有配置
   -U, --uninstall         卸载 Endpoint
   -h, --help              显示帮助
@@ -107,6 +111,8 @@ parse_args() {
             --k8s)         K8S_ENABLED="true"; shift ;;
             --k8s-api-server) K8S_API_SERVER="$2"; shift 2 ;;
             --svc)         SVC_ENABLED="true"; shift ;;
+            --http-proxy)  HTTP_PROXY="$2"; shift 2 ;;
+            --https-proxy) HTTPS_PROXY="$2"; shift 2 ;;
             -u|--upgrade)  UPGRADE_MODE="true"; shift ;;
             -U|--uninstall) UNINSTALL_MODE="true"; shift ;;
             -h|--help)     show_help; exit 0 ;;
@@ -140,6 +146,17 @@ download_endpoint() {
     arch=$(detect_arch) || exit 1
 
     info "检测到架构: ${arch}"
+    
+    # 设置代理环境变量（如果指定）
+    if [[ -n "$HTTP_PROXY" ]]; then
+        export http_proxy="$HTTP_PROXY"
+        info "使用 HTTP 代理: ${HTTP_PROXY}"
+    fi
+    if [[ -n "$HTTPS_PROXY" ]]; then
+        export https_proxy="$HTTPS_PROXY"
+        info "使用 HTTPS 代理: ${HTTPS_PROXY}"
+    fi
+    
     info "获取最新版本..."
 
     # 获取版本信息（复用 Agent 的版本接口，Endpoint 和 Agent 同版本）
@@ -211,6 +228,9 @@ generate_config() {
     info "生成配置文件..."
     mkdir -p "$CONFIG_DIR"
 
+    # 注意：能力配置（SSH/K8S/SVC）应该通过 Web 界面管理，不在配置文件中写入
+    # 这样可以避免本地配置和 Server 配置冲突
+    # 如果需要本地配置，可以手动编辑配置文件添加对应段落
     cat > "$CONFIG_FILE" << EOF
 # AWECloud Endpoint 配置文件（由安装脚本自动生成）
 
@@ -219,26 +239,39 @@ address = "${AGENT_ADDRESS}"
 token = "${ENDPOINT_TOKEN}"
 name = "${ENDPOINT_NAME}"
 
-[ssh]
-enabled = ${SSH_ENABLED}
-host = "${SSH_HOST}"
-port = ${SSH_PORT}
+# 能力配置（SSH/K8S/SVC）请通过 Web 界面管理
+# 如需本地配置，取消注释并修改以下段落：
 
-[k8s]
-enabled = ${K8S_ENABLED}
-api_server = "${K8S_API_SERVER}"
+# [ssh]
+# enabled = false
+# host = "127.0.0.1"
+# port = 22
 
-[svc]
-enabled = ${SVC_ENABLED}
+# [k8s]
+# enabled = false
+# api_server = ""
+
+# [svc]
+# enabled = false
 EOF
 
     chmod 600 "$CONFIG_FILE"
     info "配置文件: ${CONFIG_FILE}"
+    warn "能力配置（SSH/K8S/SVC）请通过 Web 界面管理"
 }
 
 # 安装 systemd 服务
 install_service() {
     info "安装 systemd 服务..."
+
+    # 构建环境变量配置
+    local env_config=""
+    if [[ -n "$HTTP_PROXY" ]]; then
+        env_config="${env_config}Environment=\"http_proxy=${HTTP_PROXY}\"\n"
+    fi
+    if [[ -n "$HTTPS_PROXY" ]]; then
+        env_config="${env_config}Environment=\"https_proxy=${HTTPS_PROXY}\"\n"
+    fi
 
     cat > "$SERVICE_FILE" << EOF
 [Unit]
@@ -259,7 +292,7 @@ LimitNOFILE=65536
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=${SERVICE_NAME}
-
+$(echo -e "$env_config")
 [Install]
 WantedBy=multi-user.target
 EOF

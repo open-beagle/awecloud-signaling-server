@@ -42,7 +42,7 @@ func (a *ACLAPI) ListEndpointK8SAPIACL(c *gin.Context) {
 		size = 20
 	}
 
-	query := db.DB.WithContext(ctx).Model(&model.EndpointK8SAPI{}).Where("revoked = ?", false)
+	query := db.DB.WithContext(ctx).Model(&model.Endpoint{}).Where("revoked = ? AND k8sapi_enabled = ?", false, true)
 	if search != "" {
 		query = query.Where("name LIKE ? OR alias LIKE ?", "%"+search+"%", "%"+search+"%")
 	}
@@ -50,7 +50,7 @@ func (a *ACLAPI) ListEndpointK8SAPIACL(c *gin.Context) {
 	var total int64
 	query.Count(&total)
 
-	var endpoints []model.EndpointK8SAPI
+	var endpoints []model.Endpoint
 	offset := (page - 1) * size
 	if err := query.Preload("User").Order("created_at DESC").Offset(offset).Limit(size).Find(&endpoints).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
@@ -103,7 +103,7 @@ func (a *ACLAPI) ListEndpointK8SAPIACL(c *gin.Context) {
 			Alias:      ep.Alias,
 			AgentID:    ep.UserID,
 			AgentName:  agentName,
-			APIServer:  ep.APIServer,
+			APIServer:  ep.K8SAPIApiServer,
 			Status:     ep.Status,
 			UserCount:  userCountMap[ep.ID],
 			GroupCount: groupCountMap[ep.ID],
@@ -143,7 +143,7 @@ func (a *ACLAPI) GetEndpointK8SAPIACL(c *gin.Context) {
 	ctx := c.Request.Context()
 	endpointID := c.Param("id")
 
-	var endpoint model.EndpointK8SAPI
+	var endpoint model.Endpoint
 	if err := db.DB.WithContext(ctx).Preload("User").First(&endpoint, "id = ?", endpointID).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
 		return
@@ -198,7 +198,7 @@ func (a *ACLAPI) GetEndpointK8SAPIACL(c *gin.Context) {
 		Alias:     endpoint.Alias,
 		AgentID:   endpoint.UserID,
 		AgentName: agentName,
-		APIServer: endpoint.APIServer,
+		APIServer: endpoint.K8SAPIApiServer,
 		Status:    endpoint.Status,
 		Users:     users,
 		Groups:    groups,
@@ -225,7 +225,7 @@ func (a *ACLAPI) AddEndpointK8SAPIACLUsers(c *gin.Context) {
 		return
 	}
 
-	var endpoint model.EndpointK8SAPI
+	var endpoint model.Endpoint
 	if err := db.DB.WithContext(ctx).First(&endpoint, "id = ?", endpointID).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
 		return
@@ -278,7 +278,7 @@ func (a *ACLAPI) AddEndpointK8SAPIACLGroups(c *gin.Context) {
 		return
 	}
 
-	var endpoint model.EndpointK8SAPI
+	var endpoint model.Endpoint
 	if err := db.DB.WithContext(ctx).First(&endpoint, "id = ?", endpointID).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
 		return

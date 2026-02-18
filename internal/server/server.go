@@ -39,9 +39,10 @@ type Server struct {
 	loginService   *service.DesktopLoginService
 	desktopAuthAPI *api.DesktopAuthAPI
 
-	aclSyncService *headscale.ACLSyncService
-	aclSyncCtx     context.Context
-	aclSyncCancel  context.CancelFunc
+	headscaleClient *headscale.Client
+	aclSyncService  *headscale.ACLSyncService
+	aclSyncCtx      context.Context
+	aclSyncCancel   context.CancelFunc
 }
 
 // GetAgentService 获取 AgentService（供 API 使用）
@@ -73,6 +74,7 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 		return nil, fmt.Errorf("创建默认管理员失败: %w", err)
 	}
 
+	var headscaleClient *headscale.Client
 	var aclSyncService *headscale.ACLSyncService
 	var aclSyncCtx context.Context
 	var aclSyncCancel context.CancelFunc
@@ -86,6 +88,7 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 		if err != nil {
 			logger.Warnf("初始化 Headscale 客户端失败: %v", err)
 		} else {
+			headscaleClient = client
 			aclSyncService = headscale.NewACLSyncService(client)
 			aclSyncCtx, aclSyncCancel = context.WithCancel(context.Background())
 		}
@@ -94,10 +97,11 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 	}
 
 	return &Server{
-		config:         cfg,
-		aclSyncService: aclSyncService,
-		aclSyncCtx:     aclSyncCtx,
-		aclSyncCancel:  aclSyncCancel,
+		config:          cfg,
+		headscaleClient: headscaleClient,
+		aclSyncService:  aclSyncService,
+		aclSyncCtx:      aclSyncCtx,
+		aclSyncCancel:   aclSyncCancel,
 	}, nil
 }
 
@@ -458,21 +462,16 @@ func (s *Server) setupRouter() *gin.Engine {
 
 					// Endpoint 管理（Endpoint 由 Agent 自动发现上报，不支持手动创建）
 					endpointAPI := api.NewEndpointAPI(s.config)
-					// 统一 Endpoint API（List+Detail 模式）
 					adminAuthGroup.GET("/endpoints", endpointAPI.ListEndpoints)
-					adminAuthGroup.GET("/endpoints/:type/:id", endpointAPI.GetEndpointDetail)
-					adminAuthGroup.PUT("/endpoints/:type/:id", endpointAPI.UpdateEndpointByType)
-					adminAuthGroup.DELETE("/endpoints/:type/:id", endpointAPI.RevokeEndpointByType)
-					// 兼容旧分类型 API
-					adminAuthGroup.GET("/endpoints/ssh", endpointAPI.ListEndpointSSH)
-					adminAuthGroup.GET("/endpoints/k8sapi", endpointAPI.ListEndpointK8SAPI)
-					adminAuthGroup.GET("/endpoints/k8sservice", endpointAPI.ListEndpointK8SService)
+					adminAuthGroup.GET("/endpoints/:id", endpointAPI.GetEndpointDetail)
+					adminAuthGroup.PUT("/endpoints/:id", endpointAPI.UpdateEndpoint)
+					adminAuthGroup.DELETE("/endpoints/:id", endpointAPI.RevokeEndpoint)
 
 					// Node Endpoint Token 重新生成
 					adminAuthGroup.POST("/nodes/:id/capabilities/endpoint-token/regenerate", nodeAPI.RegenerateEndpointToken)
 
 					// 域名管理
-					domainAPI := api.NewDomainAPI()
+					domainAPI := api.NewDomainAPI(s.headscaleClient)
 					adminAuthGroup.GET("/domains", domainAPI.List)
 					adminAuthGroup.POST("/domains/refresh", domainAPI.Refresh)
 					adminAuthGroup.DELETE("/domains/:id", domainAPI.Delete)
@@ -533,7 +532,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					clientAuthGroup.GET("/tunnel/config", tunnelConfigAPI.GetTunnelConfig)
 
 					// 域名解析（Desktop 查询）
-					clientDomainAPI := api.NewDomainAPI()
+					clientDomainAPI := api.NewDomainAPI(s.headscaleClient)
 					clientAuthGroup.GET("/dns/resolve", clientDomainAPI.Resolve)
 
 					// 资源发现（Desktop 查询可访问的资源）

@@ -32,6 +32,16 @@ type EndpointConnection struct {
 	RemoteIP           string
 	LastSeen           time.Time
 	Cancel             context.CancelFunc
+
+	// SSH 能力配置（从 Endpoint 上报）
+	SSHUsers []string // 允许的 SSH 用户列表
+
+	// K8S API 能力配置
+	K8SAPIApiServer string // K8S API Server 地址
+
+	// K8S Service 能力配置
+	K8SServiceLabelSelector string   // 标签选择器
+	K8SServiceNamespaces    []string // 命名空间列表
 }
 
 // shellSession 等待中的 shell 会话（Agent 创建，等待 Endpoint 回调）
@@ -63,6 +73,17 @@ type svcProxySession struct {
 	createdAt   time.Time
 }
 
+// EndpointServerConfig Server 下发的 Endpoint 能力配置（按 endpoint name 存储）
+type EndpointServerConfig struct {
+	SSHEnabled       bool
+	SSHEnabledSet    bool
+	K8SAPIEnabled    bool
+	K8SAPIEnabledSet bool
+	K8SAPIApiServer  string
+	K8SSvcEnabled    bool
+	K8SSvcEnabledSet bool
+}
+
 // EndpointServer Agent 内网 gRPC Server，接受 Endpoint 连接
 type EndpointServer struct {
 	pb.UnimplementedEndpointServiceServer
@@ -73,6 +94,10 @@ type EndpointServer struct {
 	// 已连接的 Endpoint
 	connections map[string]*EndpointConnection // key: endpoint name
 	connMutex   sync.RWMutex
+
+	// Server 下发的 Endpoint 能力配置（key: endpoint name）
+	serverConfigs map[string]*EndpointServerConfig
+	configMutex   sync.RWMutex
 
 	// 等待中的 shell 会话（session_id → shellSession）
 	shellSessions map[string]*shellSession
@@ -107,6 +132,7 @@ func NewEndpointServer(listenPort int, token string, parentCtx context.Context) 
 		listenPort:        listenPort,
 		token:             token,
 		connections:       make(map[string]*EndpointConnection),
+		serverConfigs:     make(map[string]*EndpointServerConfig),
 		shellSessions:     make(map[string]*shellSession),
 		k8sapiSessions:    make(map[string]*k8sapiSession),
 		svcProxySessions:  make(map[string]*svcProxySession),
@@ -116,6 +142,20 @@ func NewEndpointServer(listenPort int, token string, parentCtx context.Context) 
 		ctx:               ctx,
 		cancel:            cancel,
 	}
+}
+
+// UpdateServerConfig 更新 Server 下发的 Endpoint 能力配置
+func (s *EndpointServer) UpdateServerConfig(name string, cfg *EndpointServerConfig) {
+	s.configMutex.Lock()
+	defer s.configMutex.Unlock()
+	s.serverConfigs[name] = cfg
+}
+
+// getServerConfig 获取 Server 下发的 Endpoint 能力配置
+func (s *EndpointServer) getServerConfig(name string) *EndpointServerConfig {
+	s.configMutex.RLock()
+	defer s.configMutex.RUnlock()
+	return s.serverConfigs[name]
 }
 
 // Start 启动 gRPC Server
@@ -235,7 +275,7 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 	name := firstReq.Name
 	logger.Infof("Endpoint 心跳流建立: name=%s", name)
 
-	// 注册连接（解析能力信息）
+	// 注册连接（解析能力信息和配置）
 	conn := &EndpointConnection{
 		Name:               name,
 		Token:              firstReq.Token,
@@ -243,6 +283,13 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 		DiscoveredServices: firstReq.DiscoveredServices,
 		LastSeen:           time.Now(),
 		Cancel:             cancel,
+		// SSH 配置
+		SSHUsers: firstReq.SshUsers,
+		// K8S API 配置
+		K8SAPIApiServer: firstReq.K8SapiApiServer,
+		// K8S Service 配置
+		K8SServiceLabelSelector: firstReq.K8SserviceLabelSelector,
+		K8SServiceNamespaces:    firstReq.K8SserviceNamespaces,
 	}
 
 	s.connMutex.Lock()
@@ -259,11 +306,21 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 		logger.Infof("Endpoint 心跳流断开: name=%s", name)
 	}()
 
-	// 发送首次响应
-	if err := stream.Send(&pb.EndpointHeartbeatResponse{
+	// 发送首次响应（携带 Server 下发的能力配置）
+	firstResp := &pb.EndpointHeartbeatResponse{
 		Success: true,
 		Message: "心跳已建立",
-	}); err != nil {
+	}
+	if cfg := s.getServerConfig(name); cfg != nil {
+		firstResp.SshEnabled = cfg.SSHEnabled
+		firstResp.SshEnabledSet = cfg.SSHEnabledSet
+		firstResp.K8SapiEnabled = cfg.K8SAPIEnabled
+		firstResp.K8SapiEnabledSet = cfg.K8SAPIEnabledSet
+		firstResp.K8SapiApiServer = cfg.K8SAPIApiServer
+		firstResp.K8SserviceEnabled = cfg.K8SSvcEnabled
+		firstResp.K8SserviceEnabledSet = cfg.K8SSvcEnabledSet
+	}
+	if err := stream.Send(firstResp); err != nil {
 		return err
 	}
 
@@ -287,6 +344,14 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 			}
 			// 更新 K8S Service 发现数据
 			conn.DiscoveredServices = req.DiscoveredServices
+			// 更新 SSH 配置
+			conn.SSHUsers = req.SshUsers
+			logger.Infof("Endpoint 心跳更新: name=%s, ssh_users=%v (len=%d)", name, req.SshUsers, len(req.SshUsers))
+			// 更新 K8S API 配置
+			conn.K8SAPIApiServer = req.K8SapiApiServer
+			// 更新 K8S Service 配置
+			conn.K8SServiceLabelSelector = req.K8SserviceLabelSelector
+			conn.K8SServiceNamespaces = req.K8SserviceNamespaces
 
 			// 取出待下发的请求
 			s.pendingMutex.Lock()
@@ -298,13 +363,23 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 			delete(s.pendingSVCReqs, name)
 			s.pendingMutex.Unlock()
 
-			// 发送响应（携带各类请求通知）
-			if err := stream.Send(&pb.EndpointHeartbeatResponse{
+			// 发送响应（携带各类请求通知和 Server 下发的能力配置）
+			resp := &pb.EndpointHeartbeatResponse{
 				Success:             true,
 				ShellRequests:       shellReqs,
 				K8SapiProxyRequests: k8sapiReqs,
 				SvcProxyRequests:    svcReqs,
-			}); err != nil {
+			}
+			if cfg := s.getServerConfig(name); cfg != nil {
+				resp.SshEnabled = cfg.SSHEnabled
+				resp.SshEnabledSet = cfg.SSHEnabledSet
+				resp.K8SapiEnabled = cfg.K8SAPIEnabled
+				resp.K8SapiEnabledSet = cfg.K8SAPIEnabledSet
+				resp.K8SapiApiServer = cfg.K8SAPIApiServer
+				resp.K8SserviceEnabled = cfg.K8SSvcEnabled
+				resp.K8SserviceEnabledSet = cfg.K8SSvcEnabledSet
+			}
+			if err := stream.Send(resp); err != nil {
 				return err
 			}
 		}

@@ -8,9 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -18,6 +17,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
@@ -61,6 +61,7 @@ type AgentServiceServer struct {
 
 	headscaleClient *headscale.Client
 	config          *config.ServerConfig
+	domainService   *service.DomainService
 }
 
 // NewAgentServiceServer 创建 Agent 服务
@@ -69,6 +70,7 @@ func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
 		connections:   make(map[uint64]*AgentConnection),
 		configVersion: time.Now().Unix(),
 		config:        cfg,
+		domainService: service.NewDomainService(db.DB),
 	}
 
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
@@ -391,18 +393,15 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 		delete(s.connections, nodeID)
 		s.connMutex.Unlock()
 
+		// 清理 Node 内存缓存
+		cache.DeleteNodeStatus(nodeID)
+		logger.Infof("Node 断连，清理内存缓存: node_id=%d", nodeID)
+
 		// 断连时只清理当前 Node 的数据，不影响同 Agent 下其他 Node
 		if err := db.DB.Model(&model.Node{}).
 			Where("id = ?", nodeID).
 			Updates(map[string]any{"ip": "", "last_heartbeat": nil}).Error; err != nil {
 			logger.Errorf("Node 断连时清空 IP 失败: node_id=%d, err=%v", nodeID, err)
-		}
-
-		// 断连时只将当前 Node 关联的域名设为离线
-		if err := db.DB.Model(&model.DomainRegistry{}).
-			Where("node_id = ? AND status = ?", nodeID, model.DomainStatusOnline).
-			Update("status", model.DomainStatusOffline).Error; err != nil {
-			logger.Errorf("Node 断连时设置域名离线失败: node_id=%d, err=%v", nodeID, err)
 		}
 
 		// 检查同 Agent 下是否还有其他在线 Node
@@ -416,12 +415,18 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 		}
 		s.connMutex.RUnlock()
 
-		// 只有当该 Agent 下没有其他在线 Node 时，才将 Endpoint 设为离线
+		// 只有当该 Agent 下没有其他在线 Node 时，才清理 Endpoint 缓存
 		// 因为 Endpoint 是 Agent 级别的（user_id），不是 Node 级别的
 		if !hasOtherOnline {
-			db.DB.Model(&model.EndpointSSH{}).Where("user_id = ? AND status = ?", agentID, "online").Update("status", "offline")
-			db.DB.Model(&model.EndpointK8SAPI{}).Where("user_id = ? AND status = ?", agentID, "online").Update("status", "offline")
-			db.DB.Model(&model.EndpointK8SService{}).Where("user_id = ? AND status = ?", agentID, "online").Update("status", "offline")
+			// 查询该 Agent 的所有 Endpoint，清理缓存
+			var endpoints []model.Endpoint
+			if err := db.DB.Where("user_id = ?", agentID).Find(&endpoints).Error; err == nil {
+				for _, ep := range endpoints {
+					cache.DeleteEndpointStatus(ep.Name)
+					logger.Infof("Endpoint 断连，清理内存缓存: endpoint_name=%s", ep.Name)
+				}
+			}
+			db.DB.Model(&model.Endpoint{}).Where("user_id = ? AND status = ?", agentID, "online").Update("status", "offline")
 		}
 
 		logger.Infof("Node 断连: agent_id=%d, node_id=%d, 同 Agent 其他在线=%v", agentID, nodeID, hasOtherOnline)
@@ -488,6 +493,10 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		}
 		cache.UpdateK8SServiceDiscovery(agentID, discoveredServices)
 		logger.Infof("Agent K8S Service 发现数据已更新: agent_id=%d, count=%d", agentID, len(discoveredServices))
+
+		// 为发现的 K8S Service 创建域名（需要先获取 Node 和 User 信息）
+		// 注意：这里需要在 Node 创建/查询之后才能调用，所以将逻辑移到后面
+		// 暂存发现的 Service 列表，稍后处理
 	}
 
 	// 查询用户角色，确定 Node 类型
@@ -538,6 +547,15 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		updates["hostname"] = req.Hostname
 	}
 
+	// 更新 Node 内存缓存
+	cache.SetNodeStatus(node.ID, cache.NodeStatus{
+		NodeID:        node.ID,
+		UserID:        agentID,
+		TunnelIP:      req.TunnelIp,
+		LastHeartbeat: now,
+	})
+	logger.Debugf("更新 Node 内存缓存: node_id=%d, tunnel_ip=%s", node.ID, req.TunnelIp)
+
 	// 如果 Headscale 客户端可用，查询并更新 HeadscaleNodeID
 	if s.headscaleClient != nil && node.HeadscaleNodeID == 0 {
 		hsUserName := fmt.Sprintf("%s-%s", hsPrefix, user.Name)
@@ -568,7 +586,7 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 
 	// 处理域名注册上报
 	if len(req.DomainRegistrations) > 0 {
-		s.handleDomainRegistrations(ctx, agentID, req.DomainRegistrations, req.TunnelIp)
+		s.handleDomainRegistrations(ctx, agentID, node.ID, req.DomainRegistrations, req.TunnelIp)
 	}
 
 	// 处理已连接的 Endpoint 上报
@@ -579,6 +597,11 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	// 处理操作审计记录上报
 	if len(req.AuditRecords) > 0 {
 		s.handleAuditRecords(ctx, agentID, req.AuditRecords)
+	}
+
+	// 处理 K8S Service 发现，创建域名
+	if len(req.DiscoveredServices) > 0 {
+		s.handleK8SServiceDiscovery(ctx, agentID, node.ID, req.DiscoveredServices)
 	}
 
 	return node.ID
@@ -746,6 +769,26 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 	// 查询该 Agent 关联的 Endpoint K8SService 授权信息
 	epK8SSvcPerms := s.queryEndpointK8SServicePermissions(ctx, agentID)
 	resp.EndpointK8SservicePermissions = epK8SSvcPerms
+
+	// 查询该 Agent 关联的所有 Endpoint 能力开关配置（直接从数据库读取，不依赖权限列表）
+	var allEndpoints []model.Endpoint
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ?", agentID, false).Find(&allEndpoints).Error; err == nil {
+		logger.Infof("查询到 %d 个 Endpoint 配置 (agent_id=%d)", len(allEndpoints), agentID)
+		for _, ep := range allEndpoints {
+			logger.Infof("Endpoint 配置: name=%s, ssh_enabled=%v, k8sapi_enabled=%v, k8sapi_api_server=%s, k8sservice_enabled=%v",
+				ep.Name, ep.SSHEnabled, ep.K8SAPIEnabled, ep.K8SAPIApiServer, ep.K8SServiceEnabled)
+			resp.EndpointCapabilityConfigs = append(resp.EndpointCapabilityConfigs, &pb.EndpointCapabilityConfig{
+				EndpointName:      ep.Name,
+				SshEnabled:        ep.SSHEnabled,
+				K8SapiEnabled:     ep.K8SAPIEnabled,
+				K8SapiApiServer:   ep.K8SAPIApiServer,
+				K8SserviceEnabled: ep.K8SServiceEnabled,
+			})
+		}
+		logger.Infof("准备发送心跳响应: EndpointCapabilityConfigs 数量=%d", len(resp.EndpointCapabilityConfigs))
+	} else {
+		logger.Errorf("查询 Endpoint 配置失败 (agent_id=%d): %v", agentID, err)
+	}
 
 	return stream.Send(resp)
 }
@@ -1064,7 +1107,8 @@ func (s *AgentServiceServer) ReportNetworkChange(ctx context.Context, req *pb.Re
 // 逻辑：按 (domain, node_id) 或 (domain, endpoint_id) 联合唯一 upsert
 // 同一域名可有多条记录（不同 node_id），支持负载均衡
 // tunnelIp: Agent 的隧道 IP，当域名记录的 TargetIp 为空时自动填充
-func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agentID uint64, registrations []*pb.DomainRegistration, tunnelIp string) {
+// nodeID: 当前心跳对应的 Node ID，用于自动填充 Agent 自身域名的 node_id
+func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agentID uint64, nodeID uint64, registrations []*pb.DomainRegistration, tunnelIp string) {
 	registered := 0
 	updated := 0
 
@@ -1072,11 +1116,20 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 		var existing model.DomainRegistry
 		var err error
 
+		// 自动填充 node_id 和 endpoint_id：
+		// 1. 如果有 endpoint_id，说明是 Endpoint 域名，保持不变
+		// 2. 如果没有 endpoint_id 也没有 node_id，说明是 Agent 自身域名，自动填充当前 nodeID
+		actualNodeID := reg.NodeId
+		actualEndpointID := reg.EndpointId
+		if actualEndpointID == "" && actualNodeID == 0 {
+			actualNodeID = nodeID
+		}
+
 		// 按联合唯一条件查询：node_id 和 endpoint_id 互斥
-		if reg.NodeId > 0 {
-			err = db.DB.WithContext(ctx).Where("domain = ? AND node_id = ?", reg.Domain, reg.NodeId).First(&existing).Error
-		} else if reg.EndpointId != "" {
-			err = db.DB.WithContext(ctx).Where("domain = ? AND endpoint_id = ?", reg.Domain, reg.EndpointId).First(&existing).Error
+		if actualNodeID > 0 {
+			err = db.DB.WithContext(ctx).Where("domain = ? AND node_id = ?", reg.Domain, actualNodeID).First(&existing).Error
+		} else if actualEndpointID != "" {
+			err = db.DB.WithContext(ctx).Where("domain = ? AND endpoint_id = ?", reg.Domain, actualEndpointID).First(&existing).Error
 		} else {
 			// 兼容：无 node_id 也无 endpoint_id，按 domain + user_id 查询
 			err = db.DB.WithContext(ctx).Where("domain = ? AND user_id = ? AND node_id = 0 AND endpoint_id = ''", reg.Domain, agentID).First(&existing).Error
@@ -1092,8 +1145,8 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 			Domain:      reg.Domain,
 			Type:        model.DomainType(reg.Type),
 			UserID:      agentID,
-			NodeID:      reg.NodeId,
-			EndpointID:  reg.EndpointId,
+			NodeID:      actualNodeID,
+			EndpointID:  actualEndpointID,
 			TargetIP:    targetIp,
 			TargetPort:  int(reg.TargetPort),
 			Namespace:   reg.Namespace,
@@ -1113,8 +1166,8 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 			updates := map[string]any{
 				"type":         model.DomainType(reg.Type),
 				"user_id":      agentID,
-				"node_id":      reg.NodeId,
-				"endpoint_id":  reg.EndpointId,
+				"node_id":      actualNodeID,
+				"endpoint_id":  actualEndpointID,
 				"target_ip":    targetIp,
 				"target_port":  int(reg.TargetPort),
 				"namespace":    reg.Namespace,
@@ -1129,33 +1182,109 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 		}
 	}
 
-	logger.Infof("Agent 域名注册上报完成: agent_id=%d, registered=%d, updated=%d", agentID, registered, updated)
+	logger.Infof("Agent 域名注册上报完成: agent_id=%d, node_id=%d, registered=%d, updated=%d", agentID, nodeID, registered, updated)
 }
 
 // handleConnectedEndpoints 处理 Agent 心跳中的已连接 Endpoint 上报
-// 一个 Endpoint 可以同时提供多种能力，每种能力写入对应的数据库表
+// 一个 Endpoint 节点对应统一 endpoint 表中的一行，各能力通过字段开关控制
 // 按 (user_id, name) 唯一 upsert，不在列表中的标记为 offline
+// 接收并存储 Endpoint 上报的 SSH 用户列表
 func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agentID uint64, endpoints []*pb.ConnectedEndpoint) {
-	// 收集本次上报的 Endpoint 名称（按类型分组）
-	sshNames := make(map[string]bool)
-	k8sapiNames := make(map[string]bool)
-	k8ssvcNames := make(map[string]bool)
+	// 收集本次上报的 Endpoint 名称
+	reportedNames := make(map[string]bool)
+	now := time.Now()
 
 	for _, ep := range endpoints {
-		for _, cap := range ep.Capabilities {
-			switch cap.Type {
-			case "ssh":
-				sshNames[ep.Name] = true
-				s.upsertEndpointSSH(ctx, agentID, ep.Name, cap)
-			case "k8sapi":
-				k8sapiNames[ep.Name] = true
-				s.upsertEndpointK8SAPI(ctx, agentID, ep.Name, cap)
-			case "k8sservice":
-				k8ssvcNames[ep.Name] = true
-				s.upsertEndpointK8SService(ctx, agentID, ep.Name)
-			default:
-				logger.Warnf("未知的 Endpoint 能力类型: type=%s, name=%s", cap.Type, ep.Name)
+		reportedNames[ep.Name] = true
+
+		// 更新 Endpoint 内存缓存
+		cache.SetEndpointStatus(ep.Name, cache.EndpointStatus{
+			EndpointName:  ep.Name,
+			UserID:        agentID,
+			LastHeartbeat: now,
+		})
+		logger.Debugf("更新 Endpoint 内存缓存: endpoint_name=%s, user_id=%d", ep.Name, agentID)
+
+		// upsert 统一 endpoint 表
+		var existing model.Endpoint
+		err := db.DB.WithContext(ctx).Where("user_id = ? AND name = ? AND revoked = ?", agentID, ep.Name, false).First(&existing).Error
+		if err != nil {
+			// 不存在，创建（能力默认全部关闭，由 Web 界面管理）
+			// 将上报的 SSH 用户列表存储到数据库
+			sshUsersJSON := "[]"
+			if len(ep.SshUsers) > 0 {
+				if data, err := json.Marshal(ep.SshUsers); err == nil {
+					sshUsersJSON = string(data)
+				}
 			}
+			k8sServiceNamespacesJSON := "[]"
+			if len(ep.K8SserviceNamespaces) > 0 {
+				if data, err := json.Marshal(ep.K8SserviceNamespaces); err == nil {
+					k8sServiceNamespacesJSON = string(data)
+				}
+			}
+
+			record := model.Endpoint{
+				ID:                      uuid.New().String(),
+				UserID:                  agentID,
+				Name:                    ep.Name,
+				Status:                  "online",
+				SSHEnabled:              false,
+				SSHUsers:                sshUsersJSON,
+				K8SAPIEnabled:           false,
+				K8SAPIApiServer:         ep.K8SapiApiServer,
+				K8SServiceEnabled:       false,
+				K8SServiceLabelSelector: ep.K8SserviceLabelSelector,
+				K8SServiceNamespaces:    k8sServiceNamespacesJSON,
+			}
+			if err := db.DB.WithContext(ctx).Create(&record).Error; err != nil {
+				logger.Errorf("创建 Endpoint 失败: name=%s, err=%v", ep.Name, err)
+			} else {
+				logger.Infof("创建 Endpoint: name=%s, id=%s, ssh_users=%v",
+					ep.Name, record.ID, ep.SshUsers)
+
+				// Endpoint 创建成功后，如果 SSH 能力已开启，创建域名
+				// 注意：Endpoint 默认 SSH 能力是关闭的，需要在 Web 界面手动开启
+				// 这里只是为了支持未来可能的自动开启场景
+				if record.SSHEnabled {
+					// 查询 Agent Node 和 User 信息
+					var agentNode model.Node
+					var user model.User
+					if err := db.DB.WithContext(ctx).First(&agentNode, "user_id = ? AND type = ?", agentID, model.NodeTypeAgent).Error; err == nil {
+						if err := db.DB.WithContext(ctx).First(&user, agentID).Error; err == nil {
+							if err := s.domainService.CreateEndpointSSHDomain(ctx, &record, &agentNode, &user); err != nil {
+								logger.Errorf("创建 Endpoint SSH 域名失败: endpoint=%s, err=%v", ep.Name, err)
+							}
+						}
+					}
+				}
+			}
+		} else {
+			// 存在，更新状态和配置（不更新能力开关，能力由 Web 界面管理）
+			updates := map[string]any{
+				"status": "online",
+			}
+			// 始终更新 SSH 用户列表（即使为空）
+			if data, err := json.Marshal(ep.SshUsers); err == nil {
+				updates["ssh_users"] = string(data)
+			}
+			// 更新 K8S API 配置
+			if ep.K8SapiApiServer != "" {
+				updates["k8sapi_api_server"] = ep.K8SapiApiServer
+			}
+			// 更新 K8S Service 配置
+			if ep.K8SserviceLabelSelector != "" {
+				updates["k8sservice_label_selector"] = ep.K8SserviceLabelSelector
+			}
+			if len(ep.K8SserviceNamespaces) > 0 {
+				if data, err := json.Marshal(ep.K8SserviceNamespaces); err == nil {
+					updates["k8sservice_namespaces"] = string(data)
+				}
+			}
+
+			logger.Infof("更新 Endpoint: name=%s, id=%s, ssh_users=%v",
+				ep.Name, existing.ID, ep.SshUsers)
+			db.DB.WithContext(ctx).Model(&existing).Updates(updates)
 		}
 
 		// 更新 Endpoint K8S Service 发现缓存
@@ -1181,138 +1310,45 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 		}
 	}
 
+	// 清理不在列表中的 Endpoint 缓存
+	var allEndpoints []model.Endpoint
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ?", agentID, false).Find(&allEndpoints).Error; err == nil {
+		for _, ep := range allEndpoints {
+			if !reportedNames[ep.Name] {
+				// 不在上报列表中，清理缓存
+				cache.DeleteEndpointStatus(ep.Name)
+				logger.Infof("Endpoint 不在上报列表，清理内存缓存: endpoint_name=%s", ep.Name)
+			}
+		}
+	}
+
 	// 将不在列表中的 Endpoint 标记为 offline
-	if len(sshNames) > 0 {
-		names := make([]string, 0, len(sshNames))
-		for n := range sshNames {
+	if len(reportedNames) > 0 {
+		names := make([]string, 0, len(reportedNames))
+		for n := range reportedNames {
 			names = append(names, n)
 		}
-		db.DB.WithContext(ctx).Model(&model.EndpointSSH{}).
+		// 标记 Endpoint 为 offline
+		db.DB.WithContext(ctx).Model(&model.Endpoint{}).
 			Where("user_id = ? AND status = ? AND name NOT IN ? AND revoked = ?", agentID, "online", names, false).
 			Update("status", "offline")
 	} else {
-		db.DB.WithContext(ctx).Model(&model.EndpointSSH{}).
+		// 标记所有 Endpoint 为 offline
+		db.DB.WithContext(ctx).Model(&model.Endpoint{}).
 			Where("user_id = ? AND status = ? AND revoked = ?", agentID, "online", false).
 			Update("status", "offline")
 	}
 
-	if len(k8sapiNames) > 0 {
-		names := make([]string, 0, len(k8sapiNames))
-		for n := range k8sapiNames {
-			names = append(names, n)
-		}
-		db.DB.WithContext(ctx).Model(&model.EndpointK8SAPI{}).
-			Where("user_id = ? AND status = ? AND name NOT IN ? AND revoked = ?", agentID, "online", names, false).
-			Update("status", "offline")
-	} else {
-		db.DB.WithContext(ctx).Model(&model.EndpointK8SAPI{}).
-			Where("user_id = ? AND status = ? AND revoked = ?", agentID, "online", false).
-			Update("status", "offline")
-	}
-
-	if len(k8ssvcNames) > 0 {
-		names := make([]string, 0, len(k8ssvcNames))
-		for n := range k8ssvcNames {
-			names = append(names, n)
-		}
-		db.DB.WithContext(ctx).Model(&model.EndpointK8SService{}).
-			Where("user_id = ? AND status = ? AND name NOT IN ? AND revoked = ?", agentID, "online", names, false).
-			Update("status", "offline")
-	} else {
-		db.DB.WithContext(ctx).Model(&model.EndpointK8SService{}).
-			Where("user_id = ? AND status = ? AND revoked = ?", agentID, "online", false).
-			Update("status", "offline")
-	}
-
-	logger.Infof("Agent Endpoint 上报完成: agent_id=%d, ssh=%d, k8sapi=%d, k8ssvc=%d",
-		agentID, len(sshNames), len(k8sapiNames), len(k8ssvcNames))
-}
-
-// upsertEndpointSSH 创建或更新 SSH Endpoint
-func (s *AgentServiceServer) upsertEndpointSSH(ctx context.Context, agentID uint64, name string, cap *pb.EndpointCapabilityInfo) {
-	var existing model.EndpointSSH
-	err := db.DB.WithContext(ctx).Where("user_id = ? AND name = ? AND revoked = ?", agentID, name, false).First(&existing).Error
-	if err != nil {
-		// 不存在，创建
-		record := model.EndpointSSH{
-			ID:       uuid.New().String(),
-			UserID:   agentID,
-			Name:     name,
-			Host:     cap.Host,
-			Port:     int(cap.Port),
-			SSHUsers: "[]",
-			Status:   "online",
-			Enabled:  true,
-		}
-		if err := db.DB.WithContext(ctx).Create(&record).Error; err != nil {
-			logger.Errorf("创建 SSH Endpoint 失败: name=%s, err=%v", name, err)
-		}
-	} else {
-		// 存在，更新
-		updates := map[string]any{
-			"host":   cap.Host,
-			"port":   int(cap.Port),
-			"status": "online",
-		}
-		db.DB.WithContext(ctx).Model(&existing).Updates(updates)
-	}
-}
-
-// upsertEndpointK8SAPI 创建或更新 K8SAPI Endpoint
-func (s *AgentServiceServer) upsertEndpointK8SAPI(ctx context.Context, agentID uint64, name string, cap *pb.EndpointCapabilityInfo) {
-	var existing model.EndpointK8SAPI
-	err := db.DB.WithContext(ctx).Where("user_id = ? AND name = ? AND revoked = ?", agentID, name, false).First(&existing).Error
-	if err != nil {
-		record := model.EndpointK8SAPI{
-			ID:        uuid.New().String(),
-			UserID:    agentID,
-			Name:      name,
-			APIServer: cap.ApiServer,
-			Status:    "online",
-			Enabled:   true,
-		}
-		if err := db.DB.WithContext(ctx).Create(&record).Error; err != nil {
-			logger.Errorf("创建 K8SAPI Endpoint 失败: name=%s, err=%v", name, err)
-		}
-	} else {
-		updates := map[string]any{
-			"api_server": cap.ApiServer,
-			"status":     "online",
-		}
-		db.DB.WithContext(ctx).Model(&existing).Updates(updates)
-	}
-}
-
-// upsertEndpointK8SService 创建或更新 K8SService Endpoint
-func (s *AgentServiceServer) upsertEndpointK8SService(ctx context.Context, agentID uint64, name string) {
-	var existing model.EndpointK8SService
-	err := db.DB.WithContext(ctx).Where("user_id = ? AND name = ? AND revoked = ?", agentID, name, false).First(&existing).Error
-	if err != nil {
-		record := model.EndpointK8SService{
-			ID:      uuid.New().String(),
-			UserID:  agentID,
-			Name:    name,
-			Status:  "online",
-			Enabled: true,
-		}
-		if err := db.DB.WithContext(ctx).Create(&record).Error; err != nil {
-			logger.Errorf("创建 K8SService Endpoint 失败: name=%s, err=%v", name, err)
-		}
-	} else {
-		updates := map[string]any{
-			"status": "online",
-		}
-		db.DB.WithContext(ctx).Model(&existing).Updates(updates)
-	}
+	logger.Infof("Agent Endpoint 上报完成: agent_id=%d, count=%d", agentID, len(reportedNames))
 }
 
 // queryEndpointSSHPermissions 查询 Agent 关联的 Endpoint SSH 授权列表
 func (s *AgentServiceServer) queryEndpointSSHPermissions(ctx context.Context, agentID uint64) []*pb.EndpointSSHPermission {
 	var result []*pb.EndpointSSHPermission
 
-	// 查询该 Agent 下的所有 Endpoint SSH
-	var endpoints []model.EndpointSSH
-	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ? AND status = ?", agentID, false, "online").Find(&endpoints).Error; err != nil {
+	// 查询该 Agent 下的所有启用 SSH 的 Endpoint
+	var endpoints []model.Endpoint
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ? AND status = ? AND ssh_enabled = ?", agentID, false, "online", true).Find(&endpoints).Error; err != nil {
 		return nil
 	}
 
@@ -1375,8 +1411,8 @@ func (s *AgentServiceServer) queryEndpointSSHPermissions(ctx context.Context, ag
 func (s *AgentServiceServer) queryEndpointK8SAPIPermissions(ctx context.Context, agentID uint64) []*pb.EndpointK8SAPIPermission {
 	var result []*pb.EndpointK8SAPIPermission
 
-	var endpoints []model.EndpointK8SAPI
-	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ? AND status = ?", agentID, false, "online").Find(&endpoints).Error; err != nil {
+	var endpoints []model.Endpoint
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ? AND status = ? AND k8sapi_enabled = ?", agentID, false, "online", true).Find(&endpoints).Error; err != nil {
 		return nil
 	}
 
@@ -1399,6 +1435,7 @@ func (s *AgentServiceServer) queryEndpointK8SAPIPermissions(ctx context.Context,
 				K8SGroups:    parseJSONStringArray(p.K8SGroups),
 				Namespaces:   parseJSONStringArray(p.Namespaces),
 				IsGroup:      false,
+				ApiServer:    ep.K8SAPIApiServer,
 			})
 		}
 
@@ -1428,6 +1465,7 @@ func (s *AgentServiceServer) queryEndpointK8SAPIPermissions(ctx context.Context,
 					K8SGroups:    k8sGroups,
 					Namespaces:   namespaces,
 					IsGroup:      true,
+					ApiServer:    ep.K8SAPIApiServer,
 				})
 			}
 		}
@@ -1440,8 +1478,8 @@ func (s *AgentServiceServer) queryEndpointK8SAPIPermissions(ctx context.Context,
 func (s *AgentServiceServer) queryEndpointK8SServicePermissions(ctx context.Context, agentID uint64) []*pb.EndpointK8SServicePermission {
 	var result []*pb.EndpointK8SServicePermission
 
-	var endpoints []model.EndpointK8SService
-	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ? AND status = ?", agentID, false, "online").Find(&endpoints).Error; err != nil {
+	var endpoints []model.Endpoint
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ? AND status = ? AND k8sservice_enabled = ?", agentID, false, "online", true).Find(&endpoints).Error; err != nil {
 		return nil
 	}
 
@@ -1540,4 +1578,68 @@ func (s *AgentServiceServer) handleAuditRecords(ctx context.Context, agentID uin
 	}
 
 	logger.Infof("保存操作审计记录: agent_id=%d, count=%d", agentID, len(records))
+}
+
+// handleK8SServiceDiscovery 处理 K8S Service 自动发现，创建域名
+func (s *AgentServiceServer) handleK8SServiceDiscovery(ctx context.Context, agentID uint64, nodeID uint64, services []*pb.DiscoveredK8SService) {
+	// 查询 User 信息
+	var user model.User
+	if err := db.DB.WithContext(ctx).First(&user, agentID).Error; err != nil {
+		logger.Errorf("查询 User 失败: agent_id=%d, err=%v", agentID, err)
+		return
+	}
+
+	// 查询 Node 信息
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, nodeID).Error; err != nil {
+		logger.Errorf("查询 Node 失败: node_id=%d, err=%v", nodeID, err)
+		return
+	}
+
+	// 收集本次上报的 Service 域名
+	reportedDomains := make(map[string]bool)
+
+	// 为每个发现的 Service 创建域名
+	for _, svc := range services {
+		// 跳过没有端口的 Service
+		if len(svc.Ports) == 0 {
+			continue
+		}
+
+		// 使用第一个端口创建域名
+		port := svc.Ports[0].Port
+
+		// 生成域名
+		domain := fmt.Sprintf("%s.%s.%s.beagle", svc.ServiceName, svc.Namespace, user.Name)
+		reportedDomains[domain] = true
+
+		// 创建或更新域名
+		if err := s.domainService.CreateNodeK8SSVCDomain(ctx, &node, &user, svc.Namespace, svc.ServiceName, svc.ClusterIp, int(port)); err != nil {
+			logger.Errorf("创建 K8S Service 域名失败: service=%s.%s, err=%v", svc.ServiceName, svc.Namespace, err)
+		}
+	}
+
+	// 清理不再存在的 K8S Service 域名
+	// 查询该 Node 的所有 K8SSVC 域名
+	var existingDomains []model.DomainRegistry
+	if err := db.DB.WithContext(ctx).Where("node_id = ? AND type = ?", nodeID, model.DomainTypeK8SSVC).Find(&existingDomains).Error; err != nil {
+		logger.Errorf("查询 K8S Service 域名失败: node_id=%d, err=%v", nodeID, err)
+		return
+	}
+
+	// 删除不在上报列表中的域名
+	deletedCount := 0
+	for _, existing := range existingDomains {
+		if !reportedDomains[existing.Domain] {
+			if err := db.DB.WithContext(ctx).Delete(&existing).Error; err != nil {
+				logger.Errorf("删除过期 K8S Service 域名失败: domain=%s, err=%v", existing.Domain, err)
+			} else {
+				logger.Infof("删除过期 K8S Service 域名: domain=%s", existing.Domain)
+				deletedCount++
+			}
+		}
+	}
+
+	logger.Infof("K8S Service 域名处理完成: agent_id=%d, node_id=%d, created/updated=%d, deleted=%d",
+		agentID, nodeID, len(reportedDomains), deletedCount)
 }

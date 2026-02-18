@@ -15,7 +15,9 @@ export interface DomainItem {
   user_id: number
   user_name: string
   node_id?: number
+  node_name?: string
   endpoint_id?: string
+  endpoint_name?: string
   target_ip?: string
   target_port?: number
   namespace?: string

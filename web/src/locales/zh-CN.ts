@@ -122,8 +122,8 @@ export default {
     sshEnabled: 'SSH',
     searchPlaceholder: '搜索用户名称',
     enabled: '状态',
-    enabledTrue: '已启用',
-    enabledFalse: '已禁用',
+    enabledTrue: '启用',
+    enabledFalse: '禁用',
     enableConfirm: '确认启用用户 {name} 吗？',
     disableConfirm: '确认禁用用户 {name} 吗？禁用后该用户将无法登录。',
     enableSuccess: '启用成功',
@@ -468,14 +468,21 @@ export default {
     sshCapability: 'SSH 能力',
     k8sapiCapability: 'K8S API 能力',
     k8sserviceCapability: 'K8S Service 能力',
+    capabilities: '能力',
+    version: '版本',
+    updatedAt: '更新时间',
     // SSH
     host: '主机地址',
     port: '端口',
+    sshRunAs: '运行用户',
+    sshCanSwitchUser: '可切换用户',
     sshUsers: 'SSH 用户',
     // K8SAPI
     apiServer: 'API Server',
     // K8SService
-    serviceCount: 'Service 数'
+    serviceCount: 'Service 数',
+    labelSelector: '标签选择器',
+    namespaces: '命名空间'
   },
   resource: {
     title: '资源发现',

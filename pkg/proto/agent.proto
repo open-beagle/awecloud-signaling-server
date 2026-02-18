@@ -142,6 +142,16 @@ message ConnectedEndpoint {
   string status = 2;         // 状态：online
   repeated EndpointCapabilityInfo capabilities = 3; // 启用的能力列表
   repeated DiscoveredK8SService discovered_services = 4; // Endpoint 发现的 K8S Service（K8SService 能力时上报）
+  
+  // SSH 能力配置（从 Endpoint 自动检测）
+  repeated string ssh_users = 7;      // 允许的 SSH 用户列表
+  
+  // K8S API 能力配置
+  string k8sapi_api_server = 8;       // K8S API Server 地址
+  
+  // K8S Service 能力配置
+  string k8sservice_label_selector = 9;    // 标签选择器
+  repeated string k8sservice_namespaces = 10; // 命名空间列表
 }
 
 // DomainRegistration 域名注册信息（Agent 心跳上报）
@@ -188,6 +198,16 @@ message AgentHeartbeatResponse {
   repeated EndpointSSHPermission endpoint_ssh_permissions = 9; // Endpoint SSH 授权列表
   repeated EndpointK8SAPIPermission endpoint_k8sapi_permissions = 10; // Endpoint K8SAPI 授权列表
   repeated EndpointK8SServicePermission endpoint_k8sservice_permissions = 11; // Endpoint K8SService 授权列表
+  repeated EndpointCapabilityConfig endpoint_capability_configs = 12; // Endpoint 能力开关配置（Server 下发）
+}
+
+// EndpointCapabilityConfig Server 下发给 Agent 的 Endpoint 能力开关配置
+message EndpointCapabilityConfig {
+  string endpoint_name = 1;      // Endpoint 名称
+  bool ssh_enabled = 2;          // SSH 能力是否启用
+  bool k8sapi_enabled = 3;       // K8S API 能力是否启用
+  string k8sapi_api_server = 4;  // K8S API Server 地址
+  bool k8sservice_enabled = 5;   // K8S Service 能力是否启用
 }
 
 // AgentCapabilityConfig Agent 能力配置（Server 远程控制）
@@ -257,6 +277,7 @@ message EndpointK8SAPIPermission {
   repeated string k8s_groups = 5;  // K8S Impersonation 分组
   repeated string namespaces = 6;  // 允许的命名空间（空表示全部）
   bool is_group = 7;               // 是否来自分组授权
+  string api_server = 8;           // K8S API Server 地址（从 Endpoint 配置读取）
 }
 
 // EndpointK8SServicePermission Endpoint K8SService 授权信息（心跳响应下发给 Agent）
