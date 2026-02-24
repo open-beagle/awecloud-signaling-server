@@ -40,7 +40,7 @@
           <template #default="{ row }">
             <span v-if="row.user_name">
               {{ row.user_name }}
-              <span v-if="row.node_name"> / {{ row.node_name }}</span>
+              <span v-if="row.device_name"> / {{ row.device_name }}</span>
               <span v-if="row.endpoint_name"> / {{ row.endpoint_name }}</span>
             </span>
             <span v-else>-</span>

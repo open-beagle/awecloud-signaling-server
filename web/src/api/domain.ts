@@ -16,6 +16,7 @@ export interface DomainItem {
   user_name: string
   node_id?: number
   node_name?: string
+  device_name?: string // 设备名（Node.Hostname）
   endpoint_id?: string
   endpoint_name?: string
   target_ip?: string

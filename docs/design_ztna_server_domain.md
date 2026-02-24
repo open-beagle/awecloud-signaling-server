@@ -20,6 +20,200 @@
 | k8sapi | Kubernetes API 访问 | Node/Endpoint | 6443     |
 | k8ssvc | Kubernetes Service  | Node          | 5432     |
 
+### 域名生成规则
+
+域名格式由设备类型、能力类型和区域决定，遵循以下规则：
+
+#### 规则 1：Node SSH 域名
+
+```
+格式：{node_name}.{region}.beagle
+示例：beagle-242.beijing.beagle
+
+说明：
+- node_name：Node 设备的主机名（hostname）
+- region：Agent User 的名称（如 beijing、neimeng）
+- endpoint_id：为空（表示这是 Node 本机能力）
+```
+
+#### 规则 2：Node K8S API 域名
+
+```
+格式：kubernetes.{region}.beagle
+示例：kubernetes.beijing.beagle
+
+说明：
+- 固定前缀：kubernetes
+- region：Agent User 的名称
+- endpoint_id：为空（表示这是 Node 本机能力）
+- 注意：同一 region 只能有一个 Node K8S API 域名
+```
+
+#### 规则 3：Node K8S Service 域名
+
+```
+格式：{service_name}.{namespace}.{region}.beagle
+示例：postgres.yygl.beijing.beagle
+
+说明：
+- service_name：K8S Service 名称
+- namespace：K8S 命名空间
+- region：Agent User 的名称
+- endpoint_id：为空（表示这是 Node 本机能力）
+- 注意：由 Agent 自动发现并上报，Server 自动创建
+```
+
+#### 规则 4：Endpoint SSH 域名
+
+```
+格式：{endpoint_name}.{region}.beagle
+示例：beagle-002.neimeng.beagle
+
+说明：
+- endpoint_name：Endpoint 的名称（管理员创建时指定）
+- region：Agent User 的名称（Endpoint 所属的 Agent User）
+- endpoint_id：Endpoint 名称（如 beagle-002）
+- node_id：Endpoint 连接到的 Agent Node ID（连接后填充）
+```
+
+#### 规则 5：Endpoint K8S API 域名
+
+```
+格式：kubernetes.{region}.beagle
+示例：kubernetes.neimeng.beagle
+
+说明：
+- 固定前缀：kubernetes
+- region：Agent User 的名称（Endpoint 所属的 Agent User）
+- endpoint_id：Endpoint 名称（如 beagle-002）
+- node_id：Endpoint 连接到的 Agent Node ID（连接后填充）
+- 注意：格式与 Node K8S API 相同，通过 endpoint_id 字段区分
+```
+
+#### 规则 6：Endpoint K8S Service 域名
+
+```
+格式：{service_name}.{namespace}.{region}.beagle
+示例：postgres.yygl.neimeng.beagle
+
+说明：
+- service_name：K8S Service 名称
+- namespace：K8S 命名空间
+- region：Agent User 的名称（Endpoint 所属的 Agent User）
+- endpoint_id：Endpoint 名称（如 beagle-002）
+- node_id：Endpoint 连接到的 Agent Node ID（连接后填充）
+- 注意：格式与 Node K8S Service 相同，但通过 Agent 的 Endpoint gRPC Server 转发
+- 注意：由 Endpoint 自动发现并上报，Server 自动创建（功能待实现）
+```
+
+#### 域名唯一性约束
+
+```
+约束：(domain, user_id) 联合唯一
+
+含义：
+- 同一 Agent User 下，域名不能重复
+- 不同 Agent User 可以有相同的域名
+
+示例：
+✓ 允许：beijing 用户有 kubernetes.beijing.beagle（Node K8S API）
+✓ 允许：neimeng 用户有 kubernetes.neimeng.beagle（Node K8S API）
+✗ 禁止：beijing 用户同时有两个 kubernetes.beijing.beagle
+✓ 允许：beijing 用户有 kubernetes.beijing.beagle（Node K8S API）
+         + beagle-002 Endpoint 有 kubernetes.beijing.beagle（Endpoint K8S API）
+         （通过 endpoint_id 字段区分，实际是不同的域名记录）
+```
+
+#### 域名与设备的关系
+
+```
+Node 本机能力域名：
+- node_id：填充（关联到 Node）
+- endpoint_id：为空
+- 示例：beagle-242.beijing.beagle（SSH）
+        kubernetes.beijing.beagle（K8S API）
+        postgres.yygl.beijing.beagle（K8S Service）
+
+Endpoint 能力域名：
+- node_id：Endpoint 连接后填充（关联到 Agent Node）
+- endpoint_id：填充（关联到 Endpoint）
+- 示例：beagle-002.neimeng.beagle（SSH）
+        kubernetes.neimeng.beagle（K8S API）
+
+判断方法：
+- endpoint_id 为空 → Node 本机能力
+- endpoint_id 不为空 → Endpoint 能力
+```
+
+### 端口生成规则
+
+域名的目标端口（target_port）由域名类型和来源设备决定。Desktop 通过魔法 DNS 将域名解析为 127.1.x.x 的 VIP 地址，然后通过本地代理转发到 Tailscale 网络中的实际端口。
+
+#### Node 本机能力端口
+
+| 域名类型         | 目标端口 | Desktop 访问端口 | 说明                                    |
+| ---------------- | -------- | ---------------- | --------------------------------------- |
+| Node SSH         | 22       | 22               | Node 本机 SSH 端口（固定）              |
+| Node K8S API     | 50050    | 6443             | tsnet 虚拟端口（可配置，默认 50050）    |
+| Node K8S Service | 50051    | 动态             | tsnet 虚拟端口（固定 50051，gRPC 服务） |
+
+说明：
+
+- Node SSH：Desktop 访问 127.1.x.x:22 → Tailscale → Agent IP:22（直接访问 Node 本机 SSH）
+- Node K8S API：Desktop 访问 127.1.x.x:6443 → Tailscale → Agent IP:50050（Agent 的 tsnet 虚拟端口，转发到 K8S API Server）
+- Node K8S Service：Desktop 访问 127.1.x.x:动态端口 → Tailscale → Agent IP:50051（Agent 的 gRPC 服务，转发到 K8S Service）
+
+#### Endpoint 能力端口
+
+| 域名类型             | 目标端口 | Desktop 访问端口 | 说明                               |
+| -------------------- | -------- | ---------------- | ---------------------------------- |
+| Endpoint SSH         | 50053    | 22               | tsnet 虚拟端口（固定）             |
+| Endpoint K8S API     | 50054    | 6443             | tsnet 虚拟端口（固定，功能待实现） |
+| Endpoint K8S Service | 50055    | 动态             | tsnet 虚拟端口（固定，功能待实现） |
+
+说明：
+
+- Endpoint SSH：Desktop 访问 127.1.x.x:22 → Tailscale → Agent IP:50053（Agent 的 tsnet 虚拟端口）→ Agent gRPC:50052 → Endpoint → 实际 SSH
+- Endpoint K8S API：Desktop 访问 127.1.x.x:6443 → Tailscale → Agent IP:50054（Agent 的 tsnet 虚拟端口）→ Agent gRPC:50052 → Endpoint → 实际 K8S API
+- Endpoint K8S Service：Desktop 访问 127.1.x.x:动态端口 → Tailscale → Agent IP:50055（Agent 的 gRPC 服务）→ Agent gRPC:50052 → Endpoint → 实际 Service
+
+#### 端口分配架构
+
+```
+Desktop 魔法 DNS 解析：
+  *.beagle → 127.1.x.x（VIP 地址）
+  Desktop 本地代理监听 127.1.x.x:各种端口
+  转发到 Tailscale 网络中的 Agent IP:目标端口
+
+Node 本机能力访问流程：
+  Desktop → 127.1.x.x:22 → Tailscale → Agent IP:22（SSH）
+  Desktop → 127.1.x.x:6443 → Tailscale → Agent IP:50050（K8S API，tsnet 虚拟端口）
+  Desktop → 127.1.x.x:动态端口 → Tailscale → Agent IP:50051（K8S Service，gRPC）
+
+Endpoint 能力访问流程：
+  Desktop → 127.1.x.x:22 → Tailscale → Agent IP:50053（tsnet）→ Agent gRPC:50052 → Endpoint SSH
+  Desktop → 127.1.x.x:6443 → Tailscale → Agent IP:50054（tsnet）→ Agent gRPC:50052 → Endpoint K8S API
+  Desktop → 127.1.x.x:动态端口 → Tailscale → Agent IP:50055（gRPC）→ Agent gRPC:50052 → Endpoint Service
+```
+
+#### 关键端口说明
+
+| 端口  | 用途                                                     |
+| ----- | -------------------------------------------------------- |
+| 22    | Node 本机 SSH 端口（物理端口）                           |
+| 50050 | Node K8S API tsnet 虚拟端口（可配置，默认 50050）        |
+| 50051 | Node K8S Service gRPC 端口（tsnet 虚拟端口）             |
+| 50052 | Agent 的 Endpoint gRPC Server 端口（内网物理端口）       |
+| 50053 | Endpoint SSH tsnet 虚拟端口（固定）                      |
+| 50054 | Endpoint K8S API tsnet 虚拟端口（固定，待实现）          |
+| 50055 | Endpoint K8S Service gRPC 端口（tsnet 虚拟端口，待实现） |
+
+注意：
+
+- tsnet 虚拟端口：通过 Tailscale 的 FallbackTCPHandler 监听，不是物理端口，只在 Tailscale 网络中可达
+- 物理端口：实际监听在网卡上的端口，如 22（SSH）、50052（Agent Endpoint gRPC Server）
+- Desktop 访问端口：Desktop 本地代理监听的端口，用户实际连接的端口（如 SSH 用 22，K8S API 用 6443）
+
 ### 数据存储
 
 - **domain_registry 表**：持久化域名记录

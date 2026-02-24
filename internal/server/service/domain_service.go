@@ -219,6 +219,66 @@ func (s *DomainService) DeleteEndpointAllDomains(ctx context.Context, endpointNa
 	return nil
 }
 
+// CreateEndpointK8SAPIDomain 创建 Endpoint K8S API 域名
+// domain = "kubernetes.{region}.beagle"
+// 注意：Endpoint K8S API 域名格式和 Node K8S API 一样，通过 endpoint_id 字段区分
+func (s *DomainService) CreateEndpointK8SAPIDomain(ctx context.Context, endpoint *model.Endpoint, agentNode *model.Node, user *model.User) error {
+	// 生成域名
+	domain := fmt.Sprintf("kubernetes.%s.beagle", user.Name)
+
+	// 检查是否已存在（按 endpoint_id 区分）
+	var existing model.DomainRegistry
+	err := s.db.WithContext(ctx).Where("domain = ? AND user_id = ? AND endpoint_id = ?", domain, user.ID, endpoint.Name).First(&existing).Error
+	if err == nil {
+		logger.Infof("Endpoint K8S API 域名已存在，跳过创建: domain=%s, endpoint=%s", domain, endpoint.Name)
+		return nil
+	}
+	if err != gorm.ErrRecordNotFound {
+		return fmt.Errorf("查询域名失败: %w", err)
+	}
+
+	// Endpoint K8S API 通过 Agent 的 Endpoint gRPC Server 转发
+	// 目标端口固定为 50054（Agent 的 tsnet 虚拟端口，专用于 Endpoint K8S API）
+	port := 50054
+
+	// 创建域名记录
+	domainRecord := &model.DomainRegistry{
+		Domain:     domain,
+		Type:       model.DomainTypeK8SAPI,
+		UserID:     user.ID,
+		NodeID:     agentNode.ID,  // Agent Node ID
+		EndpointID: endpoint.Name, // Endpoint 名称
+		TargetIP:   agentNode.IP,  // Agent IP
+		TargetPort: port,          // 50054（Agent 的 tsnet 虚拟端口）
+	}
+
+	if err := s.db.WithContext(ctx).Create(domainRecord).Error; err != nil {
+		return fmt.Errorf("创建域名记录失败: %w", err)
+	}
+
+	logger.Infof("创建 Endpoint K8S API 域名成功: domain=%s, endpoint=%s, node_id=%d, user_id=%d",
+		domain, endpoint.Name, agentNode.ID, user.ID)
+	return nil
+}
+
+// DeleteEndpointK8SAPIDomain 删除 Endpoint K8S API 域名
+func (s *DomainService) DeleteEndpointK8SAPIDomain(ctx context.Context, endpointName string, user *model.User) error {
+	domain := fmt.Sprintf("kubernetes.%s.beagle", user.Name)
+
+	result := s.db.WithContext(ctx).Where("domain = ? AND user_id = ? AND endpoint_id = ?", domain, user.ID, endpointName).
+		Delete(&model.DomainRegistry{})
+
+	if result.Error != nil {
+		return fmt.Errorf("删除域名记录失败: %w", result.Error)
+	}
+
+	if result.RowsAffected > 0 {
+		logger.Infof("删除 Endpoint K8S API 域名成功: domain=%s, endpoint=%s, user_id=%d", domain, endpointName, user.ID)
+	}
+
+	return nil
+}
+
 // CreateNodeK8SSVCDomain 创建 Node K8S Service 域名
 // domain = "{service_name}.{namespace}.{region}.beagle"
 func (s *DomainService) CreateNodeK8SSVCDomain(ctx context.Context, node *model.Node, user *model.User, namespace, serviceName, clusterIP string, port int) error {

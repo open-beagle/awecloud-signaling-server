@@ -926,31 +926,36 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		}
 	}
 
-	// 6. Endpoint K8SAPI 域名：kubernetes.{endpoint-name}.{agent-name}{domain_suffix}:分配端口
-	if a.endpointServer != nil && a.endpointK8SAPIProxy != nil && a.tsManager != nil && a.tsManager.IsConnected() {
-		for _, ep := range a.endpointServer.GetConnectedEndpointDetails() {
-			hasK8SAPI := false
-			for _, cap := range ep.Capabilities {
-				if cap.Type == "k8sapi" {
-					hasK8SAPI = true
-					break
+	// 6. Endpoint K8SAPI 域名：{endpoint-name}.{agent-name}{domain_suffix}:分配端口
+	// 注意：Endpoint 不创建 K8S API 域名，K8S API 域名只属于 Agent Node
+	// Endpoint 的 K8S API 访问通过 Endpoint 自身的能力配置和端口分配实现
+	// 这里注释掉，避免创建错误的域名格式
+	/*
+		if a.endpointServer != nil && a.endpointK8SAPIProxy != nil && a.tsManager != nil && a.tsManager.IsConnected() {
+			for _, ep := range a.endpointServer.GetConnectedEndpointDetails() {
+				hasK8SAPI := false
+				for _, cap := range ep.Capabilities {
+					if cap.Type == "k8sapi" {
+						hasK8SAPI = true
+						break
+					}
 				}
-			}
-			if !hasK8SAPI {
-				continue
-			}
+				if !hasK8SAPI {
+					continue
+				}
 
-			port := a.endpointK8SAPIProxy.AllocatePort(ep.Name)
+				port := a.endpointK8SAPIProxy.AllocatePort(ep.Name)
 
-			registrations = append(registrations, &pb.DomainRegistration{
-				Domain:     "kubernetes." + ep.Name + "." + a.config.Agent.AgentName + a.domainSuffix,
-				Type:       "k8sapi",
-				TargetIp:   agentIP,
-				TargetPort: int32(port),
-				EndpointId: ep.Name,
-			})
+				registrations = append(registrations, &pb.DomainRegistration{
+					Domain:     "kubernetes." + ep.Name + "." + a.config.Agent.AgentName + a.domainSuffix,
+					Type:       "k8sapi",
+					TargetIp:   agentIP,
+					TargetPort: int32(port),
+					EndpointId: ep.Name,
+				})
+			}
 		}
-	}
+	*/
 
 	// 7. Endpoint K8SService 域名：{service}.{namespace}.{endpoint-name}.{agent-name}{domain_suffix}
 	// Endpoint K8SService 通过 SVCProxy endpoint_name 字段路由，不需要独立端口

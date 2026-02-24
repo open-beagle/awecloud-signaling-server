@@ -1162,17 +1162,23 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 			}
 			registered++
 		} else {
-			// 存在，更新
+			// 存在，更新（保留已有的 node_id，避免覆盖）
 			updates := map[string]any{
 				"type":         model.DomainType(reg.Type),
 				"user_id":      agentID,
-				"node_id":      actualNodeID,
-				"endpoint_id":  actualEndpointID,
 				"target_ip":    targetIp,
 				"target_port":  int(reg.TargetPort),
 				"namespace":    reg.Namespace,
 				"service_name": reg.ServiceName,
 				"status":       model.DomainStatusOnline,
+			}
+			// 只有当上报的 node_id 不为 0 时才更新（避免覆盖已有的正确值）
+			if actualNodeID > 0 {
+				updates["node_id"] = actualNodeID
+			}
+			// 只有当上报的 endpoint_id 不为空时才更新
+			if actualEndpointID != "" {
+				updates["endpoint_id"] = actualEndpointID
 			}
 			if err := db.DB.WithContext(ctx).Model(&existing).Updates(updates).Error; err != nil {
 				logger.Errorf("域名更新失败: domain=%s, err=%v", reg.Domain, err)

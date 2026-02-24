@@ -34,6 +34,7 @@ type DomainListItem struct {
 	UserName     string             `json:"user_name"`
 	NodeID       uint64             `json:"node_id,omitempty"`
 	NodeName     string             `json:"node_name,omitempty"`
+	DeviceName   string             `json:"device_name,omitempty"` // 设备名（Node.Hostname）
 	EndpointID   string             `json:"endpoint_id,omitempty"`
 	EndpointName string             `json:"endpoint_name,omitempty"`
 	TargetIP     string             `json:"target_ip,omitempty"`
@@ -100,10 +101,12 @@ func (a *DomainAPI) List(c *gin.Context) {
 			continue
 		}
 
-		// 获取 Node 名称
+		// 获取 Node 名称和设备名
 		nodeName := ""
+		deviceName := ""
 		if d.Node != nil {
 			nodeName = d.Node.Name
+			deviceName = d.Node.Hostname // 设备名来自 Hostname
 		}
 
 		// 获取 Endpoint 名称
@@ -128,6 +131,7 @@ func (a *DomainAPI) List(c *gin.Context) {
 			ServiceName:  d.ServiceName,
 			Status:       status,
 			NodeName:     nodeName,
+			DeviceName:   deviceName,
 			EndpointName: endpointName,
 			CreatedAt:    d.CreatedAt.Format("2006-01-02 15:04:05"),
 			UpdatedAt:    d.UpdatedAt.Format("2006-01-02 15:04:05"),

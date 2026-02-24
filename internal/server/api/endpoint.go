@@ -261,6 +261,31 @@ func (a *EndpointAPI) UpdateEndpoint(c *gin.Context) {
 		}
 	}
 
+	// 处理 K8S API 域名创建/删除
+	if req.K8SAPIEnabled != nil {
+		// 查询 Agent Node 和 User 信息
+		var agentNode model.Node
+		var user model.User
+		if err := db.DB.WithContext(ctx).First(&agentNode, "user_id = ? AND type = ?", ep.UserID, model.NodeTypeAgent).Error; err == nil {
+			if err := db.DB.WithContext(ctx).First(&user, ep.UserID).Error; err == nil {
+				// 重新加载 Endpoint 数据（获取最新的能力配置）
+				if err := db.DB.WithContext(ctx).First(&ep, "id = ?", id).Error; err == nil {
+					if *req.K8SAPIEnabled {
+						// K8S API 开启 → 创建域名
+						if err := a.domainService.CreateEndpointK8SAPIDomain(ctx, &ep, &agentNode, &user); err != nil {
+							logger.Errorf("创建 Endpoint K8S API 域名失败: endpoint=%s, err=%v", ep.Name, err)
+						}
+					} else {
+						// K8S API 关闭 → 删除域名
+						if err := a.domainService.DeleteEndpointK8SAPIDomain(ctx, ep.Name, &user); err != nil {
+							logger.Errorf("删除 Endpoint K8S API 域名失败: endpoint=%s, err=%v", ep.Name, err)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	logger.Infof("更新 Endpoint: id=%s", id)
 	recordAuditLog(ctx, c, model.ActionUpdateEndpoint, "endpoint", id, ep.Name, updates)
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("更新成功", nil))
