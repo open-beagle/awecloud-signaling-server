@@ -1229,4 +1229,115 @@ domain_registry（持久化）
 - node_id 和 endpoint_id 互斥（一条记录只能关联一个）
 - 状态不存储在数据库中，完全由内存缓存管理
 - 查询时从 node_id 或 endpoint_id 关联到内存缓存，读取设备状态
-- Node 状态可以通过 Headscale IP 查询验证，Endpoint 只能依赖心跳超时
+- Node 状态可以通过 Headscale IP 查询验证，Endpoint 只能依赖心跳超时判断
+
+## 4. Web 界面显示规范
+
+### 4.1 域名列表"所属用户"列显示规则
+
+域名列表（https://signal.wodcloud.com/domains）中的"所属用户"列，根据域名类型显示不同的内容：
+
+#### 规则 1：Node 本机能力域名
+
+显示格式：`{user_name}`
+
+示例：
+- beagle-242.beijing.beagle → 显示：beijing
+- kubernetes.beijing.beagle → 显示：beijing
+- postgres.yygl.beijing.beagle → 显示：beijing
+
+判断条件：
+- endpoint_id 为空
+- node_id > 0
+
+说明：
+- 显示 Agent User 的名称（如 beijing、neimeng）
+- 这是 Node 设备本机提供的能力
+
+#### 规则 2：Endpoint 能力域名
+
+显示格式：`{user_name} / {device_name}`
+
+示例：
+- beagle-241.beijing.beagle → 显示：beijing / beagle-242
+- kubernetes.neimeng.beagle → 显示：neimeng / beagle-003
+
+判断条件：
+- endpoint_id 不为空
+- node_id > 0（Endpoint 连接后填充）
+
+说明：
+- 第一部分：Agent User 的名称（Endpoint 所属的 Agent User）
+- 第二部分：Agent 设备名称（Endpoint 连接到的 Agent 设备的 Hostname）
+- 用斜杠分隔，表示 Endpoint 通过 Agent 提供服务
+
+#### 规则 3：Endpoint 未连接状态
+
+显示格式：`{user_name} / -`
+
+示例：
+- beagle-241.beijing.beagle → 显示：beijing / -
+
+判断条件：
+- endpoint_id 不为空
+- node_id = 0（Endpoint 尚未连接到 Agent）
+
+说明：
+- 第一部分：Agent User 的名称
+- 第二部分：显示 `-`，表示 Endpoint 尚未连接到任何 Agent
+
+### 4.2 实现逻辑
+
+后端 API 返回数据结构：
+
+```
+DomainListItem {
+    domain: string           // 域名
+    type: string            // 类型：ssh/k8sapi/k8ssvc
+    user_id: uint64         // Agent User ID
+    user_name: string       // Agent User 名称（如 beijing）
+    node_id: uint64         // Node ID（0 表示未关联）
+    device_name: string     // Agent 设备名称（Node.Hostname，如 beagle-242）
+    endpoint_id: string     // Endpoint ID（非空表示 Endpoint 域名）
+    endpoint_name: string   // Endpoint 名称（如 beagle-241）
+    status: string          // 状态：online/offline
+}
+```
+
+前端显示逻辑：
+
+```
+显示"所属用户"列：
+1. 如果 endpoint_id 为空：
+   显示：user_name
+
+2. 如果 endpoint_id 不为空 且 device_name 不为空：
+   显示：user_name / device_name
+
+3. 如果 endpoint_id 不为空 且 device_name 为空：
+   显示：user_name / -
+```
+
+### 4.3 显示示例对比
+
+| 域名                              | endpoint_id | node_id | user_name | device_name | 显示结果             |
+| --------------------------------- | ----------- | ------- | --------- | ----------- | -------------------- |
+| beagle-242.beijing.beagle         | (空)        | 44      | beijing   | beagle-242  | beijing              |
+| kubernetes.beijing.beagle         | (空)        | 44      | beijing   | beagle-242  | beijing              |
+| postgres.yygl.beijing.beagle      | (空)        | 44      | beijing   | beagle-242  | beijing              |
+| beagle-241.beijing.beagle         | beagle-241  | 44      | beijing   | beagle-242  | beijing / beagle-242 |
+| kubernetes.neimeng.beagle         | beagle-002  | 45      | neimeng   | beagle-003  | neimeng / beagle-003 |
+| beagle-241.beijing.beagle（未连接）| beagle-241  | 0       | beijing   | (空)        | beijing / -          |
+
+### 4.4 设计意图
+
+这种显示方式清晰地表达了域名的所属关系：
+
+1. **设备能力**：只显示 User 名称，表示这是该 Agent User 的设备本机提供的服务
+2. **终端能力**：显示 `User / Device`，表示这是 Endpoint（终端）通过指定的 Agent 设备提供的服务
+3. **未连接终端**：显示 `User / -`，提示管理员该 Endpoint 尚未连接到任何 Agent
+
+这样的设计让管理员一眼就能看出：
+- 服务属于哪个 Agent User（区域）
+- 服务是由哪个设备提供的（设备本机 或 通过哪个 Agent 转发的终端）
+- Endpoint 的连接状态（是否已连接到 Agent） 只能依赖心跳超时

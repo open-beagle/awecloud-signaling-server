@@ -33,10 +33,9 @@ type DomainListItem struct {
 	UserID       uint64             `json:"user_id"`
 	UserName     string             `json:"user_name"`
 	NodeID       uint64             `json:"node_id,omitempty"`
-	NodeName     string             `json:"node_name,omitempty"`
-	DeviceName   string             `json:"device_name,omitempty"` // 设备名（Node.Hostname）
-	EndpointID   string             `json:"endpoint_id,omitempty"`
-	EndpointName string             `json:"endpoint_name,omitempty"`
+	DeviceName   string             `json:"device_name,omitempty"`   // Node 设备名（Hostname）
+	EndpointID   string             `json:"endpoint_id,omitempty"`   // Endpoint ID（非空表示 Endpoint 域名）
+	EndpointName string             `json:"endpoint_name,omitempty"` // Endpoint 名称
 	TargetIP     string             `json:"target_ip,omitempty"`
 	TargetPort   int                `json:"target_port,omitempty"`
 	Namespace    string             `json:"namespace,omitempty"`
@@ -101,20 +100,15 @@ func (a *DomainAPI) List(c *gin.Context) {
 			continue
 		}
 
-		// 获取 Node 名称和设备名
-		nodeName := ""
+		// 获取 Node 设备名（Hostname）和 Endpoint 名称
 		deviceName := ""
 		if d.Node != nil {
-			nodeName = d.Node.Name
-			deviceName = d.Node.Hostname // 设备名来自 Hostname
+			deviceName = d.Node.Hostname
 		}
-
-		// 获取 Endpoint 名称
 		endpointName := ""
 		if d.Endpoint != nil {
 			endpointName = d.Endpoint.Name
 		} else if d.EndpointID != "" {
-			// Endpoint 可能未预加载，使用 endpoint_id
 			endpointName = d.EndpointID
 		}
 
@@ -124,15 +118,14 @@ func (a *DomainAPI) List(c *gin.Context) {
 			Type:         d.Type,
 			UserID:       d.UserID,
 			NodeID:       d.NodeID,
+			DeviceName:   deviceName,
 			EndpointID:   d.EndpointID,
+			EndpointName: endpointName,
 			TargetIP:     d.TargetIP,
 			TargetPort:   d.TargetPort,
 			Namespace:    d.Namespace,
 			ServiceName:  d.ServiceName,
 			Status:       status,
-			NodeName:     nodeName,
-			DeviceName:   deviceName,
-			EndpointName: endpointName,
 			CreatedAt:    d.CreatedAt.Format("2006-01-02 15:04:05"),
 			UpdatedAt:    d.UpdatedAt.Format("2006-01-02 15:04:05"),
 		}
