@@ -22,10 +22,10 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/telemetry"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/api"
-	"github.com/open-beagle/awecloud-signaling-server/internal/server/auth"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	grpcserver "github.com/open-beagle/awecloud-signaling-server/internal/server/grpc"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/proxy"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
@@ -590,11 +590,23 @@ func deviceTokenAuthInterceptor() grpc.UnaryServerInterceptor {
 			return handler(ctx, req)
 		}
 
-		// 验证 Device Token（不需要 device_info，只验证 token 是否存在且有效）
-		deviceToken, err := auth.ValidateDeviceToken(db.DB.WithContext(ctx), 0, token, auth.DeviceInfo{})
-		if err != nil {
+		// 直接通过 token 查询（不需要 clientID）
+		var deviceToken model.DeviceToken
+		if err := db.DB.WithContext(ctx).Where("device_token = ?", token).First(&deviceToken).Error; err != nil {
 			// Token 无效，继续执行（让具体方法决定是否需要认证）
-			logger.Debugf("Device Token 验证失败: %v", err)
+			logger.Debugf("Device Token 查询失败: %v", err)
+			return handler(ctx, req)
+		}
+
+		// 检查是否已撤销
+		if deviceToken.Revoked {
+			logger.Debugf("Device Token 已撤销: client_id=%d", deviceToken.ClientID)
+			return handler(ctx, req)
+		}
+
+		// 检查是否过期
+		if time.Now().After(deviceToken.ExpiresAt) {
+			logger.Debugf("Device Token 已过期: client_id=%d", deviceToken.ClientID)
 			return handler(ctx, req)
 		}
 
