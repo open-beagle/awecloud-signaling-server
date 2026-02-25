@@ -1950,14 +1950,14 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 	}
 
 	// K8S Service 权限
-	var k8sSvcUserPerms []model.AclK8SSvcUserPermission
+	var k8sSvcUserPerms []model.AclK8SServiceUserPermission
 	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&k8sSvcUserPerms)
 	for _, p := range k8sSvcUserPerms {
 		agentUserIDs[p.TargetUserID] = true
 	}
 
 	if len(groupIDs) > 0 {
-		var k8sSvcGroupPerms []model.AclK8SSvcGroupPermission
+		var k8sSvcGroupPerms []model.AclK8SServiceGroupPermission
 		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&k8sSvcGroupPerms)
 		for _, p := range k8sSvcGroupPerms {
 			agentUserIDs[p.TargetUserID] = true
@@ -1985,17 +1985,16 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 	for _, record := range domainRecords {
 		// 查询 Agent 的 Tailscale IP
 		var node model.Node
-		if err := db.DB.WithContext(ctx).Where("user_id = ? AND type IN ?", record.UserID, []string{model.NodeTypeAgent, model.NodeTypeEndpoint}).First(&node).Error; err != nil {
-			logger.Warnf("域名 %s 的 Agent/Endpoint 节点不存在", record.Domain)
+		if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", record.UserID, model.NodeTypeAgent).First(&node).Error; err != nil {
+			logger.Warnf("域名 %s 的 Agent 节点不存在", record.Domain)
 			continue
 		}
 
 		domainInfo := &pb.DomainInfo{
 			Domain:      record.Domain,
-			Type:        record.Type,
-			TargetIp:    node.TailscaleIP,
-			TargetPort:  int32(record.Port),
-			ClusterName: record.ClusterName,
+			Type:        string(record.Type),
+			TargetIp:    node.IP,
+			TargetPort:  int32(record.TargetPort),
 			Namespace:   record.Namespace,
 			ServiceName: record.ServiceName,
 			Status:      getNodeStatus(&node),
@@ -2013,11 +2012,11 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 
 // getNodeStatus 获取节点状态
 func getNodeStatus(node *model.Node) string {
-	if node.LastHeartbeatAt == nil {
+	if node.LastHeartbeat == nil {
 		return "offline"
 	}
 	// 5 分钟内有心跳认为在线
-	if time.Since(*node.LastHeartbeatAt) < 5*time.Minute {
+	if time.Since(*node.LastHeartbeat) < 5*time.Minute {
 		return "online"
 	}
 	return "offline"
