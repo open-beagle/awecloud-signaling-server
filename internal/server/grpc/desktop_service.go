@@ -1893,19 +1893,39 @@ func (s *DesktopServiceServer) getEndpointDomainStatus(dr *model.DomainRegistry)
 	return "offline"
 }
 
-// ListDomains 列出域名（Client 模式专用）
-// 返回域名及其目标 IP 和端口，用于 DNS 劫持和本地代理
+// ListDomains 列出域名（Client/Agent 模式通用）
+// - Client 模式：返回有权限访问的域名（用于 Desktop 客户端）
+// - Agent 模式：返回该 Agent 自己的域名（用于 CloudIDE）
+// ListDomains 列出域名（Client/Agent 模式通用）
+// - Client 模式（Desktop）：使用 JWT Token，返回有权限访问的域名
+// - Agent 模式（CloudIDE）：使用 Device Token，返回有权限访问的域名（与 Desktop 权限一致）
 func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDomainsRequest) (*pb.ListDomainsResponse, error) {
-	// 从 context 中获取 client_id（由认证中间件注入）
-	clientID, ok := ctx.Value("client_id").(uint64)
-	if !ok || clientID == 0 {
+	// 尝试从 context 中获取 client_id（Desktop 客户端）
+	clientID, hasClientID := ctx.Value("client_id").(uint64)
+
+	// 尝试从 context 中获取 user_id（Agent/CloudIDE）
+	agentUserID, hasAgentUserID := ctx.Value("user_id").(uint64)
+
+	// 必须至少有一种认证方式
+	if (!hasClientID || clientID == 0) && (!hasAgentUserID || agentUserID == 0) {
 		return nil, status.Errorf(codes.Unauthenticated, "未认证")
+	}
+
+	// 确定用户 ID（Agent 模式使用 agentUserID，Client 模式使用 clientID）
+	var userID uint64
+	var userType string
+	if hasAgentUserID && agentUserID > 0 {
+		userID = agentUserID
+		userType = "Agent"
+	} else {
+		userID = clientID
+		userType = "Client"
 	}
 
 	// 查询用户所属分组
 	var groupIDs []int64
 	var groupMembers []model.GroupMember
-	if err := db.DB.WithContext(ctx).Where("user_id = ?", clientID).Find(&groupMembers).Error; err == nil {
+	if err := db.DB.WithContext(ctx).Where("user_id = ?", userID).Find(&groupMembers).Error; err == nil {
 		for _, gm := range groupMembers {
 			groupIDs = append(groupIDs, gm.GroupID)
 		}
@@ -1921,7 +1941,7 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 
 	// SSH 权限
 	var sshUserPerms []model.AclSSHUserPermission
-	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&sshUserPerms)
+	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", userID, true).Find(&sshUserPerms)
 	for _, p := range sshUserPerms {
 		agentUserIDs[p.TargetUserID] = true
 	}
@@ -1936,7 +1956,7 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 
 	// K8S API 权限
 	var k8sUserPerms []model.AclK8SUserPermission
-	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&k8sUserPerms)
+	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", userID, true).Find(&k8sUserPerms)
 	for _, p := range k8sUserPerms {
 		agentUserIDs[p.TargetUserID] = true
 	}
@@ -1951,7 +1971,7 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 
 	// K8S Service 权限
 	var k8sSvcUserPerms []model.AclK8SServiceUserPermission
-	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&k8sSvcUserPerms)
+	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", userID, true).Find(&k8sSvcUserPerms)
 	for _, p := range k8sSvcUserPerms {
 		agentUserIDs[p.TargetUserID] = true
 	}
@@ -1972,6 +1992,7 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 
 	if len(allowedAgentIDs) == 0 {
 		// 没有任何权限，返回空列表
+		logger.Infof("%s %d 域名列表查询: 无权限，返回空列表", userType, userID)
 		return &pb.ListDomainsResponse{
 			Domains: []*pb.DomainInfo{},
 		}, nil
@@ -2003,7 +2024,7 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 		domains = append(domains, domainInfo)
 	}
 
-	logger.Infof("Client %d 域名列表查询: 共 %d 条域名", clientID, len(domains))
+	logger.Infof("%s %d 域名列表查询: 共 %d 条域名", userType, userID, len(domains))
 
 	return &pb.ListDomainsResponse{
 		Domains: domains,
