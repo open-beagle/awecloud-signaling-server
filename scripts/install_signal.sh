@@ -107,15 +107,15 @@ fi
 SIGNAL_STATE_DIR="$DATA_DIR/tunnel"
 mkdir -p "$SIGNAL_STATE_DIR"
 
-export SIGNAL_TOKEN="$SIGNAL_TOKEN"
-export SIGNAL_SERVER="$SIGNAL_SERVER"
-export SIGNAL_STATE_DIR="$SIGNAL_STATE_DIR"
+# 构建环境变量参数（确保传递给 sudo）
+ENV_VARS="SIGNAL_TOKEN=$SIGNAL_TOKEN SIGNAL_SERVER=$SIGNAL_SERVER SIGNAL_STATE_DIR=$SIGNAL_STATE_DIR"
 if [ -n "$SIGNAL_LOG_LEVEL" ]; then
-  export SIGNAL_LOG_LEVEL="$SIGNAL_LOG_LEVEL"
+  ENV_VARS="$ENV_VARS SIGNAL_LOG_LEVEL=$SIGNAL_LOG_LEVEL"
 fi
 
 echo "[启动] Server: $SIGNAL_SERVER"
-nohup sudo -E "$BIN_DIR/signal_agent" > "$LOG_DIR/agent.log" 2>&1 &
+echo "[启动] Token: ${SIGNAL_TOKEN:0:16}..."
+nohup sudo env $ENV_VARS "$BIN_DIR/signal_agent" > "$LOG_DIR/agent.log" 2>&1 &
 AGENT_PID=$!
 
 sleep 3

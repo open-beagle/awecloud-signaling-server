@@ -43,19 +43,23 @@ func detectUpstreamDNS() string {
 }
 
 // modifyResolvConf 修改 /etc/resolv.conf，指向本地 DNS
+// 保留原始 DNS 作为备份（fallback）
 func modifyResolvConf(upstreamDNS string) error {
 	// 备份原文件
 	if err := backupResolvConf(); err != nil {
 		return fmt.Errorf("备份 resolv.conf 失败: %w", err)
 	}
 
-	// 写入新配置（指向 127.0.0.1:15353）
-	content := fmt.Sprintf("# Signal Agent DNS (upstream: %s)\nnameserver 127.0.0.1\noptions ndots:0\n", upstreamDNS)
+	// 提取上游 DNS IP（去掉端口）
+	upstreamIP := strings.TrimSuffix(upstreamDNS, ":53")
+
+	// 写入新配置（指向 127.0.0.1:15353，保留原始 DNS 作为备份）
+	content := fmt.Sprintf("# Signal Agent DNS (upstream: %s)\nnameserver 127.0.0.1\nnameserver %s\noptions ndots:0\n", upstreamDNS, upstreamIP)
 	if err := os.WriteFile(resolvConfPath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("写入 resolv.conf 失败: %w", err)
 	}
 
-	logger.Infof("已修改 %s，指向本地 DNS 127.0.0.1:15353", resolvConfPath)
+	logger.Infof("已修改 %s，指向本地 DNS 127.0.0.1:15353（备份 DNS: %s）", resolvConfPath, upstreamIP)
 	return nil
 }
 
