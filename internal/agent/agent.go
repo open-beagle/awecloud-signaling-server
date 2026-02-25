@@ -257,6 +257,7 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 
 	// 启动 DNS 劫持（如果配置启用）
 	var dnsServer *DNSServer
+	var proxyManager *LocalProxyManager
 	if a.config.CloudIDE.DNSEnabled {
 		// 检测上游 DNS（从 /etc/resolv.conf 读取）
 		upstreamDNS := detectUpstreamDNS()
@@ -277,6 +278,16 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 					logger.Warnf("恢复 /etc/resolv.conf 失败: %v", err)
 				}
 			}()
+
+			// 启动本地代理管理器
+			proxyManager = NewLocalProxyManager(domainCache, vipAlloc, a.tsManager, a.ctx)
+			if err := proxyManager.Start(); err != nil {
+				logger.Warnf("启动本地代理管理器失败: %v", err)
+			} else {
+				// 启动代理更新循环
+				a.wg.Add(1)
+				go a.updateProxiesLoop(proxyManager, domainCache)
+			}
 		}
 	}
 
@@ -306,6 +317,11 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 
 	logger.Info("正在关闭 Client...")
 	a.cancel()
+
+	// 停止本地代理管理器
+	if proxyManager != nil {
+		proxyManager.Stop()
+	}
 
 	// 停止 DNS 服务器
 	if dnsServer != nil {
@@ -1345,6 +1361,41 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 		// 清除 SVCProxy 的 EndpointServer 引用
 		if a.svcProxy != nil {
 			a.svcProxy.SetEndpointServer(nil)
+		}
+	}
+}
+
+// updateProxiesLoop 代理更新循环（Client 模式专用）
+// 监听域名缓存变化，自动更新本地代理
+func (a *Agent) updateProxiesLoop(proxyManager *LocalProxyManager, domainCache *DomainCache) {
+	defer a.wg.Done()
+
+	// 立即执行一次更新
+	if err := proxyManager.UpdateProxies(); err != nil {
+		logger.Warnf("更新代理失败: %v", err)
+	}
+
+	// 定期检查（每 10 秒）
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	lastCount := domainCache.Count()
+
+	for {
+		select {
+		case <-ticker.C:
+			// 检查域名数量是否变化
+			currentCount := domainCache.Count()
+			if currentCount != lastCount {
+				logger.Infof("域名列表已变化: %d -> %d，更新代理", lastCount, currentCount)
+				if err := proxyManager.UpdateProxies(); err != nil {
+					logger.Warnf("更新代理失败: %v", err)
+				}
+				lastCount = currentCount
+			}
+		case <-a.ctx.Done():
+			logger.Debug("代理更新线程退出")
+			return
 		}
 	}
 }
