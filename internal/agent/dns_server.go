@@ -215,9 +215,16 @@ func buildDNSResponse(query []byte, ip string) []byte {
 		return buildDNSServerFailure(query)
 	}
 
-	// 复制查询报文作为响应基础
-	resp := make([]byte, len(query))
-	copy(resp, query)
+	// 只复制 DNS 头部和 Question 段（不包含可能存在的 Additional 段）
+	// 找到 Question 段的结束位置
+	questionEnd := findQuestionEnd(query)
+	if questionEnd < 0 {
+		return buildDNSServerFailure(query)
+	}
+
+	// 创建响应：头部 + Question + Answer
+	resp := make([]byte, questionEnd)
+	copy(resp, query[:questionEnd])
 
 	// 设置响应标志
 	resp[2] = 0x81 // QR=1, Opcode=0, AA=1
@@ -226,6 +233,12 @@ func buildDNSResponse(query []byte, ip string) []byte {
 	// 设置 Answer Count = 1
 	resp[6] = 0x00
 	resp[7] = 0x01
+
+	// 清除 Authority 和 Additional 计数
+	resp[8] = 0x00 // Authority RRs
+	resp[9] = 0x00
+	resp[10] = 0x00 // Additional RRs
+	resp[11] = 0x00
 
 	// 追加 Answer 段
 	// Name: 指针指向 Question 中的域名（offset 12）
@@ -239,6 +252,38 @@ func buildDNSResponse(query []byte, ip string) []byte {
 	answer = append(answer, parsedIP...)
 
 	return append(resp, answer...)
+}
+
+// findQuestionEnd 找到 Question 段的结束位置
+func findQuestionEnd(packet []byte) int {
+	if len(packet) < 12 {
+		return -1
+	}
+
+	// 跳过 DNS 头部（12 字节）
+	offset := 12
+
+	// 解析域名标签
+	for offset < len(packet) {
+		length := int(packet[offset])
+		if length == 0 {
+			offset++
+			break
+		}
+		offset++
+		if offset+length > len(packet) {
+			return -1
+		}
+		offset += length
+	}
+
+	// 跳过 QTYPE 和 QCLASS（各 2 字节）
+	offset += 4
+	if offset > len(packet) {
+		return -1
+	}
+
+	return offset
 }
 
 // buildDNSNXDomain 构建 NXDOMAIN 响应
