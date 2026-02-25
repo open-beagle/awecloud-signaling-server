@@ -934,13 +934,15 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		}
 	}
 
-	// 3. K8S API 域名：api.{agent_name}{domain_suffix}:50050
+	// 3. K8S API 域名：kubernetes.{agent_name}{domain_suffix}
+	// target_port 是 Agent 的 K8SAPI 代理端口（50050）
+	// Desktop/CloudIDE 通过本地代理访问 6443 端口，本地代理转发到 target_port
 	if a.config.K8S.Enabled && a.k8sAPIProxy != nil && a.tsManager != nil && a.tsManager.IsConnected() {
 		registrations = append(registrations, &pb.DomainRegistration{
 			Domain:     "kubernetes." + a.config.Agent.AgentName + a.domainSuffix,
 			Type:       "k8sapi",
 			TargetIp:   agentIP,
-			TargetPort: int32(a.config.K8S.ListenPort),
+			TargetPort: int32(a.config.K8S.ListenPort), // Agent 的 K8SAPI 代理端口（50050）
 		})
 	}
 

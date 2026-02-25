@@ -83,10 +83,25 @@ func (m *LocalProxyManager) UpdateProxies() error {
 			continue
 		}
 
-		// 构建监听地址（VIP:port）
-		// 注意：这里使用域名信息中的 target_port，而不是实际的服务端口
-		// 例如：SSH 使用 22，K8SAPI 使用 6443，K8SSVC 使用服务的实际端口
-		listenAddr := fmt.Sprintf("%s:%d", vip, domain.TargetPort)
+		// 根据域名类型决定本地监听端口（用户访问端口）
+		// 注意：这里是 Desktop 本地代理监听的端口，不是 target_port
+		// target_port 是 Desktop 通过 Tailscale 连接到 Agent 的端口
+		var listenPort int32
+		switch domain.Type {
+		case "ssh":
+			listenPort = 22 // SSH 标准端口
+		case "k8sapi":
+			listenPort = 6443 // K8S API Server 标准端口
+		case "k8ssvc":
+			// K8SSVC 需要为每个 service_port 创建监听
+			// 这里暂时使用 target_port，后续需要解析 service_ports JSON 数组
+			listenPort = domain.TargetPort
+		default:
+			listenPort = domain.TargetPort // 其他类型使用 target_port
+		}
+
+		// 构建监听地址（VIP:listenPort）
+		listenAddr := fmt.Sprintf("%s:%d", vip, listenPort)
 		newProxies[listenAddr] = domain
 	}
 
