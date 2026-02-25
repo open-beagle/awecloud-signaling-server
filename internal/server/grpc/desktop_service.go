@@ -1933,7 +1933,7 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 
 	// 查询所有可访问的域名记录
 	var domainRecords []model.DomainRegistry
-	query := db.DB.WithContext(ctx).Where("deleted_at IS NULL")
+	query := db.DB.WithContext(ctx)
 
 	// 根据权限过滤域名
 	// 1. 收集有权限的 Agent User ID
