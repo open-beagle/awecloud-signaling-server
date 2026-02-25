@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -396,6 +397,9 @@ func (a *Agent) connectToServer() error {
 	}
 	opts = append(opts, grpc.WithStatsHandler(otelgrpc.NewClientHandler(clientOpts...)))
 
+	// 添加认证拦截器（自动注入 Device Token）
+	opts = append(opts, grpc.WithUnaryInterceptor(a.authInterceptor()))
+
 	// 创建gRPC连接
 	conn, err := grpc.NewClient(grpcAddr, opts...)
 	if err != nil {
@@ -412,6 +416,20 @@ func (a *Agent) connectToServer() error {
 
 	logger.Debug("gRPC连接建立成功")
 	return nil
+}
+
+// authInterceptor 认证拦截器，自动注入 Device Token
+func (a *Agent) authInterceptor() grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		// 在 metadata 中添加 Device Token
+		md := metadata.New(map[string]string{
+			"authorization": "Bearer " + a.config.Agent.AgentToken,
+		})
+		ctx = metadata.NewOutgoingContext(ctx, md)
+
+		// 调用原始方法
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
 }
 
 // register 注册Agent

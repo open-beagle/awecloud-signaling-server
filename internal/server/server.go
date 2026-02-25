@@ -16,11 +16,13 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/telemetry"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/api"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/auth"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	grpcserver "github.com/open-beagle/awecloud-signaling-server/internal/server/grpc"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
@@ -138,6 +140,8 @@ func (s *Server) Run() error {
 			grpc.StatsHandler(otelgrpc.NewServerHandler(serverOpts...)),
 		)
 	}
+	// 添加 Device Token 认证拦截器
+	grpcOpts = append(grpcOpts, grpc.UnaryInterceptor(deviceTokenAuthInterceptor()))
 	s.grpcServer = grpc.NewServer(grpcOpts...)
 	pb.RegisterAgentServiceServer(s.grpcServer, s.agentService)
 	pb.RegisterDesktopServiceServer(s.grpcServer, s.desktopService)
@@ -554,4 +558,50 @@ func (s *Server) setupRouter() *gin.Engine {
 	})
 
 	return router
+}
+
+// deviceTokenAuthInterceptor gRPC 认证拦截器，处理 Device Token 认证
+// 从 metadata 中提取 Bearer Token，验证后将 user_id 注入到 context
+func deviceTokenAuthInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		// 从 metadata 中提取 authorization header
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			// 没有 metadata，继续执行（某些方法可能不需要认证）
+			return handler(ctx, req)
+		}
+
+		authHeaders := md.Get("authorization")
+		if len(authHeaders) == 0 {
+			// 没有 authorization header，继续执行
+			return handler(ctx, req)
+		}
+
+		// 解析 Bearer Token
+		authHeader := authHeaders[0]
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			// 不是 Bearer Token，继续执行
+			return handler(ctx, req)
+		}
+
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if token == "" {
+			// Token 为空，继续执行
+			return handler(ctx, req)
+		}
+
+		// 验证 Device Token（不需要 device_info，只验证 token 是否存在且有效）
+		deviceToken, err := auth.ValidateDeviceToken(db.DB.WithContext(ctx), 0, token, auth.DeviceInfo{})
+		if err != nil {
+			// Token 无效，继续执行（让具体方法决定是否需要认证）
+			logger.Debugf("Device Token 验证失败: %v", err)
+			return handler(ctx, req)
+		}
+
+		// 将 user_id 注入到 context（使用 ClientID）
+		ctx = context.WithValue(ctx, "user_id", uint64(deviceToken.ClientID))
+		logger.Debugf("Device Token 认证成功: user_id=%d", deviceToken.ClientID)
+
+		return handler(ctx, req)
+	}
 }
