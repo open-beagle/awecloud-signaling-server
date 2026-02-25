@@ -171,7 +171,7 @@ func buildCapabilities(cfg *EndpointConfig) []*pb.EndpointCapabilityInfo {
 }
 
 // buildConnectedEndpoint 根据配置构建 ConnectedEndpoint 消息（用于心跳上报）
-func buildConnectedEndpoint(cfg *EndpointConfig) *pb.ConnectedEndpoint {
+func buildConnectedEndpoint(cfg *EndpointConfig, discovery *K8SServiceDiscovery) *pb.ConnectedEndpoint {
 	ep := &pb.ConnectedEndpoint{
 		Name:         cfg.Agent.Name,
 		Status:       "online",
@@ -191,7 +191,10 @@ func buildConnectedEndpoint(cfg *EndpointConfig) *pb.ConnectedEndpoint {
 	// K8S Service 配置
 	if cfg.SVC.Enabled {
 		ep.K8SserviceLabelSelector = cfg.SVC.LabelSelector
-		// Namespaces 暂时不上报（配置文件中没有此字段）
+		// 添加发现的 Service 列表
+		if discovery != nil {
+			ep.DiscoveredServices = discovery.GetDiscoveredServices()
+		}
 	}
 
 	return ep
@@ -339,6 +342,17 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 	logger.Infof("Server 下发能力配置: ssh=%v, k8sapi=%v(api_server=%s), k8ssvc=%v",
 		cfg.SSH.Enabled, cfg.K8S.Enabled, cfg.K8S.APIServer, cfg.SVC.Enabled)
 
+	// 启动 K8S Service 自动发现（如果启用）
+	var discovery *K8SServiceDiscovery
+	if cfg.SVC.Enabled && cfg.K8S.APIServer != "" {
+		discovery = NewK8SServiceDiscovery(cfg, ctx)
+		if err := discovery.Start(); err != nil {
+			logger.Warnf("启动 K8S Service 自动发现失败: %v", err)
+		} else {
+			defer discovery.Stop()
+		}
+	}
+
 	logger.Info("心跳流已建立，保持连接中...")
 
 	// 心跳循环
@@ -410,9 +424,13 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 			// 添加 K8S Service 配置
 			if cfg.SVC.Enabled {
 				heartbeatReq.K8SserviceLabelSelector = cfg.SVC.LabelSelector
+				// 添加发现的 Service 列表
+				if discovery != nil {
+					heartbeatReq.DiscoveredServices = discovery.GetDiscoveredServices()
+				}
 			}
 
-			logger.Infof("发送心跳: ssh_users=%v", sshUsers)
+			logger.Infof("发送心跳: ssh_users=%v, discovered_services=%d", sshUsers, len(heartbeatReq.DiscoveredServices))
 			if err := stream.Send(heartbeatReq); err != nil {
 				return fmt.Errorf("发送心跳失败: %w", err)
 			}

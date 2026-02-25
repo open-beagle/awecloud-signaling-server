@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -1685,4 +1686,209 @@ func parseJSONStringArrayGRPC(jsonStr string) []string {
 		return nil
 	}
 	return result
+}
+
+// GetDomainList 获取域名列表（按类型分类）
+func (s *DesktopServiceServer) GetDomainList(ctx context.Context, req *pb.GetDomainListRequest) (*pb.GetDomainListResponse, error) {
+	// 验证 Desktop 是否存在
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, req.DesktopId).Error; err != nil {
+		return nil, status.Errorf(codes.NotFound, "设备不存在")
+	}
+	if node.Type != model.NodeTypeDesktop {
+		return nil, status.Errorf(codes.InvalidArgument, "设备类型错误")
+	}
+
+	clientID := node.UserID
+
+	// 查询用户所属分组
+	var groupIDs []int64
+	var groupMembers []model.GroupMember
+	if err := db.DB.WithContext(ctx).Where("user_id = ?", clientID).Find(&groupMembers).Error; err == nil {
+		for _, gm := range groupMembers {
+			groupIDs = append(groupIDs, gm.GroupID)
+		}
+	}
+
+	// 查询所有可访问的域名
+	domains := s.queryAccessibleDomains(ctx, clientID, groupIDs)
+
+	logger.Infof("Desktop %d 域名列表查询: 共 %d 条域名", req.DesktopId, len(domains))
+
+	return &pb.GetDomainListResponse{
+		Domains: domains,
+	}, nil
+}
+
+// queryAccessibleDomains 查询用户可访问的所有域名
+func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clientID uint64, groupIDs []int64) []*pb.DomainItem {
+	var domains []*pb.DomainItem
+	agentUserIDs := make(map[uint64]bool)
+
+	// 1. 收集 SSH 权限的 Agent User ID
+	var sshUserPerms []model.AclSSHUserPermission
+	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&sshUserPerms)
+	for _, p := range sshUserPerms {
+		agentUserIDs[p.TargetUserID] = true
+	}
+
+	if len(groupIDs) > 0 {
+		var sshGroupPerms []model.AclSSHGroupPermission
+		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&sshGroupPerms)
+		for _, p := range sshGroupPerms {
+			agentUserIDs[p.TargetUserID] = true
+		}
+	}
+
+	// 2. 收集 K8S API 权限的 Agent User ID
+	var k8sUserPerms []model.AclK8SUserPermission
+	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&k8sUserPerms)
+	for _, p := range k8sUserPerms {
+		agentUserIDs[p.TargetUserID] = true
+	}
+
+	if len(groupIDs) > 0 {
+		var k8sGroupPerms []model.AclK8SGroupPermission
+		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&k8sGroupPerms)
+		for _, p := range k8sGroupPerms {
+			agentUserIDs[p.TargetUserID] = true
+		}
+	}
+
+	// 3. 收集 K8S Service 权限的 Agent User ID
+	var k8sSvcUserPerms []model.AclK8SServiceUserPermission
+	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&k8sSvcUserPerms)
+	for _, p := range k8sSvcUserPerms {
+		agentUserIDs[p.TargetUserID] = true
+	}
+
+	if len(groupIDs) > 0 {
+		var k8sSvcGroupPerms []model.AclK8SServiceGroupPermission
+		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&k8sSvcGroupPerms)
+		for _, p := range k8sSvcGroupPerms {
+			agentUserIDs[p.TargetUserID] = true
+		}
+	}
+
+	// 4. 查询这些 Agent User 的所有域名记录
+	if len(agentUserIDs) == 0 {
+		return domains
+	}
+
+	var userIDList []uint64
+	for uid := range agentUserIDs {
+		userIDList = append(userIDList, uid)
+	}
+
+	var domainRegs []model.DomainRegistry
+	db.DB.WithContext(ctx).Where("user_id IN ?", userIDList).Find(&domainRegs)
+
+	// 5. 转换为 DomainItem，并判断状态
+	for _, dr := range domainRegs {
+		item := &pb.DomainItem{
+			Domain:      dr.Domain,
+			Type:        string(dr.Type),
+			Namespace:   dr.Namespace,
+			ServiceName: dr.ServiceName,
+			EndpointId:  dr.EndpointID, // 填充 endpoint_id
+		}
+
+		// 解析 region（从 domain 中提取）
+		item.Region = s.extractRegionFromDomain(dr.Domain)
+
+		// 解析 service_ports（k8ssvc 类型）
+		if dr.Type == model.DomainTypeK8SSVC && dr.ServicePorts != "" {
+			var ports []int32
+			if err := json.Unmarshal([]byte(dr.ServicePorts), &ports); err == nil {
+				item.ServicePorts = ports
+			}
+		}
+
+		// 解析 ssh_users（ssh 类型）
+		if dr.Type == model.DomainTypeSSH && dr.SshUsers != "" {
+			var users []string
+			if err := json.Unmarshal([]byte(dr.SshUsers), &users); err == nil {
+				item.SshUsers = users
+			}
+		}
+
+		// 判断状态
+		item.Status = s.getDomainStatus(ctx, &dr)
+
+		domains = append(domains, item)
+	}
+
+	return domains
+}
+
+// extractRegionFromDomain 从域名中提取 region
+// 例如：beagle-242.beijing.beagle → beijing
+//
+//	kubernetes.beijing.beagle → beijing
+//	postgres.yygl.beijing.beagle → beijing
+func (s *DesktopServiceServer) extractRegionFromDomain(domain string) string {
+	parts := strings.Split(domain, ".")
+	if len(parts) >= 3 {
+		// 倒数第二个部分是 region
+		return parts[len(parts)-2]
+	}
+	return ""
+}
+
+// getDomainStatus 判断域名状态
+func (s *DesktopServiceServer) getDomainStatus(ctx context.Context, dr *model.DomainRegistry) string {
+	// 判断是 Node 域名还是 Endpoint 域名
+	if dr.EndpointID == "" {
+		// Node 域名：通过 NodeStatusCache 判断
+		return s.getNodeDomainStatus(ctx, dr)
+	}
+	// Endpoint 域名：通过 EndpointStatusCache 判断
+	return s.getEndpointDomainStatus(dr)
+}
+
+// getNodeDomainStatus 判断 Node 域名状态
+func (s *DesktopServiceServer) getNodeDomainStatus(ctx context.Context, dr *model.DomainRegistry) string {
+	// 查询 NodeStatusCache
+	nodeStatus, exists := cache.GetNodeStatus(dr.NodeID)
+	if !exists {
+		return "offline"
+	}
+
+	// 检查心跳超时（60 秒）
+	if time.Since(nodeStatus.LastHeartbeat) < 60*time.Second {
+		return "online"
+	}
+
+	// 心跳超时，查询 Headscale 验证
+	if dr.TargetIP != "" {
+		if s.agentService != nil && s.agentService.headscaleClient != nil {
+			node, err := s.agentService.headscaleClient.GetNodeByIP(ctx, dr.TargetIP)
+			if err == nil && node != nil && node.Online {
+				// Headscale 显示在线，更新缓存
+				nodeStatus.LastHeartbeat = time.Now()
+				cache.SetNodeStatus(dr.NodeID, nodeStatus)
+				return "online"
+			}
+		}
+	}
+
+	// Headscale 查询失败或显示离线
+	return "offline"
+}
+
+// getEndpointDomainStatus 判断 Endpoint 域名状态
+func (s *DesktopServiceServer) getEndpointDomainStatus(dr *model.DomainRegistry) string {
+	// 查询 EndpointStatusCache
+	endpointStatus, exists := cache.GetEndpointStatus(dr.EndpointID)
+	if !exists {
+		return "offline"
+	}
+
+	// 检查心跳超时（60 秒）
+	if time.Since(endpointStatus.LastHeartbeat) < 60*time.Second {
+		return "online"
+	}
+
+	// Endpoint 无法通过 Headscale 查询，心跳超时直接判断为离线
+	return "offline"
 }

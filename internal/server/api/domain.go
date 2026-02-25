@@ -42,7 +42,6 @@ type DomainListItem struct {
 	ServiceName  string             `json:"service_name,omitempty"`
 	Status       model.DomainStatus `json:"status"`
 	CreatedAt    string             `json:"created_at"`
-	UpdatedAt    string             `json:"updated_at"`
 }
 
 // List 获取域名列表
@@ -127,7 +126,6 @@ func (a *DomainAPI) List(c *gin.Context) {
 			ServiceName:  d.ServiceName,
 			Status:       status,
 			CreatedAt:    d.CreatedAt.Format("2006-01-02 15:04:05"),
-			UpdatedAt:    d.UpdatedAt.Format("2006-01-02 15:04:05"),
 		}
 		if d.User != nil {
 			item.UserName = d.User.Name

@@ -1313,6 +1313,57 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 				})
 			}
 			cache.UpdateEndpointK8SServiceDiscovery(ep.Name, discoveredServices)
+
+			// 为发现的 K8S Service 创建域名
+			// 查询 Endpoint 记录
+			var endpoint model.Endpoint
+			if err := db.DB.WithContext(ctx).Where("user_id = ? AND name = ? AND revoked = ?", agentID, ep.Name, false).First(&endpoint).Error; err == nil {
+				// 查询 Agent Node 和 User 信息
+				var agentNode model.Node
+				var user model.User
+				if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", agentID, model.NodeTypeAgent).First(&agentNode).Error; err == nil {
+					if err := db.DB.WithContext(ctx).First(&user, agentID).Error; err == nil {
+						// 处理每个发现的 Service
+						for _, ds := range ep.DiscoveredServices {
+							// 提取端口列表
+							ports := make([]int32, 0, len(ds.Ports))
+							for _, p := range ds.Ports {
+								ports = append(ports, p.Port)
+							}
+
+							// 创建或更新域名记录
+							if err := s.domainService.CreateEndpointK8SSVCDomain(ctx, &endpoint, &agentNode, &user, ds.Namespace, ds.ServiceName, ports); err != nil {
+								logger.Errorf("创建 Endpoint K8S Service 域名失败: endpoint=%s, service=%s.%s, err=%v",
+									ep.Name, ds.ServiceName, ds.Namespace, err)
+							}
+						}
+
+						// 清理不再存在的 Service 域名
+						// 查询数据库中该 Endpoint 的所有 k8ssvc 域名
+						var existingDomains []model.DomainRegistry
+						if err := db.DB.WithContext(ctx).Where("endpoint_id = ? AND type = ?", ep.Name, model.DomainTypeK8SSVC).Find(&existingDomains).Error; err == nil {
+							// 构建上报的 Service 列表（namespace.service_name）
+							reportedServices := make(map[string]bool)
+							for _, ds := range ep.DiscoveredServices {
+								key := fmt.Sprintf("%s.%s", ds.Namespace, ds.ServiceName)
+								reportedServices[key] = true
+							}
+
+							// 删除不再存在的 Service 域名
+							for _, domain := range existingDomains {
+								key := fmt.Sprintf("%s.%s", domain.Namespace, domain.ServiceName)
+								if !reportedServices[key] {
+									if err := db.DB.WithContext(ctx).Delete(&domain).Error; err != nil {
+										logger.Errorf("删除 Endpoint K8S Service 域名失败: domain=%s, err=%v", domain.Domain, err)
+									} else {
+										logger.Infof("删除 Endpoint K8S Service 域名: domain=%s, endpoint=%s", domain.Domain, ep.Name)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 

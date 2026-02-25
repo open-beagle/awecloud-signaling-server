@@ -48,10 +48,6 @@ spec:
     spec:
       serviceAccountName: signal-agent
       hostname: signal-agent
-      hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
-      nodeSelector:
-        kubernetes.io/hostname: beagle-242
       containers:
         - name: agent
           image: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.2.3
@@ -66,24 +62,9 @@ spec:
             # Server 地址
             - name: SIGNAL_SERVER
               value: "https://signal.wodcloud.com"
-            # 启用 SSH
-            - name: SIGNAL_SSH
-              value: "true"
-            # 启用 K8S Service 发现
-            - name: SIGNAL_SVC_ENABLED
-              value: "true"
-            # Service 标签选择器（只发现带此标签的 Service）
-            # - name: SIGNAL_SVC_LABEL_SELECTOR
-            #   value: "signal.beagle.io/expose=true"
-            # K8S Service gRPC 监听端口（默认 9090）
-            # - name: SIGNAL_SVC_LISTEN_PORT_BASE
-            #   value: "9090"
           ports:
             - name: health
               containerPort: 8090
-              protocol: TCP
-            - name: endpoint-grpc
-              containerPort: 50052
               protocol: TCP
           # 存活性探测
           livenessProbe:

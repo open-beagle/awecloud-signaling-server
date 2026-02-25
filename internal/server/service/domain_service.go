@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -337,6 +338,80 @@ func (s *DomainService) DeleteNodeK8SSVCDomains(ctx context.Context, nodeID uint
 
 	if result.RowsAffected > 0 {
 		logger.Infof("删除 Node K8S Service 域名成功: node_id=%d, count=%d", nodeID, result.RowsAffected)
+	}
+
+	return nil
+}
+
+// CreateEndpointK8SSVCDomain 创建 Endpoint K8S Service 域名
+// domain = "{service_name}.{namespace}.{region}.beagle"
+func (s *DomainService) CreateEndpointK8SSVCDomain(ctx context.Context, endpoint *model.Endpoint, agentNode *model.Node, user *model.User, namespace, serviceName string, ports []int32) error {
+	// 生成域名
+	domain := fmt.Sprintf("%s.%s.%s.beagle", serviceName, namespace, user.Name)
+
+	// 将端口数组序列化为 JSON
+	portsJSON := "[]"
+	if len(ports) > 0 {
+		if data, err := json.Marshal(ports); err == nil {
+			portsJSON = string(data)
+		}
+	}
+
+	// 检查是否已存在（按 domain + user_id + endpoint_id 唯一）
+	var existing model.DomainRegistry
+	err := s.db.WithContext(ctx).Where("domain = ? AND user_id = ? AND endpoint_id = ?", domain, user.ID, endpoint.Name).First(&existing).Error
+	if err == nil {
+		// 已存在，更新记录
+		updates := map[string]any{
+			"target_ip":     agentNode.IP,
+			"target_port":   50055, // Endpoint K8SSVC 固定端口
+			"service_ports": portsJSON,
+		}
+		if err := s.db.WithContext(ctx).Model(&existing).Updates(updates).Error; err != nil {
+			return fmt.Errorf("更新域名记录失败: %w", err)
+		}
+		logger.Infof("更新 Endpoint K8S Service 域名: domain=%s, endpoint=%s, node_id=%d, user_id=%d, ports=%v",
+			domain, endpoint.Name, agentNode.ID, user.ID, ports)
+		return nil
+	}
+	if err != gorm.ErrRecordNotFound {
+		return fmt.Errorf("查询域名失败: %w", err)
+	}
+
+	// 创建域名记录
+	domainRecord := &model.DomainRegistry{
+		Domain:       domain,
+		Type:         model.DomainTypeK8SSVC,
+		UserID:       user.ID,
+		NodeID:       agentNode.ID,  // Agent Node ID
+		EndpointID:   endpoint.Name, // Endpoint 名称
+		TargetIP:     agentNode.IP,  // Agent IP
+		TargetPort:   50055,         // Endpoint K8SSVC 固定端口
+		Namespace:    namespace,
+		ServiceName:  serviceName,
+		ServicePorts: portsJSON,
+	}
+
+	if err := s.db.WithContext(ctx).Create(domainRecord).Error; err != nil {
+		return fmt.Errorf("创建域名记录失败: %w", err)
+	}
+
+	logger.Infof("创建 Endpoint K8S Service 域名成功: domain=%s, endpoint=%s, node_id=%d, user_id=%d, ports=%v",
+		domain, endpoint.Name, agentNode.ID, user.ID, ports)
+	return nil
+}
+
+// DeleteEndpointK8SSVCDomains 删除 Endpoint 的所有 K8S Service 域名
+func (s *DomainService) DeleteEndpointK8SSVCDomains(ctx context.Context, endpointName string) error {
+	result := s.db.WithContext(ctx).Where("endpoint_id = ? AND type = ?", endpointName, model.DomainTypeK8SSVC).
+		Delete(&model.DomainRegistry{})
+
+	if result.Error != nil {
+		return fmt.Errorf("删除 Endpoint K8S Service 域名失败: %w", result.Error)
+	}
+
+	if result.RowsAffected > 0 {
+		logger.Infof("删除 Endpoint K8S Service 域名成功: endpoint=%s, count=%d", endpointName, result.RowsAffected)
 	}
 
 	return nil

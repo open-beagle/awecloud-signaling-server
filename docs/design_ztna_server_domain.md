@@ -1,5 +1,18 @@
 # 域名服务生命周期设计 V2
 
+## 术语说明
+
+本文档中使用以下术语：
+
+- **Device（设备）**：概念层面，指运行 Agent 的设备，在 Tailscale 网络中注册为一个节点
+- **node / node_id**：技术实现层面，数据库字段名、API 路径、代码变量名保持使用 `node`
+- **Endpoint（终端）**：通过 Agent 转发访问的内网设备，不直接加入 Tailscale 网络
+
+示例：
+
+- 概念描述："管理员开启 Device 的 SSH 能力"
+- 技术实现："UPDATE node SET ssh_enabled=true WHERE id=44"
+
 ## 1. 概述
 
 域名服务是 ZTNA 体系中的核心概念，代表一个可访问的网络服务入口。
@@ -14,29 +27,48 @@
 
 ### 域名类型
 
-| 类型   | 说明                | 来源设备      | 端口示例 |
-| ------ | ------------------- | ------------- | -------- |
-| ssh    | SSH 访问            | Node/Endpoint | 22/50053 |
-| k8sapi | Kubernetes API 访问 | Node/Endpoint | 6443     |
-| k8ssvc | Kubernetes Service  | Node          | 5432     |
+域名类型根据来源设备（Device 或 Endpoint）分为两类，端口配置有所不同。
+
+#### Device 本机能力
+
+| 类型   | 说明                | target_port（数据库存储） | Desktop 访问端口     | 说明                                 |
+| ------ | ------------------- | ------------------------- | -------------------- | ------------------------------------ |
+| ssh    | SSH 访问            | 22                        | 22                   | Agent 物理 SSH 端口                  |
+| k8sapi | Kubernetes API 访问 | 50050                     | 6443                 | Agent tsnet 虚拟端口，转发到 K8S API |
+| k8ssvc | Kubernetes Service  | 50051                     | 动态（Service 端口） | Agent gRPC 服务，转发到 K8S Service  |
+
+#### Endpoint 能力
+
+| 类型   | 说明                | target_port（数据库存储） | Desktop 访问端口     | 说明                                             |
+| ------ | ------------------- | ------------------------- | -------------------- | ------------------------------------------------ |
+| ssh    | SSH 访问            | 50053                     | 22                   | Agent tsnet 虚拟端口 → Endpoint SSH              |
+| k8sapi | Kubernetes API 访问 | 50054                     | 6443                 | Agent tsnet 虚拟端口 → Endpoint K8S API          |
+| k8ssvc | Kubernetes Service  | 50055                     | 动态（Service 端口） | Agent gRPC 服务 → Endpoint K8S Service（待实现） |
+
+说明：
+
+- **target_port**：存储在 domain_registry 表中，Desktop 通过 Tailscale 连接到 Agent IP:target_port
+- **Desktop 访问端口**：Desktop 本地代理监听的端口，用户实际连接的端口
+- **Device SSH**：唯一直接访问 Agent 物理端口的能力，其他都通过 tsnet 虚拟端口或 gRPC 转发
+- **Endpoint 能力**：所有请求先到达 Agent，再通过 Agent 的 Endpoint gRPC Server（50052）转发到 Endpoint
 
 ### 域名生成规则
 
 域名格式由设备类型、能力类型和区域决定，遵循以下规则：
 
-#### 规则 1：Node SSH 域名
+#### 规则 1：Device SSH 域名
 
 ```
-格式：{node_name}.{region}.beagle
+格式：{device_name}.{region}.beagle
 示例：beagle-242.beijing.beagle
 
 说明：
-- node_name：Node 设备的主机名（hostname）
+- device_name：Device 的主机名（hostname）
 - region：Agent User 的名称（如 beijing、neimeng）
-- endpoint_id：为空（表示这是 Node 本机能力）
+- endpoint_id：为空（表示这是 Device 本机能力）
 ```
 
-#### 规则 2：Node K8S API 域名
+#### 规则 2：Device K8S API 域名
 
 ```
 格式：kubernetes.{region}.beagle
@@ -45,11 +77,11 @@
 说明：
 - 固定前缀：kubernetes
 - region：Agent User 的名称
-- endpoint_id：为空（表示这是 Node 本机能力）
-- 注意：同一 region 只能有一个 Node K8S API 域名
+- endpoint_id：为空（表示这是 Device 本机能力）
+- 注意：同一 region 只能有一个 Device K8S API 域名
 ```
 
-#### 规则 3：Node K8S Service 域名
+#### 规则 3：Device K8S Service 域名
 
 ```
 格式：{service_name}.{namespace}.{region}.beagle
@@ -59,7 +91,7 @@
 - service_name：K8S Service 名称
 - namespace：K8S 命名空间
 - region：Agent User 的名称
-- endpoint_id：为空（表示这是 Node 本机能力）
+- endpoint_id：为空（表示这是 Device 本机能力）
 - 注意：由 Agent 自动发现并上报，Server 自动创建
 ```
 
@@ -127,7 +159,7 @@
 #### 域名与设备的关系
 
 ```
-Node 本机能力域名：
+Device 本机能力域名：
 - node_id：填充（关联到 Node）
 - endpoint_id：为空
 - 示例：beagle-242.beijing.beagle（SSH）
@@ -141,7 +173,7 @@ Endpoint 能力域名：
         kubernetes.neimeng.beagle（K8S API）
 
 判断方法：
-- endpoint_id 为空 → Node 本机能力
+- endpoint_id 为空 → Device 本机能力
 - endpoint_id 不为空 → Endpoint 能力
 ```
 
@@ -149,7 +181,7 @@ Endpoint 能力域名：
 
 域名的目标端口（target_port）由域名类型和来源设备决定。Desktop 通过魔法 DNS 将域名解析为 127.1.x.x 的 VIP 地址，然后通过本地代理转发到 Tailscale 网络中的实际端口。
 
-#### Node 本机能力端口
+#### Device 本机能力端口
 
 | 域名类型         | 目标端口 | Desktop 访问端口 | 说明                                    |
 | ---------------- | -------- | ---------------- | --------------------------------------- |
@@ -185,7 +217,7 @@ Desktop 魔法 DNS 解析：
   Desktop 本地代理监听 127.1.x.x:各种端口
   转发到 Tailscale 网络中的 Agent IP:目标端口
 
-Node 本机能力访问流程：
+Device 本机能力访问流程：
   Desktop → 127.1.x.x:22 → Tailscale → Agent IP:22（SSH）
   Desktop → 127.1.x.x:6443 → Tailscale → Agent IP:50050（K8S API，tsnet 虚拟端口）
   Desktop → 127.1.x.x:动态端口 → Tailscale → Agent IP:50051（K8S Service，gRPC）
@@ -226,7 +258,7 @@ Endpoint 能力访问流程：
 
 ### 2.1 域名数据创建
 
-#### 业务 2.1.1：管理员开启 Node SSH 能力
+#### 业务 2.1.1：管理员开启 Device SSH 能力
 
 触发条件：管理员在 Web 界面开启 Node 的 SSH 能力
 
@@ -249,11 +281,11 @@ Endpoint 能力访问流程：
   │     │     INSERT INTO domain_registry (
   │     │       domain, type, user_id, node_id,
   │     │       target_ip, target_port,
-  │     │       created_at, updated_at
+  │     │       created_at
   │     │     ) VALUES (
   │     │       'beagle-242.beijing.beagle', 'ssh', 7, 44,
   │     │       '100.64.0.23', 22,
-  │     │       now(), now()
+  │     │       now()
   │     │     )
   │     │
   │     └─→ 通知 Agent 配置变更（通过心跳响应或推送）
@@ -276,7 +308,7 @@ Endpoint 能力访问流程：
 - 如果 Agent 在线（NodeStatusCache[44] 存在且心跳正常）→ status = online
 - 如果 Agent 离线（NodeStatusCache[44] 不存在）→ status = offline
 
-#### 业务 2.1.2：管理员开启 Node K8SAPI 能力
+#### 业务 2.1.2：管理员开启 Device K8SAPI 能力
 
 触发条件：管理员在 Web 界面开启 Node 的 K8SAPI 能力
 
@@ -299,11 +331,11 @@ Endpoint 能力访问流程：
   │     │     INSERT INTO domain_registry (
   │     │       domain, type, user_id, node_id,
   │     │       target_ip, target_port,
-  │     │       created_at, updated_at
+  │     │       created_at
   │     │     ) VALUES (
   │     │       'kubernetes.beijing.beagle', 'k8sapi', 7, 44,
   │     │       '100.64.0.23', 6443,
-  │     │       now(), now()
+  │     │       now()
   │     │     )
   │     │
   │     └─→ 通知 Agent 配置变更
@@ -324,7 +356,7 @@ Endpoint 能力访问流程：
 
 - 通过 NodeStatusCache[44] 判断 Agent 在线状态
 
-#### 业务 2.1.3：管理员开启 Node K8SSVC 能力（自动发现）
+#### 业务 2.1.3：管理员开启 Device K8SSVC 能力（自动发现）
 
 触发条件：管理员在 Web 界面开启 Node 的 K8SSVC 能力
 
@@ -352,7 +384,7 @@ Endpoint 能力访问流程：
   │               namespace: "yygl",
   │               service_name: "postgres",
   │               cluster_ip: "10.96.0.10",
-  │               ports: [5432]
+  │               ports: [5432, 9187]  // 数组，包含所有端口
   │             }
   │           ]
   │
@@ -369,21 +401,28 @@ Endpoint 能力访问流程：
   │           │     WHERE domain=? AND user_id=?
   │           │
   │           ├─→ 不存在 → 创建新记录
+  │           │     // 将端口数组序列化为 JSON
+  │           │     service_ports_json = json.Marshal([5432, 9187])
+  │           │     // 结果："[5432,9187]"
+  │           │
   │           │     INSERT INTO domain_registry (
   │           │       domain, type, user_id, node_id,
   │           │       target_ip, target_port,
-  │           │       namespace, service_name,
-  │           │       created_at, updated_at
+  │           │       namespace, service_name, service_ports,
+  │           │       created_at
   │           │     ) VALUES (
   │           │       'postgres.yygl.beijing.beagle', 'k8ssvc', 7, 44,
-  │           │       '10.96.0.10', 5432,
-  │           │       'yygl', 'postgres',
-  │           │       now(), now()
+  │           │       '100.64.0.23', 50051,
+  │           │       'yygl', 'postgres', '[5432,9187]',
+  │           │       now()
   │           │     )
   │           │
   │           └─→ 已存在 → 更新记录
+  │                 // 更新端口列表（可能有变化）
+  │                 service_ports_json = json.Marshal([5432, 9187])
+  │
   │                 UPDATE domain_registry SET
-  │                   target_ip=?, target_port=?, updated_at=now()
+  │                   target_ip=?, target_port=?, service_ports=?
   │                 WHERE domain=? AND user_id=?
   │
   └─→ K8SSVC 域名创建完成
@@ -436,11 +475,11 @@ Endpoint 能力访问流程：
   │     │     INSERT INTO domain_registry (
   │     │       domain, type, user_id, node_id, endpoint_id,
   │     │       target_ip, target_port,
-  │     │       created_at, updated_at
+  │     │       created_at
   │     │     ) VALUES (
   │     │       'beagle-241.beijing.beagle', 'ssh', 7, 0, 'beagle-241',
   │     │       '', 50053,
-  │     │       now(), now()
+  │     │       now()
   │     │     )
   │     │     注意：node_id=0，等待 Endpoint 连接后填充
   │     │
@@ -465,7 +504,7 @@ Endpoint 能力访问流程：
   │     │
   │     └─→ 更新域名记录，填充 node_id
   │           UPDATE domain_registry SET
-  │             node_id=44, target_ip='100.64.0.23', updated_at=now()
+  │             node_id=44, target_ip='100.64.0.23'
   │           WHERE endpoint_id='beagle-241' AND user_id=7
   │
   └─→ Endpoint SSH 域名创建完成
@@ -520,18 +559,18 @@ Endpoint 能力访问流程：
   │     │     INSERT INTO domain_registry (
   │     │       domain, type, user_id, node_id, endpoint_id,
   │     │       target_ip, target_port,
-  │     │       created_at, updated_at
+  │     │       created_at
   │     │     ) VALUES (
   │     │       'kubernetes-beagle-002.neimeng.beagle', 'k8sapi', 8, 0, 'beagle-002',
   │     │       '', 50053,
-  │     │       now(), now()
+  │     │       now()
   │     │     )
   │     │
   │     └─→ 生成 Endpoint Token
   │
   ├─→ Endpoint 连接到 Agent 后，Server 更新 node_id
   │     UPDATE domain_registry SET
-  │       node_id=45, target_ip='100.64.0.22', updated_at=now()
+  │       node_id=45, target_ip='100.64.0.22'
   │     WHERE endpoint_id='beagle-002' AND user_id=8
   │
   └─→ Endpoint K8SAPI 域名创建完成
@@ -547,9 +586,112 @@ Endpoint 能力访问流程：
 
 - 通过 EndpointStatusCache["beagle-002"] 判断 Endpoint 在线状态
 
+#### 业务 2.1.6：管理员创建 Endpoint K8SSVC 能力（自动发现）
+
+触发条件：管理员在 Web 界面创建 Endpoint 并开启 K8SSVC 能力
+
+```
+管理员在 Web 界面操作
+  │
+  ├─→ POST /api/endpoints
+  │     {
+  │       name: "beagle-002",
+  │       user_id: 8,
+  │       k8sservice_enabled: true
+  │     }
+  │
+  ├─→ Server 处理 (CreateEndpoint)
+  │     │
+  │     ├─→ 创建 Endpoint 记录
+  │     │     INSERT INTO endpoint_k8sservice (
+  │     │       name, user_id, k8sservice_enabled
+  │     │     ) VALUES (
+  │     │       'beagle-002', 8, true
+  │     │     )
+  │     │
+  │     └─→ 生成 Endpoint Token（用于 Endpoint 连接 Agent）
+  │
+  ├─→ 管理员在 Endpoint 机器上安装并启动 Endpoint
+  │     使用 Token 连接到 Agent
+  │
+  ├─→ Endpoint 连接到 Agent
+  │     │
+  │     ├─→ Endpoint 启动 K8S Service 自动发现
+  │     │     定期扫描 K8S 集群中的 Service
+  │     │
+  │     └─→ Endpoint 通过 Agent gRPC 上报发现的 Service
+  │           discovered_services: [
+  │             {
+  │               namespace: "yygl",
+  │               service_name: "postgres",
+  │               cluster_ip: "10.96.0.10",
+  │               ports: [5432, 9187]  // 数组，包含所有端口
+  │             }
+  │           ]
+  │
+  ├─→ Agent 转发到 Server（通过心跳或专用 RPC）
+  │
+  ├─→ Server 处理 Endpoint 发现的 Service (handleEndpointDiscoveredServices)
+  │     │
+  │     └─→ 对每个 discovered_service:
+  │           │
+  │           ├─→ 生成域名
+  │           │     domain = "{service_name}.{namespace}.{region}.beagle"
+  │           │     例如：postgres.yygl.neimeng.beagle
+  │           │
+  │           ├─→ 查询是否已存在
+  │           │     SELECT * FROM domain_registry
+  │           │     WHERE domain=? AND user_id=? AND endpoint_id=?
+  │           │
+  │           ├─→ 不存在 → 创建新记录
+  │           │     // 将端口数组序列化为 JSON
+  │           │     service_ports_json = json.Marshal([5432, 9187])
+  │           │     // 结果："[5432,9187]"
+  │           │
+  │           │     INSERT INTO domain_registry (
+  │           │       domain, type, user_id, node_id, endpoint_id,
+  │           │       target_ip, target_port,
+  │           │       namespace, service_name, service_ports,
+  │           │       created_at
+  │           │     ) VALUES (
+  │           │       'postgres.yygl.neimeng.beagle', 'k8ssvc', 8, 45, 'beagle-002',
+  │           │       '100.64.0.22', 50055,
+  │           │       'yygl', 'postgres', '[5432,9187]',
+  │           │       now()
+  │           │     )
+  │           │
+  │           └─→ 已存在 → 更新记录
+  │                 // 更新端口列表（可能有变化）
+  │                 service_ports_json = json.Marshal([5432, 9187])
+  │
+  │                 UPDATE domain_registry SET
+  │                   target_ip=?, target_port=?, service_ports=?
+  │                 WHERE domain=? AND user_id=? AND endpoint_id=?
+  │
+  └─→ Endpoint K8SSVC 域名创建完成
+```
+
+数据变化：
+
+- endpoint_k8sservice 表：新增记录
+- domain_registry 表：新增记录，type='k8ssvc', node_id=45（连接后填充）, endpoint_id='beagle-002', target_port=50055
+- EndpointStatusCache：新增缓存（Endpoint 连接后）
+
+状态判断：
+
+- 通过 EndpointStatusCache["beagle-002"] 判断 Endpoint 在线状态
+
+说明：
+
+- Endpoint K8SSVC 域名是自动发现的，不是手动创建
+- Endpoint 定期扫描 K8S 集群，通过 Agent 转发上报新发现的 Service
+- Server 根据上报的 Service 自动创建域名记录
+- target_port 固定为 50055（Agent 的 Endpoint K8S Service gRPC 端口）
+- 功能待实现
+
 ### 2.2 域名数据删除
 
-#### 业务 2.2.1：管理员关闭 Node SSH 能力
+#### 业务 2.2.1：管理员关闭 Device SSH 能力
 
 触发条件：管理员在 Web 界面关闭 Node 的 SSH 能力
 
@@ -581,7 +723,7 @@ Endpoint 能力访问流程：
 
 - domain_registry 表：删除 node_id=44 且 type='ssh' 且 endpoint_id='' 的记录
 
-#### 业务 2.2.2：管理员关闭 Node K8SAPI 能力
+#### 业务 2.2.2：管理员关闭 Device K8SAPI 能力
 
 触发条件：管理员在 Web 界面关闭 Node 的 K8SAPI 能力
 
@@ -613,7 +755,7 @@ Endpoint 能力访问流程：
 
 - domain_registry 表：删除 node_id=44 且 type='k8sapi' 且 endpoint_id='' 的记录
 
-#### 业务 2.2.3：管理员关闭 Node K8SSVC 能力
+#### 业务 2.2.3：管理员关闭 Device K8SSVC 能力
 
 触发条件：管理员在 Web 界面关闭 Node 的 K8SSVC 能力
 
@@ -644,6 +786,102 @@ Endpoint 能力访问流程：
 数据变化：
 
 - domain_registry 表：删除 node_id=44 且 type='k8ssvc' 的所有记录
+
+#### 业务 2.2.3a：管理员关闭 Endpoint SSH 能力
+
+触发条件：管理员在 Web 界面关闭 Endpoint 的 SSH 能力
+
+```
+管理员在 Web 界面操作
+  │
+  ├─→ PATCH /api/endpoints/beagle-241
+  │     {ssh_enabled: false}
+  │
+  ├─→ Server 处理 (UpdateEndpoint)
+  │     │
+  │     ├─→ 更新 Endpoint 配置
+  │     │     UPDATE endpoint SET ssh_enabled=false WHERE name='beagle-241'
+  │     │
+  │     ├─→ 删除 SSH 域名记录
+  │     │     DELETE FROM domain_registry
+  │     │     WHERE endpoint_id='beagle-241' AND type='ssh'
+  │     │
+  │     └─→ 通知 Agent 配置变更（通过心跳响应或推送）
+  │
+  ├─→ Agent 收到配置更新
+  │     │
+  │     └─→ 停止 Endpoint SSH 代理服务
+  │
+  └─→ Endpoint SSH 域名删除完成
+```
+
+数据变化：
+
+- domain_registry 表：删除 endpoint_id='beagle-241' 且 type='ssh' 的记录
+
+#### 业务 2.2.3b：管理员关闭 Endpoint K8SAPI 能力
+
+触发条件：管理员在 Web 界面关闭 Endpoint 的 K8SAPI 能力
+
+```
+管理员在 Web 界面操作
+  │
+  ├─→ PATCH /api/endpoints/beagle-002
+  │     {k8sapi_enabled: false}
+  │
+  ├─→ Server 处理 (UpdateEndpoint)
+  │     │
+  │     ├─→ 更新 Endpoint 配置
+  │     │     UPDATE endpoint_k8sapi SET k8sapi_enabled=false WHERE name='beagle-002'
+  │     │
+  │     ├─→ 删除 K8SAPI 域名记录
+  │     │     DELETE FROM domain_registry
+  │     │     WHERE endpoint_id='beagle-002' AND type='k8sapi'
+  │     │
+  │     └─→ 通知 Agent 配置变更
+  │
+  ├─→ Agent 收到配置更新
+  │     │
+  │     └─→ 停止 Endpoint K8SAPI 代理服务
+  │
+  └─→ Endpoint K8SAPI 域名删除完成
+```
+
+数据变化：
+
+- domain_registry 表：删除 endpoint_id='beagle-002' 且 type='k8sapi' 的记录
+
+#### 业务 2.2.3c：管理员关闭 Endpoint K8SSVC 能力
+
+触发条件：管理员在 Web 界面关闭 Endpoint 的 K8SSVC 能力
+
+```
+管理员在 Web 界面操作
+  │
+  ├─→ PATCH /api/endpoints/beagle-002
+  │     {k8sservice_enabled: false}
+  │
+  ├─→ Server 处理 (UpdateEndpoint)
+  │     │
+  │     ├─→ 更新 Endpoint 配置
+  │     │     UPDATE endpoint_k8sservice SET k8sservice_enabled=false WHERE name='beagle-002'
+  │     │
+  │     ├─→ 删除所有 K8SSVC 域名记录
+  │     │     DELETE FROM domain_registry
+  │     │     WHERE endpoint_id='beagle-002' AND type='k8ssvc'
+  │     │
+  │     └─→ 通知 Agent 配置变更
+  │
+  ├─→ Agent 收到配置更新
+  │     │
+  │     └─→ 通知 Endpoint 停止 K8S Service 自动发现
+  │
+  └─→ 所有 Endpoint K8SSVC 域名删除完成
+```
+
+数据变化：
+
+- domain_registry 表：删除 endpoint_id='beagle-002' 且 type='k8ssvc' 的所有记录
 
 #### 业务 2.2.4：管理员删除 Endpoint
 
@@ -681,7 +919,7 @@ Endpoint 能力访问流程：
 - domain_registry 表：删除 endpoint_id='beagle-241' 的所有记录
 - EndpointStatusCache：删除 endpoint_id='beagle-241' 的缓存
 
-#### 业务 2.2.5：管理员删除 Node 设备
+#### 业务 2.2.5：管理员删除 Device
 
 触发条件：管理员在 Web 界面删除 Node
 
@@ -709,7 +947,7 @@ Endpoint 能力访问流程：
 数据变化：
 
 - node 表：删除记录
-- domain_registry 表：删除所有 node_id=44 的记录（包括 Node 本机能力和 Endpoint 域名）
+- domain_registry 表：删除所有 node_id=44 的记录（包括 Device 本机能力和 Endpoint 域名）
 - NodeStatusCache：删除 node_id=44 的缓存
 
 说明：
@@ -760,7 +998,7 @@ K8S Service 被删除
 
 ### 2.3 域名状态变更
 
-#### 业务 2.3.1：Node 设备上线（Agent 启动并连接）
+#### 业务 2.3.1：Device上线（Agent 启动并连接）
 
 触发条件：Agent 启动后连接到 Server
 
@@ -802,7 +1040,7 @@ Agent 启动
 - 查询域名时，通过 node_id=44 关联到 NodeStatusCache[44]
 - NodeStatusCache[44] 存在且 LastHeartbeat < (now - 60s) → status = online
 
-#### 业务 2.3.2：Node 设备持续在线（心跳正常）
+#### 业务 2.3.2：Device持续在线（心跳正常）
 
 触发条件：Agent 每 30 秒发送心跳
 
@@ -834,7 +1072,7 @@ Agent 定时发送心跳（每 30 秒）
 
 - NodeStatusCache[44].LastHeartbeat < (now - 60s) → status = online
 
-#### 业务 2.3.3：Node 设备断连（Agent 退出或网络断开）
+#### 业务 2.3.3：Device断连（Agent 退出或网络断开）
 
 触发条件：Agent 进程退出或网络断开
 
@@ -892,7 +1130,7 @@ Endpoint 启动
   │     │
   │     └─→ 更新域名记录，填充 node_id（如果之前为 0）
   │           UPDATE domain_registry SET
-  │             node_id=44, target_ip='100.64.0.23', updated_at=now()
+  │             node_id=44, target_ip='100.64.0.23'
   │           WHERE endpoint_id='beagle-241' AND user_id=7 AND node_id=0
   │
   └─→ Endpoint 域名状态变为 online
@@ -1080,7 +1318,7 @@ Endpoint 断开与 Agent 的连接
 - Endpoint 不在 Tailscale 网络中，无法通过 Headscale 查询
 - Endpoint 只能依赖心跳超时判断（60 秒无心跳 = 离线）
 
-#### 业务 2.3.9：Node 设备重新上线
+#### 业务 2.3.9：Device重新上线
 
 触发条件：断连的 Agent 重新启动并连接
 
@@ -1134,22 +1372,120 @@ Agent 重新启动
 
 ### 3.1 domain_registry 表（持久化）
 
-| 字段         | 类型   | 说明                                         |
-| ------------ | ------ | -------------------------------------------- |
-| id           | int64  | 主键                                         |
-| domain       | string | 完整域名（如 beagle-242.beijing.beagle）     |
-| type         | string | 类型：ssh / k8sapi / k8ssvc                  |
-| user_id      | uint64 | 所属 Agent User ID                           |
-| node_id      | uint64 | 关联的 Node ID（Agent 本机能力时填充）       |
-| endpoint_id  | string | 关联的 Endpoint Name（Endpoint 能力时填充）  |
-| target_ip    | string | 目标 IP（Node 的 Tailscale IP 或 ClusterIP） |
-| target_port  | int    | 目标端口                                     |
-| namespace    | string | K8S 命名空间（k8ssvc 类型时）                |
-| service_name | string | K8S Service 名称（k8ssvc 类型时）            |
-| created_at   | time   | 创建时间                                     |
-| updated_at   | time   | 更新时间                                     |
+| 字段          | 类型   | 说明                                                                       |
+| ------------- | ------ | -------------------------------------------------------------------------- |
+| id            | int64  | 主键                                                                       |
+| domain        | string | 完整域名（如 beagle-242.beijing.beagle）                                   |
+| type          | string | 类型：ssh / k8sapi / k8ssvc                                                |
+| user_id       | uint64 | 所属 Agent User ID                                                         |
+| node_id       | uint64 | 关联的 Node ID（Agent 本机能力时填充）                                     |
+| endpoint_id   | string | 关联的 Endpoint Name（Endpoint 能力时填充）                                |
+| target_ip     | string | 目标 IP（Agent 的 Tailscale IP）                                           |
+| target_port   | int    | 目标端口（Desktop 通过 Tailscale 连接的端口）                              |
+| namespace     | string | K8S 命名空间（k8ssvc 类型时）                                              |
+| service_name  | string | K8S Service 名称（k8ssvc 类型时）                                          |
+| service_ports | string | K8S Service 端口列表（k8ssvc 类型时，JSON 数组，如 "[5432,9187]"）         |
+| ssh_users     | string | SSH 用户列表（ssh 类型时，JSON 数组，如 "[\"root\",\"deploy\"]"）          |
+| created_at    | time   | 创建时间                                                                   |
 
-注意：表中不再有 status 字段，状态完全由内存缓存管理。
+注意：
+
+- 表中不再有 `status` 字段，状态完全由内存缓存管理
+- 表中不再有 `updated_at` 字段，这是在线数据，不应持久化
+- `target_ip` 和 `service_ports` 会随心跳动态更新，但不记录更新时间
+
+#### 端口字段说明
+
+不同域名类型的端口记录方式：
+
+| 域名类型        | target_ip   | target_port | service_ports | 说明                                                      |
+| --------------- | ----------- | ----------- | ------------- | --------------------------------------------------------- |
+| Device SSH      | 100.64.0.23 | 22          | -             | Desktop → TS → Agent IP:22                                |
+| Device K8SAPI   | 100.64.0.23 | 50050       | -             | Desktop → TS → Agent IP:50050（tsnet 虚拟端口）           |
+| Device K8SSVC   | 100.64.0.23 | 50051       | "[5432,9187]" | Desktop → TS → Agent IP:50051（gRPC），Service 多端口支持 |
+| Endpoint SSH    | 100.64.0.23 | 50053       | -             | Desktop → TS → Agent IP:50053（tsnet 虚拟端口）           |
+| Endpoint K8SAPI | 100.64.0.23 | 50054       | -             | Desktop → TS → Agent IP:50054（tsnet 虚拟端口）           |
+| Endpoint K8SSVC | 100.64.0.23 | 50055       | "[5432,9187]" | Desktop → TS → Agent IP:50055（gRPC），Service 多端口支持 |
+
+说明：
+
+- `target_ip`: 始终是 Agent 的 Tailscale IP
+- `target_port`: Desktop 通过 Tailscale 连接到 Agent 的端口（物理端口或 tsnet 虚拟端口）
+- `service_ports`: 仅 k8ssvc 类型使用，JSON 数组字符串，记录 K8S Service 的所有端口
+
+#### k8ssvc 类型的完整访问流程
+
+以 `postgres.yygl.beijing.beagle:5432` 为例（Service 有多个端口：5432 和 9187）：
+
+```
+Desktop 访问流程：
+  用户连接：postgres.yygl.beijing.beagle:5432
+    │
+    ├─→ 魔法 DNS 解析：postgres.yygl.beijing.beagle → 127.1.x.x（VIP）
+    │
+    ├─→ 查询域名注册表：
+    │     domain = "postgres.yygl.beijing.beagle"
+    │     target_ip = "100.64.0.23"
+    │     target_port = 50051（Agent gRPC 端口）
+    │     service_ports = "[5432,9187]"（Service 所有端口）
+    │
+    ├─→ Desktop 本地代理为每个端口创建监听：
+    │     127.1.x.x:5432 → Agent gRPC (port=5432)
+    │     127.1.x.x:9187 → Agent gRPC (port=9187)
+    │
+    ├─→ 用户连接 127.1.x.x:5432
+    │
+    ├─→ Desktop 通过 Tailscale 连接：100.64.0.23:50051
+    │     携带参数：namespace=yygl, service_name=postgres, port=5432
+    │
+    ├─→ Agent gRPC 服务接收请求：
+    │     解析参数：namespace=yygl, service_name=postgres, port=5432
+    │
+    ├─→ Agent 转发到 K8S ClusterIP：10.3.168.100:5432
+    │
+    └─→ 最终到达 K8S Service 的 5432 端口 → Pod
+```
+
+多端口访问示例：
+
+```
+用户可以访问同一 Service 的不同端口：
+- postgres.yygl.beijing.beagle:5432  → PostgreSQL 数据库
+- postgres.yygl.beijing.beagle:9187  → Prometheus Metrics
+
+Desktop 为两个端口都创建了本地代理监听，用户根据需要选择连接哪个端口。
+```
+
+数据库记录示例：
+
+```
+Device K8SSVC（单端口）:
+  domain: "redis.cache.beijing.beagle"
+  type: "k8ssvc"
+  target_ip: "100.64.0.23"（Agent Tailscale IP）
+  target_port: 50051（Agent gRPC 端口）
+  namespace: "cache"
+  service_name: "redis"
+  service_ports: "[6379]"（单端口也用数组）
+
+Device K8SSVC（多端口）:
+  domain: "postgres.yygl.beijing.beagle"
+  type: "k8ssvc"
+  target_ip: "100.64.0.23"（Agent Tailscale IP）
+  target_port: 50051（Agent gRPC 端口）
+  namespace: "yygl"
+  service_name: "postgres"
+  service_ports: "[5432,9187]"（多端口数组）
+
+Endpoint K8SSVC（多端口）:
+  domain: "postgres.yygl.neimeng.beagle"
+  type: "k8ssvc"
+  target_ip: "100.64.0.22"（Agent Tailscale IP）
+  target_port: 50055（Agent gRPC 端口）
+  namespace: "yygl"
+  service_name: "postgres"
+  service_ports: "[5432,9187]"（多端口数组）
+```
 
 ### 3.2 NodeStatusCache（内存缓存 - 设备维度）
 
@@ -1237,36 +1573,42 @@ domain_registry（持久化）
 
 域名列表（https://signal.wodcloud.com/domains）中的"所属用户"列，根据域名类型显示不同的内容：
 
-#### 规则 1：Node 本机能力域名
+#### 规则 1：Device 本机能力域名
 
 显示格式：`{user_name}`
 
 示例：
+
 - beagle-242.beijing.beagle → 显示：beijing
 - kubernetes.beijing.beagle → 显示：beijing
 - postgres.yygl.beijing.beagle → 显示：beijing
 
 判断条件：
+
 - endpoint_id 为空
 - node_id > 0
 
 说明：
+
 - 显示 Agent User 的名称（如 beijing、neimeng）
-- 这是 Node 设备本机提供的能力
+- 这是 Device本机提供的能力
 
 #### 规则 2：Endpoint 能力域名
 
 显示格式：`{user_name} / {device_name}`
 
 示例：
+
 - beagle-241.beijing.beagle → 显示：beijing / beagle-242
 - kubernetes.neimeng.beagle → 显示：neimeng / beagle-003
 
 判断条件：
+
 - endpoint_id 不为空
 - node_id > 0（Endpoint 连接后填充）
 
 说明：
+
 - 第一部分：Agent User 的名称（Endpoint 所属的 Agent User）
 - 第二部分：Agent 设备名称（Endpoint 连接到的 Agent 设备的 Hostname）
 - 用斜杠分隔，表示 Endpoint 通过 Agent 提供服务
@@ -1276,13 +1618,16 @@ domain_registry（持久化）
 显示格式：`{user_name} / -`
 
 示例：
+
 - beagle-241.beijing.beagle → 显示：beijing / -
 
 判断条件：
+
 - endpoint_id 不为空
 - node_id = 0（Endpoint 尚未连接到 Agent）
 
 说明：
+
 - 第一部分：Agent User 的名称
 - 第二部分：显示 `-`，表示 Endpoint 尚未连接到任何 Agent
 
@@ -1320,14 +1665,14 @@ DomainListItem {
 
 ### 4.3 显示示例对比
 
-| 域名                              | endpoint_id | node_id | user_name | device_name | 显示结果             |
-| --------------------------------- | ----------- | ------- | --------- | ----------- | -------------------- |
-| beagle-242.beijing.beagle         | (空)        | 44      | beijing   | beagle-242  | beijing              |
-| kubernetes.beijing.beagle         | (空)        | 44      | beijing   | beagle-242  | beijing              |
-| postgres.yygl.beijing.beagle      | (空)        | 44      | beijing   | beagle-242  | beijing              |
-| beagle-241.beijing.beagle         | beagle-241  | 44      | beijing   | beagle-242  | beijing / beagle-242 |
-| kubernetes.neimeng.beagle         | beagle-002  | 45      | neimeng   | beagle-003  | neimeng / beagle-003 |
-| beagle-241.beijing.beagle（未连接）| beagle-241  | 0       | beijing   | (空)        | beijing / -          |
+| 域名                                | endpoint_id | node_id | user_name | device_name | 显示结果             |
+| ----------------------------------- | ----------- | ------- | --------- | ----------- | -------------------- |
+| beagle-242.beijing.beagle           | (空)        | 44      | beijing   | beagle-242  | beijing              |
+| kubernetes.beijing.beagle           | (空)        | 44      | beijing   | beagle-242  | beijing              |
+| postgres.yygl.beijing.beagle        | (空)        | 44      | beijing   | beagle-242  | beijing              |
+| beagle-241.beijing.beagle           | beagle-241  | 44      | beijing   | beagle-242  | beijing / beagle-242 |
+| kubernetes.neimeng.beagle           | beagle-002  | 45      | neimeng   | beagle-003  | neimeng / beagle-003 |
+| beagle-241.beijing.beagle（未连接） | beagle-241  | 0       | beijing   | (空)        | beijing / -          |
 
 ### 4.4 设计意图
 
@@ -1338,6 +1683,7 @@ DomainListItem {
 3. **未连接终端**：显示 `User / -`，提示管理员该 Endpoint 尚未连接到任何 Agent
 
 这样的设计让管理员一眼就能看出：
+
 - 服务属于哪个 Agent User（区域）
 - 服务是由哪个设备提供的（设备本机 或 通过哪个 Agent 转发的终端）
 - Endpoint 的连接状态（是否已连接到 Agent） 只能依赖心跳超时
