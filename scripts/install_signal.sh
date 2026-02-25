@@ -17,9 +17,7 @@ set -e
 HTTP_SERVER="${SIGNAL_HTTP_SERVER:-https://cache.ali.wodcloud.com}"
 AGENT_VERSION="${SIGNAL_VERSION:-v0.2.3}"
 
-INSTALL_DIR="$HOME/.local/signal"
 BIN_DIR="$HOME/.local/bin"
-CONFIG_DIR="$HOME/.config/signal"
 DATA_DIR="$HOME/.local/share/signal"
 LOG_DIR="$DATA_DIR/logs"
 
@@ -45,7 +43,7 @@ else
 fi
 
 # === 2. 创建目录 ===
-mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$CONFIG_DIR" "$DATA_DIR" "$LOG_DIR"
+mkdir -p "$BIN_DIR" "$DATA_DIR" "$LOG_DIR"
 
 # === 3. 检测架构 ===
 LOCAL_ARCH=$(uname -m)
@@ -68,7 +66,7 @@ echo "[下载] Agent ${AGENT_VERSION} (${TARGET_ARCH})"
 echo "[下载] $DOWNLOAD_URL"
 
 # 先下载到临时文件，成功后再替换（避免覆盖正在运行的二进制导致写入失败）
-TEMP_FILE="$INSTALL_DIR/${AGENT_BINARY}.tmp"
+TEMP_FILE="$DATA_DIR/${AGENT_BINARY}.tmp"
 rm -f "$TEMP_FILE"
 
 if command -v curl &> /dev/null; then
@@ -87,58 +85,17 @@ else
 fi
 
 # 替换旧二进制
-rm -f "$INSTALL_DIR/$AGENT_BINARY"
-mv "$TEMP_FILE" "$INSTALL_DIR/$AGENT_BINARY"
-chmod +x "$INSTALL_DIR/$AGENT_BINARY"
+TARGET_BINARY="$DATA_DIR/$AGENT_BINARY"
+rm -f "$TARGET_BINARY"
+mv "$TEMP_FILE" "$TARGET_BINARY"
+chmod +x "$TARGET_BINARY"
 echo "[下载] 完成"
 
 # 创建符号链接
 rm -f "$BIN_DIR/signal_agent"
-ln -s "$INSTALL_DIR/$AGENT_BINARY" "$BIN_DIR/signal_agent"
+ln -s "$TARGET_BINARY" "$BIN_DIR/signal_agent"
 
-# === 5. 生成配置文件（仅首次） ===
-if ! [ -e "$CONFIG_DIR/config.toml" ]; then
-  echo ""
-  echo "[配置] 生成默认配置..."
-  cat > "$CONFIG_DIR/config.toml" <<'EOF'
-# AWECloud Signaling Agent 配置文件（CloudIDE 模式）
-# 认证参数通过环境变量 SIGNAL_TOKEN、SIGNAL_SERVER 传递
-
-[tunnel]
-state_dir = ""
-state_sync_interval = 5
-enable_ssh = true
-
-[cloudide]
-ssh_config = true
-dial_socket = "/tmp/signaling.sock"
-
-[visitor]
-listen_addr = ""
-
-[health]
-port = 8090
-
-[log]
-level = "info"
-EOF
-  echo "[配置] $CONFIG_DIR/config.toml"
-else
-  # 已有配置文件，检查是否缺少 [cloudide] 段（旧版本生成的配置）
-  if ! grep -q '^\[cloudide\]' "$CONFIG_DIR/config.toml"; then
-    echo ""
-    echo "[配置] 补充 [cloudide] 段..."
-    cat >> "$CONFIG_DIR/config.toml" <<'EOF'
-
-[cloudide]
-ssh_config = true
-dial_socket = "/tmp/signaling.sock"
-EOF
-    echo "[配置] 已更新 $CONFIG_DIR/config.toml"
-  fi
-fi
-
-# === 6. 检查环境变量 ===
+# === 5. 检查环境变量 ===
 echo ""
 if [ -z "$SIGNAL_TOKEN" ] || [ -z "$SIGNAL_SERVER" ]; then
   echo "[跳过] 缺少环境变量 SIGNAL_TOKEN / SIGNAL_SERVER"
@@ -146,7 +103,7 @@ if [ -z "$SIGNAL_TOKEN" ] || [ -z "$SIGNAL_SERVER" ]; then
   exit 0
 fi
 
-# === 7. 启动 Agent ===
+# === 6. 启动 Agent ===
 SIGNAL_STATE_DIR="$DATA_DIR/tunnel"
 mkdir -p "$SIGNAL_STATE_DIR"
 
@@ -158,7 +115,7 @@ if [ -n "$SIGNAL_LOG_LEVEL" ]; then
 fi
 
 echo "[启动] Server: $SIGNAL_SERVER"
-nohup sudo -E "$BIN_DIR/signal_agent" -c "$CONFIG_DIR/config.toml" > "$LOG_DIR/agent.log" 2>&1 &
+nohup sudo -E "$BIN_DIR/signal_agent" > "$LOG_DIR/agent.log" 2>&1 &
 AGENT_PID=$!
 
 sleep 3
@@ -166,7 +123,6 @@ if ps -p "$AGENT_PID" > /dev/null 2>&1; then
   echo "[启动] ✓ Agent 运行正常 (PID: $AGENT_PID)"
   echo ""
   echo "  日志: $LOG_DIR/agent.log"
-  echo "  配置: $CONFIG_DIR/config.toml"
 else
   echo "[启动] ✗ 启动失败"
   tail -n 20 "$LOG_DIR/agent.log" 2>/dev/null || true
