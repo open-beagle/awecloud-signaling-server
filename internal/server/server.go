@@ -560,7 +560,7 @@ func (s *Server) setupRouter() *gin.Engine {
 	return router
 }
 
-// deviceTokenAuthInterceptor gRPC 认证拦截器，处理 Device Token 认证
+// deviceTokenAuthInterceptor gRPC 认证拦截器，处理 Device Token 和 Agent Token 认证
 // 从 metadata 中提取 Bearer Token，验证后将 user_id 注入到 context
 func deviceTokenAuthInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
@@ -590,30 +590,42 @@ func deviceTokenAuthInterceptor() grpc.UnaryServerInterceptor {
 			return handler(ctx, req)
 		}
 
-		// 直接通过 token 查询（不需要 clientID）
+		// 先尝试作为 Device Token 查询
 		var deviceToken model.DeviceToken
-		if err := db.DB.WithContext(ctx).Where("device_token = ?", token).First(&deviceToken).Error; err != nil {
-			// Token 无效，继续执行（让具体方法决定是否需要认证）
-			logger.Debugf("Device Token 查询失败: %v", err)
+		if err := db.DB.WithContext(ctx).Where("device_token = ?", token).First(&deviceToken).Error; err == nil {
+			// Device Token 找到了
+			// 检查是否已撤销
+			if deviceToken.Revoked {
+				logger.Debugf("Device Token 已撤销: client_id=%d", deviceToken.ClientID)
+				return handler(ctx, req)
+			}
+
+			// 检查是否过期
+			if time.Now().After(deviceToken.ExpiresAt) {
+				logger.Debugf("Device Token 已过期: client_id=%d", deviceToken.ClientID)
+				return handler(ctx, req)
+			}
+
+			// 将 user_id 注入到 context（使用 ClientID）
+			ctx = context.WithValue(ctx, "user_id", uint64(deviceToken.ClientID))
+			logger.Debugf("Device Token 认证成功: user_id=%d", deviceToken.ClientID)
+
 			return handler(ctx, req)
 		}
 
-		// 检查是否已撤销
-		if deviceToken.Revoked {
-			logger.Debugf("Device Token 已撤销: client_id=%d", deviceToken.ClientID)
+		// Device Token 未找到，尝试作为 Agent Token 查询
+		var user model.User
+		if err := db.DB.WithContext(ctx).Where("token = ?", token).First(&user).Error; err == nil {
+			// Agent Token 找到了
+			// 将 user_id 注入到 context
+			ctx = context.WithValue(ctx, "user_id", uint64(user.ID))
+			logger.Debugf("Agent Token 认证成功: user_id=%d, role=%s", user.ID, user.Role)
+
 			return handler(ctx, req)
 		}
 
-		// 检查是否过期
-		if time.Now().After(deviceToken.ExpiresAt) {
-			logger.Debugf("Device Token 已过期: client_id=%d", deviceToken.ClientID)
-			return handler(ctx, req)
-		}
-
-		// 将 user_id 注入到 context（使用 ClientID）
-		ctx = context.WithValue(ctx, "user_id", uint64(deviceToken.ClientID))
-		logger.Debugf("Device Token 认证成功: user_id=%d", deviceToken.ClientID)
-
+		// 两种 Token 都未找到，继续执行（让具体方法决定是否需要认证）
+		logger.Debugf("Token 未找到或无效")
 		return handler(ctx, req)
 	}
 }
