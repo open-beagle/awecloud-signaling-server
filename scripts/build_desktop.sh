@@ -63,7 +63,7 @@ for PLATFORM in "${PLATFORM_ARRAY[@]}"; do
     
     if [ "$OS" = "darwin" ]; then
         # macOS 构建产物是 .app 包（已打包为 zip）
-        SOURCE_FILE="${DESKTOP_DIR}/build/bin/awecloud-signaling-${BUILD_VERSION}-${OS}-${ARCH}.zip"
+        SOURCE_FILE="${DESKTOP_DIR}/build/bin/signal_desktop-${BUILD_VERSION}-${OS}-${ARCH}.zip"
         DEST_FILE="${OUTPUT_DIR}/signal_desktop-${BUILD_VERSION}-${OS}-${ARCH}.zip"
         
         if [ -f "${SOURCE_FILE}" ]; then
@@ -76,10 +76,10 @@ for PLATFORM in "${PLATFORM_ARRAY[@]}"; do
     else
         # Linux/Windows 构建产物是可执行文件
         if [ "$OS" = "windows" ]; then
-            SOURCE_FILE="${DESKTOP_DIR}/build/bin/awecloud-signaling-${BUILD_VERSION}-${OS}-${ARCH}.exe"
+            SOURCE_FILE="${DESKTOP_DIR}/build/bin/signal_desktop-${BUILD_VERSION}-${OS}-${ARCH}.exe"
             DEST_FILE="${OUTPUT_DIR}/signal_desktop-${BUILD_VERSION}-${OS}-${ARCH}.exe"
         else
-            SOURCE_FILE="${DESKTOP_DIR}/build/bin/awecloud-signaling-${BUILD_VERSION}-${OS}-${ARCH}"
+            SOURCE_FILE="${DESKTOP_DIR}/build/bin/signal_desktop-${BUILD_VERSION}-${OS}-${ARCH}"
             DEST_FILE="${OUTPUT_DIR}/signal_desktop-${BUILD_VERSION}-${OS}-${ARCH}"
         fi
         
