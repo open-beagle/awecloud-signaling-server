@@ -73,13 +73,13 @@ func modifyResolvConf(upstreamDNS string) error {
 	// 提取上游 DNS IP（去掉端口）
 	upstreamIP := strings.TrimSuffix(upstreamDNS, ":53")
 
-	// 写入新配置（指向 127.0.0.1:15353，保留原始 DNS 作为备份）
+	// 写入新配置（指向 127.0.0.1:53，保留原始 DNS 作为备份）
 	content := fmt.Sprintf("# Signal Agent DNS (upstream: %s)\nnameserver 127.0.0.1\nnameserver %s\noptions ndots:0\n", upstreamDNS, upstreamIP)
 	if err := os.WriteFile(resolvConfPath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("写入 resolv.conf 失败: %w", err)
 	}
 
-	logger.Infof("已修改 %s，指向本地 DNS 127.0.0.1:15353（备份 DNS: %s）", resolvConfPath, upstreamIP)
+	logger.Infof("已修改 %s，指向本地 DNS 127.0.0.1:53（备份 DNS: %s）", resolvConfPath, upstreamIP)
 	return nil
 }
 

@@ -265,7 +265,7 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 	logger.Infof("检测到上游 DNS: %s", upstreamDNS)
 
 	// 启动本地 DNS 服务器
-	dnsServer = NewDNSServer("127.0.0.1:15353", domainCache, vipAlloc, upstreamDNS, a.ctx)
+	dnsServer = NewDNSServer("127.0.0.1:53", domainCache, vipAlloc, upstreamDNS, a.ctx)
 	if err := dnsServer.Start(); err != nil {
 		logger.Warnf("启动 DNS 服务器失败: %v（需要 root 权限）", err)
 	} else {
