@@ -51,11 +51,9 @@ type VisitorSection struct {
 
 // CloudIDESection CloudIDE 专属配置
 type CloudIDESection struct {
-	SSHConfig  bool   `toml:"ssh_config"`  // 是否自动维护 ~/.ssh/config
 	Socks      bool   `toml:"socks"`       // 是否启用 SOCKS5 代理
 	SocksAddr  string `toml:"socks_addr"`  // SOCKS5 监听地址，默认 127.0.0.1:1080
 	DialSocket string `toml:"dial_socket"` // dial 子命令的 Unix Socket 路径，默认 /tmp/signaling.sock
-	DNSEnabled bool   `toml:"dns_enabled"` // 是否启用 DNS 劫持（修改 /etc/resolv.conf）
 }
 
 // K8SSection K8S API 代理配置
@@ -189,9 +187,6 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	}
 
 	// CloudIDE 专属（仅 SIGNAL_* 前缀）
-	if v := os.Getenv("SIGNAL_SSH_CONFIG"); v != "" {
-		cfg.CloudIDE.SSHConfig = envBool(v)
-	}
 	if v := os.Getenv("SIGNAL_SOCKS"); v != "" {
 		cfg.CloudIDE.Socks = envBool(v)
 	}
@@ -200,9 +195,6 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	}
 	if v := os.Getenv("SIGNAL_DIAL_SOCKET"); v != "" {
 		cfg.CloudIDE.DialSocket = v
-	}
-	if v := os.Getenv("SIGNAL_DNS"); v != "" {
-		cfg.CloudIDE.DNSEnabled = envBool(v)
 	}
 
 	// K8S API 代理

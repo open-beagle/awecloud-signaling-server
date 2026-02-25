@@ -255,39 +255,38 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 		go a.syncDomainsLoop(domainCache)
 	}
 
-	// 启动 DNS 劫持（如果配置启用）
+	// 启动 DNS 劫持（CloudIDE 模式默认启用）
 	var dnsServer *DNSServer
 	var proxyManager *LocalProxyManager
-	if a.config.CloudIDE.DNSEnabled {
-		// 检测上游 DNS（从 /etc/resolv.conf 读取）
-		upstreamDNS := detectUpstreamDNS()
-		logger.Infof("检测到上游 DNS: %s", upstreamDNS)
 
-		// 启动本地 DNS 服务器
-		dnsServer = NewDNSServer("127.0.0.1:15353", domainCache, vipAlloc, upstreamDNS, a.ctx)
-		if err := dnsServer.Start(); err != nil {
-			logger.Warnf("启动 DNS 服务器失败: %v（需要 root 权限）", err)
+	// 检测上游 DNS（从 /etc/resolv.conf 读取）
+	upstreamDNS := detectUpstreamDNS()
+	logger.Infof("检测到上游 DNS: %s", upstreamDNS)
+
+	// 启动本地 DNS 服务器
+	dnsServer = NewDNSServer("127.0.0.1:15353", domainCache, vipAlloc, upstreamDNS, a.ctx)
+	if err := dnsServer.Start(); err != nil {
+		logger.Warnf("启动 DNS 服务器失败: %v（需要 root 权限）", err)
+	} else {
+		// 修改 /etc/resolv.conf
+		if err := modifyResolvConf(upstreamDNS); err != nil {
+			logger.Warnf("修改 /etc/resolv.conf 失败: %v", err)
+		}
+		defer func() {
+			// 恢复 /etc/resolv.conf
+			if err := restoreResolvConf(); err != nil {
+				logger.Warnf("恢复 /etc/resolv.conf 失败: %v", err)
+			}
+		}()
+
+		// 启动本地代理管理器
+		proxyManager = NewLocalProxyManager(domainCache, vipAlloc, a.tsManager, a.ctx)
+		if err := proxyManager.Start(); err != nil {
+			logger.Warnf("启动本地代理管理器失败: %v", err)
 		} else {
-			// 修改 /etc/resolv.conf
-			if err := modifyResolvConf(upstreamDNS); err != nil {
-				logger.Warnf("修改 /etc/resolv.conf 失败: %v", err)
-			}
-			defer func() {
-				// 恢复 /etc/resolv.conf
-				if err := restoreResolvConf(); err != nil {
-					logger.Warnf("恢复 /etc/resolv.conf 失败: %v", err)
-				}
-			}()
-
-			// 启动本地代理管理器
-			proxyManager = NewLocalProxyManager(domainCache, vipAlloc, a.tsManager, a.ctx)
-			if err := proxyManager.Start(); err != nil {
-				logger.Warnf("启动本地代理管理器失败: %v", err)
-			} else {
-				// 启动代理更新循环
-				a.wg.Add(1)
-				go a.updateProxiesLoop(proxyManager, domainCache)
-			}
+			// 启动代理更新循环
+			a.wg.Add(1)
+			go a.updateProxiesLoop(proxyManager, domainCache)
 		}
 	}
 
@@ -303,11 +302,9 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 		defer dialSocket.Stop()
 	}
 
-	// 自动维护 ~/.ssh/config（如果配置启用）
-	if a.config.CloudIDE.SSHConfig {
-		if err := MaintainSSHConfig(dialSocketPath); err != nil {
-			logger.Warnf("维护 ~/.ssh/config 失败: %v", err)
-		}
+	// 自动维护 ~/.ssh/config（CloudIDE 模式默认启用）
+	if err := MaintainSSHConfig(dialSocketPath); err != nil {
+		logger.Warnf("维护 ~/.ssh/config 失败: %v", err)
 	}
 
 	// 等待中断信号
