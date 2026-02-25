@@ -36,6 +36,7 @@ const (
 	DesktopService_ResolveDomain_FullMethodName         = "/awecloud.signaling.DesktopService/ResolveDomain"
 	DesktopService_GetResources_FullMethodName          = "/awecloud.signaling.DesktopService/GetResources"
 	DesktopService_GetDomainList_FullMethodName         = "/awecloud.signaling.DesktopService/GetDomainList"
+	DesktopService_ListDomains_FullMethodName           = "/awecloud.signaling.DesktopService/ListDomains"
 )
 
 // DesktopServiceClient is the client API for DesktopService service.
@@ -78,6 +79,8 @@ type DesktopServiceClient interface {
 	GetResources(ctx context.Context, in *GetResourcesRequest, opts ...grpc.CallOption) (*GetResourcesResponse, error)
 	// 获取域名列表 - Desktop 查询可访问的域名记录（按类型分类）
 	GetDomainList(ctx context.Context, in *GetDomainListRequest, opts ...grpc.CallOption) (*GetDomainListResponse, error)
+	// 列出域名（Client 模式专用）- 返回域名及其目标 IP 和端口
+	ListDomains(ctx context.Context, in *ListDomainsRequest, opts ...grpc.CallOption) (*ListDomainsResponse, error)
 }
 
 type desktopServiceClient struct {
@@ -267,6 +270,16 @@ func (c *desktopServiceClient) GetDomainList(ctx context.Context, in *GetDomainL
 	return out, nil
 }
 
+func (c *desktopServiceClient) ListDomains(ctx context.Context, in *ListDomainsRequest, opts ...grpc.CallOption) (*ListDomainsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListDomainsResponse)
+	err := c.cc.Invoke(ctx, DesktopService_ListDomains_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DesktopServiceServer is the server API for DesktopService service.
 // All implementations must embed UnimplementedDesktopServiceServer
 // for forward compatibility.
@@ -307,6 +320,8 @@ type DesktopServiceServer interface {
 	GetResources(context.Context, *GetResourcesRequest) (*GetResourcesResponse, error)
 	// 获取域名列表 - Desktop 查询可访问的域名记录（按类型分类）
 	GetDomainList(context.Context, *GetDomainListRequest) (*GetDomainListResponse, error)
+	// 列出域名（Client 模式专用）- 返回域名及其目标 IP 和端口
+	ListDomains(context.Context, *ListDomainsRequest) (*ListDomainsResponse, error)
 	mustEmbedUnimplementedDesktopServiceServer()
 }
 
@@ -367,6 +382,9 @@ func (UnimplementedDesktopServiceServer) GetResources(context.Context, *GetResou
 }
 func (UnimplementedDesktopServiceServer) GetDomainList(context.Context, *GetDomainListRequest) (*GetDomainListResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetDomainList not implemented")
+}
+func (UnimplementedDesktopServiceServer) ListDomains(context.Context, *ListDomainsRequest) (*ListDomainsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListDomains not implemented")
 }
 func (UnimplementedDesktopServiceServer) mustEmbedUnimplementedDesktopServiceServer() {}
 func (UnimplementedDesktopServiceServer) testEmbeddedByValue()                        {}
@@ -662,6 +680,24 @@ func _DesktopService_GetDomainList_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DesktopService_ListDomains_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListDomainsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DesktopServiceServer).ListDomains(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DesktopService_ListDomains_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DesktopServiceServer).ListDomains(ctx, req.(*ListDomainsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DesktopService_ServiceDesc is the grpc.ServiceDesc for DesktopService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -724,6 +760,10 @@ var DesktopService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetDomainList",
 			Handler:    _DesktopService_GetDomainList_Handler,
+		},
+		{
+			MethodName: "ListDomains",
+			Handler:    _DesktopService_ListDomains_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

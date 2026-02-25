@@ -56,6 +56,9 @@ service DesktopService {
 
   // 获取域名列表 - Desktop 查询可访问的域名记录（按类型分类）
   rpc GetDomainList(GetDomainListRequest) returns (GetDomainListResponse);
+
+  // 列出域名（Client 模式专用）- 返回域名及其目标 IP 和端口
+  rpc ListDomains(ListDomainsRequest) returns (ListDomainsResponse);
 }
 
 // ============================================
@@ -460,4 +463,30 @@ message DomainItem {
 // GetDomainListResponse 获取域名列表响应
 message GetDomainListResponse {
   repeated DomainItem domains = 1; // 域名列表
+}
+
+// ============================================
+// 列出域名（Client 模式专用）
+// ============================================
+
+// ListDomainsRequest 列出域名请求
+message ListDomainsRequest {
+  // 空请求，Server 根据 client_id 返回可访问的域名
+}
+
+// DomainInfo 域名信息（包含目标 IP 和端口）
+message DomainInfo {
+  string domain = 1; // 域名，如 kubernetes.beijing.beagle
+  string type = 2; // 类型：ssh/k8sapi/k8ssvc
+  string target_ip = 3; // 目标 Tailscale IP
+  int32 target_port = 4; // 目标端口
+  string cluster_name = 5; // 集群名称（仅 k8sapi/k8ssvc）
+  string namespace = 6; // 命名空间（仅 k8ssvc）
+  string service_name = 7; // 服务名称（仅 k8ssvc）
+  string status = 8; // 状态：online/offline
+}
+
+// ListDomainsResponse 列出域名响应
+message ListDomainsResponse {
+  repeated DomainInfo domains = 1; // 域名列表
 }

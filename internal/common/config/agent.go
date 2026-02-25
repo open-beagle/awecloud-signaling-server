@@ -55,6 +55,7 @@ type CloudIDESection struct {
 	Socks      bool   `toml:"socks"`       // 是否启用 SOCKS5 代理
 	SocksAddr  string `toml:"socks_addr"`  // SOCKS5 监听地址，默认 127.0.0.1:1080
 	DialSocket string `toml:"dial_socket"` // dial 子命令的 Unix Socket 路径，默认 /tmp/signaling.sock
+	DNSEnabled bool   `toml:"dns_enabled"` // 是否启用 DNS 劫持（修改 /etc/resolv.conf）
 }
 
 // K8SSection K8S API 代理配置
@@ -199,6 +200,9 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	}
 	if v := os.Getenv("SIGNAL_DIAL_SOCKET"); v != "" {
 		cfg.CloudIDE.DialSocket = v
+	}
+	if v := os.Getenv("SIGNAL_DNS"); v != "" {
+		cfg.CloudIDE.DNSEnabled = envBool(v)
 	}
 
 	// K8S API 代理

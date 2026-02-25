@@ -1892,3 +1892,133 @@ func (s *DesktopServiceServer) getEndpointDomainStatus(dr *model.DomainRegistry)
 	// Endpoint 无法通过 Headscale 查询，心跳超时直接判断为离线
 	return "offline"
 }
+
+// ListDomains 列出域名（Client 模式专用）
+// 返回域名及其目标 IP 和端口，用于 DNS 劫持和本地代理
+func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDomainsRequest) (*pb.ListDomainsResponse, error) {
+	// 从 context 中获取 client_id（由认证中间件注入）
+	clientID, ok := ctx.Value("client_id").(uint64)
+	if !ok || clientID == 0 {
+		return nil, status.Errorf(codes.Unauthenticated, "未认证")
+	}
+
+	// 查询用户所属分组
+	var groupIDs []int64
+	var groupMembers []model.GroupMember
+	if err := db.DB.WithContext(ctx).Where("user_id = ?", clientID).Find(&groupMembers).Error; err == nil {
+		for _, gm := range groupMembers {
+			groupIDs = append(groupIDs, gm.GroupID)
+		}
+	}
+
+	// 查询所有可访问的域名记录
+	var domainRecords []model.DomainRegistry
+	query := db.DB.WithContext(ctx).Where("deleted_at IS NULL")
+
+	// 根据权限过滤域名
+	// 1. 收集有权限的 Agent User ID
+	agentUserIDs := make(map[uint64]bool)
+
+	// SSH 权限
+	var sshUserPerms []model.AclSSHUserPermission
+	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&sshUserPerms)
+	for _, p := range sshUserPerms {
+		agentUserIDs[p.TargetUserID] = true
+	}
+
+	if len(groupIDs) > 0 {
+		var sshGroupPerms []model.AclSSHGroupPermission
+		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&sshGroupPerms)
+		for _, p := range sshGroupPerms {
+			agentUserIDs[p.TargetUserID] = true
+		}
+	}
+
+	// K8S API 权限
+	var k8sUserPerms []model.AclK8SUserPermission
+	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&k8sUserPerms)
+	for _, p := range k8sUserPerms {
+		agentUserIDs[p.TargetUserID] = true
+	}
+
+	if len(groupIDs) > 0 {
+		var k8sGroupPerms []model.AclK8SGroupPermission
+		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&k8sGroupPerms)
+		for _, p := range k8sGroupPerms {
+			agentUserIDs[p.TargetUserID] = true
+		}
+	}
+
+	// K8S Service 权限
+	var k8sSvcUserPerms []model.AclK8SSvcUserPermission
+	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&k8sSvcUserPerms)
+	for _, p := range k8sSvcUserPerms {
+		agentUserIDs[p.TargetUserID] = true
+	}
+
+	if len(groupIDs) > 0 {
+		var k8sSvcGroupPerms []model.AclK8SSvcGroupPermission
+		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&k8sSvcGroupPerms)
+		for _, p := range k8sSvcGroupPerms {
+			agentUserIDs[p.TargetUserID] = true
+		}
+	}
+
+	// 转换为 ID 列表
+	var allowedAgentIDs []uint64
+	for id := range agentUserIDs {
+		allowedAgentIDs = append(allowedAgentIDs, id)
+	}
+
+	if len(allowedAgentIDs) == 0 {
+		// 没有任何权限，返回空列表
+		return &pb.ListDomainsResponse{
+			Domains: []*pb.DomainInfo{},
+		}, nil
+	}
+
+	// 查询域名记录
+	query.Where("user_id IN ?", allowedAgentIDs).Find(&domainRecords)
+
+	// 构建响应
+	var domains []*pb.DomainInfo
+	for _, record := range domainRecords {
+		// 查询 Agent 的 Tailscale IP
+		var node model.Node
+		if err := db.DB.WithContext(ctx).Where("user_id = ? AND type IN ?", record.UserID, []string{model.NodeTypeAgent, model.NodeTypeEndpoint}).First(&node).Error; err != nil {
+			logger.Warnf("域名 %s 的 Agent/Endpoint 节点不存在", record.Domain)
+			continue
+		}
+
+		domainInfo := &pb.DomainInfo{
+			Domain:      record.Domain,
+			Type:        record.Type,
+			TargetIp:    node.TailscaleIP,
+			TargetPort:  int32(record.Port),
+			ClusterName: record.ClusterName,
+			Namespace:   record.Namespace,
+			ServiceName: record.ServiceName,
+			Status:      getNodeStatus(&node),
+		}
+
+		domains = append(domains, domainInfo)
+	}
+
+	logger.Infof("Client %d 域名列表查询: 共 %d 条域名", clientID, len(domains))
+
+	return &pb.ListDomainsResponse{
+		Domains: domains,
+	}, nil
+}
+
+// getNodeStatus 获取节点状态
+func getNodeStatus(node *model.Node) string {
+	if node.LastHeartbeatAt == nil {
+		return "offline"
+	}
+	// 5 分钟内有心跳认为在线
+	if time.Since(*node.LastHeartbeatAt) < 5*time.Minute {
+		return "online"
+	}
+	return "offline"
+}

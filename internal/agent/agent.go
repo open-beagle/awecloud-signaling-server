@@ -234,6 +234,12 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 	a.tailscaleIP = a.tsManager.GetIP()
 	logger.Infof("Tailscale 已连接，IP: %s", a.tailscaleIP)
 
+	// 初始化域名缓存
+	domainCache := NewDomainCache()
+
+	// 初始化 VIP 分配器
+	vipAlloc := NewVIPAllocator()
+
 	// 连接 gRPC Server（用于心跳，让 Server 创建/更新 Node 记录）
 	if err := a.connectToServer(); err != nil {
 		logger.Warnf("连接 gRPC Server 失败: %v（Client 将无法在设备管理中显示）", err)
@@ -243,6 +249,35 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 		// 启动精简心跳（只上报状态，不处理配置同步）
 		a.wg.Add(1)
 		go a.heartbeatLoop()
+
+		// 启动域名同步（定期从 Server 获取可访问的域名列表）
+		a.wg.Add(1)
+		go a.syncDomainsLoop(domainCache)
+	}
+
+	// 启动 DNS 劫持（如果配置启用）
+	var dnsServer *DNSServer
+	if a.config.CloudIDE.DNSEnabled {
+		// 检测上游 DNS（从 /etc/resolv.conf 读取）
+		upstreamDNS := detectUpstreamDNS()
+		logger.Infof("检测到上游 DNS: %s", upstreamDNS)
+
+		// 启动本地 DNS 服务器
+		dnsServer = NewDNSServer("127.0.0.1:53", domainCache, vipAlloc, upstreamDNS, a.ctx)
+		if err := dnsServer.Start(); err != nil {
+			logger.Warnf("启动 DNS 服务器失败: %v（需要 root 权限）", err)
+		} else {
+			// 修改 /etc/resolv.conf
+			if err := modifyResolvConf(upstreamDNS); err != nil {
+				logger.Warnf("修改 /etc/resolv.conf 失败: %v", err)
+			}
+			defer func() {
+				// 恢复 /etc/resolv.conf
+				if err := restoreResolvConf(); err != nil {
+					logger.Warnf("恢复 /etc/resolv.conf 失败: %v", err)
+				}
+			}()
+		}
 	}
 
 	// 启动 Dial Socket 服务（供 dial 子命令使用）
@@ -271,6 +306,11 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 
 	logger.Info("正在关闭 Client...")
 	a.cancel()
+
+	// 停止 DNS 服务器
+	if dnsServer != nil {
+		dnsServer.Stop()
+	}
 
 	// 停止 Tailscale
 	if a.tsManager != nil {
@@ -1307,6 +1347,54 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 			a.svcProxy.SetEndpointServer(nil)
 		}
 	}
+}
+
+// syncDomainsLoop 域名同步循环（Client 模式专用）
+// 定期从 Server 获取可访问的域名列表，更新到本地缓存
+func (a *Agent) syncDomainsLoop(cache *DomainCache) {
+	defer a.wg.Done()
+
+	// 立即执行一次同步
+	a.syncDomains(cache)
+
+	// 定期刷新（每 30 秒）
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			a.syncDomains(cache)
+		case <-a.ctx.Done():
+			logger.Debug("域名同步线程退出")
+			return
+		}
+	}
+}
+
+// syncDomains 执行一次域名同步
+func (a *Agent) syncDomains(cache *DomainCache) {
+	// 检查 gRPC 连接
+	if !a.IsGRPCConnected() {
+		logger.Debug("gRPC 未连接，跳过域名同步")
+		return
+	}
+
+	// 调用 ListDomains API
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+
+	// 使用 Desktop gRPC 客户端
+	desktopClient := pb.NewDesktopServiceClient(a.grpcConn)
+	resp, err := desktopClient.ListDomains(ctx, &pb.ListDomainsRequest{})
+	if err != nil {
+		logger.Warnf("获取域名列表失败: %v", err)
+		return
+	}
+
+	// 更新缓存
+	cache.Update(resp.Domains)
+	logger.Infof("域名列表已更新，共 %d 个域名", cache.Count())
 }
 
 // boolStr 布尔值转字符串（用于日志）
