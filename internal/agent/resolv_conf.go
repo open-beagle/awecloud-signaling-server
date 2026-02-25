@@ -15,11 +15,32 @@ const (
 )
 
 // detectUpstreamDNS 从 /etc/resolv.conf 检测上游 DNS
+// 优先从备份文件读取，避免重复启动时丢失原始 DNS
 func detectUpstreamDNS() string {
-	file, err := os.Open(resolvConfPath)
+	// 1. 优先从备份文件读取
+	if _, err := os.Stat(resolvConfBackupPath); err == nil {
+		if dns := readUpstreamDNSFromFile(resolvConfBackupPath); dns != "" {
+			logger.Debugf("从备份文件检测到上游 DNS: %s", dns)
+			return dns
+		}
+	}
+
+	// 2. 从当前 resolv.conf 读取
+	if dns := readUpstreamDNSFromFile(resolvConfPath); dns != "" {
+		logger.Debugf("从 resolv.conf 检测到上游 DNS: %s", dns)
+		return dns
+	}
+
+	// 3. 使用默认 DNS
+	logger.Warn("未检测到有效的上游 DNS，使用默认 DNS 8.8.8.8")
+	return "8.8.8.8:53"
+}
+
+// readUpstreamDNSFromFile 从指定文件读取上游 DNS
+func readUpstreamDNSFromFile(path string) string {
+	file, err := os.Open(path)
 	if err != nil {
-		logger.Warnf("读取 %s 失败: %v，使用默认 DNS 8.8.8.8", resolvConfPath, err)
-		return "8.8.8.8:53"
+		return ""
 	}
 	defer file.Close()
 
@@ -38,8 +59,7 @@ func detectUpstreamDNS() string {
 		}
 	}
 
-	logger.Warn("未检测到有效的上游 DNS，使用默认 DNS 8.8.8.8")
-	return "8.8.8.8:53"
+	return ""
 }
 
 // modifyResolvConf 修改 /etc/resolv.conf，指向本地 DNS
