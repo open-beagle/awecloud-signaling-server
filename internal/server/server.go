@@ -613,13 +613,14 @@ func deviceTokenAuthInterceptor() grpc.UnaryServerInterceptor {
 			return handler(ctx, req)
 		}
 
-		// Device Token 未找到，尝试作为 Agent Token 查询
-		var user model.User
-		if err := db.DB.WithContext(ctx).Where("token = ?", token).First(&user).Error; err == nil {
-			// Agent Token 找到了
+		// Device Token 未找到，尝试作为 Agent Token（Deploy Token）查询
+		// Agent Token 是 Deploy Token，存储在 deploy_tokens 表
+		var deployToken model.DeployToken
+		if err := db.DB.WithContext(ctx).Where("token = ? AND status = ?", token, model.DeployTokenStatusBound).First(&deployToken).Error; err == nil {
+			// Deploy Token 找到了
 			// 将 user_id 注入到 context
-			ctx = context.WithValue(ctx, "user_id", uint64(user.ID))
-			logger.Debugf("Agent Token 认证成功: user_id=%d, role=%s", user.ID, user.Role)
+			ctx = context.WithValue(ctx, "user_id", uint64(deployToken.UserID))
+			logger.Debugf("Deploy Token 认证成功: user_id=%d", deployToken.UserID)
 
 			return handler(ctx, req)
 		}
