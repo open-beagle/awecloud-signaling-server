@@ -344,7 +344,7 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 
 // connectToServer 连接到Server
 func (a *Agent) connectToServer() error {
-	serverAddr := a.config.Server.Address
+	serverAddr := a.config.Agent.Server
 
 	// 如果没有协议前缀，添加默认的 http://
 	if !strings.Contains(serverAddr, "://") {
@@ -956,14 +956,14 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 			}
 			domain := prefix + "." + svc.Namespace + "." + a.config.Agent.AgentName + a.domainSuffix
 
-			// 注册第一个端口的域名，TargetPort 使用 K8S Service 的实际端口（如 5432）
-			// Agent SVCProxy gRPC 端口（50051）由 Server 在 ResolveDomain 响应中通过 svc_proxy_port 字段返回
+			// 注册第一个端口的域名
+			// TargetPort 使用 Agent SVCProxy gRPC 端口（50051），Service 端口存储在 ServicePorts 字段
 			if len(svc.Ports) > 0 {
 				registrations = append(registrations, &pb.DomainRegistration{
 					Domain:      domain,
 					Type:        "k8ssvc",
 					TargetIp:    agentIP,
-					TargetPort:  svc.Ports[0].Port, // K8S Service 实际端口
+					TargetPort:  int32(a.config.SVC.ListenPortBase), // Agent SVCProxy gRPC 端口（默认 50051）
 					Namespace:   svc.Namespace,
 					ServiceName: svc.Name,
 				})
@@ -1057,7 +1057,7 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 					Domain:      domain,
 					Type:        "k8ssvc",
 					TargetIp:    agentIP,
-					TargetPort:  svc.Ports[0].Port,
+					TargetPort:  50055, // Endpoint K8SSVC 固定端口（Agent gRPC 转发到 Endpoint）
 					Namespace:   svc.Namespace,
 					ServiceName: svc.ServiceName,
 					EndpointId:  ep.Name,

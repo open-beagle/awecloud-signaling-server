@@ -599,10 +599,8 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		s.handleAuditRecords(ctx, agentID, req.AuditRecords)
 	}
 
-	// 处理 K8S Service 发现，创建域名
-	if len(req.DiscoveredServices) > 0 {
-		s.handleK8SServiceDiscovery(ctx, agentID, node.ID, req.DiscoveredServices)
-	}
+	// 注意：K8S Service 域名现在通过 DomainRegistrations 上报（Agent 统一上报所有域名）
+	// 旧的 DiscoveredServices 字段已废弃，不再处理
 
 	return node.ID
 }
