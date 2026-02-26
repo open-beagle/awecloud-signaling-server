@@ -117,7 +117,7 @@ func main() {
 		// 检查是否有 SIGNAL_TOKEN 环境变量（Token 自动注册模式，CloudIDE 等场景）
 		if cfg.Agent.AgentToken != "" && cfg.Agent.AgentName == "" {
 			// 有 Token 但没有 AgentName → Token 注册模式
-			srvAddr := cfg.Server.Address
+			srvAddr := cfg.Agent.Server
 			if srvAddr == "" && BUILD_URL != "" {
 				srvAddr = BUILD_URL
 			}
@@ -167,16 +167,16 @@ func main() {
 	// 应用配置优先级：环境变量 > 配置文件 > BUILD_URL > 默认值
 	// 注意：SIGNAL_SERVER/AGENT_ADDRESS 已在 LoadAgentConfig 中处理
 	// 这里只处理 BUILD_URL 兜底逻辑
-	if cfg.Server.Address == "" && BUILD_URL != "" {
-		cfg.Server.Address = BUILD_URL
+	if cfg.Agent.Server == "" && BUILD_URL != "" {
+		cfg.Agent.Server = BUILD_URL
 		logger.Infof("使用编译时注入的 BUILD_URL: %s", BUILD_URL)
-	} else if cfg.Server.Address == "" {
-		cfg.Server.Address = "http://localhost:8080"
+	} else if cfg.Agent.Server == "" {
+		cfg.Agent.Server = "http://localhost:8080"
 		logger.Infof("使用默认 Server 地址: http://localhost:8080")
 	}
 
 	logger.Infof("Agent Name: %s", cfg.Agent.AgentName)
-	logger.Infof("Server Address: %s", cfg.Server.Address)
+	logger.Infof("Server Address: %s", cfg.Agent.Server)
 
 	// 初始化 OpenTelemetry
 	if err := telemetry.Init(telemetry.Config{
@@ -519,9 +519,7 @@ func registerWithToken(serverAddr, token, agentName, deviceName string) (*config
 			AgentName:  cfgAgentName,
 			AgentToken: token,
 			Device:     cfgDevice,
-		},
-		Server: config.ServerConnect{
-			Address: serverAddr,
+			Server:    serverAddr,
 		},
 	}
 

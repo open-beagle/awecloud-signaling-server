@@ -374,10 +374,13 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 		}
 	}
 
-	// 同步所有 Node 的 Tag
+	// 同步所有 Node 的 Tag（Agent 模式节点）
 	var dbNodes []model.Node
 	db.DB.WithContext(ctx).Preload("User").Find(&dbNodes)
-	logger.Infof("找到 %d 个 Node", len(dbNodes))
+	logger.Infof("找到 %d 个 Agent Node", len(dbNodes))
+
+	// 记录已处理的 Headscale Node ID，避免重复处理
+	processedNodeIDs := make(map[uint64]bool)
 
 	for _, dbNode := range dbNodes {
 		if dbNode.User == nil {
@@ -458,6 +461,77 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 				logger.Warnf("设置 Node %s Tag 失败: %v", dbNode.Name, err)
 			} else {
 				logger.Infof("Node %s Tag 已同步: %v", dbNode.Name, expectedTags)
+			}
+		}
+
+		processedNodeIDs[nodeInfo.HeadscaleNodeID] = true
+	}
+
+	// 同步 Client 模式节点的 Tag
+	// Client 节点不在 node 表中，但在 Headscale 中有对应的节点
+	// 需要根据 Headscale User 名称（client-xxx）来设置标签
+	var clientUsers []model.User
+	if err := db.DB.WithContext(ctx).Where("role = ?", model.UserRoleClient).Find(&clientUsers).Error; err != nil {
+		logger.Warnf("查询 Client 用户失败: %v", err)
+	} else {
+		logger.Infof("找到 %d 个 Client 用户", len(clientUsers))
+
+		// 调试：输出 userNodesMap 中所有 User 名称
+		logger.Debugf("userNodesMap 中的所有 User 名称:")
+		for userName := range userNodesMap {
+			logger.Debugf("  - %s (%d 个 Node)", userName, len(userNodesMap[userName]))
+		}
+
+		for _, user := range clientUsers {
+			userName := fmt.Sprintf("client-%s", user.Name)
+			logger.Debugf("查找 Client 用户: %s", userName)
+			hsNodes, found := userNodesMap[userName]
+			if !found || len(hsNodes) == 0 {
+				logger.Warnf("Client 用户 %s 在 Headscale 中没有对应的 Node", userName)
+				continue
+			}
+			logger.Infof("Client 用户 %s 在 Headscale 中有 %d 个 Node", userName, len(hsNodes))
+
+			// 构建期望的 Tag 列表
+			expectedTags := []string{
+				fmt.Sprintf("tag:client-%s", user.Name),
+			}
+
+			// 查询用户所属的分组
+			var groupMembers []model.GroupMember
+			db.DB.WithContext(ctx).Preload("Group").Where("user_id = ?", user.ID).Find(&groupMembers)
+			for _, gm := range groupMembers {
+				if gm.Group != nil {
+					expectedTags = append(expectedTags, fmt.Sprintf("tag:group-%s", gm.Group.Name))
+				}
+			}
+
+			// 为该 Client User 的所有 Headscale Node 设置标签
+			for _, nodeInfo := range hsNodes {
+				logger.Debugf("处理 Client Node: %s (ID: %d, IP: %s, 当前 Tags: %v)",
+					nodeInfo.GivenName, nodeInfo.HeadscaleNodeID, nodeInfo.IP, nodeInfo.Tags)
+
+				// 跳过已处理的节点（避免重复处理）
+				if processedNodeIDs[nodeInfo.HeadscaleNodeID] {
+					logger.Debugf("Client Node %s 已被处理，跳过", nodeInfo.GivenName)
+					continue
+				}
+
+				// 检查是否需要更新
+				logger.Debugf("期望 Tags: %v, 当前 Tags: %v, 是否相等: %v",
+					expectedTags, nodeInfo.Tags, tagsEqual(nodeInfo.Tags, expectedTags))
+
+				if !tagsEqual(nodeInfo.Tags, expectedTags) {
+					if err := s.client.SetTags(ctx, nodeInfo.HeadscaleNodeID, expectedTags); err != nil {
+						logger.Warnf("设置 Client Node %s (User: %s) Tag 失败: %v", nodeInfo.GivenName, userName, err)
+					} else {
+						logger.Infof("Client Node %s (User: %s) Tag 已同步: %v", nodeInfo.GivenName, userName, expectedTags)
+					}
+				} else {
+					logger.Debugf("Client Node %s Tag 已是最新，无需更新", nodeInfo.GivenName)
+				}
+
+				processedNodeIDs[nodeInfo.HeadscaleNodeID] = true
 			}
 		}
 	}

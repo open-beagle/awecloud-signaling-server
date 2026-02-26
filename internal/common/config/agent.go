@@ -11,7 +11,6 @@ import (
 
 type AgentConfig struct {
 	Agent     AgentSection     `toml:"agent"`
-	Server    ServerConnect    `toml:"server"`
 	Tunnel    TunnelSection    `toml:"tunnel"` // 使用 [tunnel] 屏蔽技术细节
 	Visitor   VisitorSection   `toml:"visitor"`
 	Health    HealthSection    `toml:"health"`
@@ -27,14 +26,10 @@ type HealthSection struct {
 }
 
 type AgentSection struct {
-	AgentName  string `toml:"name"`   // 配置文件中使用 name（Agent 名称/区域，如 beijing.beagle）
-	AgentToken string `toml:"token"`  // 配置文件中使用 token
-	Device     string `toml:"device"` // 设备名（如 beagle-241），用于标识同一 Agent 下的不同设备
-}
-
-type ServerConnect struct {
-	Address   string `toml:"address"`    // Server地址（HTTP/2统一端口，支持完整URL）
-	PublicURL string `toml:"public_url"` // FRP公网地址（可选），如果配置则忽略Server返回的地址
+	AgentName  string `toml:"name"`    // 配置文件中使用 name（Agent 名称/区域，如 beijing.beagle）
+	AgentToken string `toml:"token"`   // 配置文件中使用 token
+	Device     string `toml:"device"`  // 设备名（如 beagle-241），用于标识同一 Agent 下的不同设备
+	Server    string `toml:"server"` // Server 地址（HTTP/2统一端口，支持完整URL）
 }
 
 // TunnelSection Agent 端隧道配置（使用 [tunnel] 屏蔽技术细节）
@@ -136,7 +131,7 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 		}
 	}
 	if v, deprecated := getEnvWithDeprecation("SIGNAL_SERVER", "AGENT_ADDRESS"); v != "" {
-		cfg.Server.Address = v
+		cfg.Agent.Server = v
 		if deprecated {
 			logDeprecation("AGENT_ADDRESS", "SIGNAL_SERVER")
 		}
@@ -171,12 +166,6 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	}
 
 	// 旧变量（补充 SIGNAL_ 对应）
-	if v, deprecated := getEnvWithDeprecation("SIGNAL_PUBLIC_URL", "AGENT_PUBLIC_URL"); v != "" {
-		cfg.Server.PublicURL = v
-		if deprecated {
-			logDeprecation("AGENT_PUBLIC_URL", "SIGNAL_PUBLIC_URL")
-		}
-	}
 	if v, deprecated := getEnvWithDeprecation("SIGNAL_STATE_SYNC_INTERVAL", "TUNNEL_STATE_SYNC_INTERVAL"); v != "" {
 		if interval, err := strconv.Atoi(v); err == nil {
 			cfg.Tunnel.StateSyncInterval = interval
@@ -247,7 +236,7 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	// 如果配置文件不存在，检查是否有足够的环境变量启动
 	if !fileLoaded {
 		// 有 Token + Server 即可启动（Server 返回 role 决定行为）
-		if cfg.Agent.AgentToken != "" && cfg.Server.Address != "" {
+		if cfg.Agent.AgentToken != "" && cfg.Agent.Server != "" {
 			// Token 模式：不需要 AgentName，Server 注册时返回
 		} else if cfg.Agent.AgentName != "" {
 			// 传统 Agent 模式：需要 AgentName

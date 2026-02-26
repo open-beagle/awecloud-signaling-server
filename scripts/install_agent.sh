@@ -252,10 +252,7 @@ generate_config() {
 name = "${AGENT_NAME}"
 token = "${AGENT_TOKEN}"
 device = "${DEVICE_NAME}"
-
-# Server 连接配置
-[server]
-address = "${SERVER_ADDRESS}"
+server = "${SERVER_ADDRESS}"
 
 # Tunnel 配置
 [tunnel]

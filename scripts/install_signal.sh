@@ -103,19 +103,39 @@ if [ -z "$SIGNAL_TOKEN" ] || [ -z "$SIGNAL_SERVER" ]; then
   exit 0
 fi
 
-# === 6. 启动 Agent ===
+# === 6. 生成本地配置文件 ===
+CONFIG_FILE="$DATA_DIR/agent.toml"
 SIGNAL_STATE_DIR="$DATA_DIR/tunnel"
 mkdir -p "$SIGNAL_STATE_DIR"
 
-# 构建环境变量参数（确保传递给 sudo）
-ENV_VARS="SIGNAL_TOKEN=$SIGNAL_TOKEN SIGNAL_SERVER=$SIGNAL_SERVER SIGNAL_STATE_DIR=$SIGNAL_STATE_DIR"
-if [ -n "$SIGNAL_LOG_LEVEL" ]; then
-  ENV_VARS="$ENV_VARS SIGNAL_LOG_LEVEL=$SIGNAL_LOG_LEVEL"
-fi
+LOG_LEVEL="${SIGNAL_LOG_LEVEL:-info}"
 
+cat > "$CONFIG_FILE" <<EOF
+# AWECloud Signaling Agent 配置文件（CloudIDE 自动生成）
+
+[agent]
+token = "$SIGNAL_TOKEN"
+server = "$SIGNAL_SERVER"
+
+[tunnel]
+state_dir = "$SIGNAL_STATE_DIR"
+enable_ssh = true
+
+[cloudide]
+socks = false
+socks_addr = "127.0.0.1:1080"
+dial_socket = "/tmp/signaling.sock"
+
+[log]
+level = "$LOG_LEVEL"
+EOF
+
+echo "[配置] 已生成: $CONFIG_FILE"
+
+# === 7. 启动 Agent ===
 echo "[启动] Server: $SIGNAL_SERVER"
 echo "[启动] Token: ${SIGNAL_TOKEN:0:16}..."
-nohup sudo env $ENV_VARS "$BIN_DIR/signal_agent" > "$LOG_DIR/agent.log" 2>&1 &
+nohup sudo "$BIN_DIR/signal_agent" -c "$CONFIG_FILE" > "$LOG_DIR/agent.log" 2>&1 &
 AGENT_PID=$!
 
 sleep 3

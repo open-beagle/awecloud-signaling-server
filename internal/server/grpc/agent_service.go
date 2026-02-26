@@ -591,7 +591,7 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 
 	// 处理已连接的 Endpoint 上报
 	if len(req.ConnectedEndpoints) > 0 {
-		s.handleConnectedEndpoints(ctx, agentID, req.ConnectedEndpoints)
+		s.handleConnectedEndpoints(ctx, agentID, node.ID, req.ConnectedEndpoints)
 	}
 
 	// 处理操作审计记录上报
@@ -1193,7 +1193,8 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 // 一个 Endpoint 节点对应统一 endpoint 表中的一行，各能力通过字段开关控制
 // 按 (user_id, name) 唯一 upsert，不在列表中的标记为 offline
 // 接收并存储 Endpoint 上报的 SSH 用户列表
-func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agentID uint64, endpoints []*pb.ConnectedEndpoint) {
+// nodeID: Endpoint 连接到的 Agent Node ID，用于填充 domain_registry.node_id
+func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agentID uint64, nodeID uint64, endpoints []*pb.ConnectedEndpoint) {
 	// 收集本次上报的 Endpoint 名称
 	reportedNames := make(map[string]bool)
 	now := time.Now()
@@ -1208,6 +1209,28 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 			LastHeartbeat: now,
 		})
 		logger.Debugf("更新 Endpoint 内存缓存: endpoint_name=%s, user_id=%d", ep.Name, agentID)
+
+		// 填充 domain_registry.node_id（如果 Endpoint 已有域名记录但 node_id=0）
+		// 查询该 Endpoint 的所有域名记录
+		var domains []model.DomainRegistry
+		if err := db.DB.WithContext(ctx).Where("endpoint_id = ? AND user_id = ? AND node_id = ?", ep.Name, agentID, 0).Find(&domains).Error; err == nil && len(domains) > 0 {
+			// 查询 Agent Node 的 Tailscale IP
+			var agentNode model.Node
+			if err := db.DB.WithContext(ctx).First(&agentNode, nodeID).Error; err == nil {
+				// 更新所有域名记录的 node_id 和 target_ip
+				if err := db.DB.WithContext(ctx).Model(&model.DomainRegistry{}).
+					Where("endpoint_id = ? AND user_id = ? AND node_id = ?", ep.Name, agentID, 0).
+					Updates(map[string]any{
+						"node_id":   nodeID,
+						"target_ip": agentNode.IP,
+					}).Error; err == nil {
+					logger.Infof("填充 Endpoint 域名记录: endpoint=%s, node_id=%d, target_ip=%s, count=%d",
+						ep.Name, nodeID, agentNode.IP, len(domains))
+				} else {
+					logger.Errorf("填充 Endpoint 域名记录失败: endpoint=%s, err=%v", ep.Name, err)
+				}
+			}
+		}
 
 		// upsert 统一 endpoint 表
 		var existing model.Endpoint

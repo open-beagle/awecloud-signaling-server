@@ -156,9 +156,9 @@ sudo pkill -f signal_agent
 # 编译 Agent
 BUILD_VERSION=$(cat version) bash scripts/build.sh agent
 
-# 启动 Agent（使用环境变量）
+# 启动 Agent（使用本地配置文件）
 mkdir -p $HOME/.local/share/signal/logs $HOME/.local/share/signal/tunnel
-nohup sudo env SIGNAL_TOKEN=$SIGNAL_TOKEN SIGNAL_SERVER=$SIGNAL_SERVER SIGNAL_STATE_DIR=$HOME/.local/share/signal/tunnel SIGNAL_LOG_LEVEL=debug ./bin/signal_agent > $HOME/.local/share/signal/logs/agent.log 2>&1 &
+SIGNAL_TOKEN=$SIGNAL_TOKEN SIGNAL_SERVER=$SIGNAL_SERVER SIGNAL_LOG_LEVEL=debug bash scripts/install_signal.sh
 
 # 查看日志
 tail -f $HOME/.local/share/signal/logs/agent.log

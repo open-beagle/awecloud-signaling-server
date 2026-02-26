@@ -21,7 +21,10 @@ const (
 
 // DomainRegistry 域名注册表
 // 记录域名到 Node/Endpoint 的映射关系
-// 同一域名可有多条记录（不同 node_id），支持负载均衡
+// 唯一约束：
+// - (domain, node_id) 当 node_id > 0 且 endpoint_id = '' 时唯一
+// - (domain, endpoint_id) 当 endpoint_id != '' 时唯一
+// 注意：GORM 不支持部分唯一索引，需要在数据库迁移中手动创建
 type DomainRegistry struct {
 	ID           int64        `gorm:"primaryKey" json:"id"`
 	Domain       string       `gorm:"size:255;not null;index" json:"domain"`           // 完整域名（如 beagle-242.beijing.beagle）

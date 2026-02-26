@@ -89,7 +89,9 @@ func (m *LocalProxyManager) UpdateProxies() error {
 		var listenPort int32
 		switch domain.Type {
 		case "ssh":
-			listenPort = 22 // SSH 标准端口
+			// SSH 类型通过 ProxyCommand + DialSocket 连接，不需要本地代理
+			// 且 22 端口通常被系统 sshd 占用（监听 0.0.0.0:22），会导致绑定失败
+			continue
 		case "k8sapi":
 			listenPort = 6443 // K8S API Server 标准端口
 		case "k8ssvc":

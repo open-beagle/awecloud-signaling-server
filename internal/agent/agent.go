@@ -922,13 +922,16 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 	}
 
 	// 2. Agent 端口映射服务域名：从 ProxyManager 获取运行中的服务
+	// 注意：这部分代码已废弃，Agent 端口映射服务已被 K8S Service 发现机制替代
+	// 保留此代码仅为兼容旧配置，新部署应使用 K8S Service 发现（第 4 部分）
 	if a.proxyManager != nil {
 		for name, running := range a.proxyManager.GetStatus() {
 			if running {
 				registrations = append(registrations, &pb.DomainRegistration{
-					Domain:   name + "." + a.config.Agent.AgentName + a.domainSuffix,
-					Type:     "k8ssvc",
-					TargetIp: agentIP,
+					Domain:     name + "." + a.config.Agent.AgentName + a.domainSuffix,
+					Type:       "k8ssvc",
+					TargetIp:   agentIP,
+					TargetPort: int32(a.config.SVC.ListenPortBase), // Agent SVCProxy gRPC 端口（默认 50051）
 				})
 			}
 		}
@@ -998,37 +1001,6 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 			})
 		}
 	}
-
-	// 6. Endpoint K8SAPI 域名：{endpoint-name}.{agent-name}{domain_suffix}:分配端口
-	// 注意：Endpoint 不创建 K8S API 域名，K8S API 域名只属于 Agent Node
-	// Endpoint 的 K8S API 访问通过 Endpoint 自身的能力配置和端口分配实现
-	// 这里注释掉，避免创建错误的域名格式
-	/*
-		if a.endpointServer != nil && a.endpointK8SAPIProxy != nil && a.tsManager != nil && a.tsManager.IsConnected() {
-			for _, ep := range a.endpointServer.GetConnectedEndpointDetails() {
-				hasK8SAPI := false
-				for _, cap := range ep.Capabilities {
-					if cap.Type == "k8sapi" {
-						hasK8SAPI = true
-						break
-					}
-				}
-				if !hasK8SAPI {
-					continue
-				}
-
-				port := a.endpointK8SAPIProxy.AllocatePort(ep.Name)
-
-				registrations = append(registrations, &pb.DomainRegistration{
-					Domain:     "kubernetes." + ep.Name + "." + a.config.Agent.AgentName + a.domainSuffix,
-					Type:       "k8sapi",
-					TargetIp:   agentIP,
-					TargetPort: int32(port),
-					EndpointId: ep.Name,
-				})
-			}
-		}
-	*/
 
 	// 7. Endpoint K8SService 域名：{service}.{namespace}.{endpoint-name}.{agent-name}{domain_suffix}
 	// Endpoint K8SService 通过 SVCProxy endpoint_name 字段路由，不需要独立端口

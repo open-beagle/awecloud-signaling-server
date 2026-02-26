@@ -86,7 +86,18 @@ func (a *EndpointAPI) ListEndpoints(c *gin.Context) {
 	result := make([]EndpointListItem, len(endpoints))
 	for i, ep := range endpoints {
 		agentName := ""
-		if ep.User != nil {
+		// 通过 domain_registry 查询 Endpoint 连接的 Node
+		var domain model.DomainRegistry
+		if err := db.DB.WithContext(ctx).Where("endpoint_id = ? AND user_id = ?", ep.Name, ep.UserID).
+			Order("created_at DESC").First(&domain).Error; err == nil && domain.NodeID > 0 {
+			// 查询 Node 名称
+			var node model.Node
+			if err := db.DB.WithContext(ctx).First(&node, domain.NodeID).Error; err == nil {
+				agentName = node.Name
+			}
+		}
+		// 如果没有找到 Node，回退到 User 名称
+		if agentName == "" && ep.User != nil {
 			agentName = ep.User.Name
 		}
 		result[i] = EndpointListItem{
@@ -145,7 +156,18 @@ func (a *EndpointAPI) GetEndpointDetail(c *gin.Context) {
 		ep.ID, ep.Name, ep.SSHEnabled, ep.K8SAPIEnabled, ep.K8SServiceEnabled)
 
 	agentName := ""
-	if ep.User != nil {
+	// 通过 domain_registry 查询 Endpoint 连接的 Node
+	var domain model.DomainRegistry
+	if err := db.DB.WithContext(ctx).Where("endpoint_id = ? AND user_id = ?", ep.Name, ep.UserID).
+		Order("created_at DESC").First(&domain).Error; err == nil && domain.NodeID > 0 {
+		// 查询 Node 名称
+		var node model.Node
+		if err := db.DB.WithContext(ctx).First(&node, domain.NodeID).Error; err == nil {
+			agentName = node.Name
+		}
+	}
+	// 如果没有找到 Node，回退到 User 名称
+	if agentName == "" && ep.User != nil {
 		agentName = ep.User.Name
 	}
 
