@@ -2013,8 +2013,11 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 			TargetPort:  int32(record.TargetPort),
 			Namespace:   record.Namespace,
 			ServiceName: record.ServiceName,
-			Status:      "online", // 简化状态判断，后续可以通过 NodeStatusCache 优化
+			Status:      s.getDomainStatus(ctx, &record), // 使用统一的状态判断逻辑
 		}
+
+		// 填充 cluster_name（从 domain 中提取 region）
+		domainInfo.ClusterName = s.extractRegionFromDomain(record.Domain)
 
 		domains = append(domains, domainInfo)
 	}

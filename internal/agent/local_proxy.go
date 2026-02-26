@@ -2,8 +2,14 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"sync"
 	"time"
@@ -220,8 +226,14 @@ func (m *LocalProxyManager) handleConn(clientConn net.Conn, domain *pb.DomainInf
 	logger.Infof("[LocalProxy] 连接建立: %s -> %s (%s)",
 		clientConn.RemoteAddr(), targetAddr, domain.Type)
 
-	// 双向桥接数据
-	m.bridgeConns(clientConn, targetConn, domain.Domain)
+	// K8S API 类型需要 TLS 包装
+	// Agent 返回 HTTP，Desktop.Pod 本地代理包装成 HTTPS
+	if domain.Type == "k8sapi" {
+		m.handleK8SAPIConn(clientConn, targetConn, domain.Domain)
+	} else {
+		// 其他类型直接桥接
+		m.bridgeConns(clientConn, targetConn, domain.Domain)
+	}
 }
 
 // bridgeConns 双向桥接两个连接
@@ -272,4 +284,71 @@ func (m *LocalProxyManager) GetStatus() map[string]string {
 		status[addr] = fmt.Sprintf("%s (%s)", domain.Domain, domain.Type)
 	}
 	return status
+}
+
+// handleK8SAPIConn 处理 K8S API 连接（TLS 包装）
+// Agent 返回 HTTP，Desktop.Pod 本地代理包装成 HTTPS
+func (m *LocalProxyManager) handleK8SAPIConn(clientConn net.Conn, targetConn net.Conn, domain string) {
+	// 生成自签名证书
+	cert, err := generateSelfSignedCert(domain)
+	if err != nil {
+		logger.Errorf("[LocalProxy] %s: 生成自签名证书失败: %v", domain, err)
+		return
+	}
+
+	// 创建 TLS 配置
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	// 将客户端连接包装为 TLS 服务器
+	tlsConn := tls.Server(clientConn, tlsConfig)
+
+	// TLS 握手
+	if err := tlsConn.Handshake(); err != nil {
+		logger.Warnf("[LocalProxy] %s: TLS 握手失败: %v", domain, err)
+		return
+	}
+
+	logger.Debugf("[LocalProxy] %s: TLS 握手成功", domain)
+
+	// 双向桥接：TLS 客户端 <-> HTTP 后端
+	m.bridgeConns(tlsConn, targetConn, domain)
+}
+
+// generateSelfSignedCert 生成自签名证书
+func generateSelfSignedCert(domain string) (tls.Certificate, error) {
+	// 生成 RSA 私钥
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("生成私钥失败: %w", err)
+	}
+
+	// 证书模板
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			Organization: []string{"AWECloud Signaling"},
+			CommonName:   domain,
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // 1 年有效期
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{domain},
+	}
+
+	// 自签名证书
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("创建证书失败: %w", err)
+	}
+
+	// 构造 tls.Certificate
+	return tls.Certificate{
+		Certificate: [][]byte{certDER},
+		PrivateKey:  priv,
+	}, nil
 }

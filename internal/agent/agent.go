@@ -1043,7 +1043,12 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 
 // startK8SAPIProxy 启动 K8S API 代理
 func (a *Agent) startK8SAPIProxy() error {
-	proxy, err := NewK8SAPIProxy(&a.config.K8S, a.tsManager, a.permCache, a.auditCollector, a.ctx)
+	listenPort := uint16(a.config.K8S.ListenPort)
+	if listenPort == 0 {
+		listenPort = 50050 // 默认端口
+	}
+
+	proxy, err := NewK8SAPIProxy(listenPort, a.tsManager, a.permCache, a.auditCollector, a.ctx)
 	if err != nil {
 		return fmt.Errorf("创建 K8S API 代理失败: %w", err)
 	}
@@ -1053,7 +1058,7 @@ func (a *Agent) startK8SAPIProxy() error {
 	}
 
 	a.k8sAPIProxy = proxy
-	logger.Infof("K8S API 代理已启用: 端口 %d", a.config.K8S.ListenPort)
+	logger.Infof("K8S API 代理已启用: 端口 %d", listenPort)
 	return nil
 }
 
