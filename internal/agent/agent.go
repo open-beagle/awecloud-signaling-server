@@ -296,7 +296,7 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 	if dialSocketPath == "" {
 		dialSocketPath = "/tmp/signaling.sock"
 	}
-	dialSocket := NewDialSocketServer(dialSocketPath, a.tsManager)
+	dialSocket := NewDialSocketServer(dialSocketPath, a.tsManager, domainCache)
 	if err := dialSocket.Start(); err != nil {
 		logger.Warnf("启动 Dial Socket 失败: %v", err)
 	} else {

@@ -16,22 +16,24 @@ import (
 // 供 Desktop.Pod（CloudIDE）模式下的 dial 子命令使用
 // 监听 Unix Socket，接受连接后通过 tsnet 拨号到目标地址，桥接数据
 type DialSocketServer struct {
-	socketPath string
-	tsManager  *TailscaleManager
-	listener   net.Listener
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
+	socketPath  string
+	tsManager   *TailscaleManager
+	domainCache *DomainCache // 域名缓存，用于将魔法 DNS 域名解析为 Tailscale IP
+	listener    net.Listener
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
 }
 
 // NewDialSocketServer 创建 DialSocketServer
-func NewDialSocketServer(socketPath string, tsManager *TailscaleManager) *DialSocketServer {
+func NewDialSocketServer(socketPath string, tsManager *TailscaleManager, domainCache *DomainCache) *DialSocketServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &DialSocketServer{
-		socketPath: socketPath,
-		tsManager:  tsManager,
-		ctx:        ctx,
-		cancel:     cancel,
+		socketPath:  socketPath,
+		tsManager:   tsManager,
+		domainCache: domainCache,
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 }
 
@@ -112,23 +114,30 @@ func (s *DialSocketServer) handleConn(conn net.Conn) {
 	}
 	targetAddr := string(addrBuf)
 
-	// 3. 通过 tsnet 拨号到目标地址
-	targetConn, err := s.tsManager.Dial(s.ctx, "tcp", targetAddr)
+	// 3. 解析域名为 Tailscale IP
+	// tsnet.Dial 的 DNS 解析会走系统 DNS（被我们劫持到 127.0.0.1:53），
+	// 返回 VIP（127.1.0.x），导致连接到本机而不是远端 Tailscale 节点。
+	// 因此需要从 domainCache 查找域名对应的 target_ip（Tailscale IP），
+	// 用 Tailscale IP 替换域名后再通过 tsnet.Dial 连接。
+	dialAddr := s.resolveDialAddr(targetAddr)
+
+	// 4. 通过 tsnet 拨号到目标地址
+	targetConn, err := s.tsManager.Dial(s.ctx, "tcp", dialAddr)
 	if err != nil {
-		logger.Warnf("DialSocket tsnet 拨号失败 (%s): %v", targetAddr, err)
+		logger.Warnf("DialSocket tsnet 拨号失败 (%s -> %s): %v", targetAddr, dialAddr, err)
 		conn.Write([]byte{0x01}) // 失败
 		return
 	}
 	defer targetConn.Close()
 
-	// 4. 回复成功状态码
+	// 5. 回复成功状态码
 	if _, err := conn.Write([]byte{0x00}); err != nil {
 		return
 	}
 
-	logger.Debugf("DialSocket 连接建立: %s", targetAddr)
+	logger.Infof("DialSocket 连接建立: %s -> %s", targetAddr, dialAddr)
 
-	// 5. 双向桥接
+	// 6. 双向桥接
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -143,4 +152,39 @@ func (s *DialSocketServer) handleConn(conn net.Conn) {
 	}()
 
 	wg.Wait()
+}
+
+// resolveDialAddr 将 dial 目标地址中的魔法 DNS 域名解析为 Tailscale IP
+// 输入: "beagle-242.beijing.beagle:22"
+// 输出: "100.64.0.19:22"（从 domainCache 查找 target_ip）
+// 如果域名不在缓存中，返回原始地址（兜底，让 tsnet 自行解析）
+func (s *DialSocketServer) resolveDialAddr(targetAddr string) string {
+	if s.domainCache == nil {
+		return targetAddr
+	}
+
+	// 分离 host 和 port
+	host, port, err := net.SplitHostPort(targetAddr)
+	if err != nil {
+		return targetAddr
+	}
+
+	// 从域名缓存查找
+	domainInfo, ok := s.domainCache.Get(host)
+	if !ok || domainInfo.TargetIp == "" {
+		logger.Debugf("DialSocket 域名未在缓存中: %s，使用原始地址", host)
+		return targetAddr
+	}
+
+	// 使用 domainInfo 中的 target_ip 和 target_port
+	// 对于 SSH 类型，保持用户请求的端口（22），因为 Tailscale SSH 监听在 22 端口
+	// 对于其他类型，使用 target_port（如 K8SAPI 的 50050、K8SSVC 的 50051）
+	resolvedPort := port
+	if domainInfo.Type != "ssh" && domainInfo.TargetPort > 0 {
+		resolvedPort = fmt.Sprintf("%d", domainInfo.TargetPort)
+	}
+
+	resolved := net.JoinHostPort(domainInfo.TargetIp, resolvedPort)
+	logger.Infof("DialSocket 域名解析: %s -> %s (type=%s)", targetAddr, resolved, domainInfo.Type)
+	return resolved
 }

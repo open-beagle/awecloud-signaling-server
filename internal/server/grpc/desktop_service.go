@@ -2004,21 +2004,16 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 	// 构建响应
 	var domains []*pb.DomainInfo
 	for _, record := range domainRecords {
-		// 查询 Agent 的 Tailscale IP
-		var node model.Node
-		if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", record.UserID, model.NodeTypeAgent).First(&node).Error; err != nil {
-			logger.Warnf("域名 %s 的 Agent 节点不存在", record.Domain)
-			continue
-		}
-
+		// 使用 DomainRegistry 中的 target_ip（已经是正确的 Tailscale IP）
+		// 不再查询 Node 表，避免多节点时选择错误
 		domainInfo := &pb.DomainInfo{
 			Domain:      record.Domain,
 			Type:        string(record.Type),
-			TargetIp:    node.IP,
+			TargetIp:    record.TargetIP, // 直接使用 DomainRegistry.target_ip
 			TargetPort:  int32(record.TargetPort),
 			Namespace:   record.Namespace,
 			ServiceName: record.ServiceName,
-			Status:      getNodeStatus(&node),
+			Status:      "online", // 简化状态判断，后续可以通过 NodeStatusCache 优化
 		}
 
 		domains = append(domains, domainInfo)
