@@ -437,6 +437,7 @@ export default {
     user: '所属用户',
     targetIP: '目标 IP',
     targetPort: '目标端口',
+    sshUsers: 'SSH 用户',
     namespace: '命名空间',
     serviceName: '服务名称',
     updatedAt: '更新时间',

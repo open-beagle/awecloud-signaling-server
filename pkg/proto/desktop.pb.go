@@ -2834,6 +2834,7 @@ type DomainInfo struct {
 	ServiceName   string                 `protobuf:"bytes,7,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`            // 服务名称（仅 k8ssvc）
 	Status        string                 `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"`                                         // 状态：online/offline
 	ServicePorts  []int32                `protobuf:"varint,9,rep,packed,name=service_ports,json=servicePorts,proto3" json:"service_ports,omitempty"` // K8S Service 端口列表（仅 k8ssvc，JSON 数组解析后的值）
+	SshUsers      []string               `protobuf:"bytes,10,rep,name=ssh_users,json=sshUsers,proto3" json:"ssh_users,omitempty"`                    // SSH 用户列表（仅 ssh 类型）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2927,6 +2928,13 @@ func (x *DomainInfo) GetStatus() string {
 func (x *DomainInfo) GetServicePorts() []int32 {
 	if x != nil {
 		return x.ServicePorts
+	}
+	return nil
+}
+
+func (x *DomainInfo) GetSshUsers() []string {
+	if x != nil {
+		return x.SshUsers
 	}
 	return nil
 }
@@ -3209,7 +3217,7 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"endpointId\"Q\n" +
 	"\x15GetDomainListResponse\x128\n" +
 	"\adomains\x18\x01 \x03(\v2\x1e.awecloud.signaling.DomainItemR\adomains\"\x14\n" +
-	"\x12ListDomainsRequest\"\x97\x02\n" +
+	"\x12ListDomainsRequest\"\xb4\x02\n" +
 	"\n" +
 	"DomainInfo\x12\x16\n" +
 	"\x06domain\x18\x01 \x01(\tR\x06domain\x12\x12\n" +
@@ -3221,7 +3229,9 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\tnamespace\x18\x06 \x01(\tR\tnamespace\x12!\n" +
 	"\fservice_name\x18\a \x01(\tR\vserviceName\x12\x16\n" +
 	"\x06status\x18\b \x01(\tR\x06status\x12#\n" +
-	"\rservice_ports\x18\t \x03(\x05R\fservicePorts\"O\n" +
+	"\rservice_ports\x18\t \x03(\x05R\fservicePorts\x12\x1b\n" +
+	"\tssh_users\x18\n" +
+	" \x03(\tR\bsshUsers\"O\n" +
 	"\x13ListDomainsResponse\x128\n" +
 	"\adomains\x18\x01 \x03(\v2\x1e.awecloud.signaling.DomainInfoR\adomains*\xcc\x01\n" +
 	"\x0fDesktopDataType\x12!\n" +

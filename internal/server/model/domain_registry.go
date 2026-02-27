@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // DomainType 域名能力类型
 type DomainType string
@@ -40,6 +43,7 @@ type DomainRegistry struct {
 	SshUsers     string       `gorm:"type:text" json:"ssh_users,omitempty"`            // SSH 用户列表（ssh 类型时，JSON 数组，如 "[\"root\",\"deploy\"]"）
 	Status       DomainStatus `gorm:"size:20;not null;default:'online'" json:"status"` // online/offline
 	CreatedAt    time.Time    `json:"created_at"`
+	UpdatedAt    time.Time    `json:"updated_at"`
 
 	// 关联
 	User     *User     `gorm:"foreignKey:UserID" json:"user,omitempty"`
@@ -49,4 +53,28 @@ type DomainRegistry struct {
 
 func (DomainRegistry) TableName() string {
 	return "domain_registry"
+}
+
+// GetSSHUsers 解析 SSH 用户列表（从 JSON 字符串）
+func (d *DomainRegistry) GetSSHUsers() []string {
+	if d.SshUsers == "" || d.SshUsers == "[]" {
+		return nil
+	}
+	var users []string
+	if err := json.Unmarshal([]byte(d.SshUsers), &users); err != nil {
+		return nil
+	}
+	return users
+}
+
+// GetServicePorts 解析 Service 端口列表（从 JSON 字符串）
+func (d *DomainRegistry) GetServicePorts() []int32 {
+	if d.ServicePorts == "" || d.ServicePorts == "[]" {
+		return nil
+	}
+	var ports []int32
+	if err := json.Unmarshal([]byte(d.ServicePorts), &ports); err != nil {
+		return nil
+	}
+	return ports
 }

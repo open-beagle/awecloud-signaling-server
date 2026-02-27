@@ -22,6 +22,7 @@ export interface DomainItem {
   target_port?: number
   namespace?: string
   service_name?: string
+  ssh_users?: string[]    // SSH 用户列表（仅 ssh 类型）
   status: DomainStatus
   created_at: string
   updated_at: string

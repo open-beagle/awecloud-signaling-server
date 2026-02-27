@@ -40,8 +40,11 @@ type DomainListItem struct {
 	TargetPort   int                `json:"target_port,omitempty"`
 	Namespace    string             `json:"namespace,omitempty"`
 	ServiceName  string             `json:"service_name,omitempty"`
+	SSHUsers     []string           `json:"ssh_users,omitempty"`      // SSH 用户列表（仅 ssh 类型）
+	ServicePorts []int32            `json:"service_ports,omitempty"`  // Service 端口列表（仅 k8ssvc 类型）
 	Status       model.DomainStatus `json:"status"`
 	CreatedAt    string             `json:"created_at"`
+	UpdatedAt    string             `json:"updated_at"`
 }
 
 // List 获取域名列表
@@ -124,8 +127,11 @@ func (a *DomainAPI) List(c *gin.Context) {
 			TargetPort:   d.TargetPort,
 			Namespace:    d.Namespace,
 			ServiceName:  d.ServiceName,
+			SSHUsers:     d.GetSSHUsers(),      // 解析 SSH 用户列表
+			ServicePorts: d.GetServicePorts(),  // 解析 Service 端口列表
 			Status:       status,
 			CreatedAt:    d.CreatedAt.Format("2006-01-02 15:04:05"),
+			UpdatedAt:    d.UpdatedAt.Format("2006-01-02 15:04:05"),
 		}
 		if d.User != nil {
 			item.UserName = d.User.Name

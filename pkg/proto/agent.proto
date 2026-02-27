@@ -165,6 +165,7 @@ message DomainRegistration {
   string endpoint_id = 7; // 关联的 Endpoint ID（Endpoint 类型时）
   uint64 node_id = 8; // 关联的 Node ID（Node 注册时）
   repeated int32 service_ports = 9; // K8S Service 端口列表（k8ssvc 类型时）
+  repeated string ssh_users = 10; // SSH 用户列表（ssh 类型时）
 }
 
 // ServiceConfig 端口映射配置

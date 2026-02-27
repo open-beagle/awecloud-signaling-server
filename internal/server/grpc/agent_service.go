@@ -1147,6 +1147,14 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 			}
 		}
 
+		// 将 SshUsers 序列化为 JSON 数组
+		sshUsersJSON := "[]"
+		if len(reg.SshUsers) > 0 {
+			if data, err := json.Marshal(reg.SshUsers); err == nil {
+				sshUsersJSON = string(data)
+			}
+		}
+
 		record := model.DomainRegistry{
 			Domain:       reg.Domain,
 			Type:         model.DomainType(reg.Type),
@@ -1158,6 +1166,7 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 			Namespace:    reg.Namespace,
 			ServiceName:  reg.ServiceName,
 			ServicePorts: servicePortsJSON,
+			SshUsers:     sshUsersJSON,
 			Status:       model.DomainStatusOnline,
 		}
 
@@ -1178,6 +1187,7 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 				"namespace":     reg.Namespace,
 				"service_name":  reg.ServiceName,
 				"service_ports": servicePortsJSON,
+				"ssh_users":     sshUsersJSON,
 				"status":        model.DomainStatusOnline,
 			}
 			// 只有当上报的 node_id 不为 0 时才更新（避免覆盖已有的正确值）

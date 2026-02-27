@@ -475,6 +475,24 @@ func (s *DesktopServiceServer) GetAuthorizedHosts(ctx context.Context, req *pb.G
 			continue
 		}
 
+		// 查询 Agent 的 SSH 域名，获取实际可用的 SSH 用户列表
+		var sshDomain model.DomainRegistry
+		availableUsers := []string{} // Agent 实际可用的 SSH 用户
+		if err := db.DB.WithContext(ctx).
+			Where("user_id = ? AND type = ? AND status = ?", agentID, model.DomainTypeSSH, model.DomainStatusOnline).
+			First(&sshDomain).Error; err == nil {
+			// 解析 SSH 用户列表
+			availableUsers = sshDomain.GetSSHUsers()
+		}
+
+		// 求交集：ACL 授权的用户 ∩ Agent 实际可用的用户
+		authorizedUsers := intersectStrings(sshUsers, availableUsers)
+		if len(authorizedUsers) == 0 {
+			// 如果交集为空，跳过这个 Agent（没有可用的 SSH 用户）
+			logger.Debugf("Agent %d: ACL 授权用户 %v 与实际可用用户 %v 无交集，跳过", agentID, sshUsers, availableUsers)
+			continue
+		}
+
 		// 检查 Agent 是否在线
 		agentOnline := false
 		if s.agentService != nil {
@@ -502,7 +520,7 @@ func (s *DesktopServiceServer) GetAuthorizedHosts(ctx context.Context, req *pb.G
 			HostId:   fmt.Sprintf("%d", agentID),
 			HostName: hostName,
 			TunnelIp: tunnelIP,
-			SshUsers: sshUsers,
+			SshUsers: authorizedUsers, // 使用交集后的用户列表
 			Status:   "offline",
 			LastSeen: lastSeen,
 		}
@@ -529,6 +547,31 @@ func appendUniqueStrings(slice []string, items ...string) []string {
 		}
 	}
 	return slice
+}
+
+// intersectStrings 计算两个字符串切片的交集
+func intersectStrings(a, b []string) []string {
+	if len(a) == 0 || len(b) == 0 {
+		return []string{}
+	}
+	
+	// 将 b 转换为 map 以提高查找效率
+	bMap := make(map[string]bool)
+	for _, s := range b {
+		bMap[s] = true
+	}
+	
+	// 查找交集
+	result := []string{}
+	seen := make(map[string]bool)
+	for _, s := range a {
+		if bMap[s] && !seen[s] {
+			result = append(result, s)
+			seen[s] = true
+		}
+	}
+	
+	return result
 }
 
 // GetHostServices 获取指定主机的服务列表
@@ -1261,6 +1304,24 @@ func (s *DesktopServiceServer) buildHostsData(ctx context.Context, userID uint64
 			continue
 		}
 
+		// 查询 Agent 的 SSH 域名，获取实际可用的 SSH 用户列表
+		var sshDomain model.DomainRegistry
+		availableUsers := []string{} // Agent 实际可用的 SSH 用户
+		if err := db.DB.WithContext(ctx).
+			Where("user_id = ? AND type = ? AND status = ?", agentID, model.DomainTypeSSH, model.DomainStatusOnline).
+			First(&sshDomain).Error; err == nil {
+			// 解析 SSH 用户列表
+			availableUsers = sshDomain.GetSSHUsers()
+		}
+
+		// 求交集：ACL 授权的用户 ∩ Agent 实际可用的用户
+		authorizedUsers := intersectStrings(sshUsers, availableUsers)
+		if len(authorizedUsers) == 0 {
+			// 如果交集为空，跳过这个 Agent（没有可用的 SSH 用户）
+			logger.Debugf("buildHostsData: Agent %d: ACL 授权用户 %v 与实际可用用户 %v 无交集，跳过", agentID, sshUsers, availableUsers)
+			continue
+		}
+
 		agentOnline := false
 		if s.agentService != nil {
 			agentOnline = s.agentService.IsAgentOnline(agentID)
@@ -1283,7 +1344,7 @@ func (s *DesktopServiceServer) buildHostsData(ctx context.Context, userID uint64
 
 		host := &pb.AuthorizedHost{
 			HostId: fmt.Sprintf("%d", agentID), HostName: hostName,
-			TunnelIp: tunnelIP, SshUsers: sshUsers,
+			TunnelIp: tunnelIP, SshUsers: authorizedUsers, // 使用交集后的用户列表
 			Status: "offline", LastSeen: lastSeen,
 		}
 		if agentOnline {
@@ -2036,6 +2097,17 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 			}
 		} else if record.Type == model.DomainTypeK8SSVC {
 			logger.Warnf("ListDomains: K8SSVC 域名 %s service_ports 为空（DB值='%s'）", record.Domain, record.ServicePorts)
+		}
+
+		// 解析 ssh_users（仅 ssh 类型）
+		if record.Type == model.DomainTypeSSH && record.SshUsers != "" {
+			var users []string
+			if err := json.Unmarshal([]byte(record.SshUsers), &users); err == nil {
+				domainInfo.SshUsers = users
+				logger.Infof("ListDomains: domain=%s ssh_users=%v", record.Domain, users)
+			} else {
+				logger.Warnf("解析 ssh_users 失败: domain=%s, err=%v", record.Domain, err)
+			}
 		}
 
 		domains = append(domains, domainInfo)

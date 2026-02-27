@@ -70,6 +70,9 @@ type Agent struct {
 	// 域名后缀（从 Server 心跳响应获取）
 	domainSuffix string
 
+	// 运行模式标识
+	isClientMode bool // true = Client 模式（CloudIDE 等），false = Agent 模式
+
 	// 上下文
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -213,6 +216,9 @@ func (a *Agent) Run() error {
 // RunClient 运行 Client 模式（CloudIDE 等场景）
 // 启动 tsnet 连接网络 + SSH + gRPC 心跳（精简版，不需要 ProxyManager/VisitorManager）
 func (a *Agent) RunClient(regResult *config.RegisterResult) error {
+	// 标记为 Client 模式
+	a.isClientMode = true
+
 	// 启动健康检查HTTP服务器
 	if err := a.startHealthServer(); err != nil {
 		return fmt.Errorf("启动健康检查服务器失败: %w", err)
@@ -912,12 +918,33 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 	}
 
 	// 1. Agent SSH 域名：{device}.{agent_name}{domain_suffix}（如 beagle-242.beijing.beagle）
-	if a.config.Tunnel.EnableSSH && a.tsManager != nil && a.tsManager.IsConnected() && device != "" {
+	// Client 模式（CloudIDE）默认启用 Tailscale SSH，也需要注册域名
+	if (a.config.Tunnel.EnableSSH || a.isClientMode) && a.tsManager != nil && a.tsManager.IsConnected() && device != "" {
+		// 自动检测系统 SSH 用户
+		sshUsers := detectSystemSSHUsers()
+		if len(sshUsers) == 0 {
+			// 兜底：如果检测失败，使用默认值
+			if a.isClientMode {
+				// Client 模式：使用当前用户 + root
+				currentUser := os.Getenv("USER")
+				if currentUser != "" && currentUser != "root" {
+					sshUsers = []string{currentUser, "root"}
+					logger.Warnf("SSH 用户检测失败，使用默认值: %v", sshUsers)
+				} else {
+					sshUsers = []string{"root"}
+					logger.Warnf("SSH 用户检测失败，使用默认值: root")
+				}
+			} else {
+				sshUsers = []string{"root"}
+				logger.Warnf("SSH 用户检测失败，使用默认值: root")
+			}
+		}
 		registrations = append(registrations, &pb.DomainRegistration{
 			Domain:     device + "." + a.config.Agent.AgentName + a.domainSuffix,
 			Type:       "ssh",
 			TargetIp:   agentIP,
 			TargetPort: 22,
+			SshUsers:   sshUsers,
 		})
 	}
 
@@ -1005,6 +1032,7 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 				TargetIp:   agentIP,
 				TargetPort: int32(port),
 				EndpointId: ep.Name,
+				SshUsers:   ep.SSHUsers, // 从 Endpoint 心跳上报的 SSH 用户列表
 			})
 		}
 	}

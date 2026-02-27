@@ -485,6 +485,7 @@ message DomainInfo {
   string service_name = 7; // 服务名称（仅 k8ssvc）
   string status = 8; // 状态：online/offline
   repeated int32 service_ports = 9; // K8S Service 端口列表（仅 k8ssvc，JSON 数组解析后的值）
+  repeated string ssh_users = 10; // SSH 用户列表（仅 ssh 类型）
 }
 
 // ListDomainsResponse 列出域名响应

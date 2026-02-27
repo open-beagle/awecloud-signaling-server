@@ -437,6 +437,7 @@ export default {
     user: 'User',
     targetIP: 'Target IP',
     targetPort: 'Target Port',
+    sshUsers: 'SSH Users',
     namespace: 'Namespace',
     serviceName: 'Service Name',
     updatedAt: 'Updated At',

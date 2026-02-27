@@ -843,6 +843,7 @@ type DomainRegistration struct {
 	EndpointId    string                 `protobuf:"bytes,7,opt,name=endpoint_id,json=endpointId,proto3" json:"endpoint_id,omitempty"`               // 关联的 Endpoint ID（Endpoint 类型时）
 	NodeId        uint64                 `protobuf:"varint,8,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`                          // 关联的 Node ID（Node 注册时）
 	ServicePorts  []int32                `protobuf:"varint,9,rep,packed,name=service_ports,json=servicePorts,proto3" json:"service_ports,omitempty"` // K8S Service 端口列表（k8ssvc 类型时）
+	SshUsers      []string               `protobuf:"bytes,10,rep,name=ssh_users,json=sshUsers,proto3" json:"ssh_users,omitempty"`                    // SSH 用户列表（ssh 类型时）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -936,6 +937,13 @@ func (x *DomainRegistration) GetNodeId() uint64 {
 func (x *DomainRegistration) GetServicePorts() []int32 {
 	if x != nil {
 		return x.ServicePorts
+	}
+	return nil
+}
+
+func (x *DomainRegistration) GetSshUsers() []string {
+	if x != nil {
+		return x.SshUsers
 	}
 	return nil
 }
@@ -2850,7 +2858,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\x11k8sapi_api_server\x18\b \x01(\tR\x0fk8sapiApiServer\x12:\n" +
 	"\x19k8sservice_label_selector\x18\t \x01(\tR\x17k8sserviceLabelSelector\x123\n" +
 	"\x15k8sservice_namespaces\x18\n" +
-	" \x03(\tR\x14k8sserviceNamespaces\"\x9e\x02\n" +
+	" \x03(\tR\x14k8sserviceNamespaces\"\xbb\x02\n" +
 	"\x12DomainRegistration\x12\x16\n" +
 	"\x06domain\x18\x01 \x01(\tR\x06domain\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1b\n" +
@@ -2862,7 +2870,9 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\vendpoint_id\x18\a \x01(\tR\n" +
 	"endpointId\x12\x17\n" +
 	"\anode_id\x18\b \x01(\x04R\x06nodeId\x12#\n" +
-	"\rservice_ports\x18\t \x03(\x05R\fservicePorts\"\x8f\x01\n" +
+	"\rservice_ports\x18\t \x03(\x05R\fservicePorts\x12\x1b\n" +
+	"\tssh_users\x18\n" +
+	" \x03(\tR\bsshUsers\"\x8f\x01\n" +
 	"\rServiceConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1f\n" +

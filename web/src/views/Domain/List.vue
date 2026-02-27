@@ -56,6 +56,17 @@
             {{ row.target_port || '-' }}
           </template>
         </el-table-column>
+        <el-table-column :label="$t('domain.sshUsers')" width="150">
+          <template #default="{ row }">
+            <span v-if="row.type === 'ssh' && row.ssh_users && row.ssh_users.length > 0">
+              <el-tag v-for="user in row.ssh_users" :key="user" size="small" style="margin-right: 4px">
+                {{ user }}
+              </el-tag>
+            </span>
+            <span v-else-if="row.type === 'ssh'">-</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column :label="$t('common.status')" width="100">
           <template #default="{ row }">
             <el-tag :type="row.status === 'online' ? 'success' : 'info'" size="small">
