@@ -767,6 +767,57 @@ Agent 从 tsnet 连接中提取对端身份，不需要 Identity Token：
 向 Endpoint 发送 OpenShell 指令。Endpoint 不需要做身份验证，
 因为 gRPC 连接本身已经过 endpoint_token 认证，Agent 是唯一的指令来源。
 
+## Endpoint 端口静态化
+
+为了保证 Endpoint 重连后端口不变，Endpoint 的 SSH 和 K8SAPI 端口采用静态化设计。
+
+端口分配策略：
+
+- 端口由 Server 在创建 Endpoint 时预分配并存储在 endpoint 表中
+- SSH 端口范围：50053-50152（每个 Endpoint 独立端口）
+- K8SAPI 端口范围：50153-50252（每个 Endpoint 独立端口）
+- 端口一旦分配，除非删除 Endpoint，否则永不改变
+
+Agent 端口管理：
+
+- Agent 从 Server 心跳响应中获取 Endpoint 端口配置（EndpointCapabilityConfig.ssh_port 和 k8sapi_port 字段）
+- Agent 调用 AllocateSpecificPort 方法按指定端口监听 tsnet 虚拟端口
+- Agent 不记录端口状态，完全依赖 Server 下发
+- Endpoint 连接时，Agent 使用 Server 预分配的端口
+
+端口下发流程：
+
+```
+Server 创建 Endpoint
+  ↓
+计算端口（ssh_port = 50053 + count, k8sapi_port = 50153 + count）
+  ↓
+写入 endpoint 表（ssh_port、k8sapi_port 字段）
+  ↓
+Agent 心跳时，Server 查询 endpoint 表，通过 EndpointCapabilityConfig 下发端口
+  ↓
+Agent 收到配置：
+  - 调用 EndpointSSHProxy.AllocateSpecificPort(name, ssh_port)
+  - 调用 EndpointK8SAPIProxy.AllocateSpecificPort(name, k8sapi_port)
+  ↓
+Agent 按指定端口监听 tsnet 虚拟端口
+  ↓
+Endpoint 连接后，Agent 使用预分配的端口转发流量
+```
+
+端口持久化保证：
+
+- Endpoint 重启：Agent 从 Server 获取相同端口配置，使用相同端口监听
+- Agent 重启：Agent 从 Server 获取所有 Endpoint 端口配置，恢复监听
+- Server 重启：端口存储在数据库中，重启后自动恢复
+
+优势：
+
+- 端口固定，Endpoint 重连不影响 Desktop 连接
+- Agent 无状态，完全依赖 Server 配置
+- 数据模型清晰，端口是 Endpoint 的属性
+- 易于维护和调试
+
 ## 权限数据来源
 
 Agent 通过 gRPC 心跳从 Server 获取权限数据：

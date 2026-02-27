@@ -773,12 +773,14 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ?", agentID, false).Find(&allEndpoints).Error; err == nil {
 		logger.Infof("查询到 %d 个 Endpoint 配置 (agent_id=%d)", len(allEndpoints), agentID)
 		for _, ep := range allEndpoints {
-			logger.Infof("Endpoint 配置: name=%s, ssh_enabled=%v, k8sapi_enabled=%v, k8sapi_api_server=%s, k8sservice_enabled=%v",
-				ep.Name, ep.SSHEnabled, ep.K8SAPIEnabled, ep.K8SAPIApiServer, ep.K8SServiceEnabled)
+			logger.Infof("Endpoint 配置: name=%s, ssh_enabled=%v, ssh_port=%d, k8sapi_enabled=%v, k8sapi_port=%d, k8sapi_api_server=%s, k8sservice_enabled=%v",
+				ep.Name, ep.SSHEnabled, ep.SSHPort, ep.K8SAPIEnabled, ep.K8SAPIPort, ep.K8SAPIApiServer, ep.K8SServiceEnabled)
 			resp.EndpointCapabilityConfigs = append(resp.EndpointCapabilityConfigs, &pb.EndpointCapabilityConfig{
 				EndpointName:      ep.Name,
 				SshEnabled:        ep.SSHEnabled,
+				SshPort:           uint32(ep.SSHPort),        // 新增：从 Endpoint 表读取端口
 				K8SapiEnabled:     ep.K8SAPIEnabled,
+				K8SapiPort:        uint32(ep.K8SAPIPort),     // 新增：从 Endpoint 表读取端口
 				K8SapiApiServer:   ep.K8SAPIApiServer,
 				K8SserviceEnabled: ep.K8SServiceEnabled,
 			})

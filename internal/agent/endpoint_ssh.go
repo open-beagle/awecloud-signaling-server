@@ -153,6 +153,31 @@ func (p *EndpointSSHProxy) AllocatePort(endpointName string) uint16 {
 	return port
 }
 
+// AllocateSpecificPort 为 Endpoint 分配指定端口（Server 预分配）
+// 如果端口已被占用（且不是同一个 Endpoint），返回错误
+func (p *EndpointSSHProxy) AllocateSpecificPort(endpointName string, port uint16) error {
+	p.mapMu.Lock()
+	defer p.mapMu.Unlock()
+
+	// 检查端口是否已被其他 Endpoint 占用
+	if existingName, exists := p.portMap[port]; exists && existingName != endpointName {
+		return fmt.Errorf("端口 %d 已被 %s 占用", port, existingName)
+	}
+
+	// 检查该 Endpoint 是否已分配了不同的端口
+	if existingPort, exists := p.nameMap[endpointName]; exists && existingPort != port {
+		// 释放旧端口
+		delete(p.portMap, existingPort)
+		logger.Infof("[EndpointSSH] 释放旧端口: %s ← %d", endpointName, existingPort)
+	}
+
+	// 分配端口
+	p.portMap[port] = endpointName
+	p.nameMap[endpointName] = port
+	logger.Infof("[EndpointSSH] 分配指定端口: %s → %d", endpointName, port)
+	return nil
+}
+
 // ReleasePort 释放 Endpoint 的端口
 func (p *EndpointSSHProxy) ReleasePort(endpointName string) {
 	p.mapMu.Lock()

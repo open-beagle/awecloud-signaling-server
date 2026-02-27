@@ -81,8 +81,10 @@ type svcProxySession struct {
 type EndpointServerConfig struct {
 	SSHEnabled       bool
 	SSHEnabledSet    bool
+	SSHPort          uint32  // 新增：Server 预分配的 SSH 端口
 	K8SAPIEnabled    bool
 	K8SAPIEnabledSet bool
+	K8SAPIPort       uint32  // 新增：Server 预分配的 K8SAPI 端口
 	K8SAPIApiServer  string
 	K8SSvcEnabled    bool
 	K8SSvcEnabledSet bool
@@ -154,9 +156,47 @@ func NewEndpointServer(listenPort int, token string, parentCtx context.Context) 
 
 // UpdateServerConfig 更新 Server 下发的 Endpoint 能力配置
 func (s *EndpointServer) UpdateServerConfig(name string, cfg *EndpointServerConfig) {
+	s.connMutex.Lock()
+	defer s.connMutex.Unlock()
+
+	// 获取连接
+	conn, exists := s.connections[name]
+	if !exists {
+		// Endpoint 未连接，只更新配置
+		s.configMutex.Lock()
+		s.serverConfigs[name] = cfg
+		s.configMutex.Unlock()
+		return
+	}
+
+	// 分配 SSH 端口（如果 Server 指定了端口）
+	if cfg.SSHEnabled && cfg.SSHEnabledSet && cfg.SSHPort > 0 && conn.SSHPort == 0 {
+		if s.sshProxy != nil {
+			if err := s.sshProxy.AllocateSpecificPort(name, uint16(cfg.SSHPort)); err != nil {
+				logger.Errorf("[UpdateServerConfig] 分配 SSH 端口失败: %v", err)
+			} else {
+				conn.SSHPort = uint16(cfg.SSHPort)
+				logger.Infof("[UpdateServerConfig] 为 Endpoint %s 分配 SSH 端口: %d", name, cfg.SSHPort)
+			}
+		}
+	}
+
+	// 分配 K8SAPI 端口（如果 Server 指定了端口）
+	if cfg.K8SAPIEnabled && cfg.K8SAPIEnabledSet && cfg.K8SAPIPort > 0 && conn.K8SAPIPort == 0 {
+		if s.k8sapiProxy != nil {
+			if err := s.k8sapiProxy.AllocateSpecificPort(name, uint16(cfg.K8SAPIPort)); err != nil {
+				logger.Errorf("[UpdateServerConfig] 分配 K8SAPI 端口失败: %v", err)
+			} else {
+				conn.K8SAPIPort = uint16(cfg.K8SAPIPort)
+				logger.Infof("[UpdateServerConfig] 为 Endpoint %s 分配 K8SAPI 端口: %d", name, cfg.K8SAPIPort)
+			}
+		}
+	}
+
+	// 更新配置
 	s.configMutex.Lock()
-	defer s.configMutex.Unlock()
 	s.serverConfigs[name] = cfg
+	s.configMutex.Unlock()
 }
 
 // getServerConfig 获取 Server 下发的 Endpoint 能力配置

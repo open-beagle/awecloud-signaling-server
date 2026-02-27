@@ -251,6 +251,59 @@ Endpoint 能力访问流程：
 - **Endpoint 端口动态分配**：Endpoint SSH 和 K8SAPI 使用动态端口，由 Agent 在 Endpoint 连接时分配
 - **端口分配范围**：Endpoint SSH (50053-50152)，Endpoint K8SAPI (50153-50252)，每个范围最多支持 100 个 Endpoint
 
+#### Endpoint 端口静态化设计
+
+为了解决 Endpoint 重连后端口变化导致的连接失败问题，Endpoint 的端口采用静态化设计：
+
+端口存储位置：
+
+- 端口记录在 endpoint 表中（ssh_port、k8sapi_port 字段）
+- 不记录在 domain_registry 表中（domain_registry 的 target_port 从 endpoint 表读取）
+
+端口分配时机：
+
+- 创建 Endpoint 时，Server 根据已有 Endpoint 数量计算端口并写入数据库
+- SSH 端口：50053 + count（count 为该 Agent 下已有 Endpoint 数量）
+- K8SAPI 端口：50153 + count
+- 端口一旦分配，除非删除 Endpoint，否则永不改变
+
+端口下发流程：
+
+```
+Server 创建 Endpoint
+  ↓
+计算端口（ssh_port = 50053 + count, k8sapi_port = 50153 + count）
+  ↓
+写入 endpoint 表
+  ↓
+创建域名记录时，从 endpoint 表读取端口写入 domain_registry.target_port
+  ↓
+Agent 心跳时，Server 从 endpoint 表读取端口，通过 EndpointCapabilityConfig 下发
+  ↓
+Agent 收到配置后，调用 AllocateSpecificPort 按指定端口监听
+  ↓
+Endpoint 连接后，Agent 使用预分配的端口
+```
+
+端口持久化保证：
+
+- Endpoint 重启：Agent 从 Server 获取相同端口配置，使用相同端口监听
+- Agent 重启：Agent 从 Server 获取所有 Endpoint 端口配置，恢复监听
+- Server 重启：端口存储在数据库中，重启后自动恢复
+
+数据流向：
+
+- Server 是唯一的端口状态源（存储在 endpoint 表）
+- Agent 不记录端口状态，完全依赖 Server 下发
+- Endpoint 不参与端口分配，由 Agent 按 Server 指定的端口监听
+
+优势：
+
+- 端口固定，Endpoint 重连不影响 Desktop 连接
+- 数据模型清晰，端口是 Endpoint 的属性
+- 查询简单，不需要 JOIN domain_registry 表
+- 易于维护，一个 Endpoint 的所有信息都在 endpoint 表
+
 ### 数据存储
 
 - **domain_registry 表**：持久化域名记录

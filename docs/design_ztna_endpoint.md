@@ -220,23 +220,29 @@ web-server-1.beijing.beagle:22
 
 ### 端口分配
 
-EndpointSSH 使用动态端口 50053+（每个 Endpoint 独立端口）：
+EndpointSSH 使用静态端口（每个 Endpoint 独立端口，由 Server 预分配）：
 
 ```
-端口范围: 50053-50152（tsnet 虚拟端口，动态分配）
-第一个 Endpoint: 50053
-第二个 Endpoint: 50054
-依此类推
+端口范围: 50053-50152（tsnet 虚拟端口，静态分配）
+端口分配: Server 在创建 Endpoint 时预分配（ssh_port = 50053 + count）
+端口存储: endpoint 表的 ssh_port 字段
 
 Desktop 访问: web-server-1.beijing.beagle:22
   → 127.1.x.x:22（魔法 DNS）
-  → Tailscale → Agent IP:50053（动态分配的端口）
+  → Tailscale → Agent IP:50053（Server 预分配的端口）
   → Agent gRPC → Endpoint → SSH
 
-端口分配时机:
-  - Endpoint 连接到 Agent 时，Agent 调用 AllocatePort() 分配端口
-  - Agent 通过心跳上报分配的端口给 Server
-  - Server 更新 domain_registry 表的 target_port 字段
+端口静态化流程:
+  1. Server 创建 Endpoint 时计算端口并写入 endpoint 表
+  2. Agent 心跳时，Server 通过 EndpointCapabilityConfig 下发端口
+  3. Agent 调用 AllocateSpecificPort 按指定端口监听
+  4. Endpoint 连接后，Agent 使用预分配的端口
+  5. Endpoint 重连时，Agent 使用相同端口（从 Server 获取）
+
+优势:
+  - 端口固定，Endpoint 重连不影响 Desktop 连接
+  - Agent 无状态，完全依赖 Server 配置
+  - 易于维护和调试
 ```
 
 ## EndpointK8SAPI
@@ -299,23 +305,29 @@ kubernetes.beijing-prod.beijing.beagle:6443
 
 ### 端口分配
 
-EndpointK8SAPI 使用动态端口 50153+（每个 Endpoint 独立端口）：
+EndpointK8SAPI 使用静态端口（每个 Endpoint 独立端口，由 Server 预分配）：
 
 ```
-端口范围: 50153-50252（tsnet 虚拟端口，动态分配）
-第一个 Endpoint: 50153
-第二个 Endpoint: 50154
-依此类推
+端口范围: 50153-50252（tsnet 虚拟端口，静态分配）
+端口分配: Server 在创建 Endpoint 时预分配（k8sapi_port = 50153 + count）
+端口存储: endpoint 表的 k8sapi_port 字段
 
 Desktop 访问: kubernetes.beijing-prod.beijing.beagle:6443
   → 127.1.x.x:6443（魔法 DNS）
-  → Tailscale → Agent IP:50153（动态分配的端口）
+  → Tailscale → Agent IP:50153（Server 预分配的端口）
   → Agent gRPC → Endpoint → K8S API Server
 
-端口分配时机:
-  - Endpoint 连接到 Agent 时，Agent 调用 AllocatePort() 分配端口
-  - Agent 通过心跳上报分配的端口给 Server
-  - Server 更新 domain_registry 表的 target_port 字段
+端口静态化流程:
+  1. Server 创建 Endpoint 时计算端口并写入 endpoint 表
+  2. Agent 心跳时，Server 通过 EndpointCapabilityConfig 下发端口
+  3. Agent 调用 AllocateSpecificPort 按指定端口监听
+  4. Endpoint 连接后，Agent 使用预分配的端口
+  5. Endpoint 重连时，Agent 使用相同端口（从 Server 获取）
+
+优势:
+  - 端口固定，Endpoint 重连不影响 Desktop 连接
+  - Agent 无状态，完全依赖 Server 配置
+  - 易于维护和调试
 ```
 
 ## EndpointK8SService

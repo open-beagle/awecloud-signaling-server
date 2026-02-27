@@ -1267,8 +1267,11 @@ type EndpointCapabilityConfig struct {
 	K8SapiEnabled     bool                   `protobuf:"varint,3,opt,name=k8sapi_enabled,json=k8sapiEnabled,proto3" json:"k8sapi_enabled,omitempty"`             // K8S API 能力是否启用
 	K8SapiApiServer   string                 `protobuf:"bytes,4,opt,name=k8sapi_api_server,json=k8sapiApiServer,proto3" json:"k8sapi_api_server,omitempty"`      // K8S API Server 地址
 	K8SserviceEnabled bool                   `protobuf:"varint,5,opt,name=k8sservice_enabled,json=k8sserviceEnabled,proto3" json:"k8sservice_enabled,omitempty"` // K8S Service 能力是否启用
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// 新增：Server 预分配的端口
+	SshPort       uint32 `protobuf:"varint,6,opt,name=ssh_port,json=sshPort,proto3" json:"ssh_port,omitempty"`          // SSH 代理端口（0 表示未分配）
+	K8SapiPort    uint32 `protobuf:"varint,7,opt,name=k8sapi_port,json=k8sapiPort,proto3" json:"k8sapi_port,omitempty"` // K8SAPI 代理端口（0 表示未分配）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EndpointCapabilityConfig) Reset() {
@@ -1334,6 +1337,20 @@ func (x *EndpointCapabilityConfig) GetK8SserviceEnabled() bool {
 		return x.K8SserviceEnabled
 	}
 	return false
+}
+
+func (x *EndpointCapabilityConfig) GetSshPort() uint32 {
+	if x != nil {
+		return x.SshPort
+	}
+	return 0
+}
+
+func (x *EndpointCapabilityConfig) GetK8SapiPort() uint32 {
+	if x != nil {
+		return x.K8SapiPort
+	}
+	return 0
 }
 
 // AgentCapabilityConfig Agent 能力配置（Server 远程控制）
@@ -2923,14 +2940,17 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\x1bendpoint_k8sapi_permissions\x18\n" +
 	" \x03(\v2,.awecloud.signaling.EndpointK8SAPIPermissionR\x19endpointK8sapiPermissions\x12x\n" +
 	"\x1fendpoint_k8sservice_permissions\x18\v \x03(\v20.awecloud.signaling.EndpointK8SServicePermissionR\x1dendpointK8sservicePermissions\x12l\n" +
-	"\x1bendpoint_capability_configs\x18\f \x03(\v2,.awecloud.signaling.EndpointCapabilityConfigR\x19endpointCapabilityConfigs\"\xe2\x01\n" +
+	"\x1bendpoint_capability_configs\x18\f \x03(\v2,.awecloud.signaling.EndpointCapabilityConfigR\x19endpointCapabilityConfigs\"\x9e\x02\n" +
 	"\x18EndpointCapabilityConfig\x12#\n" +
 	"\rendpoint_name\x18\x01 \x01(\tR\fendpointName\x12\x1f\n" +
 	"\vssh_enabled\x18\x02 \x01(\bR\n" +
 	"sshEnabled\x12%\n" +
 	"\x0ek8sapi_enabled\x18\x03 \x01(\bR\rk8sapiEnabled\x12*\n" +
 	"\x11k8sapi_api_server\x18\x04 \x01(\tR\x0fk8sapiApiServer\x12-\n" +
-	"\x12k8sservice_enabled\x18\x05 \x01(\bR\x11k8sserviceEnabled\"\xda\a\n" +
+	"\x12k8sservice_enabled\x18\x05 \x01(\bR\x11k8sserviceEnabled\x12\x19\n" +
+	"\bssh_port\x18\x06 \x01(\rR\asshPort\x12\x1f\n" +
+	"\vk8sapi_port\x18\a \x01(\rR\n" +
+	"k8sapiPort\"\xda\a\n" +
 	"\x15AgentCapabilityConfig\x12\x1f\n" +
 	"\vssh_enabled\x18\x01 \x01(\bR\n" +
 	"sshEnabled\x12&\n" +

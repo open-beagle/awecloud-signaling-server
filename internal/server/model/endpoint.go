@@ -17,10 +17,12 @@ type Endpoint struct {
 	// SSH 能力
 	SSHEnabled bool   `gorm:"default:false" json:"ssh_enabled"`                 // SSH 能力开关
 	SSHUsers   string `gorm:"type:text;not null;default:'[]'" json:"ssh_users"` // 允许的 SSH 用户名列表（JSON 数组）
+	SSHPort    uint16 `gorm:"default:0" json:"ssh_port"`                        // SSH 代理端口（0 表示未分配）
 
 	// K8S API 能力
 	K8SAPIEnabled   bool   `gorm:"column:k8sapi_enabled;default:false" json:"k8sapi_enabled"`  // K8S API 能力开关
 	K8SAPIApiServer string `gorm:"column:k8sapi_api_server;size:255" json:"k8sapi_api_server"` // K8S API Server 地址
+	K8SAPIPort      uint16 `gorm:"column:k8sapi_port;default:0" json:"k8sapi_port"`            // K8SAPI 代理端口（0 表示未分配）
 
 	// K8S Service 能力
 	K8SServiceEnabled       bool   `gorm:"column:k8sservice_enabled;default:false" json:"k8sservice_enabled"`          // K8S Service 能力开关

@@ -716,10 +716,9 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 				DiscoveredServices: ep.DiscoveredServices,
 				// SSH 配置
 				SshUsers: ep.SSHUsers,
-				SshPort:  uint32(ep.SSHPort), // 动态分配的 SSH 端口
+				// 注意：不再上报端口，端口由 Server 预分配并存储在 endpoint 表
 				// K8S API 配置
 				K8SapiApiServer: ep.K8SAPIApiServer,
-				K8SapiPort:      uint32(ep.K8SAPIPort), // 动态分配的 K8SAPI 端口
 				// K8S Service 配置
 				K8SserviceLabelSelector: ep.K8SServiceLabelSelector,
 				K8SserviceNamespaces:    ep.K8SServiceNamespaces,
@@ -791,15 +790,19 @@ func (a *Agent) syncEndpointServerConfigs(resp *pb.AgentHeartbeatResponse) {
 		serverCfg := &EndpointServerConfig{
 			SSHEnabled:       cfg.SshEnabled,
 			SSHEnabledSet:    true,
+			SSHPort:          cfg.SshPort,        // 新增：解析端口字段
 			K8SAPIEnabled:    cfg.K8SapiEnabled,
 			K8SAPIEnabledSet: true,
+			K8SAPIPort:       cfg.K8SapiPort,     // 新增：解析端口字段
 			K8SAPIApiServer:  cfg.K8SapiApiServer,
 			K8SSvcEnabled:    cfg.K8SserviceEnabled,
 			K8SSvcEnabledSet: true,
 		}
 		a.endpointServer.UpdateServerConfig(cfg.EndpointName, serverCfg)
-		logger.Infof("同步 Endpoint 配置: name=%s, ssh=%v, k8sapi=%v, api_server=%s, k8ssvc=%v",
-			cfg.EndpointName, serverCfg.SSHEnabled, serverCfg.K8SAPIEnabled, serverCfg.K8SAPIApiServer, serverCfg.K8SSvcEnabled)
+		logger.Infof("同步 Endpoint 配置: name=%s, ssh=%v(port=%d), k8sapi=%v(port=%d), api_server=%s, k8ssvc=%v",
+			cfg.EndpointName, serverCfg.SSHEnabled, serverCfg.SSHPort,
+			serverCfg.K8SAPIEnabled, serverCfg.K8SAPIPort,
+			serverCfg.K8SAPIApiServer, serverCfg.K8SSvcEnabled)
 	}
 }
 

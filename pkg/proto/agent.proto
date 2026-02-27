@@ -212,6 +212,10 @@ message EndpointCapabilityConfig {
   bool k8sapi_enabled = 3; // K8S API 能力是否启用
   string k8sapi_api_server = 4; // K8S API Server 地址
   bool k8sservice_enabled = 5; // K8S Service 能力是否启用
+  
+  // 新增：Server 预分配的端口
+  uint32 ssh_port = 6;      // SSH 代理端口（0 表示未分配）
+  uint32 k8sapi_port = 7;   // K8SAPI 代理端口（0 表示未分配）
 }
 
 // AgentCapabilityConfig Agent 能力配置（Server 远程控制）
