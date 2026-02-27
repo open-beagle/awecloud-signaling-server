@@ -716,8 +716,10 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 				DiscoveredServices: ep.DiscoveredServices,
 				// SSH 配置
 				SshUsers: ep.SSHUsers,
+				SshPort:  uint32(ep.SSHPort), // 动态分配的 SSH 端口
 				// K8S API 配置
 				K8SapiApiServer: ep.K8SAPIApiServer,
+				K8SapiPort:      uint32(ep.K8SAPIPort), // 动态分配的 K8SAPI 端口
 				// K8S Service 配置
 				K8SserviceLabelSelector: ep.K8SServiceLabelSelector,
 				K8SserviceNamespaces:    ep.K8SServiceNamespaces,
@@ -1359,6 +1361,9 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 					} else {
 						a.endpointK8SAPIProxy = k8sapiProxy
 					}
+
+					// 设置代理对象引用（用于端口分配）
+					a.endpointServer.SetProxies(a.endpointSSHProxy, a.endpointK8SAPIProxy)
 
 					// 设置 SVCProxy 的 EndpointServer 引用（用于 Endpoint 跳跃路径）
 					if a.svcProxy != nil {

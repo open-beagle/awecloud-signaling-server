@@ -264,8 +264,8 @@ Endpoint 部署在内网 K8S 集群，通过 gRPC 连接到 Agent，Agent 作为
        → 本地代理接收请求（127.1.x.y:6443）
 
   6. Desktop 本地代理转发
-       → 查询域名注册表：target_ip=100.64.0.23, target_port=50054
-       → 通过 tsnet Dial 连接 Agent（100.64.0.23:50054）
+       → 查询域名注册表：target_ip=100.64.0.23, target_port=50153（动态分配）
+       → 通过 tsnet Dial 连接 Agent（100.64.0.23:50153）
 
   7. Agent 接收请求
        → 从 tsnet 连接提取身份（zhangsan）
@@ -303,10 +303,10 @@ Endpoint 部署在内网 K8S 集群，通过 gRPC 连接到 Agent，Agent 作为
     │     127.1.x.y:6443 → 监听 K8S API 请求
     │
     ├── 查询域名注册表
-    │     kubernetes-beijing-prod.beijing.beagle → target_ip=100.64.0.23, target_port=50054
+    │     kubernetes-beijing-prod.beijing.beagle → target_ip=100.64.0.23, target_port=50153（动态分配）
     │
     ├── tsnet Dial 转发
-    │     通过 Tailscale 隧道连接 Agent（100.64.0.23:50054）
+    │     通过 Tailscale 隧道连接 Agent（100.64.0.23:50153）
     │     桥接请求和响应
     │
     └── kubeconfig 生成
@@ -315,7 +315,7 @@ Endpoint 部署在内网 K8S 集群，通过 gRPC 连接到 Agent，Agent 作为
           insecure-skip-tls-verify: true
 
   Agent 侧：
-    ├── tsnet 监听 Endpoint K8S API 代理端口（50054）
+    ├── tsnet 监听 Endpoint K8S API 代理端口（50153+，动态分配）
     │     从 tsnet 连接提取身份
     │     查询 AclK8SAPIJumpPermission（本地缓存）
     │
@@ -349,7 +349,7 @@ Endpoint 部署在内网 K8S 集群，通过 gRPC 连接到 Agent，Agent 作为
   身份中继          Agent 自己完成                       Agent → Endpoint
   域名格式          kubernetes.{region}.beagle           kubernetes-{endpoint}.{region}.beagle
   VIP 分配          127.1.x.x:6443                       127.1.x.y:6443（不同 VIP）
-  Agent 端口        50050（tsnet 虚拟端口）              50054（tsnet 虚拟端口）
+  Agent 端口        50050（tsnet 虚拟端口，固定）        50153+（tsnet 虚拟端口，动态分配）
   适用场景          Agent 在主节点                       Agent 不在主节点
 ```
 

@@ -736,8 +736,10 @@ type ConnectedEndpoint struct {
 	DiscoveredServices []*DiscoveredK8SService   `protobuf:"bytes,4,rep,name=discovered_services,json=discoveredServices,proto3" json:"discovered_services,omitempty"` // Endpoint 发现的 K8S Service（K8SService 能力时上报）
 	// SSH 能力配置（从 Endpoint 自动检测）
 	SshUsers []string `protobuf:"bytes,7,rep,name=ssh_users,json=sshUsers,proto3" json:"ssh_users,omitempty"` // 允许的 SSH 用户列表
+	SshPort  uint32   `protobuf:"varint,11,opt,name=ssh_port,json=sshPort,proto3" json:"ssh_port,omitempty"`  // 动态分配的 SSH 端口（0 表示未分配）
 	// K8S API 能力配置
 	K8SapiApiServer string `protobuf:"bytes,8,opt,name=k8sapi_api_server,json=k8sapiApiServer,proto3" json:"k8sapi_api_server,omitempty"` // K8S API Server 地址
+	K8SapiPort      uint32 `protobuf:"varint,12,opt,name=k8sapi_port,json=k8sapiPort,proto3" json:"k8sapi_port,omitempty"`                // 动态分配的 K8SAPI 端口（0 表示未分配）
 	// K8S Service 能力配置
 	K8SserviceLabelSelector string   `protobuf:"bytes,9,opt,name=k8sservice_label_selector,json=k8sserviceLabelSelector,proto3" json:"k8sservice_label_selector,omitempty"` // 标签选择器
 	K8SserviceNamespaces    []string `protobuf:"bytes,10,rep,name=k8sservice_namespaces,json=k8sserviceNamespaces,proto3" json:"k8sservice_namespaces,omitempty"`           // 命名空间列表
@@ -810,11 +812,25 @@ func (x *ConnectedEndpoint) GetSshUsers() []string {
 	return nil
 }
 
+func (x *ConnectedEndpoint) GetSshPort() uint32 {
+	if x != nil {
+		return x.SshPort
+	}
+	return 0
+}
+
 func (x *ConnectedEndpoint) GetK8SapiApiServer() string {
 	if x != nil {
 		return x.K8SapiApiServer
 	}
 	return ""
+}
+
+func (x *ConnectedEndpoint) GetK8SapiPort() uint32 {
+	if x != nil {
+		return x.K8SapiPort
+	}
+	return 0
 }
 
 func (x *ConnectedEndpoint) GetK8SserviceLabelSelector() string {
@@ -2848,14 +2864,17 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\x13discovered_services\x18\n" +
 	" \x03(\v2(.awecloud.signaling.DiscoveredK8SServiceR\x12discoveredServices\x12V\n" +
 	"\x13connected_endpoints\x18\v \x03(\v2%.awecloud.signaling.ConnectedEndpointR\x12connectedEndpoints\x12M\n" +
-	"\raudit_records\x18\f \x03(\v2(.awecloud.signaling.OperationAuditRecordR\fauditRecords\"\xa4\x03\n" +
+	"\raudit_records\x18\f \x03(\v2(.awecloud.signaling.OperationAuditRecordR\fauditRecords\"\xe0\x03\n" +
 	"\x11ConnectedEndpoint\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12N\n" +
 	"\fcapabilities\x18\x03 \x03(\v2*.awecloud.signaling.EndpointCapabilityInfoR\fcapabilities\x12Y\n" +
 	"\x13discovered_services\x18\x04 \x03(\v2(.awecloud.signaling.DiscoveredK8SServiceR\x12discoveredServices\x12\x1b\n" +
-	"\tssh_users\x18\a \x03(\tR\bsshUsers\x12*\n" +
-	"\x11k8sapi_api_server\x18\b \x01(\tR\x0fk8sapiApiServer\x12:\n" +
+	"\tssh_users\x18\a \x03(\tR\bsshUsers\x12\x19\n" +
+	"\bssh_port\x18\v \x01(\rR\asshPort\x12*\n" +
+	"\x11k8sapi_api_server\x18\b \x01(\tR\x0fk8sapiApiServer\x12\x1f\n" +
+	"\vk8sapi_port\x18\f \x01(\rR\n" +
+	"k8sapiPort\x12:\n" +
 	"\x19k8sservice_label_selector\x18\t \x01(\tR\x17k8sserviceLabelSelector\x123\n" +
 	"\x15k8sservice_namespaces\x18\n" +
 	" \x03(\tR\x14k8sserviceNamespaces\"\xbb\x02\n" +

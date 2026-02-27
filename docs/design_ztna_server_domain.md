@@ -41,9 +41,9 @@
 
 | 类型   | 说明                | target_port（数据库存储） | Desktop 访问端口     | 说明                                             |
 | ------ | ------------------- | ------------------------- | -------------------- | ------------------------------------------------ |
-| ssh    | SSH 访问            | 50053                     | 22                   | Agent tsnet 虚拟端口 → Endpoint SSH              |
-| k8sapi | Kubernetes API 访问 | 50054                     | 6443                 | Agent tsnet 虚拟端口 → Endpoint K8S API          |
-| k8ssvc | Kubernetes Service  | 50055                     | 动态（Service 端口） | Agent gRPC 服务 → Endpoint K8S Service（待实现） |
+| ssh    | SSH 访问            | 50053+（动态分配）        | 22                   | Agent tsnet 虚拟端口 → Endpoint SSH              |
+| k8sapi | Kubernetes API 访问 | 50153+（动态分配）        | 6443                 | Agent tsnet 虚拟端口 → Endpoint K8S API          |
+| k8ssvc | Kubernetes Service  | 50051                     | 动态（Service 端口） | Agent gRPC 服务 → Endpoint K8S Service（待实现） |
 
 说明：
 
@@ -51,6 +51,8 @@
 - **Desktop 访问端口**：Desktop 本地代理监听的端口，用户实际连接的端口
 - **Device SSH**：唯一直接访问 Agent 物理端口的能力，其他都通过 tsnet 虚拟端口或 gRPC 转发
 - **Endpoint 能力**：所有请求先到达 Agent，再通过 Agent 的 Endpoint gRPC Server（50052）转发到 Endpoint
+- **Endpoint SSH/K8SAPI 端口动态分配**：每个 Endpoint 分配一个独立端口，由 Agent 在 Endpoint 连接时分配，通过心跳上报给 Server
+- **Endpoint K8SSVC 端口固定**：所有 Endpoint 共享 50051 端口，通过 gRPC 参数区分不同 Endpoint 和 Service
 
 ### 域名生成规则
 
@@ -197,17 +199,19 @@ Endpoint 能力域名：
 
 #### Endpoint 能力端口
 
-| 域名类型             | 目标端口 | Desktop 访问端口 | 说明                               |
-| -------------------- | -------- | ---------------- | ---------------------------------- |
-| Endpoint SSH         | 50053    | 22               | tsnet 虚拟端口（固定）             |
-| Endpoint K8S API     | 50054    | 6443             | tsnet 虚拟端口（固定，功能待实现） |
-| Endpoint K8S Service | 50055    | 动态             | tsnet 虚拟端口（固定，功能待实现） |
+| 域名类型             | 目标端口           | Desktop 访问端口 | 说明                                                |
+| -------------------- | ------------------ | ---------------- | --------------------------------------------------- |
+| Endpoint SSH         | 50053+（动态分配） | 22               | tsnet 虚拟端口，每个 Endpoint 独立端口              |
+| Endpoint K8S API     | 50153+（动态分配） | 6443             | tsnet 虚拟端口，每个 Endpoint 独立端口              |
+| Endpoint K8S Service | 50051              | 动态             | gRPC 服务，所有 Endpoint 共享，通过参数区分（固定） |
 
 说明：
 
-- Endpoint SSH：Desktop 访问 127.1.x.x:22 → Tailscale → Agent IP:50053（Agent 的 tsnet 虚拟端口）→ Agent gRPC:50052 → Endpoint → 实际 SSH
-- Endpoint K8S API：Desktop 访问 127.1.x.x:6443 → Tailscale → Agent IP:50054（Agent 的 tsnet 虚拟端口）→ Agent gRPC:50052 → Endpoint → 实际 K8S API
-- Endpoint K8S Service：Desktop 访问 127.1.x.x:动态端口 → Tailscale → Agent IP:50055（Agent 的 gRPC 服务）→ Agent gRPC:50052 → Endpoint → 实际 Service
+- Endpoint SSH：Desktop 访问 127.1.x.x:22 → Tailscale → Agent IP:50053+N（动态分配）→ Agent gRPC:50052 → Endpoint → 实际 SSH
+- Endpoint K8S API：Desktop 访问 127.1.x.x:6443 → Tailscale → Agent IP:50153+N（动态分配）→ Agent gRPC:50052 → Endpoint → 实际 K8S API
+- Endpoint K8S Service：Desktop 访问 127.1.x.x:动态端口 → Tailscale → Agent IP:50051（固定）→ Agent gRPC:50052 → Endpoint → 实际 Service
+- **端口动态分配**：Endpoint 连接到 Agent 时，Agent 为其分配独立端口（SSH: 50053+, K8SAPI: 50153+）
+- **端口上报**：Agent 通过心跳将分配的端口上报给 Server，Server 更新 domain_registry 表的 target_port 字段
 
 #### 端口分配架构
 
@@ -223,28 +227,29 @@ Device 本机能力访问流程：
   Desktop → 127.1.x.x:动态端口 → Tailscale → Agent IP:50051（K8S Service，gRPC）
 
 Endpoint 能力访问流程：
-  Desktop → 127.1.x.x:22 → Tailscale → Agent IP:50053（tsnet）→ Agent gRPC:50052 → Endpoint SSH
-  Desktop → 127.1.x.x:6443 → Tailscale → Agent IP:50054（tsnet）→ Agent gRPC:50052 → Endpoint K8S API
-  Desktop → 127.1.x.x:动态端口 → Tailscale → Agent IP:50055（gRPC）→ Agent gRPC:50052 → Endpoint Service
+  Desktop → 127.1.x.x:22 → Tailscale → Agent IP:50053+N（tsnet，动态分配）→ Agent gRPC:50052 → Endpoint SSH
+  Desktop → 127.1.x.x:6443 → Tailscale → Agent IP:50153+N（tsnet，动态分配）→ Agent gRPC:50052 → Endpoint K8S API
+  Desktop → 127.1.x.x:动态端口 → Tailscale → Agent IP:50051（gRPC，固定）→ Agent gRPC:50052 → Endpoint Service
 ```
 
 #### 关键端口说明
 
-| 端口  | 用途                                                     |
-| ----- | -------------------------------------------------------- |
-| 22    | Node 本机 SSH 端口（物理端口）                           |
-| 50050 | Node K8S API tsnet 虚拟端口（可配置，默认 50050）        |
-| 50051 | Node K8S Service gRPC 端口（tsnet 虚拟端口）             |
-| 50052 | Agent 的 Endpoint gRPC Server 端口（内网物理端口）       |
-| 50053 | Endpoint SSH tsnet 虚拟端口（固定）                      |
-| 50054 | Endpoint K8S API tsnet 虚拟端口（固定，待实现）          |
-| 50055 | Endpoint K8S Service gRPC 端口（tsnet 虚拟端口，待实现） |
+| 端口   | 用途                                                                |
+| ------ | ------------------------------------------------------------------- |
+| 22     | Node 本机 SSH 端口（物理端口）                                      |
+| 50050  | Node K8S API tsnet 虚拟端口（可配置，默认 50050）                   |
+| 50051  | Node/Endpoint K8S Service gRPC 端口（tsnet 虚拟端口，固定）         |
+| 50052  | Agent 的 Endpoint gRPC Server 端口（内网物理端口）                  |
+| 50053+ | Endpoint SSH tsnet 虚拟端口（动态分配，每个 Endpoint 独立端口）     |
+| 50153+ | Endpoint K8S API tsnet 虚拟端口（动态分配，每个 Endpoint 独立端口） |
 
 注意：
 
 - tsnet 虚拟端口：通过 Tailscale 的 FallbackTCPHandler 监听，不是物理端口，只在 Tailscale 网络中可达
 - 物理端口：实际监听在网卡上的端口，如 22（SSH）、50052（Agent Endpoint gRPC Server）
 - Desktop 访问端口：Desktop 本地代理监听的端口，用户实际连接的端口（如 SSH 用 22，K8S API 用 6443）
+- **Endpoint 端口动态分配**：Endpoint SSH 和 K8SAPI 使用动态端口，由 Agent 在 Endpoint 连接时分配
+- **端口分配范围**：Endpoint SSH (50053-50152)，Endpoint K8SAPI (50153-50252)，每个范围最多支持 100 个 Endpoint
 
 ### 数据存储
 
@@ -471,17 +476,17 @@ Endpoint 能力访问流程：
   │     │     domain = "{endpoint_name}.{region}.beagle"
   │     │     例如：beagle-241.beijing.beagle
   │     │
-  │     ├─→ 创建域名记录（暂不填充 node_id）
+  │     ├─→ 创建域名记录（暂不填充 node_id 和 target_port）
   │     │     INSERT INTO domain_registry (
   │     │       domain, type, user_id, node_id, endpoint_id,
   │     │       target_ip, target_port,
   │     │       created_at
   │     │     ) VALUES (
   │     │       'beagle-241.beijing.beagle', 'ssh', 7, 0, 'beagle-241',
-  │     │       '', 50053,
+  │     │       '', 0,
   │     │       now()
   │     │     )
-  │     │     注意：node_id=0，等待 Endpoint 连接后填充
+  │     │     注意：node_id=0, target_port=0，等待 Endpoint 连接后由 Agent 分配端口并填充
   │     │
   │     └─→ 生成 Endpoint Token（用于 Endpoint 连接 Agent）
   │
@@ -490,8 +495,17 @@ Endpoint 能力访问流程：
   │
   ├─→ Endpoint 连接到 Agent
   │     │
+  │     ├─→ Agent 为 Endpoint 分配端口
+  │     │     SSH 端口: 50053（第一个 Endpoint）
+  │     │     记录: EndpointConnection.SSHPort = 50053
+  │     │
   │     └─→ Agent 下次心跳上报
-  │           connected_endpoints: ["beagle-241"]
+  │           connected_endpoints: [
+  │             {
+  │               name: "beagle-241",
+  │               ssh_port: 50053
+  │             }
+  │           ]
   │
   ├─→ Server 处理心跳 (handleConnectedEndpoints)
   │     │
@@ -502,9 +516,9 @@ Endpoint 能力访问流程：
   │     │       LastHeartbeat: now()
   │     │     }
   │     │
-  │     └─→ 更新域名记录，填充 node_id
+  │     └─→ 更新域名记录，填充 node_id 和 target_port
   │           UPDATE domain_registry SET
-  │             node_id=44, target_ip='100.64.0.23'
+  │             node_id=44, target_ip='100.64.0.23', target_port=50053
   │           WHERE endpoint_id='beagle-241' AND user_id=7
   │
   └─→ Endpoint SSH 域名创建完成
@@ -555,23 +569,50 @@ Endpoint 能力访问流程：
   │     │     domain = "kubernetes-{endpoint_name}.{region}.beagle"
   │     │     例如：kubernetes-beagle-002.neimeng.beagle
   │     │
-  │     ├─→ 创建域名记录（暂不填充 node_id）
+  │     ├─→ 创建域名记录（暂不填充 node_id 和 target_port）
   │     │     INSERT INTO domain_registry (
   │     │       domain, type, user_id, node_id, endpoint_id,
   │     │       target_ip, target_port,
   │     │       created_at
   │     │     ) VALUES (
   │     │       'kubernetes-beagle-002.neimeng.beagle', 'k8sapi', 8, 0, 'beagle-002',
-  │     │       '', 50053,
+  │     │       '', 0,
   │     │       now()
   │     │     )
+  │     │     注意：node_id=0, target_port=0，等待 Endpoint 连接后由 Agent 分配端口并填充
   │     │
-  │     └─→ 生成 Endpoint Token
+  │     └─→ 生成 Endpoint Token（用于 Endpoint 连接 Agent）
   │
-  ├─→ Endpoint 连接到 Agent 后，Server 更新 node_id
-  │     UPDATE domain_registry SET
-  │       node_id=45, target_ip='100.64.0.22'
-  │     WHERE endpoint_id='beagle-002' AND user_id=8
+  ├─→ 管理员在 Endpoint 机器上安装并启动 Endpoint
+  │     使用 Token 连接到 Agent
+  │
+  ├─→ Endpoint 连接到 Agent
+  │     │
+  │     ├─→ Agent 为 Endpoint 分配端口
+  │     │     K8SAPI 端口: 50153（第一个 Endpoint）
+  │     │     记录: EndpointConnection.K8SAPIPort = 50153
+  │     │
+  │     └─→ Agent 下次心跳上报
+  │           connected_endpoints: [
+  │             {
+  │               name: "beagle-002",
+  │               k8sapi_port: 50153
+  │             }
+  │           ]
+  │
+  ├─→ Server 处理心跳 (handleConnectedEndpoints)
+  │     │
+  │     ├─→ 更新内存缓存
+  │     │     EndpointStatusCache["beagle-002"] = {
+  │     │       EndpointName: "beagle-002",
+  │     │       UserID: 8,
+  │     │       LastHeartbeat: now()
+  │     │     }
+  │     │
+  │     └─→ 更新域名记录，填充 node_id 和 target_port
+  │           UPDATE domain_registry SET
+  │             node_id=45, target_ip='100.64.0.22', target_port=50153
+  │           WHERE endpoint_id='beagle-002' AND user_id=8
   │
   └─→ Endpoint K8SAPI 域名创建完成
 ```
@@ -579,7 +620,7 @@ Endpoint 能力访问流程：
 数据变化：
 
 - endpoint_k8sapi 表：新增记录
-- domain_registry 表：新增记录，type='k8sapi', node_id=45（连接后填充）, endpoint_id='beagle-002'
+- domain_registry 表：新增记录，type='k8sapi', node_id=45（连接后填充）, endpoint_id='beagle-002', target_port=50153（动态分配）
 - EndpointStatusCache：新增缓存（Endpoint 连接后）
 
 状态判断：
@@ -1372,21 +1413,21 @@ Agent 重新启动
 
 ### 3.1 domain_registry 表（持久化）
 
-| 字段          | 类型   | 说明                                                                       |
-| ------------- | ------ | -------------------------------------------------------------------------- |
-| id            | int64  | 主键                                                                       |
-| domain        | string | 完整域名（如 beagle-242.beijing.beagle）                                   |
-| type          | string | 类型：ssh / k8sapi / k8ssvc                                                |
-| user_id       | uint64 | 所属 Agent User ID                                                         |
-| node_id       | uint64 | 关联的 Node ID（Agent 本机能力时填充）                                     |
-| endpoint_id   | string | 关联的 Endpoint Name（Endpoint 能力时填充）                                |
-| target_ip     | string | 目标 IP（Agent 的 Tailscale IP）                                           |
-| target_port   | int    | 目标端口（Desktop 通过 Tailscale 连接的端口）                              |
-| namespace     | string | K8S 命名空间（k8ssvc 类型时）                                              |
-| service_name  | string | K8S Service 名称（k8ssvc 类型时）                                          |
-| service_ports | string | K8S Service 端口列表（k8ssvc 类型时，JSON 数组，如 "[5432,9187]"）         |
-| ssh_users     | string | SSH 用户列表（ssh 类型时，JSON 数组，如 "[\"root\",\"deploy\"]"）          |
-| created_at    | time   | 创建时间                                                                   |
+| 字段          | 类型   | 说明                                                               |
+| ------------- | ------ | ------------------------------------------------------------------ |
+| id            | int64  | 主键                                                               |
+| domain        | string | 完整域名（如 beagle-242.beijing.beagle）                           |
+| type          | string | 类型：ssh / k8sapi / k8ssvc                                        |
+| user_id       | uint64 | 所属 Agent User ID                                                 |
+| node_id       | uint64 | 关联的 Node ID（Agent 本机能力时填充）                             |
+| endpoint_id   | string | 关联的 Endpoint Name（Endpoint 能力时填充）                        |
+| target_ip     | string | 目标 IP（Agent 的 Tailscale IP）                                   |
+| target_port   | int    | 目标端口（Desktop 通过 Tailscale 连接的端口）                      |
+| namespace     | string | K8S 命名空间（k8ssvc 类型时）                                      |
+| service_name  | string | K8S Service 名称（k8ssvc 类型时）                                  |
+| service_ports | string | K8S Service 端口列表（k8ssvc 类型时，JSON 数组，如 "[5432,9187]"） |
+| ssh_users     | string | SSH 用户列表（ssh 类型时，JSON 数组，如 "[\"root\",\"deploy\"]"）  |
+| created_at    | time   | 创建时间                                                           |
 
 注意：
 
@@ -1398,20 +1439,22 @@ Agent 重新启动
 
 不同域名类型的端口记录方式：
 
-| 域名类型        | target_ip   | target_port | service_ports | 说明                                                      |
-| --------------- | ----------- | ----------- | ------------- | --------------------------------------------------------- |
-| Device SSH      | 100.64.0.23 | 22          | -             | Desktop → TS → Agent IP:22                                |
-| Device K8SAPI   | 100.64.0.23 | 50050       | -             | Desktop → TS → Agent IP:50050（tsnet 虚拟端口）           |
-| Device K8SSVC   | 100.64.0.23 | 50051       | "[5432,9187]" | Desktop → TS → Agent IP:50051（gRPC），Service 多端口支持 |
-| Endpoint SSH    | 100.64.0.23 | 50053       | -             | Desktop → TS → Agent IP:50053（tsnet 虚拟端口）           |
-| Endpoint K8SAPI | 100.64.0.23 | 50054       | -             | Desktop → TS → Agent IP:50054（tsnet 虚拟端口）           |
-| Endpoint K8SSVC | 100.64.0.23 | 50055       | "[5432,9187]" | Desktop → TS → Agent IP:50055（gRPC），Service 多端口支持 |
+| 域名类型        | target_ip   | target_port    | service_ports | 说明                                                            |
+| --------------- | ----------- | -------------- | ------------- | --------------------------------------------------------------- |
+| Device SSH      | 100.64.0.23 | 22             | -             | Desktop → TS → Agent IP:22                                      |
+| Device K8SAPI   | 100.64.0.23 | 50050          | -             | Desktop → TS → Agent IP:50050（tsnet 虚拟端口，固定）           |
+| Device K8SSVC   | 100.64.0.23 | 50051          | "[5432,9187]" | Desktop → TS → Agent IP:50051（gRPC，固定），Service 多端口支持 |
+| Endpoint SSH    | 100.64.0.23 | 50053+（动态） | -             | Desktop → TS → Agent IP:50053+N（tsnet 虚拟端口，动态分配）     |
+| Endpoint K8SAPI | 100.64.0.23 | 50153+（动态） | -             | Desktop → TS → Agent IP:50153+N（tsnet 虚拟端口，动态分配）     |
+| Endpoint K8SSVC | 100.64.0.23 | 50051          | "[5432,9187]" | Desktop → TS → Agent IP:50051（gRPC，固定），Service 多端口支持 |
 
 说明：
 
 - `target_ip`: 始终是 Agent 的 Tailscale IP
 - `target_port`: Desktop 通过 Tailscale 连接到 Agent 的端口（物理端口或 tsnet 虚拟端口）
 - `service_ports`: 仅 k8ssvc 类型使用，JSON 数组字符串，记录 K8S Service 的所有端口
+- **Endpoint SSH/K8SAPI 端口动态分配**：每个 Endpoint 分配独立端口，由 Agent 在 Endpoint 连接时分配，通过心跳上报给 Server
+- **Endpoint K8SSVC 端口固定**：所有 Endpoint 共享 50051 端口，通过 gRPC 参数区分不同 Endpoint 和 Service
 
 #### k8ssvc 类型的完整访问流程
 

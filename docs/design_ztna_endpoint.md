@@ -218,6 +218,27 @@ AclSSHJumpGroupPermission:
 web-server-1.beijing.beagle:22
 ```
 
+### 端口分配
+
+EndpointSSH 使用动态端口 50053+（每个 Endpoint 独立端口）：
+
+```
+端口范围: 50053-50152（tsnet 虚拟端口，动态分配）
+第一个 Endpoint: 50053
+第二个 Endpoint: 50054
+依此类推
+
+Desktop 访问: web-server-1.beijing.beagle:22
+  → 127.1.x.x:22（魔法 DNS）
+  → Tailscale → Agent IP:50053（动态分配的端口）
+  → Agent gRPC → Endpoint → SSH
+
+端口分配时机:
+  - Endpoint 连接到 Agent 时，Agent 调用 AllocatePort() 分配端口
+  - Agent 通过心跳上报分配的端口给 Server
+  - Server 更新 domain_registry 表的 target_port 字段
+```
+
 ## EndpointK8SAPI
 
 EndpointK8SAPI 装在内网 K8S 主节点上，提供 K8S API 代理。和 EndpointSSH 一样，反向连接 Agent。
@@ -272,8 +293,29 @@ AclK8SAPIJumpGroupPermission:
 ### 域名
 
 ```
-kubernetes.<endpoint-name>.<agent-name>.beagle:50050
-kubernetes.beijing-prod.beijing.beagle:50050
+kubernetes.<endpoint-name>.<agent-name>.beagle:6443
+kubernetes.beijing-prod.beijing.beagle:6443
+```
+
+### 端口分配
+
+EndpointK8SAPI 使用动态端口 50153+（每个 Endpoint 独立端口）：
+
+```
+端口范围: 50153-50252（tsnet 虚拟端口，动态分配）
+第一个 Endpoint: 50153
+第二个 Endpoint: 50154
+依此类推
+
+Desktop 访问: kubernetes.beijing-prod.beijing.beagle:6443
+  → 127.1.x.x:6443（魔法 DNS）
+  → Tailscale → Agent IP:50153（动态分配的端口）
+  → Agent gRPC → Endpoint → K8S API Server
+
+端口分配时机:
+  - Endpoint 连接到 Agent 时，Agent 调用 AllocatePort() 分配端口
+  - Agent 通过心跳上报分配的端口给 Server
+  - Server 更新 domain_registry 表的 target_port 字段
 ```
 
 ## EndpointK8SService
@@ -339,6 +381,26 @@ AclK8SServiceJumpGroupPermission:
 ```
 <service>.<namespace>.<endpoint-name>.<agent-name>.beagle
 pg.yygl.remote-cluster.beijing.beagle:5432
+```
+
+### 端口分配
+
+EndpointK8SService 使用固定端口 50051（gRPC 服务，所有 Endpoint 共享）：
+
+```
+端口: 50051（tsnet 虚拟端口，固定）
+所有 Endpoint 共享同一个端口，通过 gRPC 参数区分不同 Endpoint 和 Service
+
+Desktop 访问: pg.yygl.remote-cluster.beijing.beagle:5432
+  → 127.1.x.x:5432（魔法 DNS）
+  → Tailscale → Agent IP:50051（固定端口）
+  → Agent gRPC SVCProxy(endpoint=remote-cluster, namespace=yygl, service=pg)
+  → Endpoint → K8S ClusterIP
+
+说明:
+  - EndpointK8SService 不需要动态端口分配
+  - 通过 gRPC 参数传递目标 Endpoint 和 Service 信息
+  - Desktop 通过 VIP 隔离不同 Service 的端口冲突
 ```
 
 ## Endpoint 部署模型

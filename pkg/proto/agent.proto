@@ -145,9 +145,11 @@ message ConnectedEndpoint {
   
   // SSH 能力配置（从 Endpoint 自动检测）
   repeated string ssh_users = 7; // 允许的 SSH 用户列表
+  uint32 ssh_port = 11; // 动态分配的 SSH 端口（0 表示未分配）
   
   // K8S API 能力配置
   string k8sapi_api_server = 8; // K8S API Server 地址
+  uint32 k8sapi_port = 12; // 动态分配的 K8SAPI 端口（0 表示未分配）
   
   // K8S Service 能力配置
   string k8sservice_label_selector = 9; // 标签选择器

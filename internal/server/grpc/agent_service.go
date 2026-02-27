@@ -1230,6 +1230,30 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 		})
 		logger.Debugf("更新 Endpoint 内存缓存: endpoint_name=%s, user_id=%d", ep.Name, agentID)
 
+		// 更新 Endpoint SSH 和 K8SAPI 域名的端口
+		// Agent 为 Endpoint 动态分配端口后，通过心跳上报，Server 更新域名注册表
+		if ep.SshPort > 0 {
+			// 更新 SSH 域名的 target_port
+			if err := db.DB.WithContext(ctx).Model(&model.DomainRegistry{}).
+				Where("endpoint_id = ? AND user_id = ? AND type = ?", ep.Name, agentID, model.DomainTypeSSH).
+				Update("target_port", ep.SshPort).Error; err != nil {
+				logger.Errorf("更新 Endpoint SSH 域名端口失败: endpoint=%s, port=%d, err=%v", ep.Name, ep.SshPort, err)
+			} else {
+				logger.Infof("更新 Endpoint SSH 域名端口: endpoint=%s, port=%d", ep.Name, ep.SshPort)
+			}
+		}
+
+		if ep.K8SapiPort > 0 {
+			// 更新 K8SAPI 域名的 target_port
+			if err := db.DB.WithContext(ctx).Model(&model.DomainRegistry{}).
+				Where("endpoint_id = ? AND user_id = ? AND type = ?", ep.Name, agentID, model.DomainTypeK8SAPI).
+				Update("target_port", ep.K8SapiPort).Error; err != nil {
+				logger.Errorf("更新 Endpoint K8SAPI 域名端口失败: endpoint=%s, port=%d, err=%v", ep.Name, ep.K8SapiPort, err)
+			} else {
+				logger.Infof("更新 Endpoint K8SAPI 域名端口: endpoint=%s, port=%d", ep.Name, ep.K8SapiPort)
+			}
+		}
+
 		// 填充 domain_registry.node_id（如果 Endpoint 已有域名记录但 node_id=0）
 		// 查询该 Endpoint 的所有域名记录
 		var domains []model.DomainRegistry

@@ -42,6 +42,10 @@ type EndpointConnection struct {
 	// K8S Service 能力配置
 	K8SServiceLabelSelector string   // 标签选择器
 	K8SServiceNamespaces    []string // 命名空间列表
+
+	// 动态分配的端口（Endpoint 连接时分配）
+	SSHPort     uint16 // SSH 代理端口（0 表示未分配）
+	K8SAPIPort  uint16 // K8SAPI 代理端口（0 表示未分配）
 }
 
 // shellSession 等待中的 shell 会话（Agent 创建，等待 Endpoint 回调）
@@ -118,6 +122,10 @@ type EndpointServer struct {
 	// 待下发的 K8S Service 代理请求（endpoint name → []*SVCProxyRequest）
 	pendingSVCReqs map[string][]*pb.SVCProxyRequest
 	pendingMutex   sync.Mutex
+
+	// Endpoint 代理对象（用于端口分配）
+	sshProxy    *EndpointSSHProxy
+	k8sapiProxy *EndpointK8SAPIProxy
 
 	grpcServer *net.Listener
 	server     *grpc.Server
@@ -202,6 +210,13 @@ func (s *EndpointServer) Stop() {
 // UpdateToken 更新 Endpoint 令牌
 func (s *EndpointServer) UpdateToken(token string) {
 	s.token = token
+}
+
+// SetProxies 设置 Endpoint 代理对象（用于端口分配）
+// 必须在 Start() 之前调用
+func (s *EndpointServer) SetProxies(sshProxy *EndpointSSHProxy, k8sapiProxy *EndpointK8SAPIProxy) {
+	s.sshProxy = sshProxy
+	s.k8sapiProxy = k8sapiProxy
 }
 
 // GetConnectedEndpoints 获取已连接的 Endpoint 列表
@@ -299,7 +314,34 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 	s.connections[name] = conn
 	s.connMutex.Unlock()
 
+	// 为 Endpoint 分配端口（根据能力）
+	for _, cap := range conn.Capabilities {
+		switch cap.Type {
+		case "ssh":
+			if s.sshProxy != nil && conn.SSHPort == 0 {
+				conn.SSHPort = s.sshProxy.AllocatePort(name)
+				logger.Infof("[EndpointServer] 为 Endpoint %s 分配 SSH 端口: %d", name, conn.SSHPort)
+			}
+		case "k8sapi":
+			if s.k8sapiProxy != nil && conn.K8SAPIPort == 0 {
+				conn.K8SAPIPort = s.k8sapiProxy.AllocatePort(name)
+				logger.Infof("[EndpointServer] 为 Endpoint %s 分配 K8SAPI 端口: %d", name, conn.K8SAPIPort)
+			}
+		}
+	}
+
 	defer func() {
+		// 释放端口
+		if conn.SSHPort != 0 && s.sshProxy != nil {
+			s.sshProxy.ReleasePort(name)
+			logger.Infof("[EndpointServer] 释放 Endpoint %s 的 SSH 端口: %d", name, conn.SSHPort)
+		}
+		if conn.K8SAPIPort != 0 && s.k8sapiProxy != nil {
+			s.k8sapiProxy.ReleasePort(name)
+			logger.Infof("[EndpointServer] 释放 Endpoint %s 的 K8SAPI 端口: %d", name, conn.K8SAPIPort)
+		}
+
+		// 删除连接记录
 		s.connMutex.Lock()
 		delete(s.connections, name)
 		s.connMutex.Unlock()

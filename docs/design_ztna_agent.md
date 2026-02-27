@@ -245,6 +245,15 @@ kubernetes.<agent-name>.beagle:6443
 kubernetes.beijing.beagle:6443
 ```
 
+### 端口分配
+
+AgentK8SAPI 使用固定端口 50050（可配置，默认 50050）：
+
+```
+端口: 50050（tsnet 虚拟端口，固定）
+Desktop 访问: kubernetes.beijing.beagle:6443 → 127.1.x.x:6443 → Tailscale → Agent IP:50050
+```
+
 ### 为什么必须走域名 + 魔法 DNS
 
 Desktop 不能用 127.0.0.1:6443，必须用 kubernetes.beijing.beagle:6443。原因：
