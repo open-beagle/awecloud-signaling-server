@@ -2825,14 +2825,15 @@ func (*ListDomainsRequest) Descriptor() ([]byte, []int) {
 // DomainInfo 域名信息（包含目标 IP 和端口）
 type DomainInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Domain        string                 `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"`                              // 域名，如 kubernetes.beijing.beagle
-	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`                                  // 类型：ssh/k8sapi/k8ssvc
-	TargetIp      string                 `protobuf:"bytes,3,opt,name=target_ip,json=targetIp,proto3" json:"target_ip,omitempty"`          // 目标 Tailscale IP
-	TargetPort    int32                  `protobuf:"varint,4,opt,name=target_port,json=targetPort,proto3" json:"target_port,omitempty"`   // 目标端口
-	ClusterName   string                 `protobuf:"bytes,5,opt,name=cluster_name,json=clusterName,proto3" json:"cluster_name,omitempty"` // 集群名称（仅 k8sapi/k8ssvc）
-	Namespace     string                 `protobuf:"bytes,6,opt,name=namespace,proto3" json:"namespace,omitempty"`                        // 命名空间（仅 k8ssvc）
-	ServiceName   string                 `protobuf:"bytes,7,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"` // 服务名称（仅 k8ssvc）
-	Status        string                 `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"`                              // 状态：online/offline
+	Domain        string                 `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"`                                         // 域名，如 kubernetes.beijing.beagle
+	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`                                             // 类型：ssh/k8sapi/k8ssvc
+	TargetIp      string                 `protobuf:"bytes,3,opt,name=target_ip,json=targetIp,proto3" json:"target_ip,omitempty"`                     // 目标 Tailscale IP
+	TargetPort    int32                  `protobuf:"varint,4,opt,name=target_port,json=targetPort,proto3" json:"target_port,omitempty"`              // 目标端口
+	ClusterName   string                 `protobuf:"bytes,5,opt,name=cluster_name,json=clusterName,proto3" json:"cluster_name,omitempty"`            // 集群名称（仅 k8sapi/k8ssvc）
+	Namespace     string                 `protobuf:"bytes,6,opt,name=namespace,proto3" json:"namespace,omitempty"`                                   // 命名空间（仅 k8ssvc）
+	ServiceName   string                 `protobuf:"bytes,7,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`            // 服务名称（仅 k8ssvc）
+	Status        string                 `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"`                                         // 状态：online/offline
+	ServicePorts  []int32                `protobuf:"varint,9,rep,packed,name=service_ports,json=servicePorts,proto3" json:"service_ports,omitempty"` // K8S Service 端口列表（仅 k8ssvc，JSON 数组解析后的值）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2921,6 +2922,13 @@ func (x *DomainInfo) GetStatus() string {
 		return x.Status
 	}
 	return ""
+}
+
+func (x *DomainInfo) GetServicePorts() []int32 {
+	if x != nil {
+		return x.ServicePorts
+	}
+	return nil
 }
 
 // ListDomainsResponse 列出域名响应
@@ -3201,7 +3209,7 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"endpointId\"Q\n" +
 	"\x15GetDomainListResponse\x128\n" +
 	"\adomains\x18\x01 \x03(\v2\x1e.awecloud.signaling.DomainItemR\adomains\"\x14\n" +
-	"\x12ListDomainsRequest\"\xf2\x01\n" +
+	"\x12ListDomainsRequest\"\x97\x02\n" +
 	"\n" +
 	"DomainInfo\x12\x16\n" +
 	"\x06domain\x18\x01 \x01(\tR\x06domain\x12\x12\n" +
@@ -3212,7 +3220,8 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\fcluster_name\x18\x05 \x01(\tR\vclusterName\x12\x1c\n" +
 	"\tnamespace\x18\x06 \x01(\tR\tnamespace\x12!\n" +
 	"\fservice_name\x18\a \x01(\tR\vserviceName\x12\x16\n" +
-	"\x06status\x18\b \x01(\tR\x06status\"O\n" +
+	"\x06status\x18\b \x01(\tR\x06status\x12#\n" +
+	"\rservice_ports\x18\t \x03(\x05R\fservicePorts\"O\n" +
 	"\x13ListDomainsResponse\x128\n" +
 	"\adomains\x18\x01 \x03(\v2\x1e.awecloud.signaling.DomainInfoR\adomains*\xcc\x01\n" +
 	"\x0fDesktopDataType\x12!\n" +

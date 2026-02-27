@@ -834,14 +834,15 @@ func (x *ConnectedEndpoint) GetK8SserviceNamespaces() []string {
 // DomainRegistration 域名注册信息（Agent 心跳上报）
 type DomainRegistration struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Domain        string                 `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"`                              // 完整域名（如 beagle-242.beijing.beagle）
-	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`                                  // 能力类型：ssh / k8sapi / k8ssvc
-	TargetIp      string                 `protobuf:"bytes,3,opt,name=target_ip,json=targetIp,proto3" json:"target_ip,omitempty"`          // 目标 IP（Node 的 Tailscale IP 或 ClusterIP）
-	TargetPort    int32                  `protobuf:"varint,4,opt,name=target_port,json=targetPort,proto3" json:"target_port,omitempty"`   // 目标端口
-	Namespace     string                 `protobuf:"bytes,5,opt,name=namespace,proto3" json:"namespace,omitempty"`                        // K8S 命名空间（k8ssvc 类型时）
-	ServiceName   string                 `protobuf:"bytes,6,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"` // K8S Service 名称（k8ssvc 类型时）
-	EndpointId    string                 `protobuf:"bytes,7,opt,name=endpoint_id,json=endpointId,proto3" json:"endpoint_id,omitempty"`    // 关联的 Endpoint ID（Endpoint 类型时）
-	NodeId        uint64                 `protobuf:"varint,8,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`               // 关联的 Node ID（Node 注册时）
+	Domain        string                 `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"`                                         // 完整域名（如 beagle-242.beijing.beagle）
+	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`                                             // 能力类型：ssh / k8sapi / k8ssvc
+	TargetIp      string                 `protobuf:"bytes,3,opt,name=target_ip,json=targetIp,proto3" json:"target_ip,omitempty"`                     // 目标 IP（Node 的 Tailscale IP 或 ClusterIP）
+	TargetPort    int32                  `protobuf:"varint,4,opt,name=target_port,json=targetPort,proto3" json:"target_port,omitempty"`              // 目标端口
+	Namespace     string                 `protobuf:"bytes,5,opt,name=namespace,proto3" json:"namespace,omitempty"`                                   // K8S 命名空间（k8ssvc 类型时）
+	ServiceName   string                 `protobuf:"bytes,6,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`            // K8S Service 名称（k8ssvc 类型时）
+	EndpointId    string                 `protobuf:"bytes,7,opt,name=endpoint_id,json=endpointId,proto3" json:"endpoint_id,omitempty"`               // 关联的 Endpoint ID（Endpoint 类型时）
+	NodeId        uint64                 `protobuf:"varint,8,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`                          // 关联的 Node ID（Node 注册时）
+	ServicePorts  []int32                `protobuf:"varint,9,rep,packed,name=service_ports,json=servicePorts,proto3" json:"service_ports,omitempty"` // K8S Service 端口列表（k8ssvc 类型时）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -930,6 +931,13 @@ func (x *DomainRegistration) GetNodeId() uint64 {
 		return x.NodeId
 	}
 	return 0
+}
+
+func (x *DomainRegistration) GetServicePorts() []int32 {
+	if x != nil {
+		return x.ServicePorts
+	}
+	return nil
 }
 
 // ServiceConfig 端口映射配置
@@ -2842,7 +2850,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\x11k8sapi_api_server\x18\b \x01(\tR\x0fk8sapiApiServer\x12:\n" +
 	"\x19k8sservice_label_selector\x18\t \x01(\tR\x17k8sserviceLabelSelector\x123\n" +
 	"\x15k8sservice_namespaces\x18\n" +
-	" \x03(\tR\x14k8sserviceNamespaces\"\xf9\x01\n" +
+	" \x03(\tR\x14k8sserviceNamespaces\"\x9e\x02\n" +
 	"\x12DomainRegistration\x12\x16\n" +
 	"\x06domain\x18\x01 \x01(\tR\x06domain\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1b\n" +
@@ -2853,7 +2861,8 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\fservice_name\x18\x06 \x01(\tR\vserviceName\x12\x1f\n" +
 	"\vendpoint_id\x18\a \x01(\tR\n" +
 	"endpointId\x12\x17\n" +
-	"\anode_id\x18\b \x01(\x04R\x06nodeId\"\x8f\x01\n" +
+	"\anode_id\x18\b \x01(\x04R\x06nodeId\x12#\n" +
+	"\rservice_ports\x18\t \x03(\x05R\fservicePorts\"\x8f\x01\n" +
 	"\rServiceConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1f\n" +

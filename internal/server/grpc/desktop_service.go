@@ -2004,6 +2004,12 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 	// 构建响应
 	var domains []*pb.DomainInfo
 	for _, record := range domainRecords {
+		// 调试：打印原始数据库记录
+		if record.Type == model.DomainTypeK8SSVC {
+			logger.Infof("ListDomains: 处理 K8SSVC 域名 %s, DB service_ports='%s', len=%d", 
+				record.Domain, record.ServicePorts, len(record.ServicePorts))
+		}
+
 		// 使用 DomainRegistry 中的 target_ip（已经是正确的 Tailscale IP）
 		// 不再查询 Node 表，避免多节点时选择错误
 		domainInfo := &pb.DomainInfo{
@@ -2018,6 +2024,19 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 
 		// 填充 cluster_name（从 domain 中提取 region）
 		domainInfo.ClusterName = s.extractRegionFromDomain(record.Domain)
+
+		// 解析 service_ports（仅 k8ssvc 类型）
+		if record.Type == model.DomainTypeK8SSVC && record.ServicePorts != "" {
+			var ports []int32
+			if err := json.Unmarshal([]byte(record.ServicePorts), &ports); err == nil {
+				domainInfo.ServicePorts = ports
+				logger.Infof("ListDomains: domain=%s service_ports=%v", record.Domain, ports)
+			} else {
+				logger.Warnf("解析 service_ports 失败: domain=%s, err=%v", record.Domain, err)
+			}
+		} else if record.Type == model.DomainTypeK8SSVC {
+			logger.Warnf("ListDomains: K8SSVC 域名 %s service_ports 为空（DB值='%s'）", record.Domain, record.ServicePorts)
+		}
 
 		domains = append(domains, domainInfo)
 	}

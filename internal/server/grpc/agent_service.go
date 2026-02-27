@@ -1139,17 +1139,26 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 			targetIp = tunnelIp
 		}
 
+		// 将 ServicePorts 序列化为 JSON 数组
+		servicePortsJSON := "[]"
+		if len(reg.ServicePorts) > 0 {
+			if data, err := json.Marshal(reg.ServicePorts); err == nil {
+				servicePortsJSON = string(data)
+			}
+		}
+
 		record := model.DomainRegistry{
-			Domain:      reg.Domain,
-			Type:        model.DomainType(reg.Type),
-			UserID:      agentID,
-			NodeID:      actualNodeID,
-			EndpointID:  actualEndpointID,
-			TargetIP:    targetIp,
-			TargetPort:  int(reg.TargetPort),
-			Namespace:   reg.Namespace,
-			ServiceName: reg.ServiceName,
-			Status:      model.DomainStatusOnline,
+			Domain:       reg.Domain,
+			Type:         model.DomainType(reg.Type),
+			UserID:       agentID,
+			NodeID:       actualNodeID,
+			EndpointID:   actualEndpointID,
+			TargetIP:     targetIp,
+			TargetPort:   int(reg.TargetPort),
+			Namespace:    reg.Namespace,
+			ServiceName:  reg.ServiceName,
+			ServicePorts: servicePortsJSON,
+			Status:       model.DomainStatusOnline,
 		}
 
 		if err != nil {
@@ -1162,13 +1171,14 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 		} else {
 			// 存在，更新（保留已有的 node_id，避免覆盖）
 			updates := map[string]any{
-				"type":         model.DomainType(reg.Type),
-				"user_id":      agentID,
-				"target_ip":    targetIp,
-				"target_port":  int(reg.TargetPort),
-				"namespace":    reg.Namespace,
-				"service_name": reg.ServiceName,
-				"status":       model.DomainStatusOnline,
+				"type":          model.DomainType(reg.Type),
+				"user_id":       agentID,
+				"target_ip":     targetIp,
+				"target_port":   int(reg.TargetPort),
+				"namespace":     reg.Namespace,
+				"service_name":  reg.ServiceName,
+				"service_ports": servicePortsJSON,
+				"status":        model.DomainStatusOnline,
 			}
 			// 只有当上报的 node_id 不为 0 时才更新（避免覆盖已有的正确值）
 			if actualNodeID > 0 {

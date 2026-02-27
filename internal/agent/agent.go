@@ -959,16 +959,23 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 			}
 			domain := prefix + "." + svc.Namespace + "." + a.config.Agent.AgentName + a.domainSuffix
 
-			// 注册第一个端口的域名
+			// 注册域名，包含 Service 的所有端口
 			// TargetPort 使用 Agent SVCProxy gRPC 端口（50051），Service 端口存储在 ServicePorts 字段
 			if len(svc.Ports) > 0 {
+				// 提取所有端口号
+				servicePorts := make([]int32, 0, len(svc.Ports))
+				for _, port := range svc.Ports {
+					servicePorts = append(servicePorts, port.Port)
+				}
+
 				registrations = append(registrations, &pb.DomainRegistration{
-					Domain:      domain,
-					Type:        "k8ssvc",
-					TargetIp:    agentIP,
-					TargetPort:  int32(a.config.SVC.ListenPortBase), // Agent SVCProxy gRPC 端口（默认 50051）
-					Namespace:   svc.Namespace,
-					ServiceName: svc.Name,
+					Domain:       domain,
+					Type:         "k8ssvc",
+					TargetIp:     agentIP,
+					TargetPort:   int32(a.config.SVC.ListenPortBase), // Agent SVCProxy gRPC 端口（默认 50051）
+					Namespace:    svc.Namespace,
+					ServiceName:  svc.Name,
+					ServicePorts: servicePorts, // Service 的所有端口
 				})
 			}
 		}

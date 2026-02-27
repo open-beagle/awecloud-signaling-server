@@ -138,32 +138,33 @@ message AgentHeartbeatRequest {
 
 // ConnectedEndpoint Agent 上报的已连接 Endpoint 信息
 message ConnectedEndpoint {
-  string name = 1;           // Endpoint 名称
-  string status = 2;         // 状态：online
+  string name = 1; // Endpoint 名称
+  string status = 2; // 状态：online
   repeated EndpointCapabilityInfo capabilities = 3; // 启用的能力列表
   repeated DiscoveredK8SService discovered_services = 4; // Endpoint 发现的 K8S Service（K8SService 能力时上报）
   
   // SSH 能力配置（从 Endpoint 自动检测）
-  repeated string ssh_users = 7;      // 允许的 SSH 用户列表
+  repeated string ssh_users = 7; // 允许的 SSH 用户列表
   
   // K8S API 能力配置
-  string k8sapi_api_server = 8;       // K8S API Server 地址
+  string k8sapi_api_server = 8; // K8S API Server 地址
   
   // K8S Service 能力配置
-  string k8sservice_label_selector = 9;    // 标签选择器
+  string k8sservice_label_selector = 9; // 标签选择器
   repeated string k8sservice_namespaces = 10; // 命名空间列表
 }
 
 // DomainRegistration 域名注册信息（Agent 心跳上报）
 message DomainRegistration {
-  string domain = 1;       // 完整域名（如 beagle-242.beijing.beagle）
-  string type = 2;         // 能力类型：ssh / k8sapi / k8ssvc
-  string target_ip = 3;    // 目标 IP（Node 的 Tailscale IP 或 ClusterIP）
-  int32 target_port = 4;   // 目标端口
-  string namespace = 5;    // K8S 命名空间（k8ssvc 类型时）
+  string domain = 1; // 完整域名（如 beagle-242.beijing.beagle）
+  string type = 2; // 能力类型：ssh / k8sapi / k8ssvc
+  string target_ip = 3; // 目标 IP（Node 的 Tailscale IP 或 ClusterIP）
+  int32 target_port = 4; // 目标端口
+  string namespace = 5; // K8S 命名空间（k8ssvc 类型时）
   string service_name = 6; // K8S Service 名称（k8ssvc 类型时）
-  string endpoint_id = 7;  // 关联的 Endpoint ID（Endpoint 类型时）
-  uint64 node_id = 8;      // 关联的 Node ID（Node 注册时）
+  string endpoint_id = 7; // 关联的 Endpoint ID（Endpoint 类型时）
+  uint64 node_id = 8; // 关联的 Node ID（Node 注册时）
+  repeated int32 service_ports = 9; // K8S Service 端口列表（k8ssvc 类型时）
 }
 
 // ServiceConfig 端口映射配置
@@ -203,103 +204,103 @@ message AgentHeartbeatResponse {
 
 // EndpointCapabilityConfig Server 下发给 Agent 的 Endpoint 能力开关配置
 message EndpointCapabilityConfig {
-  string endpoint_name = 1;      // Endpoint 名称
-  bool ssh_enabled = 2;          // SSH 能力是否启用
-  bool k8sapi_enabled = 3;       // K8S API 能力是否启用
-  string k8sapi_api_server = 4;  // K8S API Server 地址
-  bool k8sservice_enabled = 5;   // K8S Service 能力是否启用
+  string endpoint_name = 1; // Endpoint 名称
+  bool ssh_enabled = 2; // SSH 能力是否启用
+  bool k8sapi_enabled = 3; // K8S API 能力是否启用
+  string k8sapi_api_server = 4; // K8S API Server 地址
+  bool k8sservice_enabled = 5; // K8S Service 能力是否启用
 }
 
 // AgentCapabilityConfig Agent 能力配置（Server 远程控制）
 // 通过 xxx_set 标志位区分"Server 设置为 false/0"和"Server 未设置"
 message AgentCapabilityConfig {
-  bool ssh_enabled = 1;              // SSH 开关
-  bool ssh_enabled_set = 2;         // SSH 开关是否由 Server 设置（始终为 true）
+  bool ssh_enabled = 1; // SSH 开关
+  bool ssh_enabled_set = 2; // SSH 开关是否由 Server 设置（始终为 true）
 
-  bool k8s_enabled = 3;             // K8S API 开关
-  bool k8s_enabled_set = 4;         // K8S API 开关是否由 Server 设置
-  int32 k8s_listen_port = 5;        // K8S API 监听端口
-  bool k8s_listen_port_set = 6;     // K8S API 监听端口是否由 Server 设置
-  string k8s_api_server = 7;        // K8S API Server 地址
-  bool k8s_api_server_set = 8;      // K8S API Server 地址是否由 Server 设置
+  bool k8s_enabled = 3; // K8S API 开关
+  bool k8s_enabled_set = 4; // K8S API 开关是否由 Server 设置
+  int32 k8s_listen_port = 5; // K8S API 监听端口
+  bool k8s_listen_port_set = 6; // K8S API 监听端口是否由 Server 设置
+  string k8s_api_server = 7; // K8S API Server 地址
+  bool k8s_api_server_set = 8; // K8S API Server 地址是否由 Server 设置
 
-  bool svc_enabled = 9;             // K8S Service 开关
-  bool svc_enabled_set = 10;        // K8S Service 开关是否由 Server 设置
-  string svc_label_selector = 11;   // 标签选择器
+  bool svc_enabled = 9; // K8S Service 开关
+  bool svc_enabled_set = 10; // K8S Service 开关是否由 Server 设置
+  string svc_label_selector = 11; // 标签选择器
   bool svc_label_selector_set = 12; // 标签选择器是否由 Server 设置
-  string svc_namespaces = 13;       // 命名空间列表（逗号分隔）
-  bool svc_namespaces_set = 14;     // 命名空间列表是否由 Server 设置
-  int32 svc_listen_port_base = 15;  // gRPC 监听端口
+  string svc_namespaces = 13; // 命名空间列表（逗号分隔）
+  bool svc_namespaces_set = 14; // 命名空间列表是否由 Server 设置
+  int32 svc_listen_port_base = 15; // gRPC 监听端口
   bool svc_listen_port_base_set = 16; // gRPC 监听端口是否由 Server 设置
 
-  bool endpoint_enabled = 17;          // Endpoint 功能开关
-  bool endpoint_enabled_set = 18;      // Endpoint 功能开关是否由 Server 设置
-  int32 endpoint_listen_port = 19;     // Endpoint 内网 gRPC 监听端口（默认 50052）
-  bool endpoint_listen_port_set = 20;  // Endpoint 监听端口是否由 Server 设置
-  string endpoint_token = 21;          // Endpoint 注册令牌（ep_ 前缀）
-  bool endpoint_token_set = 22;        // Endpoint 令牌是否由 Server 设置
+  bool endpoint_enabled = 17; // Endpoint 功能开关
+  bool endpoint_enabled_set = 18; // Endpoint 功能开关是否由 Server 设置
+  int32 endpoint_listen_port = 19; // Endpoint 内网 gRPC 监听端口（默认 50052）
+  bool endpoint_listen_port_set = 20; // Endpoint 监听端口是否由 Server 设置
+  string endpoint_token = 21; // Endpoint 注册令牌（ep_ 前缀）
+  bool endpoint_token_set = 22; // Endpoint 令牌是否由 Server 设置
 }
 
 // K8SPermission K8S API 授权信息（心跳响应下发给 Agent）
 message K8SPermission {
-  uint64 user_id = 1;            // 被授权用户 ID
-  string user_name = 2;          // 被授权用户名
+  uint64 user_id = 1; // 被授权用户 ID
+  string user_name = 2; // 被授权用户名
   repeated string k8s_groups = 3; // K8S Impersonation 分组
   repeated string namespaces = 4; // 允许的命名空间（空表示全部）
-  bool is_group = 5;             // 是否来自分组授权
+  bool is_group = 5; // 是否来自分组授权
 }
 
 // K8SServicePermission K8S Service 授权信息（心跳响应下发给 Agent）
 message K8SServicePermission {
-  uint64 user_id = 1;              // 被授权用户 ID
-  string user_name = 2;            // 被授权用户名
-  repeated string namespaces = 3;   // 允许的命名空间（空表示全部）
+  uint64 user_id = 1; // 被授权用户 ID
+  string user_name = 2; // 被授权用户名
+  repeated string namespaces = 3; // 允许的命名空间（空表示全部）
   repeated string service_names = 4; // 允许的 Service 名称（空表示全部）
-  bool is_group = 5;               // 是否来自分组授权
+  bool is_group = 5; // 是否来自分组授权
 }
 
 // EndpointSSHPermission Endpoint SSH 授权信息（心跳响应下发给 Agent）
 message EndpointSSHPermission {
-  string endpoint_id = 1;          // Endpoint ID
-  string endpoint_name = 2;        // Endpoint 名称
-  uint64 user_id = 3;              // 被授权用户 ID
-  string user_name = 4;            // 被授权用户名
-  repeated string ssh_users = 5;   // 允许的 SSH 登录用户名
-  bool is_group = 6;               // 是否来自分组授权
+  string endpoint_id = 1; // Endpoint ID
+  string endpoint_name = 2; // Endpoint 名称
+  uint64 user_id = 3; // 被授权用户 ID
+  string user_name = 4; // 被授权用户名
+  repeated string ssh_users = 5; // 允许的 SSH 登录用户名
+  bool is_group = 6; // 是否来自分组授权
 }
 
 // EndpointK8SAPIPermission Endpoint K8SAPI 授权信息（心跳响应下发给 Agent）
 message EndpointK8SAPIPermission {
-  string endpoint_id = 1;          // Endpoint ID
-  string endpoint_name = 2;        // Endpoint 名称
-  uint64 user_id = 3;              // 被授权用户 ID
-  string user_name = 4;            // 被授权用户名
-  repeated string k8s_groups = 5;  // K8S Impersonation 分组
-  repeated string namespaces = 6;  // 允许的命名空间（空表示全部）
-  bool is_group = 7;               // 是否来自分组授权
-  string api_server = 8;           // K8S API Server 地址（从 Endpoint 配置读取）
+  string endpoint_id = 1; // Endpoint ID
+  string endpoint_name = 2; // Endpoint 名称
+  uint64 user_id = 3; // 被授权用户 ID
+  string user_name = 4; // 被授权用户名
+  repeated string k8s_groups = 5; // K8S Impersonation 分组
+  repeated string namespaces = 6; // 允许的命名空间（空表示全部）
+  bool is_group = 7; // 是否来自分组授权
+  string api_server = 8; // K8S API Server 地址（从 Endpoint 配置读取）
 }
 
 // EndpointK8SServicePermission Endpoint K8SService 授权信息（心跳响应下发给 Agent）
 message EndpointK8SServicePermission {
-  string endpoint_id = 1;            // Endpoint ID
-  string endpoint_name = 2;          // Endpoint 名称
-  uint64 user_id = 3;                // 被授权用户 ID
-  string user_name = 4;              // 被授权用户名
-  repeated string namespaces = 5;    // 允许的命名空间（空表示全部）
+  string endpoint_id = 1; // Endpoint ID
+  string endpoint_name = 2; // Endpoint 名称
+  uint64 user_id = 3; // 被授权用户 ID
+  string user_name = 4; // 被授权用户名
+  repeated string namespaces = 5; // 允许的命名空间（空表示全部）
   repeated string service_names = 6; // 允许的 Service 名称（空表示全部）
-  bool is_group = 7;                 // 是否来自分组授权
+  bool is_group = 7; // 是否来自分组授权
 }
 
 // OperationAuditRecord 操作审计记录（Agent 心跳上报）
 message OperationAuditRecord {
-  string client_user_name = 1;     // Client 用户名
-  string endpoint_name = 2;        // Endpoint 名称（Endpoint 跳跃时填写）
-  string operation_type = 3;       // 操作类型：ssh_session / k8s_api_request / k8s_service_connect
-  string target = 4;               // 操作目标（如 "root@beagle-241"）
-  string detail = 5;               // 操作详情（JSON）
-  int64 started_at = 6;            // 开始时间（Unix 时间戳秒）
-  int64 ended_at = 7;              // 结束时间（Unix 时间戳秒）
+  string client_user_name = 1; // Client 用户名
+  string endpoint_name = 2; // Endpoint 名称（Endpoint 跳跃时填写）
+  string operation_type = 3; // 操作类型：ssh_session / k8s_api_request / k8s_service_connect
+  string target = 4; // 操作目标（如 "root@beagle-241"）
+  string detail = 5; // 操作详情（JSON）
+  int64 started_at = 6; // 开始时间（Unix 时间戳秒）
+  int64 ended_at = 7; // 结束时间（Unix 时间戳秒）
 }
 
 // ============================================
@@ -388,13 +389,13 @@ message ReportNetworkChangeResponse {
 // SVCProxyData K8S Service 代理数据帧
 // 首包携带连接参数（is_connect=true），后续包携带数据
 message SVCProxyData {
-  string namespace = 1;      // 目标命名空间（首包携带）
-  string service_name = 2;   // 目标 Service 名称（首包携带）
-  int32 port = 3;            // 目标端口（首包携带）
-  bytes data = 4;            // 数据载荷
-  bool is_connect = 5;       // 是否为连接请求（首包 true）
-  bool is_close = 6;         // 是否为关闭通知
-  string error = 7;          // 错误信息（如有）
-  string endpoint_name = 8;  // Endpoint 名称（首包携带，非空时走 Endpoint 跳跃路径）
+  string namespace = 1; // 目标命名空间（首包携带）
+  string service_name = 2; // 目标 Service 名称（首包携带）
+  int32 port = 3; // 目标端口（首包携带）
+  bytes data = 4; // 数据载荷
+  bool is_connect = 5; // 是否为连接请求（首包 true）
+  bool is_close = 6; // 是否为关闭通知
+  string error = 7; // 错误信息（如有）
+  string endpoint_name = 8; // Endpoint 名称（首包携带，非空时走 Endpoint 跳跃路径）
 }
 
