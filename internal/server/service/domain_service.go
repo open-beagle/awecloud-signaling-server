@@ -167,15 +167,15 @@ func (s *DomainService) CreateEndpointSSHDomain(ctx context.Context, endpoint *m
 		return fmt.Errorf("查询域名失败: %w", err)
 	}
 
-	// 创建域名记录
+	// 创建域名记录（使用 Endpoint 预分配的端口）
 	domainRecord := &model.DomainRegistry{
 		Domain:     domain,
 		Type:       model.DomainTypeSSH,
 		UserID:     user.ID,
-		NodeID:     agentNode.ID,  // Agent Node ID
-		EndpointID: endpoint.Name, // Endpoint 名称
-		TargetIP:   agentNode.IP,  // Agent IP
-		TargetPort: 50053,         // Endpoint SSH 端口
+		NodeID:     agentNode.ID,       // Agent Node ID
+		EndpointID: endpoint.Name,      // Endpoint 名称
+		TargetIP:   agentNode.IP,       // Agent IP
+		TargetPort: int(endpoint.SSHPort), // 从 Endpoint 表读取端口
 	}
 
 	if err := s.db.WithContext(ctx).Create(domainRecord).Error; err != nil {
@@ -238,19 +238,15 @@ func (s *DomainService) CreateEndpointK8SAPIDomain(ctx context.Context, endpoint
 		return fmt.Errorf("查询域名失败: %w", err)
 	}
 
-	// Endpoint K8S API 通过 Agent 的 Endpoint gRPC Server 转发
-	// 目标端口固定为 50054（Agent 的 tsnet 虚拟端口，专用于 Endpoint K8S API）
-	port := 50054
-
-	// 创建域名记录
+	// 创建域名记录（使用 Endpoint 预分配的端口）
 	domainRecord := &model.DomainRegistry{
 		Domain:     domain,
 		Type:       model.DomainTypeK8SAPI,
 		UserID:     user.ID,
-		NodeID:     agentNode.ID,  // Agent Node ID
-		EndpointID: endpoint.Name, // Endpoint 名称
-		TargetIP:   agentNode.IP,  // Agent IP
-		TargetPort: port,          // 50054（Agent 的 tsnet 虚拟端口）
+		NodeID:     agentNode.ID,          // Agent Node ID
+		EndpointID: endpoint.Name,         // Endpoint 名称
+		TargetIP:   agentNode.IP,          // Agent IP
+		TargetPort: int(endpoint.K8SAPIPort), // 从 Endpoint 表读取端口
 	}
 
 	if err := s.db.WithContext(ctx).Create(domainRecord).Error; err != nil {

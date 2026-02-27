@@ -31,8 +31,10 @@ export interface EndpointDetail {
   ssh_run_as: string
   ssh_can_switch_user: boolean
   ssh_users: string[]
+  ssh_port: number
   k8sapi_enabled: boolean
   k8sapi_api_server: string
+  k8sapi_port: number
   k8sservice_enabled: boolean
   k8sservice_label_selector: string
   k8sservice_namespaces: string[]

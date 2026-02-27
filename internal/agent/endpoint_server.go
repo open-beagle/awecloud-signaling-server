@@ -328,7 +328,7 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 	}
 
 	name := firstReq.Name
-	logger.Infof("Endpoint 心跳流建立: name=%s", name)
+	logger.Debugf("Endpoint 心跳流建立: name=%s", name)
 
 	// 注册连接（解析能力信息和配置）
 	conn := &EndpointConnection{
@@ -385,7 +385,7 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 		s.connMutex.Lock()
 		delete(s.connections, name)
 		s.connMutex.Unlock()
-		logger.Infof("Endpoint 心跳流断开: name=%s", name)
+		logger.Debugf("Endpoint 心跳流断开: name=%s", name)
 	}()
 
 	// 发送首次响应（携带 Server 下发的能力配置）
@@ -428,7 +428,7 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 			conn.DiscoveredServices = req.DiscoveredServices
 			// 更新 SSH 配置
 			conn.SSHUsers = req.SshUsers
-			logger.Infof("Endpoint 心跳更新: name=%s, ssh_users=%v (len=%d)", name, req.SshUsers, len(req.SshUsers))
+			logger.Debugf("Endpoint 心跳更新: name=%s, ssh_users=%v (len=%d)", name, req.SshUsers, len(req.SshUsers))
 			// 更新 K8S API 配置
 			conn.K8SAPIApiServer = req.K8SapiApiServer
 			// 更新 K8S Service 配置

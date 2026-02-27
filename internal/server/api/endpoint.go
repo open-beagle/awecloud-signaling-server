@@ -131,8 +131,10 @@ type EndpointDetailResponse struct {
 	Status                  string    `json:"status"`
 	SSHEnabled              bool      `json:"ssh_enabled"`
 	SSHUsers                []string  `json:"ssh_users"`
+	SSHPort                 uint16    `json:"ssh_port"`
 	K8SAPIEnabled           bool      `json:"k8sapi_enabled"`
 	K8SAPIApiServer         string    `json:"k8sapi_api_server"`
+	K8SAPIPort              uint16    `json:"k8sapi_port"`
 	K8SServiceEnabled       bool      `json:"k8sservice_enabled"`
 	K8SServiceLabelSelector string    `json:"k8sservice_label_selector"`
 	K8SServiceNamespaces    []string  `json:"k8sservice_namespaces"`
@@ -181,8 +183,10 @@ func (a *EndpointAPI) GetEndpointDetail(c *gin.Context) {
 		Status:                  ep.Status,
 		SSHEnabled:              ep.SSHEnabled,
 		SSHUsers:                parseJSONStringArray(ep.SSHUsers),
+		SSHPort:                 ep.SSHPort,
 		K8SAPIEnabled:           ep.K8SAPIEnabled,
 		K8SAPIApiServer:         ep.K8SAPIApiServer,
+		K8SAPIPort:              ep.K8SAPIPort,
 		K8SServiceEnabled:       ep.K8SServiceEnabled,
 		K8SServiceLabelSelector: ep.K8SServiceLabelSelector,
 		K8SServiceNamespaces:    parseJSONStringArray(ep.K8SServiceNamespaces),

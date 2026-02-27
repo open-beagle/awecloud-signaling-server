@@ -64,18 +64,22 @@ func handleK8SAPIProxyRequest(ctx context.Context, client pb.EndpointServiceClie
 			msg, err := stream.Recv()
 			if err != nil {
 				if err != io.EOF {
-					logger.Debugf("K8SAPI gRPC 接收结束: %v", err)
+					logger.Warnf("K8SAPI gRPC 接收错误 (session=%s): %v", req.SessionId, err)
+				} else {
+					logger.Infof("K8SAPI gRPC 接收 EOF (session=%s)", req.SessionId)
 				}
 				targetConn.Close()
 				return
 			}
 			if msg.IsClose {
+				logger.Infof("K8SAPI 收到关闭信号 (session=%s)", req.SessionId)
 				targetConn.Close()
 				return
 			}
 			if len(msg.Data) > 0 {
+				logger.Debugf("K8SAPI gRPC → K8S API: %d bytes (session=%s)", len(msg.Data), req.SessionId)
 				if _, writeErr := targetConn.Write(msg.Data); writeErr != nil {
-					logger.Debugf("K8SAPI TCP 写入失败: %v", writeErr)
+					logger.Warnf("K8SAPI TCP 写入失败 (session=%s): %v", req.SessionId, writeErr)
 					return
 				}
 			}
@@ -89,14 +93,17 @@ func handleK8SAPIProxyRequest(ctx context.Context, client pb.EndpointServiceClie
 		for {
 			n, err := targetConn.Read(buf)
 			if n > 0 {
+				logger.Debugf("K8SAPI K8S API → gRPC: %d bytes (session=%s)", n, req.SessionId)
 				if sendErr := stream.Send(&pb.K8SAPIProxyData{Data: buf[:n]}); sendErr != nil {
-					logger.Debugf("K8SAPI gRPC 发送失败: %v", sendErr)
+					logger.Warnf("K8SAPI gRPC 发送失败 (session=%s): %v", req.SessionId, sendErr)
 					return
 				}
 			}
 			if err != nil {
 				if err != io.EOF {
-					logger.Debugf("K8SAPI TCP 读取结束: %v", err)
+					logger.Warnf("K8SAPI TCP 读取错误 (session=%s): %v", req.SessionId, err)
+				} else {
+					logger.Infof("K8SAPI TCP 读取 EOF (session=%s)", req.SessionId)
 				}
 				_ = stream.Send(&pb.K8SAPIProxyData{IsClose: true})
 				return

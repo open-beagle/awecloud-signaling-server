@@ -475,11 +475,13 @@ export default {
     // SSH
     host: '主机地址',
     port: '端口',
+    sshPort: 'SSH 端口',
     sshRunAs: '运行用户',
     sshCanSwitchUser: '可切换用户',
     sshUsers: 'SSH 用户',
     // K8SAPI
     apiServer: 'API Server',
+    k8sapiPort: 'K8SAPI 端口',
     // K8SService
     serviceCount: 'Service 数',
     labelSelector: '标签选择器',

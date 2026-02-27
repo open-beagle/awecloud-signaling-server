@@ -523,11 +523,11 @@ func (a *Agent) heartbeatLoop() {
 		default:
 		}
 
-		logger.Infof("建立心跳流...")
+		logger.Debugf("建立心跳流...")
 
 		stream, err := a.grpcClient.Heartbeat(a.ctx)
 		if err != nil {
-			logger.Infof("建立心跳流失败: %v，%v后重试", err, retryDelay)
+			logger.Debugf("建立心跳流失败: %v，%v后重试", err, retryDelay)
 
 			select {
 			case <-time.After(retryDelay):
@@ -537,29 +537,29 @@ func (a *Agent) heartbeatLoop() {
 				}
 				continue
 			case <-a.ctx.Done():
-				logger.Info("心跳线程退出")
+				logger.Debug("心跳线程退出")
 				return
 			}
 		}
 
 		retryDelay = 5 * time.Second
-		logger.Infof("心跳流已建立")
+		logger.Debugf("心跳流已建立")
 
 		// 心跳循环
 		a.runHeartbeatStream(stream)
 
 		select {
 		case <-a.ctx.Done():
-			logger.Info("心跳线程退出")
+			logger.Debug("心跳线程退出")
 			return
 		default:
-			logger.Infof("心跳流已断开，%v后重新连接", retryDelay)
+			logger.Debugf("心跳流已断开，%v后重新连接", retryDelay)
 		}
 
 		select {
 		case <-time.After(retryDelay):
 		case <-a.ctx.Done():
-			logger.Info("心跳线程退出")
+			logger.Debug("心跳线程退出")
 			return
 		}
 	}
@@ -586,7 +586,7 @@ func (a *Agent) runHeartbeatStream(stream pb.AgentService_HeartbeatClient) {
 		for {
 			resp, err := stream.Recv()
 			if err != nil {
-				logger.Infof("接收心跳响应失败: %v", err)
+				logger.Debugf("接收心跳响应失败: %v", err)
 				return
 			}
 
@@ -595,7 +595,7 @@ func (a *Agent) runHeartbeatStream(stream pb.AgentService_HeartbeatClient) {
 
 			// 检查是否需要立即上报
 			if resp.RequestImmediateReport {
-				logger.Infof("收到 Server 立即上报请求，准备发送心跳")
+				logger.Debugf("收到 Server 立即上报请求，准备发送心跳")
 				select {
 				case immediateReport <- struct{}{}:
 				default:
@@ -618,7 +618,7 @@ func (a *Agent) runHeartbeatStream(stream pb.AgentService_HeartbeatClient) {
 				logger.Warnf("发送立即上报心跳失败: %v", err)
 				return
 			}
-			logger.Infof("立即上报心跳已发送")
+			logger.Debugf("立即上报心跳已发送")
 
 		case <-recvDone:
 			logger.Debug("心跳接收协程退出")

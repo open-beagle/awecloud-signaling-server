@@ -475,11 +475,13 @@ export default {
     // SSH
     host: 'Host',
     port: 'Port',
+    sshPort: 'SSH Port',
     sshRunAs: 'Run As',
     sshCanSwitchUser: 'Can Switch User',
     sshUsers: 'SSH Users',
     // K8SAPI
     apiServer: 'API Server',
+    k8sapiPort: 'K8SAPI Port',
     // K8SService
     serviceCount: 'Service Count',
     labelSelector: 'Label Selector',

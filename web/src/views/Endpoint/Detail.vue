@@ -43,7 +43,7 @@
             </template>
             <span v-else>-</span>
           </el-descriptions-item>
-          <el-descriptions-item label="">&nbsp;</el-descriptions-item>
+          <el-descriptions-item :label="$t('endpoint.port')">{{ endpoint.ssh_port || '-' }}</el-descriptions-item>
         </el-descriptions>
       </el-card>
 
@@ -57,7 +57,7 @@
         </template>
         <el-descriptions :column="2" border label-class-name="desc-label">
           <el-descriptions-item :label="$t('endpoint.apiServer')">{{ endpoint.k8sapi_api_server || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="">&nbsp;</el-descriptions-item>
+          <el-descriptions-item :label="$t('endpoint.port')">{{ endpoint.k8sapi_port || '-' }}</el-descriptions-item>
         </el-descriptions>
       </el-card>
 

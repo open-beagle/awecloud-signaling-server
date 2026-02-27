@@ -200,6 +200,29 @@ func (p *EndpointK8SAPIProxy) handleConn(conn net.Conn, endpointName string) {
 		return
 	}
 
+	// 设置读取超时（30 秒），等待 Desktop 发送第一个数据包
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+
+	// 等待第一个数据包（TLS ClientHello）
+	firstBuf := make([]byte, 32*1024)
+	n, err := conn.Read(firstBuf)
+	if err != nil {
+		logger.Warnf("[EndpointK8SAPI] 等待第一个数据包失败 (endpoint=%s, client=%s): %v", endpointName, clientUserName, err)
+		_ = stream.Send(&pb.K8SAPIProxyData{IsClose: true})
+		return
+	}
+
+	logger.Debugf("[EndpointK8SAPI] 收到第一个数据包: %d bytes (endpoint=%s)", n, endpointName)
+
+	// 发送第一个数据包到 Endpoint
+	if err := stream.Send(&pb.K8SAPIProxyData{Data: firstBuf[:n]}); err != nil {
+		logger.Warnf("[EndpointK8SAPI] 发送第一个数据包失败: %v", err)
+		return
+	}
+
+	// 清除读取超时，恢复正常读取
+	conn.SetReadDeadline(time.Time{})
+
 	// 双向桥接：TCP conn ↔ gRPC stream
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -214,10 +237,12 @@ func (p *EndpointK8SAPIProxy) handleConn(conn net.Conn, endpointName string) {
 				if sendErr := stream.Send(&pb.K8SAPIProxyData{
 					Data: buf[:n],
 				}); sendErr != nil {
+					logger.Debugf("[EndpointK8SAPI] gRPC 发送失败: %v", sendErr)
 					return
 				}
 			}
 			if err != nil {
+				logger.Debugf("[EndpointK8SAPI] TCP 读取结束: %v", err)
 				_ = stream.Send(&pb.K8SAPIProxyData{IsClose: true})
 				return
 			}
@@ -230,10 +255,12 @@ func (p *EndpointK8SAPIProxy) handleConn(conn net.Conn, endpointName string) {
 		for {
 			msg, err := stream.Recv()
 			if err != nil {
+				logger.Debugf("[EndpointK8SAPI] gRPC 接收结束: %v", err)
 				conn.Close()
 				return
 			}
 			if msg.IsClose {
+				logger.Debugf("[EndpointK8SAPI] 收到关闭信号")
 				conn.Close()
 				return
 			}
@@ -244,6 +271,7 @@ func (p *EndpointK8SAPIProxy) handleConn(conn net.Conn, endpointName string) {
 			}
 			if len(msg.Data) > 0 {
 				if _, writeErr := conn.Write(msg.Data); writeErr != nil {
+					logger.Debugf("[EndpointK8SAPI] TCP 写入失败: %v", writeErr)
 					return
 				}
 			}
@@ -251,6 +279,8 @@ func (p *EndpointK8SAPIProxy) handleConn(conn net.Conn, endpointName string) {
 	}()
 
 	wg.Wait()
+
+	logger.Debugf("[EndpointK8SAPI] 连接已关闭: endpoint=%s, client=%s", endpointName, clientUserName)
 
 	// 记录审计
 	if p.auditCollector != nil {

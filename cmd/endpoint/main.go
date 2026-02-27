@@ -353,7 +353,7 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 		}
 	}
 
-	logger.Info("心跳流已建立，保持连接中...")
+	logger.Debug("心跳流已建立，保持连接中...")
 
 	// 心跳循环
 	ticker := time.NewTicker(3 * time.Second)
@@ -430,7 +430,7 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 				}
 			}
 
-			logger.Infof("发送心跳: ssh_users=%v, discovered_services=%d", sshUsers, len(heartbeatReq.DiscoveredServices))
+			logger.Debugf("发送心跳: ssh_users=%v, discovered_services=%d", sshUsers, len(heartbeatReq.DiscoveredServices))
 			if err := stream.Send(heartbeatReq); err != nil {
 				return fmt.Errorf("发送心跳失败: %w", err)
 			}
