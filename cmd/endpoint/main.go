@@ -401,6 +401,11 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 			for _, svcReq := range resp.SvcProxyRequests {
 				go handleSVCProxyRequest(ctx, client, cfg, svcReq)
 			}
+
+			// 处理原始字节流请求通知（协议升级）
+			for _, rawReq := range resp.RawStreamRequests {
+				go handleRawStreamRequest(ctx, client, cfg, rawReq)
+			}
 		}
 	}()
 

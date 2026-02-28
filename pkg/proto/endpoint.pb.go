@@ -324,6 +324,7 @@ type EndpointHeartbeatResponse struct {
 	ShellRequests       []*ShellRequest        `protobuf:"bytes,3,rep,name=shell_requests,json=shellRequests,proto3" json:"shell_requests,omitempty"`                     // Shell 请求通知
 	K8SapiProxyRequests []*K8SAPIProxyRequest  `protobuf:"bytes,4,rep,name=k8sapi_proxy_requests,json=k8sapiProxyRequests,proto3" json:"k8sapi_proxy_requests,omitempty"` // K8S API 代理请求通知
 	SvcProxyRequests    []*SVCProxyRequest     `protobuf:"bytes,5,rep,name=svc_proxy_requests,json=svcProxyRequests,proto3" json:"svc_proxy_requests,omitempty"`          // K8S Service 代理请求通知
+	RawStreamRequests   []*RawStreamRequest    `protobuf:"bytes,6,rep,name=raw_stream_requests,json=rawStreamRequests,proto3" json:"raw_stream_requests,omitempty"`       // 原始字节流请求通知（用于协议升级）
 	// Server 下发的能力配置（由 Web 界面管理，Endpoint 应以此为准）
 	SshEnabled           bool   `protobuf:"varint,10,opt,name=ssh_enabled,json=sshEnabled,proto3" json:"ssh_enabled,omitempty"`                                 // SSH 能力是否启用
 	SshEnabledSet        bool   `protobuf:"varint,11,opt,name=ssh_enabled_set,json=sshEnabledSet,proto3" json:"ssh_enabled_set,omitempty"`                      // ssh_enabled 是否有效（false 表示未下发）
@@ -397,6 +398,13 @@ func (x *EndpointHeartbeatResponse) GetK8SapiProxyRequests() []*K8SAPIProxyReque
 func (x *EndpointHeartbeatResponse) GetSvcProxyRequests() []*SVCProxyRequest {
 	if x != nil {
 		return x.SvcProxyRequests
+	}
+	return nil
+}
+
+func (x *EndpointHeartbeatResponse) GetRawStreamRequests() []*RawStreamRequest {
+	if x != nil {
+		return x.RawStreamRequests
 	}
 	return nil
 }
@@ -821,13 +829,18 @@ func (x *K8SAPIProxyRequest) GetSessionId() string {
 
 // K8SAPIProxyData Endpoint K8S API 代理数据帧
 type K8SAPIProxyData struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	IsOpen        bool                   `protobuf:"varint,1,opt,name=is_open,json=isOpen,proto3" json:"is_open,omitempty"`         // 是否为开启会话请求（首包 true）
-	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // 会话 ID
-	Token         string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`                          // 注册令牌（首包携带）
-	Data          []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`                            // 数据载荷
-	IsClose       bool                   `protobuf:"varint,5,opt,name=is_close,json=isClose,proto3" json:"is_close,omitempty"`      // 是否为关闭通知
-	Error         string                 `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`                          // 错误信息
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	IsOpen    bool                   `protobuf:"varint,1,opt,name=is_open,json=isOpen,proto3" json:"is_open,omitempty"`         // 是否为开启会话请求（首包 true）
+	SessionId string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // 会话 ID
+	Token     string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`                          // 注册令牌（首包携带）
+	Data      []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`                            // 数据载荷（已废弃，使用 http_request/http_response）
+	IsClose   bool                   `protobuf:"varint,5,opt,name=is_close,json=isClose,proto3" json:"is_close,omitempty"`      // 是否为关闭通知
+	Error     string                 `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`                          // 错误信息
+	UserName  string                 `protobuf:"bytes,7,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`    // Desktop 用户名（仅首包，Agent WhoIs 提取）
+	K8SGroups []string               `protobuf:"bytes,8,rep,name=k8s_groups,json=k8sGroups,proto3" json:"k8s_groups,omitempty"` // Impersonation 分组（仅首包，Agent ACL 查询）
+	// 结构化 HTTP 请求/响应（新增）
+	HttpRequest   *K8SAPIHTTPRequest  `protobuf:"bytes,9,opt,name=http_request,json=httpRequest,proto3" json:"http_request,omitempty"`     // HTTP 请求（Agent → Endpoint）
+	HttpResponse  *K8SAPIHTTPResponse `protobuf:"bytes,10,opt,name=http_response,json=httpResponse,proto3" json:"http_response,omitempty"` // HTTP 响应（Endpoint → Agent）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -904,6 +917,164 @@ func (x *K8SAPIProxyData) GetError() string {
 	return ""
 }
 
+func (x *K8SAPIProxyData) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
+}
+
+func (x *K8SAPIProxyData) GetK8SGroups() []string {
+	if x != nil {
+		return x.K8SGroups
+	}
+	return nil
+}
+
+func (x *K8SAPIProxyData) GetHttpRequest() *K8SAPIHTTPRequest {
+	if x != nil {
+		return x.HttpRequest
+	}
+	return nil
+}
+
+func (x *K8SAPIProxyData) GetHttpResponse() *K8SAPIHTTPResponse {
+	if x != nil {
+		return x.HttpResponse
+	}
+	return nil
+}
+
+// K8SAPIHTTPRequest 结构化 HTTP 请求
+type K8SAPIHTTPRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Method        string                 `protobuf:"bytes,1,opt,name=method,proto3" json:"method,omitempty"`                                                                             // HTTP 方法（GET/POST/PUT/DELETE/PATCH）
+	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`                                                                                 // 请求路径（/api, /api/v1/nodes 等）
+	Headers       map[string]string      `protobuf:"bytes,3,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // 请求头（只传必要的，如 Accept, Content-Type）
+	Body          []byte                 `protobuf:"bytes,4,opt,name=body,proto3" json:"body,omitempty"`                                                                                 // 请求体（POST/PUT/PATCH）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *K8SAPIHTTPRequest) Reset() {
+	*x = K8SAPIHTTPRequest{}
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *K8SAPIHTTPRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*K8SAPIHTTPRequest) ProtoMessage() {}
+
+func (x *K8SAPIHTTPRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use K8SAPIHTTPRequest.ProtoReflect.Descriptor instead.
+func (*K8SAPIHTTPRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *K8SAPIHTTPRequest) GetMethod() string {
+	if x != nil {
+		return x.Method
+	}
+	return ""
+}
+
+func (x *K8SAPIHTTPRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *K8SAPIHTTPRequest) GetHeaders() map[string]string {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *K8SAPIHTTPRequest) GetBody() []byte {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
+// K8SAPIHTTPResponse 结构化 HTTP 响应
+type K8SAPIHTTPResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StatusCode    int32                  `protobuf:"varint,1,opt,name=status_code,json=statusCode,proto3" json:"status_code,omitempty"`                                                  // HTTP 状态码（200, 404, 500 等）
+	Headers       map[string]string      `protobuf:"bytes,2,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // 响应头（Content-Type 等）
+	Body          []byte                 `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`                                                                                 // 响应体
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *K8SAPIHTTPResponse) Reset() {
+	*x = K8SAPIHTTPResponse{}
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *K8SAPIHTTPResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*K8SAPIHTTPResponse) ProtoMessage() {}
+
+func (x *K8SAPIHTTPResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use K8SAPIHTTPResponse.ProtoReflect.Descriptor instead.
+func (*K8SAPIHTTPResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *K8SAPIHTTPResponse) GetStatusCode() int32 {
+	if x != nil {
+		return x.StatusCode
+	}
+	return 0
+}
+
+func (x *K8SAPIHTTPResponse) GetHeaders() map[string]string {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *K8SAPIHTTPResponse) GetBody() []byte {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
 // SVCProxyRequest Agent 通知 Endpoint 的 K8S Service 代理请求
 type SVCProxyRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -917,7 +1088,7 @@ type SVCProxyRequest struct {
 
 func (x *SVCProxyRequest) Reset() {
 	*x = SVCProxyRequest{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[11]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -929,7 +1100,7 @@ func (x *SVCProxyRequest) String() string {
 func (*SVCProxyRequest) ProtoMessage() {}
 
 func (x *SVCProxyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[11]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -942,7 +1113,7 @@ func (x *SVCProxyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SVCProxyRequest.ProtoReflect.Descriptor instead.
 func (*SVCProxyRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{11}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SVCProxyRequest) GetSessionId() string {
@@ -988,7 +1159,7 @@ type EndpointSVCProxyData struct {
 
 func (x *EndpointSVCProxyData) Reset() {
 	*x = EndpointSVCProxyData{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[12]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1000,7 +1171,7 @@ func (x *EndpointSVCProxyData) String() string {
 func (*EndpointSVCProxyData) ProtoMessage() {}
 
 func (x *EndpointSVCProxyData) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[12]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1013,7 +1184,7 @@ func (x *EndpointSVCProxyData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EndpointSVCProxyData.ProtoReflect.Descriptor instead.
 func (*EndpointSVCProxyData) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{12}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *EndpointSVCProxyData) GetIsOpen() bool {
@@ -1058,6 +1229,168 @@ func (x *EndpointSVCProxyData) GetError() string {
 	return ""
 }
 
+// RawStreamRequest Agent 通知 Endpoint 的原始字节流请求
+type RawStreamRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // 会话 ID
+	UserName      string                 `protobuf:"bytes,2,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`    // 用户名
+	K8SGroups     []string               `protobuf:"bytes,3,rep,name=k8s_groups,json=k8sGroups,proto3" json:"k8s_groups,omitempty"` // K8S 分组
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RawStreamRequest) Reset() {
+	*x = RawStreamRequest{}
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RawStreamRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RawStreamRequest) ProtoMessage() {}
+
+func (x *RawStreamRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RawStreamRequest.ProtoReflect.Descriptor instead.
+func (*RawStreamRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *RawStreamRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *RawStreamRequest) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
+}
+
+func (x *RawStreamRequest) GetK8SGroups() []string {
+	if x != nil {
+		return x.K8SGroups
+	}
+	return nil
+}
+
+// RawStreamData 原始字节流数据（用于协议升级）
+type RawStreamData struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	IsOpen        bool                   `protobuf:"varint,1,opt,name=is_open,json=isOpen,proto3" json:"is_open,omitempty"`         // 是否为开启流的首包
+	IsClose       bool                   `protobuf:"varint,2,opt,name=is_close,json=isClose,proto3" json:"is_close,omitempty"`      // 是否为关闭流的标志
+	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // 会话 ID
+	Token         string                 `protobuf:"bytes,4,opt,name=token,proto3" json:"token,omitempty"`                          // Endpoint Token（仅首包）
+	UserName      string                 `protobuf:"bytes,5,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`    // 用户名（Agent → Endpoint 首包）
+	K8SGroups     []string               `protobuf:"bytes,6,rep,name=k8s_groups,json=k8sGroups,proto3" json:"k8s_groups,omitempty"` // K8S 分组（Agent → Endpoint 首包）
+	Data          []byte                 `protobuf:"bytes,7,opt,name=data,proto3" json:"data,omitempty"`                            // 原始字节流数据
+	Error         string                 `protobuf:"bytes,8,opt,name=error,proto3" json:"error,omitempty"`                          // 错误信息
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RawStreamData) Reset() {
+	*x = RawStreamData{}
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RawStreamData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RawStreamData) ProtoMessage() {}
+
+func (x *RawStreamData) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RawStreamData.ProtoReflect.Descriptor instead.
+func (*RawStreamData) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *RawStreamData) GetIsOpen() bool {
+	if x != nil {
+		return x.IsOpen
+	}
+	return false
+}
+
+func (x *RawStreamData) GetIsClose() bool {
+	if x != nil {
+		return x.IsClose
+	}
+	return false
+}
+
+func (x *RawStreamData) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *RawStreamData) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *RawStreamData) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
+}
+
+func (x *RawStreamData) GetK8SGroups() []string {
+	if x != nil {
+		return x.K8SGroups
+	}
+	return nil
+}
+
+func (x *RawStreamData) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *RawStreamData) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 var File_pkg_proto_endpoint_proto protoreflect.FileDescriptor
 
 const file_pkg_proto_endpoint_proto_rawDesc = "" +
@@ -1087,13 +1420,14 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x03 \x01(\x05R\x04port\x12\x1d\n" +
 	"\n" +
-	"api_server\x18\x04 \x01(\tR\tapiServer\"\xf6\x04\n" +
+	"api_server\x18\x04 \x01(\tR\tapiServer\"\xcc\x05\n" +
 	"\x19EndpointHeartbeatResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12G\n" +
 	"\x0eshell_requests\x18\x03 \x03(\v2 .awecloud.signaling.ShellRequestR\rshellRequests\x12Z\n" +
 	"\x15k8sapi_proxy_requests\x18\x04 \x03(\v2&.awecloud.signaling.K8SAPIProxyRequestR\x13k8sapiProxyRequests\x12Q\n" +
-	"\x12svc_proxy_requests\x18\x05 \x03(\v2#.awecloud.signaling.SVCProxyRequestR\x10svcProxyRequests\x12\x1f\n" +
+	"\x12svc_proxy_requests\x18\x05 \x03(\v2#.awecloud.signaling.SVCProxyRequestR\x10svcProxyRequests\x12T\n" +
+	"\x13raw_stream_requests\x18\x06 \x03(\v2$.awecloud.signaling.RawStreamRequestR\x11rawStreamRequests\x12\x1f\n" +
 	"\vssh_enabled\x18\n" +
 	" \x01(\bR\n" +
 	"sshEnabled\x12&\n" +
@@ -1138,7 +1472,7 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	" \x01(\tR\x05error\"3\n" +
 	"\x12K8SAPIProxyRequest\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\"\xa4\x01\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"\xf7\x02\n" +
 	"\x0fK8SAPIProxyData\x12\x17\n" +
 	"\ais_open\x18\x01 \x01(\bR\x06isOpen\x12\x1d\n" +
 	"\n" +
@@ -1146,7 +1480,29 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	"\x05token\x18\x03 \x01(\tR\x05token\x12\x12\n" +
 	"\x04data\x18\x04 \x01(\fR\x04data\x12\x19\n" +
 	"\bis_close\x18\x05 \x01(\bR\aisClose\x12\x14\n" +
-	"\x05error\x18\x06 \x01(\tR\x05error\"\x85\x01\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\x12\x1b\n" +
+	"\tuser_name\x18\a \x01(\tR\buserName\x12\x1d\n" +
+	"\n" +
+	"k8s_groups\x18\b \x03(\tR\tk8sGroups\x12H\n" +
+	"\fhttp_request\x18\t \x01(\v2%.awecloud.signaling.K8SAPIHTTPRequestR\vhttpRequest\x12K\n" +
+	"\rhttp_response\x18\n" +
+	" \x01(\v2&.awecloud.signaling.K8SAPIHTTPResponseR\fhttpResponse\"\xdd\x01\n" +
+	"\x11K8SAPIHTTPRequest\x12\x16\n" +
+	"\x06method\x18\x01 \x01(\tR\x06method\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x12L\n" +
+	"\aheaders\x18\x03 \x03(\v22.awecloud.signaling.K8SAPIHTTPRequest.HeadersEntryR\aheaders\x12\x12\n" +
+	"\x04body\x18\x04 \x01(\fR\x04body\x1a:\n" +
+	"\fHeadersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd4\x01\n" +
+	"\x12K8SAPIHTTPResponse\x12\x1f\n" +
+	"\vstatus_code\x18\x01 \x01(\x05R\n" +
+	"statusCode\x12M\n" +
+	"\aheaders\x18\x02 \x03(\v23.awecloud.signaling.K8SAPIHTTPResponse.HeadersEntryR\aheaders\x12\x12\n" +
+	"\x04body\x18\x03 \x01(\fR\x04body\x1a:\n" +
+	"\fHeadersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x85\x01\n" +
 	"\x0fSVCProxyRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1c\n" +
@@ -1160,13 +1516,31 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	"\x05token\x18\x03 \x01(\tR\x05token\x12\x12\n" +
 	"\x04data\x18\x04 \x01(\fR\x04data\x12\x19\n" +
 	"\bis_close\x18\x05 \x01(\bR\aisClose\x12\x14\n" +
-	"\x05error\x18\x06 \x01(\tR\x05error2\xfe\x03\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\"m\n" +
+	"\x10RawStreamRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
+	"\tuser_name\x18\x02 \x01(\tR\buserName\x12\x1d\n" +
+	"\n" +
+	"k8s_groups\x18\x03 \x03(\tR\tk8sGroups\"\xde\x01\n" +
+	"\rRawStreamData\x12\x17\n" +
+	"\ais_open\x18\x01 \x01(\bR\x06isOpen\x12\x19\n" +
+	"\bis_close\x18\x02 \x01(\bR\aisClose\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\x12\x14\n" +
+	"\x05token\x18\x04 \x01(\tR\x05token\x12\x1b\n" +
+	"\tuser_name\x18\x05 \x01(\tR\buserName\x12\x1d\n" +
+	"\n" +
+	"k8s_groups\x18\x06 \x03(\tR\tk8sGroups\x12\x12\n" +
+	"\x04data\x18\a \x01(\fR\x04data\x12\x14\n" +
+	"\x05error\x18\b \x01(\tR\x05error2\xd9\x04\n" +
 	"\x0fEndpointService\x12e\n" +
 	"\bRegister\x12+.awecloud.signaling.EndpointRegisterRequest\x1a,.awecloud.signaling.EndpointRegisterResponse\x12l\n" +
 	"\tHeartbeat\x12,.awecloud.signaling.EndpointHeartbeatRequest\x1a-.awecloud.signaling.EndpointHeartbeatResponse(\x010\x01\x12M\n" +
 	"\tOpenShell\x12\x1d.awecloud.signaling.ShellData\x1a\x1d.awecloud.signaling.ShellData(\x010\x01\x12_\n" +
 	"\x0fOpenK8SAPIProxy\x12#.awecloud.signaling.K8SAPIProxyData\x1a#.awecloud.signaling.K8SAPIProxyData(\x010\x01\x12f\n" +
-	"\fOpenSVCProxy\x12(.awecloud.signaling.EndpointSVCProxyData\x1a(.awecloud.signaling.EndpointSVCProxyData(\x010\x01B<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
+	"\fOpenSVCProxy\x12(.awecloud.signaling.EndpointSVCProxyData\x1a(.awecloud.signaling.EndpointSVCProxyData(\x010\x01\x12Y\n" +
+	"\rOpenRawStream\x12!.awecloud.signaling.RawStreamData\x1a!.awecloud.signaling.RawStreamData(\x010\x01B<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
 
 var (
 	file_pkg_proto_endpoint_proto_rawDescOnce sync.Once
@@ -1180,7 +1554,7 @@ func file_pkg_proto_endpoint_proto_rawDescGZIP() []byte {
 	return file_pkg_proto_endpoint_proto_rawDescData
 }
 
-var file_pkg_proto_endpoint_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_pkg_proto_endpoint_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_pkg_proto_endpoint_proto_goTypes = []any{
 	(*EndpointRegisterRequest)(nil),   // 0: awecloud.signaling.EndpointRegisterRequest
 	(*EndpointRegisterResponse)(nil),  // 1: awecloud.signaling.EndpointRegisterResponse
@@ -1193,33 +1567,46 @@ var file_pkg_proto_endpoint_proto_goTypes = []any{
 	(*ShellData)(nil),                 // 8: awecloud.signaling.ShellData
 	(*K8SAPIProxyRequest)(nil),        // 9: awecloud.signaling.K8SAPIProxyRequest
 	(*K8SAPIProxyData)(nil),           // 10: awecloud.signaling.K8SAPIProxyData
-	(*SVCProxyRequest)(nil),           // 11: awecloud.signaling.SVCProxyRequest
-	(*EndpointSVCProxyData)(nil),      // 12: awecloud.signaling.EndpointSVCProxyData
-	nil,                               // 13: awecloud.signaling.DiscoveredK8SService.LabelsEntry
+	(*K8SAPIHTTPRequest)(nil),         // 11: awecloud.signaling.K8SAPIHTTPRequest
+	(*K8SAPIHTTPResponse)(nil),        // 12: awecloud.signaling.K8SAPIHTTPResponse
+	(*SVCProxyRequest)(nil),           // 13: awecloud.signaling.SVCProxyRequest
+	(*EndpointSVCProxyData)(nil),      // 14: awecloud.signaling.EndpointSVCProxyData
+	(*RawStreamRequest)(nil),          // 15: awecloud.signaling.RawStreamRequest
+	(*RawStreamData)(nil),             // 16: awecloud.signaling.RawStreamData
+	nil,                               // 17: awecloud.signaling.DiscoveredK8SService.LabelsEntry
+	nil,                               // 18: awecloud.signaling.K8SAPIHTTPRequest.HeadersEntry
+	nil,                               // 19: awecloud.signaling.K8SAPIHTTPResponse.HeadersEntry
 }
 var file_pkg_proto_endpoint_proto_depIdxs = []int32{
 	3,  // 0: awecloud.signaling.EndpointHeartbeatRequest.capabilities:type_name -> awecloud.signaling.EndpointCapabilityInfo
 	5,  // 1: awecloud.signaling.EndpointHeartbeatRequest.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
 	7,  // 2: awecloud.signaling.EndpointHeartbeatResponse.shell_requests:type_name -> awecloud.signaling.ShellRequest
 	9,  // 3: awecloud.signaling.EndpointHeartbeatResponse.k8sapi_proxy_requests:type_name -> awecloud.signaling.K8SAPIProxyRequest
-	11, // 4: awecloud.signaling.EndpointHeartbeatResponse.svc_proxy_requests:type_name -> awecloud.signaling.SVCProxyRequest
-	6,  // 5: awecloud.signaling.DiscoveredK8SService.ports:type_name -> awecloud.signaling.ServicePort
-	13, // 6: awecloud.signaling.DiscoveredK8SService.labels:type_name -> awecloud.signaling.DiscoveredK8SService.LabelsEntry
-	0,  // 7: awecloud.signaling.EndpointService.Register:input_type -> awecloud.signaling.EndpointRegisterRequest
-	2,  // 8: awecloud.signaling.EndpointService.Heartbeat:input_type -> awecloud.signaling.EndpointHeartbeatRequest
-	8,  // 9: awecloud.signaling.EndpointService.OpenShell:input_type -> awecloud.signaling.ShellData
-	10, // 10: awecloud.signaling.EndpointService.OpenK8SAPIProxy:input_type -> awecloud.signaling.K8SAPIProxyData
-	12, // 11: awecloud.signaling.EndpointService.OpenSVCProxy:input_type -> awecloud.signaling.EndpointSVCProxyData
-	1,  // 12: awecloud.signaling.EndpointService.Register:output_type -> awecloud.signaling.EndpointRegisterResponse
-	4,  // 13: awecloud.signaling.EndpointService.Heartbeat:output_type -> awecloud.signaling.EndpointHeartbeatResponse
-	8,  // 14: awecloud.signaling.EndpointService.OpenShell:output_type -> awecloud.signaling.ShellData
-	10, // 15: awecloud.signaling.EndpointService.OpenK8SAPIProxy:output_type -> awecloud.signaling.K8SAPIProxyData
-	12, // 16: awecloud.signaling.EndpointService.OpenSVCProxy:output_type -> awecloud.signaling.EndpointSVCProxyData
-	12, // [12:17] is the sub-list for method output_type
-	7,  // [7:12] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	13, // 4: awecloud.signaling.EndpointHeartbeatResponse.svc_proxy_requests:type_name -> awecloud.signaling.SVCProxyRequest
+	15, // 5: awecloud.signaling.EndpointHeartbeatResponse.raw_stream_requests:type_name -> awecloud.signaling.RawStreamRequest
+	6,  // 6: awecloud.signaling.DiscoveredK8SService.ports:type_name -> awecloud.signaling.ServicePort
+	17, // 7: awecloud.signaling.DiscoveredK8SService.labels:type_name -> awecloud.signaling.DiscoveredK8SService.LabelsEntry
+	11, // 8: awecloud.signaling.K8SAPIProxyData.http_request:type_name -> awecloud.signaling.K8SAPIHTTPRequest
+	12, // 9: awecloud.signaling.K8SAPIProxyData.http_response:type_name -> awecloud.signaling.K8SAPIHTTPResponse
+	18, // 10: awecloud.signaling.K8SAPIHTTPRequest.headers:type_name -> awecloud.signaling.K8SAPIHTTPRequest.HeadersEntry
+	19, // 11: awecloud.signaling.K8SAPIHTTPResponse.headers:type_name -> awecloud.signaling.K8SAPIHTTPResponse.HeadersEntry
+	0,  // 12: awecloud.signaling.EndpointService.Register:input_type -> awecloud.signaling.EndpointRegisterRequest
+	2,  // 13: awecloud.signaling.EndpointService.Heartbeat:input_type -> awecloud.signaling.EndpointHeartbeatRequest
+	8,  // 14: awecloud.signaling.EndpointService.OpenShell:input_type -> awecloud.signaling.ShellData
+	10, // 15: awecloud.signaling.EndpointService.OpenK8SAPIProxy:input_type -> awecloud.signaling.K8SAPIProxyData
+	14, // 16: awecloud.signaling.EndpointService.OpenSVCProxy:input_type -> awecloud.signaling.EndpointSVCProxyData
+	16, // 17: awecloud.signaling.EndpointService.OpenRawStream:input_type -> awecloud.signaling.RawStreamData
+	1,  // 18: awecloud.signaling.EndpointService.Register:output_type -> awecloud.signaling.EndpointRegisterResponse
+	4,  // 19: awecloud.signaling.EndpointService.Heartbeat:output_type -> awecloud.signaling.EndpointHeartbeatResponse
+	8,  // 20: awecloud.signaling.EndpointService.OpenShell:output_type -> awecloud.signaling.ShellData
+	10, // 21: awecloud.signaling.EndpointService.OpenK8SAPIProxy:output_type -> awecloud.signaling.K8SAPIProxyData
+	14, // 22: awecloud.signaling.EndpointService.OpenSVCProxy:output_type -> awecloud.signaling.EndpointSVCProxyData
+	16, // 23: awecloud.signaling.EndpointService.OpenRawStream:output_type -> awecloud.signaling.RawStreamData
+	18, // [18:24] is the sub-list for method output_type
+	12, // [12:18] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_pkg_proto_endpoint_proto_init() }
@@ -1233,7 +1620,7 @@ func file_pkg_proto_endpoint_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_endpoint_proto_rawDesc), len(file_pkg_proto_endpoint_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

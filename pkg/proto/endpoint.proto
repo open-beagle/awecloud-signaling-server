@@ -24,6 +24,9 @@ service EndpointService {
 
   // OpenSVCProxy - Agent 指令 Endpoint 开启 K8S Service 代理（gRPC 双向流）
   rpc OpenSVCProxy(stream EndpointSVCProxyData) returns (stream EndpointSVCProxyData);
+
+  // OpenRawStream - Agent 指令 Endpoint 开启原始字节流（用于协议升级，如 kubectl logs/exec）
+  rpc OpenRawStream(stream RawStreamData) returns (stream RawStreamData);
 }
 
 // ============================================
@@ -32,16 +35,16 @@ service EndpointService {
 
 // EndpointRegisterRequest Endpoint 注册请求
 message EndpointRegisterRequest {
-  string token = 1;          // 注册令牌（ep_ 前缀，Server 生成）
-  string name = 2;           // Endpoint 名称（如 hostname）
-  string version = 3;        // Endpoint 版本号
+  string token = 1; // 注册令牌（ep_ 前缀，Server 生成）
+  string name = 2; // Endpoint 名称（如 hostname）
+  string version = 3; // Endpoint 版本号
 }
 
 // EndpointRegisterResponse Endpoint 注册响应
 message EndpointRegisterResponse {
-  bool success = 1;          // 是否成功
-  string message = 2;        // 响应消息
-  string endpoint_id = 3;    // Endpoint ID（Agent 分配）
+  bool success = 1; // 是否成功
+  string message = 2; // 响应消息
+  string endpoint_id = 3; // Endpoint ID（Agent 分配）
 }
 
 // ============================================
@@ -50,45 +53,46 @@ message EndpointRegisterResponse {
 
 // EndpointHeartbeatRequest Endpoint 心跳请求
 message EndpointHeartbeatRequest {
-  string token = 1;          // 注册令牌（用于身份验证）
-  string name = 2;           // Endpoint 名称
+  string token = 1; // 注册令牌（用于身份验证）
+  string name = 2; // Endpoint 名称
   repeated EndpointCapabilityInfo capabilities = 3; // 启用的能力列表
   repeated DiscoveredK8SService discovered_services = 4; // Endpoint 发现的 K8S Service
   
   // SSH 能力配置（从 Endpoint 自动检测）
-  repeated string ssh_users = 7;      // 允许的 SSH 用户列表
+  repeated string ssh_users = 7; // 允许的 SSH 用户列表
   
   // K8S API 能力配置
-  string k8sapi_api_server = 8;       // K8S API Server 地址
+  string k8sapi_api_server = 8; // K8S API Server 地址
   
   // K8S Service 能力配置
-  string k8sservice_label_selector = 9;    // 标签选择器
+  string k8sservice_label_selector = 9; // 标签选择器
   repeated string k8sservice_namespaces = 10; // 命名空间列表
 }
 
 // EndpointCapabilityInfo Endpoint 单项能力信息
 message EndpointCapabilityInfo {
-  string type = 1;           // 能力类型：ssh / k8sapi / k8sservice
-  string host = 2;           // SSH 内网地址（SSH 类型时）
-  int32 port = 3;            // SSH 端口（SSH 类型时，默认 22）
-  string api_server = 4;     // K8S API Server 地址（K8SAPI 类型时）
+  string type = 1; // 能力类型：ssh / k8sapi / k8sservice
+  string host = 2; // SSH 内网地址（SSH 类型时）
+  int32 port = 3; // SSH 端口（SSH 类型时，默认 22）
+  string api_server = 4; // K8S API Server 地址（K8SAPI 类型时）
 }
 
 // EndpointHeartbeatResponse Endpoint 心跳响应
 message EndpointHeartbeatResponse {
-  bool success = 1;          // 是否成功
-  string message = 2;        // 响应消息
-  repeated ShellRequest shell_requests = 3;              // Shell 请求通知
+  bool success = 1; // 是否成功
+  string message = 2; // 响应消息
+  repeated ShellRequest shell_requests = 3; // Shell 请求通知
   repeated K8SAPIProxyRequest k8sapi_proxy_requests = 4; // K8S API 代理请求通知
-  repeated SVCProxyRequest svc_proxy_requests = 5;       // K8S Service 代理请求通知
+  repeated SVCProxyRequest svc_proxy_requests = 5; // K8S Service 代理请求通知
+  repeated RawStreamRequest raw_stream_requests = 6; // 原始字节流请求通知（用于协议升级）
 
   // Server 下发的能力配置（由 Web 界面管理，Endpoint 应以此为准）
-  bool ssh_enabled = 10;           // SSH 能力是否启用
-  bool ssh_enabled_set = 11;       // ssh_enabled 是否有效（false 表示未下发）
-  bool k8sapi_enabled = 12;        // K8S API 能力是否启用
-  bool k8sapi_enabled_set = 13;    // k8sapi_enabled 是否有效
-  string k8sapi_api_server = 14;   // K8S API Server 地址（Server 存储的值）
-  bool k8sservice_enabled = 15;    // K8S Service 能力是否启用
+  bool ssh_enabled = 10; // SSH 能力是否启用
+  bool ssh_enabled_set = 11; // ssh_enabled 是否有效（false 表示未下发）
+  bool k8sapi_enabled = 12; // K8S API 能力是否启用
+  bool k8sapi_enabled_set = 13; // k8sapi_enabled 是否有效
+  string k8sapi_api_server = 14; // K8S API Server 地址（Server 存储的值）
+  bool k8sservice_enabled = 15; // K8S Service 能力是否启用
   bool k8sservice_enabled_set = 16; // k8sservice_enabled 是否有效
 }
 
@@ -98,17 +102,17 @@ message EndpointHeartbeatResponse {
 
 // DiscoveredK8SService 发现的 K8S Service（Endpoint/Agent 心跳上报）
 message DiscoveredK8SService {
-  string namespace = 1;          // 命名空间
-  string service_name = 2;      // Service 名称
-  string cluster_ip = 3;        // ClusterIP
+  string namespace = 1; // 命名空间
+  string service_name = 2; // Service 名称
+  string cluster_ip = 3; // ClusterIP
   repeated ServicePort ports = 4; // 端口列表
   map<string, string> labels = 5; // 标签
 }
 
 // ServicePort K8S Service 端口
 message ServicePort {
-  string name = 1;     // 端口名称
-  int32 port = 2;      // 端口号
+  string name = 1; // 端口名称
+  int32 port = 2; // 端口号
   string protocol = 3; // 协议（TCP/UDP）
 }
 
@@ -118,24 +122,24 @@ message ServicePort {
 
 // ShellRequest Agent 通知 Endpoint 的 Shell 请求
 message ShellRequest {
-  string session_id = 1;     // 会话 ID（Agent 生成，Endpoint 回调时携带）
-  string login = 2;          // 登录用户名（如 "root"）
-  uint32 rows = 3;           // 终端行数
-  uint32 cols = 4;           // 终端列数
+  string session_id = 1; // 会话 ID（Agent 生成，Endpoint 回调时携带）
+  string login = 2; // 登录用户名（如 "root"）
+  uint32 rows = 3; // 终端行数
+  uint32 cols = 4; // 终端列数
 }
 
 // ShellData Endpoint Shell 会话数据帧
 message ShellData {
-  bool is_open = 1;          // 是否为开启会话请求（首包 true）
-  string session_id = 2;     // 会话 ID
-  string token = 3;          // 注册令牌（首包携带）
-  bytes data = 4;            // 数据载荷（stdin / stdout）
-  bool is_resize = 5;        // 是否为窗口大小变更
-  uint32 rows = 6;           // 新的终端行数
-  uint32 cols = 7;           // 新的终端列数
-  bool is_close = 8;         // 是否为关闭通知
-  int32 exit_code = 9;       // 退出码
-  string error = 10;         // 错误信息
+  bool is_open = 1; // 是否为开启会话请求（首包 true）
+  string session_id = 2; // 会话 ID
+  string token = 3; // 注册令牌（首包携带）
+  bytes data = 4; // 数据载荷（stdin / stdout）
+  bool is_resize = 5; // 是否为窗口大小变更
+  uint32 rows = 6; // 新的终端行数
+  uint32 cols = 7; // 新的终端列数
+  bool is_close = 8; // 是否为关闭通知
+  int32 exit_code = 9; // 退出码
+  string error = 10; // 错误信息
 }
 
 // ============================================
@@ -144,17 +148,38 @@ message ShellData {
 
 // K8SAPIProxyRequest Agent 通知 Endpoint 的 K8S API 代理请求
 message K8SAPIProxyRequest {
-  string session_id = 1;     // 会话 ID
+  string session_id = 1; // 会话 ID
 }
 
 // K8SAPIProxyData Endpoint K8S API 代理数据帧
 message K8SAPIProxyData {
-  bool is_open = 1;          // 是否为开启会话请求（首包 true）
-  string session_id = 2;     // 会话 ID
-  string token = 3;          // 注册令牌（首包携带）
-  bytes data = 4;            // 数据载荷
-  bool is_close = 5;         // 是否为关闭通知
-  string error = 6;          // 错误信息
+  bool is_open = 1; // 是否为开启会话请求（首包 true）
+  string session_id = 2; // 会话 ID
+  string token = 3; // 注册令牌（首包携带）
+  bytes data = 4; // 数据载荷（已废弃，使用 http_request/http_response）
+  bool is_close = 5; // 是否为关闭通知
+  string error = 6; // 错误信息
+  string user_name = 7; // Desktop 用户名（仅首包，Agent WhoIs 提取）
+  repeated string k8s_groups = 8; // Impersonation 分组（仅首包，Agent ACL 查询）
+  
+  // 结构化 HTTP 请求/响应（新增）
+  K8SAPIHTTPRequest http_request = 9; // HTTP 请求（Agent → Endpoint）
+  K8SAPIHTTPResponse http_response = 10; // HTTP 响应（Endpoint → Agent）
+}
+
+// K8SAPIHTTPRequest 结构化 HTTP 请求
+message K8SAPIHTTPRequest {
+  string method = 1; // HTTP 方法（GET/POST/PUT/DELETE/PATCH）
+  string path = 2; // 请求路径（/api, /api/v1/nodes 等）
+  map<string, string> headers = 3; // 请求头（只传必要的，如 Accept, Content-Type）
+  bytes body = 4; // 请求体（POST/PUT/PATCH）
+}
+
+// K8SAPIHTTPResponse 结构化 HTTP 响应
+message K8SAPIHTTPResponse {
+  int32 status_code = 1; // HTTP 状态码（200, 404, 500 等）
+  map<string, string> headers = 2; // 响应头（Content-Type 等）
+  bytes body = 3; // 响应体
 }
 
 // ============================================
@@ -163,18 +188,41 @@ message K8SAPIProxyData {
 
 // SVCProxyRequest Agent 通知 Endpoint 的 K8S Service 代理请求
 message SVCProxyRequest {
-  string session_id = 1;     // 会话 ID
-  string namespace = 2;      // 目标命名空间
-  string service_name = 3;   // 目标 Service 名称
-  int32 port = 4;            // 目标端口
+  string session_id = 1; // 会话 ID
+  string namespace = 2; // 目标命名空间
+  string service_name = 3; // 目标 Service 名称
+  int32 port = 4; // 目标端口
 }
 
 // EndpointSVCProxyData Endpoint K8S Service 代理数据帧
 message EndpointSVCProxyData {
-  bool is_open = 1;          // 是否为开启会话请求（首包 true）
-  string session_id = 2;     // 会话 ID
-  string token = 3;          // 注册令牌（首包携带）
-  bytes data = 4;            // 数据载荷
-  bool is_close = 5;         // 是否为关闭通知
-  string error = 6;          // 错误信息
+  bool is_open = 1; // 是否为开启会话请求（首包 true）
+  string session_id = 2; // 会话 ID
+  string token = 3; // 注册令牌（首包携带）
+  bytes data = 4; // 数据载荷
+  bool is_close = 5; // 是否为关闭通知
+  string error = 6; // 错误信息
+}
+
+// ============================================
+// 原始字节流（用于协议升级，如 kubectl logs/exec）
+// ============================================
+
+// RawStreamRequest Agent 通知 Endpoint 的原始字节流请求
+message RawStreamRequest {
+  string session_id = 1; // 会话 ID
+  string user_name = 2; // 用户名
+  repeated string k8s_groups = 3; // K8S 分组
+}
+
+// RawStreamData 原始字节流数据（用于协议升级）
+message RawStreamData {
+  bool is_open = 1; // 是否为开启流的首包
+  bool is_close = 2; // 是否为关闭流的标志
+  string session_id = 3; // 会话 ID
+  string token = 4; // Endpoint Token（仅首包）
+  string user_name = 5; // 用户名（Agent → Endpoint 首包）
+  repeated string k8s_groups = 6; // K8S 分组（Agent → Endpoint 首包）
+  bytes data = 7; // 原始字节流数据
+  string error = 8; // 错误信息
 }

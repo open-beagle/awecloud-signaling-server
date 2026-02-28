@@ -24,6 +24,7 @@ const (
 	EndpointService_OpenShell_FullMethodName       = "/awecloud.signaling.EndpointService/OpenShell"
 	EndpointService_OpenK8SAPIProxy_FullMethodName = "/awecloud.signaling.EndpointService/OpenK8SAPIProxy"
 	EndpointService_OpenSVCProxy_FullMethodName    = "/awecloud.signaling.EndpointService/OpenSVCProxy"
+	EndpointService_OpenRawStream_FullMethodName   = "/awecloud.signaling.EndpointService/OpenRawStream"
 )
 
 // EndpointServiceClient is the client API for EndpointService service.
@@ -42,6 +43,8 @@ type EndpointServiceClient interface {
 	OpenK8SAPIProxy(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[K8SAPIProxyData, K8SAPIProxyData], error)
 	// OpenSVCProxy - Agent 指令 Endpoint 开启 K8S Service 代理（gRPC 双向流）
 	OpenSVCProxy(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[EndpointSVCProxyData, EndpointSVCProxyData], error)
+	// OpenRawStream - Agent 指令 Endpoint 开启原始字节流（用于协议升级，如 kubectl logs/exec）
+	OpenRawStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[RawStreamData, RawStreamData], error)
 }
 
 type endpointServiceClient struct {
@@ -114,6 +117,19 @@ func (c *endpointServiceClient) OpenSVCProxy(ctx context.Context, opts ...grpc.C
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type EndpointService_OpenSVCProxyClient = grpc.BidiStreamingClient[EndpointSVCProxyData, EndpointSVCProxyData]
 
+func (c *endpointServiceClient) OpenRawStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[RawStreamData, RawStreamData], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &EndpointService_ServiceDesc.Streams[4], EndpointService_OpenRawStream_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[RawStreamData, RawStreamData]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EndpointService_OpenRawStreamClient = grpc.BidiStreamingClient[RawStreamData, RawStreamData]
+
 // EndpointServiceServer is the server API for EndpointService service.
 // All implementations must embed UnimplementedEndpointServiceServer
 // for forward compatibility.
@@ -130,6 +146,8 @@ type EndpointServiceServer interface {
 	OpenK8SAPIProxy(grpc.BidiStreamingServer[K8SAPIProxyData, K8SAPIProxyData]) error
 	// OpenSVCProxy - Agent 指令 Endpoint 开启 K8S Service 代理（gRPC 双向流）
 	OpenSVCProxy(grpc.BidiStreamingServer[EndpointSVCProxyData, EndpointSVCProxyData]) error
+	// OpenRawStream - Agent 指令 Endpoint 开启原始字节流（用于协议升级，如 kubectl logs/exec）
+	OpenRawStream(grpc.BidiStreamingServer[RawStreamData, RawStreamData]) error
 	mustEmbedUnimplementedEndpointServiceServer()
 }
 
@@ -154,6 +172,9 @@ func (UnimplementedEndpointServiceServer) OpenK8SAPIProxy(grpc.BidiStreamingServ
 }
 func (UnimplementedEndpointServiceServer) OpenSVCProxy(grpc.BidiStreamingServer[EndpointSVCProxyData, EndpointSVCProxyData]) error {
 	return status.Error(codes.Unimplemented, "method OpenSVCProxy not implemented")
+}
+func (UnimplementedEndpointServiceServer) OpenRawStream(grpc.BidiStreamingServer[RawStreamData, RawStreamData]) error {
+	return status.Error(codes.Unimplemented, "method OpenRawStream not implemented")
 }
 func (UnimplementedEndpointServiceServer) mustEmbedUnimplementedEndpointServiceServer() {}
 func (UnimplementedEndpointServiceServer) testEmbeddedByValue()                         {}
@@ -222,6 +243,13 @@ func _EndpointService_OpenSVCProxy_Handler(srv interface{}, stream grpc.ServerSt
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type EndpointService_OpenSVCProxyServer = grpc.BidiStreamingServer[EndpointSVCProxyData, EndpointSVCProxyData]
 
+func _EndpointService_OpenRawStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(EndpointServiceServer).OpenRawStream(&grpc.GenericServerStream[RawStreamData, RawStreamData]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EndpointService_OpenRawStreamServer = grpc.BidiStreamingServer[RawStreamData, RawStreamData]
+
 // EndpointService_ServiceDesc is the grpc.ServiceDesc for EndpointService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -256,6 +284,12 @@ var EndpointService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "OpenSVCProxy",
 			Handler:       _EndpointService_OpenSVCProxy_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "OpenRawStream",
+			Handler:       _EndpointService_OpenRawStream_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

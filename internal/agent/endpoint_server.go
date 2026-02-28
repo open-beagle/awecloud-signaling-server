@@ -46,6 +46,9 @@ type EndpointConnection struct {
 	// 动态分配的端口（Endpoint 连接时分配）
 	SSHPort     uint16 // SSH 代理端口（0 表示未分配）
 	K8SAPIPort  uint16 // K8SAPI 代理端口（0 表示未分配）
+
+	// Heartbeat 流（用于直接调用 Endpoint RPC）
+	HeartbeatStream pb.EndpointService_HeartbeatServer
 }
 
 // shellSession 等待中的 shell 会话（Agent 创建，等待 Endpoint 回调）
@@ -63,6 +66,8 @@ type shellSession struct {
 // k8sapiSession 等待中的 K8S API 代理会话
 type k8sapiSession struct {
 	sessionID string
+	userName  string   // Desktop 用户名（Agent WhoIs 提取）
+	k8sGroups []string // Impersonation 分组（Agent ACL 查询）
 	streamCh  chan pb.EndpointService_OpenK8SAPIProxyServer
 	createdAt time.Time
 }
@@ -75,6 +80,15 @@ type svcProxySession struct {
 	port        int32
 	streamCh    chan pb.EndpointService_OpenSVCProxyServer
 	createdAt   time.Time
+}
+
+// rawStreamSession 等待中的原始字节流会话（用于协议升级）
+type rawStreamSession struct {
+	sessionID string
+	userName  string   // Desktop 用户名（Agent WhoIs 提取）
+	k8sGroups []string // Impersonation 分组（Agent ACL 查询）
+	streamCh  chan pb.EndpointService_OpenRawStreamServer
+	createdAt time.Time
 }
 
 // EndpointServerConfig Server 下发的 Endpoint 能力配置（按 endpoint name 存储）
@@ -117,6 +131,10 @@ type EndpointServer struct {
 	svcProxySessions map[string]*svcProxySession
 	svcProxyMutex    sync.Mutex
 
+	// 等待中的原始字节流会话（session_id → rawStreamSession）
+	rawStreamSessions map[string]*rawStreamSession
+	rawStreamMutex    sync.Mutex
+
 	// 待下发的 shell 请求（endpoint name → []*ShellRequest）
 	pendingShellReqs map[string][]*pb.ShellRequest
 	// 待下发的 K8S API 代理请求（endpoint name → []*K8SAPIProxyRequest）
@@ -146,6 +164,7 @@ func NewEndpointServer(listenPort int, token string, parentCtx context.Context) 
 		shellSessions:     make(map[string]*shellSession),
 		k8sapiSessions:    make(map[string]*k8sapiSession),
 		svcProxySessions:  make(map[string]*svcProxySession),
+		rawStreamSessions: make(map[string]*rawStreamSession),
 		pendingShellReqs:  make(map[string][]*pb.ShellRequest),
 		pendingK8SAPIReqs: make(map[string][]*pb.K8SAPIProxyRequest),
 		pendingSVCReqs:    make(map[string][]*pb.SVCProxyRequest),
@@ -345,6 +364,8 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 		// K8S Service 配置
 		K8SServiceLabelSelector: firstReq.K8SserviceLabelSelector,
 		K8SServiceNamespaces:    firstReq.K8SserviceNamespaces,
+		// Heartbeat 流（用于直接调用 Endpoint RPC）
+		HeartbeatStream: stream,
 	}
 
 	s.connMutex.Lock()
@@ -635,6 +656,16 @@ func (s *EndpointServer) OpenK8SAPIProxy(stream pb.EndpointService_OpenK8SAPIPro
 	}
 	s.k8sapiMutex.Unlock()
 
+	// 向 Endpoint 发送身份信息（user_name 和 k8s_groups）
+	if err := stream.Send(&pb.K8SAPIProxyData{
+		UserName:  session.userName,
+		K8SGroups: session.k8sGroups,
+	}); err != nil {
+		logger.Warnf("OpenK8SAPIProxy 发送身份信息失败: session_id=%s, err=%v", sessionID, err)
+		return fmt.Errorf("发送身份信息失败: %w", err)
+	}
+	logger.Infof("OpenK8SAPIProxy 已发送身份信息: session_id=%s, user=%s, groups=%v", sessionID, session.userName, session.k8sGroups)
+
 	// 通知等待方：Endpoint 已回调，传递 gRPC 流
 	select {
 	case session.streamCh <- stream:
@@ -650,7 +681,7 @@ func (s *EndpointServer) OpenK8SAPIProxy(stream pb.EndpointService_OpenK8SAPIPro
 
 // RequestK8SAPIProxy 请求 Endpoint 开启 K8S API 代理会话
 // 创建 session → 通知 Endpoint → 等待回调 → 返回 gRPC 流
-func (s *EndpointServer) RequestK8SAPIProxy(ctx context.Context, endpointName string) (pb.EndpointService_OpenK8SAPIProxyServer, error) {
+func (s *EndpointServer) RequestK8SAPIProxy(ctx context.Context, endpointName string, userName string, k8sGroups []string) (pb.EndpointService_OpenK8SAPIProxyServer, error) {
 	// 检查 Endpoint 是否在线
 	s.connMutex.RLock()
 	_, connected := s.connections[endpointName]
@@ -659,10 +690,12 @@ func (s *EndpointServer) RequestK8SAPIProxy(ctx context.Context, endpointName st
 		return nil, fmt.Errorf("Endpoint %s 不在线", endpointName)
 	}
 
-	// 创建 session
+	// 创建 session（携带用户身份信息）
 	sessionID := uuid.New().String()
 	session := &k8sapiSession{
 		sessionID: sessionID,
+		userName:  userName,
+		k8sGroups: k8sGroups,
 		streamCh:  make(chan pb.EndpointService_OpenK8SAPIProxyServer, 1),
 		createdAt: time.Now(),
 	}
@@ -799,4 +832,117 @@ func (s *EndpointServer) RequestSVCProxy(ctx context.Context, endpointName, name
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+// RequestRawStream 请求 Endpoint 开启原始字节流（用于协议升级）
+// 使用直接调用机制（通过 HeartbeatStream）而不是心跳队列
+func (s *EndpointServer) RequestRawStream(ctx context.Context, endpointName string, userName string, k8sGroups []string) (pb.EndpointService_OpenRawStreamServer, error) {
+	// 检查 Endpoint 是否在线
+	s.connMutex.RLock()
+	conn, connected := s.connections[endpointName]
+	s.connMutex.RUnlock()
+	if !connected {
+		return nil, fmt.Errorf("Endpoint %s 不在线", endpointName)
+	}
+
+	// 创建 session（携带用户身份信息）
+	sessionID := uuid.New().String()
+	session := &rawStreamSession{
+		sessionID: sessionID,
+		userName:  userName,
+		k8sGroups: k8sGroups,
+		streamCh:  make(chan pb.EndpointService_OpenRawStreamServer, 1),
+		createdAt: time.Now(),
+	}
+
+	s.rawStreamMutex.Lock()
+	s.rawStreamSessions[sessionID] = session
+	s.rawStreamMutex.Unlock()
+
+	defer func() {
+		s.rawStreamMutex.Lock()
+		delete(s.rawStreamSessions, sessionID)
+		s.rawStreamMutex.Unlock()
+	}()
+
+	logger.Infof("[RawStream] 原始流请求已创建: session_id=%s, endpoint=%s, user=%s", sessionID, endpointName, userName)
+
+	// 通过 HeartbeatStream 直接通知 Endpoint（立即响应）
+	// 构造 RawStreamRequest 通知
+	rawStreamReq := &pb.RawStreamRequest{
+		SessionId: sessionID,
+		UserName:  userName,
+		K8SGroups: k8sGroups,
+	}
+
+	// 发送通知到 Endpoint（通过心跳响应）
+	if conn.HeartbeatStream != nil {
+		if err := conn.HeartbeatStream.Send(&pb.EndpointHeartbeatResponse{
+			Success:           true,
+			RawStreamRequests: []*pb.RawStreamRequest{rawStreamReq},
+		}); err != nil {
+			logger.Warnf("[RawStream] 发送通知失败: session_id=%s, err=%v", sessionID, err)
+			return nil, fmt.Errorf("发送通知到 Endpoint 失败: %w", err)
+		}
+		logger.Infof("[RawStream] 已发送通知到 Endpoint: session_id=%s", sessionID)
+	} else {
+		return nil, fmt.Errorf("Endpoint %s 的 HeartbeatStream 不可用", endpointName)
+	}
+
+	// 等待 Endpoint 回调 OpenRawStream（超时 10 秒，协议升级需要快速响应）
+	select {
+	case stream := <-session.streamCh:
+		logger.Infof("[RawStream] 原始流已建立: session_id=%s, endpoint=%s", sessionID, endpointName)
+		return stream, nil
+	case <-time.After(10 * time.Second):
+		return nil, fmt.Errorf("等待 Endpoint %s 回调超时（10s）", endpointName)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// OpenRawStream Endpoint 回调的原始字节流会话（gRPC 双向流）
+func (s *EndpointServer) OpenRawStream(stream pb.EndpointService_OpenRawStreamServer) error {
+	// 接收首包（Endpoint 发送 session_id + token）
+	firstMsg, err := stream.Recv()
+	if err != nil {
+		return fmt.Errorf("接收 OpenRawStream 首包失败: %w", err)
+	}
+
+	if !firstMsg.IsOpen {
+		return fmt.Errorf("OpenRawStream 首包缺少 is_open 标志")
+	}
+
+	// 验证 token
+	if firstMsg.Token != s.token {
+		logger.Warnf("OpenRawStream 拒绝: token 不匹配, session_id=%s", firstMsg.SessionId)
+		return fmt.Errorf("认证失败")
+	}
+
+	sessionID := firstMsg.SessionId
+	logger.Infof("OpenRawStream 回调: session_id=%s", sessionID)
+
+	// 查找等待中的 session
+	s.rawStreamMutex.Lock()
+	session, exists := s.rawStreamSessions[sessionID]
+	if !exists {
+		s.rawStreamMutex.Unlock()
+		logger.Warnf("OpenRawStream 找不到 session: session_id=%s（可能已超时）", sessionID)
+		return fmt.Errorf("session 不存在或已超时")
+	}
+	s.rawStreamMutex.Unlock()
+
+	// 通知等待方
+	select {
+	case session.streamCh <- stream:
+		logger.Infof("OpenRawStream 已通知等待方: session_id=%s", sessionID)
+	default:
+		logger.Warnf("OpenRawStream 等待方已超时: session_id=%s", sessionID)
+		return fmt.Errorf("等待方已超时")
+	}
+
+	// 保持流打开，直到客户端关闭
+	<-stream.Context().Done()
+	logger.Infof("OpenRawStream 流已关闭: session_id=%s", sessionID)
+	return nil
 }
