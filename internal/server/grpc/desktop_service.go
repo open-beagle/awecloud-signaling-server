@@ -1782,76 +1782,123 @@ func (s *DesktopServiceServer) GetDomainList(ctx context.Context, req *pb.GetDom
 }
 
 // queryAccessibleDomains 查询用户可访问的所有域名
+// queryAccessibleDomains 查询用户可访问的所有域名
+// 按权限类型分别收集有权限的 Agent User ID，然后按类型过滤域名
+// SSH 类型还需要做用户列表交集（ACL 授权的用户 ∩ Agent 实际可用的用户）
 func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clientID uint64, groupIDs []int64) []*pb.DomainItem {
 	var domains []*pb.DomainItem
-	agentUserIDs := make(map[uint64]bool)
 
-	// 1. 收集 SSH 权限的 Agent User ID
+	// 按类型分别收集有权限的 Agent User ID
+	sshAgentIDs := make(map[uint64]bool)    // SSH 权限
+	k8sAgentIDs := make(map[uint64]bool)    // K8S API 权限
+	k8sSvcAgentIDs := make(map[uint64]bool) // K8S Service 权限
+
+	// SSH 权限的授权用户列表（agent_user_id → 授权的 SSH 用户名列表）
+	sshAuthorizedUsers := make(map[uint64][]string)
+
+	// 1. 收集 SSH 权限
 	var sshUserPerms []model.AclSSHUserPermission
 	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&sshUserPerms)
 	for _, p := range sshUserPerms {
-		agentUserIDs[p.TargetUserID] = true
+		sshAgentIDs[p.TargetUserID] = true
+		var users []string
+		if err := json.Unmarshal([]byte(p.SSHUsers), &users); err == nil {
+			sshAuthorizedUsers[p.TargetUserID] = appendUniqueStrings(sshAuthorizedUsers[p.TargetUserID], users...)
+		}
 	}
 
 	if len(groupIDs) > 0 {
 		var sshGroupPerms []model.AclSSHGroupPermission
 		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&sshGroupPerms)
 		for _, p := range sshGroupPerms {
-			agentUserIDs[p.TargetUserID] = true
+			sshAgentIDs[p.TargetUserID] = true
+			var users []string
+			if err := json.Unmarshal([]byte(p.SSHUsers), &users); err == nil {
+				sshAuthorizedUsers[p.TargetUserID] = appendUniqueStrings(sshAuthorizedUsers[p.TargetUserID], users...)
+			}
 		}
 	}
 
-	// 2. 收集 K8S API 权限的 Agent User ID
+	// 2. 收集 K8S API 权限
 	var k8sUserPerms []model.AclK8SUserPermission
 	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&k8sUserPerms)
 	for _, p := range k8sUserPerms {
-		agentUserIDs[p.TargetUserID] = true
+		k8sAgentIDs[p.TargetUserID] = true
 	}
 
 	if len(groupIDs) > 0 {
 		var k8sGroupPerms []model.AclK8SGroupPermission
 		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&k8sGroupPerms)
 		for _, p := range k8sGroupPerms {
-			agentUserIDs[p.TargetUserID] = true
+			k8sAgentIDs[p.TargetUserID] = true
 		}
 	}
 
-	// 3. 收集 K8S Service 权限的 Agent User ID
+	// 3. 收集 K8S Service 权限
 	var k8sSvcUserPerms []model.AclK8SServiceUserPermission
 	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&k8sSvcUserPerms)
 	for _, p := range k8sSvcUserPerms {
-		agentUserIDs[p.TargetUserID] = true
+		k8sSvcAgentIDs[p.TargetUserID] = true
 	}
 
 	if len(groupIDs) > 0 {
 		var k8sSvcGroupPerms []model.AclK8SServiceGroupPermission
 		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&k8sSvcGroupPerms)
 		for _, p := range k8sSvcGroupPerms {
-			agentUserIDs[p.TargetUserID] = true
+			k8sSvcAgentIDs[p.TargetUserID] = true
 		}
 	}
 
-	// 4. 查询这些 Agent User 的所有域名记录
-	if len(agentUserIDs) == 0 {
+	// 4. 合并所有有权限的 Agent User ID（用于一次性查询域名）
+	allAgentIDs := make(map[uint64]bool)
+	for uid := range sshAgentIDs {
+		allAgentIDs[uid] = true
+	}
+	for uid := range k8sAgentIDs {
+		allAgentIDs[uid] = true
+	}
+	for uid := range k8sSvcAgentIDs {
+		allAgentIDs[uid] = true
+	}
+
+	if len(allAgentIDs) == 0 {
 		return domains
 	}
 
 	var userIDList []uint64
-	for uid := range agentUserIDs {
+	for uid := range allAgentIDs {
 		userIDList = append(userIDList, uid)
 	}
 
 	var domainRegs []model.DomainRegistry
 	db.DB.WithContext(ctx).Where("user_id IN ?", userIDList).Find(&domainRegs)
 
-	// 5. 转换为 DomainItem，并判断状态
+	// 5. 按类型过滤域名，只返回用户有对应类型权限的域名
 	for _, dr := range domainRegs {
+		// 检查用户是否有该类型的权限
+		switch dr.Type {
+		case model.DomainTypeSSH:
+			if !sshAgentIDs[dr.UserID] {
+				continue // 没有 SSH 权限，跳过
+			}
+		case model.DomainTypeK8SAPI:
+			if !k8sAgentIDs[dr.UserID] {
+				continue // 没有 K8S API 权限，跳过
+			}
+		case model.DomainTypeK8SSVC:
+			if !k8sSvcAgentIDs[dr.UserID] {
+				continue // 没有 K8S Service 权限，跳过
+			}
+		default:
+			continue
+		}
+
 		item := &pb.DomainItem{
 			Domain:      dr.Domain,
 			Type:        string(dr.Type),
 			Namespace:   dr.Namespace,
 			ServiceName: dr.ServiceName,
-			EndpointId:  dr.EndpointID, // 填充 endpoint_id
+			EndpointId:  dr.EndpointID,
 		}
 
 		// 解析 region（从 domain 中提取）
@@ -1865,12 +1912,18 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 			}
 		}
 
-		// 解析 ssh_users（ssh 类型）
-		if dr.Type == model.DomainTypeSSH && dr.SshUsers != "" {
-			var users []string
-			if err := json.Unmarshal([]byte(dr.SshUsers), &users); err == nil {
-				item.SshUsers = users
+		// SSH 类型：做用户列表交集（ACL 授权的用户 ∩ Agent 实际可用的用户）
+		if dr.Type == model.DomainTypeSSH {
+			// Agent 实际可用的 SSH 用户
+			availableUsers := dr.GetSSHUsers()
+			// ACL 授权的 SSH 用户
+			authorizedUsers := sshAuthorizedUsers[dr.UserID]
+			// 求交集
+			filteredUsers := intersectStrings(authorizedUsers, availableUsers)
+			if len(filteredUsers) == 0 {
+				continue // 交集为空，跳过该域名
 			}
+			item.SshUsers = filteredUsers
 		}
 
 		// 判断状态
