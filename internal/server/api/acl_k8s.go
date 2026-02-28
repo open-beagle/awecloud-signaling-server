@@ -11,6 +11,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
 // ========== K8S API 授权 ==========
@@ -239,6 +240,10 @@ func (a *ACLAPI) AddK8SACLUsers(c *gin.Context) {
 	}
 
 	logger.Infof("添加 K8S 用户授权: target_user_id=%d, user_ids=%v", targetUserID, req.UserIDs)
+	
+	// 推送权限变更到 Desktop 客户端（K8S API 权限 → 全部数据）
+	a.notifyDesktopDataChange(pb.DesktopDataType_DESKTOP_DATA_TYPE_ALL)
+	
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
 }
 

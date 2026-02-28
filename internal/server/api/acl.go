@@ -12,12 +12,19 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
 // ACLAPI 授权管理 API
 type ACLAPI struct {
-	config  *config.ServerConfig
-	aclSync *headscale.ACLSyncService
+	config         *config.ServerConfig
+	aclSync        *headscale.ACLSyncService
+	desktopService DesktopServiceInterface
+}
+
+// DesktopServiceInterface Desktop 服务接口（用于权限变更推送）
+type DesktopServiceInterface interface {
+	NotifyAllDesktopsDataChange(dataType pb.DesktopDataType)
 }
 
 // NewACLAPI 创建 ACLAPI
@@ -37,6 +44,18 @@ func NewACLAPI(cfg *config.ServerConfig) *ACLAPI {
 	}
 
 	return api
+}
+
+// SetDesktopService 设置 Desktop 服务（用于权限变更推送）
+func (a *ACLAPI) SetDesktopService(desktopService DesktopServiceInterface) {
+	a.desktopService = desktopService
+}
+
+// notifyDesktopDataChange 通知 Desktop 数据变更（辅助方法）
+func (a *ACLAPI) notifyDesktopDataChange(dataType pb.DesktopDataType) {
+	if a.desktopService != nil {
+		go a.desktopService.NotifyAllDesktopsDataChange(dataType)
+	}
 }
 
 // ========== 服务授权 ==========
@@ -593,6 +612,9 @@ func (a *ACLAPI) AddUserACLUsers(c *gin.Context) {
 		}()
 	}
 
+	// 推送权限变更到 Desktop 客户端（SSH 权限 → 我的主机）
+	a.notifyDesktopDataChange(pb.DesktopDataType_DESKTOP_DATA_TYPE_HOSTS)
+
 	logger.Infof("添加用户授权: target_user_id=%d, user_ids=%v", targetUserID, req.UserIDs)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
@@ -643,6 +665,9 @@ func (a *ACLAPI) AddUserACLGroups(c *gin.Context) {
 		}()
 	}
 
+	// 推送权限变更到 Desktop 客户端（SSH 权限 → 我的主机）
+	a.notifyDesktopDataChange(pb.DesktopDataType_DESKTOP_DATA_TYPE_HOSTS)
+
 	logger.Infof("添加用户分组授权: target_user_id=%d, group_ids=%v", targetUserID, req.GroupIDs)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
@@ -673,6 +698,9 @@ func (a *ACLAPI) RemoveUserACLUser(c *gin.Context) {
 		}()
 	}
 
+	// 推送权限变更到 Desktop 客户端（SSH 权限 → 我的主机）
+	a.notifyDesktopDataChange(pb.DesktopDataType_DESKTOP_DATA_TYPE_HOSTS)
+
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
 }
 
@@ -700,6 +728,9 @@ func (a *ACLAPI) RemoveUserACLGroup(c *gin.Context) {
 			}
 		}()
 	}
+
+	// 推送权限变更到 Desktop 客户端（SSH 权限 → 我的主机）
+	a.notifyDesktopDataChange(pb.DesktopDataType_DESKTOP_DATA_TYPE_HOSTS)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
 }
