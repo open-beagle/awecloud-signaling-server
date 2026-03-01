@@ -20,7 +20,11 @@ import (
 // handleShellRequest 处理来自 Agent 的 Shell 请求
 // 通过 gRPC OpenShell 双向流，spawn shell 并桥接 I/O
 func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cfg *EndpointConfig, req *pb.ShellRequest) {
-	logger.Infof("收到 Shell 请求: session_id=%s, login=%s", req.SessionId, req.Login)
+	if req.Command != "" {
+		logger.Infof("收到 Shell exec 请求: session_id=%s, login=%s, command=%s", req.SessionId, req.Login, req.Command)
+	} else {
+		logger.Infof("收到 Shell 请求: session_id=%s, login=%s", req.SessionId, req.Login)
+	}
 
 	// 查找系统用户
 	u, err := user.Lookup(req.Login)
@@ -55,8 +59,16 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 		return
 	}
 
-	// 创建 PTY
-	cmd := exec.Command(shell, "-l")
+	// 根据是否有 command 参数，选择不同的执行方式
+	var cmd *exec.Cmd
+	if req.Command != "" {
+		// exec 模式：执行单个命令
+		cmd = exec.Command(shell, "-c", req.Command)
+	} else {
+		// shell 模式：启动交互式 shell
+		cmd = exec.Command(shell, "-l")
+	}
+
 	cmd.Dir = loginShell
 	cmd.Env = buildShellEnv(u, shell)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -81,16 +93,23 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 	}
 	// 注意：ptmx 在 shell 退出后手动关闭（cmd.Wait 之后），不使用 defer
 
-	logger.Infof("Shell 已启动: session_id=%s, login=%s, shell=%s, pid=%d",
-		req.SessionId, req.Login, shell, cmd.Process.Pid)
+	if req.Command != "" {
+		logger.Infof("Shell exec 已启动: session_id=%s, login=%s, command=%s, pid=%d",
+			req.SessionId, req.Login, req.Command, cmd.Process.Pid)
+	} else {
+		logger.Infof("Shell 已启动: session_id=%s, login=%s, shell=%s, pid=%d",
+			req.SessionId, req.Login, shell, cmd.Process.Pid)
+	}
 
 	// 双向桥接：gRPC stream ↔ PTY
 	var wg sync.WaitGroup
+	outputDone := make(chan struct{}) // PTY→gRPC 输出完成信号
 
 	// PTY stdout → gRPC stream
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer close(outputDone)
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := ptmx.Read(buf)
@@ -149,13 +168,16 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 	// shell 已退出，关闭 PTY 以解除 PTY→gRPC 协程的 Read 阻塞
 	ptmx.Close()
 
-	// 发送退出码（在 wg.Wait 之前发送，确保 Agent 能收到 IsClose）
+	// 等待 PTY→gRPC 输出完成（确保所有输出都已发送）
+	<-outputDone
+
+	// 发送退出码（在输出完成后发送）
 	stream.Send(&pb.ShellData{
 		IsClose:  true,
 		ExitCode: int32(exitCode),
 	})
 
-	// 等待 I/O 协程完成
+	// 等待 gRPC→PTY 协程完成
 	wg.Wait()
 
 	logger.Infof("Shell 已退出: session_id=%s, exit_code=%d", req.SessionId, exitCode)

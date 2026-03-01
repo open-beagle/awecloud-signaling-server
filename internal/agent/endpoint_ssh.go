@@ -277,8 +277,9 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 	var shellStream pb.EndpointService_OpenShellServer
 	shellReady := make(chan struct{})
 	shellErr := make(chan error, 1)
+	var execCommand string // exec 模式的命令
 
-	// 处理 SSH 请求（pty-req, shell, window-change 等）
+	// 处理 SSH 请求（pty-req, shell, exec, window-change 等）
 	go func() {
 		ptyReceived := false
 		for req := range requests {
@@ -306,9 +307,32 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 				if !ptyReceived {
 					rows, cols = 24, 80
 				}
-				stream, err := p.endpointServer.RequestShell(ctx, endpointName, login, rows, cols)
+				stream, err := p.endpointServer.RequestShell(ctx, endpointName, login, rows, cols, "")
 				if err != nil {
 					logger.Warnf("[EndpointSSH] 请求 Endpoint shell 失败: %v", err)
+					shellErr <- err
+					return
+				}
+				shellStream = stream
+				close(shellReady)
+
+			case "exec":
+				// exec 请求：执行单个命令
+				if req.WantReply {
+					req.Reply(true, nil)
+				}
+				// 解析命令：payload 是 string (uint32 length + data)
+				if len(req.Payload) >= 4 {
+					cmdLen := int(req.Payload[0])<<24 | int(req.Payload[1])<<16 | int(req.Payload[2])<<8 | int(req.Payload[3])
+					if len(req.Payload) >= 4+cmdLen {
+						execCommand = string(req.Payload[4 : 4+cmdLen])
+						logger.Infof("[EndpointSSH] exec 请求: endpoint=%s, login=%s, command=%s", endpointName, login, execCommand)
+					}
+				}
+				// exec 不需要 pty，使用默认大小
+				stream, err := p.endpointServer.RequestShell(ctx, endpointName, login, rows, cols, execCommand)
+				if err != nil {
+					logger.Warnf("[EndpointSSH] 请求 Endpoint exec 失败: %v", err)
 					shellErr <- err
 					return
 				}

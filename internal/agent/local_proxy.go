@@ -103,9 +103,9 @@ func (m *LocalProxyManager) UpdateProxies() error {
 		// target_port 是 Desktop 通过 Tailscale 连接到 Agent 的端口
 		switch domain.Type {
 		case "ssh":
-			// SSH 类型通过 ProxyCommand + DialSocket 连接，不需要本地代理
-			// 且 22 端口通常被系统 sshd 占用（监听 0.0.0.0:22），会导致绑定失败
-			continue
+			// SSH 类型：监听 VIP:22
+			listenAddr := fmt.Sprintf("%s:22", vip)
+			newProxies[listenAddr] = domain
 		case "k8sapi":
 			// K8S API Server 标准端口
 			listenAddr := fmt.Sprintf("%s:6443", vip)
@@ -230,8 +230,8 @@ func (m *LocalProxyManager) handleConn(clientConn net.Conn, domain *pb.DomainInf
 
 	switch domain.Type {
 	case "ssh":
-		// SSH：直接连接到 Tailscale IP:22
-		targetAddr = fmt.Sprintf("%s:22", domain.TargetIp)
+		// SSH：连接到 Endpoint SSH 代理端口（如 100.64.0.22:50053）
+		targetAddr = fmt.Sprintf("%s:%d", domain.TargetIp, domain.TargetPort)
 
 	case "k8sapi":
 		// K8SAPI：连接到 Agent K8SAPI 代理端口（如 100.64.0.19:50050）

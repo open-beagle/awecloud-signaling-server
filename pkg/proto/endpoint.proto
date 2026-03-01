@@ -126,6 +126,7 @@ message ShellRequest {
   string login = 2; // 登录用户名（如 "root"）
   uint32 rows = 3; // 终端行数
   uint32 cols = 4; // 终端列数
+  string command = 5; // 要执行的命令（exec 模式时使用，为空则为交互式 shell）
 }
 
 // ShellData Endpoint Shell 会话数据帧

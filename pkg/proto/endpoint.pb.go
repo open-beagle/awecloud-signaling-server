@@ -603,6 +603,7 @@ type ShellRequest struct {
 	Login         string                 `protobuf:"bytes,2,opt,name=login,proto3" json:"login,omitempty"`                          // 登录用户名（如 "root"）
 	Rows          uint32                 `protobuf:"varint,3,opt,name=rows,proto3" json:"rows,omitempty"`                           // 终端行数
 	Cols          uint32                 `protobuf:"varint,4,opt,name=cols,proto3" json:"cols,omitempty"`                           // 终端列数
+	Command       string                 `protobuf:"bytes,5,opt,name=command,proto3" json:"command,omitempty"`                      // 要执行的命令（exec 模式时使用，为空则为交互式 shell）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -663,6 +664,13 @@ func (x *ShellRequest) GetCols() uint32 {
 		return x.Cols
 	}
 	return 0
+}
+
+func (x *ShellRequest) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
 }
 
 // ShellData Endpoint Shell 会话数据帧
@@ -1450,13 +1458,14 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	"\vServicePort\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x1a\n" +
-	"\bprotocol\x18\x03 \x01(\tR\bprotocol\"k\n" +
+	"\bprotocol\x18\x03 \x01(\tR\bprotocol\"\x85\x01\n" +
 	"\fShellRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x14\n" +
 	"\x05login\x18\x02 \x01(\tR\x05login\x12\x12\n" +
 	"\x04rows\x18\x03 \x01(\rR\x04rows\x12\x12\n" +
-	"\x04cols\x18\x04 \x01(\rR\x04cols\"\x80\x02\n" +
+	"\x04cols\x18\x04 \x01(\rR\x04cols\x12\x18\n" +
+	"\acommand\x18\x05 \x01(\tR\acommand\"\x80\x02\n" +
 	"\tShellData\x12\x17\n" +
 	"\ais_open\x18\x01 \x01(\bR\x06isOpen\x12\x1d\n" +
 	"\n" +

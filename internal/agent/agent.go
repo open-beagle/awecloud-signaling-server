@@ -262,42 +262,64 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 		go a.syncDomainsLoop(domainCache)
 	}
 
-	// 启动 DNS 劫持（CloudIDE 模式默认启用）
+	// P7-1: 启动 DNS 管理（CloudIDE 模式默认启用）
 	var dnsServer *DNSServer
+	var dnsConfigMgr *DNSConfigManager
+	var networkConfigMgr *NetworkConfigManager
 	var proxyManager *LocalProxyManager
 
-	// 检测上游 DNS（从 /etc/resolv.conf 读取）
-	upstreamDNS := detectUpstreamDNS()
-	logger.Infof("检测到上游 DNS: %s", upstreamDNS)
+	// 配置 VIP 地址段到 lo 接口（127.1.0.0/16）
+	networkConfigMgr = NewNetworkConfigManager()
+	if err := networkConfigMgr.Setup(); err != nil {
+		logger.Warnf("配置 VIP 地址段失败: %v（需要 root 权限）", err)
+	}
 
-	// 启动本地 DNS 服务器
-	dnsServer = NewDNSServer("127.0.0.1:53", domainCache, vipAlloc, upstreamDNS, a.ctx)
-	if err := dnsServer.Start(); err != nil {
-		logger.Warnf("启动 DNS 服务器失败: %v（需要 root 权限）", err)
+	// 创建 DNS 配置管理器（使用 127.0.0.2 避免端口冲突）
+	dnsConfigMgr = NewDNSConfigManager("127.0.0.2")
+
+	// 设置 DNS 配置（备份原始配置 + 修改 /etc/resolv.conf）
+	if err := dnsConfigMgr.Setup(); err != nil {
+		logger.Warnf("设置 DNS 配置失败: %v（需要 root 权限）", err)
 	} else {
-		// 修改 /etc/resolv.conf
-		if err := modifyResolvConf(upstreamDNS); err != nil {
-			logger.Warnf("修改 /etc/resolv.conf 失败: %v", err)
-		}
-		defer func() {
-			// 恢复 /etc/resolv.conf
-			if err := restoreResolvConf(); err != nil {
-				logger.Warnf("恢复 /etc/resolv.conf 失败: %v", err)
-			}
-		}()
+		// 获取上游 DNS
+		upstreamDNS := dnsConfigMgr.GetUpstreamDNS()
 
-		// 启动本地代理管理器
-		proxyManager = NewLocalProxyManager(domainCache, vipAlloc, a.tsManager, a.ctx)
-		if err := proxyManager.Start(); err != nil {
-			logger.Warnf("启动本地代理管理器失败: %v", err)
+		// 创建 DNS 解析回调函数
+		resolveFunc := func(domain string) (string, bool) {
+			// 从 DomainCache 查询域名
+			_, ok := domainCache.Get(domain)
+			if !ok {
+				return "", false
+			}
+			// 分配 VIP（幂等）
+			vip, err := vipAlloc.Allocate(domain)
+			if err != nil {
+				logger.Warnf("[DNS] 分配 VIP 失败 (%s): %v", domain, err)
+				return "", false
+			}
+			return vip, true
+		}
+
+		// 启动本地 DNS 服务器（监听 127.0.0.2:53）
+		dnsServer = NewDNSServer("127.0.0.2:53", resolveFunc, upstreamDNS+":53")
+		if err := dnsServer.Start(); err != nil {
+			logger.Warnf("启动 DNS 服务器失败: %v", err)
+			// 恢复 DNS 配置
+			dnsConfigMgr.Restore()
 		} else {
-			// 启动代理更新循环
-			a.wg.Add(1)
-			go a.updateProxiesLoop(proxyManager, domainCache)
+			// 启动本地代理管理器
+			proxyManager = NewLocalProxyManager(domainCache, vipAlloc, a.tsManager, a.ctx)
+			if err := proxyManager.Start(); err != nil {
+				logger.Warnf("启动本地代理管理器失败: %v", err)
+			} else {
+				// 启动代理更新循环
+				a.wg.Add(1)
+				go a.updateProxiesLoop(proxyManager, domainCache)
+			}
 		}
 	}
 
-	// 启动 Dial Socket 服务（供 dial 子命令使用）
+	// 启动 Dial Socket 服务（供 dial 子命令使用，兼容旧版本）
 	dialSocketPath := a.config.CloudIDE.DialSocket
 	if dialSocketPath == "" {
 		dialSocketPath = "/tmp/signaling.sock"
@@ -309,9 +331,12 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 		defer dialSocket.Stop()
 	}
 
-	// 自动维护 ~/.ssh/config（CloudIDE 模式默认启用）
-	if err := MaintainSSHConfig(dialSocketPath); err != nil {
-		logger.Warnf("维护 ~/.ssh/config 失败: %v", err)
+	// P7-3: 自动生成 KubeConfig（CloudIDE 模式默认启用）
+	if proxyManager != nil {
+		kubeconfigMgr := NewClientKubeconfigManager(domainCache, vipAlloc)
+		if err := kubeconfigMgr.Generate(); err != nil {
+			logger.Warnf("生成 KubeConfig 失败: %v", err)
+		}
 	}
 
 	// 等待中断信号
@@ -330,6 +355,20 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 	// 停止 DNS 服务器
 	if dnsServer != nil {
 		dnsServer.Stop()
+	}
+
+	// P7-1: 恢复 DNS 配置
+	if dnsConfigMgr != nil {
+		if err := dnsConfigMgr.Restore(); err != nil {
+			logger.Warnf("恢复 DNS 配置失败: %v", err)
+		}
+	}
+
+	// P7-1: 清理 VIP 地址段配置
+	if networkConfigMgr != nil {
+		if err := networkConfigMgr.Cleanup(); err != nil {
+			logger.Warnf("清理 VIP 地址段失败: %v", err)
+		}
 	}
 
 	// 停止 Tailscale

@@ -1,7 +1,8 @@
+// Package agent 提供 Agent 端功能
+// dns_server.go 提供本地 DNS 服务器，拦截 .beagle 域名解析
 package agent
 
 import (
-	"context"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -11,31 +12,30 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 )
 
+// DNSResolveFunc 域名解析回调函数
+// 输入域名（不含末尾点），返回 VIP 地址和是否成功
+type DNSResolveFunc func(domain string) (vip string, ok bool)
+
 // DNSServer 本地 DNS 服务器
-// 监听 127.0.0.1:53，拦截 .beagle 域名解析
 type DNSServer struct {
 	listenAddr  string
 	conn        *net.UDPConn
-	domainCache *DomainCache
-	vipAlloc    *VIPAllocator
+	resolve     DNSResolveFunc
 	upstreamDNS string // 上游 DNS 地址（用于转发非 .beagle 域名）
 
-	ctx    context.Context
 	stopCh chan struct{}
 	wg     sync.WaitGroup
 }
 
 // NewDNSServer 创建 DNS 服务器
-func NewDNSServer(listenAddr string, domainCache *DomainCache, vipAlloc *VIPAllocator, upstreamDNS string, ctx context.Context) *DNSServer {
+func NewDNSServer(listenAddr string, resolve DNSResolveFunc, upstreamDNS string) *DNSServer {
 	if upstreamDNS == "" {
 		upstreamDNS = "8.8.8.8:53"
 	}
 	return &DNSServer{
 		listenAddr:  listenAddr,
-		domainCache: domainCache,
-		vipAlloc:    vipAlloc,
+		resolve:     resolve,
 		upstreamDNS: upstreamDNS,
-		ctx:         ctx,
 		stopCh:      make(chan struct{}),
 	}
 }
@@ -53,7 +53,7 @@ func (s *DNSServer) Start() error {
 	}
 
 	s.conn = conn
-	logger.Infof("[DNS] 本地 DNS 服务器已启动: %s", s.listenAddr)
+	logger.Infof("[DNS] 本地 DNS 服务器已启动: %s (上游: %s)", s.listenAddr, s.upstreamDNS)
 
 	s.wg.Add(1)
 	go s.serve()
@@ -89,7 +89,7 @@ func (s *DNSServer) serve() {
 			case <-s.stopCh:
 				return
 			default:
-				logger.Warnf("[DNS] 读取请求失败: %v", err)
+				logger.Debugf("[DNS] 读取请求失败: %v", err)
 				continue
 			}
 		}
@@ -106,7 +106,7 @@ func (s *DNSServer) handleQuery(packet []byte, remoteAddr *net.UDPAddr) {
 	// 解析查询域名
 	domain, qtype, err := parseDNSQuestion(packet)
 	if err != nil {
-		logger.Warnf("[DNS] 解析查询失败: %v", err)
+		logger.Debugf("[DNS] 解析查询失败: %v", err)
 		return
 	}
 
@@ -115,23 +115,13 @@ func (s *DNSServer) handleQuery(packet []byte, remoteAddr *net.UDPAddr) {
 
 	// 检查是否是 .beagle 域名
 	if strings.HasSuffix(domain, ".beagle") && qtype == 1 { // A 记录
-		// 检查域名是否在缓存中
-		if _, ok := s.domainCache.Get(domain); ok {
-			// 分配 VIP
-			vip, err := s.vipAlloc.Allocate(domain)
-			if err != nil {
-				logger.Warnf("[DNS] 分配 VIP 失败: %v", err)
-				resp := buildDNSServerFailure(packet)
-				s.conn.WriteToUDP(resp, remoteAddr)
-				return
-			}
-
+		vip, ok := s.resolve(domain)
+		if ok {
 			resp := buildDNSResponse(packet, vip)
 			s.conn.WriteToUDP(resp, remoteAddr)
 			logger.Infof("[DNS] 解析: %s → %s", domain, vip)
 			return
 		}
-
 		// 域名未注册，返回 NXDOMAIN
 		resp := buildDNSNXDomain(packet)
 		s.conn.WriteToUDP(resp, remoteAddr)
@@ -142,7 +132,7 @@ func (s *DNSServer) handleQuery(packet []byte, remoteAddr *net.UDPAddr) {
 	// 非 .beagle 域名，转发到上游 DNS
 	resp, err := s.forwardToUpstream(packet)
 	if err != nil {
-		logger.Warnf("[DNS] 转发到上游失败: %v", err)
+		logger.Debugf("[DNS] 转发到上游失败 (%s): %v", domain, err)
 		resp = buildDNSServerFailure(packet)
 	}
 	s.conn.WriteToUDP(resp, remoteAddr)
@@ -215,16 +205,9 @@ func buildDNSResponse(query []byte, ip string) []byte {
 		return buildDNSServerFailure(query)
 	}
 
-	// 只复制 DNS 头部和 Question 段（不包含可能存在的 Additional 段）
-	// 找到 Question 段的结束位置
-	questionEnd := findQuestionEnd(query)
-	if questionEnd < 0 {
-		return buildDNSServerFailure(query)
-	}
-
-	// 创建响应：头部 + Question + Answer
-	resp := make([]byte, questionEnd)
-	copy(resp, query[:questionEnd])
+	// 复制查询报文作为响应基础
+	resp := make([]byte, len(query))
+	copy(resp, query)
 
 	// 设置响应标志
 	resp[2] = 0x81 // QR=1, Opcode=0, AA=1
@@ -233,12 +216,6 @@ func buildDNSResponse(query []byte, ip string) []byte {
 	// 设置 Answer Count = 1
 	resp[6] = 0x00
 	resp[7] = 0x01
-
-	// 清除 Authority 和 Additional 计数
-	resp[8] = 0x00 // Authority RRs
-	resp[9] = 0x00
-	resp[10] = 0x00 // Additional RRs
-	resp[11] = 0x00
 
 	// 追加 Answer 段
 	// Name: 指针指向 Question 中的域名（offset 12）
@@ -252,38 +229,6 @@ func buildDNSResponse(query []byte, ip string) []byte {
 	answer = append(answer, parsedIP...)
 
 	return append(resp, answer...)
-}
-
-// findQuestionEnd 找到 Question 段的结束位置
-func findQuestionEnd(packet []byte) int {
-	if len(packet) < 12 {
-		return -1
-	}
-
-	// 跳过 DNS 头部（12 字节）
-	offset := 12
-
-	// 解析域名标签
-	for offset < len(packet) {
-		length := int(packet[offset])
-		if length == 0 {
-			offset++
-			break
-		}
-		offset++
-		if offset+length > len(packet) {
-			return -1
-		}
-		offset += length
-	}
-
-	// 跳过 QTYPE 和 QCLASS（各 2 字节）
-	offset += 4
-	if offset > len(packet) {
-		return -1
-	}
-
-	return offset
 }
 
 // buildDNSNXDomain 构建 NXDOMAIN 响应
