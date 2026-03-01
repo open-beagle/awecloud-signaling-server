@@ -554,13 +554,13 @@ func intersectStrings(a, b []string) []string {
 	if len(a) == 0 || len(b) == 0 {
 		return []string{}
 	}
-	
+
 	// 将 b 转换为 map 以提高查找效率
 	bMap := make(map[string]bool)
 	for _, s := range b {
 		bMap[s] = true
 	}
-	
+
 	// 查找交集
 	result := []string{}
 	seen := make(map[string]bool)
@@ -570,8 +570,18 @@ func intersectStrings(a, b []string) []string {
 			seen[s] = true
 		}
 	}
-	
+
 	return result
+}
+
+// contains 检查字符串切片中是否包含指定字符串
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }
 
 // GetHostServices 获取指定主机的服务列表
@@ -1796,6 +1806,23 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 	// SSH 权限的授权用户列表（agent_user_id → 授权的 SSH 用户名列表）
 	sshAuthorizedUsers := make(map[uint64][]string)
 
+	// Endpoint 权限：endpoint_id(UUID) → 是否有权限
+	endpointSSHIDs := make(map[string]bool)    // Endpoint SSH 权限（key 为 UUID）
+	endpointK8SAPIIDs := make(map[string]bool) // Endpoint K8S API 权限（key 为 UUID）
+	endpointK8SSvcIDs := make(map[string]bool) // Endpoint K8S Service 权限（key 为 UUID）
+
+	// Endpoint SSH 权限的授权用户列表（endpoint_id(UUID) → 授权的 SSH 用户名列表）
+	endpointSSHAuthorizedUsers := make(map[string][]string)
+
+	// Endpoint 权限（按 Name 索引，用于匹配 DomainRegistry.endpoint_id）
+	// DomainRegistry.endpoint_id 存的是 Endpoint.Name，而 ACL 表存的是 Endpoint.ID(UUID)
+	endpointSSHNames := make(map[string]bool)    // Endpoint SSH 权限（key 为 Name）
+	endpointK8SAPINames := make(map[string]bool) // Endpoint K8S API 权限（key 为 Name）
+	endpointK8SSvcNames := make(map[string]bool) // Endpoint K8S Service 权限（key 为 Name）
+
+	// Endpoint SSH 权限的授权用户列表（endpoint_name → 授权的 SSH 用户名列表）
+	endpointSSHAuthorizedUsersByName := make(map[string][]string)
+
 	// 1. 收集 SSH 权限
 	var sshUserPerms []model.AclSSHUserPermission
 	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&sshUserPerms)
@@ -1849,7 +1876,60 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 		}
 	}
 
-	// 4. 合并所有有权限的 Agent User ID（用于一次性查询域名）
+	// 4. 收集 Endpoint SSH 权限
+	var endpointSSHUserPerms []model.AclEndpointSSHUserPermission
+	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&endpointSSHUserPerms)
+	for _, p := range endpointSSHUserPerms {
+		endpointSSHIDs[p.EndpointID] = true
+		var users []string
+		if err := json.Unmarshal([]byte(p.SSHUsers), &users); err == nil {
+			endpointSSHAuthorizedUsers[p.EndpointID] = appendUniqueStrings(endpointSSHAuthorizedUsers[p.EndpointID], users...)
+		}
+	}
+
+	if len(groupIDs) > 0 {
+		var endpointSSHGroupPerms []model.AclEndpointSSHGroupPermission
+		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&endpointSSHGroupPerms)
+		for _, p := range endpointSSHGroupPerms {
+			endpointSSHIDs[p.EndpointID] = true
+			var users []string
+			if err := json.Unmarshal([]byte(p.SSHUsers), &users); err == nil {
+				endpointSSHAuthorizedUsers[p.EndpointID] = appendUniqueStrings(endpointSSHAuthorizedUsers[p.EndpointID], users...)
+			}
+		}
+	}
+
+	// 5. 收集 Endpoint K8S API 权限
+	var endpointK8SAPIUserPerms []model.AclEndpointK8SAPIUserPermission
+	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&endpointK8SAPIUserPerms)
+	for _, p := range endpointK8SAPIUserPerms {
+		endpointK8SAPIIDs[p.EndpointID] = true
+	}
+
+	if len(groupIDs) > 0 {
+		var endpointK8SAPIGroupPerms []model.AclEndpointK8SAPIGroupPermission
+		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&endpointK8SAPIGroupPerms)
+		for _, p := range endpointK8SAPIGroupPerms {
+			endpointK8SAPIIDs[p.EndpointID] = true
+		}
+	}
+
+	// 6. 收集 Endpoint K8S Service 权限
+	var endpointK8SSvcUserPerms []model.AclEndpointK8SServiceUserPermission
+	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&endpointK8SSvcUserPerms)
+	for _, p := range endpointK8SSvcUserPerms {
+		endpointK8SSvcIDs[p.EndpointID] = true
+	}
+
+	if len(groupIDs) > 0 {
+		var endpointK8SSvcGroupPerms []model.AclEndpointK8SServiceGroupPermission
+		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&endpointK8SSvcGroupPerms)
+		for _, p := range endpointK8SSvcGroupPerms {
+			endpointK8SSvcIDs[p.EndpointID] = true
+		}
+	}
+
+	// 7. 合并所有有权限的 Agent User ID（用于一次性查询域名）
 	allAgentIDs := make(map[uint64]bool)
 	for uid := range sshAgentIDs {
 		allAgentIDs[uid] = true
@@ -1859,6 +1939,45 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 	}
 	for uid := range k8sSvcAgentIDs {
 		allAgentIDs[uid] = true
+	}
+
+	// 查询 Endpoint 对应的 Agent User ID
+	var endpointIDs []string
+	for eid := range endpointSSHIDs {
+		endpointIDs = append(endpointIDs, eid)
+	}
+	for eid := range endpointK8SAPIIDs {
+		if !contains(endpointIDs, eid) {
+			endpointIDs = append(endpointIDs, eid)
+		}
+	}
+	for eid := range endpointK8SSvcIDs {
+		if !contains(endpointIDs, eid) {
+			endpointIDs = append(endpointIDs, eid)
+		}
+	}
+
+	if len(endpointIDs) > 0 {
+		var endpoints []model.Endpoint
+		db.DB.WithContext(ctx).Where("id IN ?", endpointIDs).Find(&endpoints)
+		for _, ep := range endpoints {
+			allAgentIDs[ep.UserID] = true
+			// 建立 UUID → Name 映射，将权限 map 转换为以 Name 为 key
+			// DomainRegistry.endpoint_id 存的是 Endpoint.Name，ACL 表存的是 Endpoint.ID(UUID)
+			if endpointSSHIDs[ep.ID] {
+				endpointSSHNames[ep.Name] = true
+				// 转换 SSH 授权用户列表
+				if users, ok := endpointSSHAuthorizedUsers[ep.ID]; ok {
+					endpointSSHAuthorizedUsersByName[ep.Name] = appendUniqueStrings(endpointSSHAuthorizedUsersByName[ep.Name], users...)
+				}
+			}
+			if endpointK8SAPIIDs[ep.ID] {
+				endpointK8SAPINames[ep.Name] = true
+			}
+			if endpointK8SSvcIDs[ep.ID] {
+				endpointK8SSvcNames[ep.Name] = true
+			}
+		}
 	}
 
 	if len(allAgentIDs) == 0 {
@@ -1873,24 +1992,40 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 	var domainRegs []model.DomainRegistry
 	db.DB.WithContext(ctx).Where("user_id IN ?", userIDList).Find(&domainRegs)
 
-	// 5. 按类型过滤域名，只返回用户有对应类型权限的域名
+	// 8. 按类型过滤域名，只返回用户有对应类型权限的域名
+	// 注意：dr.EndpointID 是 Endpoint.Name（如 beagle-002），需要用 endpointXxxNames 匹配
 	for _, dr := range domainRegs {
 		// 检查用户是否有该类型的权限
+		hasPermission := false
+
 		switch dr.Type {
 		case model.DomainTypeSSH:
-			if !sshAgentIDs[dr.UserID] {
-				continue // 没有 SSH 权限，跳过
+			// 检查 Agent 级别权限或 Endpoint 级别权限
+			if sshAgentIDs[dr.UserID] {
+				hasPermission = true
+			} else if dr.EndpointID != "" && endpointSSHNames[dr.EndpointID] {
+				hasPermission = true
 			}
 		case model.DomainTypeK8SAPI:
-			if !k8sAgentIDs[dr.UserID] {
-				continue // 没有 K8S API 权限，跳过
+			// 检查 Agent 级别权限或 Endpoint 级别权限
+			if k8sAgentIDs[dr.UserID] {
+				hasPermission = true
+			} else if dr.EndpointID != "" && endpointK8SAPINames[dr.EndpointID] {
+				hasPermission = true
 			}
 		case model.DomainTypeK8SSVC:
-			if !k8sSvcAgentIDs[dr.UserID] {
-				continue // 没有 K8S Service 权限，跳过
+			// 检查 Agent 级别权限或 Endpoint 级别权限
+			if k8sSvcAgentIDs[dr.UserID] {
+				hasPermission = true
+			} else if dr.EndpointID != "" && endpointK8SSvcNames[dr.EndpointID] {
+				hasPermission = true
 			}
 		default:
 			continue
+		}
+
+		if !hasPermission {
+			continue // 没有权限，跳过
 		}
 
 		item := &pb.DomainItem{
@@ -1916,8 +2051,15 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 		if dr.Type == model.DomainTypeSSH {
 			// Agent 实际可用的 SSH 用户
 			availableUsers := dr.GetSSHUsers()
-			// ACL 授权的 SSH 用户
-			authorizedUsers := sshAuthorizedUsers[dr.UserID]
+
+			// 获取 ACL 授权的 SSH 用户（优先 Agent 级别，其次 Endpoint 级别）
+			var authorizedUsers []string
+			if sshAgentIDs[dr.UserID] {
+				authorizedUsers = sshAuthorizedUsers[dr.UserID]
+			} else if dr.EndpointID != "" && endpointSSHNames[dr.EndpointID] {
+				authorizedUsers = endpointSSHAuthorizedUsersByName[dr.EndpointID]
+			}
+
 			// 求交集
 			filteredUsers := intersectStrings(authorizedUsers, availableUsers)
 			if len(filteredUsers) == 0 {
@@ -2098,6 +2240,70 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 		}
 	}
 
+	// Endpoint SSH 权限
+	var endpointSSHUserPerms []model.AclEndpointSSHUserPermission
+	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", userID, true).Find(&endpointSSHUserPerms)
+	for _, p := range endpointSSHUserPerms {
+		// 查询 Endpoint 对应的 Agent User ID
+		var ep model.Endpoint
+		if err := db.DB.WithContext(ctx).Where("id = ?", p.EndpointID).First(&ep).Error; err == nil {
+			agentUserIDs[ep.UserID] = true
+		}
+	}
+
+	if len(groupIDs) > 0 {
+		var endpointSSHGroupPerms []model.AclEndpointSSHGroupPermission
+		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&endpointSSHGroupPerms)
+		for _, p := range endpointSSHGroupPerms {
+			var ep model.Endpoint
+			if err := db.DB.WithContext(ctx).Where("id = ?", p.EndpointID).First(&ep).Error; err == nil {
+				agentUserIDs[ep.UserID] = true
+			}
+		}
+	}
+
+	// Endpoint K8S API 权限
+	var endpointK8SAPIUserPerms []model.AclEndpointK8SAPIUserPermission
+	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", userID, true).Find(&endpointK8SAPIUserPerms)
+	for _, p := range endpointK8SAPIUserPerms {
+		var ep model.Endpoint
+		if err := db.DB.WithContext(ctx).Where("id = ?", p.EndpointID).First(&ep).Error; err == nil {
+			agentUserIDs[ep.UserID] = true
+		}
+	}
+
+	if len(groupIDs) > 0 {
+		var endpointK8SAPIGroupPerms []model.AclEndpointK8SAPIGroupPermission
+		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&endpointK8SAPIGroupPerms)
+		for _, p := range endpointK8SAPIGroupPerms {
+			var ep model.Endpoint
+			if err := db.DB.WithContext(ctx).Where("id = ?", p.EndpointID).First(&ep).Error; err == nil {
+				agentUserIDs[ep.UserID] = true
+			}
+		}
+	}
+
+	// Endpoint K8S Service 权限
+	var endpointK8SSvcUserPerms []model.AclEndpointK8SServiceUserPermission
+	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", userID, true).Find(&endpointK8SSvcUserPerms)
+	for _, p := range endpointK8SSvcUserPerms {
+		var ep model.Endpoint
+		if err := db.DB.WithContext(ctx).Where("id = ?", p.EndpointID).First(&ep).Error; err == nil {
+			agentUserIDs[ep.UserID] = true
+		}
+	}
+
+	if len(groupIDs) > 0 {
+		var endpointK8SSvcGroupPerms []model.AclEndpointK8SServiceGroupPermission
+		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&endpointK8SSvcGroupPerms)
+		for _, p := range endpointK8SSvcGroupPerms {
+			var ep model.Endpoint
+			if err := db.DB.WithContext(ctx).Where("id = ?", p.EndpointID).First(&ep).Error; err == nil {
+				agentUserIDs[ep.UserID] = true
+			}
+		}
+	}
+
 	// 转换为 ID 列表
 	var allowedAgentIDs []uint64
 	for id := range agentUserIDs {
@@ -2120,7 +2326,7 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 	for _, record := range domainRecords {
 		// 调试：打印原始数据库记录
 		if record.Type == model.DomainTypeK8SSVC {
-			logger.Infof("ListDomains: 处理 K8SSVC 域名 %s, DB service_ports='%s', len=%d", 
+			logger.Infof("ListDomains: 处理 K8SSVC 域名 %s, DB service_ports='%s', len=%d",
 				record.Domain, record.ServicePorts, len(record.ServicePorts))
 		}
 
