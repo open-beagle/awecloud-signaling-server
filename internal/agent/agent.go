@@ -16,9 +16,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -566,6 +568,23 @@ func (a *Agent) heartbeatLoop() {
 
 		stream, err := a.grpcClient.Heartbeat(a.ctx)
 		if err != nil {
+			// 检查是否是用户禁用错误
+			if st, ok := status.FromError(err); ok {
+				if st.Code() == codes.PermissionDenied {
+					logger.Error("========================================")
+					logger.Error("安全提示: 用户已禁用")
+					logger.Errorf("用户: %s", a.config.Agent.AgentName)
+					logger.Error("========================================")
+					logger.Info("停止所有服务...")
+
+					// 停止服务
+					a.stopServices()
+
+					logger.Info("进程退出")
+					os.Exit(1)
+				}
+			}
+
 			logger.Debugf("建立心跳流失败: %v，%v后重试", err, retryDelay)
 
 			select {
@@ -625,6 +644,22 @@ func (a *Agent) runHeartbeatStream(stream pb.AgentService_HeartbeatClient) {
 		for {
 			resp, err := stream.Recv()
 			if err != nil {
+				// 检查是否是用户禁用错误
+				if st, ok := status.FromError(err); ok {
+					if st.Code() == codes.PermissionDenied {
+						logger.Error("========================================")
+						logger.Error("安全提示: 用户已禁用")
+						logger.Errorf("用户: %s", a.config.Agent.AgentName)
+						logger.Error("========================================")
+						logger.Info("停止所有服务...")
+
+						// 停止服务
+						a.stopServices()
+
+						logger.Info("进程退出")
+						os.Exit(1)
+					}
+				}
 				logger.Debugf("接收心跳响应失败: %v", err)
 				return
 			}
@@ -829,10 +864,10 @@ func (a *Agent) syncEndpointServerConfigs(resp *pb.AgentHeartbeatResponse) {
 		serverCfg := &EndpointServerConfig{
 			SSHEnabled:       cfg.SshEnabled,
 			SSHEnabledSet:    true,
-			SSHPort:          cfg.SshPort,        // 新增：解析端口字段
+			SSHPort:          cfg.SshPort, // 新增：解析端口字段
 			K8SAPIEnabled:    cfg.K8SapiEnabled,
 			K8SAPIEnabledSet: true,
-			K8SAPIPort:       cfg.K8SapiPort,     // 新增：解析端口字段
+			K8SAPIPort:       cfg.K8SapiPort, // 新增：解析端口字段
 			K8SAPIApiServer:  cfg.K8SapiApiServer,
 			K8SSvcEnabled:    cfg.K8SserviceEnabled,
 			K8SSvcEnabledSet: true,
@@ -1559,4 +1594,47 @@ func stringSliceEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// stopServices 停止所有服务（用于用户禁用时主动退出）
+func (a *Agent) stopServices() {
+	logger.Info("停止 DNS 服务器...")
+	// DNS 服务器会随着 tsnet 关闭而停止
+
+	logger.Info("停止本地代理管理器...")
+	if a.proxyManager != nil {
+		// ProxyManager 会随着 context 取消而停止
+	}
+
+	logger.Info("停止 Visitor 管理器...")
+	if a.visitorManager != nil {
+		// VisitorManager 会随着 context 取消而停止
+	}
+
+	logger.Info("停止 Endpoint 服务...")
+	if a.endpointServer != nil {
+		// EndpointServer 会随着 context 取消而停止
+	}
+
+	logger.Info("断开 tsnet 连接...")
+	if a.tsManager != nil {
+		// TailscaleManager 会随着 context 取消而停止
+	}
+
+	// 取消 context，触发所有服务停止
+	a.cancel()
+
+	// 等待所有 goroutine 退出（最多等待 5 秒）
+	done := make(chan struct{})
+	go func() {
+		a.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		logger.Info("所有服务已停止")
+	case <-time.After(5 * time.Second):
+		logger.Warn("等待服务停止超时，强制退出")
+	}
 }

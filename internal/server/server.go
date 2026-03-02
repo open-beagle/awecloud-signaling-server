@@ -340,6 +340,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					// 用户管理
 					userAPI := api.NewUserAPI(s.config)
 					userAPI.SetAgentService(s.agentService)
+					userAPI.SetDesktopService(s.desktopService)
 					adminAuthGroup.GET("/users", userAPI.List)
 					adminAuthGroup.GET("/users/:id", userAPI.Get)
 					adminAuthGroup.POST("/users", userAPI.Create)

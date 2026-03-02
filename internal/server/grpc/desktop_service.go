@@ -28,13 +28,14 @@ import (
 
 // DesktopConnection Desktop 连接信息
 type DesktopConnection struct {
-	NodeID    uint64
-	UserID    uint64
-	Stream    pb.DesktopService_HeartbeatServer
-	TunnelIP  string
-	Connected bool
-	LastSeen  time.Time
-	Cancel    context.CancelFunc
+	NodeID         uint64
+	UserID         uint64
+	Stream         pb.DesktopService_HeartbeatServer
+	TunnelIP       string
+	Connected      bool
+	LastSeen       time.Time
+	Cancel         context.CancelFunc
+	HeartbeatCount int // 心跳计数器，用于定期检查用户状态
 }
 
 // DesktopDataStream Desktop 数据流连接信息
@@ -213,6 +214,12 @@ func (s *DesktopServiceServer) Authenticate(ctx context.Context, req *pb.Desktop
 		return &pb.DesktopAuthenticateResponse{Success: false, Message: "用户不存在"}, nil
 	}
 
+	// 检查用户是否启用
+	if !user.Enabled {
+		logger.Warnf("Desktop 认证失败: 用户已禁用, desktopId=%d, userId=%d, userName=%s", req.DesktopId, user.ID, user.Name)
+		return &pb.DesktopAuthenticateResponse{Success: false, Message: "您的账号已被禁用"}, nil
+	}
+
 	resp := &pb.DesktopAuthenticateResponse{Success: true, Message: "认证成功"}
 	if s.headscaleClient != nil && s.config != nil {
 		if authKey, serverURL, err := s.getOrCreateAuthKey(ctx, user.ID, user.Name); err == nil {
@@ -247,6 +254,17 @@ func (s *DesktopServiceServer) Heartbeat(stream pb.DesktopService_HeartbeatServe
 	}
 
 	logger.Infof("Desktop 心跳流验证通过: desktopId=%d, name=%s, userId=%d", nodeID, node.Name, node.UserID)
+
+	// 检查用户是否启用
+	var user model.User
+	if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err != nil {
+		logger.Errorf("Desktop 心跳流建立失败: 用户不存在, userId=%d", node.UserID)
+		return status.Error(codes.NotFound, "用户不存在")
+	}
+	if !user.Enabled {
+		logger.Warnf("Desktop 心跳流建立失败: 用户已禁用, desktopId=%d, userId=%d, userName=%s", nodeID, user.ID, user.Name)
+		return status.Error(codes.PermissionDenied, "用户已禁用")
+	}
 
 	conn := &DesktopConnection{
 		NodeID: nodeID, UserID: node.UserID, Stream: stream,
@@ -290,6 +308,21 @@ func (s *DesktopServiceServer) Heartbeat(stream pb.DesktopService_HeartbeatServe
 			conn.TunnelIP = req.TunnelIp
 			conn.Connected = req.TunnelConnected
 			conn.LastSeen = time.Now()
+
+			// 定期检查用户状态（每 10 次心跳检查一次，约 5 分钟）
+			if conn.HeartbeatCount%10 == 0 {
+				var user model.User
+				if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err == nil {
+					if !user.Enabled {
+						logger.Warnf("Desktop 心跳检测到用户已禁用，断开连接: desktopId=%d, userId=%d, userName=%s", nodeID, user.ID, user.Name)
+						// 清空心跳时间和 IP
+						db.DB.Model(&model.Node{}).Where("id = ?", nodeID).Updates(map[string]any{"last_heartbeat": nil, "ip": ""})
+						return status.Error(codes.PermissionDenied, "用户已禁用")
+					}
+				}
+			}
+			conn.HeartbeatCount++
+
 			s.handleDesktopHeartbeat(ctx, nodeID, req)
 			if err := s.sendDesktopHeartbeatResponse(ctx, stream, node.UserID); err != nil {
 				return err
@@ -396,6 +429,27 @@ func (s *DesktopServiceServer) IsDesktopOnline(nodeID uint64) bool {
 	conn, exists := s.connections[nodeID]
 	s.connMutex.RUnlock()
 	return exists && time.Since(conn.LastSeen) < 60*time.Second
+}
+
+// DisconnectDesktop 断开指定 Desktop 的连接
+func (s *DesktopServiceServer) DisconnectDesktop(nodeID uint64) {
+	// 断开心跳连接
+	s.connMutex.Lock()
+	if conn, exists := s.connections[nodeID]; exists {
+		conn.Cancel()
+		delete(s.connections, nodeID)
+		logger.Infof("已断开 Desktop 心跳连接: nodeId=%d", nodeID)
+	}
+	s.connMutex.Unlock()
+
+	// 断开数据流连接
+	s.dataStreamMutex.Lock()
+	if ds, exists := s.dataStreams[nodeID]; exists {
+		ds.Cancel()
+		delete(s.dataStreams, nodeID)
+		logger.Infof("已断开 Desktop 数据流连接: nodeId=%d", nodeID)
+	}
+	s.dataStreamMutex.Unlock()
 }
 
 // GetAuthorizedHosts 获取已授权主机列表（SSH 授权）

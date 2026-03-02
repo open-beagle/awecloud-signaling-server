@@ -23,9 +23,10 @@ import (
 
 // UserAPI 用户管理 API
 type UserAPI struct {
-	config       *config.ServerConfig
-	hsClient     *headscale.Client
-	agentService *grpcserver.AgentServiceServer
+	config         *config.ServerConfig
+	hsClient       *headscale.Client
+	agentService   *grpcserver.AgentServiceServer
+	desktopService *grpcserver.DesktopServiceServer
 }
 
 // NewUserAPI 创建 UserAPI
@@ -50,6 +51,11 @@ func NewUserAPI(cfg *config.ServerConfig) *UserAPI {
 // SetAgentService 设置 AgentService（用于获取实时状态）
 func (a *UserAPI) SetAgentService(service *grpcserver.AgentServiceServer) {
 	a.agentService = service
+}
+
+// SetDesktopService 设置 DesktopService（用于断开连接）
+func (a *UserAPI) SetDesktopService(service *grpcserver.DesktopServiceServer) {
+	a.desktopService = service
 }
 
 // UserListItem 用户列表项
@@ -532,38 +538,29 @@ func (a *UserAPI) Delete(c *gin.Context) {
 		return
 	}
 
-	// 在 Headscale 删除 Node 和 User
+	logger.Infof("开始删除用户: id=%d, name=%s, role=%s", user.ID, user.Name, user.Role)
+
+	// 步骤 1：断开所有 gRPC 连接
+	a.disconnectUserConnections(ctx, user.ID, user.Role)
+
+	// 步骤 2：清理 Headscale 节点和用户
 	if a.hsClient != nil {
-		hsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-
-		// 删除所有关联的 Node
-		var nodes []model.Node
-		db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Find(&nodes)
-		for _, node := range nodes {
-			if node.ID > 0 {
-				_ = a.hsClient.DeleteNode(hsCtx, node.ID)
-			}
-		}
-
-		// 删除 User
-		userName := fmt.Sprintf("%s-%s", user.Role, user.Name)
-		_ = a.hsClient.DeleteUser(hsCtx, userName)
+		a.cleanupHeadscaleResources(ctx, user.ID, user.Name, user.Role)
 	}
 
-	// 删除相关数据
+	// 步骤 3：删除数据库相关数据
 	db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.Node{})
 	db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.ProxyService{})
 	db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.PortForward{})
 	db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.GroupMember{})
 
-	// 删除用户
+	// 步骤 4：删除用户
 	if err := db.DB.WithContext(ctx).Delete(&model.User{}, user.ID).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
 		return
 	}
 
-	logger.Infof("删除用户: id=%d, name=%s", user.ID, user.Name)
+	logger.Infof("删除用户成功: id=%d, name=%s", user.ID, user.Name)
 
 	actionType := model.ActionDeleteAgent
 	if user.Role == model.UserRoleClient {
@@ -665,7 +662,26 @@ func (a *UserAPI) setUserEnabled(c *gin.Context, enabled bool) {
 	action := "启用"
 	if !enabled {
 		action = "禁用"
+
+		// 禁用用户时，执行清理操作（仅 Server 层面，不清理 Headscale）
+		logger.Infof("开始清理被禁用用户的连接: userId=%d, userName=%s", user.ID, user.Name)
+
+		// 子任务 1：断开所有 gRPC 连接
+		a.disconnectUserConnections(ctx, user.ID, user.Role)
+
+		// 子任务 2：清空数据库心跳信息
+		result := db.DB.WithContext(ctx).Model(&model.Node{}).
+			Where("user_id = ?", user.ID).
+			Updates(map[string]any{"last_heartbeat": nil, "ip": ""})
+		if result.Error != nil {
+			logger.Errorf("清空用户设备心跳信息失败: userId=%d, error=%v", user.ID, result.Error)
+		} else {
+			logger.Infof("已清空用户设备心跳信息: userId=%d, 影响行数=%d", user.ID, result.RowsAffected)
+		}
+
+		logger.Infof("用户禁用完成（Server 层面）: userId=%d, userName=%s", user.ID, user.Name)
 	}
+
 	logger.Infof("%s用户: id=%d, name=%s", action, user.ID, user.Name)
 
 	actionType := model.ActionUpdateAgent
@@ -679,6 +695,83 @@ func (a *UserAPI) setUserEnabled(c *gin.Context, enabled bool) {
 	recordAuditLog(ctx, c, actionType, "user", strconv.FormatUint(user.ID, 10), user.Name, detail)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse(action+"成功", nil))
+}
+
+// disconnectUserConnections 断开用户的所有 gRPC 连接
+func (a *UserAPI) disconnectUserConnections(ctx context.Context, userID uint64, role model.UserRole) {
+	// 查询该用户的所有 Node
+	var nodes []model.Node
+	if err := db.DB.WithContext(ctx).Where("user_id = ?", userID).Find(&nodes).Error; err != nil {
+		logger.Errorf("查询用户设备失败: userId=%d, error=%v", userID, err)
+		return
+	}
+
+	logger.Infof("准备断开用户连接: userId=%d, role=%s, 设备数=%d", userID, role, len(nodes))
+
+	if role == model.UserRoleClient {
+		// Desktop 设备：断开心跳流和数据流
+		if a.desktopService != nil {
+			for _, node := range nodes {
+				if node.Type == model.NodeTypeDesktop {
+					// 断开心跳连接
+					a.desktopService.DisconnectDesktop(node.ID)
+					logger.Infof("已断开 Desktop 设备连接: nodeId=%d, nodeName=%s", node.ID, node.Name)
+				}
+			}
+		}
+	} else if role == model.UserRoleAgent {
+		// Agent 设备：断开心跳流
+		if a.agentService != nil {
+			for _, node := range nodes {
+				if node.Type == model.NodeTypeAgent {
+					a.agentService.DisconnectAgent(node.ID)
+					logger.Infof("已断开 Agent 设备连接: nodeId=%d, nodeName=%s", node.ID, node.Name)
+				}
+			}
+		}
+	}
+}
+
+// cleanupHeadscaleResources 清理用户的 Headscale 资源（删除节点和用户）
+func (a *UserAPI) cleanupHeadscaleResources(ctx context.Context, userID uint64, userName string, role model.UserRole) {
+	// 构造 Headscale User 名称
+	hsUserName := fmt.Sprintf("%s-%s", role, userName)
+
+	logger.Infof("开始清理 Headscale 资源: hsUser=%s", hsUserName)
+
+	hsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	// 查询该用户的所有 Headscale 节点
+	nodes, err := a.hsClient.ListNodesByUser(hsCtx, hsUserName)
+	if err != nil {
+		logger.Errorf("查询 Headscale 节点失败: hsUser=%s, error=%v", hsUserName, err)
+	} else {
+		logger.Infof("准备删除 Headscale 节点: hsUser=%s, 节点数=%d", hsUserName, len(nodes))
+
+		// 删除所有节点
+		for _, node := range nodes {
+			if node.Id > 0 {
+				hsCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				if err := a.hsClient.DeleteNode(hsCtx, node.Id); err != nil {
+					logger.Errorf("删除 Headscale 节点失败: nodeId=%d, nodeName=%s, error=%v", node.Id, node.GivenName, err)
+				} else {
+					logger.Infof("已删除 Headscale 节点: nodeId=%d, nodeName=%s", node.Id, node.GivenName)
+				}
+				cancel()
+			}
+		}
+	}
+
+	// 删除 Headscale User
+	hsCtx2, cancel2 := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel2()
+
+	if err := a.hsClient.DeleteUser(hsCtx2, hsUserName); err != nil {
+		logger.Errorf("删除 Headscale 用户失败: hsUser=%s, error=%v", hsUserName, err)
+	} else {
+		logger.Infof("已删除 Headscale 用户: hsUser=%s", hsUserName)
+	}
 }
 
 // generateUserSecret 生成随机密钥

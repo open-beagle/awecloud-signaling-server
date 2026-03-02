@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -36,13 +38,14 @@ func parseJSONStringArray(jsonStr string) []string {
 // AgentConnection Agent 连接信息
 // 以 NodeID 为 key 存储，同一 AgentID（UserID）下可以有多个 Node 同时在线
 type AgentConnection struct {
-	AgentID   uint64
-	NodeID    uint64 // 当前心跳流对应的 Node ID（connections map 的 key）
-	Stream    pb.AgentService_HeartbeatServer
-	TunnelIP  string
-	Connected bool
-	LastSeen  time.Time
-	Cancel    context.CancelFunc
+	AgentID        uint64
+	NodeID         uint64 // 当前心跳流对应的 Node ID（connections map 的 key）
+	Stream         pb.AgentService_HeartbeatServer
+	TunnelIP       string
+	Connected      bool
+	LastSeen       time.Time
+	Cancel         context.CancelFunc
+	HeartbeatCount int // 心跳计数器，用于定期检查用户状态
 }
 
 // AgentServiceServer Agent 服务实现
@@ -137,6 +140,15 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 		}, nil
 	}
 
+	// 检查用户是否启用
+	if !user.Enabled {
+		logger.Warnf("Agent 注册失败: 用户已禁用, name=%s, userId=%d", req.Name, user.ID)
+		return &pb.AgentRegisterResponse{
+			Success: false,
+			Message: "用户已禁用，请联系管理员",
+		}, nil
+	}
+
 	// 查询或创建 Node（Agent 类型按 user_id + type 唯一）
 	var node model.Node
 	// 设备名：优先使用 SystemInfo.Hostname，否则使用 Agent 名称
@@ -224,6 +236,15 @@ func (s *AgentServiceServer) Authenticate(ctx context.Context, req *pb.AgentAuth
 		return &pb.AgentAuthenticateResponse{
 			Success: false,
 			Message: "用户角色不是 Agent",
+		}, nil
+	}
+
+	// 检查用户是否启用
+	if !user.Enabled {
+		logger.Warnf("Agent 认证失败: 用户已禁用, agentId=%d, userId=%d, userName=%s", req.AgentId, user.ID, user.Name)
+		return &pb.AgentAuthenticateResponse{
+			Success: false,
+			Message: "用户已禁用，请联系管理员",
 		}, nil
 	}
 
@@ -360,6 +381,12 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 		return fmt.Errorf("用户角色不支持心跳: %d (role=%s)", agentID, user.Role)
 	}
 
+	// 检查用户是否启用
+	if !user.Enabled {
+		logger.Warnf("Agent 心跳流建立失败: 用户已禁用, agentId=%d, userId=%d, userName=%s", agentID, user.ID, user.Name)
+		return status.Error(codes.PermissionDenied, "用户已禁用")
+	}
+
 	// 先处理第一个心跳，获取 NodeID（handleHeartbeat 会创建或查询 Node）
 	nodeID := s.handleHeartbeat(context.Background(), agentID, firstReq)
 	if nodeID == 0 {
@@ -453,6 +480,20 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 			conn.TunnelIP = req.TunnelIp
 			conn.Connected = req.TunnelConnected
 			conn.LastSeen = time.Now()
+
+			// 定期检查用户状态（每 10 次心跳检查一次，约 5 分钟）
+			if conn.HeartbeatCount%10 == 0 {
+				var user model.User
+				if err := db.DB.WithContext(context.Background()).First(&user, agentID).Error; err == nil {
+					if !user.Enabled {
+						logger.Warnf("Agent 心跳检测到用户已禁用，断开连接: agentId=%d, nodeId=%d, userName=%s", agentID, nodeID, user.Name)
+						// 清空心跳时间和 IP
+						db.DB.Model(&model.Node{}).Where("id = ?", nodeID).Updates(map[string]any{"last_heartbeat": nil, "ip": ""})
+						return status.Error(codes.PermissionDenied, fmt.Sprintf("用户已禁用: %d", agentID))
+					}
+				}
+			}
+			conn.HeartbeatCount++
 
 			// 处理心跳（使用独立 context）
 			newNodeID := s.handleHeartbeat(context.Background(), agentID, req)
@@ -778,9 +819,9 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 			resp.EndpointCapabilityConfigs = append(resp.EndpointCapabilityConfigs, &pb.EndpointCapabilityConfig{
 				EndpointName:      ep.Name,
 				SshEnabled:        ep.SSHEnabled,
-				SshPort:           uint32(ep.SSHPort),        // 新增：从 Endpoint 表读取端口
+				SshPort:           uint32(ep.SSHPort), // 新增：从 Endpoint 表读取端口
 				K8SapiEnabled:     ep.K8SAPIEnabled,
-				K8SapiPort:        uint32(ep.K8SAPIPort),     // 新增：从 Endpoint 表读取端口
+				K8SapiPort:        uint32(ep.K8SAPIPort), // 新增：从 Endpoint 表读取端口
 				K8SapiApiServer:   ep.K8SAPIApiServer,
 				K8SserviceEnabled: ep.K8SServiceEnabled,
 			})
@@ -1018,6 +1059,21 @@ func (s *AgentServiceServer) IsAgentOnline(agentID uint64) bool {
 	}
 
 	return time.Since(*node.LastHeartbeat) < 60*time.Second
+}
+
+// DisconnectAgent 断开指定 Agent 的所有连接
+func (s *AgentServiceServer) DisconnectAgent(agentID uint64) {
+	s.connMutex.Lock()
+	defer s.connMutex.Unlock()
+
+	// 遍历所有连接，断开属于该 Agent 的所有 Node 连接
+	for nodeID, conn := range s.connections {
+		if conn.AgentID == agentID {
+			conn.Cancel()
+			delete(s.connections, nodeID)
+			logger.Infof("已断开 Agent 连接: agentId=%d, nodeId=%d", agentID, nodeID)
+		}
+	}
 }
 
 // GetAgentConnection 获取 Agent 连接（返回该 AgentID 下第一个在线连接）
@@ -1290,7 +1346,7 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 				Status:                  "online",
 				SSHEnabled:              false,
 				SSHUsers:                sshUsersJSON,
-				SSHPort:                 sshPort,    // 新增：分配 SSH 端口
+				SSHPort:                 sshPort, // 新增：分配 SSH 端口
 				K8SAPIEnabled:           false,
 				K8SAPIApiServer:         ep.K8SapiApiServer,
 				K8SAPIPort:              k8sapiPort, // 新增：分配 K8SAPI 端口
