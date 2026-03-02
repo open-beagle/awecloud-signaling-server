@@ -76,12 +76,12 @@ func fetchVersionInfo(baseURL string) (*VersionInfo, error) {
 	}
 	versionCacheMutex.RUnlock()
 
-	// 构建 version.json URL
+	// 构建 signal_desktop-version.json URL
 	versionURL := baseURL
 	if !strings.HasSuffix(versionURL, "/") {
 		versionURL += "/"
 	}
-	versionURL += "version.json"
+	versionURL += "signal_desktop-version.json"
 
 	// 发起 HTTP 请求
 	client := &http.Client{
@@ -190,18 +190,18 @@ func buildDownloadInfo(baseURL, osType, arch string, versionInfo *VersionInfo) D
 	switch osType {
 	case "windows":
 		arch = "amd64" // Windows 只支持 amd64
-		filename = "awecloud-signaling-" + version + "-windows-" + arch + ".exe"
+		filename = "signal_desktop-" + version + "-windows-" + arch + ".exe"
 	case "linux":
 		arch = "amd64" // Linux 只支持 amd64
-		filename = "awecloud-signaling-" + version + "-linux-" + arch
+		filename = "signal_desktop-" + version + "-linux-" + arch
 	case "darwin":
 		// macOS 支持 arm64 和 amd64
 		if arch != "arm64" {
 			arch = "amd64"
 		}
-		filename = "awecloud-signaling-" + version + "-darwin-" + arch + ".zip"
+		filename = "signal_desktop-" + version + "-darwin-" + arch + ".zip"
 	default:
-		filename = "awecloud-signaling-" + version + "-windows-amd64.exe"
+		filename = "signal_desktop-" + version + "-windows-amd64.exe"
 		osType = "windows"
 		arch = "amd64"
 	}

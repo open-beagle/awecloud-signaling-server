@@ -29,6 +29,19 @@ jobs:
       - name: Build Frontend
         run: BUILD_VERSION=${{ steps.version.outputs.BUILD_VERSION }} bash ./scripts/build_frontend.sh
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Cross Build Server, Agent and Endpoint
+        run: |
+          BUILD_VERSION=${{ steps.version.outputs.BUILD_VERSION }} \
+          GOOS=linux \
+          GOARCHS=amd64,arm64 \
+          BUILD_TARGETS=server,agent,endpoint \
+          bash scripts/build.sh
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
@@ -43,18 +56,6 @@ jobs:
           registry: registry.cn-qingdao.aliyuncs.com
           username: ${{ secrets.REGISTRY_USER_ALIYUN }}
           password: ${{ secrets.REGISTRY_PASSWORD_ALIYUN }}
-
-      - name: Cross Build Server and Agent
-        run: |
-          docker run --rm --platform linux/amd64 \
-            -v ${{ github.workspace }}:/go/src/github.com/open-beagle/awecloud-signaling-server \
-            -w /go/src/github.com/open-beagle/awecloud-signaling-server \
-            -e BUILD_VERSION=${{ steps.version.outputs.BUILD_VERSION }} \
-            -e GOOS=linux \
-            -e GOARCHS=amd64,arm64 \
-            -e BUILD_TARGETS=server,agent \
-            registry.cn-qingdao.aliyuncs.com/wod/golang:1.25-alpine \
-            bash ./.beagle/build.sh
 
       # Server Images
       - name: Build Server AMD64 image
@@ -139,23 +140,79 @@ jobs:
             ${{ secrets.S3_ACCESS_KEY_ALIYUN }} ${{ secrets.S3_SECRET_KEY_ALIYUN }}
           
           VERSION="${{ steps.version.outputs.BUILD_VERSION }}"
+          S3_BUCKET="aliyun/vscode/awecloud-signaling"
           
-          # 上传安装脚本
-          echo "Uploading install.sh..."
-          mc cp scripts/install_agent.sh "aliyun/vscode/awecloud-signaling/install.sh"
+          # 上传 Agent 安装脚本
+          echo "Uploading install_agent.sh..."
+          mc cp scripts/install_agent.sh "${S3_BUCKET}/install_agent.sh"
           
           # 上传 Agent 二进制
-          echo "Uploading agent-${VERSION}-linux-amd64..."
-          mc cp bin/agent-linux-amd64 "aliyun/vscode/awecloud-signaling/agent-${VERSION}-linux-amd64"
+          echo "Uploading signal_agent-${VERSION}-linux-amd64..."
+          mc cp bin/signal_agent-linux-amd64 "${S3_BUCKET}/signal_agent-${VERSION}-linux-amd64"
           
-          echo "Uploading agent-${VERSION}-linux-arm64..."
-          mc cp bin/agent-linux-arm64 "aliyun/vscode/awecloud-signaling/agent-${VERSION}-linux-arm64"
+          echo "Uploading signal_agent-${VERSION}-linux-arm64..."
+          mc cp bin/signal_agent-linux-arm64 "${S3_BUCKET}/signal_agent-${VERSION}-linux-arm64"
           
           # 创建 Agent 版本信息文件
-          echo "{\"version\":\"${VERSION}\",\"build_date\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > agent-version.json
-          mc cp agent-version.json "aliyun/vscode/awecloud-signaling/agent-version.json"
+          cat > signal_agent-version.json << EOF
+          {
+            "version": "${VERSION}",
+            "build_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "files": {
+              "linux-amd64": "signal_agent-${VERSION}-linux-amd64",
+              "linux-arm64": "signal_agent-${VERSION}-linux-arm64"
+            }
+          }
+          EOF
+          mc cp signal_agent-version.json "${S3_BUCKET}/signal_agent-version.json"
+          
+          # 设置公开访问权限
+          mc anonymous set download "${S3_BUCKET}/install_agent.sh"
+          mc anonymous set download "${S3_BUCKET}/signal_agent-version.json"
+          mc anonymous set download "${S3_BUCKET}/signal_agent-${VERSION}-linux-amd64"
+          mc anonymous set download "${S3_BUCKET}/signal_agent-${VERSION}-linux-arm64"
           
           echo "Agent ${VERSION} uploaded successfully!"
+        env:
+          S3_ACCESS_KEY_ALIYUN: ${{ secrets.S3_ACCESS_KEY_ALIYUN }}
+          S3_SECRET_KEY_ALIYUN: ${{ secrets.S3_SECRET_KEY_ALIYUN }}
+
+      - name: Upload Endpoint to S3
+        run: |
+          VERSION="${{ steps.version.outputs.BUILD_VERSION }}"
+          S3_BUCKET="aliyun/vscode/awecloud-signaling"
+          
+          # 上传 Endpoint 安装脚本
+          echo "Uploading install_endpoint.sh..."
+          mc cp scripts/install_endpoint.sh "${S3_BUCKET}/install_endpoint.sh"
+          
+          # 上传 Endpoint 二进制
+          echo "Uploading signal_endpoint-${VERSION}-linux-amd64..."
+          mc cp bin/signal_endpoint-linux-amd64 "${S3_BUCKET}/signal_endpoint-${VERSION}-linux-amd64"
+          
+          echo "Uploading signal_endpoint-${VERSION}-linux-arm64..."
+          mc cp bin/signal_endpoint-linux-arm64 "${S3_BUCKET}/signal_endpoint-${VERSION}-linux-arm64"
+          
+          # 创建 Endpoint 版本信息文件
+          cat > signal_endpoint-version.json << EOF
+          {
+            "version": "${VERSION}",
+            "build_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "files": {
+              "linux-amd64": "signal_endpoint-${VERSION}-linux-amd64",
+              "linux-arm64": "signal_endpoint-${VERSION}-linux-arm64"
+            }
+          }
+          EOF
+          mc cp signal_endpoint-version.json "${S3_BUCKET}/signal_endpoint-version.json"
+          
+          # 设置公开访问权限
+          mc anonymous set download "${S3_BUCKET}/install_endpoint.sh"
+          mc anonymous set download "${S3_BUCKET}/signal_endpoint-version.json"
+          mc anonymous set download "${S3_BUCKET}/signal_endpoint-${VERSION}-linux-amd64"
+          mc anonymous set download "${S3_BUCKET}/signal_endpoint-${VERSION}-linux-arm64"
+          
+          echo "Endpoint ${VERSION} uploaded successfully!"
         env:
           S3_ACCESS_KEY_ALIYUN: ${{ secrets.S3_ACCESS_KEY_ALIYUN }}
           S3_SECRET_KEY_ALIYUN: ${{ secrets.S3_SECRET_KEY_ALIYUN }}
