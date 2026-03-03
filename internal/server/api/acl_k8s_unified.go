@@ -14,7 +14,7 @@ import (
 
 // ========== K8S API 聚合查询（P9 新增） ==========
 // 按"集群"（Agent User）维度聚合，每个集群一行
-// 一个集群的 K8S API 要么由 Agent Node 直接提供，要么由 Endpoint 跳跃提供，有且只有一种
+// 服务提供者从 domain_registry 表获取具体的 Node 名和 Endpoint 名
 
 // K8SUnifiedACLClusterItem K8S API 授权集群列表项
 type K8SUnifiedACLClusterItem struct {
@@ -23,7 +23,7 @@ type K8SUnifiedACLClusterItem struct {
 	Alias        string    `json:"alias"`         // 集群别名
 	ProviderType string    `json:"provider_type"` // 提供者类型："agent" 或 "endpoint"
 	ProviderID   string    `json:"provider_id"`   // 提供者 ID（Agent User ID 字符串 或 Endpoint ID）
-	ProviderName string    `json:"provider_name"` // 提供者名称（Endpoint name，agent 时为空）
+	ProviderName string    `json:"provider_name"` // 提供者名称（如 "beagle-242" 或 "unicom-08 / beagle-002"）
 	UserCount    int64     `json:"user_count"`    // 用户级授权条数
 	GroupCount   int64     `json:"group_count"`   // 分组级授权条数
 	CreatedAt    time.Time `json:"created_at"`    // 集群创建时间
@@ -43,31 +43,27 @@ func (a *ACLAPI) ListK8SUnifiedACL(c *gin.Context) {
 		size = 20
 	}
 
-	// 用 map 按 Agent User ID 聚合
 	clusterMap := make(map[uint64]*K8SUnifiedACLClusterItem)
 
-	// 1. 查询 Agent K8S API 授权（有授权记录的 Agent User）
 	if typeFilter == "all" || typeFilter == "agent" {
 		a.collectAgentK8SClusters(search, clusterMap)
 	}
-
-	// 2. 查询 Endpoint K8S API 授权（有 k8sapi_enabled 的 Endpoint，按所属 Agent User 聚合）
 	if typeFilter == "all" || typeFilter == "endpoint" {
 		a.collectEndpointK8SAPIClusters(search, clusterMap)
 	}
 
-	// 转为切片
+	// 从 domain_registry 获取服务提供者名称
+	a.fillK8SAPIProviderNames(clusterMap)
+
 	items := make([]K8SUnifiedACLClusterItem, 0, len(clusterMap))
 	for _, item := range clusterMap {
 		items = append(items, *item)
 	}
 
-	// 按创建时间倒序排序
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].CreatedAt.After(items[j].CreatedAt)
 	})
 
-	// 内存分页
 	total := int64(len(items))
 	offset := (page - 1) * size
 	end := offset + size
@@ -81,8 +77,50 @@ func (a *ACLAPI) ListK8SUnifiedACL(c *gin.Context) {
 	c.JSON(http.StatusOK, NewPagedResponse(items[offset:end], total, page, size))
 }
 
+// fillK8SAPIProviderNames 从 domain_registry 查询 k8sapi 类型记录，填充服务提供者名称
+func (a *ACLAPI) fillK8SAPIProviderNames(clusterMap map[uint64]*K8SUnifiedACLClusterItem) {
+	if len(clusterMap) == 0 {
+		return
+	}
+
+	userIDs := make([]uint64, 0, len(clusterMap))
+	for uid := range clusterMap {
+		userIDs = append(userIDs, uid)
+	}
+
+	// 查询 domain_registry 中 type='k8sapi' 的记录，关联 Node 获取名称
+	var domainRegs []model.DomainRegistry
+	db.DB.Model(&model.DomainRegistry{}).
+		Where("type = ? AND user_id IN ?", model.DomainTypeK8SAPI, userIDs).
+		Preload("Node").
+		Find(&domainRegs)
+
+	for _, dr := range domainRegs {
+		item, ok := clusterMap[dr.UserID]
+		if !ok {
+			continue
+		}
+
+		nodeName := ""
+		if dr.Node != nil {
+			nodeName = dr.Node.Name
+		}
+
+		if dr.EndpointID != "" {
+			// Endpoint 提供：显示 "node_name / endpoint_name"
+			if nodeName != "" {
+				item.ProviderName = nodeName + " / " + dr.EndpointID
+			} else {
+				item.ProviderName = dr.EndpointID
+			}
+		} else if nodeName != "" {
+			// Agent Node 直接提供：显示 node_name
+			item.ProviderName = nodeName
+		}
+	}
+}
+
 // collectAgentK8SClusters 收集由 Agent 直接提供 K8S API 的集群
-// 判断依据：acl_k8s_user_permission 或 acl_k8s_group_permission 表中有 target_user_id 记录
 func (a *ACLAPI) collectAgentK8SClusters(search string, clusterMap map[uint64]*K8SUnifiedACLClusterItem) {
 	// 查询有 K8S 用户授权记录的 Agent User ID
 	var userCounts []struct {
@@ -100,7 +138,6 @@ func (a *ACLAPI) collectAgentK8SClusters(search string, clusterMap map[uint64]*K
 		agentUserIDs[uc.TargetUserID] = true
 	}
 
-	// 查询有 K8S 分组授权记录的 Agent User ID
 	var groupCounts []struct {
 		TargetUserID uint64 `gorm:"column:target_user_id"`
 		Count        int64  `gorm:"column:count"`
@@ -115,12 +152,10 @@ func (a *ACLAPI) collectAgentK8SClusters(search string, clusterMap map[uint64]*K
 		agentUserIDs[gc.TargetUserID] = true
 	}
 
-	// 没有任何授权记录，直接返回
 	if len(agentUserIDs) == 0 {
 		return
 	}
 
-	// 查询这些 Agent User 的信息
 	ids := make([]uint64, 0, len(agentUserIDs))
 	for id := range agentUserIDs {
 		ids = append(ids, id)
@@ -151,9 +186,7 @@ func (a *ACLAPI) collectAgentK8SClusters(search string, clusterMap map[uint64]*K
 }
 
 // collectEndpointK8SAPIClusters 收集由 Endpoint 提供 K8S API 的集群
-// 通过 Endpoint.user_id 关联到 Agent User，按 Agent User 聚合
 func (a *ACLAPI) collectEndpointK8SAPIClusters(search string, clusterMap map[uint64]*K8SUnifiedACLClusterItem) {
-	// 查询所有启用了 K8SAPI 的 Endpoint
 	var endpoints []model.Endpoint
 	if err := db.DB.Model(&model.Endpoint{}).
 		Where("revoked = ? AND k8sapi_enabled = ?", false, true).
@@ -166,13 +199,11 @@ func (a *ACLAPI) collectEndpointK8SAPIClusters(search string, clusterMap map[uin
 		return
 	}
 
-	// 收集 Endpoint ID 用于查询授权数
 	endpointIDs := make([]string, len(endpoints))
 	for i, ep := range endpoints {
 		endpointIDs[i] = ep.ID
 	}
 
-	// 查询 Endpoint K8SAPI 用户授权数
 	userCountMap := make(map[string]int64)
 	var userCounts []struct {
 		EndpointID string `gorm:"column:endpoint_id"`
@@ -186,7 +217,6 @@ func (a *ACLAPI) collectEndpointK8SAPIClusters(search string, clusterMap map[uin
 		userCountMap[uc.EndpointID] = uc.Count
 	}
 
-	// 查询 Endpoint K8SAPI 分组授权数
 	groupCountMap := make(map[string]int64)
 	var groupCounts []struct {
 		EndpointID string `gorm:"column:endpoint_id"`
@@ -200,22 +230,18 @@ func (a *ACLAPI) collectEndpointK8SAPIClusters(search string, clusterMap map[uin
 		groupCountMap[gc.EndpointID] = gc.Count
 	}
 
-	// 按 Agent User 聚合（一个集群只有一个 Endpoint 提供 K8SAPI）
 	for _, ep := range endpoints {
 		if ep.User == nil {
 			continue
 		}
 		user := ep.User
 
-		// 如果有搜索条件，按集群名/别名过滤
 		if search != "" {
-			nameMatch := containsIgnoreCase(user.Name, search) || containsIgnoreCase(user.Alias, search)
-			if !nameMatch {
+			if !containsIgnoreCase(user.Name, search) && !containsIgnoreCase(user.Alias, search) {
 				continue
 			}
 		}
 
-		// 如果该集群已经被 Agent 占了（理论上不会，因为一个集群只有一种提供方式）
 		if _, exists := clusterMap[user.ID]; exists {
 			continue
 		}
@@ -226,7 +252,7 @@ func (a *ACLAPI) collectEndpointK8SAPIClusters(search string, clusterMap map[uin
 			Alias:        user.Alias,
 			ProviderType: "endpoint",
 			ProviderID:   ep.ID,
-			ProviderName: ep.Name,
+			ProviderName: ep.Name, // 会被 fillK8SAPIProviderNames 覆盖为 "node / endpoint"
 			UserCount:    userCountMap[ep.ID],
 			GroupCount:   groupCountMap[ep.ID],
 			CreatedAt:    user.CreatedAt,
@@ -235,19 +261,18 @@ func (a *ACLAPI) collectEndpointK8SAPIClusters(search string, clusterMap map[uin
 }
 
 // ========== K8S Service 聚合查询（P9 新增） ==========
-// 同样按"集群"维度聚合
 
 // K8SServiceUnifiedACLClusterItem K8S Service 授权集群列表项
 type K8SServiceUnifiedACLClusterItem struct {
-	ID           uint64    `json:"id"`            // 集群 ID（Agent User ID）
-	Name         string    `json:"name"`          // 集群名
-	Alias        string    `json:"alias"`         // 集群别名
-	ProviderType string    `json:"provider_type"` // 提供者类型："agent" 或 "endpoint"
-	ProviderID   string    `json:"provider_id"`   // 提供者 ID
-	ProviderName string    `json:"provider_name"` // 提供者名称（Endpoint name，agent 时为空）
-	UserCount    int64     `json:"user_count"`    // 用户级授权条数
-	GroupCount   int64     `json:"group_count"`   // 分组级授权条数
-	CreatedAt    time.Time `json:"created_at"`    // 集群创建时间
+	ID           uint64    `json:"id"`
+	Name         string    `json:"name"`
+	Alias        string    `json:"alias"`
+	ProviderType string    `json:"provider_type"`
+	ProviderID   string    `json:"provider_id"`
+	ProviderName string    `json:"provider_name"`
+	UserCount    int64     `json:"user_count"`
+	GroupCount   int64     `json:"group_count"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // ListK8SServiceUnifiedACL 获取 K8S Service 授权合并列表（按集群聚合）
@@ -269,10 +294,12 @@ func (a *ACLAPI) ListK8SServiceUnifiedACL(c *gin.Context) {
 	if typeFilter == "all" || typeFilter == "agent" {
 		a.collectAgentK8SServiceClusters(search, clusterMap)
 	}
-
 	if typeFilter == "all" || typeFilter == "endpoint" {
 		a.collectEndpointK8SServiceClusters(search, clusterMap)
 	}
+
+	// 从 domain_registry 获取服务提供者名称
+	a.fillK8SServiceProviderNames(clusterMap)
 
 	items := make([]K8SServiceUnifiedACLClusterItem, 0, len(clusterMap))
 	for _, item := range clusterMap {
@@ -294,6 +321,54 @@ func (a *ACLAPI) ListK8SServiceUnifiedACL(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, NewPagedResponse(items[offset:end], total, page, size))
+}
+
+// fillK8SServiceProviderNames 从 domain_registry 查询 k8ssvc 类型记录，填充服务提供者名称
+func (a *ACLAPI) fillK8SServiceProviderNames(clusterMap map[uint64]*K8SServiceUnifiedACLClusterItem) {
+	if len(clusterMap) == 0 {
+		return
+	}
+
+	userIDs := make([]uint64, 0, len(clusterMap))
+	for uid := range clusterMap {
+		userIDs = append(userIDs, uid)
+	}
+
+	// k8ssvc 可能有多条记录（每个 service 一条），取第一条即可获取 Node/Endpoint 信息
+	var domainRegs []model.DomainRegistry
+	db.DB.Model(&model.DomainRegistry{}).
+		Where("type = ? AND user_id IN ?", model.DomainTypeK8SSVC, userIDs).
+		Preload("Node").
+		Find(&domainRegs)
+
+	// 按 user_id 去重，只取第一条
+	seen := make(map[uint64]bool)
+	for _, dr := range domainRegs {
+		if seen[dr.UserID] {
+			continue
+		}
+		seen[dr.UserID] = true
+
+		item, ok := clusterMap[dr.UserID]
+		if !ok {
+			continue
+		}
+
+		nodeName := ""
+		if dr.Node != nil {
+			nodeName = dr.Node.Name
+		}
+
+		if dr.EndpointID != "" {
+			if nodeName != "" {
+				item.ProviderName = nodeName + " / " + dr.EndpointID
+			} else {
+				item.ProviderName = dr.EndpointID
+			}
+		} else if nodeName != "" {
+			item.ProviderName = nodeName
+		}
+	}
 }
 
 // collectAgentK8SServiceClusters 收集由 Agent 直接提供 K8S Service 的集群
@@ -412,8 +487,7 @@ func (a *ACLAPI) collectEndpointK8SServiceClusters(search string, clusterMap map
 		user := ep.User
 
 		if search != "" {
-			nameMatch := containsIgnoreCase(user.Name, search) || containsIgnoreCase(user.Alias, search)
-			if !nameMatch {
+			if !containsIgnoreCase(user.Name, search) && !containsIgnoreCase(user.Alias, search) {
 				continue
 			}
 		}
@@ -438,13 +512,12 @@ func (a *ACLAPI) collectEndpointK8SServiceClusters(search string, clusterMap map
 
 // containsIgnoreCase 不区分大小写的字符串包含检查
 func containsIgnoreCase(s, substr string) bool {
-	return len(s) >= len(substr) &&
-		(s == substr ||
-			len(substr) == 0 ||
-			findIgnoreCase(s, substr))
-}
-
-func findIgnoreCase(s, substr string) bool {
+	if len(substr) == 0 {
+		return true
+	}
+	if len(s) < len(substr) {
+		return false
+	}
 	for i := 0; i <= len(s)-len(substr); i++ {
 		match := true
 		for j := 0; j < len(substr); j++ {
