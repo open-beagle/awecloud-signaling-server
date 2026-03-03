@@ -1090,6 +1090,7 @@ type SVCProxyRequest struct {
 	Namespace     string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`                        // 目标命名空间
 	ServiceName   string                 `protobuf:"bytes,3,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"` // 目标 Service 名称
 	Port          int32                  `protobuf:"varint,4,opt,name=port,proto3" json:"port,omitempty"`                                 // 目标端口
+	ClusterIp     string                 `protobuf:"bytes,5,opt,name=cluster_ip,json=clusterIp,proto3" json:"cluster_ip,omitempty"`       // ClusterIP（物理节点部署时直连，避免依赖 cluster.local DNS）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1150,6 +1151,13 @@ func (x *SVCProxyRequest) GetPort() int32 {
 		return x.Port
 	}
 	return 0
+}
+
+func (x *SVCProxyRequest) GetClusterIp() string {
+	if x != nil {
+		return x.ClusterIp
+	}
+	return ""
 }
 
 // EndpointSVCProxyData Endpoint K8S Service 代理数据帧
@@ -1511,13 +1519,15 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	"\x04body\x18\x03 \x01(\fR\x04body\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x85\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa4\x01\n" +
 	"\x0fSVCProxyRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x12!\n" +
 	"\fservice_name\x18\x03 \x01(\tR\vserviceName\x12\x12\n" +
-	"\x04port\x18\x04 \x01(\x05R\x04port\"\xa9\x01\n" +
+	"\x04port\x18\x04 \x01(\x05R\x04port\x12\x1d\n" +
+	"\n" +
+	"cluster_ip\x18\x05 \x01(\tR\tclusterIp\"\xa9\x01\n" +
 	"\x14EndpointSVCProxyData\x12\x17\n" +
 	"\ais_open\x18\x01 \x01(\bR\x06isOpen\x12\x1d\n" +
 	"\n" +

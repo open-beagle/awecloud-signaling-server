@@ -147,7 +147,15 @@ func (p *K8SSVCProxy) SVCProxy(stream pb.AgentService_SVCProxyServer) error {
 
 	// 如果 endpoint_name 非空，走 Endpoint 跳跃路径
 	if endpointName != "" {
-		return p.handleEndpointSVCProxy(stream, peerIdentity, endpointName, namespace, serviceName, port)
+		// 尝试从本地 Informer 获取 ClusterIP（unicom-08 有 Informer 时可用）
+		// 如果 Informer 为 nil 或未找到，传空字符串，由 Endpoint 侧自行处理
+		clusterIP := ""
+		if p.informer != nil {
+			if svc := p.informer.FindService(namespace, serviceName); svc != nil {
+				clusterIP = svc.ClusterIP
+			}
+		}
+		return p.handleEndpointSVCProxy(stream, peerIdentity, endpointName, namespace, serviceName, clusterIP, port)
 	}
 
 	// 3. 检查权限（Agent 直连路径）
@@ -158,7 +166,13 @@ func (p *K8SSVCProxy) SVCProxy(stream pb.AgentService_SVCProxyServer) error {
 		return fmt.Errorf("权限不足")
 	}
 
-	// 4. 查找 Service 的 ClusterIP
+	// 4. 查找 Service 的 ClusterIP（需要 Informer）
+	if p.informer == nil {
+		logger.Warnf("SVCProxy Agent 直连路径不可用：Informer 未初始化（无 K8S 访问能力）")
+		_ = stream.Send(&pb.SVCProxyData{Error: "Agent 直连路径不可用"})
+		return fmt.Errorf("Informer 未初始化")
+	}
+
 	svc := p.informer.FindService(namespace, serviceName)
 	if svc == nil {
 		logger.Warnf("SVCProxy Service 未找到: %s/%s", namespace, serviceName)
@@ -253,7 +267,7 @@ func (p *K8SSVCProxy) SVCProxy(stream pb.AgentService_SVCProxyServer) error {
 
 // handleEndpointSVCProxy 处理 Endpoint 跳跃路径的 SVCProxy
 // Desktop → Agent SVCProxy(endpoint_name=xxx) → Agent RequestSVCProxy → Endpoint OpenSVCProxy → K8S ClusterIP
-func (p *K8SSVCProxy) handleEndpointSVCProxy(stream pb.AgentService_SVCProxyServer, peerIdentity *PeerIdentity, endpointName, namespace, serviceName string, port int32) error {
+func (p *K8SSVCProxy) handleEndpointSVCProxy(stream pb.AgentService_SVCProxyServer, peerIdentity *PeerIdentity, endpointName, namespace, serviceName, clusterIP string, port int32) error {
 	// 检查 Endpoint K8SService 权限
 	if !p.permCache.CheckEndpointK8SServiceAccess(peerIdentity.UserName, endpointName, namespace, serviceName) {
 		logger.Warnf("SVCProxy Endpoint 权限拒绝: user=%s, endpoint=%s, ns=%s, svc=%s",
@@ -269,7 +283,7 @@ func (p *K8SSVCProxy) handleEndpointSVCProxy(stream pb.AgentService_SVCProxyServ
 	}
 
 	// 请求 Endpoint 开启 SVC 代理
-	epStream, err := p.endpointServer.RequestSVCProxy(stream.Context(), endpointName, namespace, serviceName, port)
+	epStream, err := p.endpointServer.RequestSVCProxy(stream.Context(), endpointName, namespace, serviceName, clusterIP, port)
 	if err != nil {
 		logger.Warnf("SVCProxy Endpoint 请求失败: %v", err)
 		_ = stream.Send(&pb.SVCProxyData{Error: fmt.Sprintf("Endpoint 连接失败: %v", err)})

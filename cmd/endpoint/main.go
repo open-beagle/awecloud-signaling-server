@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -344,14 +345,35 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 
 	// 启动 K8S Service 自动发现（如果启用）
 	var discovery *K8SServiceDiscovery
-	if cfg.SVC.Enabled && cfg.K8S.APIServer != "" {
-		discovery = NewK8SServiceDiscovery(cfg, ctx)
-		if err := discovery.Start(); err != nil {
+	var discoveryMu sync.Mutex // 保护 discovery 的并发访问
+	startDiscovery := func() {
+		discoveryMu.Lock()
+		defer discoveryMu.Unlock()
+		if discovery != nil {
+			return // 已经启动，不重复启动
+		}
+		if cfg.K8S.APIServer == "" {
+			logger.Warnf("K8S API Server 地址未知，无法启动 K8S Service 自动发现")
+			return
+		}
+		d := NewK8SServiceDiscovery(cfg, ctx)
+		if err := d.Start(); err != nil {
 			logger.Warnf("启动 K8S Service 自动发现失败: %v", err)
 		} else {
-			defer discovery.Stop()
+			discovery = d
+			logger.Infof("K8S Service 自动发现已启动")
 		}
 	}
+	if cfg.SVC.Enabled {
+		startDiscovery()
+	}
+	defer func() {
+		discoveryMu.Lock()
+		if discovery != nil {
+			discovery.Stop()
+		}
+		discoveryMu.Unlock()
+	}()
 
 	logger.Debug("心跳流已建立，保持连接中...")
 
@@ -381,7 +403,13 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 				}
 			}
 			if resp.K8SserviceEnabledSet {
+				prevEnabled := cfg.SVC.Enabled
 				cfg.SVC.Enabled = resp.K8SserviceEnabled
+				// 如果 K8S Service 从未启用变为启用，动态启动自动发现
+				if !prevEnabled && cfg.SVC.Enabled {
+					logger.Infof("Server 下发 K8S Service 能力已启用，动态启动自动发现")
+					go startDiscovery()
+				}
 			}
 
 			// 重新构建能力列表（基于最新配置）
@@ -429,10 +457,12 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 			// 添加 K8S Service 配置
 			if cfg.SVC.Enabled {
 				heartbeatReq.K8SserviceLabelSelector = cfg.SVC.LabelSelector
-				// 添加发现的 Service 列表
+				// 添加发现的 Service 列表（加锁保护 discovery 并发访问）
+				discoveryMu.Lock()
 				if discovery != nil {
 					heartbeatReq.DiscoveredServices = discovery.GetDiscoveredServices()
 				}
+				discoveryMu.Unlock()
 			}
 
 			logger.Debugf("发送心跳: ssh_users=%v, discovered_services=%d", sshUsers, len(heartbeatReq.DiscoveredServices))

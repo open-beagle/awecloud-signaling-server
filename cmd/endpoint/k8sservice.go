@@ -33,20 +33,33 @@ func handleSVCProxyRequest(ctx context.Context, client pb.EndpointServiceClient,
 		return
 	}
 
-	// 连接本地 K8S Service（ClusterIP:Port）
-	// Endpoint 运行在 K8S 集群内，可以直接访问 ClusterIP
-	targetAddr := fmt.Sprintf("%s.%s.svc.cluster.local:%d", req.ServiceName, req.Namespace, req.Port)
+	// 连接本地 K8S Service
+	// 优先使用 ClusterIP 直连（物理节点部署时 cluster.local DNS 不可用）
+	// 回退到 DNS 名（Pod 内部署时 ClusterIP 可能未知）
+	var targetAddr string
+	var targetConn net.Conn
+	var dialErr error
 
-	targetConn, err := net.Dial("tcp", targetAddr)
-	if err != nil {
-		// 回退：尝试直接用 ServiceName.Namespace:Port
-		targetAddr = fmt.Sprintf("%s.%s:%d", req.ServiceName, req.Namespace, req.Port)
-		targetConn, err = net.Dial("tcp", targetAddr)
-		if err != nil {
-			logger.Warnf("SVC 连接失败: %s, err=%v", targetAddr, err)
-			_ = stream.Send(&pb.EndpointSVCProxyData{IsClose: true, Error: fmt.Sprintf("连接失败: %v", err)})
-			return
+	if req.ClusterIp != "" {
+		// 优先：ClusterIP 直连，不依赖 DNS
+		targetAddr = fmt.Sprintf("%s:%d", req.ClusterIp, req.Port)
+		targetConn, dialErr = net.Dial("tcp", targetAddr)
+	}
+
+	if targetConn == nil {
+		// 回退：cluster.local DNS 名（Pod 内部署）
+		dnsAddr := fmt.Sprintf("%s.%s.svc.cluster.local:%d", req.ServiceName, req.Namespace, req.Port)
+		targetConn, dialErr = net.Dial("tcp", dnsAddr)
+		if targetConn != nil {
+			targetAddr = dnsAddr
 		}
+	}
+
+	if targetConn == nil {
+		logger.Warnf("SVC 连接失败: cluster_ip=%s, svc=%s/%s:%d, err=%v",
+			req.ClusterIp, req.Namespace, req.ServiceName, req.Port, dialErr)
+		_ = stream.Send(&pb.EndpointSVCProxyData{IsClose: true, Error: fmt.Sprintf("连接失败: %v", dialErr)})
+		return
 	}
 	defer targetConn.Close()
 

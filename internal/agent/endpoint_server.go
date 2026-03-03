@@ -44,8 +44,8 @@ type EndpointConnection struct {
 	K8SServiceNamespaces    []string // 命名空间列表
 
 	// 动态分配的端口（Endpoint 连接时分配）
-	SSHPort     uint16 // SSH 代理端口（0 表示未分配）
-	K8SAPIPort  uint16 // K8SAPI 代理端口（0 表示未分配）
+	SSHPort    uint16 // SSH 代理端口（0 表示未分配）
+	K8SAPIPort uint16 // K8SAPI 代理端口（0 表示未分配）
 
 	// Heartbeat 流（用于直接调用 Endpoint RPC）
 	HeartbeatStream pb.EndpointService_HeartbeatServer
@@ -95,10 +95,10 @@ type rawStreamSession struct {
 type EndpointServerConfig struct {
 	SSHEnabled       bool
 	SSHEnabledSet    bool
-	SSHPort          uint32  // 新增：Server 预分配的 SSH 端口
+	SSHPort          uint32 // 新增：Server 预分配的 SSH 端口
 	K8SAPIEnabled    bool
 	K8SAPIEnabledSet bool
-	K8SAPIPort       uint32  // 新增：Server 预分配的 K8SAPI 端口
+	K8SAPIPort       uint32 // 新增：Server 预分配的 K8SAPI 端口
 	K8SAPIApiServer  string
 	K8SSvcEnabled    bool
 	K8SSvcEnabledSet bool
@@ -784,7 +784,7 @@ func (s *EndpointServer) OpenSVCProxy(stream pb.EndpointService_OpenSVCProxyServ
 
 // RequestSVCProxy 请求 Endpoint 开启 K8S Service 代理会话
 // 创建 session → 通知 Endpoint → 等待回调 → 返回 gRPC 流
-func (s *EndpointServer) RequestSVCProxy(ctx context.Context, endpointName, namespace, serviceName string, port int32) (pb.EndpointService_OpenSVCProxyServer, error) {
+func (s *EndpointServer) RequestSVCProxy(ctx context.Context, endpointName, namespace, serviceName, clusterIP string, port int32) (pb.EndpointService_OpenSVCProxyServer, error) {
 	// 检查 Endpoint 是否在线
 	s.connMutex.RLock()
 	_, connected := s.connections[endpointName]
@@ -814,18 +814,19 @@ func (s *EndpointServer) RequestSVCProxy(ctx context.Context, endpointName, name
 		s.svcProxyMutex.Unlock()
 	}()
 
-	// 将请求加入待下发队列
+	// 将请求加入待下发队列（携带 ClusterIP，供物理节点 Endpoint 直连）
 	req := &pb.SVCProxyRequest{
 		SessionId:   sessionID,
 		Namespace:   namespace,
 		ServiceName: serviceName,
 		Port:        port,
+		ClusterIp:   clusterIP,
 	}
 	s.pendingMutex.Lock()
 	s.pendingSVCReqs[endpointName] = append(s.pendingSVCReqs[endpointName], req)
 	s.pendingMutex.Unlock()
 
-	logger.Infof("SVC 代理请求已排队: session_id=%s, endpoint=%s, %s/%s:%d", sessionID, endpointName, namespace, serviceName, port)
+	logger.Infof("SVC 代理请求已排队: session_id=%s, endpoint=%s, %s/%s:%d (clusterIP=%s)", sessionID, endpointName, namespace, serviceName, port, clusterIP)
 
 	// 等待 Endpoint 回调（超时 30 秒）
 	select {

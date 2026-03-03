@@ -1177,19 +1177,21 @@ func (a *Agent) startK8SAPIProxy() error {
 }
 
 // startK8SServiceModules 启动 K8S Service 发现和代理模块
+// Informer 启动失败时仅打印 warn，SVCProxy 仍然启动（支持 Endpoint 跳跃路径）
 func (a *Agent) startK8SServiceModules() error {
-	// 启动 Informer
+	// 尝试启动 Informer（物理节点无 K8S 访问能力时允许失败）
 	informer, err := NewK8SServiceInformer(&a.config.SVC, nil, a.ctx)
 	if err != nil {
-		return fmt.Errorf("创建 K8S Service Informer 失败: %w", err)
+		logger.Warnf("创建 K8S Service Informer 失败（Agent 直连路径不可用）: %v", err)
+	} else if err := informer.Start(); err != nil {
+		logger.Warnf("启动 K8S Service Informer 失败（Agent 直连路径不可用）: %v", err)
+		informer = nil
+	} else {
+		a.svcInformer = informer
+		logger.Infof("K8S Service Informer 已启动: selector=%s", a.config.SVC.LabelSelector)
 	}
 
-	if err := informer.Start(); err != nil {
-		return fmt.Errorf("启动 K8S Service Informer 失败: %w", err)
-	}
-	a.svcInformer = informer
-
-	// 启动 SVCProxy gRPC 服务
+	// 启动 SVCProxy gRPC 服务（informer 为 nil 时仍可处理 Endpoint 跳跃路径）
 	svcProxy, err := NewK8SSVCProxy(&a.config.SVC, a.tsManager, a.permCache, informer, a.auditCollector, a.ctx)
 	if err != nil {
 		return fmt.Errorf("创建 K8S SVCProxy 失败: %w", err)
@@ -1200,8 +1202,8 @@ func (a *Agent) startK8SServiceModules() error {
 	}
 	a.svcProxy = svcProxy
 
-	logger.Infof("K8S Service 模块已启用: selector=%s, gRPC 端口=%d",
-		a.config.SVC.LabelSelector, a.config.SVC.ListenPortBase)
+	logger.Infof("K8S SVCProxy 已启动: gRPC 端口=%d (informer=%v)",
+		a.config.SVC.ListenPortBase, a.svcInformer != nil)
 	return nil
 }
 
