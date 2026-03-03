@@ -316,63 +316,105 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 		return fmt.Errorf("发送首次心跳失败: %w", err)
 	}
 
-	// 接收首次响应
-	resp, err := stream.Recv()
-	if err != nil {
-		return fmt.Errorf("接收心跳响应失败: %w", err)
-	}
-	if !resp.Success {
-		return fmt.Errorf("心跳被拒绝: %s", resp.Message)
-	}
-
-	// 处理首次响应中 Server 下发的能力配置
-	if resp.SshEnabledSet {
-		cfg.SSH.Enabled = resp.SshEnabled
-	}
-	if resp.K8SapiEnabledSet {
-		cfg.K8S.Enabled = resp.K8SapiEnabled
-		if resp.K8SapiApiServer != "" && cfg.K8S.APIServer == "" {
-			cfg.K8S.APIServer = resp.K8SapiApiServer
+	// 接收首次响应（带超时）
+	respChan := make(chan *pb.EndpointHeartbeatResponse, 1)
+	errChan := make(chan error, 1)
+	
+	go func() {
+		resp, err := stream.Recv()
+		if err != nil {
+			errChan <- err
+			return
 		}
+		respChan <- resp
+	}()
+	
+	var resp *pb.EndpointHeartbeatResponse
+	select {
+	case resp = <-respChan:
+		// 成功接收响应
+		if !resp.Success {
+			return fmt.Errorf("心跳被拒绝: %s", resp.Message)
+		}
+	case err := <-errChan:
+		return fmt.Errorf("接收心跳响应失败: %w", err)
+	case <-time.After(3 * time.Second):
+		// 超时：使用默认配置（全部禁用），后续通过心跳响应更新
+		logger.Warnf("等待首次心跳响应超时（3秒），使用默认配置（全部禁用），后续通过心跳响应更新")
+		cfg.SSH.Enabled = false
+		cfg.K8S.Enabled = false
+		cfg.SVC.Enabled = false
+		resp = nil // 标记为超时
 	}
-	if resp.K8SserviceEnabledSet {
-		cfg.SVC.Enabled = resp.K8SserviceEnabled
-	}
-	// 重新构建能力列表（基于 Server 下发的配置）
-	caps = buildCapabilities(cfg)
-	logger.Infof("Server 下发能力配置: ssh=%v, k8sapi=%v(api_server=%s), k8ssvc=%v",
-		cfg.SSH.Enabled, cfg.K8S.Enabled, cfg.K8S.APIServer, cfg.SVC.Enabled)
 
-	// 启动 K8S Service 自动发现（如果启用）
+	// 处理首次响应中 Server 下发的能力配置（如果没有超时）
+	if resp != nil {
+		if resp.SshEnabledSet {
+			cfg.SSH.Enabled = resp.SshEnabled
+		}
+		if resp.K8SapiEnabledSet {
+			cfg.K8S.Enabled = resp.K8SapiEnabled
+			if resp.K8SapiApiServer != "" && cfg.K8S.APIServer == "" {
+				cfg.K8S.APIServer = resp.K8SapiApiServer
+			}
+		}
+		if resp.K8SserviceEnabledSet {
+			cfg.SVC.Enabled = resp.K8SserviceEnabled
+			// 如果 Server 下发了 api_server，更新配置
+			if resp.K8SapiApiServer != "" {
+				cfg.K8S.APIServer = resp.K8SapiApiServer
+			}
+		}
+		logger.Infof("Server 下发能力配置: ssh=%v, k8sapi=%v(api_server=%s), k8ssvc=%v",
+			cfg.SSH.Enabled, cfg.K8S.Enabled, cfg.K8S.APIServer, cfg.SVC.Enabled)
+	}
+	
+	// 重新构建能力列表（基于 Server 下发的配置或默认配置）
+	caps = buildCapabilities(cfg)
+
+	// 启动 K8S Service 自动发现（根据 Server 下发的配置）
 	var discovery *K8SServiceDiscovery
 	var discoveryMu sync.Mutex // 保护 discovery 的并发访问
+	
+	// stopDiscovery 停止 K8S Service 自动发现
+	stopDiscovery := func() {
+		discoveryMu.Lock()
+		defer discoveryMu.Unlock()
+		if discovery != nil {
+			logger.Infof("停止 K8S Service 自动发现")
+			discovery.Stop()
+			discovery = nil
+		}
+	}
+	
+	// startDiscovery 启动 K8S Service 自动发现
 	startDiscovery := func() {
 		discoveryMu.Lock()
 		defer discoveryMu.Unlock()
 		if discovery != nil {
+			logger.Debugf("K8S Service 自动发现已经启动，跳过")
 			return // 已经启动，不重复启动
 		}
 		if cfg.K8S.APIServer == "" {
-			logger.Warnf("K8S API Server 地址未知，无法启动 K8S Service 自动发现")
+			logger.Errorf("K8S API Server 地址未知，无法启动 K8S Service 自动发现")
 			return
 		}
 		d := NewK8SServiceDiscovery(cfg, ctx)
 		if err := d.Start(); err != nil {
-			logger.Warnf("启动 K8S Service 自动发现失败: %v", err)
+			logger.Errorf("启动 K8S Service 自动发现失败: %v", err)
 		} else {
 			discovery = d
 			logger.Infof("K8S Service 自动发现已启动")
 		}
 	}
+	
+	// Bug 1 修复：根据 Server 下发的配置启动服务模块（而不是本地配置）
 	if cfg.SVC.Enabled {
 		startDiscovery()
 	}
+	
 	defer func() {
-		discoveryMu.Lock()
-		if discovery != nil {
-			discovery.Stop()
-		}
-		discoveryMu.Unlock()
+		stopDiscovery()
 	}()
 
 	logger.Debug("心跳流已建立，保持连接中...")
@@ -397,18 +439,45 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 			}
 			if resp.K8SapiEnabledSet {
 				cfg.K8S.Enabled = resp.K8SapiEnabled
-				// 如果 Server 下发了 api_server，优先使用（本地配置为空时）
-				if resp.K8SapiApiServer != "" && cfg.K8S.APIServer == "" {
+				// 如果 Server 下发了 api_server，更新配置
+				if resp.K8SapiApiServer != "" {
 					cfg.K8S.APIServer = resp.K8SapiApiServer
 				}
 			}
+			
+			// Bug 2 修复：响应 Server 的配置变更，动态启动或停止服务模块
 			if resp.K8SserviceEnabledSet {
 				prevEnabled := cfg.SVC.Enabled
 				cfg.SVC.Enabled = resp.K8SserviceEnabled
-				// 如果 K8S Service 从未启用变为启用，动态启动自动发现
-				if !prevEnabled && cfg.SVC.Enabled {
-					logger.Infof("Server 下发 K8S Service 能力已启用，动态启动自动发现")
-					go startDiscovery()
+				
+				// 如果 Server 下发了 api_server，更新配置
+				if resp.K8SapiApiServer != "" {
+					cfg.K8S.APIServer = resp.K8SapiApiServer
+				}
+				
+				// 根据配置变更，动态启动或停止服务模块
+				if cfg.SVC.Enabled {
+					// 应该启用：检查是否已启动
+					discoveryMu.Lock()
+					isRunning := (discovery != nil)
+					discoveryMu.Unlock()
+					
+					if !isRunning {
+						logger.Infof("Server 下发 K8S Service 能力已启用，动态启动自动发现")
+						go startDiscovery()
+					} else if prevEnabled != cfg.SVC.Enabled {
+						logger.Debugf("K8S Service 能力保持启用状态")
+					}
+				} else {
+					// 应该禁用：检查是否正在运行
+					discoveryMu.Lock()
+					isRunning := (discovery != nil)
+					discoveryMu.Unlock()
+					
+					if isRunning {
+						logger.Infof("Server 下发 K8S Service 能力已禁用，停止自动发现")
+						go stopDiscovery()
+					}
 				}
 			}
 

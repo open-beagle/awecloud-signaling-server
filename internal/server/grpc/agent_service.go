@@ -1461,6 +1461,7 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 		}
 
 		// 更新 Endpoint K8S Service 发现缓存
+		logger.Debugf("处理 Endpoint %s 的 K8S Service 发现数据: discovered_services=%d", ep.Name, len(ep.DiscoveredServices))
 		if len(ep.DiscoveredServices) > 0 {
 			discoveredServices := make([]cache.EndpointDiscoveredService, 0, len(ep.DiscoveredServices))
 			for _, ds := range ep.DiscoveredServices {
