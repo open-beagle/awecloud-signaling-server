@@ -64,8 +64,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete } from '@element-plus/icons-vue'
-import { getGroupMembers, addGroupMember, removeGroupMember } from '@/api/group'
-import { getClients } from '@/api/client'
+import { getGroupMembers, getGroup, addGroupMember, removeGroupMember } from '@/api/group'
+import { getUsers } from '@/api/user'
 
 const route = useRoute()
 
@@ -90,8 +90,17 @@ const loadMembers = async () => {
 
   loading.value = true
   try {
+    // 先加载分组信息
+    if (!groupInfo.value) {
+      const groupRes = await getGroup(groupId)
+      if (groupRes.success && groupRes.data) {
+        groupInfo.value = groupRes.data
+      }
+    }
+
     const res = await getGroupMembers(groupId)
     if (res.success && res.data) {
+      console.log('API 返回的原始数据:', res.data)
       // 兼容新旧两种 API 响应格式
       if (res.data.group && res.data.members) {
         // 新格式: { group: {...}, members: [...] }
@@ -100,6 +109,7 @@ const loadMembers = async () => {
       } else if (Array.isArray(res.data)) {
         // 旧格式: 直接返回数组
         members.value = res.data
+        console.log('成员数据:', members.value)
       }
     }
   } catch (error) {
@@ -112,7 +122,7 @@ const loadMembers = async () => {
 
 const loadClients = async () => {
   try {
-    const res = await getClients(1, 1000)
+    const res = await getUsers({ role: 'client', page: 1, size: 1000 })
     if (res.success && res.data) {
       allClients.value = res.data
     }
