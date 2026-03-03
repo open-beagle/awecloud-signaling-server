@@ -348,7 +348,12 @@ export default {
     serviceNamesTip: 'Controls which services the user can access, leave empty for all',
     searchK8SServicePlaceholder: 'Search agent name',
     addK8SServiceUserAuth: 'Add K8S Service User Authorization',
-    addK8SServiceGroupAuth: 'Add K8S Service Group Authorization'
+    addK8SServiceGroupAuth: 'Add K8S Service Group Authorization',
+    // P9 unified display
+    type: 'Type',
+    typeAgent: 'Agent',
+    typeEndpoint: 'Endpoint',
+    belongAgent: 'Belongs to Agent'
   },
   aclEndpoint: {
     searchPlaceholder: 'Search endpoint name',

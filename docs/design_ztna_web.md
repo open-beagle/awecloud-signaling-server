@@ -105,9 +105,10 @@ Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理�
 │     ├── 服务授权    /acl/services             （不变，AgentService）
 │     ├── 用户授权    /acl/users                （不变）
 │     ├── 分组授权    /acl/groups               （不变）
-│     ├── SSH 授权    /acl/ssh                  （增强，包含 Agent SSH + Endpoint SSH）
-│     ├── K8S API 授权    /acl/k8s                  （新增，包含 Agent K8SAPI + Endpoint K8SAPI）
-│     └── K8S Service 授权 /acl/k8s-service      （新增，包含 Agent K8SService + Endpoint K8SService）
+│     ├── SSH 授权    /acl/ssh                  （Agent SSH，Headscale ACL 鉴权）
+│     ├── K8S API 授权    /acl/k8s              （合并展示 Agent + Endpoint K8SAPI）
+│     ├── K8S Service 授权 /acl/k8s-service     （合并展示 Agent + Endpoint K8SService）
+│     └── Endpoint SSH 授权 /acl/endpoint-ssh   （Endpoint SSH，Agent PermissionCache 鉴权）
 ├── 隧道管理                                    （不变）
 │     ├── User 管理   /tunnel/users
 │     ├── Node 管理   /tunnel/nodes
@@ -121,17 +122,23 @@ Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理�
 
 ### K8SAPI 授权页面（/acl/k8s）
 
-管理 AgentK8SAPI 的访问权限（第 3 层）。以 Agent 为维度，配置哪些用户/分组可以访问哪个 Agent 的 K8S API，以及对应的命名空间和 K8S 角色。
+合并展示 Agent K8SAPI 和 Endpoint K8SAPI 的授权列表（P9 简化）。以统一列表展示所有 K8S API 授权对象，每项标记类型（Agent/Endpoint）。
 
 列表视图：
 
-| 列         | 说明                               |
-| ---------- | ---------------------------------- |
-| Agent      | Agent 名称（启用了 K8SAPI 能力的） |
-| 别名       | Agent 别名                         |
-| 用户授权数 | 用户级授权条数                     |
-| 分组授权数 | 分组级授权条数                     |
-| 操作       | 管理授权                           |
+| 列         | 说明                                                    |
+| ---------- | ------------------------------------------------------- |
+| 名称       | Agent 名称或 Endpoint 名称                              |
+| 别名       | 别名                                                    |
+| 类型       | Agent（el-tag primary）或 Endpoint（el-tag warning）    |
+| 所属 Agent | Agent 类型时显示"—"，Endpoint 类型时显示所属 Agent 名称 |
+| 用户授权数 | 用户级授权条数                                          |
+| 分组授权数 | 分组级授权条数                                          |
+| 操作       | 管理授权                                                |
+
+搜索区支持按类型（全部/Agent/Endpoint）筛选和关键词搜索。
+
+点击"管理授权"：Agent 类型跳转 /acl/k8s/:id（Agent 授权详情），Endpoint 类型跳转 /acl/endpoint-k8sapi/:id（Endpoint 授权详情）。
 
 详情页面（点击"管理授权"进入）：
 
@@ -159,17 +166,22 @@ Agent: beijing（kubernetes.beijing.beagle:50050）
 
 ### K8S Service 授权页面（/acl/k8s-service）
 
-管理 AgentK8SService 的访问权限（第 3 层）。以 Agent 为维度，配置哪些用户/分组可以访问哪个 Agent 自动发现的 K8S Service，按命名空间和 Service 名称控制。
+合并展示 Agent K8SService 和 Endpoint K8SService 的授权列表（P9 简化）。结构与 K8SAPI 授权页面一致，区别：多一列"发现的 Service 数"。
 
 列表视图：
 
-| 列         | 说明                                   |
-| ---------- | -------------------------------------- |
-| Agent      | Agent 名称（启用了 K8SService 能力的） |
-| 别名       | Agent 别名                             |
-| 用户授权数 | 用户级授权条数                         |
-| 分组授权数 | 分组级授权条数                         |
-| 操作       | 管理授权                               |
+| 列              | 说明                                                    |
+| --------------- | ------------------------------------------------------- |
+| 名称            | Agent 名称或 Endpoint 名称                              |
+| 别名            | 别名                                                    |
+| 类型            | Agent（el-tag primary）或 Endpoint（el-tag warning）    |
+| 所属 Agent      | Agent 类型时显示"—"，Endpoint 类型时显示所属 Agent 名称 |
+| 发现 Service 数 | 自动发现的 K8S Service 数量                             |
+| 用户授权数      | 用户级授权条数                                          |
+| 分组授权数      | 分组级授权条数                                          |
+| 操作            | 管理授权                                                |
+
+点击"管理授权"：Agent 类型跳转 /acl/k8s-service/:id，Endpoint 类型跳转 /acl/endpoint-k8sservice/:id。
 
 详情页面（点击"管理授权"进入）：
 

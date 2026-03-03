@@ -94,7 +94,7 @@ const items = computed(() => {
     breadcrumbs.push({ title: `授权详情: ${sshName}` })
   }
   
-  // 8. 授权管理 - K8S API 授权
+  // 8. 授权管理 - K8S API 授权（P9：合并展示 Agent + Endpoint）
   else if (path === '/acl/k8s') {
     breadcrumbs.push({ title: '授权管理' })
     breadcrumbs.push({ path: '/acl/k8s', title: 'K8S API 授权' })
@@ -102,10 +102,10 @@ const items = computed(() => {
     const k8sName = (route.query.name as string) || `#${route.params.id}`
     breadcrumbs.push({ title: '授权管理' })
     breadcrumbs.push({ path: '/acl/k8s', title: 'K8S API 授权' })
-    breadcrumbs.push({ title: `授权详情: ${k8sName}` })
+    breadcrumbs.push({ title: `Agent 授权: ${k8sName}` })
   }
   
-  // 9. 授权管理 - K8S Service 授权
+  // 9. 授权管理 - K8S Service 授权（P9：合并展示 Agent + Endpoint）
   else if (path === '/acl/k8s-service') {
     breadcrumbs.push({ title: '授权管理' })
     breadcrumbs.push({ path: '/acl/k8s-service', title: 'K8S Service 授权' })
@@ -113,7 +113,7 @@ const items = computed(() => {
     const k8sSvcName = (route.query.name as string) || `#${route.params.id}`
     breadcrumbs.push({ title: '授权管理' })
     breadcrumbs.push({ path: '/acl/k8s-service', title: 'K8S Service 授权' })
-    breadcrumbs.push({ title: `授权详情: ${k8sSvcName}` })
+    breadcrumbs.push({ title: `Agent 授权: ${k8sSvcName}` })
   }
   
   // 10. 终端管理
@@ -136,26 +136,26 @@ const items = computed(() => {
     breadcrumbs.push({ title: `授权详情: ${endpointName}` })
   }
   
-  // 12. Endpoint K8SAPI 授权
+  // 12. Endpoint K8SAPI 授权（P9：面包屑指向合并列表页）
   else if (path === '/acl/endpoint-k8sapi') {
     breadcrumbs.push({ title: '授权管理' })
-    breadcrumbs.push({ path: '/acl/endpoint-k8sapi', title: 'Endpoint K8S 授权' })
+    breadcrumbs.push({ path: '/acl/k8s', title: 'K8S API 授权' })
   } else if (path.match(/^\/acl\/endpoint-k8sapi\/[a-f0-9-]+$/)) {
     const endpointName = (route.query.name as string) || `#${route.params.id}`
     breadcrumbs.push({ title: '授权管理' })
-    breadcrumbs.push({ path: '/acl/endpoint-k8sapi', title: 'Endpoint K8S 授权' })
-    breadcrumbs.push({ title: `授权详情: ${endpointName}` })
+    breadcrumbs.push({ path: '/acl/k8s', title: 'K8S API 授权' })
+    breadcrumbs.push({ title: `Endpoint 授权: ${endpointName}` })
   }
   
-  // 13. Endpoint K8SService 授权
+  // 13. Endpoint K8SService 授权（P9：面包屑指向合并列表页）
   else if (path === '/acl/endpoint-k8sservice') {
     breadcrumbs.push({ title: '授权管理' })
-    breadcrumbs.push({ path: '/acl/endpoint-k8sservice', title: 'Endpoint SVC 授权' })
+    breadcrumbs.push({ path: '/acl/k8s-service', title: 'K8S Service 授权' })
   } else if (path.match(/^\/acl\/endpoint-k8sservice\/[a-f0-9-]+$/)) {
     const endpointName = (route.query.name as string) || `#${route.params.id}`
     breadcrumbs.push({ title: '授权管理' })
-    breadcrumbs.push({ path: '/acl/endpoint-k8sservice', title: 'Endpoint SVC 授权' })
-    breadcrumbs.push({ title: `授权详情: ${endpointName}` })
+    breadcrumbs.push({ path: '/acl/k8s-service', title: 'K8S Service 授权' })
+    breadcrumbs.push({ title: `Endpoint 授权: ${endpointName}` })
   }
   
   // 14. Endpoint 管理（旧路由兼容）

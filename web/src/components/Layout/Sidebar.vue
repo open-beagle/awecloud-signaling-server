@@ -79,12 +79,6 @@
         <el-menu-item index="/acl/endpoint-ssh">
           {{ t('menu.aclEndpointSSH') }}
         </el-menu-item>
-        <el-menu-item index="/acl/endpoint-k8sapi">
-          {{ t('menu.aclEndpointK8S') }}
-        </el-menu-item>
-        <el-menu-item index="/acl/endpoint-k8sservice">
-          {{ t('menu.aclEndpointK8SService') }}
-        </el-menu-item>
       </el-sub-menu>
       <!-- 隧道管理 -->
       <el-sub-menu index="tunnel">

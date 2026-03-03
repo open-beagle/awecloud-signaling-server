@@ -301,11 +301,16 @@ Desktop 侧用 VIP 隔离端口冲突：
 │ 服务授权         │ Headscale ACL│ 是           │ Agent 指定端口           │ AgentService     │
 │ 用户授权         │ Headscale ACL│ 是           │ Agent 所有端口           │ 通用             │
 │ 分组授权         │ Headscale ACL│ 是           │ 分组所有节点所有端口     │ 通用             │
-│ SSH 授权         │ 混合         │ 部分         │ Agent/Endpoint SSH       │ Agent + Endpoint │
-│ K8S API 授权         │ Agent 本地   │ 否           │ Agent/Endpoint K8S + NS  │ Agent + Endpoint │
-│ K8S Service 授权  │ Agent 本地   │ 否           │ Agent/Endpoint SVC + NS  │ Agent + Endpoint │
+│ SSH 授权         │ 混合         │ 部分         │ Agent SSH（ACL）         │ Agent            │
+│ K8S API 授权     │ Agent 本地   │ 否           │ Agent/Endpoint K8S + NS  │ Agent + Endpoint │
+│                  │              │              │ （合并展示，独立链路）   │                  │
+│ K8S Service 授权 │ Agent 本地   │ 否           │ Agent/Endpoint SVC + NS  │ Agent + Endpoint │
+│                  │              │              │ （合并展示，独立链路）   │                  │
+│ Endpoint SSH 授权│ Agent 本地   │ 否           │ Endpoint SSH             │ Endpoint         │
 └──────────────────┴──────────────┴──────────────┴──────────────────────────┴──────────────────┘
 ```
+
+说明（P9 变更）：K8S API 授权和 K8S Service 授权的 Web 列表页合并展示 Agent 和 Endpoint 两种类型，但后端数据链路完全独立（各自的 DB 表、心跳字段、Agent 缓存和鉴权方法不变）。SSH 授权因鉴权机制不同（Headscale ACL vs PermissionCache），Agent SSH 和 Endpoint SSH 保持独立页面。
 
 ## 授权层级体系（更新）
 

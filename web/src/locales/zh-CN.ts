@@ -348,7 +348,12 @@ export default {
     serviceNamesTip: '控制用户可访问的 Service，留空表示全部',
     searchK8SServicePlaceholder: '搜索代理名称',
     addK8SServiceUserAuth: '添加 K8S Service 用户授权',
-    addK8SServiceGroupAuth: '添加 K8S Service 分组授权'
+    addK8SServiceGroupAuth: '添加 K8S Service 分组授权',
+    // P9 合并展示
+    type: '类型',
+    typeAgent: 'Agent',
+    typeEndpoint: 'Endpoint',
+    belongAgent: '所属 Agent'
   },
   aclEndpoint: {
     searchPlaceholder: '搜索 Endpoint 名称',

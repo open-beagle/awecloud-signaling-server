@@ -227,6 +227,38 @@ service_pattern → 允许访问的 Service 模式（如 "*.yygl" 或 "\_"）
 
 ```
 
+## 聚合查询 API（P9 新增）
+
+为支持 Web 管理界面的授权合并展示，新增两个聚合查询 API，将 Agent 和 Endpoint 的授权列表合并返回。
+
+### K8S API 聚合查询
+
+```
+
+GET /api/v1/admin/acl/k8s-unified
+
+```
+
+将 Agent K8S API 授权列表（原 /api/v1/admin/acl/k8s）和 Endpoint K8S API 授权列表（原 /api/v1/admin/acl/endpoint-k8sapi）合并为一个列表返回。每项标记 type 字段（"agent" 或 "endpoint"）。
+
+请求参数：type（all/agent/endpoint）、search、page、size
+
+实现方式：分别查询两个数据源，在内存中合并后分页。数据量通常几十条，不存在性能问题。
+
+### K8S Service 聚合查询
+
+```
+
+GET /api/v1/admin/acl/k8s-service-unified
+
+```
+
+将 Agent K8S Service 授权列表（原 /api/v1/admin/acl/k8s-service）和 Endpoint K8S Service 授权列表（原 /api/v1/admin/acl/endpoint-k8sservice）合并返回。结构同上。
+
+### 现有 API 保留
+
+所有现有的分离 API 保留不变，详情页仍使用原有 API 进行授权的增删改查操作。聚合 API 仅用于列表页展示。
+
 ## 心跳同步扩展
 
 Agent 通过 gRPC 心跳从 Server 获取权限数据：
