@@ -353,7 +353,9 @@ export default {
     type: 'Type',
     typeAgent: 'Agent',
     typeEndpoint: 'Endpoint',
-    belongAgent: 'Belongs to Agent'
+    belongAgent: 'Belongs to Agent',
+    clusterName: 'Cluster',
+    provider: 'Provider'
   },
   aclEndpoint: {
     searchPlaceholder: 'Search endpoint name',

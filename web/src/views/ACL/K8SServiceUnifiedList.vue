@@ -23,22 +23,18 @@
     <!-- 列表 -->
     <el-card shadow="never">
       <el-table v-loading="loading" :data="list" stripe>
-        <el-table-column prop="name" :label="$t('common.name')" min-width="150">
+        <el-table-column prop="name" :label="$t('acl.clusterName')" min-width="150">
           <template #default="{ row }">
             <el-link type="primary" :underline="false" @click="handleView(row)">{{ row.name }}</el-link>
           </template>
         </el-table-column>
         <el-table-column prop="alias" :label="$t('user.alias')" min-width="120" />
-        <el-table-column prop="type" :label="$t('acl.type')" width="120" align="center">
+        <el-table-column :label="$t('acl.provider')" min-width="180">
           <template #default="{ row }">
-            <el-tag :type="row.type === 'agent' ? '' : 'warning'" size="small">
-              {{ row.type === 'agent' ? $t('acl.typeAgent') : $t('acl.typeEndpoint') }}
+            <el-tag :type="row.provider_type === 'agent' ? '' : 'warning'" size="small">
+              {{ row.provider_type === 'agent' ? $t('acl.typeAgent') : $t('acl.typeEndpoint') }}
             </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="agent_name" :label="$t('acl.belongAgent')" min-width="120">
-          <template #default="{ row }">
-            {{ row.type === 'endpoint' ? row.agent_name : '—' }}
+            <span v-if="row.provider_name" style="margin-left: 8px">{{ row.provider_name }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="user_count" :label="$t('acl.userCount')" width="100" align="center">
@@ -114,12 +110,12 @@ const handleSearch = () => { pagination.page = 1; fetchList() }
 const handleReset = () => { searchForm.type = 'all'; searchForm.search = ''; pagination.page = 1; fetchList() }
 
 const handleView = (row: K8SServiceUnifiedACLItem) => {
-  if (row.type === 'agent') {
-    // Agent 类型 → 跳转到 Agent K8S Service 授权详情页
-    router.push({ path: `/acl/k8s-service/${row.id}`, query: { name: row.name } })
+  if (row.provider_type === 'agent') {
+    // Agent 提供 → 跳转到 Agent K8S Service 授权详情页
+    router.push({ path: `/acl/k8s-service/${row.provider_id}`, query: { name: row.name } })
   } else {
-    // Endpoint 类型 → 跳转到 Endpoint K8SService 授权详情页
-    router.push({ path: `/acl/endpoint-k8sservice/${row.id}`, query: { name: row.name } })
+    // Endpoint 提供 → 跳转到 Endpoint K8SService 授权详情页
+    router.push({ path: `/acl/endpoint-k8sservice/${row.provider_id}`, query: { name: row.provider_name } })
   }
 }
 

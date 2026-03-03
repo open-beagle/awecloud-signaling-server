@@ -353,7 +353,9 @@ export default {
     type: '类型',
     typeAgent: 'Agent',
     typeEndpoint: 'Endpoint',
-    belongAgent: '所属 Agent'
+    belongAgent: '所属 Agent',
+    clusterName: '集群名称',
+    provider: '服务提供者'
   },
   aclEndpoint: {
     searchPlaceholder: '搜索 Endpoint 名称',
