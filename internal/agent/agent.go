@@ -1359,6 +1359,10 @@ func (a *Agent) applySVCConfig() {
 	if a.config.SVC.Enabled {
 		if err := a.startK8SServiceModules(); err != nil {
 			logger.Warnf("远程启动 K8S Service 模块失败: %v", err)
+		} else if a.svcProxy != nil && a.endpointServer != nil {
+			// SVC 模块重启后，重新绑定 EndpointServer 引用（Endpoint 跳跃路径需要）
+			a.svcProxy.SetEndpointServer(a.endpointServer)
+			logger.Infof("SVC 模块重启后重新绑定 EndpointServer")
 		}
 	} else {
 		logger.Info("K8S Service 模块已通过远程配置关闭")

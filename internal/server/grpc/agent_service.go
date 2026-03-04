@@ -1482,10 +1482,10 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 					EndpointName: ep.Name, // 标记来源为 Endpoint
 				})
 			}
-			
+
 			// 获取当前 Agent 的所有发现数据
 			currentServices := cache.GetK8SServiceDiscovery(agentID)
-			
+
 			// 过滤掉该 Endpoint 的旧数据
 			filteredServices := make([]cache.DiscoveredService, 0)
 			for _, svc := range currentServices {
@@ -1493,13 +1493,13 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 					filteredServices = append(filteredServices, svc)
 				}
 			}
-			
+
 			// 合并新数据
 			allServices := append(filteredServices, discoveredServices...)
-			
+
 			// 更新到 Agent 的缓存中（复用 Agent 的资源发现逻辑）
 			cache.UpdateK8SServiceDiscovery(agentID, allServices)
-			logger.Infof("Endpoint K8S Service 发现数据已合并到 Agent 缓存: agent_id=%d, endpoint=%s, count=%d", 
+			logger.Infof("Endpoint K8S Service 发现数据已合并到 Agent 缓存: agent_id=%d, endpoint=%s, count=%d",
 				agentID, ep.Name, len(discoveredServices))
 
 			// 为发现的 K8S Service 创建域名
@@ -1591,7 +1591,8 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 func (s *AgentServiceServer) queryEndpointSSHPermissions(ctx context.Context, agentID uint64) []*pb.EndpointSSHPermission {
 	var result []*pb.EndpointSSHPermission
 
-	// 查询该 Agent 下的所有启用 SSH 的 Endpoint
+	// 视角1（服务提供方）：查询属于当前 Agent 的 Endpoint，收集其授权用户列表
+	// 适用场景：unicom-08 Agent 拥有 beagle-002 Endpoint，向 Desktop/CloudIDE 用户提供 SSH 服务
 	var endpoints []model.Endpoint
 	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ? AND status = ? AND ssh_enabled = ?", agentID, false, "online", true).Find(&endpoints).Error; err != nil {
 		return nil
@@ -1649,6 +1650,43 @@ func (s *AgentServiceServer) queryEndpointSSHPermissions(ctx context.Context, ag
 		}
 	}
 
+	// 视角2（访问方）：查询当前 Agent 的 User 被直接授权访问的 Endpoint SSH 服务
+	// 适用场景：CloudIDE Agent 自身作为访问方，被授权访问其他 Agent 的 Endpoint SSH
+	var selfPerms []model.AclEndpointSSHUserPermission
+	if err := db.DB.WithContext(ctx).Preload("Endpoint").
+		Where("user_id = ? AND enabled = ?", agentID, true).
+		Find(&selfPerms).Error; err == nil {
+		for _, p := range selfPerms {
+			if p.Endpoint == nil || p.Endpoint.Revoked || p.Endpoint.Status != "online" || !p.Endpoint.SSHEnabled {
+				continue
+			}
+			// 避免重复（已在视角1中处理的 Endpoint 跳过）
+			alreadyAdded := false
+			for _, ep := range endpoints {
+				if ep.ID == p.EndpointID {
+					alreadyAdded = true
+					break
+				}
+			}
+			if alreadyAdded {
+				continue
+			}
+			// 查询当前 Agent 的 User 名称
+			var selfUser model.User
+			if err := db.DB.WithContext(ctx).First(&selfUser, agentID).Error; err != nil {
+				continue
+			}
+			result = append(result, &pb.EndpointSSHPermission{
+				EndpointId:   p.EndpointID,
+				EndpointName: p.Endpoint.Name,
+				UserId:       agentID,
+				UserName:     selfUser.Name,
+				SshUsers:     parseJSONStringArray(p.SSHUsers),
+				IsGroup:      false,
+			})
+		}
+	}
+
 	return result
 }
 
@@ -1656,6 +1694,7 @@ func (s *AgentServiceServer) queryEndpointSSHPermissions(ctx context.Context, ag
 func (s *AgentServiceServer) queryEndpointK8SAPIPermissions(ctx context.Context, agentID uint64) []*pb.EndpointK8SAPIPermission {
 	var result []*pb.EndpointK8SAPIPermission
 
+	// 视角1（服务提供方）：查询属于当前 Agent 的 Endpoint，收集其授权用户列表
 	var endpoints []model.Endpoint
 	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ? AND status = ? AND k8sapi_enabled = ?", agentID, false, "online", true).Find(&endpoints).Error; err != nil {
 		return nil
@@ -1716,6 +1755,48 @@ func (s *AgentServiceServer) queryEndpointK8SAPIPermissions(ctx context.Context,
 		}
 	}
 
+	// 视角2（访问方）：查询当前 Agent 的 User 被直接授权访问的 Endpoint K8SAPI 服务
+	// 适用场景：CloudIDE Agent 自身作为访问方，被授权访问其他 Agent 的 Endpoint K8SAPI
+	var selfPerms []model.AclEndpointK8SAPIUserPermission
+	if err := db.DB.WithContext(ctx).Preload("Endpoint").
+		Where("user_id = ? AND enabled = ?", agentID, true).
+		Find(&selfPerms).Error; err == nil {
+		var selfUser model.User
+		selfUserLoaded := false
+		for _, p := range selfPerms {
+			if p.Endpoint == nil || p.Endpoint.Revoked || p.Endpoint.Status != "online" || !p.Endpoint.K8SAPIEnabled {
+				continue
+			}
+			// 避免重复
+			alreadyAdded := false
+			for _, ep := range endpoints {
+				if ep.ID == p.EndpointID {
+					alreadyAdded = true
+					break
+				}
+			}
+			if alreadyAdded {
+				continue
+			}
+			if !selfUserLoaded {
+				if err := db.DB.WithContext(ctx).First(&selfUser, agentID).Error; err != nil {
+					break
+				}
+				selfUserLoaded = true
+			}
+			result = append(result, &pb.EndpointK8SAPIPermission{
+				EndpointId:   p.EndpointID,
+				EndpointName: p.Endpoint.Name,
+				UserId:       agentID,
+				UserName:     selfUser.Name,
+				K8SGroups:    parseJSONStringArray(p.K8SGroups),
+				Namespaces:   parseJSONStringArray(p.Namespaces),
+				IsGroup:      false,
+				ApiServer:    p.Endpoint.K8SAPIApiServer,
+			})
+		}
+	}
+
 	return result
 }
 
@@ -1723,6 +1804,8 @@ func (s *AgentServiceServer) queryEndpointK8SAPIPermissions(ctx context.Context,
 func (s *AgentServiceServer) queryEndpointK8SServicePermissions(ctx context.Context, agentID uint64) []*pb.EndpointK8SServicePermission {
 	var result []*pb.EndpointK8SServicePermission
 
+	// 视角1（服务提供方）：查询属于当前 Agent 的 Endpoint，收集其授权用户列表
+	// 适用场景：unicom-08 Agent 拥有 beagle-002 Endpoint，向 Desktop/CloudIDE 用户提供 K8SService
 	var endpoints []model.Endpoint
 	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ? AND status = ? AND k8sservice_enabled = ?", agentID, false, "online", true).Find(&endpoints).Error; err != nil {
 		return nil
@@ -1778,6 +1861,47 @@ func (s *AgentServiceServer) queryEndpointK8SServicePermissions(ctx context.Cont
 					IsGroup:      true,
 				})
 			}
+		}
+	}
+
+	// 视角2（访问方）：查询当前 Agent 的 User 被直接授权访问的 Endpoint K8SService
+	// 适用场景：CloudIDE Agent 自身作为访问方，被授权访问其他 Agent 的 Endpoint K8SService
+	var selfPerms []model.AclEndpointK8SServiceUserPermission
+	if err := db.DB.WithContext(ctx).Preload("Endpoint").
+		Where("user_id = ? AND enabled = ?", agentID, true).
+		Find(&selfPerms).Error; err == nil {
+		var selfUser model.User
+		selfUserLoaded := false
+		for _, p := range selfPerms {
+			if p.Endpoint == nil || p.Endpoint.Revoked || p.Endpoint.Status != "online" || !p.Endpoint.K8SServiceEnabled {
+				continue
+			}
+			// 避免重复（已在视角1中处理的 Endpoint 跳过）
+			alreadyAdded := false
+			for _, ep := range endpoints {
+				if ep.ID == p.EndpointID {
+					alreadyAdded = true
+					break
+				}
+			}
+			if alreadyAdded {
+				continue
+			}
+			if !selfUserLoaded {
+				if err := db.DB.WithContext(ctx).First(&selfUser, agentID).Error; err != nil {
+					break
+				}
+				selfUserLoaded = true
+			}
+			result = append(result, &pb.EndpointK8SServicePermission{
+				EndpointId:   p.EndpointID,
+				EndpointName: p.Endpoint.Name,
+				UserId:       agentID,
+				UserName:     selfUser.Name,
+				Namespaces:   parseJSONStringArray(p.Namespaces),
+				ServiceNames: parseJSONStringArray(p.ServiceNames),
+				IsGroup:      false,
+			})
 		}
 	}
 

@@ -37,6 +37,12 @@
         <el-table-column prop="service_name" :label="$t('resource.serviceName')" min-width="150" />
         <el-table-column prop="namespace" :label="$t('resource.namespace')" min-width="120" />
         <el-table-column prop="agent_name" :label="$t('resource.agentName')" min-width="120" />
+        <el-table-column prop="endpoint_name" label="Endpoint" min-width="120">
+          <template #default="{ row }">
+            <span v-if="row.endpoint_name">{{ row.endpoint_name }}</span>
+            <span v-else style="color: #999">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="cluster_ip" :label="$t('resource.clusterIP')" width="140" />
         <el-table-column :label="$t('resource.ports')" min-width="200">
           <template #default="{ row }">
