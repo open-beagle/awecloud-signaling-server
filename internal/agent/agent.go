@@ -1116,43 +1116,9 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		}
 	}
 
-	// 7. Endpoint K8SService 域名：{service}.{namespace}.{endpoint-name}.{agent-name}{domain_suffix}
-	// Endpoint K8SService 通过 SVCProxy endpoint_name 字段路由，不需要独立端口
-	// 使用 Agent SVCProxy gRPC 端口（50051），Desktop 首包携带 endpoint_name
-	if a.endpointServer != nil && a.svcProxy != nil && a.tsManager != nil && a.tsManager.IsConnected() {
-		for _, ep := range a.endpointServer.GetConnectedEndpointDetails() {
-			// 检查 Endpoint 是否有 K8SService 能力
-			hasK8SService := false
-			for _, cap := range ep.Capabilities {
-				if cap.Type == "k8sservice" {
-					hasK8SService = true
-					break
-				}
-			}
-			if !hasK8SService {
-				continue
-			}
-
-			// 遍历 Endpoint 发现的 K8S Service
-			for _, svc := range ep.DiscoveredServices {
-				if len(svc.Ports) == 0 {
-					continue
-				}
-				// 域名格式：{service_name}.{namespace}.{region}.beagle
-				// 不包含 endpoint_name，通过 endpoint_id 字段区分不同 Endpoint
-				domain := svc.ServiceName + "." + svc.Namespace + "." + a.config.Agent.AgentName + a.domainSuffix
-				registrations = append(registrations, &pb.DomainRegistration{
-					Domain:      domain,
-					Type:        "k8ssvc",
-					TargetIp:    agentIP,
-					TargetPort:  50055, // Endpoint K8SSVC 固定端口（Agent gRPC 转发到 Endpoint）
-					Namespace:   svc.Namespace,
-					ServiceName: svc.ServiceName,
-					EndpointId:  ep.Name,
-				})
-			}
-		}
-	}
+	// 7. Endpoint K8SService 域名：由 Server 端统一管理
+	// Agent 不再生成 Endpoint K8S Service 域名，避免与 Server 端的域名创建逻辑冲突
+	// Server 端会在处理 Endpoint 心跳时，通过 CreateEndpointK8SSVCDomain 函数创建域名
 
 	return registrations
 }
