@@ -298,13 +298,14 @@ func (a *ResourceAPI) GetK8SServiceDiscoveries(c *gin.Context) {
 
 	// 展平为扁平列表，每条记录包含 agent 信息
 	type FlatDiscovery struct {
-		AgentID     uint64                       `json:"agent_id"`
-		AgentName   string                       `json:"agent_name"`
-		Namespace   string                       `json:"namespace"`
-		ServiceName string                       `json:"service_name"`
-		ClusterIP   string                       `json:"cluster_ip"`
-		Ports       []cache.DiscoveredServicePort `json:"ports"`
-		Labels      map[string]string            `json:"labels"`
+		AgentID      uint64                        `json:"agent_id"`
+		AgentName    string                        `json:"agent_name"`
+		Namespace    string                        `json:"namespace"`
+		ServiceName  string                        `json:"service_name"`
+		ClusterIP    string                        `json:"cluster_ip"`
+		Ports        []cache.DiscoveredServicePort `json:"ports"`
+		Labels       map[string]string             `json:"labels"`
+		EndpointName string                        `json:"endpoint_name"` // 发现来源：为空表示 Agent 本身发现，不为空表示 Endpoint 发现
 	}
 
 	var result []FlatDiscovery
@@ -317,13 +318,14 @@ func (a *ResourceAPI) GetK8SServiceDiscoveries(c *gin.Context) {
 		}
 		for _, svc := range services {
 			result = append(result, FlatDiscovery{
-				AgentID:     agentID,
-				AgentName:   agentName,
-				Namespace:   svc.Namespace,
-				ServiceName: svc.ServiceName,
-				ClusterIP:   svc.ClusterIP,
-				Ports:       svc.Ports,
-				Labels:      svc.Labels,
+				AgentID:      agentID,
+				AgentName:    agentName,
+				Namespace:    svc.Namespace,
+				ServiceName:  svc.ServiceName,
+				ClusterIP:    svc.ClusterIP,
+				Ports:        svc.Ports,
+				Labels:       svc.Labels,
+				EndpointName: svc.EndpointName, // 从缓存中读取 EndpointName
 			})
 		}
 	}

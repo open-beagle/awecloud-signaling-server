@@ -1460,10 +1460,11 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 			}
 		}
 
-		// 更新 Endpoint K8S Service 发现缓存
+		// 更新 Endpoint K8S Service 发现缓存（复用 Agent 的缓存结构）
 		logger.Debugf("处理 Endpoint %s 的 K8S Service 发现数据: discovered_services=%d", ep.Name, len(ep.DiscoveredServices))
 		if len(ep.DiscoveredServices) > 0 {
-			discoveredServices := make([]cache.EndpointDiscoveredService, 0, len(ep.DiscoveredServices))
+			// 转换为 Agent 的 DiscoveredService 结构，添加 EndpointName 字段
+			discoveredServices := make([]cache.DiscoveredService, 0, len(ep.DiscoveredServices))
 			for _, ds := range ep.DiscoveredServices {
 				ports := make([]cache.DiscoveredServicePort, 0, len(ds.Ports))
 				for _, p := range ds.Ports {
@@ -1473,14 +1474,33 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 						Protocol: p.Protocol,
 					})
 				}
-				discoveredServices = append(discoveredServices, cache.EndpointDiscoveredService{
-					Namespace:   ds.Namespace,
-					ServiceName: ds.ServiceName,
-					ClusterIP:   ds.ClusterIp,
-					Ports:       ports,
+				discoveredServices = append(discoveredServices, cache.DiscoveredService{
+					Namespace:    ds.Namespace,
+					ServiceName:  ds.ServiceName,
+					ClusterIP:    ds.ClusterIp,
+					Ports:        ports,
+					EndpointName: ep.Name, // 标记来源为 Endpoint
 				})
 			}
-			cache.UpdateEndpointK8SServiceDiscovery(ep.Name, discoveredServices)
+			
+			// 获取当前 Agent 的所有发现数据
+			currentServices := cache.GetK8SServiceDiscovery(agentID)
+			
+			// 过滤掉该 Endpoint 的旧数据
+			filteredServices := make([]cache.DiscoveredService, 0)
+			for _, svc := range currentServices {
+				if svc.EndpointName != ep.Name {
+					filteredServices = append(filteredServices, svc)
+				}
+			}
+			
+			// 合并新数据
+			allServices := append(filteredServices, discoveredServices...)
+			
+			// 更新到 Agent 的缓存中（复用 Agent 的资源发现逻辑）
+			cache.UpdateK8SServiceDiscovery(agentID, allServices)
+			logger.Infof("Endpoint K8S Service 发现数据已合并到 Agent 缓存: agent_id=%d, endpoint=%s, count=%d", 
+				agentID, ep.Name, len(discoveredServices))
 
 			// 为发现的 K8S Service 创建域名
 			// 查询 Endpoint 记录

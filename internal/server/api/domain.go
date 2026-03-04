@@ -36,6 +36,8 @@ type DomainListItem struct {
 	DeviceName   string             `json:"device_name,omitempty"`   // Node 设备名（Hostname）
 	EndpointID   string             `json:"endpoint_id,omitempty"`   // Endpoint ID（非空表示 Endpoint 域名）
 	EndpointName string             `json:"endpoint_name,omitempty"` // Endpoint 名称
+	Region       string             `json:"region,omitempty"`        // Region（Agent User 名称）
+	AgentName    string             `json:"agent_name,omitempty"`    // Agent 名称（Node 名称）
 	TargetIP     string             `json:"target_ip,omitempty"`
 	TargetPort   int                `json:"target_port,omitempty"`
 	Namespace    string             `json:"namespace,omitempty"`
@@ -104,14 +106,22 @@ func (a *DomainAPI) List(c *gin.Context) {
 
 		// 获取 Node 设备名（Hostname）和 Endpoint 名称
 		deviceName := ""
+		agentName := ""
 		if d.Node != nil {
 			deviceName = d.Node.Hostname
+			agentName = d.Node.Name
 		}
 		endpointName := ""
 		if d.Endpoint != nil {
 			endpointName = d.Endpoint.Name
 		} else if d.EndpointID != "" {
 			endpointName = d.EndpointID
+		}
+
+		// Region 是 Agent User 的名称
+		region := ""
+		if d.User != nil {
+			region = d.User.Name
 		}
 
 		item := DomainListItem{
@@ -123,6 +133,8 @@ func (a *DomainAPI) List(c *gin.Context) {
 			DeviceName:   deviceName,
 			EndpointID:   d.EndpointID,
 			EndpointName: endpointName,
+			Region:       region,
+			AgentName:    agentName,
 			TargetIP:     d.TargetIP,
 			TargetPort:   d.TargetPort,
 			Namespace:    d.Namespace,

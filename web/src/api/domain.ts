@@ -18,6 +18,8 @@ export interface DomainItem {
   device_name?: string    // Node 设备名（Hostname）
   endpoint_id?: string    // Endpoint ID（非空表示 Endpoint 域名）
   endpoint_name?: string  // Endpoint 名称
+  region?: string         // Region（Agent User 名称）
+  agent_name?: string     // Agent 名称（Node 名称）
   target_ip?: string
   target_port?: number
   namespace?: string

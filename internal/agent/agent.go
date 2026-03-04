@@ -1138,7 +1138,9 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 				if len(svc.Ports) == 0 {
 					continue
 				}
-				domain := svc.ServiceName + "." + svc.Namespace + "." + ep.Name + "." + a.config.Agent.AgentName + a.domainSuffix
+				// 域名格式：{service_name}.{namespace}.{region}.beagle
+				// 不包含 endpoint_name，通过 endpoint_id 字段区分不同 Endpoint
+				domain := svc.ServiceName + "." + svc.Namespace + "." + a.config.Agent.AgentName + a.domainSuffix
 				registrations = append(registrations, &pb.DomainRegistration{
 					Domain:      domain,
 					Type:        "k8ssvc",
