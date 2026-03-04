@@ -147,12 +147,20 @@ func (p *K8SSVCProxy) SVCProxy(stream pb.AgentService_SVCProxyServer) error {
 
 	// 如果 endpoint_name 非空，走 Endpoint 跳跃路径
 	if endpointName != "" {
-		// 尝试从本地 Informer 获取 ClusterIP（unicom-08 有 Informer 时可用）
-		// 如果 Informer 为 nil 或未找到，传空字符串，由 Endpoint 侧自行处理
+		// 查找 ClusterIP：优先从本地 Informer 获取，其次从 Endpoint 上报的发现数据中获取
 		clusterIP := ""
 		if p.informer != nil {
 			if svc := p.informer.FindService(namespace, serviceName); svc != nil {
 				clusterIP = svc.ClusterIP
+			}
+		}
+		// Informer 未找到时，从 Endpoint 上报的 DiscoveredServices 中查找
+		// 物理主机 Agent 无 Informer，但 Endpoint 自身有 K8S 访问能力，会上报 ClusterIP
+		if clusterIP == "" && p.endpointServer != nil {
+			clusterIP = p.endpointServer.FindEndpointServiceClusterIP(endpointName, namespace, serviceName)
+			if clusterIP != "" {
+				logger.Debugf("SVCProxy 从 Endpoint 发现数据获取 ClusterIP: endpoint=%s, %s/%s -> %s",
+					endpointName, namespace, serviceName, clusterIP)
 			}
 		}
 		return p.handleEndpointSVCProxy(stream, peerIdentity, endpointName, namespace, serviceName, clusterIP, port)

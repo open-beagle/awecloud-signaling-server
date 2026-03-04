@@ -629,6 +629,23 @@ func (s *EndpointServer) IsEndpointConnected(name string) bool {
 	return exists
 }
 
+// FindEndpointServiceClusterIP 从 Endpoint 上报的发现数据中查找 ClusterIP
+// 用于物理主机 Agent（无本地 Informer）通过 Endpoint 的发现数据获取 ClusterIP
+func (s *EndpointServer) FindEndpointServiceClusterIP(endpointName, namespace, serviceName string) string {
+	s.connMutex.RLock()
+	defer s.connMutex.RUnlock()
+	conn, exists := s.connections[endpointName]
+	if !exists {
+		return ""
+	}
+	for _, svc := range conn.DiscoveredServices {
+		if svc.Namespace == namespace && svc.ServiceName == serviceName {
+			return svc.ClusterIp
+		}
+	}
+	return ""
+}
+
 // OpenK8SAPIProxy Endpoint 回调的 K8S API 代理会话（gRPC 双向流）
 // Endpoint 收到心跳中的 K8SAPIProxyRequest 通知后，主动调用此 RPC
 func (s *EndpointServer) OpenK8SAPIProxy(stream pb.EndpointService_OpenK8SAPIProxyServer) error {
