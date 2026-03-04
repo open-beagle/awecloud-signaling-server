@@ -56,6 +56,21 @@
         </el-table-column>
         <el-table-column prop="node_count" :label="$t('user.nodeCount')" width="100" align="center" />
         <el-table-column prop="service_count" :label="$t('user.serviceCount')" width="100" align="center" />
+        <el-table-column prop="versions" :label="$t('user.version')" width="180" align="center">
+          <template #default="{ row }">
+            <div v-if="row.versions && row.versions.length > 0">
+              <div v-for="(version, index) in row.versions" :key="index">
+                <el-tag size="small" :type="needsUpgrade(version, row.latest_version) ? 'warning' : 'success'">
+                  {{ version }}
+                </el-tag>
+              </div>
+              <el-tooltip v-if="needsUpgrade(row.versions, row.latest_version)" :content="$t('user.upgradeHint', { version: row.latest_version })" placement="top">
+                <el-icon color="#E6A23C" style="margin-top: 4px"><Warning /></el-icon>
+              </el-tooltip>
+            </div>
+            <el-text v-else type="info" size="small">{{ $t('user.noVersion') }}</el-text>
+          </template>
+        </el-table-column>
         <el-table-column prop="enabled" :label="$t('user.enabled')" width="100" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.enabled" type="success" size="small">{{ $t('user.enabledTrue') }}</el-tag>
@@ -111,6 +126,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Upload } from '@element-plus/icons-vue'
+import { Warning } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import { getUsers, deleteUser, enableUser, disableUser, type User, type UserRole, type UserSource } from '@/api/user'
 import { formatTime } from '@/utils/time'
@@ -264,6 +280,36 @@ const handleDisable = async (row: User) => {
 const handleCreateSuccess = () => {
   showCreateDialog.value = false
   fetchUsers()
+}
+
+// 检查是否需要升级
+const needsUpgrade = (versions: string | string[], latestVersion: string) => {
+  if (!latestVersion) return false
+  
+  const versionList = Array.isArray(versions) ? versions : [versions]
+  
+  // 如果任何一个版本低于最新版本，则需要升级
+  return versionList.some(v => compareVersion(v, latestVersion) < 0)
+}
+
+// 版本号比较函数
+const compareVersion = (v1: string, v2: string): number => {
+  if (!v1 || !v2) return 0
+  
+  const parts1 = v1.split('.').map(Number)
+  const parts2 = v2.split('.').map(Number)
+  
+  const maxLength = Math.max(parts1.length, parts2.length)
+  
+  for (let i = 0; i < maxLength; i++) {
+    const num1 = parts1[i] || 0
+    const num2 = parts2[i] || 0
+    
+    if (num1 > num2) return 1
+    if (num1 < num2) return -1
+  }
+  
+  return 0
 }
 
 onMounted(() => {

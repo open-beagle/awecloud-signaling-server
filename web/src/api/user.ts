@@ -22,6 +22,8 @@ export interface User {
   node_count?: number
   service_count?: number
   group_count?: number
+  versions?: string[]      // 设备版本列表（去重）
+  latest_version?: string  // 最新版本号
 }
 
 // 用户详情中的设备

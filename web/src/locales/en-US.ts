@@ -146,7 +146,14 @@ export default {
     nodes: 'Nodes',
     regenerateSecret: 'Regenerate Secret',
     newSecret: 'New Secret',
-    secretWarning: 'Please save this secret carefully, it cannot be viewed again after closing!'
+    secretWarning: 'Please save this secret carefully, it cannot be viewed again after closing!',
+    version: 'Version',
+    versions: 'Versions',
+    noVersion: 'No version info',
+    upgradeAvailable: 'Update available',
+    latestVersion: 'Latest version',
+    currentVersion: 'Current version',
+    upgradeHint: 'Latest version: {version}, please upgrade'
   },
   node: {
     list: 'Node List',

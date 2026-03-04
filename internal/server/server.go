@@ -503,6 +503,10 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.GET("/system/config", api.GetSystemConfig)
 					adminAuthGroup.PUT("/system/config", api.UpdateSystemConfig)
 
+					// 版本管理
+					versionAPI := api.NewVersionAPI(s.config)
+					adminAuthGroup.GET("/version/latest", versionAPI.GetLatest)
+
 					// 隧道管理
 					tunnelAPI := api.NewTunnelAPI(s.config)
 					adminAuthGroup.GET("/tunnel/users", tunnelAPI.ListTunnelUsers)

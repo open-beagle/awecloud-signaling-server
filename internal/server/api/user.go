@@ -73,6 +73,8 @@ type UserListItem struct {
 	Enabled      bool             `json:"enabled"`     // 是否启用
 	Source       model.UserSource `json:"source"`      // 来源：manual / logto
 	LastOnline   string           `json:"last_online"`
+	Versions     []string         `json:"versions"`     // 设备版本列表（去重）
+	LatestVersion string          `json:"latest_version"` // 最新版本号
 	CreatedAt    time.Time        `json:"created_at"`
 }
 
@@ -164,6 +166,33 @@ func (a *UserAPI) List(c *gin.Context) {
 		groupCountMap[gc.UserID] = gc.Count
 	}
 
+	// 查询每个用户的设备版本信息
+	var userVersions []struct {
+		UserID  uint64 `gorm:"column:user_id"`
+		Version string `gorm:"column:version"`
+	}
+	db.DB.WithContext(ctx).Model(&model.Node{}).
+		Select("user_id, version").
+		Where("version IS NOT NULL AND version != ''").
+		Find(&userVersions)
+
+	// 构建用户版本映射（去重）
+	userVersionMap := make(map[uint64]map[string]bool)
+	for _, uv := range userVersions {
+		if userVersionMap[uv.UserID] == nil {
+			userVersionMap[uv.UserID] = make(map[string]bool)
+		}
+		userVersionMap[uv.UserID][uv.Version] = true
+	}
+
+	// 获取最新版本号（从所有已连接的 Agent 节点统计）
+	var latestVersion string
+	db.DB.WithContext(ctx).Model(&model.Node{}).
+		Where("type = ? AND version IS NOT NULL AND version != ''", model.NodeTypeAgent).
+		Order("version DESC").
+		Limit(1).
+		Pluck("version", &latestVersion)
+
 	result := make([]UserListItem, len(users))
 	for i, user := range users {
 		stats := nodeStatsMap[user.ID]
@@ -172,21 +201,31 @@ func (a *UserAPI) List(c *gin.Context) {
 			status = "online"
 		}
 
+		// 转换版本集合为切片
+		versions := []string{}
+		if versionSet := userVersionMap[user.ID]; versionSet != nil {
+			for v := range versionSet {
+				versions = append(versions, v)
+			}
+		}
+
 		result[i] = UserListItem{
-			ID:           user.ID,
-			Name:         user.Name,
-			Alias:        user.Alias,
-			Role:         string(user.Role),
-			NodeCount:    stats.Count,
-			OnlineCount:  stats.OnlineCount,
-			ServiceCount: serviceCountMap[user.ID],
-			GroupCount:   groupCountMap[user.ID],
-			Status:       status,
-			SSHEnabled:   user.SSHEnabled,
-			Enabled:      user.Enabled,
-			Source:       user.Source,
-			LastOnline:   stats.LastOnline,
-			CreatedAt:    user.CreatedAt,
+			ID:            user.ID,
+			Name:          user.Name,
+			Alias:         user.Alias,
+			Role:          string(user.Role),
+			NodeCount:     stats.Count,
+			OnlineCount:   stats.OnlineCount,
+			ServiceCount:  serviceCountMap[user.ID],
+			GroupCount:    groupCountMap[user.ID],
+			Status:        status,
+			SSHEnabled:    user.SSHEnabled,
+			Enabled:       user.Enabled,
+			Source:        user.Source,
+			LastOnline:    stats.LastOnline,
+			Versions:      versions,
+			LatestVersion: latestVersion,
+			CreatedAt:     user.CreatedAt,
 		}
 	}
 

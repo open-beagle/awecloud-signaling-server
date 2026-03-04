@@ -146,7 +146,14 @@ export default {
     nodes: '设备列表',
     regenerateSecret: '重新生成密钥',
     newSecret: '新密钥',
-    secretWarning: '请妥善保存此密钥，关闭后将无法再次查看！'
+    secretWarning: '请妥善保存此密钥，关闭后将无法再次查看！',
+    version: '版本',
+    versions: '版本列表',
+    noVersion: '无版本信息',
+    upgradeAvailable: '有新版本',
+    latestVersion: '最新版本',
+    currentVersion: '当前版本',
+    upgradeHint: '最新版本：{version}，请升级'
   },
   node: {
     list: '设备列表',
