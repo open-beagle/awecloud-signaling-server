@@ -15,7 +15,7 @@ set -e
 
 # === 配置 ===
 HTTP_SERVER="${SIGNAL_HTTP_SERVER:-https://cache.ali.wodcloud.com}"
-AGENT_VERSION="${SIGNAL_VERSION:-v0.2.3}"
+AGENT_VERSION="${SIGNAL_VERSION:-v0.2.4}"
 
 BIN_DIR="$HOME/.local/bin"
 DATA_DIR="$HOME/.local/share/signal"
