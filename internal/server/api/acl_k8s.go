@@ -22,6 +22,7 @@ type K8SACLListItem struct {
 	Name       string    `json:"name"`
 	Alias      string    `json:"alias"`
 	Role       string    `json:"role"`
+	K8SEnabled bool      `json:"k8s_enabled"` // 是否启用 K8S API（从 node 表查询）
 	UserCount  int64     `json:"user_count"`
 	GroupCount int64     `json:"group_count"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -54,6 +55,22 @@ func (a *ACLAPI) ListK8SACL(c *gin.Context) {
 	if err := query.Order("created_at DESC").Offset(offset).Limit(size).Find(&users).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
 		return
+	}
+
+	// 查询每个用户的 K8S 启用状态（从 node 表）
+	var k8sStatuses []struct {
+		UserID     uint64 `gorm:"column:user_id"`
+		K8SEnabled bool   `gorm:"column:k8s_enabled"`
+	}
+	db.DB.WithContext(ctx).Model(&model.Node{}).
+		Select("user_id, COALESCE(k8s_enabled, 0) as k8s_enabled").
+		Where("type = ? AND user_id IN (?)", model.NodeTypeAgent, getUserIDs(users)).
+		Group("user_id").
+		Find(&k8sStatuses)
+
+	k8sEnabledMap := make(map[uint64]bool)
+	for _, status := range k8sStatuses {
+		k8sEnabledMap[status.UserID] = status.K8SEnabled
 	}
 
 	// 查询授权数量
@@ -90,6 +107,7 @@ func (a *ACLAPI) ListK8SACL(c *gin.Context) {
 			Name:       user.Name,
 			Alias:      user.Alias,
 			Role:       string(user.Role),
+			K8SEnabled: k8sEnabledMap[user.ID],
 			UserCount:  userCountMap[user.ID],
 			GroupCount: groupCountMap[user.ID],
 			CreatedAt:  user.CreatedAt,
@@ -112,12 +130,13 @@ type K8SACLPermissionItem struct {
 
 // K8SACLDetail K8S API 授权详情
 type K8SACLDetail struct {
-	ID     uint64                 `json:"id"`
-	Name   string                 `json:"name"`
-	Alias  string                 `json:"alias"`
-	Role   string                 `json:"role"`
-	Users  []K8SACLPermissionItem `json:"users"`
-	Groups []K8SACLPermissionItem `json:"groups"`
+	ID         uint64                 `json:"id"`
+	Name       string                 `json:"name"`
+	Alias      string                 `json:"alias"`
+	Role       string                 `json:"role"`
+	K8SEnabled bool                   `json:"k8s_enabled"` // 是否启用 K8S API
+	Users      []K8SACLPermissionItem `json:"users"`
+	Groups     []K8SACLPermissionItem `json:"groups"`
 }
 
 // GetK8SACL 获取 K8S API 授权详情
@@ -133,6 +152,15 @@ func (a *ACLAPI) GetK8SACL(c *gin.Context) {
 	if err := db.DB.WithContext(ctx).First(&targetUser, targetUserID).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
 		return
+	}
+
+	// 查询该用户的 K8S 启用状态
+	var node model.Node
+	k8sEnabled := false
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", targetUserID, model.NodeTypeAgent).First(&node).Error; err == nil {
+		if node.K8SEnabled != nil {
+			k8sEnabled = *node.K8SEnabled
+		}
 	}
 
 	// 查询已授权用户
@@ -174,12 +202,13 @@ func (a *ACLAPI) GetK8SACL(c *gin.Context) {
 	}
 
 	result := K8SACLDetail{
-		ID:     targetUser.ID,
-		Name:   targetUser.Name,
-		Alias:  targetUser.Alias,
-		Role:   string(targetUser.Role),
-		Users:  users,
-		Groups: groups,
+		ID:         targetUser.ID,
+		Name:       targetUser.Name,
+		Alias:      targetUser.Alias,
+		Role:       string(targetUser.Role),
+		K8SEnabled: k8sEnabled,
+		Users:      users,
+		Groups:     groups,
 	}
 
 	c.JSON(http.StatusOK, NewSuccessResponse(result))
@@ -345,6 +374,15 @@ func (a *ACLAPI) RemoveK8SACLGroup(c *gin.Context) {
 }
 
 // ========== JSON 数组工具函数 ==========
+
+// getUserIDs 从用户列表提取 ID 列表
+func getUserIDs(users []model.User) []uint64 {
+	ids := make([]uint64, len(users))
+	for i, u := range users {
+		ids[i] = u.ID
+	}
+	return ids
+}
 
 // parseJSONStringArray 解析 JSON 字符串数组
 func parseJSONStringArray(jsonStr string) []string {
