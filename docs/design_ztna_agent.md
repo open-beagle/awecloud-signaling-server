@@ -512,6 +512,8 @@ Agent 部署在 K8S 集群中时，通过 K8S API 监听 Service 资源变更，
 
 AgentK8SService 和 AgentService（原 ProxyService）共存不冲突。AgentService 走 tsnet 独立端口（手动配置），AgentK8SService 走 tsnet gRPC 代理（自动发现）。
 
+权限模型（P10 简化）：K8S Service 访问统一使用 Agent 级别权限（AclK8SServicePermission），Agent 根据自身能力自动选择实现方式（有 K8S 访问能力则直连，否则自动选择可用的 Endpoint 代理），对客户端完全透明。
+
 ### 能力控制
 
 AgentK8SService 能力由 Server 远程控制，通过心跳下发 `k8s_service_enabled` 字段：
@@ -592,6 +594,44 @@ K8S Service 变更事件
     pg.yygl.beijing.beagle:5432   → VIP 127.1.0.1:5432 → gRPC SVCProxy(pg, yygl)
     pg.prod.beijing.beagle:5432   → VIP 127.1.0.2:5432 → gRPC SVCProxy(pg, prod)
 ```
+
+### SVCProxy 实现逻辑（P10 重构）
+
+```
+func (p *K8SSVCProxy) SVCProxy(stream pb.AgentService_SVCProxyServer) error {
+    // 1. 接收首包（不包含 endpoint_name）
+    firstMsg, err := stream.Recv()
+    namespace := firstMsg.Namespace
+    serviceName := firstMsg.ServiceName
+    port := firstMsg.Port
+
+    // 2. 提取身份
+    peerIdentity, err := p.extractIdentityFromStream(stream)
+
+    // 3. 统一权限检查（Agent 级别）
+    if !p.permCache.CheckK8SServiceAccess(peerIdentity.UserName, namespace, serviceName) {
+        return fmt.Errorf("权限不足")
+    }
+
+    // 4. 判断实现方式
+    if p.informer != nil {
+        // 路径 A：Agent 有 K8S 访问能力，直接连接
+        return p.handleDirectConnection(stream, namespace, serviceName, port)
+    } else if p.endpointServer != nil {
+        // 路径 B：Agent 无 K8S 访问能力，自动选择 Endpoint
+        endpoint := p.selectAvailableEndpoint(namespace, serviceName)
+        return p.handleEndpointProxy(stream, endpoint, namespace, serviceName, port)
+    } else {
+        return fmt.Errorf("无可用的 K8S 访问路径")
+    }
+}
+```
+
+Endpoint 自动选择策略：
+- 优先选择有该 Service 发现数据的 Endpoint
+- K8SService 能力已启用的 Endpoint
+- 状态为 online 的 Endpoint
+- 支持负载均衡（轮询/随机/最少连接数）
 
 ## AgentService — Agent 手动端口映射
 
@@ -825,10 +865,9 @@ Agent 通过 gRPC 心跳从 Server 获取权限数据：
 ```
 心跳响应新增字段：
   k8s_permissions:          → 第 3 层，AgentK8SAPI 权限
-  k8s_service_permissions:  → 第 3 层，AgentK8SService 权限
+  k8s_service_permissions:  → 第 3 层，K8S Service 权限（Agent 级别，自动选择实现）
   ssh_endpoint_permissions: → Endpoint SSH 授权
   k8sapi_endpoint_permissions: → Endpoint K8SAPI 授权
-  k8sservice_endpoint_permissions: → Endpoint K8S Service 授权
 
 Agent 本地缓存，随心跳刷新（30 秒一次）。
 ```
@@ -844,9 +883,10 @@ User (agent-beijing)
   ├── AgentK8SAPI（新增能力）— 本机 K8S API 代理
   │     通过 Server 下发 k8s_enabled + AclK8sPermission 控制
   │
-  ├── AgentK8SService（新增能力）— 本机 K8S SVC 代理
+  ├── AgentK8SService（新增能力）— K8S SVC 代理（统一权限）
   │     通过 Server 下发 k8s_service_enabled + AclK8SServicePermission 控制
   │     自动发现 K8S Service，走 tsnet gRPC 代理
+  │     Agent 自动选择直连或 Endpoint 代理，对客户端透明
   │
   ├── EndpointSSH（新增对象）— 内网 SSH 跳跃端点
   │     ├── web-server-1  → 192.168.1.100 (online)
@@ -854,13 +894,9 @@ User (agent-beijing)
   │     └── db-server     → 192.168.1.200 (offline)
   │     通过 AclSSHJumpPermission 控制
   │
-  ├── EndpointK8SAPI（新增对象）— 内网 K8S API 跳跃端点
-  │     └── beijing-prod  → 192.168.1.10 (online)
-  │     通过 AclK8SAPIJumpPermission 控制
-  │
-  └── EndpointK8SService（新增对象）— 内网 K8S SVC 跳跃端点
-        └── remote-cluster  → (online, 发现 12 个 Service)
-        通过 AclK8SServiceJumpPermission 控制
+  └── EndpointK8SAPI（新增对象）— 内网 K8S API 跳跃端点
+        └── beijing-prod  → 192.168.1.10 (online)
+        通过 AclK8SAPIJumpPermission 控制
 ```
 
 ## 能力控制总结
@@ -878,10 +914,9 @@ User (agent-beijing)
 权限数据：
   ssh_permissions: []            → AgentSSH 权限
   k8s_permissions: []            → AgentK8SAPI 权限
-  k8s_service_permissions: []    → AgentK8SService 权限
+  k8s_service_permissions: []    → K8S Service 权限（Agent 级别，自动选择实现）
   ssh_endpoint_permissions: []   → Endpoint SSH 授权
   k8sapi_endpoint_permissions: [] → Endpoint K8SAPI 授权
-  k8sservice_endpoint_permissions: [] → Endpoint K8S Service 授权
 ```
 
 Agent 本地不需要任何业务配置，只需要：

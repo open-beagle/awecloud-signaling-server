@@ -1589,6 +1589,7 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 
 	logger.Infof("Desktop %d 解析域名: %s → %s:%d (user=%s, target_ip=%s)", req.DesktopId, req.Domain, agentIP, record.TargetPort, userName, record.TargetIP)
 
+	// P10 重构：删除 endpoint_name 字段，Agent 自动选择实现路径
 	return &pb.ResolveDomainResponse{
 		Success:      true,
 		Message:      "解析成功",
@@ -1599,8 +1600,7 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 		DomainType:   string(record.Type),
 		Namespace:    record.Namespace,
 		ServiceName:  record.ServiceName,
-		SvcProxyPort: 50051,             // Agent SVCProxy 默认端口
-		EndpointName: record.EndpointID, // Endpoint 名称（非空时走 Endpoint 跳跃路径）
+		SvcProxyPort: 50051, // Agent SVCProxy 默认端口
 	}, nil
 }
 
@@ -2082,12 +2082,12 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 			continue // 没有权限，跳过
 		}
 
+		// P10 重构：删除 endpoint_id 字段
 		item := &pb.DomainItem{
 			Domain:      dr.Domain,
 			Type:        string(dr.Type),
 			Namespace:   dr.Namespace,
 			ServiceName: dr.ServiceName,
-			EndpointId:  dr.EndpointID,
 		}
 
 		// 解析 region（从 domain 中提取）
@@ -2372,8 +2372,8 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 		}, nil
 	}
 
-	// 查询域名记录
-	query.Where("user_id IN ?", allowedAgentIDs).Find(&domainRecords)
+	// 查询域名记录（Preload Endpoint 关联，用于填充 endpoint_name）
+	query.Preload("Endpoint").Where("user_id IN ?", allowedAgentIDs).Find(&domainRecords)
 
 	// 构建响应
 	var domains []*pb.DomainInfo
@@ -2398,6 +2398,9 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 
 		// 填充 cluster_name（从 domain 中提取 region）
 		domainInfo.ClusterName = s.extractRegionFromDomain(record.Domain)
+
+		// P10 重构：删除 endpoint_id 和 endpoint_name 字段
+		// 客户端不需要知道底层实现细节
 
 		// 解析 service_ports（仅 k8ssvc 类型）
 		if record.Type == model.DomainTypeK8SSVC && record.ServicePorts != "" {

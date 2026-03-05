@@ -84,7 +84,7 @@ func (m *LocalProxyManager) UpdateProxies() error {
 
 	// 调试：打印所有域名的类型和 service_ports
 	for _, domain := range domains {
-		logger.Infof("[LocalProxy] 域名 %s type='%s' service_ports=%v (len=%d)", 
+		logger.Infof("[LocalProxy] 域名 %s type='%s' service_ports=%v (len=%d)",
 			domain.Domain, domain.Type, domain.ServicePorts, len(domain.ServicePorts))
 	}
 
@@ -390,6 +390,7 @@ func (m *LocalProxyManager) handleK8SSVCConn(clientConn net.Conn, domain *pb.Dom
 	}
 
 	// 4. 发送首包（连接参数）
+	// P10 重构：不再发送 endpoint_name，由 neimeng Agent 自动选择实现路径
 	err = stream.Send(&pb.SVCProxyData{
 		Namespace:   domain.Namespace,
 		ServiceName: domain.ServiceName,

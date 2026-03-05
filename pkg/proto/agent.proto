@@ -214,8 +214,8 @@ message EndpointCapabilityConfig {
   bool k8sservice_enabled = 5; // K8S Service 能力是否启用
   
   // 新增：Server 预分配的端口
-  uint32 ssh_port = 6;      // SSH 代理端口（0 表示未分配）
-  uint32 k8sapi_port = 7;   // K8SAPI 代理端口（0 表示未分配）
+  uint32 ssh_port = 6; // SSH 代理端口（0 表示未分配）
+  uint32 k8sapi_port = 7; // K8SAPI 代理端口（0 表示未分配）
 }
 
 // AgentCapabilityConfig Agent 能力配置（Server 远程控制）
@@ -403,6 +403,6 @@ message SVCProxyData {
   bool is_connect = 5; // 是否为连接请求（首包 true）
   bool is_close = 6; // 是否为关闭通知
   string error = 7; // 错误信息（如有）
-  string endpoint_name = 8; // Endpoint 名称（首包携带，非空时走 Endpoint 跳跃路径）
+  // 删除 endpoint_name 字段（P10 重构：Agent 自动选择实现路径）
 }
 

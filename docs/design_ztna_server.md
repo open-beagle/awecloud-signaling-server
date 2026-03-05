@@ -149,18 +149,16 @@ GET /api/v1/client/dns/resolve
 
 ### 新增 ACL
 
-| 模型                             | 层级    | 说明                                |
-| -------------------------------- | ------- | ----------------------------------- |
-| AclK8sUserPermission             | 第 3 层 | AgentK8SAPI 权限（用户级）          |
-| AclK8sGroupPermission            | 第 3 层 | AgentK8SAPI 权限（分组级）          |
-| AclK8SServiceUserPermission      | 第 3 层 | AgentK8SService 权限（用户级）      |
-| AclK8SServiceGroupPermission     | 第 3 层 | AgentK8SService 权限（分组级）      |
-| AclSSHJumpUserPermission         | Endpoint SSH | EndpointSSH 授权（用户）        |
-| AclSSHJumpGroupPermission        | Endpoint SSH | EndpointSSH 授权（分组）        |
-| AclK8SAPIJumpUserPermission      | Endpoint K8S | EndpointK8SAPI 授权（用户）     |
-| AclK8SAPIJumpGroupPermission     | Endpoint K8S | EndpointK8SAPI 授权（分组）     |
-| AclK8SServiceJumpUserPermission  | Endpoint K8S | EndpointK8S Service 授权（用户） |
-| AclK8SServiceJumpGroupPermission | Endpoint K8S | EndpointK8S Service 授权（分组） |
+| 模型                             | 层级         | 说明                           |
+| -------------------------------- | ------------ | ------------------------------ |
+| AclK8sUserPermission             | 第 3 层      | AgentK8SAPI 权限（用户级）     |
+| AclK8sGroupPermission            | 第 3 层      | AgentK8SAPI 权限（分组级）     |
+| AclK8SServiceUserPermission      | 第 3 层      | K8S Service 权限（用户级）     |
+| AclK8SServiceGroupPermission     | 第 3 层      | K8S Service 权限（分组级）     |
+| AclSSHJumpUserPermission         | Endpoint SSH | EndpointSSH 授权（用户）       |
+| AclSSHJumpGroupPermission        | Endpoint SSH | EndpointSSH 授权（分组）       |
+| AclK8SAPIJumpUserPermission      | Endpoint K8S | EndpointK8SAPI 授权（用户）    |
+| AclK8SAPIJumpGroupPermission     | Endpoint K8S | EndpointK8SAPI 授权（分组）    |
 
 ### ACL 字段说明
 
@@ -182,15 +180,15 @@ k8s_role → K8S 角色
 
 ```
 
-第 3 层 — AgentK8SService 权限：
+第 3 层 — K8S Service 权限（Agent 级别，自动选择实现）：
 
 ```
 
 AclK8SServiceUserPermission:
-agent*user_id → 哪个 Agent
+agent_user_id → 哪个 Agent（哪个集群）
 user_id → 被授权用户
 namespaces → 允许的命名空间列表（"*" = 全部）
-service*pattern → 允许的 Service 名称模式（"*" = 全部，"pg\*" = pg 开头）
+service_pattern → 允许的 Service 名称模式（"*" = 全部，"pg*" = pg 开头）
 
 AclK8SServiceGroupPermission:
 agent_user_id → 哪个 Agent
@@ -198,9 +196,11 @@ group_id → 被授权分组
 namespaces → 允许的命名空间列表
 service_pattern → 允许的 Service 名称模式
 
+说明：Agent 统一检查权限，自动选择直连或 Endpoint 代理，客户端无需感知。
+
 ```
 
-第 4 层 — Endpoint 跳跃权限（以 SSH 为例，K8S 和 SVC 结构类似）：
+第 4 层 — Endpoint 跳跃权限（SSH 和 K8SAPI）：
 
 ```
 
@@ -220,16 +220,11 @@ user_id → 被授权用户
 namespaces → 允许的命名空间列表
 k8s_role → Impersonation 角色
 
-AclK8SServiceJumpUserPermission:
-endpoint*k8sservice_id → 哪个 EndpointK8SService
-user_id → 被授权用户
-service_pattern → 允许访问的 Service 模式（如 "*.yygl" 或 "\_"）
-
 ```
 
-## 聚合查询 API（P9 新增）
+## 聚合查询 API（P9 新增，P10 简化）
 
-为支持 Web 管理界面的授权合并展示，新增两个聚合查询 API，将 Agent 和 Endpoint 的授权列表合并返回。
+为支持 Web 管理界面的授权合并展示，新增 K8S API 聚合查询 API。
 
 ### K8S API 聚合查询
 
@@ -245,15 +240,9 @@ GET /api/v1/admin/acl/k8s-unified
 
 实现方式：分别查询两个数据源，在内存中合并后分页。数据量通常几十条，不存在性能问题。
 
-### K8S Service 聚合查询
+### K8S Service 授权（P10 简化）
 
-```
-
-GET /api/v1/admin/acl/k8s-service-unified
-
-```
-
-将 Agent K8S Service 授权列表（原 /api/v1/admin/acl/k8s-service）和 Endpoint K8S Service 授权列表（原 /api/v1/admin/acl/endpoint-k8sservice）合并返回。结构同上。
+K8S Service 授权简化为 Agent 级别权限，不再有 Endpoint 级别的独立权限。使用原有的 `/api/v1/admin/acl/k8s-service` API，不需要聚合查询。
 
 ### 现有 API 保留
 
@@ -267,10 +256,9 @@ Agent 通过 gRPC 心跳从 Server 获取权限数据：
 
 心跳响应新增字段：
 k8s_permissions: → 第 3 层，AgentK8SAPI 权限
-k8s_service_permissions: → 第 3 层，AgentK8SService 权限
+k8s_service_permissions: → 第 3 层，K8S Service 权限（Agent 级别，自动选择实现）
 ssh_endpoint_permissions: → Endpoint SSH 授权
 k8sapi_endpoint_permissions: → Endpoint K8SAPI 授权
-k8sservice_endpoint_permissions: → Endpoint K8S Service 授权
 
 Agent 本地缓存，随心跳刷新（30 秒一次）。
 
@@ -320,18 +308,16 @@ updated_at time
 
 ### 新增 ACL 表
 
-| 表名                                 | 说明                                |
-| ------------------------------------ | ----------------------------------- |
-| acl_k8s_user_permission              | AgentK8SAPI 权限（用户级）          |
-| acl_k8s_group_permission             | AgentK8SAPI 权限（分组级）          |
-| acl_k8s_service_user_permission      | AgentK8SService 权限（用户级）      |
-| acl_k8s_service_group_permission     | AgentK8SService 权限（分组级）      |
-| acl_ssh_jump_user_permission         | EndpointSSH 授权（用户）        |
-| acl_ssh_jump_group_permission        | EndpointSSH 授权（分组）        |
-| acl_k8sapi_jump_user_permission      | EndpointK8SAPI 授权（用户）     |
-| acl_k8sapi_jump_group_permission     | EndpointK8SAPI 授权（分组）     |
-| acl_k8sservice_jump_user_permission  | EndpointK8S Service 授权（用户） |
-| acl_k8sservice_jump_group_permission | EndpointK8S Service 授权（分组） |
+| 表名                             | 说明                           |
+| -------------------------------- | ------------------------------ |
+| acl_k8s_user_permission          | AgentK8SAPI 权限（用户级）     |
+| acl_k8s_group_permission         | AgentK8SAPI 权限（分组级）     |
+| acl_k8s_service_user_permission  | K8S Service 权限（用户级）     |
+| acl_k8s_service_group_permission | K8S Service 权限（分组级）     |
+| acl_ssh_jump_user_permission     | EndpointSSH 授权（用户）       |
+| acl_ssh_jump_group_permission    | EndpointSSH 授权（分组）       |
+| acl_k8sapi_jump_user_permission  | EndpointK8SAPI 授权（用户）    |
+| acl_k8sapi_jump_group_permission | EndpointK8SAPI 授权（分组）    |
 
 ### 其他新增表
 

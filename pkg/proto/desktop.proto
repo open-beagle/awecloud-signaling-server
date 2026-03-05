@@ -392,7 +392,7 @@ message ResolveDomainResponse {
   string namespace = 8; // K8S 命名空间（k8ssvc 类型时）
   string service_name = 9; // K8S Service 名称（k8ssvc 类型时）
   int32 svc_proxy_port = 10; // Agent SVCProxy gRPC 端口（k8ssvc 类型时，默认 9090）
-  string endpoint_name = 11; // Endpoint 名称（Endpoint 跳跃时，非空表示需要走 Endpoint 路径）
+  // 删除 endpoint_name 字段（P10 重构）
 }
 
 // ============================================
@@ -457,7 +457,7 @@ message DomainItem {
   string namespace = 6; // K8S 命名空间（k8ssvc 类型时）
   string service_name = 7; // K8S Service 名称（k8ssvc 类型时）
   string region = 8; // 区域名称（从 domain 解析，如 beijing）
-  string endpoint_id = 9; // Endpoint 名称（Endpoint 域名时填充，Device 域名时为空）
+  // 删除 endpoint_id 字段（P10 重构）
 }
 
 // GetDomainListResponse 获取域名列表响应
@@ -486,6 +486,7 @@ message DomainInfo {
   string status = 8; // 状态：online/offline
   repeated int32 service_ports = 9; // K8S Service 端口列表（仅 k8ssvc，JSON 数组解析后的值）
   repeated string ssh_users = 10; // SSH 用户列表（仅 ssh 类型）
+  // 删除 endpoint_id 和 endpoint_name 字段（P10 重构）
 }
 
 // ListDomainsResponse 列出域名响应

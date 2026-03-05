@@ -159,16 +159,17 @@ Endpoint 不在 Tailscale 网络中，不连 Server 或 Headscale，只反向连
 │  已实现。决定谁能 SSH 到 Agent 节点，用哪个 Linux 用户。        │
 │  规则来源：AclSSHUserPermission / AclSSHGroupPermission         │
 │                                                                 │
-│  第 3 层：Agent 本机应用层（Agent 本地鉴权）                     │
+│  第 3 层：Agent 应用层（Agent 本地鉴权）                         │
 │  待实现。AgentK8SAPI 代理 K8S API 请求，AgentK8SService 代理    │
 │  自动发现的 K8S Service。Agent 从 tsnet 提取身份后本地鉴权。    │
 │  规则来源：AclK8sPermission / AclK8SServicePermission           │
+│  说明：Agent 自动选择直连或 Endpoint 代理，对客户端透明。       │
 │                                                                 │
 │  第 4 层：Endpoint 跳跃（Agent 中转到内网）                      │
 │  待实现。通过 Agent 跳跃到内网的 Endpoint。                     │
-│  规则来源：                                                      │
-│    AclSSHJumpPermission / AclK8SAPIJumpPermission /             │
-│    AclK8SServiceJumpPermission                                  │
+│  规则来源：AclSSHJumpPermission / AclK8SAPIJumpPermission       │
+│  说明：仅 SSH 和 K8SAPI 有独立的 Endpoint 权限，                │
+│        K8SService 使用 Agent 级别权限（第 3 层）。              │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -243,9 +244,11 @@ Endpoint 域名不为空时，挂在 <endpoint-domain>.<agent-name>.beagle 下�
     <ssh-name>.<endpoint-domain>.<agent-name>.beagle:22
     web-server-1.prod.beijing.beagle:22
 
-  EndpointK8SService:
-    <service>.<namespace>.<endpoint-domain>.<agent-name>.beagle
-    pg.yygl.prod.beijing.beagle:5432
+说明（P10 简化）：
+  K8S Service 域名不再包含 Endpoint 信息，统一为：
+    <service>.<namespace>.<agent-name>.beagle
+    pg.yygl.beijing.beagle:5432
+  Agent 自动选择直连或 Endpoint 代理，对客户端透明。
 ```
 
 Client 节点域名（Desktop.Pod / Desktop.Host）：
@@ -264,19 +267,23 @@ beijing（Agent User / 环境）
   ├── Agent 本机能力（直接挂在 beijing.beagle 下）
   │     beagle-xx1.beijing.beagle:22           → AgentSSH（Node 实例）
   │     beagle-xx2.beijing.beagle:22           → AgentSSH（Node 实例）
-  │     kubernetes.beijing.beagle:50050               → AgentK8SAPI
-  │     pg.yygl.beijing.beagle:5432            → AgentK8SService
+  │     kubernetes.beijing.beagle:50050        → AgentK8SAPI
+  │     pg.yygl.beijing.beagle:5432            → K8S Service（Agent 自动选择实现）
   │
   ├── Endpoint ""（域名为空，直接挂在 beijing.beagle 下）
   │     web-server-1.beijing.beagle:22         → EndpointSSH
   │
   ├── Endpoint "prod"
-  │     kubernetes.prod.beijing.beagle:50050          → EndpointK8SAPI
+  │     kubernetes.prod.beijing.beagle:50050   → EndpointK8SAPI
   │     web-server-1.prod.beijing.beagle:22    → EndpointSSH
   │
   └── Endpoint "dev"
-        kubernetes.dev.beijing.beagle:50050           → EndpointK8SAPI
+        kubernetes.dev.beijing.beagle:50050    → EndpointK8SAPI
         db-1.dev.beijing.beagle:22             → EndpointSSH
+
+说明（P10 简化）：
+  K8S Service 域名统一为 <service>.<namespace>.<agent-name>.beagle
+  不再区分 Agent 直连和 Endpoint 跳跃，Agent 自动选择实现方式。
 ```
 
 ### 域名与数据的关系
@@ -288,22 +295,26 @@ domain_registry 表中的域名来源：
 
 beagle-xx1 注册，上报能力 ssh + k8sapi + k8ssvc：
   beagle-xx1.beijing.beagle:22        → type=ssh, node_id=xxx
-  kubernetes.beijing.beagle:50050             → type=k8sapi, node_id=xxx
+  kubernetes.beijing.beagle:50050     → type=k8sapi, node_id=xxx
   pg.yygl.beijing.beagle:5432         → type=k8ssvc, node_id=xxx
 
 beagle-xx2 注册，上报能力 ssh + k8sapi：
   beagle-xx2.beijing.beagle:22        → type=ssh, node_id=yyy
-  kubernetes.beijing.beagle:50050             → type=k8sapi, node_id=yyy（共享域名，负载均衡）
+  kubernetes.beijing.beagle:50050     → type=k8sapi, node_id=yyy（共享域名，负载均衡）
 
 Endpoint "" 注册，上报能力 ssh：
   web-server-1.beijing.beagle:22      → type=ssh, endpoint_id=aaa
 
 Endpoint "prod" 注册，上报能力 k8sapi + ssh：
-  kubernetes.prod.beijing.beagle:50050        → type=k8sapi, endpoint_id=bbb
-  web-server-1.prod.beijing.beagle:22 → type=ssh, endpoint_id=bbb
+  kubernetes.prod.beijing.beagle:50050 → type=k8sapi, endpoint_id=bbb
+  web-server-1.prod.beijing.beagle:22  → type=ssh, endpoint_id=bbb
 
 Client Node 注册：
   ide-sc.zhangsan.beagle:22           → type=ssh, node_id=www
+
+说明（P10 简化）：
+  K8S Service 域名不再区分 Agent 和 Endpoint，统一注册为 type=k8ssvc
+  Agent 根据自身能力自动选择实现方式（直连或 Endpoint 代理）
 ```
 
 说明：

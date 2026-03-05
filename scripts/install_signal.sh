@@ -15,7 +15,7 @@ set -e
 
 # === 配置 ===
 HTTP_SERVER="${SIGNAL_HTTP_SERVER:-https://cache.ali.wodcloud.com}"
-AGENT_VERSION="${SIGNAL_VERSION:-v0.2.4}"
+AGENT_VERSION="${SIGNAL_VERSION:-}"  # 留空则自动获取最新版本
 
 BIN_DIR="$HOME/.local/bin"
 DATA_DIR="$HOME/.local/share/signal"
@@ -57,7 +57,36 @@ case "$LOCAL_ARCH" in
     ;;
 esac
 
-# === 4. 下载二进制（每次都重新下载，MVP 阶段快速迭代） ===
+# === 4. 获取最新版本（如果未指定） ===
+if [ -z "$AGENT_VERSION" ]; then
+  echo ""
+  echo "[版本] 获取最新版本..."
+  
+  VERSION_URL="${HTTP_SERVER}/vscode/awecloud-signaling/signal_agent-version.json"
+  VERSION_RESPONSE=""
+  
+  if command -v curl &> /dev/null; then
+    VERSION_RESPONSE=$(curl -fsSL "$VERSION_URL" 2>&1) || true
+  elif command -v wget &> /dev/null; then
+    VERSION_RESPONSE=$(wget -qO- "$VERSION_URL" 2>&1) || true
+  fi
+  
+  if [ -n "$VERSION_RESPONSE" ]; then
+    AGENT_VERSION=$(echo "$VERSION_RESPONSE" | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || true)
+  fi
+  
+  if [ -z "$AGENT_VERSION" ]; then
+    echo "[版本] 无法获取最新版本，使用默认版本 v0.2.4"
+    AGENT_VERSION="v0.2.4"
+  else
+    echo "[版本] 最新版本: $AGENT_VERSION"
+  fi
+else
+  echo ""
+  echo "[版本] 使用指定版本: $AGENT_VERSION"
+fi
+
+# === 5. 下载二进制（每次都重新下载，MVP 阶段快速迭代） ===
 AGENT_BINARY="signal_agent-${AGENT_VERSION}-linux-${TARGET_ARCH}"
 DOWNLOAD_URL="${HTTP_SERVER}/vscode/awecloud-signaling/${AGENT_BINARY}"
 
@@ -95,7 +124,7 @@ echo "[下载] 完成"
 rm -f "$BIN_DIR/signal_agent"
 ln -s "$TARGET_BINARY" "$BIN_DIR/signal_agent"
 
-# === 5. 检查环境变量 ===
+# === 6. 检查环境变量 ===
 echo ""
 if [ -z "$SIGNAL_TOKEN" ] || [ -z "$SIGNAL_SERVER" ]; then
   echo "[跳过] 缺少环境变量 SIGNAL_TOKEN / SIGNAL_SERVER"
@@ -103,7 +132,7 @@ if [ -z "$SIGNAL_TOKEN" ] || [ -z "$SIGNAL_SERVER" ]; then
   exit 0
 fi
 
-# === 6. 生成本地配置文件 ===
+# === 7. 生成本地配置文件 ===
 CONFIG_FILE="$DATA_DIR/agent.toml"
 SIGNAL_STATE_DIR="$DATA_DIR/tunnel"
 mkdir -p "$SIGNAL_STATE_DIR"
@@ -132,7 +161,7 @@ EOF
 
 echo "[配置] 已生成: $CONFIG_FILE"
 
-# === 7. 启动 Agent ===
+# === 8. 启动 Agent ===
 echo "[启动] Server: $SIGNAL_SERVER"
 echo "[启动] Token: ${SIGNAL_TOKEN:0:16}..."
 nohup sudo "$BIN_DIR/signal_agent" -c "$CONFIG_FILE" > "$LOG_DIR/agent.log" 2>&1 &

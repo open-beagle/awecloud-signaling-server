@@ -220,40 +220,31 @@ AclK8SAPIJumpUserPermission:
 
 ### 6. K8S Service 授权（/acl/k8s-service）— 新增
 
-业务含义：控制谁能访问自动发现的 K8S Service，按命名空间和 Service 名称控制。包含 Agent K8SService 和 Endpoint K8SService。
+业务含义：控制谁能访问自动发现的 K8S Service，按命名空间和 Service 名称控制。
 
-ZTNA 增强：K8S Service 授权现在包含两种目标：
+对象：AclK8SServiceUserPermission、AclK8SServiceGroupPermission（Agent 级别）
 
-- AgentK8SService：Agent 自动发现的 K8S Service（Agent 在 K8S 集群内）
-- EndpointK8SService：Endpoint 自动发现的 K8S Service（Endpoint 在 K8S 集群内）
-
-对象：
-
-- AclK8SServiceUserPermission、AclK8SServiceGroupPermission（AgentK8SService，新增）
-- AclK8SServiceJumpUserPermission、AclK8SServiceJumpGroupPermission（EndpointK8SService，新增）
-
-AgentK8S Service 授权结构：
+授权结构：
 
 ```
 AclK8SServiceUserPermission:
-  agent_user_id   → 哪个 Agent
+  agent_user_id   → 哪个 Agent（哪个集群）
   user_id         → 被授权用户
   namespaces      → 允许的命名空间列表（"*" = 全部）
   service_pattern → 允许的 Service 名称模式（"*" = 全部，"pg*" = pg 开头）
-```
 
-EndpointK8S Service 授权结构：
-
-```
-AclK8SServiceJumpUserPermission:
-  endpoint_k8sservice_id → 哪个 EndpointK8SService
-  user_id/group_id       → 被授权用户/分组
-  service_pattern        → 允许的 Service 模式
+AclK8SServiceGroupPermission:
+  agent_user_id   → 哪个 Agent
+  group_id        → 被授权分组
+  namespaces      → 允许的命名空间列表
+  service_pattern → 允许的 Service 名称模式
 ```
 
 与 Headscale 的关系：不翻译成 Headscale ACL。
 
 为什么不能复用服务授权（AclServicePermission）：AgentK8SService 是自动发现模式，同一个 Agent 上可能有多个 Service 使用相同端口（如多个命名空间各有一个 PostgreSQL:5432）。Headscale ACL 只认 tag + 端口，无法区分 namespace/service name。因此 K8SService 的权限控制必须在应用层，按 namespace + service name 级别控制。
+
+实现方式：Agent 统一检查权限，自动选择直连或 Endpoint 代理。客户端不需要知道底层实现细节（直连还是跳跃），只需要有访问该 Agent 的 K8S Service 权限即可。
 
 ## AgentService 与 AgentK8SService 的区别
 
@@ -304,15 +295,18 @@ Desktop 侧用 VIP 隔离端口冲突：
 │ SSH 授权         │ 混合         │ 部分         │ Agent SSH（ACL）         │ Agent            │
 │ K8S API 授权     │ Agent 本地   │ 否           │ Agent/Endpoint K8S + NS  │ Agent + Endpoint │
 │                  │              │              │ （合并展示，独立链路）   │                  │
-│ K8S Service 授权 │ Agent 本地   │ 否           │ Agent/Endpoint SVC + NS  │ Agent + Endpoint │
-│                  │              │              │ （合并展示，独立链路）   │                  │
+│ K8S Service 授权 │ Agent 本地   │ 否           │ Agent 级别 + NS          │ Agent            │
+│                  │              │              │ （Agent 自动选择实现）   │                  │
 │ Endpoint SSH 授权│ Agent 本地   │ 否           │ Endpoint SSH             │ Endpoint         │
 └──────────────────┴──────────────┴──────────────┴──────────────────────────┴──────────────────┘
 ```
 
-说明（P9 变更）：K8S API 授权和 K8S Service 授权的 Web 列表页合并展示 Agent 和 Endpoint 两种类型，但后端数据链路完全独立（各自的 DB 表、心跳字段、Agent 缓存和鉴权方法不变）。SSH 授权因鉴权机制不同（Headscale ACL vs PermissionCache），Agent SSH 和 Endpoint SSH 保持独立页面。
+说明（P10 变更）：
+- K8S API 授权：Web 列表页合并展示 Agent 和 Endpoint 两种类型，后端数据链路独立
+- K8S Service 授权：简化为 Agent 级别权限，Agent 自动选择直连或 Endpoint 代理，客户端无需感知
+- SSH 授权：因鉴权机制不同（Headscale ACL vs PermissionCache），Agent SSH 和 Endpoint SSH 保持独立页面
 
-## 授权层级体系（更新）
+## 授权层级体系（P10 更新）
 
 ```
 第 1 层：网络可达性（Headscale ACL）
@@ -327,11 +321,12 @@ Desktop 侧用 VIP 隔离端口冲突：
 第 3 层：K8S 访问（Agent 本地鉴权）
   Agent K8SAPI → Agent 本地鉴权
   Endpoint K8SAPI → Agent 本地鉴权
-  Agent K8SService → Agent 本地鉴权
-  Endpoint K8SService → Agent 本地鉴权
+  K8S Service → Agent 统一鉴权（自动选择直连或 Endpoint 代理）
 ```
 
 第 1 层是所有后续层的前提。Desktop 必须先能连到 Agent（第 1 层通过），后续层的鉴权才会被触发。
+
+K8S Service 访问简化说明：不再区分 Agent K8SService 和 Endpoint K8SService 权限，统一为 Agent 级别权限。Agent 根据自身能力自动选择实现方式（有 K8S 访问能力则直连，否则自动选择可用的 Endpoint 代理），对客户端完全透明。
 
 ## 实现优先级
 
@@ -364,16 +359,16 @@ Agent 用户同时是授权目标方（别人访问它）和服务/端口转发�
     │      │   WHERE target_user_id = user_id
     │      ├─ AclSSHUserPermission / AclSSHGroupPermission
     │      │   WHERE target_user_id = user_id
-    │      ├─ AclK8sUserPermission / AclK8sGroupPermission（新增）
+    │      ├─ AclK8sUserPermission / AclK8sGroupPermission
     │      │   WHERE agent_user_id = user_id
-    │      └─ AclK8SServiceUserPermission / AclK8SServiceGroupPermission（新增）
+    │      └─ AclK8SServiceUserPermission / AclK8SServiceGroupPermission
     │          WHERE agent_user_id = user_id
     │
     ├─ 2. 清理该 Agent 关联的业务数据
     │      ├─ ProxyService 表 WHERE user_id = ?
     │      ├─ PortForward 表 WHERE user_id = ?
-    │      ├─ Endpoint 表（三种）WHERE user_id = ?（新增）
-    │      └─ DomainRegistry 表 WHERE user_id = ?（新增）
+    │      ├─ Endpoint 表（SSH/K8SAPI）WHERE user_id = ?
+    │      └─ DomainRegistry 表 WHERE user_id = ?
     │
     ├─ 3. 清理分组成员关系
     │      └─ GroupMember 表 WHERE user_id = ?
@@ -393,9 +388,9 @@ Client 用户是被授权方（它访问别人）。
     │      ├─ AclUserUserPermission WHERE user_id = ?
     │      ├─ AclGroupUserPermission WHERE user_id = ?
     │      ├─ AclSSHUserPermission WHERE user_id = ?
-    │      ├─ AclK8sUserPermission WHERE user_id = ?（新增）
-    │      ├─ AclK8SServiceUserPermission WHERE user_id = ?（新增）
-    │      └─ Endpoint Jump 授权（三种 _user_permission）WHERE user_id = ?（新增）
+    │      ├─ AclK8sUserPermission WHERE user_id = ?
+    │      ├─ AclK8SServiceUserPermission WHERE user_id = ?
+    │      └─ Endpoint Jump 授权（SSH/K8SAPI _user_permission）WHERE user_id = ?
     │
     ├─ 2. 清理分组成员关系
     │      └─ GroupMember 表 WHERE user_id = ?

@@ -35,6 +35,7 @@ type EndpointK8SAPIUserPermission struct {
 }
 
 // EndpointK8SServiceUserPermission 单个用户对某 Endpoint 的 K8SService 权限
+// 已废弃（P10 重构）：统一使用 K8SServiceUserPermission
 type EndpointK8SServiceUserPermission struct {
 	EndpointID   string   // Endpoint ID
 	EndpointName string   // Endpoint 名称
@@ -61,7 +62,8 @@ type PermissionCache struct {
 	epK8SAPIPermissions map[string][]*EndpointK8SAPIUserPermission
 	epK8SAPIMutex       sync.RWMutex
 
-	// Endpoint K8SService 权限：key = user_name
+	// Endpoint K8SService 权限（已废弃，P10 重构）
+	// 保留字段以兼容旧代码，但不再使用
 	epK8SSvcPermissions map[string][]*EndpointK8SServiceUserPermission
 	epK8SSvcMutex       sync.RWMutex
 }
@@ -288,71 +290,18 @@ func (c *PermissionCache) CheckEndpointK8SAPIAccess(userName, endpointName strin
 }
 
 // UpdateEndpointK8SServicePermissions 从心跳响应更新 Endpoint K8SService 权限
+// 已废弃（P10 重构）：不再使用 Endpoint 级别权限，统一使用 Agent 级别权限
 func (c *PermissionCache) UpdateEndpointK8SServicePermissions(perms []*pb.EndpointK8SServicePermission) {
-	c.epK8SSvcMutex.Lock()
-	defer c.epK8SSvcMutex.Unlock()
-
-	newPerms := make(map[string][]*EndpointK8SServiceUserPermission)
-	for _, p := range perms {
-		newPerms[p.UserName] = append(newPerms[p.UserName], &EndpointK8SServiceUserPermission{
-			EndpointID:   p.EndpointId,
-			EndpointName: p.EndpointName,
-			Namespaces:   p.Namespaces,
-			ServiceNames: p.ServiceNames,
-		})
-	}
-
-	c.epK8SSvcPermissions = newPerms
-	logger.Debugf("Endpoint K8SService 权限缓存已更新: %d 个用户", len(newPerms))
+	// 空实现，保留以兼容旧代码
+	logger.Debugf("UpdateEndpointK8SServicePermissions 已废弃（P10 重构），忽略 %d 条权限", len(perms))
 }
 
 // CheckEndpointK8SServiceAccess 检查用户对某 Endpoint 的 K8SService 访问权限
+// 已废弃（P10 重构）：不再使用，统一使用 CheckK8SServiceAccess
 func (c *PermissionCache) CheckEndpointK8SServiceAccess(userName, endpointName, namespace, serviceName string) bool {
-	c.epK8SSvcMutex.RLock()
-	defer c.epK8SSvcMutex.RUnlock()
-
-	perms, ok := c.epK8SSvcPermissions[userName]
-	if !ok {
-		return false
-	}
-
-	for _, p := range perms {
-		if p.EndpointName != endpointName {
-			continue
-		}
-
-		// 检查命名空间
-		if len(p.Namespaces) > 0 {
-			nsAllowed := false
-			for _, ns := range p.Namespaces {
-				if ns == "*" || ns == namespace {
-					nsAllowed = true
-					break
-				}
-			}
-			if !nsAllowed {
-				continue
-			}
-		}
-
-		// 检查 Service 名称
-		if len(p.ServiceNames) > 0 {
-			svcAllowed := false
-			for _, sn := range p.ServiceNames {
-				if sn == "*" || sn == serviceName {
-					svcAllowed = true
-					break
-				}
-			}
-			if !svcAllowed {
-				continue
-			}
-		}
-
-		return true
-	}
-
-	return false
+	// 兼容旧代码：直接调用 Agent 级别权限检查
+	logger.Debugf("CheckEndpointK8SServiceAccess 已废弃（P10 重构），转发到 CheckK8SServiceAccess")
+	return c.CheckK8SServiceAccess(userName, namespace, serviceName)
 }
 
 // mergeStringSlice 合并两个字符串切片，去重
