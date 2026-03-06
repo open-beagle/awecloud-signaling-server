@@ -157,6 +157,7 @@ dial_socket = "/tmp/signaling.sock"
 
 [log]
 level = "$LOG_LEVEL"
+file = "$LOG_DIR/agent.log"
 EOF
 
 echo "[配置] 已生成: $CONFIG_FILE"
@@ -164,7 +165,8 @@ echo "[配置] 已生成: $CONFIG_FILE"
 # === 8. 启动 Agent ===
 echo "[启动] Server: $SIGNAL_SERVER"
 echo "[启动] Token: ${SIGNAL_TOKEN:0:16}..."
-nohup sudo "$BIN_DIR/signal_agent" -c "$CONFIG_FILE" > "$LOG_DIR/agent.log" 2>&1 &
+# 注意：配置文件中已指定日志路径 log.file，nohup 重定向作为备份
+nohup sudo "$BIN_DIR/signal_agent" -c "$CONFIG_FILE" >> "$LOG_DIR/agent.log" 2>&1 &
 AGENT_PID=$!
 
 sleep 3
