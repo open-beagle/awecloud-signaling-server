@@ -849,17 +849,23 @@ func (s *AgentServiceServer) queryK8SPermissions(ctx context.Context, agentID ui
 		return nil
 	}
 
+	logger.Debugf("[queryK8SPermissions] agent_id=%d, 查询到 %d 条用户权限", agentID, len(userPerms))
+
 	for _, p := range userPerms {
 		if p.User == nil {
+			logger.Warnf("[queryK8SPermissions] user_id=%d 的 User 为 nil，跳过", p.UserID)
 			continue
 		}
-		result = append(result, &pb.K8SPermission{
+		perm := &pb.K8SPermission{
 			UserId:     p.UserID,
 			UserName:   p.User.Name,
 			K8SGroups:  parseJSONStringArray(p.K8SGroups),
 			Namespaces: parseJSONStringArray(p.Namespaces),
 			IsGroup:    false,
-		})
+		}
+		result = append(result, perm)
+		logger.Debugf("[queryK8SPermissions] 添加用户权限: user_id=%d, user_name=%s, k8s_groups=%v", 
+			p.UserID, p.User.Name, perm.K8SGroups)
 	}
 
 	// 2. 查询分组授权，展开分组成员

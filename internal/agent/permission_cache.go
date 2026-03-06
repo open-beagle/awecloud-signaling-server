@@ -98,10 +98,21 @@ func (c *PermissionCache) UpdateK8SPermissions(perms []*pb.K8SPermission) {
 				Namespaces: p.Namespaces,
 			}
 		}
+		logger.Debugf("[PermCache] 添加 K8S 权限: user=%s, groups=%v, namespaces=%v", 
+			p.UserName, p.K8SGroups, p.Namespaces)
 	}
 
 	c.k8sPermissions = newPerms
-	logger.Debugf("K8S 权限缓存已更新: %d 个用户", len(newPerms))
+	logger.Infof("K8S 权限缓存已更新: %d 个用户", len(newPerms))
+	
+	// 输出所有用户名，用于调试
+	if len(newPerms) > 0 {
+		userNames := make([]string, 0, len(newPerms))
+		for userName := range newPerms {
+			userNames = append(userNames, userName)
+		}
+		logger.Debugf("[PermCache] K8S 权限用户列表: %v", userNames)
+	}
 }
 
 // CheckK8SAccess 检查用户的 K8S API 访问权限
