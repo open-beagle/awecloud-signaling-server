@@ -82,8 +82,11 @@ type Agent struct {
 }
 
 // NewAgent 创建Agent
-func NewAgent(cfg *config.AgentConfig, version string) (*Agent, error) {
+func NewAgent(cfg *config.AgentConfig, version, buildDate string) (*Agent, error) {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// 设置版本信息（供 Endpoint SSH 横幅使用）
+	SetVersionInfo(version, buildDate)
 
 	// 初始化网络检测器
 	lanDetector := NewLANDetector()
@@ -1394,7 +1397,7 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 			} else {
 				// 启动 Endpoint SSH 代理（在 tsnet 上监听，接收 Desktop SSH 连接）
 				if a.tsManager != nil && a.tsManager.IsConnected() {
-					sshProxy, err := NewEndpointSSHProxy(a.endpointServer, a.tsManager, a.auditCollector, a.permCache, a.config.Tunnel.StateDir, a.ctx)
+					sshProxy, err := NewEndpointSSHProxy(a.endpointServer, a.tsManager, a.auditCollector, a.permCache, a.grpcClient, a.config.Tunnel.StateDir, a.ctx)
 					if err != nil {
 						logger.Warnf("创建 Endpoint SSH 代理失败: %v", err)
 					} else if err := sshProxy.Start(); err != nil {

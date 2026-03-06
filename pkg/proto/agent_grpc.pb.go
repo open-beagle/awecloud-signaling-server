@@ -27,6 +27,7 @@ const (
 	AgentService_ReportVisitorStatus_FullMethodName = "/awecloud.signaling.AgentService/ReportVisitorStatus"
 	AgentService_ReportNetworkChange_FullMethodName = "/awecloud.signaling.AgentService/ReportNetworkChange"
 	AgentService_SVCProxy_FullMethodName            = "/awecloud.signaling.AgentService/SVCProxy"
+	AgentService_GetUserDeviceInfo_FullMethodName   = "/awecloud.signaling.AgentService/GetUserDeviceInfo"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -51,6 +52,8 @@ type AgentServiceClient interface {
 	ReportNetworkChange(ctx context.Context, in *ReportNetworkChangeRequest, opts ...grpc.CallOption) (*ReportNetworkChangeResponse, error)
 	// SVCProxy - K8S Service 代理（双向流，Desktop → Agent → K8S ClusterIP）
 	SVCProxy(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SVCProxyData, SVCProxyData], error)
+	// 获取用户设备信息（用于 SSH 横幅显示）
+	GetUserDeviceInfo(ctx context.Context, in *GetUserDeviceInfoRequest, opts ...grpc.CallOption) (*GetUserDeviceInfoResponse, error)
 }
 
 type agentServiceClient struct {
@@ -147,6 +150,16 @@ func (c *agentServiceClient) SVCProxy(ctx context.Context, opts ...grpc.CallOpti
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_SVCProxyClient = grpc.BidiStreamingClient[SVCProxyData, SVCProxyData]
 
+func (c *agentServiceClient) GetUserDeviceInfo(ctx context.Context, in *GetUserDeviceInfoRequest, opts ...grpc.CallOption) (*GetUserDeviceInfoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetUserDeviceInfoResponse)
+	err := c.cc.Invoke(ctx, AgentService_GetUserDeviceInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -169,6 +182,8 @@ type AgentServiceServer interface {
 	ReportNetworkChange(context.Context, *ReportNetworkChangeRequest) (*ReportNetworkChangeResponse, error)
 	// SVCProxy - K8S Service 代理（双向流，Desktop → Agent → K8S ClusterIP）
 	SVCProxy(grpc.BidiStreamingServer[SVCProxyData, SVCProxyData]) error
+	// 获取用户设备信息（用于 SSH 横幅显示）
+	GetUserDeviceInfo(context.Context, *GetUserDeviceInfoRequest) (*GetUserDeviceInfoResponse, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -202,6 +217,9 @@ func (UnimplementedAgentServiceServer) ReportNetworkChange(context.Context, *Rep
 }
 func (UnimplementedAgentServiceServer) SVCProxy(grpc.BidiStreamingServer[SVCProxyData, SVCProxyData]) error {
 	return status.Error(codes.Unimplemented, "method SVCProxy not implemented")
+}
+func (UnimplementedAgentServiceServer) GetUserDeviceInfo(context.Context, *GetUserDeviceInfoRequest) (*GetUserDeviceInfoResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetUserDeviceInfo not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -346,6 +364,24 @@ func _AgentService_SVCProxy_Handler(srv interface{}, stream grpc.ServerStream) e
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_SVCProxyServer = grpc.BidiStreamingServer[SVCProxyData, SVCProxyData]
 
+func _AgentService_GetUserDeviceInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetUserDeviceInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).GetUserDeviceInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_GetUserDeviceInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).GetUserDeviceInfo(ctx, req.(*GetUserDeviceInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -376,6 +412,10 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReportNetworkChange",
 			Handler:    _AgentService_ReportNetworkChange_Handler,
+		},
+		{
+			MethodName: "GetUserDeviceInfo",
+			Handler:    _AgentService_GetUserDeviceInfo_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -205,7 +205,7 @@ func main() {
 	}
 
 	// 创建并启动Agent
-	agt, err := agent.NewAgent(cfg, version)
+	agt, err := agent.NewAgent(cfg, version, buildDate)
 	if err != nil {
 		logger.Fatalf("创建Agent失败: %v", err)
 	}
@@ -380,20 +380,28 @@ func splitString(s string, sep rune) []string {
 func printSSHBanner(localUser, remoteUser, remoteIP string) {
 	// 提取真实的用户名（去掉 tag: 前缀）
 	displayRemoteUser := extractRealUser(remoteUser)
+	
+	// 获取当前时间
+	connectTime := time.Now().Format("2006-01-02 15:04:05")
 
 	fmt.Println("================================================================")
 	fmt.Println("           AWECloud Signaling - SSH Access")
 	fmt.Println("================================================================")
-	fmt.Printf("  Version:     %s\n", version)
-	fmt.Printf("  Build Date:  %s\n", buildDate)
-	fmt.Printf("  Git Commit:  %s\n", gitCommit)
+	fmt.Printf("  Version:      %s\n", version)
+	fmt.Printf("  Build Date:   %s\n", buildDate)
+	fmt.Printf("  Connect Time: %s\n", connectTime)
 	fmt.Println("----------------------------------------------------------------")
+	
+	// 构建 Remote User 行
 	if displayRemoteUser != "" {
-		fmt.Printf("  Remote User: %s\n", displayRemoteUser)
+		fmt.Printf("  Remote User:   %s\n", displayRemoteUser)
 	}
+	
+	// 构建 Remote Device 行
 	if remoteIP != "" {
-		fmt.Printf("  Remote IP:   %s\n", remoteIP)
+		fmt.Printf("  Remote Device: %s\n", remoteIP)
 	}
+	
 	fmt.Println("================================================================")
 	fmt.Println()
 }

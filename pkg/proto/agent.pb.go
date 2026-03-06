@@ -2805,6 +2805,136 @@ func (x *SVCProxyData) GetError() string {
 	return ""
 }
 
+// GetUserDeviceInfoRequest 获取用户设备信息请求
+type GetUserDeviceInfoRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserName      string                 `protobuf:"bytes,1,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"` // 用户名
+	DeviceIp      string                 `protobuf:"bytes,2,opt,name=device_ip,json=deviceIp,proto3" json:"device_ip,omitempty"` // 设备 IP（用于匹配具体设备）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetUserDeviceInfoRequest) Reset() {
+	*x = GetUserDeviceInfoRequest{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetUserDeviceInfoRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetUserDeviceInfoRequest) ProtoMessage() {}
+
+func (x *GetUserDeviceInfoRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetUserDeviceInfoRequest.ProtoReflect.Descriptor instead.
+func (*GetUserDeviceInfoRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *GetUserDeviceInfoRequest) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
+}
+
+func (x *GetUserDeviceInfoRequest) GetDeviceIp() string {
+	if x != nil {
+		return x.DeviceIp
+	}
+	return ""
+}
+
+// GetUserDeviceInfoResponse 获取用户设备信息响应
+type GetUserDeviceInfoResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserName      string                 `protobuf:"bytes,1,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`          // 用户名
+	DisplayName   string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"` // 真实姓名（User.Alias，可能为空）
+	DeviceName    string                 `protobuf:"bytes,3,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`    // 设备名称
+	DeviceOs      string                 `protobuf:"bytes,4,opt,name=device_os,json=deviceOs,proto3" json:"device_os,omitempty"`          // 操作系统
+	DeviceIp      string                 `protobuf:"bytes,5,opt,name=device_ip,json=deviceIp,proto3" json:"device_ip,omitempty"`          // 设备 IP
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetUserDeviceInfoResponse) Reset() {
+	*x = GetUserDeviceInfoResponse{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetUserDeviceInfoResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetUserDeviceInfoResponse) ProtoMessage() {}
+
+func (x *GetUserDeviceInfoResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetUserDeviceInfoResponse.ProtoReflect.Descriptor instead.
+func (*GetUserDeviceInfoResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *GetUserDeviceInfoResponse) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
+}
+
+func (x *GetUserDeviceInfoResponse) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *GetUserDeviceInfoResponse) GetDeviceName() string {
+	if x != nil {
+		return x.DeviceName
+	}
+	return ""
+}
+
+func (x *GetUserDeviceInfoResponse) GetDeviceOs() string {
+	if x != nil {
+		return x.DeviceOs
+	}
+	return ""
+}
+
+func (x *GetUserDeviceInfoResponse) GetDeviceIp() string {
+	if x != nil {
+		return x.DeviceIp
+	}
+	return ""
+}
+
 var File_pkg_proto_agent_proto protoreflect.FileDescriptor
 
 const file_pkg_proto_agent_proto_rawDesc = "" +
@@ -3084,7 +3214,17 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\n" +
 	"is_connect\x18\x05 \x01(\bR\tisConnect\x12\x19\n" +
 	"\bis_close\x18\x06 \x01(\bR\aisClose\x12\x14\n" +
-	"\x05error\x18\a \x01(\tR\x05error2\xec\x06\n" +
+	"\x05error\x18\a \x01(\tR\x05error\"T\n" +
+	"\x18GetUserDeviceInfoRequest\x12\x1b\n" +
+	"\tuser_name\x18\x01 \x01(\tR\buserName\x12\x1b\n" +
+	"\tdevice_ip\x18\x02 \x01(\tR\bdeviceIp\"\xb6\x01\n" +
+	"\x19GetUserDeviceInfoResponse\x12\x1b\n" +
+	"\tuser_name\x18\x01 \x01(\tR\buserName\x12!\n" +
+	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\x1f\n" +
+	"\vdevice_name\x18\x03 \x01(\tR\n" +
+	"deviceName\x12\x1b\n" +
+	"\tdevice_os\x18\x04 \x01(\tR\bdeviceOs\x12\x1b\n" +
+	"\tdevice_ip\x18\x05 \x01(\tR\bdeviceIp2\xde\a\n" +
 	"\fAgentService\x12_\n" +
 	"\bRegister\x12(.awecloud.signaling.AgentRegisterRequest\x1a).awecloud.signaling.AgentRegisterResponse\x12k\n" +
 	"\fAuthenticate\x12,.awecloud.signaling.AgentAuthenticateRequest\x1a-.awecloud.signaling.AgentAuthenticateResponse\x12f\n" +
@@ -3093,7 +3233,8 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\x11ReportProxyStatus\x12,.awecloud.signaling.ReportProxyStatusRequest\x1a-.awecloud.signaling.ReportProxyStatusResponse\x12v\n" +
 	"\x13ReportVisitorStatus\x12..awecloud.signaling.ReportVisitorStatusRequest\x1a/.awecloud.signaling.ReportVisitorStatusResponse\x12v\n" +
 	"\x13ReportNetworkChange\x12..awecloud.signaling.ReportNetworkChangeRequest\x1a/.awecloud.signaling.ReportNetworkChangeResponse\x12R\n" +
-	"\bSVCProxy\x12 .awecloud.signaling.SVCProxyData\x1a .awecloud.signaling.SVCProxyData(\x010\x01B<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
+	"\bSVCProxy\x12 .awecloud.signaling.SVCProxyData\x1a .awecloud.signaling.SVCProxyData(\x010\x01\x12p\n" +
+	"\x11GetUserDeviceInfo\x12,.awecloud.signaling.GetUserDeviceInfoRequest\x1a-.awecloud.signaling.GetUserDeviceInfoResponseB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
 
 var (
 	file_pkg_proto_agent_proto_rawDescOnce sync.Once
@@ -3107,7 +3248,7 @@ func file_pkg_proto_agent_proto_rawDescGZIP() []byte {
 	return file_pkg_proto_agent_proto_rawDescData
 }
 
-var file_pkg_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
+var file_pkg_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_pkg_proto_agent_proto_goTypes = []any{
 	(*SystemInfo)(nil),                   // 0: awecloud.signaling.SystemInfo
 	(*NetworkInterface)(nil),             // 1: awecloud.signaling.NetworkInterface
@@ -3142,8 +3283,10 @@ var file_pkg_proto_agent_proto_goTypes = []any{
 	(*ReportNetworkChangeRequest)(nil),   // 30: awecloud.signaling.ReportNetworkChangeRequest
 	(*ReportNetworkChangeResponse)(nil),  // 31: awecloud.signaling.ReportNetworkChangeResponse
 	(*SVCProxyData)(nil),                 // 32: awecloud.signaling.SVCProxyData
-	(*DiscoveredK8SService)(nil),         // 33: awecloud.signaling.DiscoveredK8SService
-	(*EndpointCapabilityInfo)(nil),       // 34: awecloud.signaling.EndpointCapabilityInfo
+	(*GetUserDeviceInfoRequest)(nil),     // 33: awecloud.signaling.GetUserDeviceInfoRequest
+	(*GetUserDeviceInfoResponse)(nil),    // 34: awecloud.signaling.GetUserDeviceInfoResponse
+	(*DiscoveredK8SService)(nil),         // 35: awecloud.signaling.DiscoveredK8SService
+	(*EndpointCapabilityInfo)(nil),       // 36: awecloud.signaling.EndpointCapabilityInfo
 }
 var file_pkg_proto_agent_proto_depIdxs = []int32{
 	0,  // 0: awecloud.signaling.AgentRegisterRequest.system_info:type_name -> awecloud.signaling.SystemInfo
@@ -3152,11 +3295,11 @@ var file_pkg_proto_agent_proto_depIdxs = []int32{
 	7,  // 3: awecloud.signaling.AgentHeartbeatRequest.forward_status:type_name -> awecloud.signaling.ForwardStatus
 	1,  // 4: awecloud.signaling.AgentHeartbeatRequest.networks:type_name -> awecloud.signaling.NetworkInterface
 	10, // 5: awecloud.signaling.AgentHeartbeatRequest.domain_registrations:type_name -> awecloud.signaling.DomainRegistration
-	33, // 6: awecloud.signaling.AgentHeartbeatRequest.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
+	35, // 6: awecloud.signaling.AgentHeartbeatRequest.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
 	9,  // 7: awecloud.signaling.AgentHeartbeatRequest.connected_endpoints:type_name -> awecloud.signaling.ConnectedEndpoint
 	21, // 8: awecloud.signaling.AgentHeartbeatRequest.audit_records:type_name -> awecloud.signaling.OperationAuditRecord
-	34, // 9: awecloud.signaling.ConnectedEndpoint.capabilities:type_name -> awecloud.signaling.EndpointCapabilityInfo
-	33, // 10: awecloud.signaling.ConnectedEndpoint.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
+	36, // 9: awecloud.signaling.ConnectedEndpoint.capabilities:type_name -> awecloud.signaling.EndpointCapabilityInfo
+	35, // 10: awecloud.signaling.ConnectedEndpoint.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
 	11, // 11: awecloud.signaling.AgentHeartbeatResponse.services:type_name -> awecloud.signaling.ServiceConfig
 	12, // 12: awecloud.signaling.AgentHeartbeatResponse.forwards:type_name -> awecloud.signaling.ForwardConfig
 	16, // 13: awecloud.signaling.AgentHeartbeatResponse.k8s_permissions:type_name -> awecloud.signaling.K8SPermission
@@ -3178,16 +3321,18 @@ var file_pkg_proto_agent_proto_depIdxs = []int32{
 	28, // 29: awecloud.signaling.AgentService.ReportVisitorStatus:input_type -> awecloud.signaling.ReportVisitorStatusRequest
 	30, // 30: awecloud.signaling.AgentService.ReportNetworkChange:input_type -> awecloud.signaling.ReportNetworkChangeRequest
 	32, // 31: awecloud.signaling.AgentService.SVCProxy:input_type -> awecloud.signaling.SVCProxyData
-	3,  // 32: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.AgentRegisterResponse
-	5,  // 33: awecloud.signaling.AgentService.Authenticate:output_type -> awecloud.signaling.AgentAuthenticateResponse
-	13, // 34: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.AgentHeartbeatResponse
-	23, // 35: awecloud.signaling.AgentService.GetRealtimeStatus:output_type -> awecloud.signaling.GetRealtimeStatusResponse
-	26, // 36: awecloud.signaling.AgentService.ReportProxyStatus:output_type -> awecloud.signaling.ReportProxyStatusResponse
-	29, // 37: awecloud.signaling.AgentService.ReportVisitorStatus:output_type -> awecloud.signaling.ReportVisitorStatusResponse
-	31, // 38: awecloud.signaling.AgentService.ReportNetworkChange:output_type -> awecloud.signaling.ReportNetworkChangeResponse
-	32, // 39: awecloud.signaling.AgentService.SVCProxy:output_type -> awecloud.signaling.SVCProxyData
-	32, // [32:40] is the sub-list for method output_type
-	24, // [24:32] is the sub-list for method input_type
+	33, // 32: awecloud.signaling.AgentService.GetUserDeviceInfo:input_type -> awecloud.signaling.GetUserDeviceInfoRequest
+	3,  // 33: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.AgentRegisterResponse
+	5,  // 34: awecloud.signaling.AgentService.Authenticate:output_type -> awecloud.signaling.AgentAuthenticateResponse
+	13, // 35: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.AgentHeartbeatResponse
+	23, // 36: awecloud.signaling.AgentService.GetRealtimeStatus:output_type -> awecloud.signaling.GetRealtimeStatusResponse
+	26, // 37: awecloud.signaling.AgentService.ReportProxyStatus:output_type -> awecloud.signaling.ReportProxyStatusResponse
+	29, // 38: awecloud.signaling.AgentService.ReportVisitorStatus:output_type -> awecloud.signaling.ReportVisitorStatusResponse
+	31, // 39: awecloud.signaling.AgentService.ReportNetworkChange:output_type -> awecloud.signaling.ReportNetworkChangeResponse
+	32, // 40: awecloud.signaling.AgentService.SVCProxy:output_type -> awecloud.signaling.SVCProxyData
+	34, // 41: awecloud.signaling.AgentService.GetUserDeviceInfo:output_type -> awecloud.signaling.GetUserDeviceInfoResponse
+	33, // [33:42] is the sub-list for method output_type
+	24, // [24:33] is the sub-list for method input_type
 	24, // [24:24] is the sub-list for extension type_name
 	24, // [24:24] is the sub-list for extension extendee
 	0,  // [0:24] is the sub-list for field type_name
@@ -3205,7 +3350,7 @@ func file_pkg_proto_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_agent_proto_rawDesc), len(file_pkg_proto_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   33,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

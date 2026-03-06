@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -1803,4 +1804,62 @@ func (s *AgentServiceServer) handleK8SServiceDiscovery(ctx context.Context, agen
 
 	logger.Infof("K8S Service 域名处理完成: agent_id=%d, node_id=%d, created/updated=%d, deleted=%d",
 		agentID, nodeID, len(reportedDomains), deletedCount)
+}
+
+// GetUserDeviceInfo 获取用户设备信息（用于 SSH 横幅显示）
+func (s *AgentServiceServer) GetUserDeviceInfo(ctx context.Context, req *pb.GetUserDeviceInfoRequest) (*pb.GetUserDeviceInfoResponse, error) {
+	logger.Debugf("收到用户设备信息查询: user_name=%s, device_ip=%s", req.UserName, req.DeviceIp)
+
+	resp := &pb.GetUserDeviceInfoResponse{
+		UserName:  req.UserName,
+		DeviceIp:  req.DeviceIp,
+	}
+
+	// 1. 查询用户信息（获取 Alias）
+	var user model.User
+	if err := db.DB.WithContext(ctx).Where("name = ? AND role = ?", req.UserName, model.UserRoleClient).First(&user).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			logger.Warnf("用户不存在: user_name=%s", req.UserName)
+			return resp, nil
+		}
+		logger.Errorf("查询用户失败: user_name=%s, err=%v", req.UserName, err)
+		return nil, fmt.Errorf("查询用户失败: %v", err)
+	}
+
+	resp.DisplayName = user.Alias
+
+	// 2. 根据 IP 查询 Node 信息（获取设备名称和操作系统）
+	var node model.Node
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND ip = ? AND type = ?", user.ID, req.DeviceIp, model.NodeTypeDesktop).First(&node).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			logger.Debugf("未找到设备信息: user_id=%d, ip=%s", user.ID, req.DeviceIp)
+			return resp, nil
+		}
+		logger.Errorf("查询设备失败: user_id=%d, ip=%s, err=%v", user.ID, req.DeviceIp, err)
+		return nil, fmt.Errorf("查询设备失败: %v", err)
+	}
+
+	// 3. 解析 SystemInfo JSON 获取操作系统
+	if node.SystemInfo != "" {
+		var sysInfo model.NodeSystemInfo
+		if err := json.Unmarshal([]byte(node.SystemInfo), &sysInfo); err != nil {
+			logger.Warnf("解析设备系统信息失败: node_id=%d, err=%v", node.ID, err)
+		} else {
+			resp.DeviceOs = sysInfo.OS
+			if sysInfo.OSVersion != "" {
+				resp.DeviceOs = fmt.Sprintf("%s %s", sysInfo.OS, sysInfo.OSVersion)
+			}
+		}
+	}
+
+	// 4. 设备名称优先使用 Node.Name，其次使用 Hostname
+	resp.DeviceName = node.Name
+	if resp.DeviceName == "" {
+		resp.DeviceName = node.Hostname
+	}
+
+	logger.Debugf("用户设备信息查询成功: user_name=%s, display_name=%s, device_name=%s, device_os=%s",
+		req.UserName, resp.DisplayName, resp.DeviceName, resp.DeviceOs)
+
+	return resp, nil
 }

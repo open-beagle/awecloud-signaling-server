@@ -20,6 +20,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +29,18 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
+
+var (
+	// 版本信息（由 Agent 主程序设置）
+	version   = "dev"
+	buildDate = "unknown"
+)
+
+// SetVersionInfo 设置版本信息（由 Agent 主程序调用）
+func SetVersionInfo(ver, date string) {
+	version = ver
+	buildDate = date
+}
 
 // EndpointSSHPortBase Endpoint SSH 代理的起始端口
 // 每个 Endpoint 分配一个端口：50053, 50054, 50055, ...
@@ -41,6 +54,7 @@ type EndpointSSHProxy struct {
 	tsManager      *TailscaleManager
 	auditCollector *AuditCollector
 	permCache      *PermissionCache // 权限缓存
+	grpcClient     pb.AgentServiceClient // gRPC 客户端（用于查询用户设备信息）
 	sshConfig      *ssh.ServerConfig
 	hostKey        ssh.Signer
 
@@ -61,7 +75,7 @@ type EndpointSSHProxy struct {
 }
 
 // NewEndpointSSHProxy 创建 Endpoint SSH 代理
-func NewEndpointSSHProxy(endpointServer *EndpointServer, tsManager *TailscaleManager, auditCollector *AuditCollector, permCache *PermissionCache, stateDir string, parentCtx context.Context) (*EndpointSSHProxy, error) {
+func NewEndpointSSHProxy(endpointServer *EndpointServer, tsManager *TailscaleManager, auditCollector *AuditCollector, permCache *PermissionCache, grpcClient pb.AgentServiceClient, stateDir string, parentCtx context.Context) (*EndpointSSHProxy, error) {
 	// 加载或生成 Ed25519 主机密钥（持久化到 stateDir，避免重启后 Host Key 变化）
 	privKey, err := loadOrGenerateHostKey(stateDir)
 	if err != nil {
@@ -80,6 +94,7 @@ func NewEndpointSSHProxy(endpointServer *EndpointServer, tsManager *TailscaleMan
 		tsManager:      tsManager,
 		auditCollector: auditCollector,
 		permCache:      permCache,
+		grpcClient:     grpcClient,
 		hostKey:        hostKey,
 		portMap:        make(map[uint16]string),
 		nameMap:        make(map[string]uint16),
@@ -207,10 +222,17 @@ func (p *EndpointSSHProxy) HandleConn(ctx context.Context, conn net.Conn, endpoi
 
 	// 尝试通过 tsnet WhoIs 提取 Desktop 用户身份
 	clientUserName := ""
+	clientIP := ""
 	if p.tsManager != nil {
 		if lc, err := p.tsManager.LocalClient(); err == nil {
 			if whois, err := lc.WhoIs(ctx, conn.RemoteAddr().String()); err == nil && whois.UserProfile != nil {
 				clientUserName, _ = parseHeadscaleUserName(whois.UserProfile.LoginName)
+				// 提取 IP 地址（去掉端口号）
+				if addr, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
+					clientIP = addr
+				} else {
+					clientIP = conn.RemoteAddr().String()
+				}
 			}
 		}
 	}
@@ -282,7 +304,7 @@ func (p *EndpointSSHProxy) HandleConn(ctx context.Context, conn net.Conn, endpoi
 		}
 
 		// 处理 session（只处理第一个）
-		p.handleSession(ctx, channel, requests, endpointName, login)
+		p.handleSession(ctx, channel, requests, endpointName, login, clientUserName, clientIP)
 
 		// 会话结束，记录审计
 		if p.auditCollector != nil {
@@ -304,7 +326,7 @@ func (p *EndpointSSHProxy) HandleConn(ctx context.Context, conn net.Conn, endpoi
 
 // handleSession 处理 SSH session channel
 // 等待 pty-req 和 shell 请求，然后请求 Endpoint 开启 shell 并桥接 I/O
-func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channel, requests <-chan *ssh.Request, endpointName, login string) {
+func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channel, requests <-chan *ssh.Request, endpointName, login, clientUserName, clientIP string) {
 	defer channel.Close()
 
 	var rows, cols uint32 = 24, 80 // 默认终端大小
@@ -405,6 +427,14 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 		return
 	case <-ctx.Done():
 		return
+	}
+
+	// 显示 SSH 横幅（仅在交互式 shell 时显示，exec 模式不显示）
+	if execCommand == "" {
+		banner := p.buildSSHBanner(ctx, clientUserName, clientIP)
+		if banner != "" {
+			channel.Write([]byte(banner))
+		}
 	}
 
 	// 双向桥接：SSH channel ↔ gRPC Shell 流
@@ -512,4 +542,75 @@ func loadOrGenerateHostKey(stateDir string) (ed25519.PrivateKey, error) {
 
 	logger.Infof("[EndpointSSH] 已生成并保存 Host Key: %s", keyPath)
 	return privKey, nil
+}
+
+// buildSSHBanner 构建 SSH 登录横幅
+func (p *EndpointSSHProxy) buildSSHBanner(ctx context.Context, clientUserName, clientIP string) string {
+	if clientUserName == "" {
+		return "" // 无法获取客户端信息，不显示横幅
+	}
+
+	// 查询用户设备信息（通过 gRPC 调用 Server）
+	userInfo := p.queryUserDeviceInfo(ctx, clientUserName, clientIP)
+
+	// 构建横幅
+	var banner strings.Builder
+	banner.WriteString("================================================================\n")
+	banner.WriteString("           AWECloud Signaling - SSH Access\n")
+	banner.WriteString("================================================================\n")
+	banner.WriteString(fmt.Sprintf("  Version:      %s\n", version))
+	banner.WriteString(fmt.Sprintf("  Build Date:   %s\n", buildDate))
+	banner.WriteString(fmt.Sprintf("  Connect Time: %s\n", time.Now().Format("2006-01-02 15:04:05")))
+	banner.WriteString("----------------------------------------------------------------\n")
+
+	// Remote User 行
+	if userInfo != nil && userInfo.DisplayName != "" {
+		banner.WriteString(fmt.Sprintf("  Remote User:   %s , %s\n", clientUserName, userInfo.DisplayName))
+	} else {
+		banner.WriteString(fmt.Sprintf("  Remote User:   %s\n", clientUserName))
+	}
+
+	// Remote Device 行
+	deviceParts := []string{clientIP}
+	if userInfo != nil {
+		if userInfo.DeviceName != "" {
+			deviceParts = append(deviceParts, userInfo.DeviceName)
+		}
+		if userInfo.DeviceOs != "" {
+			deviceParts = append(deviceParts, userInfo.DeviceOs)
+		}
+	}
+	banner.WriteString(fmt.Sprintf("  Remote Device: %s\n", strings.Join(deviceParts, " , ")))
+
+	banner.WriteString("================================================================\n")
+	banner.WriteString("\n")
+
+	return banner.String()
+}
+
+// queryUserDeviceInfo 查询用户设备信息
+func (p *EndpointSSHProxy) queryUserDeviceInfo(ctx context.Context, userName, deviceIP string) *pb.GetUserDeviceInfoResponse {
+	if p.grpcClient == nil {
+		logger.Debugf("[EndpointSSH] gRPC 客户端未初始化，跳过用户设备信息查询")
+		return nil
+	}
+
+	// 设置超时
+	queryCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	// 调用 Server 的 GetUserDeviceInfo API
+	resp, err := p.grpcClient.GetUserDeviceInfo(queryCtx, &pb.GetUserDeviceInfoRequest{
+		UserName: userName,
+		DeviceIp: deviceIP,
+	})
+	if err != nil {
+		logger.Debugf("[EndpointSSH] 查询用户设备信息失败: user=%s, ip=%s, err=%v", userName, deviceIP, err)
+		return nil
+	}
+
+	logger.Debugf("[EndpointSSH] 查询用户设备信息成功: user=%s, display_name=%s, device_name=%s, device_os=%s",
+		userName, resp.DisplayName, resp.DeviceName, resp.DeviceOs)
+
+	return resp
 }

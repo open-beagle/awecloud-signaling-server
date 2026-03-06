@@ -31,6 +31,9 @@ service AgentService {
 
   // SVCProxy - K8S Service 代理（双向流，Desktop → Agent → K8S ClusterIP）
   rpc SVCProxy(stream SVCProxyData) returns (stream SVCProxyData);
+
+  // 获取用户设备信息（用于 SSH 横幅显示）
+  rpc GetUserDeviceInfo(GetUserDeviceInfoRequest) returns (GetUserDeviceInfoResponse);
 }
 
 // ============================================
@@ -404,5 +407,24 @@ message SVCProxyData {
   bool is_close = 6; // 是否为关闭通知
   string error = 7; // 错误信息（如有）
   // 删除 endpoint_name 字段（P10 重构：Agent 自动选择实现路径）
+}
+
+// ============================================
+// 获取用户设备信息（用于 SSH 横幅显示）
+// ============================================
+
+// GetUserDeviceInfoRequest 获取用户设备信息请求
+message GetUserDeviceInfoRequest {
+  string user_name = 1; // 用户名
+  string device_ip = 2; // 设备 IP（用于匹配具体设备）
+}
+
+// GetUserDeviceInfoResponse 获取用户设备信息响应
+message GetUserDeviceInfoResponse {
+  string user_name = 1; // 用户名
+  string display_name = 2; // 真实姓名（User.Alias，可能为空）
+  string device_name = 3; // 设备名称
+  string device_os = 4; // 操作系统
+  string device_ip = 5; // 设备 IP
 }
 
