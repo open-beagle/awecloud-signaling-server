@@ -244,49 +244,19 @@ func (c *PermissionCache) CheckEndpointSSHAccess(userName, endpointName string) 
 }
 
 // UpdateEndpointK8SAPIPermissions 从心跳响应更新 Endpoint K8SAPI 权限
+// 已废弃（P11 重构）：不再使用 Endpoint 级别权限，统一使用 Agent 级别权限
 func (c *PermissionCache) UpdateEndpointK8SAPIPermissions(perms []*pb.EndpointK8SAPIPermission) {
-	c.epK8SAPIMutex.Lock()
-	defer c.epK8SAPIMutex.Unlock()
-
-	newPerms := make(map[string][]*EndpointK8SAPIUserPermission)
-	for _, p := range perms {
-		newPerms[p.UserName] = append(newPerms[p.UserName], &EndpointK8SAPIUserPermission{
-			EndpointID:   p.EndpointId,
-			EndpointName: p.EndpointName,
-			K8SGroups:    p.K8SGroups,
-			Namespaces:   p.Namespaces,
-		})
-	}
-
-	c.epK8SAPIPermissions = newPerms
-	logger.Debugf("Endpoint K8SAPI 权限缓存已更新: %d 个用户", len(newPerms))
+	// 空实现，保留以兼容旧代码
+	logger.Debugf("UpdateEndpointK8SAPIPermissions 已废弃（P11 重构），忽略 %d 条权限", len(perms))
 }
 
 // CheckEndpointK8SAPIAccess 检查用户对某 Endpoint 的 K8SAPI 访问权限
+// 已废弃（P11 重构）：不再使用，统一使用 CheckK8SAccess
 // 返回: k8sGroups（Impersonation 分组）, allowed（是否允许）
 func (c *PermissionCache) CheckEndpointK8SAPIAccess(userName, endpointName string) ([]string, bool) {
-	c.epK8SAPIMutex.RLock()
-	defer c.epK8SAPIMutex.RUnlock()
-
-	perms, ok := c.epK8SAPIPermissions[userName]
-	if !ok {
-		return nil, false
-	}
-
-	var allK8SGroups []string
-	found := false
-	for _, p := range perms {
-		if p.EndpointName == endpointName {
-			found = true
-			allK8SGroups = mergeStringSlice(allK8SGroups, p.K8SGroups)
-		}
-	}
-
-	if !found {
-		return nil, false
-	}
-
-	return allK8SGroups, true
+	// 兼容旧代码：直接调用 Agent 级别权限检查
+	logger.Debugf("CheckEndpointK8SAPIAccess 已废弃（P11 重构），转发到 CheckK8SAccess")
+	return c.CheckK8SAccess(userName, "")
 }
 
 // UpdateEndpointK8SServicePermissions 从心跳响应更新 Endpoint K8SService 权限

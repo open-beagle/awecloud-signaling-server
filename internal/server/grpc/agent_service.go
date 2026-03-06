@@ -802,12 +802,13 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 	resp.EndpointSshPermissions = epSSHPerms
 
 	// 查询该 Agent 关联的 Endpoint K8SAPI 授权信息
-	epK8SAPIPerms := s.queryEndpointK8SAPIPermissions(ctx, agentID)
-	resp.EndpointK8SapiPermissions = epK8SAPIPerms
+	// P11 重构：Endpoint K8SAPI 权限已废弃，统一使用 Agent 级别权限
+	// 保留字段以兼容旧版本 Agent，但不再填充数据
+	resp.EndpointK8SapiPermissions = nil
 
-	// 查询该 Agent 关联的 Endpoint K8SService 授权信息
-	epK8SSvcPerms := s.queryEndpointK8SServicePermissions(ctx, agentID)
-	resp.EndpointK8SservicePermissions = epK8SSvcPerms
+	// P10 重构：Endpoint K8SService 权限已废弃，统一使用 Agent 级别权限
+	// 保留字段以兼容旧版本 Agent，但不再填充数据
+	resp.EndpointK8SservicePermissions = nil
 
 	// 查询该 Agent 关联的所有 Endpoint 能力开关配置（直接从数据库读取，不依赖权限列表）
 	var allEndpoints []model.Endpoint
