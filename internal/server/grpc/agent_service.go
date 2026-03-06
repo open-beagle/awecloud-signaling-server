@@ -797,6 +797,12 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		resp.K8SServicePermissions = k8sSvcPerms
 	}
 
+	// 查询该 Agent 下所有 Endpoint 的 SSH 授权信息（P12 简化：复用 Agent SSH 授权）
+	endpointSSHPerms := s.queryEndpointSSHPermissions(ctx, agentID)
+	if len(endpointSSHPerms) > 0 {
+		resp.EndpointSshPermissions = endpointSSHPerms
+	}
+
 	// 查询该 Agent 关联的 Endpoint K8SAPI 授权信息
 	// P11 重构：Endpoint K8SAPI 权限已废弃，统一使用 Agent 级别权限
 	// 保留字段以兼容旧版本 Agent，但不再填充数据
@@ -963,6 +969,94 @@ func (s *AgentServiceServer) queryK8SServicePermissions(ctx context.Context, age
 			})
 		}
 	}
+
+	return result
+}
+
+// queryEndpointSSHPermissions 查询 Agent 下所有 Endpoint 的 SSH 授权列表
+// P12 简化：Endpoint SSH 复用 Agent SSH 授权
+// 用户如果有权限 SSH 到某个 Agent，就自动有权限 SSH 到该 Agent 下的所有 Endpoint
+func (s *AgentServiceServer) queryEndpointSSHPermissions(ctx context.Context, agentID uint64) []*pb.EndpointSSHPermission {
+	var result []*pb.EndpointSSHPermission
+
+	// 1. 查询该 Agent 下的所有 Endpoint
+	var endpoints []model.Endpoint
+	if err := db.DB.WithContext(ctx).
+		Where("user_id = ?", agentID).
+		Find(&endpoints).Error; err != nil {
+		logger.Errorf("查询 Endpoint 列表失败: agent_id=%d, err=%v", agentID, err)
+		return nil
+	}
+
+	if len(endpoints) == 0 {
+		return nil
+	}
+
+	// 2. 查询 Agent SSH 用户授权
+	var userPerms []model.AclSSHUserPermission
+	if err := db.DB.WithContext(ctx).Preload("User").
+		Where("target_user_id = ? AND enabled = ?", agentID, true).
+		Find(&userPerms).Error; err != nil {
+		logger.Errorf("查询 SSH 用户授权失败: %v", err)
+		return nil
+	}
+
+	// 3. 查询 Agent SSH 分组授权
+	var groupPerms []model.AclSSHGroupPermission
+	if err := db.DB.WithContext(ctx).
+		Where("target_user_id = ? AND enabled = ?", agentID, true).
+		Find(&groupPerms).Error; err != nil {
+		logger.Errorf("查询 SSH 分组授权失败: %v", err)
+		return nil
+	}
+
+	// 4. 为每个 Endpoint 构建权限列表
+	for _, endpoint := range endpoints {
+		// 4.1 添加用户授权
+		for _, p := range userPerms {
+			if p.User == nil {
+				continue
+			}
+			result = append(result, &pb.EndpointSSHPermission{
+				EndpointId:   endpoint.ID,
+				EndpointName: endpoint.Name,
+				UserId:       p.UserID,
+				UserName:     p.User.Name,
+				SshUsers:     parseJSONStringArray(p.SSHUsers),
+				IsGroup:      false,
+			})
+		}
+
+		// 4.2 添加分组授权（展开分组成员）
+		for _, gp := range groupPerms {
+			sshUsers := parseJSONStringArray(gp.SSHUsers)
+
+			var members []model.GroupMember
+			if err := db.DB.WithContext(ctx).Preload("User").
+				Where("group_id = ?", gp.GroupID).
+				Find(&members).Error; err != nil {
+				logger.Errorf("查询分组成员失败: group_id=%d, err=%v", gp.GroupID, err)
+				continue
+			}
+
+			for _, m := range members {
+				if m.User == nil {
+					continue
+				}
+				result = append(result, &pb.EndpointSSHPermission{
+					EndpointId:   endpoint.ID,
+					EndpointName: endpoint.Name,
+					UserId:       m.UserID,
+					UserName:     m.User.Name,
+					SshUsers:     sshUsers,
+					IsGroup:      true,
+				})
+			}
+		}
+	}
+
+	logger.Debugf("[queryEndpointSSHPermissions] agent_id=%d, endpoints=%d, permissions=%d",
+		agentID, len(endpoints), len(result))
 
 	return result
 }
