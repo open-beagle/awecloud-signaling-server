@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -37,9 +38,12 @@ func InitLogrus(level string, logFile string) error {
 
 	// 设置日志输出
 	if logFile != "" {
-		// 创建日志目录
-		if err := os.MkdirAll("logs", 0755); err != nil {
-			return err
+		// 创建日志目录（从日志文件路径中提取目录）
+		logDir := filepath.Dir(logFile)
+		if logDir != "" && logDir != "." && logDir != "/" {
+			if err := os.MkdirAll(logDir, 0755); err != nil {
+				return err
+			}
 		}
 
 		// 创建轮转日志Writer

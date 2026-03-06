@@ -113,7 +113,9 @@ endpoint_k8sservice:
 | created_at | time   |                                |                       |
 | updated_at | time   |                                |                       |
 
-### 新增 ACL 表（10 张）
+### 新增 ACL 表（8 张）
+
+P12 简化：删除 Endpoint SSH 授权表（2 张），从 10 张减少到 8 张。
 
 第 3 层 — AgentK8SAPI 授权（2 张）：
 
@@ -163,19 +165,11 @@ acl_k8s_service_group_permission:
 | service_pattern | string | NOT NULL                     | Service 名称模式            |
 | granted_at      | time   |                              | 授权时间                    |
 
-第 4 层 — Endpoint 授权（6 张）：
+第 4 层 — Endpoint 授权（4 张）：
 
-三种 Endpoint 类型 × 用户/分组 = 6 张表，结构对称。
+P12 简化：Endpoint SSH 不再有独立授权表，直接复用 Agent SSH 授权（acl*ssh*\*\_permission）。
 
-acl_ssh_jump_user_permission / acl_ssh_jump_group_permission:
-
-| 字段             | 类型         | 约束                           | 说明                           |
-| ---------------- | ------------ | ------------------------------ | ------------------------------ |
-| id               | int64        | PK                             | 主键                           |
-| endpoint_ssh_id  | string       | NOT NULL, INDEX, UNIQUE(e,u/g) | 目标 EndpointSSH ID            |
-| user_id/group_id | uint64/int64 | NOT NULL, INDEX, UNIQUE(e,u/g) | 被授权用户/分组                |
-| ssh_users        | string       | NOT NULL                       | 允许的 Linux 用户（JSON 数组） |
-| granted_at       | time         |                                | 授权时间                       |
+两种 Endpoint 类型（K8SAPI、K8SService）× 用户/分组 = 4 张表，结构对称。
 
 acl_k8sapi_jump_user_permission / acl_k8sapi_jump_group_permission:
 
@@ -253,12 +247,12 @@ operation_audit_log:
 | 身份与设备 | 5    | 0    | 5    |
 | 认证       | 3    | 0    | 3    |
 | 服务       | 3    | 0    | 3    |
-| ACL        | 8    | 10   | 18   |
+| ACL        | 8    | 8    | 16   |
 | Endpoint   | 0    | 3    | 3    |
 | 域名       | 0    | 1    | 1    |
 | 审计       | 1    | 1    | 2    |
 | 辅助       | 3    | 0    | 3    |
-| 合计       | 23   | 15   | 38   |
+| 合计       | 23   | 13   | 36   |
 
 ## 迁移策略
 
@@ -268,4 +262,4 @@ GORM AutoMigrate 自动创建新表，现有表不做结构变更。
 
 1. P0 — domain_registry（域名体系依赖）
 2. P1 — acl*k8s*\*\_permission（4 张，AgentK8SAPI/K8S Service 授权）
-3. P2 — endpoint*\*（3 张）+ acl*_*jump*_\_permission（6 张）+ operation_audit_log
+3. P2 — endpoint*\*（3 张）+ acl*_*jump*_\_permission（4 张，P12 简化后）+ operation_audit_log

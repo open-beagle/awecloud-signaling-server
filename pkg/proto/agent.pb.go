@@ -1721,91 +1721,6 @@ func (x *K8SServicePermission) GetIsGroup() bool {
 	return false
 }
 
-// EndpointSSHPermission Endpoint SSH 授权信息（心跳响应下发给 Agent）
-type EndpointSSHPermission struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	EndpointId    string                 `protobuf:"bytes,1,opt,name=endpoint_id,json=endpointId,proto3" json:"endpoint_id,omitempty"`       // Endpoint ID
-	EndpointName  string                 `protobuf:"bytes,2,opt,name=endpoint_name,json=endpointName,proto3" json:"endpoint_name,omitempty"` // Endpoint 名称
-	UserId        uint64                 `protobuf:"varint,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`                  // 被授权用户 ID
-	UserName      string                 `protobuf:"bytes,4,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`             // 被授权用户名
-	SshUsers      []string               `protobuf:"bytes,5,rep,name=ssh_users,json=sshUsers,proto3" json:"ssh_users,omitempty"`             // 允许的 SSH 登录用户名
-	IsGroup       bool                   `protobuf:"varint,6,opt,name=is_group,json=isGroup,proto3" json:"is_group,omitempty"`               // 是否来自分组授权
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *EndpointSSHPermission) Reset() {
-	*x = EndpointSSHPermission{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[18]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *EndpointSSHPermission) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*EndpointSSHPermission) ProtoMessage() {}
-
-func (x *EndpointSSHPermission) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[18]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use EndpointSSHPermission.ProtoReflect.Descriptor instead.
-func (*EndpointSSHPermission) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{18}
-}
-
-func (x *EndpointSSHPermission) GetEndpointId() string {
-	if x != nil {
-		return x.EndpointId
-	}
-	return ""
-}
-
-func (x *EndpointSSHPermission) GetEndpointName() string {
-	if x != nil {
-		return x.EndpointName
-	}
-	return ""
-}
-
-func (x *EndpointSSHPermission) GetUserId() uint64 {
-	if x != nil {
-		return x.UserId
-	}
-	return 0
-}
-
-func (x *EndpointSSHPermission) GetUserName() string {
-	if x != nil {
-		return x.UserName
-	}
-	return ""
-}
-
-func (x *EndpointSSHPermission) GetSshUsers() []string {
-	if x != nil {
-		return x.SshUsers
-	}
-	return nil
-}
-
-func (x *EndpointSSHPermission) GetIsGroup() bool {
-	if x != nil {
-		return x.IsGroup
-	}
-	return false
-}
-
 // EndpointK8SAPIPermission Endpoint K8SAPI 授权信息（心跳响应下发给 Agent）
 type EndpointK8SAPIPermission struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1823,7 +1738,7 @@ type EndpointK8SAPIPermission struct {
 
 func (x *EndpointK8SAPIPermission) Reset() {
 	*x = EndpointK8SAPIPermission{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[19]
+	mi := &file_pkg_proto_agent_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1835,7 +1750,7 @@ func (x *EndpointK8SAPIPermission) String() string {
 func (*EndpointK8SAPIPermission) ProtoMessage() {}
 
 func (x *EndpointK8SAPIPermission) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[19]
+	mi := &file_pkg_proto_agent_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1848,7 +1763,7 @@ func (x *EndpointK8SAPIPermission) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EndpointK8SAPIPermission.ProtoReflect.Descriptor instead.
 func (*EndpointK8SAPIPermission) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{19}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *EndpointK8SAPIPermission) GetEndpointId() string {
@@ -1923,7 +1838,7 @@ type EndpointK8SServicePermission struct {
 
 func (x *EndpointK8SServicePermission) Reset() {
 	*x = EndpointK8SServicePermission{}
-	mi := &file_pkg_proto_agent_proto_msgTypes[20]
+	mi := &file_pkg_proto_agent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1935,7 +1850,7 @@ func (x *EndpointK8SServicePermission) String() string {
 func (*EndpointK8SServicePermission) ProtoMessage() {}
 
 func (x *EndpointK8SServicePermission) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_agent_proto_msgTypes[20]
+	mi := &file_pkg_proto_agent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1948,7 +1863,7 @@ func (x *EndpointK8SServicePermission) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EndpointK8SServicePermission.ProtoReflect.Descriptor instead.
 func (*EndpointK8SServicePermission) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{20}
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *EndpointK8SServicePermission) GetEndpointId() string {
@@ -1994,6 +1909,91 @@ func (x *EndpointK8SServicePermission) GetServiceNames() []string {
 }
 
 func (x *EndpointK8SServicePermission) GetIsGroup() bool {
+	if x != nil {
+		return x.IsGroup
+	}
+	return false
+}
+
+// EndpointSSHPermission Endpoint SSH 授权信息（心跳响应下发给 Agent）
+type EndpointSSHPermission struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EndpointId    string                 `protobuf:"bytes,1,opt,name=endpoint_id,json=endpointId,proto3" json:"endpoint_id,omitempty"`       // Endpoint ID
+	EndpointName  string                 `protobuf:"bytes,2,opt,name=endpoint_name,json=endpointName,proto3" json:"endpoint_name,omitempty"` // Endpoint 名称
+	UserId        uint64                 `protobuf:"varint,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`                  // 被授权用户 ID
+	UserName      string                 `protobuf:"bytes,4,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`             // 被授权用户名
+	SshUsers      []string               `protobuf:"bytes,5,rep,name=ssh_users,json=sshUsers,proto3" json:"ssh_users,omitempty"`             // 允许的 SSH 用户列表（空表示全部）
+	IsGroup       bool                   `protobuf:"varint,6,opt,name=is_group,json=isGroup,proto3" json:"is_group,omitempty"`               // 是否来自分组授权
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EndpointSSHPermission) Reset() {
+	*x = EndpointSSHPermission{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EndpointSSHPermission) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EndpointSSHPermission) ProtoMessage() {}
+
+func (x *EndpointSSHPermission) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EndpointSSHPermission.ProtoReflect.Descriptor instead.
+func (*EndpointSSHPermission) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *EndpointSSHPermission) GetEndpointId() string {
+	if x != nil {
+		return x.EndpointId
+	}
+	return ""
+}
+
+func (x *EndpointSSHPermission) GetEndpointName() string {
+	if x != nil {
+		return x.EndpointName
+	}
+	return ""
+}
+
+func (x *EndpointSSHPermission) GetUserId() uint64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *EndpointSSHPermission) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
+}
+
+func (x *EndpointSSHPermission) GetSshUsers() []string {
+	if x != nil {
+		return x.SshUsers
+	}
+	return nil
+}
+
+func (x *EndpointSSHPermission) GetIsGroup() bool {
 	if x != nil {
 		return x.IsGroup
 	}
@@ -2986,15 +2986,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"namespaces\x18\x03 \x03(\tR\n" +
 	"namespaces\x12#\n" +
 	"\rservice_names\x18\x04 \x03(\tR\fserviceNames\x12\x19\n" +
-	"\bis_group\x18\x05 \x01(\bR\aisGroup\"\xcb\x01\n" +
-	"\x15EndpointSSHPermission\x12\x1f\n" +
-	"\vendpoint_id\x18\x01 \x01(\tR\n" +
-	"endpointId\x12#\n" +
-	"\rendpoint_name\x18\x02 \x01(\tR\fendpointName\x12\x17\n" +
-	"\auser_id\x18\x03 \x01(\x04R\x06userId\x12\x1b\n" +
-	"\tuser_name\x18\x04 \x01(\tR\buserName\x12\x1b\n" +
-	"\tssh_users\x18\x05 \x03(\tR\bsshUsers\x12\x19\n" +
-	"\bis_group\x18\x06 \x01(\bR\aisGroup\"\x8f\x02\n" +
+	"\bis_group\x18\x05 \x01(\bR\aisGroup\"\x8f\x02\n" +
 	"\x18EndpointK8SAPIPermission\x12\x1f\n" +
 	"\vendpoint_id\x18\x01 \x01(\tR\n" +
 	"endpointId\x12#\n" +
@@ -3019,7 +3011,15 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"namespaces\x18\x05 \x03(\tR\n" +
 	"namespaces\x12#\n" +
 	"\rservice_names\x18\x06 \x03(\tR\fserviceNames\x12\x19\n" +
-	"\bis_group\x18\a \x01(\bR\aisGroup\"\xf6\x01\n" +
+	"\bis_group\x18\a \x01(\bR\aisGroup\"\xcb\x01\n" +
+	"\x15EndpointSSHPermission\x12\x1f\n" +
+	"\vendpoint_id\x18\x01 \x01(\tR\n" +
+	"endpointId\x12#\n" +
+	"\rendpoint_name\x18\x02 \x01(\tR\fendpointName\x12\x17\n" +
+	"\auser_id\x18\x03 \x01(\x04R\x06userId\x12\x1b\n" +
+	"\tuser_name\x18\x04 \x01(\tR\buserName\x12\x1b\n" +
+	"\tssh_users\x18\x05 \x03(\tR\bsshUsers\x12\x19\n" +
+	"\bis_group\x18\x06 \x01(\bR\aisGroup\"\xf6\x01\n" +
 	"\x14OperationAuditRecord\x12(\n" +
 	"\x10client_user_name\x18\x01 \x01(\tR\x0eclientUserName\x12#\n" +
 	"\rendpoint_name\x18\x02 \x01(\tR\fendpointName\x12%\n" +
@@ -3127,9 +3127,9 @@ var file_pkg_proto_agent_proto_goTypes = []any{
 	(*AgentCapabilityConfig)(nil),        // 15: awecloud.signaling.AgentCapabilityConfig
 	(*K8SPermission)(nil),                // 16: awecloud.signaling.K8SPermission
 	(*K8SServicePermission)(nil),         // 17: awecloud.signaling.K8SServicePermission
-	(*EndpointSSHPermission)(nil),        // 18: awecloud.signaling.EndpointSSHPermission
-	(*EndpointK8SAPIPermission)(nil),     // 19: awecloud.signaling.EndpointK8SAPIPermission
-	(*EndpointK8SServicePermission)(nil), // 20: awecloud.signaling.EndpointK8SServicePermission
+	(*EndpointK8SAPIPermission)(nil),     // 18: awecloud.signaling.EndpointK8SAPIPermission
+	(*EndpointK8SServicePermission)(nil), // 19: awecloud.signaling.EndpointK8SServicePermission
+	(*EndpointSSHPermission)(nil),        // 20: awecloud.signaling.EndpointSSHPermission
 	(*OperationAuditRecord)(nil),         // 21: awecloud.signaling.OperationAuditRecord
 	(*GetRealtimeStatusRequest)(nil),     // 22: awecloud.signaling.GetRealtimeStatusRequest
 	(*GetRealtimeStatusResponse)(nil),    // 23: awecloud.signaling.GetRealtimeStatusResponse
@@ -3162,9 +3162,9 @@ var file_pkg_proto_agent_proto_depIdxs = []int32{
 	16, // 13: awecloud.signaling.AgentHeartbeatResponse.k8s_permissions:type_name -> awecloud.signaling.K8SPermission
 	17, // 14: awecloud.signaling.AgentHeartbeatResponse.k8s_service_permissions:type_name -> awecloud.signaling.K8SServicePermission
 	15, // 15: awecloud.signaling.AgentHeartbeatResponse.capability_config:type_name -> awecloud.signaling.AgentCapabilityConfig
-	18, // 16: awecloud.signaling.AgentHeartbeatResponse.endpoint_ssh_permissions:type_name -> awecloud.signaling.EndpointSSHPermission
-	19, // 17: awecloud.signaling.AgentHeartbeatResponse.endpoint_k8sapi_permissions:type_name -> awecloud.signaling.EndpointK8SAPIPermission
-	20, // 18: awecloud.signaling.AgentHeartbeatResponse.endpoint_k8sservice_permissions:type_name -> awecloud.signaling.EndpointK8SServicePermission
+	20, // 16: awecloud.signaling.AgentHeartbeatResponse.endpoint_ssh_permissions:type_name -> awecloud.signaling.EndpointSSHPermission
+	18, // 17: awecloud.signaling.AgentHeartbeatResponse.endpoint_k8sapi_permissions:type_name -> awecloud.signaling.EndpointK8SAPIPermission
+	19, // 18: awecloud.signaling.AgentHeartbeatResponse.endpoint_k8sservice_permissions:type_name -> awecloud.signaling.EndpointK8SServicePermission
 	14, // 19: awecloud.signaling.AgentHeartbeatResponse.endpoint_capability_configs:type_name -> awecloud.signaling.EndpointCapabilityConfig
 	1,  // 20: awecloud.signaling.GetRealtimeStatusResponse.networks:type_name -> awecloud.signaling.NetworkInterface
 	24, // 21: awecloud.signaling.ReportProxyStatusRequest.statuses:type_name -> awecloud.signaling.ProxyStatus

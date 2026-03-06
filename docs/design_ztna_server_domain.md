@@ -108,6 +108,7 @@
 - region：Agent User 的名称（Endpoint 所属的 Agent User）
 - endpoint_id：Endpoint 名称（如 beagle-002）
 - node_id：Endpoint 连接到的 Agent Node ID（连接后填充）
+- 授权：P12 简化，复用 Agent SSH 授权（acl_ssh_*_permission）
 ```
 
 #### 规则 5：Endpoint K8S API 域名

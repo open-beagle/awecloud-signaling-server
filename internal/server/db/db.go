@@ -142,10 +142,6 @@ func autoMigrate() error {
 		// Endpoint 模型（统一表）
 		&model.Endpoint{},
 
-		// ACL Endpoint SSH 授权模型
-		&model.AclEndpointSSHUserPermission{},
-		&model.AclEndpointSSHGroupPermission{},
-
 		// 操作级审计日志
 		&model.OperationAuditLog{},
 	)

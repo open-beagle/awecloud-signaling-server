@@ -797,10 +797,6 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		resp.K8SServicePermissions = k8sSvcPerms
 	}
 
-	// 查询该 Agent 关联的 Endpoint SSH 授权信息
-	epSSHPerms := s.queryEndpointSSHPermissions(ctx, agentID)
-	resp.EndpointSshPermissions = epSSHPerms
-
 	// 查询该 Agent 关联的 Endpoint K8SAPI 授权信息
 	// P11 重构：Endpoint K8SAPI 权限已废弃，统一使用 Agent 级别权限
 	// 保留字段以兼容旧版本 Agent，但不再填充数据
@@ -1592,109 +1588,6 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 	}
 
 	logger.Infof("Agent Endpoint 上报完成: agent_id=%d, count=%d", agentID, len(reportedNames))
-}
-
-// queryEndpointSSHPermissions 查询 Agent 关联的 Endpoint SSH 授权列表
-func (s *AgentServiceServer) queryEndpointSSHPermissions(ctx context.Context, agentID uint64) []*pb.EndpointSSHPermission {
-	var result []*pb.EndpointSSHPermission
-
-	// 视角1（服务提供方）：查询属于当前 Agent 的 Endpoint，收集其授权用户列表
-	// 适用场景：unicom-08 Agent 拥有 beagle-002 Endpoint，向 Desktop/CloudIDE 用户提供 SSH 服务
-	var endpoints []model.Endpoint
-	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ? AND status = ? AND ssh_enabled = ?", agentID, false, "online", true).Find(&endpoints).Error; err != nil {
-		return nil
-	}
-
-	for _, ep := range endpoints {
-		// 查询用户授权
-		var userPerms []model.AclEndpointSSHUserPermission
-		if err := db.DB.WithContext(ctx).Preload("User").
-			Where("endpoint_id = ? AND enabled = ?", ep.ID, true).
-			Find(&userPerms).Error; err != nil {
-			continue
-		}
-		for _, p := range userPerms {
-			if p.User == nil {
-				continue
-			}
-			result = append(result, &pb.EndpointSSHPermission{
-				EndpointId:   ep.ID,
-				EndpointName: ep.Name,
-				UserId:       p.UserID,
-				UserName:     p.User.Name,
-				SshUsers:     parseJSONStringArray(p.SSHUsers),
-				IsGroup:      false,
-			})
-		}
-
-		// 查询分组授权，展开成员
-		var groupPerms []model.AclEndpointSSHGroupPermission
-		if err := db.DB.WithContext(ctx).
-			Where("endpoint_id = ? AND enabled = ?", ep.ID, true).
-			Find(&groupPerms).Error; err != nil {
-			continue
-		}
-		for _, gp := range groupPerms {
-			sshUsers := parseJSONStringArray(gp.SSHUsers)
-			var members []model.GroupMember
-			if err := db.DB.WithContext(ctx).Preload("User").
-				Where("group_id = ?", gp.GroupID).Find(&members).Error; err != nil {
-				continue
-			}
-			for _, m := range members {
-				if m.User == nil {
-					continue
-				}
-				result = append(result, &pb.EndpointSSHPermission{
-					EndpointId:   ep.ID,
-					EndpointName: ep.Name,
-					UserId:       m.UserID,
-					UserName:     m.User.Name,
-					SshUsers:     sshUsers,
-					IsGroup:      true,
-				})
-			}
-		}
-	}
-
-	// 视角2（访问方）：查询当前 Agent 的 User 被直接授权访问的 Endpoint SSH 服务
-	// 适用场景：CloudIDE Agent 自身作为访问方，被授权访问其他 Agent 的 Endpoint SSH
-	var selfPerms []model.AclEndpointSSHUserPermission
-	if err := db.DB.WithContext(ctx).Preload("Endpoint").
-		Where("user_id = ? AND enabled = ?", agentID, true).
-		Find(&selfPerms).Error; err == nil {
-		for _, p := range selfPerms {
-			if p.Endpoint == nil || p.Endpoint.Revoked || p.Endpoint.Status != "online" || !p.Endpoint.SSHEnabled {
-				continue
-			}
-			// 避免重复（已在视角1中处理的 Endpoint 跳过）
-			alreadyAdded := false
-			for _, ep := range endpoints {
-				if ep.ID == p.EndpointID {
-					alreadyAdded = true
-					break
-				}
-			}
-			if alreadyAdded {
-				continue
-			}
-			// 查询当前 Agent 的 User 名称
-			var selfUser model.User
-			if err := db.DB.WithContext(ctx).First(&selfUser, agentID).Error; err != nil {
-				continue
-			}
-			result = append(result, &pb.EndpointSSHPermission{
-				EndpointId:   p.EndpointID,
-				EndpointName: p.Endpoint.Name,
-				UserId:       agentID,
-				UserName:     selfUser.Name,
-				SshUsers:     parseJSONStringArray(p.SSHUsers),
-				IsGroup:      false,
-			})
-		}
-	}
-
-	return result
 }
 
 // queryEndpointK8SAPIPermissions 查询 Agent 关联的 Endpoint K8SAPI 授权列表

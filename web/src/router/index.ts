@@ -60,23 +60,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Endpoint/Detail.vue'),
         meta: { requiresAuth: true }
       },
-      // 兼容旧路由
-      {
-        path: 'endpoints/:type/:id',
-        redirect: to => `/endpoints/${to.params.id}`
-      },
-      {
-        path: 'endpoints/ssh',
-        redirect: '/endpoints?type=ssh'
-      },
-      {
-        path: 'endpoints/k8s',
-        redirect: '/endpoints?type=k8sapi'
-      },
-      {
-        path: 'endpoints/svc',
-        redirect: '/endpoints?type=k8sservice'
-      },
       // 分组管理
       {
         path: 'groups',
@@ -179,41 +162,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ACL/K8SServiceDetail.vue'),
         meta: { requiresAuth: true }
       },
-      // Endpoint SSH 授权
-      {
-        path: 'acl/endpoint-ssh',
-        name: 'ACLEndpointSSH',
-        component: () => import('@/views/ACL/EndpointSSHList.vue'),
-        meta: { requiresAuth: true }
-      },
-      {
-        path: 'acl/endpoint-ssh/:id',
-        name: 'ACLEndpointSSHDetail',
-        component: () => import('@/views/ACL/EndpointSSHDetail.vue'),
-        meta: { requiresAuth: true }
-      },
-      // Endpoint K8SAPI 授权（P9：列表页合并到 /acl/k8s，仅保留详情页）
-      {
-        path: 'acl/endpoint-k8sapi',
-        redirect: '/acl/k8s'
-      },
-      {
-        path: 'acl/endpoint-k8sapi/:id',
-        name: 'ACLEndpointK8SDetail',
-        component: () => import('@/views/ACL/EndpointK8SDetail.vue'),
-        meta: { requiresAuth: true }
-      },
-      // Endpoint K8SService 授权（P9：列表页合并到 /acl/k8s-service，仅保留详情页）
-      {
-        path: 'acl/endpoint-k8sservice',
-        redirect: '/acl/k8s-service'
-      },
-      {
-        path: 'acl/endpoint-k8sservice/:id',
-        name: 'ACLEndpointK8SServiceDetail',
-        component: () => import('@/views/ACL/EndpointK8SServiceDetail.vue'),
-        meta: { requiresAuth: true }
-      },
       // 隧道管理（保留旧路由）
       {
         path: 'tunnel/users',
@@ -259,51 +207,6 @@ const routes: RouteRecordRaw[] = [
         name: 'SystemConfig',
         component: () => import('@/views/System/Config.vue'),
         meta: { requiresAuth: true }
-      },
-      // 旧路由重定向（兼容）
-      {
-        path: 'agents',
-        redirect: '/users?role=agent'
-      },
-      {
-        path: 'agents/:identifier',
-        redirect: to => `/users/${to.params.identifier}`
-      },
-      {
-        path: 'clients',
-        redirect: '/users?role=client'
-      },
-      {
-        path: 'clients/:identifier',
-        redirect: to => `/users/${to.params.identifier}`
-      },
-      {
-        path: 'groups/clients',
-        redirect: '/groups'
-      },
-      {
-        path: 'groups/agents',
-        redirect: '/groups'
-      },
-      {
-        path: 'ssh',
-        redirect: '/acl/ssh'
-      },
-      {
-        path: 'service-auth/desktop',
-        redirect: '/acl/services'
-      },
-      {
-        path: 'service-auth/agent',
-        redirect: '/acl/services'
-      },
-      {
-        path: 'agent-auth/desktop',
-        redirect: '/acl/users'
-      },
-      {
-        path: 'agent-auth/agent',
-        redirect: '/acl/users'
       }
     ]
   }

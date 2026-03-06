@@ -124,7 +124,7 @@ Desktop.Host 特有的 GUI 功能，展示用户可访问的所有资源：
 │  │   ├── 🗄 pg.yygl.beijing.beagle                 │    │
 │  │   │     PostgreSQL (5432)  ● 在线            │    │
 │  │   ├── 🖥 web-server-1.beijing.beagle            │    │
-│  │   │     EndpointSSH (22)  ● 在线             │    │
+│  │   │     EndpointSSH (22)  ● 在线（P12：复用 Agent SSH 授权） │    │
 │  │   └── 🔧 kubernetes.beijing-prod.beijing.beagle        │    │
 │  │         EndpointK8SAPI (50050)  ● 在线       │    │
 │  └─────────────────────────────────────────────┘    │
@@ -135,13 +135,13 @@ Desktop.Host 特有的 GUI 功能，展示用户可访问的所有资源：
 
 ### 连接操作
 
-| 资源类型        | 操作                             |
-| --------------- | -------------------------------- |
-| AgentSSH        | 复制 ssh 命令 / 打开终端直接连接 |
-| EndpointSSH     | 复制 ssh 命令                    |
-| AgentK8SService | 复制连接字符串 / 显示 VIP 地址   |
-| AgentK8SAPI     | 复制 kubeconfig 配置             |
-| EndpointK8SAPI  | 复制 kubeconfig 配置             |
+| 资源类型        | 操作                                      |
+| --------------- | ----------------------------------------- |
+| AgentSSH        | 复制 ssh 命令 / 打开终端直接连接          |
+| EndpointSSH     | 复制 ssh 命令（P12：复用 Agent SSH 授权） |
+| AgentK8SService | 复制连接字符串 / 显示 VIP 地址            |
+| AgentK8SAPI     | 复制 kubeconfig 配置                      |
+| EndpointK8SAPI  | 复制 kubeconfig 配置                      |
 
 ## K8S API 访问流程
 

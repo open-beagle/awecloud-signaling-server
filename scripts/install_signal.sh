@@ -19,7 +19,6 @@ AGENT_VERSION="${SIGNAL_VERSION:-}"  # 留空则自动获取最新版本
 
 BIN_DIR="$HOME/.local/bin"
 DATA_DIR="$HOME/.local/share/signal"
-LOG_DIR="$DATA_DIR/logs"
 
 # === 1. 停止旧进程 ===
 echo "=========================================="
@@ -43,7 +42,7 @@ else
 fi
 
 # === 2. 创建目录 ===
-mkdir -p "$BIN_DIR" "$DATA_DIR" "$LOG_DIR"
+mkdir -p "$BIN_DIR" "$DATA_DIR" "$DATA_DIR/logs"
 
 # === 3. 检测架构 ===
 LOCAL_ARCH=$(uname -m)
@@ -72,7 +71,7 @@ if [ -z "$AGENT_VERSION" ]; then
   fi
   
   if [ -n "$VERSION_RESPONSE" ]; then
-    AGENT_VERSION=$(echo "$VERSION_RESPONSE" | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || true)
+    AGENT_VERSION=$(echo "$VERSION_RESPONSE" | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || true)
   fi
   
   if [ -z "$AGENT_VERSION" ]; then
@@ -157,7 +156,7 @@ dial_socket = "/tmp/signaling.sock"
 
 [log]
 level = "$LOG_LEVEL"
-file = "$LOG_DIR/agent.log"
+file = "$DATA_DIR/logs/agent.log"
 EOF
 
 echo "[配置] 已生成: $CONFIG_FILE"
@@ -166,16 +165,16 @@ echo "[配置] 已生成: $CONFIG_FILE"
 echo "[启动] Server: $SIGNAL_SERVER"
 echo "[启动] Token: ${SIGNAL_TOKEN:0:16}..."
 # 注意：配置文件中已指定日志路径 log.file，nohup 重定向作为备份
-nohup sudo "$BIN_DIR/signal_agent" -c "$CONFIG_FILE" >> "$LOG_DIR/agent.log" 2>&1 &
+nohup sudo "$BIN_DIR/signal_agent" -c "$CONFIG_FILE" >> "$DATA_DIR/logs/agent.log" 2>&1 &
 AGENT_PID=$!
 
 sleep 3
 if ps -p "$AGENT_PID" > /dev/null 2>&1; then
   echo "[启动] ✓ Agent 运行正常 (PID: $AGENT_PID)"
   echo ""
-  echo "  日志: $LOG_DIR/agent.log"
+  echo "  日志: $DATA_DIR/logs/agent.log"
 else
   echo "[启动] ✗ 启动失败"
-  tail -n 20 "$LOG_DIR/agent.log" 2>/dev/null || true
+  tail -n 20 "$DATA_DIR/logs/agent.log" 2>/dev/null || true
   exit 1
 fi

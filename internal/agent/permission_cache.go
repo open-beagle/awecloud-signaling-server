@@ -26,23 +26,6 @@ type EndpointSSHUserPermission struct {
 	SSHUsers     []string // 允许的 SSH 登录用户名
 }
 
-// EndpointK8SAPIUserPermission 单个用户对某 Endpoint 的 K8SAPI 权限
-type EndpointK8SAPIUserPermission struct {
-	EndpointID   string   // Endpoint ID
-	EndpointName string   // Endpoint 名称
-	K8SGroups    []string // Impersonation 分组
-	Namespaces   []string // 允许的命名空间（空表示全部）
-}
-
-// EndpointK8SServiceUserPermission 单个用户对某 Endpoint 的 K8SService 权限
-// 已废弃（P10 重构）：统一使用 K8SServiceUserPermission
-type EndpointK8SServiceUserPermission struct {
-	EndpointID   string   // Endpoint ID
-	EndpointName string   // Endpoint 名称
-	Namespaces   []string // 允许的命名空间（空表示全部）
-	ServiceNames []string // 允许的 Service 名称（空表示全部）
-}
-
 // PermissionCache Agent 本地权限缓存
 // 从心跳响应中同步，供 K8SAPI 代理和 SVCProxy 鉴权使用
 type PermissionCache struct {
@@ -57,25 +40,14 @@ type PermissionCache struct {
 	// Endpoint SSH 权限：key = user_name, value = 按 endpoint_name 索引的权限列表
 	epSSHPermissions map[string][]*EndpointSSHUserPermission
 	epSSHMutex       sync.RWMutex
-
-	// Endpoint K8SAPI 权限：key = user_name
-	epK8SAPIPermissions map[string][]*EndpointK8SAPIUserPermission
-	epK8SAPIMutex       sync.RWMutex
-
-	// Endpoint K8SService 权限（已废弃，P10 重构）
-	// 保留字段以兼容旧代码，但不再使用
-	epK8SSvcPermissions map[string][]*EndpointK8SServiceUserPermission
-	epK8SSvcMutex       sync.RWMutex
 }
 
 // NewPermissionCache 创建权限缓存
 func NewPermissionCache() *PermissionCache {
 	return &PermissionCache{
-		k8sPermissions:      make(map[string]*K8SUserPermission),
-		k8sSvcPermissions:   make(map[string]*K8SServiceUserPermission),
-		epSSHPermissions:    make(map[string][]*EndpointSSHUserPermission),
-		epK8SAPIPermissions: make(map[string][]*EndpointK8SAPIUserPermission),
-		epK8SSvcPermissions: make(map[string][]*EndpointK8SServiceUserPermission),
+		k8sPermissions:    make(map[string]*K8SUserPermission),
+		k8sSvcPermissions: make(map[string]*K8SServiceUserPermission),
+		epSSHPermissions:  make(map[string][]*EndpointSSHUserPermission),
 	}
 }
 
@@ -252,37 +224,6 @@ func (c *PermissionCache) CheckEndpointSSHAccess(userName, endpointName string) 
 	}
 
 	return allSSHUsers, true
-}
-
-// UpdateEndpointK8SAPIPermissions 从心跳响应更新 Endpoint K8SAPI 权限
-// 已废弃（P11 重构）：不再使用 Endpoint 级别权限，统一使用 Agent 级别权限
-func (c *PermissionCache) UpdateEndpointK8SAPIPermissions(perms []*pb.EndpointK8SAPIPermission) {
-	// 空实现，保留以兼容旧代码
-	logger.Debugf("UpdateEndpointK8SAPIPermissions 已废弃（P11 重构），忽略 %d 条权限", len(perms))
-}
-
-// CheckEndpointK8SAPIAccess 检查用户对某 Endpoint 的 K8SAPI 访问权限
-// 已废弃（P11 重构）：不再使用，统一使用 CheckK8SAccess
-// 返回: k8sGroups（Impersonation 分组）, allowed（是否允许）
-func (c *PermissionCache) CheckEndpointK8SAPIAccess(userName, endpointName string) ([]string, bool) {
-	// 兼容旧代码：直接调用 Agent 级别权限检查
-	logger.Debugf("CheckEndpointK8SAPIAccess 已废弃（P11 重构），转发到 CheckK8SAccess")
-	return c.CheckK8SAccess(userName, "")
-}
-
-// UpdateEndpointK8SServicePermissions 从心跳响应更新 Endpoint K8SService 权限
-// 已废弃（P10 重构）：不再使用 Endpoint 级别权限，统一使用 Agent 级别权限
-func (c *PermissionCache) UpdateEndpointK8SServicePermissions(perms []*pb.EndpointK8SServicePermission) {
-	// 空实现，保留以兼容旧代码
-	logger.Debugf("UpdateEndpointK8SServicePermissions 已废弃（P10 重构），忽略 %d 条权限", len(perms))
-}
-
-// CheckEndpointK8SServiceAccess 检查用户对某 Endpoint 的 K8SService 访问权限
-// 已废弃（P10 重构）：不再使用，统一使用 CheckK8SServiceAccess
-func (c *PermissionCache) CheckEndpointK8SServiceAccess(userName, endpointName, namespace, serviceName string) bool {
-	// 兼容旧代码：直接调用 Agent 级别权限检查
-	logger.Debugf("CheckEndpointK8SServiceAccess 已废弃（P10 重构），转发到 CheckK8SServiceAccess")
-	return c.CheckK8SServiceAccess(userName, namespace, serviceName)
 }
 
 // mergeStringSlice 合并两个字符串切片，去重

@@ -822,8 +822,6 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 		a.permCache.UpdateK8SPermissions(resp.K8SPermissions)
 		a.permCache.UpdateK8SServicePermissions(resp.K8SServicePermissions)
 		a.permCache.UpdateEndpointSSHPermissions(resp.EndpointSshPermissions)
-		a.permCache.UpdateEndpointK8SAPIPermissions(resp.EndpointK8SapiPermissions)
-		a.permCache.UpdateEndpointK8SServicePermissions(resp.EndpointK8SservicePermissions)
 	}
 
 	// 同步 Endpoint 能力配置到 EndpointServer（让 Agent 能把 Server 配置下发给 Endpoint）

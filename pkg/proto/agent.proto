@@ -266,16 +266,6 @@ message K8SServicePermission {
   bool is_group = 5; // 是否来自分组授权
 }
 
-// EndpointSSHPermission Endpoint SSH 授权信息（心跳响应下发给 Agent）
-message EndpointSSHPermission {
-  string endpoint_id = 1; // Endpoint ID
-  string endpoint_name = 2; // Endpoint 名称
-  uint64 user_id = 3; // 被授权用户 ID
-  string user_name = 4; // 被授权用户名
-  repeated string ssh_users = 5; // 允许的 SSH 登录用户名
-  bool is_group = 6; // 是否来自分组授权
-}
-
 // EndpointK8SAPIPermission Endpoint K8SAPI 授权信息（心跳响应下发给 Agent）
 message EndpointK8SAPIPermission {
   string endpoint_id = 1; // Endpoint ID
@@ -297,6 +287,16 @@ message EndpointK8SServicePermission {
   repeated string namespaces = 5; // 允许的命名空间（空表示全部）
   repeated string service_names = 6; // 允许的 Service 名称（空表示全部）
   bool is_group = 7; // 是否来自分组授权
+}
+
+// EndpointSSHPermission Endpoint SSH 授权信息（心跳响应下发给 Agent）
+message EndpointSSHPermission {
+  string endpoint_id = 1; // Endpoint ID
+  string endpoint_name = 2; // Endpoint 名称
+  uint64 user_id = 3; // 被授权用户 ID
+  string user_name = 4; // 被授权用户名
+  repeated string ssh_users = 5; // 允许的 SSH 用户列表（空表示全部）
+  bool is_group = 6; // 是否来自分组授权
 }
 
 // OperationAuditRecord 操作审计记录（Agent 心跳上报）

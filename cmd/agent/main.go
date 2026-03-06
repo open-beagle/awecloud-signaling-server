@@ -153,9 +153,7 @@ func main() {
 
 	// 初始化日志
 	logFile := cfg.Log.File
-	if logFile == "" {
-		logFile = "logs/agent.log"
-	}
+	// 如果配置文件中没有指定日志文件，只输出到标准输出（不创建 logs 目录）
 	if err := logger.InitLogrus(cfg.Log.Level, logFile); err != nil {
 		log.Fatalf("初始化日志失败: %v", err)
 	}

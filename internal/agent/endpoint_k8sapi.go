@@ -228,7 +228,8 @@ func (p *EndpointK8SAPIProxy) handleHTTPRequest(w http.ResponseWriter, r *http.R
 	// 检查权限，获取 Impersonation 分组
 	var k8sGroups []string
 	if p.permCache != nil && clientUserName != "" {
-		groups, allowed := p.permCache.CheckEndpointK8SAPIAccess(clientUserName, endpointName)
+		// P11 重构：直接使用 Agent 级别权限检查（不再区分 Endpoint）
+		groups, allowed := p.permCache.CheckK8SAccess(clientUserName, "")
 		if !allowed {
 			logger.Warnf("[EndpointK8SAPI] 权限拒绝: user=%s, endpoint=%s", clientUserName, endpointName)
 			http.Error(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","message":"权限不足","reason":"Forbidden","code":403}`, http.StatusForbidden)
@@ -417,7 +418,8 @@ func (p *EndpointK8SAPIProxy) handleProtocolUpgrade(w http.ResponseWriter, r *ht
 	// 1. 检查权限
 	var k8sGroups []string
 	if p.permCache != nil && clientUserName != "" {
-		groups, allowed := p.permCache.CheckEndpointK8SAPIAccess(clientUserName, endpointName)
+		// P11 重构：直接使用 Agent 级别权限检查（不再区分 Endpoint）
+		groups, allowed := p.permCache.CheckK8SAccess(clientUserName, "")
 		if !allowed {
 			logger.Warnf("[EndpointK8SAPI] 协议升级权限拒绝: user=%s, endpoint=%s", clientUserName, endpointName)
 			http.Error(w, "权限不足", http.StatusForbidden)
