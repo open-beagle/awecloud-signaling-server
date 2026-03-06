@@ -187,77 +187,8 @@ func (a *ACLAPI) collectAgentK8SClusters(search string, clusterMap map[uint64]*K
 
 // collectEndpointK8SAPIClusters 收集由 Endpoint 提供 K8S API 的集群
 func (a *ACLAPI) collectEndpointK8SAPIClusters(search string, clusterMap map[uint64]*K8SUnifiedACLClusterItem) {
-	var endpoints []model.Endpoint
-	if err := db.DB.Model(&model.Endpoint{}).
-		Where("revoked = ? AND k8sapi_enabled = ?", false, true).
-		Preload("User").
-		Find(&endpoints).Error; err != nil {
-		return
-	}
-
-	if len(endpoints) == 0 {
-		return
-	}
-
-	endpointIDs := make([]string, len(endpoints))
-	for i, ep := range endpoints {
-		endpointIDs[i] = ep.ID
-	}
-
-	userCountMap := make(map[string]int64)
-	var userCounts []struct {
-		EndpointID string `gorm:"column:endpoint_id"`
-		Count      int64  `gorm:"column:count"`
-	}
-	db.DB.Model(&model.AclEndpointK8SAPIUserPermission{}).
-		Select("endpoint_id, COUNT(*) as count").
-		Where("endpoint_id IN ?", endpointIDs).
-		Group("endpoint_id").Find(&userCounts)
-	for _, uc := range userCounts {
-		userCountMap[uc.EndpointID] = uc.Count
-	}
-
-	groupCountMap := make(map[string]int64)
-	var groupCounts []struct {
-		EndpointID string `gorm:"column:endpoint_id"`
-		Count      int64  `gorm:"column:count"`
-	}
-	db.DB.Model(&model.AclEndpointK8SAPIGroupPermission{}).
-		Select("endpoint_id, COUNT(*) as count").
-		Where("endpoint_id IN ?", endpointIDs).
-		Group("endpoint_id").Find(&groupCounts)
-	for _, gc := range groupCounts {
-		groupCountMap[gc.EndpointID] = gc.Count
-	}
-
-	for _, ep := range endpoints {
-		if ep.User == nil {
-			continue
-		}
-		user := ep.User
-
-		if search != "" {
-			if !containsIgnoreCase(user.Name, search) && !containsIgnoreCase(user.Alias, search) {
-				continue
-			}
-		}
-
-		if _, exists := clusterMap[user.ID]; exists {
-			continue
-		}
-
-		clusterMap[user.ID] = &K8SUnifiedACLClusterItem{
-			ID:           user.ID,
-			Name:         user.Name,
-			Alias:        user.Alias,
-			ProviderType: "endpoint",
-			ProviderID:   ep.ID,
-			ProviderName: ep.Name, // 会被 fillK8SAPIProviderNames 覆盖为 "node / endpoint"
-			UserCount:    userCountMap[ep.ID],
-			GroupCount:   groupCountMap[ep.ID],
-			CreatedAt:    user.CreatedAt,
-		}
-	}
+	// P11 重构：Endpoint K8SAPI 权限已废弃，不再收集
+	// 保留方法以兼容旧代码，但不执行任何操作
 }
 
 // ========== K8S Service 聚合查询（P9 新增） ==========
@@ -437,77 +368,8 @@ func (a *ACLAPI) collectAgentK8SServiceClusters(search string, clusterMap map[ui
 
 // collectEndpointK8SServiceClusters 收集由 Endpoint 提供 K8S Service 的集群
 func (a *ACLAPI) collectEndpointK8SServiceClusters(search string, clusterMap map[uint64]*K8SServiceUnifiedACLClusterItem) {
-	var endpoints []model.Endpoint
-	if err := db.DB.Model(&model.Endpoint{}).
-		Where("revoked = ? AND k8sservice_enabled = ?", false, true).
-		Preload("User").
-		Find(&endpoints).Error; err != nil {
-		return
-	}
-
-	if len(endpoints) == 0 {
-		return
-	}
-
-	endpointIDs := make([]string, len(endpoints))
-	for i, ep := range endpoints {
-		endpointIDs[i] = ep.ID
-	}
-
-	userCountMap := make(map[string]int64)
-	var userCounts []struct {
-		EndpointID string `gorm:"column:endpoint_id"`
-		Count      int64  `gorm:"column:count"`
-	}
-	db.DB.Model(&model.AclEndpointK8SServiceUserPermission{}).
-		Select("endpoint_id, COUNT(*) as count").
-		Where("endpoint_id IN ?", endpointIDs).
-		Group("endpoint_id").Find(&userCounts)
-	for _, uc := range userCounts {
-		userCountMap[uc.EndpointID] = uc.Count
-	}
-
-	groupCountMap := make(map[string]int64)
-	var groupCounts []struct {
-		EndpointID string `gorm:"column:endpoint_id"`
-		Count      int64  `gorm:"column:count"`
-	}
-	db.DB.Model(&model.AclEndpointK8SServiceGroupPermission{}).
-		Select("endpoint_id, COUNT(*) as count").
-		Where("endpoint_id IN ?", endpointIDs).
-		Group("endpoint_id").Find(&groupCounts)
-	for _, gc := range groupCounts {
-		groupCountMap[gc.EndpointID] = gc.Count
-	}
-
-	for _, ep := range endpoints {
-		if ep.User == nil {
-			continue
-		}
-		user := ep.User
-
-		if search != "" {
-			if !containsIgnoreCase(user.Name, search) && !containsIgnoreCase(user.Alias, search) {
-				continue
-			}
-		}
-
-		if _, exists := clusterMap[user.ID]; exists {
-			continue
-		}
-
-		clusterMap[user.ID] = &K8SServiceUnifiedACLClusterItem{
-			ID:           user.ID,
-			Name:         user.Name,
-			Alias:        user.Alias,
-			ProviderType: "endpoint",
-			ProviderID:   ep.ID,
-			ProviderName: ep.Name,
-			UserCount:    userCountMap[ep.ID],
-			GroupCount:   groupCountMap[ep.ID],
-			CreatedAt:    user.CreatedAt,
-		}
-	}
+	// P10 重构：Endpoint K8SService 权限已废弃，不再收集
+	// 保留方法以兼容旧代码，但不执行任何操作
 }
 
 // containsIgnoreCase 不区分大小写的字符串包含检查
