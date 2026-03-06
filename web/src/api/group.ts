@@ -58,7 +58,7 @@ export const getGroupMembers = (groupId: number) => {
 
 // 添加分组成员
 export const addGroupMember = (groupId: number, userId: number) => {
-  return request.post<any, ApiResponse>(`/api/v1/admin/groups/${groupId}/members`, { user_id: userId })
+  return request.post<any, ApiResponse>(`/api/v1/admin/groups/${groupId}/members`, { user_ids: [userId] })
 }
 
 // 移除分组成员

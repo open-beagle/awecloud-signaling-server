@@ -442,6 +442,9 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.POST("/acl/k8s-service/:id/groups", aclAPI.AddK8SServiceACLGroups)
 					adminAuthGroup.DELETE("/acl/k8s-service/:id/users/:uid", aclAPI.RemoveK8SServiceACLUser)
 					adminAuthGroup.DELETE("/acl/k8s-service/:id/groups/:gid", aclAPI.RemoveK8SServiceACLGroup)
+					// K8S 聚合查询（P9：合并展示 Agent + Endpoint）
+					adminAuthGroup.GET("/acl/k8s-unified", aclAPI.ListK8SUnifiedACL)
+					adminAuthGroup.GET("/acl/k8s-service-unified", aclAPI.ListK8SServiceUnifiedACL)
 
 					// Endpoint SSH 授权
 					adminAuthGroup.GET("/acl/endpoint-ssh", aclAPI.ListEndpointSSHACL)

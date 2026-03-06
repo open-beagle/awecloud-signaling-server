@@ -320,20 +320,7 @@ func (a *GroupAPINew) GetMembers(c *gin.Context) {
 		return
 	}
 
-	result := make([]GroupMemberItem, 0, len(members))
-	for _, m := range members {
-		if m.User != nil {
-			result = append(result, GroupMemberItem{
-				ID:       m.User.ID,
-				Name:     m.User.Name,
-				Alias:    m.User.Alias,
-				Role:     string(m.User.Role),
-				JoinedAt: m.CreatedAt,
-			})
-		}
-	}
-
-	c.JSON(http.StatusOK, NewSuccessResponse(result))
+	c.JSON(http.StatusOK, NewSuccessResponse(members))
 }
 
 // AddMemberRequest 添加成员请求

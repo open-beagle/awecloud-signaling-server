@@ -14,12 +14,13 @@ type DiscoveredServicePort struct {
 
 // DiscoveredService Agent 发现的 K8S Service
 type DiscoveredService struct {
-	Namespace   string                  `json:"namespace"`
-	ServiceName string                  `json:"service_name"`
-	ClusterIP   string                  `json:"cluster_ip"`
-	Ports       []DiscoveredServicePort `json:"ports"`
-	Labels      map[string]string       `json:"labels"`
-	UpdatedAt   time.Time               `json:"updated_at"`
+	Namespace    string                  `json:"namespace"`
+	ServiceName  string                  `json:"service_name"`
+	ClusterIP    string                  `json:"cluster_ip"`
+	Ports        []DiscoveredServicePort `json:"ports"`
+	Labels       map[string]string       `json:"labels"`
+	UpdatedAt    time.Time               `json:"updated_at"`
+	EndpointName string                  `json:"endpoint_name"` // 发现来源：为空表示 Agent 本身发现，不为空表示 Endpoint 发现
 }
 
 var (

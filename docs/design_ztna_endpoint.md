@@ -330,19 +330,23 @@ Desktop 访问: kubernetes.beijing-prod.beijing.beagle:6443
   - 易于维护和调试
 ```
 
-## EndpointK8SService
+## EndpointK8SService（P10 简化）
 
 EndpointK8SService 装在内网 K8S 集群节点上，提供 K8S Service 代理。核心能力和 AgentK8SService 一样：K8S Service 自动发现 + SVC 代理。区别是 EndpointK8SService 不在 Tailscale 网络中，它通过 Agent 中转。
+
+权限模型简化（P10）：不再有独立的 Endpoint 级别权限，统一使用 Agent 级别权限（AclK8SServicePermission）。Agent 根据自身能力自动选择直连或 Endpoint 代理，对客户端完全透明。
 
 ### 工作流程
 
 ```
-Desktop 访问 pg.yygl.remote.beagle:5432：
+Desktop 访问 pg.yygl.beijing.beagle:5432：
   1. Desktop → tsnet → Agent gRPC Server → SVCProxy RPC
   2. Agent 从 tsnet 提取身份 → zhangsan
-  3. Agent 查找目标 EndpointK8SService → remote-cluster
-  4. Agent 查询 AclK8SServiceJumpPermission → zhangsan 能不能访问这个 SVC
-  5. Agent 通过 gRPC 流转发到 EndpointK8SService
+  3. Agent 统一权限检查 → zhangsan 能否访问 beijing 的 K8S Service
+  4. Agent 判断实现方式：
+     - 有 K8S 访问能力 → 直接连接 ClusterIP
+     - 无 K8S 访问能力 → 自动选择可用的 Endpoint 代理
+  5. 如果选择 Endpoint：Agent 通过 gRPC 流转发到 EndpointK8SService
   6. EndpointK8SService 转发到 K8S ClusterIP (10.96.23.45:5432)
   7. 双向桥接
 ```
@@ -374,44 +378,47 @@ EndpointK8SService 发现的 Service 列表（Endpoint 上报 → Agent 缓存 �
   status            → online/offline
 ```
 
-### ACL
+### ACL（P10 简化）
+
+不再有独立的 Endpoint K8SService 权限表。使用 Agent 级别权限（AclK8SServicePermission）：
 
 ```
-AclK8SServiceJumpUserPermission:
-  endpoint_k8sservice_id → 哪个 EndpointK8SService
-  user_id                → 被授权用户
-  service_pattern        → 允许访问的 Service 模式（如 "*.yygl" 或 "*"）
+AclK8SServiceUserPermission:
+  agent_user_id   → 哪个 Agent（哪个集群）
+  user_id         → 被授权用户
+  namespaces      → 允许的命名空间列表
+  service_pattern → 允许的 Service 名称模式
 
-AclK8SServiceJumpGroupPermission:
-  endpoint_k8sservice_id → 哪个 EndpointK8SService
-  group_id               → 被授权分组
-  service_pattern        → 允许访问的 Service 模式
+Agent 统一检查权限，自动选择直连或 Endpoint 代理。
 ```
 
-### 域名
+### 域名（P10 简化）
 
 ```
-<service>.<namespace>.<endpoint-name>.<agent-name>.beagle
-pg.yygl.remote-cluster.beijing.beagle:5432
+<service>.<namespace>.<agent-name>.beagle
+pg.yygl.beijing.beagle:5432
+
+说明：域名不再包含 Endpoint 信息，客户端只需要知道要访问哪个 Agent 的 K8S Service。
+Agent 自动选择实现方式（直连或 Endpoint 代理）。
 ```
 
-### 端口分配
+### 端口分配（P10 简化）
 
 EndpointK8SService 使用固定端口 50051（gRPC 服务，所有 Endpoint 共享）：
 
 ```
 端口: 50051（tsnet 虚拟端口，固定）
-所有 Endpoint 共享同一个端口，通过 gRPC 参数区分不同 Endpoint 和 Service
+所有 Endpoint 共享同一个端口，Agent 自动选择可用的 Endpoint
 
-Desktop 访问: pg.yygl.remote-cluster.beijing.beagle:5432
+Desktop 访问: pg.yygl.beijing.beagle:5432
   → 127.1.x.x:5432（魔法 DNS）
   → Tailscale → Agent IP:50051（固定端口）
-  → Agent gRPC SVCProxy(endpoint=remote-cluster, namespace=yygl, service=pg)
-  → Endpoint → K8S ClusterIP
+  → Agent gRPC SVCProxy(namespace=yygl, service=pg)
+  → Agent 自动选择 Endpoint → K8S ClusterIP
 
 说明:
   - EndpointK8SService 不需要动态端口分配
-  - 通过 gRPC 参数传递目标 Endpoint 和 Service 信息
+  - 客户端不需要指定 Endpoint，Agent 自动选择
   - Desktop 通过 VIP 隔离不同 Service 的端口冲突
 ```
 

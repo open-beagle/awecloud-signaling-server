@@ -17,12 +17,9 @@ spec:
     spec:
       containers:
         - name: server
-          image: registry.cn-qingdao.aliyuncs.com/wod/signal-server:v0.2.2
+          image: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.2.4
           imagePullPolicy: Always
           ports:
-            - name: frp
-              containerPort: 7000
-              protocol: TCP
             - name: web
               containerPort: 8080
               protocol: TCP
@@ -33,33 +30,17 @@ spec:
                 secretKeyRef:
                   name: signal-server
                   key: jwt-secret
-            # FRP Auth Token（必需）
-            - name: TOKEN
+            # Headscale API Key（必需）
+            - name: HEADSCALE_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: signal-server
-                  key: token
-            # FRP 公网访问地址（可选）
-            # 如果配置，Agent/Desktop 将使用此地址连接 FRP 服务
-            # 格式: wss://domain/path 或 ws://domain/path
-            # 示例: wss://signaling.example.com/ws
-            - name: PUBLIC_URL
-              value: ""
-            # OpenTelemetry 配置（可选）
-            # K8s 内部访问 otel-collector
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: "http://otel-collector:4317"
-            # - name: OTEL_SERVICE_NAME
-            #   value: "signaling-server"
-            # - name: OTEL_SERVICE_NAMESPACE
-            #   value: "default"
+                  key: headscale-api-key
           volumeMounts:
             - name: data
-              mountPath: /home/code/data
-            - name: logs
-              mountPath: /home/code/logs
+              mountPath: /app/data
             - name: config
-              mountPath: /home/code/config
+              mountPath: /app/config
           # 存活性探测 - 检查进程是否存活
           livenessProbe:
             httpGet:
@@ -89,8 +70,6 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: signal-server
-        - name: logs
-          emptyDir: {}
         - name: config
           configMap:
             name: signal-server

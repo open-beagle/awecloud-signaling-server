@@ -146,14 +146,6 @@ func autoMigrate() error {
 		&model.AclEndpointSSHUserPermission{},
 		&model.AclEndpointSSHGroupPermission{},
 
-		// ACL Endpoint K8SAPI 授权模型
-		&model.AclEndpointK8SAPIUserPermission{},
-		&model.AclEndpointK8SAPIGroupPermission{},
-
-		// ACL Endpoint K8SService 授权模型
-		&model.AclEndpointK8SServiceUserPermission{},
-		&model.AclEndpointK8SServiceGroupPermission{},
-
 		// 操作级审计日志
 		&model.OperationAuditLog{},
 	)

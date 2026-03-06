@@ -341,9 +341,10 @@ ZTNA 新页面搜索区域设计：
 │     ├── 服务授权    /acl/services             （不变，AgentService）
 │     ├── 用户授权    /acl/users                （不变）
 │     ├── 分组授权    /acl/groups               （不变）
-│     ├── SSH 授权    /acl/ssh                  （增强，包含 Agent SSH + Endpoint SSH）
-│     ├── K8S API 授权    /acl/k8s                  （新增，包含 Agent K8SAPI + Endpoint K8SAPI）
-│     └── K8S Service 授权 /acl/k8s-service      （新增，包含 Agent K8SService + Endpoint K8SService）
+│     ├── SSH 授权    /acl/ssh                  （Agent SSH，Headscale ACL 鉴权）
+│     ├── K8S API 授权    /acl/k8s              （合并展示 Agent + Endpoint K8SAPI）
+│     ├── K8S Service 授权 /acl/k8s-service     （合并展示 Agent + Endpoint K8SService）
+│     └── Endpoint SSH 授权 /acl/endpoint-ssh   （Endpoint SSH，Agent PermissionCache 鉴权）
 ├── 隧道管理（el-sub-menu，不变）
 │     ├── User 管理   /tunnel/users
 │     ├── Node 管理   /tunnel/nodes
@@ -363,39 +364,48 @@ Sidebar 新增菜单项的图标选择：
 
 ## 路由设计
 
-### 新增路由
+### 新增/变更路由
 
-| 路径                 | 名称                | 组件路径                       |
-| -------------------- | ------------------- | ------------------------------ |
-| /acl/k8s             | ACLK8S              | views/ACL/K8SList.vue          |
-| /acl/k8s/:id         | ACLK8SDetail        | views/ACL/K8SDetail.vue        |
-| /acl/k8s-service     | ACLK8SService       | views/ACL/K8SServiceList.vue   |
-| /acl/k8s-service/:id | ACLK8SServiceDetail | views/ACL/K8SServiceDetail.vue |
-| /acl/jump            | ACLJump             | views/ACL/JumpList.vue         |
-| /acl/jump/ssh/:id    | ACLJumpSSHDetail    | views/ACL/JumpSSHDetail.vue    |
-| /acl/jump/k8s/:id    | ACLJumpK8SDetail    | views/ACL/JumpK8SDetail.vue    |
-| /acl/jump/svc/:id    | ACLJumpSVCDetail    | views/ACL/JumpSVCDetail.vue    |
-| /endpoints           | Endpoints           | views/Endpoint/List.vue        |
-| /endpoints/:type/:id | EndpointDetail      | views/Endpoint/Detail.vue      |
-| /resources           | Resources           | views/Resource/List.vue        |
-| /domains             | Domains             | views/Domain/List.vue          |
+| 路径                         | 名称                        | 组件路径                            | 说明                         |
+| ---------------------------- | --------------------------- | ----------------------------------- | ---------------------------- |
+| /acl/k8s                     | ACLK8S                      | views/ACL/K8SUnifiedList.vue        | 合并列表（Agent+Endpoint）   |
+| /acl/k8s/:id                 | ACLK8SDetail                | views/ACL/K8SDetail.vue             | Agent K8S 授权详情           |
+| /acl/k8s-service             | ACLK8SService               | views/ACL/K8SServiceUnifiedList.vue | 合并列表（Agent+Endpoint）   |
+| /acl/k8s-service/:id         | ACLK8SServiceDetail         | views/ACL/K8SServiceDetail.vue      | Agent K8SService 授权详情    |
+| /acl/endpoint-ssh            | ACLEndpointSSH              | views/ACL/EndpointSSHList.vue       | Endpoint SSH 授权列表        |
+| /acl/endpoint-ssh/:id        | ACLEndpointSSHDetail        | views/ACL/JumpSSHDetail.vue         | Endpoint SSH 授权详情        |
+| /acl/endpoint-k8sapi/:id     | ACLEndpointK8SAPIDetail     | views/ACL/JumpK8SDetail.vue         | Endpoint K8SAPI 授权详情     |
+| /acl/endpoint-k8sservice/:id | ACLEndpointK8SServiceDetail | views/ACL/JumpSVCDetail.vue         | Endpoint K8SService 授权详情 |
+| /endpoints                   | Endpoints                   | views/Endpoint/List.vue             | 不变                         |
+| /endpoints/:type/:id         | EndpointDetail              | views/Endpoint/Detail.vue           | 不变                         |
+| /resources                   | Resources                   | views/Resource/List.vue             | 不变                         |
+| /domains                     | Domains                     | views/Domain/List.vue               | 不变                         |
+
+### 兼容重定向
+
+| 旧路径            | 重定向到                     |
+| ----------------- | ---------------------------- |
+| /acl/jump         | /acl/endpoint-ssh            |
+| /acl/jump/ssh/:id | /acl/endpoint-ssh/:id        |
+| /acl/jump/k8s/:id | /acl/endpoint-k8sapi/:id     |
+| /acl/jump/svc/:id | /acl/endpoint-k8sservice/:id |
 
 ### 面包屑映射
 
-| 路径                 | 面包屑                                         |
-| -------------------- | ---------------------------------------------- |
-| /acl/k8s             | 授权管理 > K8SAPI 授权                         |
-| /acl/k8s/:id         | 授权管理 > K8SAPI 授权 > 授权详情: {name}      |
-| /acl/k8s-service     | 授权管理 > K8S Service 授权                    |
-| /acl/k8s-service/:id | 授权管理 > K8S Service 授权 > 授权详情: {name} |
-| /acl/jump            | 授权管理 > 跳跃授权                            |
-| /acl/jump/ssh/:id    | 授权管理 > 跳跃授权 > SSH 跳跃: {name}         |
-| /acl/jump/k8s/:id    | 授权管理 > 跳跃授权 > K8S 跳跃: {name}         |
-| /acl/jump/svc/:id    | 授权管理 > 跳跃授权 > SVC 跳跃: {name}         |
-| /endpoints           | 终端管理                                       |
-| /endpoints/:type/:id | 终端管理 > 终端详情: {name}                    |
-| /resources           | 资源发现                                       |
-| /domains             | 域名管理                                       |
+| 路径                         | 面包屑                                              |
+| ---------------------------- | --------------------------------------------------- |
+| /acl/k8s                     | 授权管理 > K8S API 授权                             |
+| /acl/k8s/:id                 | 授权管理 > K8S API 授权 > Agent 授权: {name}        |
+| /acl/endpoint-k8sapi/:id     | 授权管理 > K8S API 授权 > Endpoint 授权: {name}     |
+| /acl/k8s-service             | 授权管理 > K8S Service 授权                         |
+| /acl/k8s-service/:id         | 授权管理 > K8S Service 授权 > Agent 授权: {name}    |
+| /acl/endpoint-k8sservice/:id | 授权管理 > K8S Service 授权 > Endpoint 授权: {name} |
+| /acl/endpoint-ssh            | 授权管理 > Endpoint SSH 授权                        |
+| /acl/endpoint-ssh/:id        | 授权管理 > Endpoint SSH 授权 > 授权详情: {name}     |
+| /endpoints                   | 终端管理                                            |
+| /endpoints/:type/:id         | 终端管理 > 终端详情: {name}                         |
+| /resources                   | 资源发现                                            |
+| /domains                     | 域名管理                                            |
 
 ---
 
@@ -403,76 +413,85 @@ Sidebar 新增菜单项的图标选择：
 
 ---
 
-### 1. K8SAPI 授权列表页（/acl/k8s）
+### 1. K8S API 授权合并列表页（/acl/k8s）
 
 #### 原型图
 
 ```
-面包屑：授权管理 > K8SAPI 授权
+面包屑：授权管理 > K8S API 授权
 
 ┌─────────────────────────────────────────────────────────────────┐
 │ el-card 搜索区                                                   │
-│  [Agent ▼ 全部]  [搜索框________] [搜索] [重置]                  │
+│  [类型 ▼ 全部/Agent/Endpoint]  [搜索框________] [搜索] [重置]    │
 └─────────────────────────────────────────────────────────────────┘
 ┌─────────────────────────────────────────────────────────────────┐
 │ el-card 数据区                                                   │
 │                                                                  │
-│  ┌────────┬────────┬──────────┬──────────┬──────────┬────────┐  │
-│  │ Agent  │ 别名   │ K8S 集群 │ 用户授权 │ 分组授权 │ 操作   │  │
-│  │ 名称   │        │ 地址     │ 数       │ 数       │        │  │
-│  ├────────┼────────┼──────────┼──────────┼──────────┼────────┤  │
-│  │beijing │ 北京   │ local    │ [3]      │ [2]      │ 管理   │  │
-│  │        │ 机房   │ host:    │          │          │ 授权   │  │
-│  │        │        │ 6443     │          │          │        │  │
-│  ├────────┼────────┼──────────┼──────────┼──────────┼────────┤  │
-│  │shanghai│ 上海   │ local    │ [1]      │ [0]      │ 管理   │  │
-│  │        │ 机房   │ host:    │          │          │ 授权   │  │
-│  │        │        │ 6443     │          │          │        │  │
-│  └────────┴────────┴──────────┴──────────┴──────────┴────────┘  │
+│  ┌────────┬────────┬────────┬────────┬──────┬──────┬────────┐   │
+│  │ 名称   │ 别名   │ 类型   │ 所属   │ 用户 │ 分组 │ 操作   │   │
+│  │        │        │        │ Agent  │ 授权 │ 授权 │        │   │
+│  ├────────┼────────┼────────┼────────┼──────┼──────┼────────┤   │
+│  │beijing │ 北京   │ Agent  │ —      │ [3]  │ [2]  │ 管理   │   │
+│  │        │ 机房   │        │        │      │      │ 授权   │   │
+│  ├────────┼────────┼────────┼────────┼──────┼──────┼────────┤   │
+│  │prod    │ 生产   │Endpoint│ beijing│ [1]  │ [0]  │ 管理   │   │
+│  │        │ 集群   │        │        │      │      │ 授权   │   │
+│  └────────┴────────┴────────┴────────┴──────┴──────┴────────┘   │
 │                                                                  │
-│  共 2 条  [10 ▼] [< 1 >]                                        │
+│  共 N 条  [10 ▼] [< 1 >]                                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 #### 核心业务
 
-展示所有启用了 K8SAPI 能力的 Agent 列表。管理员点击"管理授权"进入详情页，配置哪些用户/分组可以访问该 Agent 的 K8S API。
+合并展示 Agent K8SAPI 和 Endpoint K8SAPI 的授权列表（P9 简化）。列表同时包含启用了 K8SAPI 能力的 Agent 和启用了 K8SAPI 的 Endpoint，每项标记类型。
 
-只有 agent.toml 中 k8s.enabled=true 的 Agent 才会出现在此列表中。Agent 通过心跳上报 K8S 能力状态，Server 记录。
+支持按类型（全部/Agent/Endpoint）筛选和关键词搜索。
+
+点击"管理授权"：Agent 类型跳转 /acl/k8s/:id（Agent 授权详情），Endpoint 类型跳转 /acl/endpoint-k8sapi/:id（Endpoint 授权详情）。
+
+后端数据链路不变：Agent K8S 和 Endpoint K8S 仍然是两条完全独立的链路（各自的 DB 表、心跳字段、Agent 缓存和鉴权方法），仅在 Web 列表页合并展示。
 
 #### 核心数据
 
-数据来源：GET /api/v1/acl/k8s
+数据来源：GET /api/v1/admin/acl/k8s-unified
 
 请求参数：
 
-| 参数   | 类型   | 说明                   |
-| ------ | ------ | ---------------------- |
-| search | string | 按 Agent 名称/别名搜索 |
-| page   | int    | 页码                   |
-| size   | int    | 每页条数               |
+| 参数   | 类型   | 说明                                       |
+| ------ | ------ | ------------------------------------------ |
+| type   | string | 筛选类型：all / agent / endpoint，默认 all |
+| search | string | 按名称/别名搜索                            |
+| page   | int    | 页码                                       |
+| size   | int    | 每页条数                                   |
 
 响应字段：
 
-| 字段        | 类型   | 说明                |
-| ----------- | ------ | ------------------- |
-| id          | uint64 | Agent User ID       |
-| name        | string | Agent 名称          |
-| alias       | string | Agent 别名          |
-| api_server  | string | K8S API Server 地址 |
-| user_count  | int    | 用户级授权条数      |
-| group_count | int    | 分组级授权条数      |
+| 字段        | 类型   | 说明                                                       |
+| ----------- | ------ | ---------------------------------------------------------- |
+| id          | string | Agent User ID（agent 类型）或 Endpoint ID（endpoint 类型） |
+| name        | string | Agent 名称或 Endpoint 名称                                 |
+| alias       | string | 别名                                                       |
+| type        | string | "agent" 或 "endpoint"                                      |
+| agent_name  | string | 所属 Agent 名称（endpoint 类型时有值，agent 类型时为空）   |
+| agent_id    | uint64 | 所属 Agent User ID（endpoint 类型时有值）                  |
+| api_server  | string | K8S API Server 地址                                        |
+| status      | string | online/offline（endpoint 类型时有值）                      |
+| user_count  | int64  | 用户级授权条数                                             |
+| group_count | int64  | 分组级授权条数                                             |
 
 #### 组件设计
 
-| 区域   | 组件                                   |
-| ------ | -------------------------------------- |
-| 搜索区 | el-card > el-form(:inline) > el-input  |
-| 表格   | el-card > el-table(:data, stripe)      |
-| 名称列 | el-link(@click 跳转详情，传 ?name=xxx) |
-| 数量列 | el-tag(type="primary" / "success")     |
-| 操作列 | el-button(type="primary", link)        |
-| 分页   | el-pagination                          |
+| 区域       | 组件                                                      |
+| ---------- | --------------------------------------------------------- |
+| 类型筛选   | el-select(v-model, options: 全部/Agent/Endpoint)          |
+| 搜索区     | el-card > el-form(:inline) > el-input                     |
+| 表格       | el-card > el-table(:data, stripe)                         |
+| 类型列     | el-tag(type="primary" Agent, type="warning" Endpoint)     |
+| 所属 Agent | Agent 类型显示"—"，Endpoint 类型显示 agent_name           |
+| 数量列     | el-tag(type="primary" / "success")                        |
+| 操作列     | el-button(type="primary", link)，根据 type 跳转不同详情页 |
+| 分页       | el-pagination                                             |
 
 ---
 
@@ -596,7 +615,7 @@ Sidebar 新增菜单项的图标选择：
 
 ---
 
-### 3. K8S Service 授权列表页（/acl/k8s-service）
+### 3. K8S Service 授权合并列表页（/acl/k8s-service）
 
 #### 原型图
 
@@ -605,52 +624,43 @@ Sidebar 新增菜单项的图标选择：
 
 ┌─────────────────────────────────────────────────────────────────┐
 │ el-card 搜索区                                                   │
-│  [Agent ▼ 全部]  [搜索框________] [搜索] [重置]                  │
+│  [类型 ▼ 全部/Agent/Endpoint]  [搜索框________] [搜索] [重置]    │
 └─────────────────────────────────────────────────────────────────┘
 ┌─────────────────────────────────────────────────────────────────┐
 │ el-card 数据区                                                   │
 │                                                                  │
-│  ┌────────┬────────┬──────────┬──────────┬──────────┬────────┐  │
-│  │ Agent  │ 别名   │ 发现的   │ 用户授权 │ 分组授权 │ 操作   │  │
-│  │ 名称   │        │ Service数│ 数       │ 数       │        │  │
-│  ├────────┼────────┼──────────┼──────────┼──────────┼────────┤  │
-│  │beijing │ 北京   │ [12]     │ [3]      │ [2]      │ 管理   │  │
-│  │        │ 机房   │          │          │          │ 授权   │  │
-│  ├────────┼────────┼──────────┼──────────┼──────────┼────────┤  │
-│  │shanghai│ 上海   │ [8]      │ [1]      │ [0]      │ 管理   │  │
-│  │        │ 机房   │          │          │          │ 授权   │  │
-│  └────────┴────────┴──────────┴──────────┴──────────┴────────┘  │
+│  ┌────────┬────────┬────────┬────────┬──────┬──────┬──────┬───┐ │
+│  │ 名称   │ 别名   │ 类型   │ 所属   │ 发现 │ 用户 │ 分组 │操作│ │
+│  │        │        │        │ Agent  │ SVC数│ 授权 │ 授权 │    │ │
+│  ├────────┼────────┼────────┼────────┼──────┼──────┼──────┼───┤ │
+│  │beijing │ 北京   │ Agent  │ —      │ [12] │ [3]  │ [2]  │管理│ │
+│  │        │ 机房   │        │        │      │      │      │授权│ │
+│  ├────────┼────────┼────────┼────────┼──────┼──────┼──────┼───┤ │
+│  │prod    │ 生产   │Endpoint│ beijing│ [5]  │ [1]  │ [0]  │管理│ │
+│  │        │ 集群   │        │        │      │      │      │授权│ │
+│  └────────┴────────┴────────┴────────┴──────┴──────┴──────┴───┘ │
 │                                                                  │
-│  共 2 条  [10 ▼] [< 1 >]                                        │
+│  共 N 条  [10 ▼] [< 1 >]                                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 #### 核心业务
 
-展示所有启用了 K8SService 能力的 Agent 列表。只有 agent.toml 中 svc.enabled=true 的 Agent 才出现。"发现的 Service 数"来自 Agent 心跳上报的 discovered_services 数量。
+合并展示 Agent K8SService 和 Endpoint K8SService 的授权列表（P9 简化）。结构与 K8S API 合并列表页一致，区别：多一列"发现的 Service 数"。
 
-管理员点击"管理授权"进入详情页，按命名空间和 Service 名称模式配置访问权限。
+点击"管理授权"：Agent 类型跳转 /acl/k8s-service/:id，Endpoint 类型跳转 /acl/endpoint-k8sservice/:id。
 
 #### 核心数据
 
-数据来源：GET /api/v1/acl/k8s-service
+数据来源：GET /api/v1/admin/acl/k8s-service-unified
 
-请求参数：search, page, size（同 K8SAPI 授权列表）
+请求参数：同 K8S API 合并列表（type, search, page, size）
 
-响应字段：
-
-| 字段          | 类型   | 说明                  |
-| ------------- | ------ | --------------------- |
-| id            | uint64 | Agent User ID         |
-| name          | string | Agent 名称            |
-| alias         | string | Agent 别名            |
-| service_count | int    | 发现的 K8S Service 数 |
-| user_count    | int    | 用户级授权条数        |
-| group_count   | int    | 分组级授权条数        |
+响应字段：同 K8S API 合并列表，区别：api_server 替换为 service_count（发现的 Service 数）
 
 #### 组件设计
 
-与 K8SAPI 授权列表页结构完全一致。区别：多一列"发现的 Service 数"，少一列"K8S 集群地址"。
+与 K8S API 合并列表页结构完全一致。区别：多一列"发现的 Service 数"（el-tag），少一列"K8S 集群地址"。
 
 ---
 
@@ -792,71 +802,48 @@ Sidebar 新增菜单项的图标选择：
 
 ---
 
-### 5. 跳跃授权列表页（/acl/jump）
+### 5. Endpoint SSH 授权列表页（/acl/endpoint-ssh）
 
 #### 原型图
 
 ```
-面包屑：授权管理 > 跳跃授权
+面包屑：授权管理 > Endpoint SSH 授权
 
 ┌─────────────────────────────────────────────────────────────────┐
-│ el-tabs (type="card")                                            │
+│ el-card 搜索区                                                   │
+│  [所属 Agent ▼ 全部]  [搜索框________] [搜索] [重置]             │
+└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│ el-card 数据区                                                   │
 │                                                                  │
-│  ┌──────────────┬──────────────┬──────────────┐                 │
-│  │ SSH 跳跃授权 │ K8S 跳跃授权 │ SVC 跳跃授权 │                 │
-│  └──────────────┴──────────────┴──────────────┘                 │
+│  ┌──────────┬────────┬────────┬──────┬──────┬────────┐          │
+│  │ Endpoint │ 别名   │ 所属   │ 用户 │ 分组 │ 操作   │          │
+│  │ 名称     │        │ Agent  │ 授权 │ 授权 │        │          │
+│  ├──────────┼────────┼────────┼──────┼──────┼────────┤          │
+│  │ web-     │ Web    │ beijing│ [2]  │ [1]  │ 管理   │          │
+│  │ server-1 │ 服务器 │        │      │      │ 授权   │          │
+│  ├──────────┼────────┼────────┼──────┼──────┼────────┤          │
+│  │ db-      │ 数据库 │ beijing│ [1]  │ [0]  │ 管理   │          │
+│  │ server   │ 服务器 │        │      │      │ 授权   │          │
+│  └──────────┴────────┴────────┴──────┴──────┴────────┘          │
 │                                                                  │
-│  === SSH 跳跃授权 Tab（默认激活）===                             │
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │ el-card 搜索区                                           │    │
-│  │  [所属 Agent ▼ 全部]  [搜索框____] [搜索] [重置]         │    │
-│  └─────────────────────────────────────────────────────────┘    │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │ el-card 数据区                                           │    │
-│  │                                                          │    │
-│  │  ┌──────────┬────────┬────────┬──────┬──────┬────────┐  │    │
-│  │  │ Endpoint │ 别名   │ 所属   │ 用户 │ 分组 │ 操作   │  │    │
-│  │  │ 名称     │        │ Agent  │ 授权 │ 授权 │        │  │    │
-│  │  ├──────────┼────────┼────────┼──────┼──────┼────────┤  │    │
-│  │  │ web-     │ Web    │ beijing│ [2]  │ [1]  │ 管理   │  │    │
-│  │  │ server-1 │ 服务器 │        │      │      │ 授权   │  │    │
-│  │  ├──────────┼────────┼────────┼──────┼──────┼────────┤  │    │
-│  │  │ db-      │ 数据库 │ beijing│ [1]  │ [0]  │ 管理   │  │    │
-│  │  │ server   │ 服务器 │        │      │      │ 授权   │  │    │
-│  │  └──────────┴────────┴────────┴──────┴──────┴────────┘  │    │
-│  │                                                          │    │
-│  │  共 2 条  [10 ▼] [< 1 >]                                │    │
-│  └─────────────────────────────────────────────────────────┘    │
-│                                                                  │
-│  === K8S 跳跃授权 Tab ===                                       │
-│  （结构类似，Endpoint 列显示 EndpointK8SAPI 名称）              │
-│                                                                  │
-│  === SVC 跳跃授权 Tab ===                                       │
-│  （结构类似，Endpoint 列显示 EndpointK8SService 名称）          │
-│                                                                  │
+│  共 2 条  [10 ▼] [< 1 >]                                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 #### 核心业务
 
-跳跃授权管理三种 Endpoint 跳跃的访问权限（第 4 层）。用 el-tabs 切换三种类型，每个 Tab 内是独立的列表 + 搜索 + 分页。
+原"跳跃授权"页面（/acl/jump）有三个 Tab：SSH/K8S/SVC。P9 合并后，K8S 和 SVC 的列表合并到 K8S API 授权和 K8S Service 授权的合并列表页中，只剩 SSH。
 
-三个 Tab 的列表结构完全一致，区别仅在于数据来源和跳转的详情页路径不同。
+因此去掉 el-tabs，退化为普通列表页，路由从 /acl/jump 改为 /acl/endpoint-ssh。
 
-管理员点击"管理授权"进入对应类型的详情页。
+管理员点击"管理授权"进入 /acl/endpoint-ssh/:id 详情页。
 
 #### 核心数据
 
-三个 Tab 分别请求不同 API：
+数据来源：GET /api/v1/admin/acl/endpoint-ssh（原 /api/v1/admin/acl/jump/ssh）
 
-| Tab          | API                      | 详情路径          |
-| ------------ | ------------------------ | ----------------- |
-| SSH 跳跃授权 | GET /api/v1/acl/jump/ssh | /acl/jump/ssh/:id |
-| K8S 跳跃授权 | GET /api/v1/acl/jump/k8s | /acl/jump/k8s/:id |
-| SVC 跳跃授权 | GET /api/v1/acl/jump/svc | /acl/jump/svc/:id |
-
-请求参数（三个 Tab 通用）：
+请求参数：
 
 | 参数     | 类型   | 说明                      |
 | -------- | ------ | ------------------------- |
@@ -865,7 +852,7 @@ Sidebar 新增菜单项的图标选择：
 | page     | int    | 页码                      |
 | size     | int    | 每页条数                  |
 
-响应字段（三个 Tab 通用）：
+响应字段：
 
 | 字段        | 类型   | 说明               |
 | ----------- | ------ | ------------------ |
@@ -881,14 +868,11 @@ Sidebar 新增菜单项的图标选择：
 
 | 区域       | 组件                                              |
 | ---------- | ------------------------------------------------- |
-| Tab 切换   | el-tabs(type="card", v-model 绑定当前 Tab)        |
 | Agent 筛选 | el-select(filterable, clearable, 加载 Agent 列表) |
 | 搜索区     | el-card > el-form(:inline)                        |
 | 表格       | el-card > el-table                                |
-| 名称列     | el-link(@click 跳转对应类型详情页)                |
+| 名称列     | el-link(@click 跳转 /acl/endpoint-ssh/:id)        |
 | 分页       | el-pagination                                     |
-
-Tab 切换时各自独立加载数据，互不影响。每个 Tab 有自己的 searchForm、pagination、loading 状态。
 
 ---
 
@@ -2033,9 +2017,9 @@ Endpoint 开关状态：
 | menu.endpointK8SService | EndpointK8SService | EndpointK8SService |
 | menu.resources          | 资源发现           | Resources          |
 | menu.domains            | 域名管理           | Domains            |
-| menu.aclK8S             | K8SAPI 授权        | K8SAPI ACL         |
+| menu.aclK8S             | K8S API 授权       | K8S API ACL        |
 | menu.aclK8SService      | K8S Service 授权   | K8SService ACL     |
-| menu.aclJump            | 跳跃授权           | Jump ACL           |
+| menu.aclEndpointSSH     | Endpoint SSH 授权  | Endpoint SSH ACL   |
 
 授权管理相关：
 
@@ -2049,6 +2033,10 @@ Endpoint 开关状态：
 | acl.jumpSSH            | SSH 跳跃授权     | SSH Jump ACL        |
 | acl.jumpK8S            | K8S 跳跃授权     | K8S Jump ACL        |
 | acl.jumpSVC            | SVC 跳跃授权     | SVC Jump ACL        |
+| acl.type               | 类型             | Type                |
+| acl.typeAgent          | Agent            | Agent               |
+| acl.typeEndpoint       | Endpoint         | Endpoint            |
+| acl.belongAgent        | 所属 Agent       | Belongs to Agent    |
 | acl.apiServer          | K8S API 地址     | K8S API Server      |
 | acl.labelSelector      | 标签选择器       | Label Selector      |
 | acl.discoveredServices | 已发现的 Service | Discovered Services |
@@ -2157,38 +2145,46 @@ Endpoint 开关状态：
 ```
 web/src/
 ├── api/
-│     ├── aclK8s.ts              （新增）K8SAPI 授权 API
-│     ├── aclK8sService.ts       （新增）K8S Service 授权 API
-│     ├── aclJump.ts             （新增）跳跃授权 API
-│     ├── endpoint.ts            （新增）终端管理 API
-│     ├── resource.ts            （新增）资源发现 API
-│     └── domain.ts              （新增）域名管理 API
+│     ├── aclK8s.ts              （不变）K8SAPI 授权 API（Agent 详情用）
+│     ├── aclK8sService.ts       （不变）K8S Service 授权 API（Agent 详情用）
+│     ├── aclK8sUnified.ts       （新增）K8S API 聚合查询 API
+│     ├── aclK8sServiceUnified.ts（新增）K8S Service 聚合查询 API
+│     ├── aclJump.ts             （保留）跳跃授权 API（Endpoint 详情用）
+│     ├── endpoint.ts            （不变）终端管理 API
+│     ├── resource.ts            （不变）资源发现 API
+│     └── domain.ts              （不变）域名管理 API
 ├── views/
 │     ├── ACL/
-│     │     ├── K8SList.vue              （新增）
-│     │     ├── K8SDetail.vue            （新增）
-│     │     ├── K8SServiceList.vue       （新增）
-│     │     ├── K8SServiceDetail.vue     （新增）
-│     │     ├── JumpList.vue             （新增）
-│     │     ├── JumpSSHDetail.vue        （新增）
-│     │     ├── JumpK8SDetail.vue        （新增）
-│     │     └── JumpSVCDetail.vue        （新增）
+│     │     ├── K8SUnifiedList.vue       （新增）K8S API 合并列表页
+│     │     ├── K8SDetail.vue            （不变）Agent K8S 授权详情
+│     │     ├── K8SServiceUnifiedList.vue（新增）K8S Service 合并列表页
+│     │     ├── K8SServiceDetail.vue     （不变）Agent K8SService 授权详情
+│     │     ├── EndpointSSHList.vue      （新增）Endpoint SSH 授权列表（原 JumpList SSH Tab）
+│     │     ├── JumpSSHDetail.vue        （不变）Endpoint SSH 授权详情
+│     │     ├── JumpK8SDetail.vue        （不变）Endpoint K8SAPI 授权详情
+│     │     └── JumpSVCDetail.vue        （不变）Endpoint K8SService 授权详情
 │     ├── Endpoint/
-│     │     ├── SSHList.vue              （新增）
-│     │     ├── K8SList.vue              （新增）
-│     │     └── SVCList.vue              （新增）
+│     │     ├── SSHList.vue              （不变）
+│     │     ├── K8SList.vue              （不变）
+│     │     └── SVCList.vue              （不变）
 │     ├── Resource/
-│     │     └── List.vue                 （新增）
+│     │     └── List.vue                 （不变）
 │     └── Domain/
-│           └── List.vue                 （新增）
+│           └── List.vue                 （不变）
 ├── components/Common/
-│     ├── AuthGrantDialog.vue            （新增）通用授权弹窗（穿梭框模式）
-│     └── Breadcrumb.vue                 （修改，新增路由映射）
+│     ├── AuthGrantDialog.vue            （不变）通用授权弹窗（穿梭框模式）
+│     └── Breadcrumb.vue                 （修改，更新路由映射）
 ├── assets/styles/
-│     └── main.css                       （修改，新增统一搜索区域样式）
+│     └── main.css                       （不变）
 └── router/
-      └── index.ts                       （修改，新增路由）
+      └── index.ts                       （修改，更新路由 + 兼容重定向）
 ```
+
+说明（P9 变更）：
+
+- K8SList.vue 和 K8SServiceList.vue 被 K8SUnifiedList.vue 和 K8SServiceUnifiedList.vue 替换
+- JumpList.vue 不再需要（三个 Tab 拆分：SSH 独立为 EndpointSSHList.vue，K8S 和 SVC 合并到 Unified 列表）
+- 三个 Jump 详情页（JumpSSHDetail/JumpK8SDetail/JumpSVCDetail）保留，路由改为 /acl/endpoint-xxx/:id
 
 ---
 

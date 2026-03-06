@@ -404,3 +404,374 @@ func formatJSONStringArray(arr []string) string {
 	data, _ := json.Marshal(arr)
 	return string(data)
 }
+
+// ========== Endpoint K8SAPI 授权（兼容路由） ==========
+// P10/P11 重构后，Endpoint 级别权限已统一为 Agent 级别
+// 以下方法保留前端兼容，内部通过 Endpoint ID 映射到 Agent ID 操作 Agent 级别权限表
+
+// EndpointK8SAPIACLListItem Endpoint K8SAPI 授权列表项（兼容前端）
+type EndpointK8SAPIACLListItem struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	Alias      string    `json:"alias"`
+	AgentID    uint64    `json:"agent_id"`
+	AgentName  string    `json:"agent_name"`
+	APIServer  string    `json:"api_server"`
+	Status     string    `json:"status"`
+	UserCount  int64     `json:"user_count"`
+	GroupCount int64     `json:"group_count"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// ListEndpointK8SAPIACL 获取 Endpoint K8SAPI 授权列表（兼容路由）
+func (a *ACLAPI) ListEndpointK8SAPIACL(c *gin.Context) {
+	ctx := c.Request.Context()
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
+	search := c.Query("search")
+
+	if page < 1 {
+		page = 1
+	}
+	if size < 1 || size > 100 {
+		size = 20
+	}
+
+	query := db.DB.WithContext(ctx).Model(&model.Endpoint{}).Where("revoked = ? AND k8sapi_enabled = ?", false, true)
+	if search != "" {
+		query = query.Where("name LIKE ? OR alias LIKE ?", "%"+search+"%", "%"+search+"%")
+	}
+
+	var total int64
+	query.Count(&total)
+
+	var endpoints []model.Endpoint
+	offset := (page - 1) * size
+	if err := query.Preload("User").Order("created_at DESC").Offset(offset).Limit(size).Find(&endpoints).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
+		return
+	}
+
+	userCountMap := make(map[string]int64)
+	groupCountMap := make(map[string]int64)
+
+	if len(endpoints) > 0 {
+		endpointToAgent := make(map[string]uint64)
+		agentIDs := make([]uint64, 0, len(endpoints))
+		for _, ep := range endpoints {
+			endpointToAgent[ep.ID] = ep.UserID
+			agentIDs = append(agentIDs, ep.UserID)
+		}
+
+		var userCounts []struct {
+			TargetUserID uint64 `gorm:"column:target_user_id"`
+			Count        int64  `gorm:"column:count"`
+		}
+		db.DB.WithContext(ctx).Model(&model.AclK8SUserPermission{}).
+			Select("target_user_id, COUNT(*) as count").
+			Where("target_user_id IN ?", agentIDs).
+			Group("target_user_id").Find(&userCounts)
+
+		agentUserCount := make(map[uint64]int64)
+		for _, uc := range userCounts {
+			agentUserCount[uc.TargetUserID] = uc.Count
+		}
+		for epID, agentID := range endpointToAgent {
+			userCountMap[epID] = agentUserCount[agentID]
+		}
+
+		var groupCounts []struct {
+			TargetUserID uint64 `gorm:"column:target_user_id"`
+			Count        int64  `gorm:"column:count"`
+		}
+		db.DB.WithContext(ctx).Model(&model.AclK8SGroupPermission{}).
+			Select("target_user_id, COUNT(*) as count").
+			Where("target_user_id IN ?", agentIDs).
+			Group("target_user_id").Find(&groupCounts)
+
+		agentGroupCount := make(map[uint64]int64)
+		for _, gc := range groupCounts {
+			agentGroupCount[gc.TargetUserID] = gc.Count
+		}
+		for epID, agentID := range endpointToAgent {
+			groupCountMap[epID] = agentGroupCount[agentID]
+		}
+	}
+
+	result := make([]EndpointK8SAPIACLListItem, len(endpoints))
+	for i, ep := range endpoints {
+		agentName := ""
+		if ep.User != nil {
+			agentName = ep.User.Name
+		}
+		result[i] = EndpointK8SAPIACLListItem{
+			ID:         ep.ID,
+			Name:       ep.Name,
+			Alias:      ep.Alias,
+			AgentID:    ep.UserID,
+			AgentName:  agentName,
+			APIServer:  ep.K8SAPIApiServer,
+			Status:     ep.Status,
+			UserCount:  userCountMap[ep.ID],
+			GroupCount: groupCountMap[ep.ID],
+			CreatedAt:  ep.CreatedAt,
+		}
+	}
+
+	c.JSON(http.StatusOK, NewPagedResponse(result, total, page, size))
+}
+
+// EndpointK8SAPIACLPermissionItem Endpoint K8SAPI 授权项（兼容前端）
+type EndpointK8SAPIACLPermissionItem struct {
+	ID         uint64    `json:"id"`
+	Name       string    `json:"name"`
+	Alias      string    `json:"alias"`
+	K8SGroups  []string  `json:"k8s_groups"`
+	Namespaces []string  `json:"namespaces"`
+	Enabled    bool      `json:"enabled"`
+	GrantedAt  time.Time `json:"granted_at"`
+}
+
+// EndpointK8SAPIACLDetail Endpoint K8SAPI 授权详情（兼容前端）
+type EndpointK8SAPIACLDetail struct {
+	ID        string                            `json:"id"`
+	Name      string                            `json:"name"`
+	Alias     string                            `json:"alias"`
+	AgentID   uint64                            `json:"agent_id"`
+	AgentName string                            `json:"agent_name"`
+	APIServer string                            `json:"api_server"`
+	Status    string                            `json:"status"`
+	Users     []EndpointK8SAPIACLPermissionItem `json:"users"`
+	Groups    []EndpointK8SAPIACLPermissionItem `json:"groups"`
+}
+
+// GetEndpointK8SAPIACL 获取 Endpoint K8SAPI 授权详情（兼容路由）
+func (a *ACLAPI) GetEndpointK8SAPIACL(c *gin.Context) {
+	ctx := c.Request.Context()
+	endpointID := c.Param("id")
+
+	var endpoint model.Endpoint
+	if err := db.DB.WithContext(ctx).Preload("User").First(&endpoint, "id = ?", endpointID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
+		return
+	}
+
+	agentID := endpoint.UserID
+
+	var userPerms []model.AclK8SUserPermission
+	db.DB.WithContext(ctx).Preload("User").Where("target_user_id = ?", agentID).Find(&userPerms)
+
+	users := make([]EndpointK8SAPIACLPermissionItem, 0, len(userPerms))
+	for _, p := range userPerms {
+		if p.User != nil {
+			users = append(users, EndpointK8SAPIACLPermissionItem{
+				ID:         p.User.ID,
+				Name:       p.User.Name,
+				Alias:      p.User.Alias,
+				K8SGroups:  parseJSONStringArray(p.K8SGroups),
+				Namespaces: parseJSONStringArray(p.Namespaces),
+				Enabled:    p.Enabled,
+				GrantedAt:  p.GrantedAt,
+			})
+		}
+	}
+
+	var groupPerms []model.AclK8SGroupPermission
+	db.DB.WithContext(ctx).Preload("Group").Where("target_user_id = ?", agentID).Find(&groupPerms)
+
+	groups := make([]EndpointK8SAPIACLPermissionItem, 0, len(groupPerms))
+	for _, p := range groupPerms {
+		if p.Group != nil {
+			groups = append(groups, EndpointK8SAPIACLPermissionItem{
+				ID:         uint64(p.Group.ID),
+				Name:       p.Group.Name,
+				Alias:      p.Group.Alias,
+				K8SGroups:  parseJSONStringArray(p.K8SGroups),
+				Namespaces: parseJSONStringArray(p.Namespaces),
+				Enabled:    p.Enabled,
+				GrantedAt:  p.GrantedAt,
+			})
+		}
+	}
+
+	agentName := ""
+	if endpoint.User != nil {
+		agentName = endpoint.User.Name
+	}
+
+	result := EndpointK8SAPIACLDetail{
+		ID:        endpoint.ID,
+		Name:      endpoint.Name,
+		Alias:     endpoint.Alias,
+		AgentID:   endpoint.UserID,
+		AgentName: agentName,
+		APIServer: endpoint.K8SAPIApiServer,
+		Status:    endpoint.Status,
+		Users:     users,
+		Groups:    groups,
+	}
+
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+// AddEndpointK8SAPIACLUsersRequest 添加 Endpoint K8SAPI 用户授权请求（兼容前端）
+type AddEndpointK8SAPIACLUsersRequest struct {
+	UserIDs    []uint64 `json:"user_ids" binding:"required,min=1"`
+	K8SGroups  []string `json:"k8s_groups"`
+	Namespaces []string `json:"namespaces"`
+}
+
+// AddEndpointK8SAPIACLUsers 添加 Endpoint K8SAPI 用户授权（兼容路由）
+func (a *ACLAPI) AddEndpointK8SAPIACLUsers(c *gin.Context) {
+	ctx := c.Request.Context()
+	endpointID := c.Param("id")
+
+	var req AddEndpointK8SAPIACLUsersRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
+		return
+	}
+
+	var endpoint model.Endpoint
+	if err := db.DB.WithContext(ctx).First(&endpoint, "id = ?", endpointID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
+		return
+	}
+
+	agentID := endpoint.UserID
+	k8sGroupsJSON := formatJSONStringArray(req.K8SGroups)
+	namespacesJSON := formatJSONStringArray(req.Namespaces)
+	now := time.Now()
+
+	for _, userID := range req.UserIDs {
+		var existing model.AclK8SUserPermission
+		if err := db.DB.WithContext(ctx).Where("target_user_id = ? AND user_id = ?", agentID, userID).First(&existing).Error; err == nil {
+			existing.K8SGroups = k8sGroupsJSON
+			existing.Namespaces = namespacesJSON
+			existing.Enabled = true
+			db.DB.WithContext(ctx).Save(&existing)
+			continue
+		}
+
+		perm := &model.AclK8SUserPermission{
+			TargetUserID: agentID,
+			UserID:       userID,
+			K8SGroups:    k8sGroupsJSON,
+			Namespaces:   namespacesJSON,
+			Enabled:      true,
+			GrantedAt:    now,
+		}
+		db.DB.WithContext(ctx).Create(perm)
+	}
+
+	logger.Infof("添加 K8SAPI 用户授权 (Endpoint兼容路由): endpoint_id=%s, agent_id=%d, user_ids=%v", endpointID, agentID, req.UserIDs)
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
+}
+
+// AddEndpointK8SAPIACLGroupsRequest 添加 Endpoint K8SAPI 分组授权请求（兼容前端）
+type AddEndpointK8SAPIACLGroupsRequest struct {
+	GroupIDs   []int64  `json:"group_ids" binding:"required,min=1"`
+	K8SGroups  []string `json:"k8s_groups"`
+	Namespaces []string `json:"namespaces"`
+}
+
+// AddEndpointK8SAPIACLGroups 添加 Endpoint K8SAPI 分组授权（兼容路由）
+func (a *ACLAPI) AddEndpointK8SAPIACLGroups(c *gin.Context) {
+	ctx := c.Request.Context()
+	endpointID := c.Param("id")
+
+	var req AddEndpointK8SAPIACLGroupsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
+		return
+	}
+
+	var endpoint model.Endpoint
+	if err := db.DB.WithContext(ctx).First(&endpoint, "id = ?", endpointID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
+		return
+	}
+
+	agentID := endpoint.UserID
+	k8sGroupsJSON := formatJSONStringArray(req.K8SGroups)
+	namespacesJSON := formatJSONStringArray(req.Namespaces)
+	now := time.Now()
+
+	for _, groupID := range req.GroupIDs {
+		var existing model.AclK8SGroupPermission
+		if err := db.DB.WithContext(ctx).Where("target_user_id = ? AND group_id = ?", agentID, groupID).First(&existing).Error; err == nil {
+			existing.K8SGroups = k8sGroupsJSON
+			existing.Namespaces = namespacesJSON
+			existing.Enabled = true
+			db.DB.WithContext(ctx).Save(&existing)
+			continue
+		}
+
+		perm := &model.AclK8SGroupPermission{
+			TargetUserID: agentID,
+			GroupID:      groupID,
+			K8SGroups:    k8sGroupsJSON,
+			Namespaces:   namespacesJSON,
+			Enabled:      true,
+			GrantedAt:    now,
+		}
+		db.DB.WithContext(ctx).Create(perm)
+	}
+
+	logger.Infof("添加 K8SAPI 分组授权 (Endpoint兼容路由): endpoint_id=%s, agent_id=%d, group_ids=%v", endpointID, agentID, req.GroupIDs)
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
+}
+
+// RemoveEndpointK8SAPIACLUser 撤销 Endpoint K8SAPI 用户授权（兼容路由）
+func (a *ACLAPI) RemoveEndpointK8SAPIACLUser(c *gin.Context) {
+	ctx := c.Request.Context()
+	endpointID := c.Param("id")
+	userID, _ := strconv.ParseUint(c.Param("uid"), 10, 64)
+
+	var endpoint model.Endpoint
+	if err := db.DB.WithContext(ctx).First(&endpoint, "id = ?", endpointID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
+		return
+	}
+
+	agentID := endpoint.UserID
+	result := db.DB.WithContext(ctx).Where("target_user_id = ? AND user_id = ?", agentID, userID).Delete(&model.AclK8SUserPermission{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
+		return
+	}
+
+	logger.Infof("撤销 K8SAPI 用户授权 (Endpoint兼容路由): endpoint_id=%s, agent_id=%d, user_id=%d", endpointID, agentID, userID)
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
+}
+
+// RemoveEndpointK8SAPIACLGroup 撤销 Endpoint K8SAPI 分组授权（兼容路由）
+func (a *ACLAPI) RemoveEndpointK8SAPIACLGroup(c *gin.Context) {
+	ctx := c.Request.Context()
+	endpointID := c.Param("id")
+	groupID, _ := strconv.ParseInt(c.Param("gid"), 10, 64)
+
+	var endpoint model.Endpoint
+	if err := db.DB.WithContext(ctx).First(&endpoint, "id = ?", endpointID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
+		return
+	}
+
+	agentID := endpoint.UserID
+	result := db.DB.WithContext(ctx).Where("target_user_id = ? AND group_id = ?", agentID, groupID).Delete(&model.AclK8SGroupPermission{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
+		return
+	}
+
+	logger.Infof("撤销 K8SAPI 分组授权 (Endpoint兼容路由): endpoint_id=%s, agent_id=%d, group_id=%d", endpointID, agentID, groupID)
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
+}

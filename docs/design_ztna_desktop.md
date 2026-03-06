@@ -133,11 +133,9 @@ SSH 直连 Agent：
 SSH 跳跃到 Endpoint：
   ssh deploy@web-server-1.beijing.beagle
 
-SVC 直连 Agent：
+K8S Service 访问（自动选择实现）：
   psql -h pg.yygl.beijing.beagle -p 5432
-
-SVC 跳跃到 Endpoint：
-  psql -h pg.yygl.remote-cluster.beijing.beagle -p 5432
+  （Agent 自动选择直连或 Endpoint 代理，对用户透明）
 
 K8S API 直连 Agent：
   kubectl --server=https://kubernetes.beijing.beagle:50050 get pods

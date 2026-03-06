@@ -12,6 +12,7 @@ export interface DiscoveredK8SService {
   cluster_ip: string
   ports: { name: string; port: number; protocol: string }[]
   labels: Record<string, string>
+  endpoint_name: string // 发现来源：为空表示 Agent 本身发现，不为空表示 Endpoint 发现
 }
 
 // 获取发现的 K8S Service 列表

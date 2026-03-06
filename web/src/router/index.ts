@@ -153,11 +153,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ACL/SSHDetail.vue'),
         meta: { requiresAuth: true }
       },
-      // K8S API 授权
+      // K8S API 授权（P9：合并展示 Agent + Endpoint）
       {
         path: 'acl/k8s',
         name: 'ACLK8S',
-        component: () => import('@/views/ACL/K8SList.vue'),
+        component: () => import('@/views/ACL/K8SUnifiedList.vue'),
         meta: { requiresAuth: true }
       },
       {
@@ -166,11 +166,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ACL/K8SDetail.vue'),
         meta: { requiresAuth: true }
       },
-      // K8SService 授权
+      // K8SService 授权（P9：合并展示 Agent + Endpoint）
       {
         path: 'acl/k8s-service',
         name: 'ACLK8SService',
-        component: () => import('@/views/ACL/K8SServiceList.vue'),
+        component: () => import('@/views/ACL/K8SServiceUnifiedList.vue'),
         meta: { requiresAuth: true }
       },
       {
@@ -192,12 +192,10 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ACL/EndpointSSHDetail.vue'),
         meta: { requiresAuth: true }
       },
-      // Endpoint K8SAPI 授权
+      // Endpoint K8SAPI 授权（P9：列表页合并到 /acl/k8s，仅保留详情页）
       {
         path: 'acl/endpoint-k8sapi',
-        name: 'ACLEndpointK8S',
-        component: () => import('@/views/ACL/EndpointK8SList.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/acl/k8s'
       },
       {
         path: 'acl/endpoint-k8sapi/:id',
@@ -205,12 +203,10 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ACL/EndpointK8SDetail.vue'),
         meta: { requiresAuth: true }
       },
-      // Endpoint K8SService 授权
+      // Endpoint K8SService 授权（P9：列表页合并到 /acl/k8s-service，仅保留详情页）
       {
         path: 'acl/endpoint-k8sservice',
-        name: 'ACLEndpointK8SService',
-        component: () => import('@/views/ACL/EndpointK8SServiceList.vue'),
-        meta: { requiresAuth: true }
+        redirect: '/acl/k8s-service'
       },
       {
         path: 'acl/endpoint-k8sservice/:id',

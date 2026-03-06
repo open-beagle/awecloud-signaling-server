@@ -40,6 +40,7 @@ type EndpointSSHProxy struct {
 	endpointServer *EndpointServer
 	tsManager      *TailscaleManager
 	auditCollector *AuditCollector
+	permCache      *PermissionCache // 权限缓存
 	sshConfig      *ssh.ServerConfig
 	hostKey        ssh.Signer
 
@@ -60,7 +61,7 @@ type EndpointSSHProxy struct {
 }
 
 // NewEndpointSSHProxy 创建 Endpoint SSH 代理
-func NewEndpointSSHProxy(endpointServer *EndpointServer, tsManager *TailscaleManager, auditCollector *AuditCollector, stateDir string, parentCtx context.Context) (*EndpointSSHProxy, error) {
+func NewEndpointSSHProxy(endpointServer *EndpointServer, tsManager *TailscaleManager, auditCollector *AuditCollector, permCache *PermissionCache, stateDir string, parentCtx context.Context) (*EndpointSSHProxy, error) {
 	// 加载或生成 Ed25519 主机密钥（持久化到 stateDir，避免重启后 Host Key 变化）
 	privKey, err := loadOrGenerateHostKey(stateDir)
 	if err != nil {
@@ -78,6 +79,7 @@ func NewEndpointSSHProxy(endpointServer *EndpointServer, tsManager *TailscaleMan
 		endpointServer: endpointServer,
 		tsManager:      tsManager,
 		auditCollector: auditCollector,
+		permCache:      permCache,
 		hostKey:        hostKey,
 		portMap:        make(map[uint16]string),
 		nameMap:        make(map[string]uint16),
@@ -230,6 +232,38 @@ func (p *EndpointSSHProxy) HandleConn(ctx context.Context, conn net.Conn, endpoi
 	// 提取登录用户名
 	login := sshConn.User()
 	logger.Infof("[EndpointSSH] SSH 连接: endpoint=%s, login=%s, client=%s", endpointName, login, clientUserName)
+
+	// 权限检查：验证用户是否有权访问该 Endpoint
+	if clientUserName == "" {
+		logger.Warnf("[EndpointSSH] 无法识别 Desktop 用户身份，拒绝连接: endpoint=%s", endpointName)
+		return
+	}
+
+	if p.permCache != nil {
+		allowedSSHUsers, allowed := p.permCache.CheckEndpointSSHAccess(clientUserName, endpointName)
+		if !allowed {
+			logger.Warnf("[EndpointSSH] 用户无权访问 Endpoint: user=%s, endpoint=%s", clientUserName, endpointName)
+			return
+		}
+
+		// 检查 SSH 登录用户名是否在允许列表中
+		loginAllowed := false
+		for _, allowedUser := range allowedSSHUsers {
+			if allowedUser == login || allowedUser == "*" {
+				loginAllowed = true
+				break
+			}
+		}
+		if !loginAllowed {
+			logger.Warnf("[EndpointSSH] SSH 登录用户名不在允许列表中: user=%s, endpoint=%s, login=%s, allowed=%v",
+				clientUserName, endpointName, login, allowedSSHUsers)
+			return
+		}
+
+		logger.Infof("[EndpointSSH] 权限验证通过: user=%s, endpoint=%s, login=%s", clientUserName, endpointName, login)
+	} else {
+		logger.Warnf("[EndpointSSH] 权限缓存未初始化，跳过权限检查")
+	}
 
 	// 丢弃全局请求
 	go ssh.DiscardRequests(reqs)

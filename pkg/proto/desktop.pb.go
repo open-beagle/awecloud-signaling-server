@@ -2137,7 +2137,6 @@ type ResolveDomainResponse struct {
 	Namespace     string                 `protobuf:"bytes,8,opt,name=namespace,proto3" json:"namespace,omitempty"`                               // K8S 命名空间（k8ssvc 类型时）
 	ServiceName   string                 `protobuf:"bytes,9,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`        // K8S Service 名称（k8ssvc 类型时）
 	SvcProxyPort  int32                  `protobuf:"varint,10,opt,name=svc_proxy_port,json=svcProxyPort,proto3" json:"svc_proxy_port,omitempty"` // Agent SVCProxy gRPC 端口（k8ssvc 类型时，默认 9090）
-	EndpointName  string                 `protobuf:"bytes,11,opt,name=endpoint_name,json=endpointName,proto3" json:"endpoint_name,omitempty"`    // Endpoint 名称（Endpoint 跳跃时，非空表示需要走 Endpoint 路径）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2240,13 +2239,6 @@ func (x *ResolveDomainResponse) GetSvcProxyPort() int32 {
 		return x.SvcProxyPort
 	}
 	return 0
-}
-
-func (x *ResolveDomainResponse) GetEndpointName() string {
-	if x != nil {
-		return x.EndpointName
-	}
-	return ""
 }
 
 // GetResourcesRequest 资源发现请求
@@ -2642,7 +2634,6 @@ type DomainItem struct {
 	Namespace     string                 `protobuf:"bytes,6,opt,name=namespace,proto3" json:"namespace,omitempty"`                                   // K8S 命名空间（k8ssvc 类型时）
 	ServiceName   string                 `protobuf:"bytes,7,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`            // K8S Service 名称（k8ssvc 类型时）
 	Region        string                 `protobuf:"bytes,8,opt,name=region,proto3" json:"region,omitempty"`                                         // 区域名称（从 domain 解析，如 beijing）
-	EndpointId    string                 `protobuf:"bytes,9,opt,name=endpoint_id,json=endpointId,proto3" json:"endpoint_id,omitempty"`               // Endpoint 名称（Endpoint 域名时填充，Device 域名时为空）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2729,13 +2720,6 @@ func (x *DomainItem) GetServiceName() string {
 func (x *DomainItem) GetRegion() string {
 	if x != nil {
 		return x.Region
-	}
-	return ""
-}
-
-func (x *DomainItem) GetEndpointId() string {
-	if x != nil {
-		return x.EndpointId
 	}
 	return ""
 }
@@ -3151,7 +3135,7 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\x14ResolveDomainRequest\x12\x1d\n" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12\x16\n" +
-	"\x06domain\x18\x02 \x01(\tR\x06domain\"\xeb\x02\n" +
+	"\x06domain\x18\x02 \x01(\tR\x06domain\"\xc6\x02\n" +
 	"\x15ResolveDomainResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
@@ -3166,8 +3150,7 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\tnamespace\x18\b \x01(\tR\tnamespace\x12!\n" +
 	"\fservice_name\x18\t \x01(\tR\vserviceName\x12$\n" +
 	"\x0esvc_proxy_port\x18\n" +
-	" \x01(\x05R\fsvcProxyPort\x12#\n" +
-	"\rendpoint_name\x18\v \x01(\tR\fendpointName\"4\n" +
+	" \x01(\x05R\fsvcProxyPort\"4\n" +
 	"\x13GetResourcesRequest\x12\x1d\n" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\"|\n" +
@@ -3202,7 +3185,7 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"k8sService\"5\n" +
 	"\x14GetDomainListRequest\x12\x1d\n" +
 	"\n" +
-	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\"\x8c\x02\n" +
+	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\"\xeb\x01\n" +
 	"\n" +
 	"DomainItem\x12\x16\n" +
 	"\x06domain\x18\x01 \x01(\tR\x06domain\x12\x12\n" +
@@ -3212,9 +3195,7 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\tssh_users\x18\x05 \x03(\tR\bsshUsers\x12\x1c\n" +
 	"\tnamespace\x18\x06 \x01(\tR\tnamespace\x12!\n" +
 	"\fservice_name\x18\a \x01(\tR\vserviceName\x12\x16\n" +
-	"\x06region\x18\b \x01(\tR\x06region\x12\x1f\n" +
-	"\vendpoint_id\x18\t \x01(\tR\n" +
-	"endpointId\"Q\n" +
+	"\x06region\x18\b \x01(\tR\x06region\"Q\n" +
 	"\x15GetDomainListResponse\x128\n" +
 	"\adomains\x18\x01 \x03(\v2\x1e.awecloud.signaling.DomainItemR\adomains\"\x14\n" +
 	"\x12ListDomainsRequest\"\xb4\x02\n" +

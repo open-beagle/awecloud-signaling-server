@@ -1116,41 +1116,9 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		}
 	}
 
-	// 7. Endpoint K8SService 域名：{service}.{namespace}.{endpoint-name}.{agent-name}{domain_suffix}
-	// Endpoint K8SService 通过 SVCProxy endpoint_name 字段路由，不需要独立端口
-	// 使用 Agent SVCProxy gRPC 端口（50051），Desktop 首包携带 endpoint_name
-	if a.endpointServer != nil && a.svcProxy != nil && a.tsManager != nil && a.tsManager.IsConnected() {
-		for _, ep := range a.endpointServer.GetConnectedEndpointDetails() {
-			// 检查 Endpoint 是否有 K8SService 能力
-			hasK8SService := false
-			for _, cap := range ep.Capabilities {
-				if cap.Type == "k8sservice" {
-					hasK8SService = true
-					break
-				}
-			}
-			if !hasK8SService {
-				continue
-			}
-
-			// 遍历 Endpoint 发现的 K8S Service
-			for _, svc := range ep.DiscoveredServices {
-				if len(svc.Ports) == 0 {
-					continue
-				}
-				domain := svc.ServiceName + "." + svc.Namespace + "." + ep.Name + "." + a.config.Agent.AgentName + a.domainSuffix
-				registrations = append(registrations, &pb.DomainRegistration{
-					Domain:      domain,
-					Type:        "k8ssvc",
-					TargetIp:    agentIP,
-					TargetPort:  50055, // Endpoint K8SSVC 固定端口（Agent gRPC 转发到 Endpoint）
-					Namespace:   svc.Namespace,
-					ServiceName: svc.ServiceName,
-					EndpointId:  ep.Name,
-				})
-			}
-		}
-	}
+	// 7. Endpoint K8SService 域名：由 Server 端统一管理
+	// Agent 不再生成 Endpoint K8S Service 域名，避免与 Server 端的域名创建逻辑冲突
+	// Server 端会在处理 Endpoint 心跳时，通过 CreateEndpointK8SSVCDomain 函数创建域名
 
 	return registrations
 }
@@ -1177,19 +1145,21 @@ func (a *Agent) startK8SAPIProxy() error {
 }
 
 // startK8SServiceModules 启动 K8S Service 发现和代理模块
+// Informer 启动失败时仅打印 warn，SVCProxy 仍然启动（支持 Endpoint 跳跃路径）
 func (a *Agent) startK8SServiceModules() error {
-	// 启动 Informer
+	// 尝试启动 Informer（物理节点无 K8S 访问能力时允许失败）
 	informer, err := NewK8SServiceInformer(&a.config.SVC, nil, a.ctx)
 	if err != nil {
-		return fmt.Errorf("创建 K8S Service Informer 失败: %w", err)
+		logger.Warnf("创建 K8S Service Informer 失败（Agent 直连路径不可用）: %v", err)
+	} else if err := informer.Start(); err != nil {
+		logger.Warnf("启动 K8S Service Informer 失败（Agent 直连路径不可用）: %v", err)
+		informer = nil
+	} else {
+		a.svcInformer = informer
+		logger.Infof("K8S Service Informer 已启动: selector=%s", a.config.SVC.LabelSelector)
 	}
 
-	if err := informer.Start(); err != nil {
-		return fmt.Errorf("启动 K8S Service Informer 失败: %w", err)
-	}
-	a.svcInformer = informer
-
-	// 启动 SVCProxy gRPC 服务
+	// 启动 SVCProxy gRPC 服务（informer 为 nil 时仍可处理 Endpoint 跳跃路径）
 	svcProxy, err := NewK8SSVCProxy(&a.config.SVC, a.tsManager, a.permCache, informer, a.auditCollector, a.ctx)
 	if err != nil {
 		return fmt.Errorf("创建 K8S SVCProxy 失败: %w", err)
@@ -1200,8 +1170,8 @@ func (a *Agent) startK8SServiceModules() error {
 	}
 	a.svcProxy = svcProxy
 
-	logger.Infof("K8S Service 模块已启用: selector=%s, gRPC 端口=%d",
-		a.config.SVC.LabelSelector, a.config.SVC.ListenPortBase)
+	logger.Infof("K8S SVCProxy 已启动: gRPC 端口=%d (informer=%v)",
+		a.config.SVC.ListenPortBase, a.svcInformer != nil)
 	return nil
 }
 
@@ -1389,6 +1359,10 @@ func (a *Agent) applySVCConfig() {
 	if a.config.SVC.Enabled {
 		if err := a.startK8SServiceModules(); err != nil {
 			logger.Warnf("远程启动 K8S Service 模块失败: %v", err)
+		} else if a.svcProxy != nil && a.endpointServer != nil {
+			// SVC 模块重启后，重新绑定 EndpointServer 引用（Endpoint 跳跃路径需要）
+			a.svcProxy.SetEndpointServer(a.endpointServer)
+			logger.Infof("SVC 模块重启后重新绑定 EndpointServer")
 		}
 	} else {
 		logger.Info("K8S Service 模块已通过远程配置关闭")
@@ -1422,7 +1396,7 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 			} else {
 				// 启动 Endpoint SSH 代理（在 tsnet 上监听，接收 Desktop SSH 连接）
 				if a.tsManager != nil && a.tsManager.IsConnected() {
-					sshProxy, err := NewEndpointSSHProxy(a.endpointServer, a.tsManager, a.auditCollector, a.config.Tunnel.StateDir, a.ctx)
+					sshProxy, err := NewEndpointSSHProxy(a.endpointServer, a.tsManager, a.auditCollector, a.permCache, a.config.Tunnel.StateDir, a.ctx)
 					if err != nil {
 						logger.Warnf("创建 Endpoint SSH 代理失败: %v", err)
 					} else if err := sshProxy.Start(); err != nil {

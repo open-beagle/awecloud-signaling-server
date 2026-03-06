@@ -193,6 +193,7 @@ message SVCProxyRequest {
   string namespace = 2; // 目标命名空间
   string service_name = 3; // 目标 Service 名称
   int32 port = 4; // 目标端口
+  string cluster_ip = 5; // ClusterIP（物理节点部署时直连，避免依赖 cluster.local DNS）
 }
 
 // EndpointSVCProxyData Endpoint K8S Service 代理数据帧

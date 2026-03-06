@@ -2715,14 +2715,13 @@ func (x *ReportNetworkChangeResponse) GetMessage() string {
 // 首包携带连接参数（is_connect=true），后续包携带数据
 type SVCProxyData struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Namespace     string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`                           // 目标命名空间（首包携带）
-	ServiceName   string                 `protobuf:"bytes,2,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`    // 目标 Service 名称（首包携带）
-	Port          int32                  `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`                                    // 目标端口（首包携带）
-	Data          []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`                                     // 数据载荷
-	IsConnect     bool                   `protobuf:"varint,5,opt,name=is_connect,json=isConnect,proto3" json:"is_connect,omitempty"`         // 是否为连接请求（首包 true）
-	IsClose       bool                   `protobuf:"varint,6,opt,name=is_close,json=isClose,proto3" json:"is_close,omitempty"`               // 是否为关闭通知
-	Error         string                 `protobuf:"bytes,7,opt,name=error,proto3" json:"error,omitempty"`                                   // 错误信息（如有）
-	EndpointName  string                 `protobuf:"bytes,8,opt,name=endpoint_name,json=endpointName,proto3" json:"endpoint_name,omitempty"` // Endpoint 名称（首包携带，非空时走 Endpoint 跳跃路径）
+	Namespace     string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`                        // 目标命名空间（首包携带）
+	ServiceName   string                 `protobuf:"bytes,2,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"` // 目标 Service 名称（首包携带）
+	Port          int32                  `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`                                 // 目标端口（首包携带）
+	Data          []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`                                  // 数据载荷
+	IsConnect     bool                   `protobuf:"varint,5,opt,name=is_connect,json=isConnect,proto3" json:"is_connect,omitempty"`      // 是否为连接请求（首包 true）
+	IsClose       bool                   `protobuf:"varint,6,opt,name=is_close,json=isClose,proto3" json:"is_close,omitempty"`            // 是否为关闭通知
+	Error         string                 `protobuf:"bytes,7,opt,name=error,proto3" json:"error,omitempty"`                                // 错误信息（如有）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2802,13 +2801,6 @@ func (x *SVCProxyData) GetIsClose() bool {
 func (x *SVCProxyData) GetError() string {
 	if x != nil {
 		return x.Error
-	}
-	return ""
-}
-
-func (x *SVCProxyData) GetEndpointName() string {
-	if x != nil {
-		return x.EndpointName
 	}
 	return ""
 }
@@ -3083,7 +3075,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\bnetworks\x18\x02 \x03(\v2$.awecloud.signaling.NetworkInterfaceR\bnetworks\"Q\n" +
 	"\x1bReportNetworkChangeResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xec\x01\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\xc7\x01\n" +
 	"\fSVCProxyData\x12\x1c\n" +
 	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12!\n" +
 	"\fservice_name\x18\x02 \x01(\tR\vserviceName\x12\x12\n" +
@@ -3092,8 +3084,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\n" +
 	"is_connect\x18\x05 \x01(\bR\tisConnect\x12\x19\n" +
 	"\bis_close\x18\x06 \x01(\bR\aisClose\x12\x14\n" +
-	"\x05error\x18\a \x01(\tR\x05error\x12#\n" +
-	"\rendpoint_name\x18\b \x01(\tR\fendpointName2\xec\x06\n" +
+	"\x05error\x18\a \x01(\tR\x05error2\xec\x06\n" +
 	"\fAgentService\x12_\n" +
 	"\bRegister\x12(.awecloud.signaling.AgentRegisterRequest\x1a).awecloud.signaling.AgentRegisterResponse\x12k\n" +
 	"\fAuthenticate\x12,.awecloud.signaling.AgentAuthenticateRequest\x1a-.awecloud.signaling.AgentAuthenticateResponse\x12f\n" +

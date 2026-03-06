@@ -1589,6 +1589,7 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 
 	logger.Infof("Desktop %d 解析域名: %s → %s:%d (user=%s, target_ip=%s)", req.DesktopId, req.Domain, agentIP, record.TargetPort, userName, record.TargetIP)
 
+	// P10 重构：删除 endpoint_name 字段，Agent 自动选择实现路径
 	return &pb.ResolveDomainResponse{
 		Success:      true,
 		Message:      "解析成功",
@@ -1599,8 +1600,7 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 		DomainType:   string(record.Type),
 		Namespace:    record.Namespace,
 		ServiceName:  record.ServiceName,
-		SvcProxyPort: 50051,             // Agent SVCProxy 默认端口
-		EndpointName: record.EndpointID, // Endpoint 名称（非空时走 Endpoint 跳跃路径）
+		SvcProxyPort: 50051, // Agent SVCProxy 默认端口
 	}, nil
 }
 
@@ -1954,34 +1954,10 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 	}
 
 	// 5. 收集 Endpoint K8S API 权限
-	var endpointK8SAPIUserPerms []model.AclEndpointK8SAPIUserPermission
-	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&endpointK8SAPIUserPerms)
-	for _, p := range endpointK8SAPIUserPerms {
-		endpointK8SAPIIDs[p.EndpointID] = true
-	}
-
-	if len(groupIDs) > 0 {
-		var endpointK8SAPIGroupPerms []model.AclEndpointK8SAPIGroupPermission
-		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&endpointK8SAPIGroupPerms)
-		for _, p := range endpointK8SAPIGroupPerms {
-			endpointK8SAPIIDs[p.EndpointID] = true
-		}
-	}
+	// P11 重构：已废弃，不再查询 Endpoint K8SAPI 权限
 
 	// 6. 收集 Endpoint K8S Service 权限
-	var endpointK8SSvcUserPerms []model.AclEndpointK8SServiceUserPermission
-	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&endpointK8SSvcUserPerms)
-	for _, p := range endpointK8SSvcUserPerms {
-		endpointK8SSvcIDs[p.EndpointID] = true
-	}
-
-	if len(groupIDs) > 0 {
-		var endpointK8SSvcGroupPerms []model.AclEndpointK8SServiceGroupPermission
-		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&endpointK8SSvcGroupPerms)
-		for _, p := range endpointK8SSvcGroupPerms {
-			endpointK8SSvcIDs[p.EndpointID] = true
-		}
-	}
+	// P10 重构：已废弃，不再查询 Endpoint K8SService 权限
 
 	// 7. 合并所有有权限的 Agent User ID（用于一次性查询域名）
 	allAgentIDs := make(map[uint64]bool)
@@ -2082,12 +2058,12 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 			continue // 没有权限，跳过
 		}
 
+		// P10 重构：删除 endpoint_id 字段
 		item := &pb.DomainItem{
 			Domain:      dr.Domain,
 			Type:        string(dr.Type),
 			Namespace:   dr.Namespace,
 			ServiceName: dr.ServiceName,
-			EndpointId:  dr.EndpointID,
 		}
 
 		// 解析 region（从 domain 中提取）
@@ -2317,46 +2293,10 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 	}
 
 	// Endpoint K8S API 权限
-	var endpointK8SAPIUserPerms []model.AclEndpointK8SAPIUserPermission
-	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", userID, true).Find(&endpointK8SAPIUserPerms)
-	for _, p := range endpointK8SAPIUserPerms {
-		var ep model.Endpoint
-		if err := db.DB.WithContext(ctx).Where("id = ?", p.EndpointID).First(&ep).Error; err == nil {
-			agentUserIDs[ep.UserID] = true
-		}
-	}
-
-	if len(groupIDs) > 0 {
-		var endpointK8SAPIGroupPerms []model.AclEndpointK8SAPIGroupPermission
-		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&endpointK8SAPIGroupPerms)
-		for _, p := range endpointK8SAPIGroupPerms {
-			var ep model.Endpoint
-			if err := db.DB.WithContext(ctx).Where("id = ?", p.EndpointID).First(&ep).Error; err == nil {
-				agentUserIDs[ep.UserID] = true
-			}
-		}
-	}
+	// P11 重构：已废弃，不再查询 Endpoint K8SAPI 权限
 
 	// Endpoint K8S Service 权限
-	var endpointK8SSvcUserPerms []model.AclEndpointK8SServiceUserPermission
-	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", userID, true).Find(&endpointK8SSvcUserPerms)
-	for _, p := range endpointK8SSvcUserPerms {
-		var ep model.Endpoint
-		if err := db.DB.WithContext(ctx).Where("id = ?", p.EndpointID).First(&ep).Error; err == nil {
-			agentUserIDs[ep.UserID] = true
-		}
-	}
-
-	if len(groupIDs) > 0 {
-		var endpointK8SSvcGroupPerms []model.AclEndpointK8SServiceGroupPermission
-		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&endpointK8SSvcGroupPerms)
-		for _, p := range endpointK8SSvcGroupPerms {
-			var ep model.Endpoint
-			if err := db.DB.WithContext(ctx).Where("id = ?", p.EndpointID).First(&ep).Error; err == nil {
-				agentUserIDs[ep.UserID] = true
-			}
-		}
-	}
+	// P10 重构：已废弃，不再查询 Endpoint K8SService 权限
 
 	// 转换为 ID 列表
 	var allowedAgentIDs []uint64
@@ -2372,8 +2312,8 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 		}, nil
 	}
 
-	// 查询域名记录
-	query.Where("user_id IN ?", allowedAgentIDs).Find(&domainRecords)
+	// 查询域名记录（Preload Endpoint 关联，用于填充 endpoint_name）
+	query.Preload("Endpoint").Where("user_id IN ?", allowedAgentIDs).Find(&domainRecords)
 
 	// 构建响应
 	var domains []*pb.DomainInfo
@@ -2398,6 +2338,9 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 
 		// 填充 cluster_name（从 domain 中提取 region）
 		domainInfo.ClusterName = s.extractRegionFromDomain(record.Domain)
+
+		// P10 重构：删除 endpoint_id 和 endpoint_name 字段
+		// 客户端不需要知道底层实现细节
 
 		// 解析 service_ports（仅 k8ssvc 类型）
 		if record.Type == model.DomainTypeK8SSVC && record.ServicePorts != "" {

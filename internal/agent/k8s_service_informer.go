@@ -244,19 +244,13 @@ func (i *K8SServiceInformer) Stop() {
 }
 
 // createK8SClientset 创建 K8S 客户端
+// 优先级：显式 kubeconfig > InCluster > ~/.kube/config
 func createK8SClientset(kubeconfig string) (kubernetes.Interface, error) {
 	var config *rest.Config
 	var err error
 
-	if kubeconfig == "" {
-		// InCluster 模式
-		config, err = rest.InClusterConfig()
-		if err != nil {
-			return nil, fmt.Errorf("InCluster 配置失败: %w", err)
-		}
-		logger.Info("使用 InCluster K8S 配置")
-	} else {
-		// 展开 ~
+	if kubeconfig != "" {
+		// 显式指定 kubeconfig，展开 ~
 		if strings.HasPrefix(kubeconfig, "~/") {
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
@@ -264,12 +258,33 @@ func createK8SClientset(kubeconfig string) (kubernetes.Interface, error) {
 			}
 			kubeconfig = filepath.Join(homeDir, kubeconfig[2:])
 		}
-
 		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
 			return nil, fmt.Errorf("从 kubeconfig 创建配置失败: %w", err)
 		}
 		logger.Infof("使用 kubeconfig: %s", kubeconfig)
+	} else {
+		// 尝试 InCluster（Pod 内部署）
+		config, err = rest.InClusterConfig()
+		if err != nil {
+			// InCluster 失败，降级到 ~/.kube/config（物理节点部署）
+			logger.Infof("InCluster 配置不可用，降级到 kubeconfig: %v", err)
+			kubeconfigPath := os.Getenv("KUBECONFIG")
+			if kubeconfigPath == "" {
+				homeDir, err := os.UserHomeDir()
+				if err != nil {
+					return nil, fmt.Errorf("获取用户主目录失败: %w", err)
+				}
+				kubeconfigPath = filepath.Join(homeDir, ".kube", "config")
+			}
+			config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+			if err != nil {
+				return nil, fmt.Errorf("kubeconfig 配置失败 (%s): %w", kubeconfigPath, err)
+			}
+			logger.Infof("使用 kubeconfig: %s", kubeconfigPath)
+		} else {
+			logger.Info("使用 InCluster K8S 配置")
+		}
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
