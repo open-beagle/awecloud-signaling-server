@@ -78,6 +78,8 @@ message AgentRegisterResponse {
   uint64 agent_id = 3; // Agent ID（Headscale User ID）
   string auth_key = 4; // Tailscale PreAuthKey，用于隧道连接
   string server_url = 5; // Headscale 服务器地址
+  string user_name = 6; // 用户名
+  string device_name = 7; // 设备名称（Node.Name，即 DeployToken.Name）
 }
 
 // ============================================
@@ -137,6 +139,7 @@ message AgentHeartbeatRequest {
   repeated ConnectedEndpoint connected_endpoints = 11; // 已连接的 Endpoint 列表
   // 操作审计记录（Agent 上报）
   repeated OperationAuditRecord audit_records = 12; // 操作审计记录
+  string device_name = 13; // 设备名称（Node.Name，即 DeployToken.Name）
 }
 
 // ConnectedEndpoint Agent 上报的已连接 Endpoint 信息

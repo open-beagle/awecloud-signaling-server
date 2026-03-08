@@ -97,47 +97,38 @@ func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
 
 // Register Agent 注册
 func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegisterRequest) (*pb.AgentRegisterResponse, error) {
-	logger.Infof("Agent 注册请求: name=%s, version=%s", req.Name, req.Version)
+	logger.Infof("Agent 注册请求: version=%s", req.Version)
 
-	// 查询 User（Agent 角色）
-	var user model.User
-	if err := db.DB.WithContext(ctx).Where("name = ? AND role = ?", req.Name, model.UserRoleAgent).First(&user).Error; err != nil {
-		logger.Warnf("Agent 用户不存在: %s", req.Name)
+	// 先通过 DeployToken 查询用户
+	var deployToken model.DeployToken
+	if err := db.DB.WithContext(ctx).Where("token = ? AND status = ?", req.Secret, model.DeployTokenStatusBound).First(&deployToken).Error; err != nil {
+		logger.Warnf("DeployToken 不存在或未绑定: %s", req.Secret)
 		return &pb.AgentRegisterResponse{
 			Success: false,
-			Message: "Agent 不存在",
+			Message: "无效的 Token",
 		}, nil
 	}
 
-	// 验证密钥（支持两种方式：user secret 或 deploy token）
-	authenticated := false
+	// 更新 DeployToken 最后使用时间
+	deployToken.UpdateLastUsed()
+	db.DB.WithContext(ctx).Save(&deployToken)
 
-	// 方式1：bcrypt 验证 user secret
-	if user.SecretHash != "" {
-		if err := bcrypt.CompareHashAndPassword([]byte(user.SecretHash), []byte(req.Secret)); err == nil {
-			authenticated = true
-		}
-	}
-
-	// 方式2：deploy token 验证（查询该用户的有效 deploy token）
-	if !authenticated {
-		var deployToken model.DeployToken
-		if err := db.DB.WithContext(ctx).Where(
-			"user_id = ? AND token = ? AND status = ?",
-			user.ID, req.Secret, model.DeployTokenStatusBound,
-		).First(&deployToken).Error; err == nil {
-			authenticated = true
-			// 更新最后使用时间
-			deployToken.UpdateLastUsed()
-			db.DB.WithContext(ctx).Save(&deployToken)
-		}
-	}
-
-	if !authenticated {
-		logger.Warnf("Agent 认证失败: %s", req.Name)
+	// 查询用户
+	var user model.User
+	if err := db.DB.WithContext(ctx).First(&user, deployToken.UserID).Error; err != nil {
+		logger.Warnf("用户不存在: user_id=%d", deployToken.UserID)
 		return &pb.AgentRegisterResponse{
 			Success: false,
-			Message: "认证失败",
+			Message: "用户不存在",
+		}, nil
+	}
+
+	// 验证用户角色
+	if user.Role != model.UserRoleAgent {
+		logger.Warnf("用户角色不是 Agent: user_id=%d, role=%s", user.ID, user.Role)
+		return &pb.AgentRegisterResponse{
+			Success: false,
+			Message: "用户角色不匹配",
 		}, nil
 	}
 
@@ -152,8 +143,8 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 
 	// 查询或创建 Node（Agent 类型按 user_id + type 唯一）
 	var node model.Node
-	// 设备名：优先使用 SystemInfo.Hostname，否则使用 Agent 名称
-	deviceName := req.Name
+	// 设备名：优先使用 SystemInfo.Hostname，否则使用 Token 名称
+	deviceName := deployToken.Name
 	if req.SystemInfo != nil && req.SystemInfo.Hostname != "" {
 		deviceName = req.SystemInfo.Hostname
 	}
@@ -198,24 +189,26 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 
 	// 构建响应
 	resp := &pb.AgentRegisterResponse{
-		Success: true,
-		Message: "注册成功",
-		AgentId: user.ID,
+		Success:    true,
+		Message:    "注册成功",
+		AgentId:    user.ID,
+		UserName:   user.Name,
+		DeviceName: node.Name, // 返回 Node.Name（即 DeployToken.Name）
 	}
 
 	// 创建 Tailscale 预认证密钥
 	if s.headscaleClient != nil && s.config != nil {
-		authKey, serverURL, err := s.createAgentAuthKey(ctx, req.Name, user.ID)
+		authKey, serverURL, err := s.createAgentAuthKey(ctx, user.Name, user.ID)
 		if err != nil {
 			logger.Errorf("创建 Tailscale 预认证密钥失败: %v", err)
 		} else {
 			resp.AuthKey = authKey
 			resp.ServerUrl = serverURL
-			logger.Infof("已为 Agent %s 创建 Tailscale 预认证密钥", req.Name)
+			logger.Infof("已为 Agent %s 创建 Tailscale 预认证密钥", user.Name)
 		}
 	}
 
-	logger.Infof("Agent 注册成功: %s (ID: %d)", req.Name, user.ID)
+	logger.Infof("Agent 注册成功: %s (ID: %d)", user.Name, user.ID)
 	return resp, nil
 }
 
@@ -552,29 +545,36 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		}
 	}
 
-	// 确定 Node 名称
-	nodeName := req.Hostname
+	// 查询或创建 Node（Agent/Desktop 按 user_id + type + name 唯一）
+	// 注意：Node.Name 来自 DeployToken.Name，在 Register 时已设置
+	// 心跳时应该按 user_id + type + name 查询，确保每个 Token 对应独立的 Node
+	var node model.Node
+	nodeName := req.DeviceName // DeviceName 在 Register 时设置为 DeployToken.Name
 	if nodeName == "" {
-		nodeName = user.Name
+		// 兜底：如果 DeviceName 为空（旧版本 Agent），使用 hostname
+		nodeName = req.Hostname
+		if nodeName == "" {
+			nodeName = user.Name
+		}
+		logger.Warnf("心跳时 DeviceName 为空，使用 hostname 作为 Node.Name: user_id=%d, hostname=%s", agentID, nodeName)
 	}
 
-	// 查询或创建 Node（用 user_id + type + name 唯一定位）
-	var node model.Node
 	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ? AND name = ?", agentID, nodeType, nodeName).First(&node).Error; err != nil {
-		// Node 不存在，创建
+		// Node 不存在，创建新 Node
+		// 注意：正常情况下，Node 应该在 Register 时已创建，这里是兜底逻辑
 		now := time.Now()
 		node = model.Node{
 			UserID:        agentID,
 			Name:          nodeName,
 			Type:          nodeType,
-			Hostname:      nodeName,
+			Hostname:      req.Hostname,
 			IP:            req.TunnelIp,
 			LastHeartbeat: &now,
 		}
 		if err := db.DB.WithContext(ctx).Create(&node).Error; err != nil {
 			logger.Errorf("创建 Node 失败: user_id=%d, type=%s, name=%s, err=%v", agentID, nodeType, nodeName, err)
 		} else {
-			logger.Infof("创建 Node: user_id=%d, name=%s, type=%s", agentID, nodeName, nodeType)
+			logger.Infof("心跳时创建 Node: user_id=%d, name=%s, type=%s", agentID, nodeName, nodeType)
 		}
 	}
 
@@ -602,7 +602,7 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	if s.headscaleClient != nil && node.HeadscaleNodeID == 0 {
 		hsUserName := fmt.Sprintf("%s-%s", hsPrefix, user.Name)
 		// 按用户名 + 节点名精确匹配（一个 Headscale 用户下可能有多个节点）
-		hsNode, err := s.headscaleClient.GetNodeByUserAndName(ctx, hsUserName, nodeName)
+		hsNode, err := s.headscaleClient.GetNodeByUserAndName(ctx, hsUserName, node.Name)
 		if err != nil {
 			logger.Warnf("通过 User+Name 查询 Headscale 节点失败: %v", err)
 		} else if hsNode != nil {

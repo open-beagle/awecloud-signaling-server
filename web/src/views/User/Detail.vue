@@ -27,16 +27,6 @@
         </el-descriptions-item>
         <el-descriptions-item :label="$t('common.createdAt')">{{ formatTime(user?.created_at) }}</el-descriptions-item>
       </el-descriptions>
-
-      <!-- 操作按钮 -->
-      <div class="action-buttons">
-        <el-button type="warning" @click="handleRegenerateSecret">
-          {{ $t('user.regenerateSecret') }}
-        </el-button>
-        <el-button type="danger" @click="handleDelete">
-          {{ $t('common.delete') }}
-        </el-button>
-      </div>
     </el-card>
 
     <!-- 设备列表 -->
@@ -85,7 +75,7 @@
 
       <!-- Agent 部署历史 -->
       <el-table v-if="user?.role === 'agent'" v-loading="deployLoading" :data="deployTokens" stripe>
-        <el-table-column prop="device_name" :label="$t('agent.deviceName')" min-width="120" />
+        <el-table-column prop="name" :label="$t('agent.tokenName')" min-width="120" />
         <el-table-column :label="$t('common.status')" width="100">
           <template #default="{ row }">
             <el-tag :type="getDeployStatusType(row.status)" size="small">
@@ -107,12 +97,11 @@
         <el-table-column :label="$t('common.actions')" width="100" fixed="right">
           <template #default="{ row }">
             <el-button
-              v-if="row.status === 'pending'"
               size="small"
               type="danger"
               @click="handleRevokeDeployToken(row)"
             >
-              {{ $t('common.revoke') }}
+              {{ $t('common.delete') }}
             </el-button>
           </template>
         </el-table-column>
@@ -128,7 +117,6 @@
           </template>
         </el-table-column>
         <el-table-column prop="name" :label="$t('clientToken.tokenName')" min-width="120" />
-        <el-table-column prop="device_name" :label="$t('clientToken.deviceName')" min-width="120" />
         <el-table-column prop="created_by_name" :label="$t('common.createdBy')" width="100" />
         <el-table-column :label="$t('common.createdAt')" width="180">
           <template #default="{ row }">
@@ -343,15 +331,15 @@ const handleRevokeDeployToken = async (token: DeployToken) => {
     )
     const res = await revokeDeployToken(token.id)
     if (res.success) {
-      ElMessage.success(t('common.revokeSuccess'))
+      ElMessage.success(t('common.deleteSuccess'))
       loadDeployHistory()
     } else {
-      ElMessage.error(res.message || t('common.revokeFailed'))
+      ElMessage.error(res.message || t('common.deleteFailed'))
     }
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('撤销部署 Token 失败:', error)
-      ElMessage.error(t('common.revokeFailed'))
+      ElMessage.error(t('common.deleteFailed'))
     }
   }
 }
@@ -484,12 +472,6 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-}
-
-.action-buttons {
-  margin-top: 20px;
-  display: flex;
-  gap: 10px;
 }
 
 .secret-box {

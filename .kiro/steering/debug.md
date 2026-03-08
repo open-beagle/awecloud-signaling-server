@@ -86,7 +86,7 @@ docker build --no-cache -f .beagle/server.dockerfile \
 docker push ${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION}
 
 # 重启部署
-sleep 3 && kubectl --context aliyun --namespace beagle-access rollout restart deployment/signal-server
+sleep 3 && kubectl --context aliyun.beagle --namespace beagle-access rollout restart deployment/signal-server
 ```
 
 ### Agent
@@ -112,7 +112,7 @@ docker build --no-cache -f .beagle/agent.dockerfile \
 docker push ${REGISTRY}/awecloud-signaling-agent:${BUILD_VERSION}
 
 # 重启部署
-sleep 3 && kubectl --context beagle --namespace beagle-access rollout restart deployment/signal-agent
+sleep 3 && kubectl --context beijing.beagle --namespace beagle-access rollout restart deployment/signal-agent
 ```
 
 #### 二进制
@@ -141,10 +141,10 @@ BUILD_VERSION=$(cat version) bash scripts/push_to_s3.sh endpoint
 
 ```bash
 # Server
-kubectl --context aliyun -n beagle-access exec -it deployment/signal-server -- /bin/sh
+kubectl --context aliyun.beagle -n beagle-access exec -it deployment/signal-server -- /bin/sh
 
 # Agent
-kubectl --context beagle -n beagle-access exec -it deployment/signal-agent -- /bin/sh
+kubectl --context beijing.beagle -n beagle-access exec -it deployment/signal-agent -- /bin/sh
 ```
 
 ### 本地 CloudIDE 调试

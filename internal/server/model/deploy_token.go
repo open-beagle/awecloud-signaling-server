@@ -22,14 +22,14 @@ const (
 // 设备绑定说明：
 // 统一使用 hostname 的 SHA256 哈希作为设备指纹。
 // Token 首次使用后绑定 hostname，其他设备无法复用。
+// Headscale 设备名称使用 Token 的 Name 字段：agent-{name} 或 client-{name}。
 type DeployToken struct {
 	ID                uint64            `gorm:"primaryKey;autoIncrement" json:"id"`
 	Token             string            `gorm:"size:500;not null;uniqueIndex" json:"-"`          // 部署 Token（不返回给前端）
 	UserID            uint64            `gorm:"not null;index" json:"user_id"`                   // 关联的用户 ID
-	Name              string            `gorm:"size:100;not null" json:"name"`                   // Token 名称/备注
+	Name              string            `gorm:"size:100;not null" json:"name"`                   // Token 名称（用作 Headscale 设备名）
 	Status            DeployTokenStatus `gorm:"size:20;not null;default:pending" json:"status"`  // 状态
 	DeviceFingerprint string            `gorm:"size:255" json:"device_fingerprint"`              // 绑定的设备指纹（SHA256(hostname)）
-	DeviceName        string            `gorm:"size:100" json:"device_name"`                     // 设备名称（hostname）
 	SSHEnabled        bool              `gorm:"default:false" json:"ssh_enabled"`                // 是否启用 SSH
 	SSHUsers          string            `gorm:"size:500" json:"ssh_users"`                       // SSH 用户名列表（JSON 数组，Client 角色专用）
 	ExpiresAt         *time.Time        `json:"expires_at"`                                      // 首次使用截止时间（可选，Agent 默认 24h，Client 无限制）
@@ -94,11 +94,10 @@ func (t *DeployToken) CanUse(deviceFingerprint string) (bool, string) {
 }
 
 // Bind 绑定设备
-func (t *DeployToken) Bind(fingerprint, deviceName string) {
+func (t *DeployToken) Bind(fingerprint string) {
 	now := time.Now()
 	t.Status = DeployTokenStatusBound
 	t.DeviceFingerprint = fingerprint
-	t.DeviceName = deviceName
 	t.BoundAt = &now
 	t.LastUsedAt = &now
 }

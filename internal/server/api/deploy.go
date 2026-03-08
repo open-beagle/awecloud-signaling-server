@@ -65,7 +65,6 @@ type DeployTokenListItem struct {
 	Name              string     `json:"name"`
 	Status            string     `json:"status"`
 	DeviceFingerprint string     `json:"device_fingerprint,omitempty"`
-	DeviceName        string     `json:"device_name,omitempty"`
 	SSHEnabled        bool       `json:"ssh_enabled"`
 	CreatedBy         uint64     `json:"created_by"`
 	CreatedByName     string     `json:"created_by_name,omitempty"`
@@ -79,7 +78,6 @@ type DeployTokenListItem struct {
 type RegisterRequest struct {
 	Token             string `json:"token" binding:"required"`              // 部署 Token
 	DeviceFingerprint string `json:"device_fingerprint" binding:"required"` // 设备指纹（SHA256(hostname)）
-	DeviceName        string `json:"device_name"`                           // 设备名称（hostname，可选）
 }
 
 // RegisterResponse 统一注册响应
@@ -91,6 +89,7 @@ type RegisterResponse struct {
 	HeadscaleURL string                 `json:"headscale_url,omitempty"` // Headscale 地址
 	AuthKey      string                 `json:"auth_key,omitempty"`      // Headscale 认证密钥
 	UserName     string                 `json:"user_name,omitempty"`     // 用户名
+	DeviceName   string                 `json:"device_name,omitempty"`   // 设备名称（Node.Name，用于域名注册）
 }
 
 // --- Token 管理 API ---
@@ -239,7 +238,6 @@ func (a *DeployAPI) ListDeployTokens(c *gin.Context) {
 			Name:              t.Name,
 			Status:            string(t.Status),
 			DeviceFingerprint: t.DeviceFingerprint,
-			DeviceName:        t.DeviceName,
 			SSHEnabled:        t.SSHEnabled,
 			CreatedBy:         t.CreatedBy,
 			CreatedAt:         t.CreatedAt,
@@ -297,7 +295,7 @@ func (a *DeployAPI) GetDeployCommand(c *gin.Context) {
 	c.JSON(http.StatusOK, NewSuccessResponse(result))
 }
 
-// RevokeDeployToken 撤销部署 Token
+// RevokeDeployToken 撤销/删除部署 Token
 func (a *DeployAPI) RevokeDeployToken(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -313,11 +311,18 @@ func (a *DeployAPI) RevokeDeployToken(c *gin.Context) {
 		return
 	}
 
-	if deployToken.Status == model.DeployTokenStatusRevoked {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("Token 已被撤销"))
+	// 如果 Token 已经被撤销或过期,直接删除
+	if deployToken.Status == model.DeployTokenStatusRevoked || deployToken.IsExpired() {
+		if err := db.DB.WithContext(ctx).Delete(&deployToken).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
+			return
+		}
+		logger.Infof("删除失效的部署 Token: id=%d, status=%s", tokenID, deployToken.Status)
+		c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
 		return
 	}
 
+	// 否则先撤销
 	deployToken.Revoke()
 	if err := db.DB.WithContext(ctx).Save(&deployToken).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("撤销失败"))
@@ -376,11 +381,7 @@ func (a *DeployAPI) Register(c *gin.Context) {
 
 	// 绑定设备
 	if isFirstUse {
-		deviceName := req.DeviceName
-		if deviceName == "" {
-			deviceName = deployToken.Name
-		}
-		deployToken.Bind(req.DeviceFingerprint, deviceName)
+		deployToken.Bind(req.DeviceFingerprint)
 	} else {
 		deployToken.UpdateLastUsed()
 	}
@@ -388,6 +389,40 @@ func (a *DeployAPI) Register(c *gin.Context) {
 	if err := db.DB.WithContext(ctx).Save(&deployToken).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新 Token 失败"))
 		return
+	}
+
+	// 创建或更新 Node（使用 DeployToken 名称）
+	var node model.Node
+	nodeType := model.NodeTypeAgent
+	if user.Role == model.UserRoleClient {
+		nodeType = model.NodeTypeDesktop
+	}
+
+	// 使用 DeployToken 名称作为 Node 名称
+	nodeName := deployToken.Name
+
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", user.ID, nodeType).First(&node).Error; err != nil {
+		// Node 不存在，创建新 Node
+		node = model.Node{
+			UserID: user.ID,
+			Name:   nodeName,
+			Type:   nodeType,
+		}
+		if err := db.DB.WithContext(ctx).Create(&node).Error; err != nil {
+			logger.Errorf("创建 Node 失败: user_id=%d, name=%s, err=%v", user.ID, nodeName, err)
+		} else {
+			logger.Infof("注册时创建 Node: user_id=%d, name=%s, type=%s", user.ID, nodeName, nodeType)
+		}
+	} else {
+		// Node 已存在，更新名称（使用 DeployToken 名称）
+		if node.Name != nodeName {
+			node.Name = nodeName
+			if err := db.DB.WithContext(ctx).Save(&node).Error; err != nil {
+				logger.Errorf("更新 Node 名称失败: node_id=%d, new_name=%s, err=%v", node.ID, nodeName, err)
+			} else {
+				logger.Infof("注册时更新 Node 名称: node_id=%d, old_name=%s, new_name=%s", node.ID, node.Name, nodeName)
+			}
+		}
 	}
 
 	// 根据 User.Role 分支 Headscale 逻辑
@@ -418,16 +453,13 @@ func (a *DeployAPI) Register(c *gin.Context) {
 		HeadscaleURL: headscaleURL,
 		AuthKey:      authKey,
 		UserName:     user.Name,
+		DeviceName:   node.Name, // 返回 Node.Name（即 DeployToken.Name）供 Agent 使用
 	}
 
 	switch user.Role {
 	case model.UserRoleAgent:
 		resp.Message = "Agent 注册成功"
 		resp.Config = map[string]interface{}{
-			"agent": map[string]interface{}{
-				"name":   user.Name,
-				"device": deployToken.DeviceName,
-			},
 			"server": map[string]interface{}{
 				"address": a.config.Server.PublicURL,
 			},
@@ -443,8 +475,8 @@ func (a *DeployAPI) Register(c *gin.Context) {
 		}
 	}
 
-	logger.Infof("统一注册成功: user=%s, role=%s, device=%s, first_use=%v",
-		user.Name, user.Role, deployToken.DeviceName, isFirstUse)
+	logger.Infof("统一注册成功: user=%s, role=%s, token=%s, first_use=%v",
+		user.Name, user.Role, deployToken.Name, isFirstUse)
 
 	c.JSON(http.StatusOK, NewSuccessResponse(resp))
 }
