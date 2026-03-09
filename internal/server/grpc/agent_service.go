@@ -143,11 +143,8 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 
 	// 查询或创建 Node（Agent 类型按 user_id + type 唯一）
 	var node model.Node
-	// 设备名：优先使用 SystemInfo.Hostname，否则使用 Token 名称
+	// Agent 设备名：使用 DeployToken.Name（不使用系统 hostname）
 	deviceName := deployToken.Name
-	if req.SystemInfo != nil && req.SystemInfo.Hostname != "" {
-		deviceName = req.SystemInfo.Hostname
-	}
 	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", user.ID, model.NodeTypeAgent).First(&node).Error; err != nil {
 		// 创建新 Node
 		node = model.Node{

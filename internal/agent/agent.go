@@ -251,7 +251,7 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 	// 启动 Tailscale（仅网络连接）
 	a.tsManager = NewTailscaleManager(a.config, nil, 0, "", a.ctx)
 
-	if err := a.tsManager.Start(regResult.HeadscaleURL, regResult.AuthKey); err != nil {
+	if err := a.tsManager.Start(regResult.HeadscaleURL, regResult.AuthKey, a.deviceName); err != nil {
 		return fmt.Errorf("启动 Tailscale 失败: %w", err)
 	}
 
@@ -549,7 +549,7 @@ func (a *Agent) register() error {
 			a.tsManager = NewTailscaleManager(a.config, a.grpcClient, a.agentID, a.config.Agent.AgentToken, a.ctx)
 		}
 
-		if err := a.tsManager.Start(resp.ServerUrl, resp.AuthKey); err != nil {
+		if err := a.tsManager.Start(resp.ServerUrl, resp.AuthKey, a.deviceName); err != nil {
 			return fmt.Errorf("启动 Tailscale 失败: %w", err)
 		}
 
