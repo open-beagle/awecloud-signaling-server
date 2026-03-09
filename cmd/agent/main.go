@@ -420,6 +420,13 @@ func extractRealUser(remoteUser string) string {
 	tags := strings.Split(remoteUser, ",")
 	for _, tag := range tags {
 		tag = strings.TrimSpace(tag)
+		
+		// 查找以 "tag:client-" 开头的标签（优先）
+		if strings.HasPrefix(tag, "tag:client-") {
+			// 去掉 "tag:client-" 前缀
+			return strings.TrimPrefix(tag, "tag:client-")
+		}
+		
 		// 查找以 "tag:desktop-" 开头但不是 "tag:desktop-group-" 的标签
 		if strings.HasPrefix(tag, "tag:desktop-") && !strings.HasPrefix(tag, "tag:desktop-group-") {
 			// 去掉 "tag:desktop-" 前缀

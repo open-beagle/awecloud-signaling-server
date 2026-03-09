@@ -546,6 +546,8 @@ func loadOrGenerateHostKey(stateDir string) (ed25519.PrivateKey, error) {
 }
 
 // buildSSHBanner 构建 SSH 登录横幅
+// 注意：横幅直接写入 SSH channel（不经过 PTY），需要使用 \r\n 换行
+// PTY 的 onlcr 设置会自动将 \n 转换为 \r\n，但 SSH channel 是 raw mode
 func (p *EndpointSSHProxy) buildSSHBanner(ctx context.Context, clientUserName, clientIP string) string {
 	if clientUserName == "" {
 		return "" // 无法获取客户端信息，不显示横幅
@@ -554,21 +556,21 @@ func (p *EndpointSSHProxy) buildSSHBanner(ctx context.Context, clientUserName, c
 	// 查询用户设备信息（通过 gRPC 调用 Server）
 	userInfo := p.queryUserDeviceInfo(ctx, clientUserName, clientIP)
 
-	// 构建横幅
+	// 构建横幅（使用 \r\n 换行，因为直接写入 SSH channel）
 	var banner strings.Builder
-	banner.WriteString("================================================================\n")
-	banner.WriteString("           AWECloud Signaling - SSH Access\n")
-	banner.WriteString("================================================================\n")
-	banner.WriteString(fmt.Sprintf("  Version:      %s\n", version))
-	banner.WriteString(fmt.Sprintf("  Build Date:   %s\n", buildDate))
-	banner.WriteString(fmt.Sprintf("  Connect Time: %s\n", time.Now().Format("2006-01-02 15:04:05")))
-	banner.WriteString("----------------------------------------------------------------\n")
+	banner.WriteString("================================================================\r\n")
+	banner.WriteString("           AWECloud Signaling - SSH Access\r\n")
+	banner.WriteString("================================================================\r\n")
+	banner.WriteString(fmt.Sprintf("  Version:      %s\r\n", version))
+	banner.WriteString(fmt.Sprintf("  Build Date:   %s\r\n", buildDate))
+	banner.WriteString(fmt.Sprintf("  Connect Time: %s\r\n", time.Now().Format("2006-01-02 15:04:05")))
+	banner.WriteString("----------------------------------------------------------------\r\n")
 
 	// Remote User 行
 	if userInfo != nil && userInfo.DisplayName != "" {
-		banner.WriteString(fmt.Sprintf("  Remote User:   %s , %s\n", clientUserName, userInfo.DisplayName))
+		banner.WriteString(fmt.Sprintf("  Remote User:   %s , %s\r\n", clientUserName, userInfo.DisplayName))
 	} else {
-		banner.WriteString(fmt.Sprintf("  Remote User:   %s\n", clientUserName))
+		banner.WriteString(fmt.Sprintf("  Remote User:   %s\r\n", clientUserName))
 	}
 
 	// Remote Device 行
@@ -581,10 +583,9 @@ func (p *EndpointSSHProxy) buildSSHBanner(ctx context.Context, clientUserName, c
 			deviceParts = append(deviceParts, userInfo.DeviceOs)
 		}
 	}
-	banner.WriteString(fmt.Sprintf("  Remote Device: %s\n", strings.Join(deviceParts, " , ")))
+	banner.WriteString(fmt.Sprintf("  Remote Device: %s\r\n", strings.Join(deviceParts, " , ")))
 
-	banner.WriteString("================================================================\n")
-	banner.WriteString("\n")
+	banner.WriteString("================================================================\r\n")
 
 	return banner.String()
 }
