@@ -1842,14 +1842,8 @@ func (s *AgentServiceServer) GetUserDeviceInfo(ctx context.Context, req *pb.GetU
 		if err := json.Unmarshal([]byte(node.SystemInfo), &sysInfo); err != nil {
 			logger.Warnf("解析设备系统信息失败: node_id=%d, err=%v", node.ID, err)
 		} else {
-			// 构建操作系统字符串
-			if sysInfo.OS != "" {
-				if sysInfo.OSVersion != "" {
-					resp.DeviceOs = fmt.Sprintf("%s %s", sysInfo.OS, sysInfo.OSVersion)
-				} else {
-					resp.DeviceOs = sysInfo.OS
-				}
-			}
+			// 直接使用 OS 字段（已包含完整信息，如 "Windows 10"）
+			resp.DeviceOs = sysInfo.OS
 		}
 	}
 
