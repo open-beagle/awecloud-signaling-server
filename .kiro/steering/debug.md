@@ -25,10 +25,10 @@
 
 详细的节点信息（IP、域名注册表、端口分配、安装/升级命令、Token）见 `.tmp/debug.md`。
 
-### 关键架构速查
+### 关键架构说明
 
-- Agent（beijing）：beagle-242 节点，应使用 Service 部署（需要 SSH + Endpoint 全功能），Endpoint gRPC Server 监听 0.0.0.0:50052
-- Endpoint（beagle-241）：systemd 二进制部署，连接 beagle-242 的 Agent 50052 端口
+- Agent：部署在内网环境，提供 SSH + Endpoint 全功能，Endpoint gRPC Server 监听 0.0.0.0:50052
+- Endpoint：systemd 二进制部署，连接 Agent 的 50052 端口
 - Endpoint SSH/K8SAPI 代理使用 tsnet FallbackTCPHandler（不是物理端口监听，只在 Tailscale 网络可达）
 
 ## 编译命令
@@ -71,7 +71,7 @@ BUILD_VERSION=$(cat version) bash scripts/build_frontend.sh
 # 构建Server代码
 BUILD_VERSION=$(cat version) bash scripts/build.sh server
 
-# 设置版本和镜像仓库
+# 设置版本和镜像仓库（根据实际环境调整）
 export BUILD_VERSION=$(cat version)
 export REGISTRY=registry.cn-qingdao.aliyuncs.com/wod
 export AUTHOR=open-beagle
@@ -85,7 +85,7 @@ docker build --no-cache -f .beagle/server.dockerfile \
   . && \
 docker push ${REGISTRY}/awecloud-signaling-server:${BUILD_VERSION}
 
-# 重启部署
+# 重启部署（根据实际环境调整 context 和 namespace）
 sleep 3 && kubectl --context aliyun.beagle --namespace beagle-access rollout restart deployment/signal-server
 ```
 
@@ -111,7 +111,7 @@ docker build --no-cache -f .beagle/agent.dockerfile \
   . && \
 docker push ${REGISTRY}/awecloud-signaling-agent:${BUILD_VERSION}
 
-# 重启部署
+# 重启部署（根据实际环境调整 context 和 namespace）
 sleep 3 && kubectl --context beijing.beagle --namespace beagle-access rollout restart deployment/signal-agent
 ```
 
@@ -172,16 +172,82 @@ sudo cat /etc/resolv.conf
 # 检查 SSH 配置
 cat ~/.ssh/config
 
-# 测试 DNS 解析
-nslookup beagle-242.beijing.beagle 127.0.0.1
+# 测试 DNS 解析（替换为实际域名）
+nslookup <agent-domain> 127.0.0.1
 
-# 测试 SSH 连接
-ssh beagle-242.beijing.beagle
+# 测试 SSH 连接（替换为实际域名）
+ssh <agent-domain>
 ```
 
 ### 节点 SSH
 
-见 `.tmp/debug.md` 中的具体 IP 和端口。
+见 `.tmp/debug.md` 中的具体节点信息和 SSH 连接方式。
+
+## 日志位置
+
+### Server 日志
+
+- Kubernetes：通过 `kubectl logs` 查看
+
+  ```bash
+  kubectl logs deployment/signal-server -f
+  ```
+
+### Agent 日志
+
+- **systemd 二进制部署**：`/etc/kubernetes/data/signaling/logs/agent.log`
+
+  ```bash
+  # 查看日志
+  tail -f /etc/kubernetes/data/signaling/logs/agent.log
+
+  # 或使用 journalctl
+  journalctl -u k8s-signaling -f
+  ```
+
+- **本地 CloudIDE 调试**：`$HOME/.local/share/signal/logs/agent.log`
+
+  ```bash
+  tail -f $HOME/.local/share/signal/logs/agent.log
+  ```
+
+### Endpoint 日志
+
+- **systemd 二进制部署**：`/etc/kubernetes/data/signaling/logs/endpoint.log`
+
+  ```bash
+  # 查看日志
+  tail -f /etc/kubernetes/data/signaling/logs/endpoint.log
+
+  # 或使用 journalctl
+  journalctl -u signal-endpoint -f
+  ```
+
+### Desktop (Signal) 日志
+
+- **Windows**：`%APPDATA%\com.beagle.signal\logs\`
+
+  ```powershell
+  # 查看日志目录
+  explorer %APPDATA%\com.beagle.signal\logs\
+
+  # 或使用命令行
+  type %APPDATA%\com.beagle.signal\logs\signal.log
+  ```
+
+- **macOS**：`~/Library/Application Support/com.beagle.signal/logs/`
+
+  ```bash
+  # 查看日志
+  tail -f ~/Library/Application\ Support/com.beagle.signal/logs/signal.log
+  ```
+
+- **Linux**：`~/.local/share/com.beagle.signal/logs/`
+
+  ```bash
+  # 查看日志
+  tail -f ~/.local/share/com.beagle.signal/logs/signal.log
+  ```
 
 ## 数据库位置
 

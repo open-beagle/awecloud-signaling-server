@@ -244,19 +244,20 @@ create_directories() {
 generate_config() {
     info "生成配置文件..."
     
+    # 创建日志目录
+    mkdir -p "${DATA_DIR}/logs"
+    
     cat > "$CONFIG_FILE" << EOF
 # AWECloud Agent 配置文件
 # 由安装脚本自动生成
 
 [agent]
-name = "${AGENT_NAME}"
 token = "${AGENT_TOKEN}"
-device = "${DEVICE_NAME}"
 server = "${SERVER_ADDRESS}"
 
 # Tunnel 配置
 [tunnel]
-state_dir = "${DATA_DIR}"
+state_dir = "${DATA_DIR}/tunnel"
 state_sync_interval = 5
 enable_ssh = ${ENABLE_SSH}
 
@@ -267,6 +268,8 @@ listen_addr = ""   # 留空自动检测局域网 IP
 # 日志配置
 [log]
 level = "info"
+file = "$DATA_DIR/logs/agent.log"
+
 EOF
 
     chmod 600 "$CONFIG_FILE"

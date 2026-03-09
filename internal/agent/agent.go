@@ -904,6 +904,29 @@ func (a *Agent) syncEndpointServerConfigs(resp *pb.AgentHeartbeatResponse) {
 			K8SSvcEnabled:    cfg.K8SserviceEnabled,
 			K8SSvcEnabledSet: true,
 		}
+		
+		// 预分配端口（即使 Endpoint 尚未连接）
+		// 这样可以避免 buildDomainRegistrations 中 AllocatePort 自动分配导致的端口不一致
+		if cfg.SshEnabled && cfg.SshPort > 0 && a.endpointSSHProxy != nil {
+			if err := a.endpointSSHProxy.AllocateSpecificPort(cfg.EndpointName, uint16(cfg.SshPort)); err != nil {
+				logger.Warnf("[syncEndpointServerConfigs] 预分配 SSH 端口失败: endpoint=%s, port=%d, err=%v", 
+					cfg.EndpointName, cfg.SshPort, err)
+			} else {
+				logger.Debugf("[syncEndpointServerConfigs] 预分配 SSH 端口: endpoint=%s, port=%d", 
+					cfg.EndpointName, cfg.SshPort)
+			}
+		}
+		
+		if cfg.K8SapiEnabled && cfg.K8SapiPort > 0 && a.endpointK8SAPIProxy != nil {
+			if err := a.endpointK8SAPIProxy.AllocateSpecificPort(cfg.EndpointName, uint16(cfg.K8SapiPort)); err != nil {
+				logger.Warnf("[syncEndpointServerConfigs] 预分配 K8SAPI 端口失败: endpoint=%s, port=%d, err=%v", 
+					cfg.EndpointName, cfg.K8SapiPort, err)
+			} else {
+				logger.Debugf("[syncEndpointServerConfigs] 预分配 K8SAPI 端口: endpoint=%s, port=%d", 
+					cfg.EndpointName, cfg.K8SapiPort)
+			}
+		}
+		
 		a.endpointServer.UpdateServerConfig(cfg.EndpointName, serverCfg)
 		logger.Infof("同步 Endpoint 配置: name=%s, ssh=%v(port=%d), k8sapi=%v(port=%d), api_server=%s, k8ssvc=%v",
 			cfg.EndpointName, serverCfg.SSHEnabled, serverCfg.SSHPort,

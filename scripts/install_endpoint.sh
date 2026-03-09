@@ -227,6 +227,10 @@ download_endpoint() {
 generate_config() {
     info "生成配置文件..."
     mkdir -p "$CONFIG_DIR"
+    
+    # 创建数据目录和日志目录
+    local DATA_DIR="/etc/kubernetes/data/signaling"
+    mkdir -p "${DATA_DIR}/logs"
 
     # 注意：能力配置（SSH/K8S/SVC）应该通过 Web 界面管理，不在配置文件中写入
     # 这样可以避免本地配置和 Server 配置冲突
@@ -239,20 +243,11 @@ address = "${AGENT_ADDRESS}"
 token = "${ENDPOINT_TOKEN}"
 name = "${ENDPOINT_NAME}"
 
-# 能力配置（SSH/K8S/SVC）请通过 Web 界面管理
-# 如需本地配置，取消注释并修改以下段落：
+# 日志配置
+[log]
+level = "info"
+file = "$DATA_DIR/logs/endpoint.log""
 
-# [ssh]
-# enabled = false
-# host = "127.0.0.1"
-# port = 22
-
-# [k8s]
-# enabled = false
-# api_server = ""
-
-# [svc]
-# enabled = false
 EOF
 
     chmod 600 "$CONFIG_FILE"
