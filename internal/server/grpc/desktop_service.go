@@ -1931,27 +1931,7 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 	}
 
 	// 4. 收集 Endpoint SSH 权限
-	var endpointSSHUserPerms []model.AclEndpointSSHUserPermission
-	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&endpointSSHUserPerms)
-	for _, p := range endpointSSHUserPerms {
-		endpointSSHIDs[p.EndpointID] = true
-		var users []string
-		if err := json.Unmarshal([]byte(p.SSHUsers), &users); err == nil {
-			endpointSSHAuthorizedUsers[p.EndpointID] = appendUniqueStrings(endpointSSHAuthorizedUsers[p.EndpointID], users...)
-		}
-	}
-
-	if len(groupIDs) > 0 {
-		var endpointSSHGroupPerms []model.AclEndpointSSHGroupPermission
-		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&endpointSSHGroupPerms)
-		for _, p := range endpointSSHGroupPerms {
-			endpointSSHIDs[p.EndpointID] = true
-			var users []string
-			if err := json.Unmarshal([]byte(p.SSHUsers), &users); err == nil {
-				endpointSSHAuthorizedUsers[p.EndpointID] = appendUniqueStrings(endpointSSHAuthorizedUsers[p.EndpointID], users...)
-			}
-		}
-	}
+	// P12 重构：已废弃，Endpoint SSH 复用 Agent SSH 授权
 
 	// 5. 收集 Endpoint K8S API 权限
 	// P11 重构：已废弃，不再查询 Endpoint K8SAPI 权限
@@ -2271,26 +2251,7 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 	}
 
 	// Endpoint SSH 权限
-	var endpointSSHUserPerms []model.AclEndpointSSHUserPermission
-	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", userID, true).Find(&endpointSSHUserPerms)
-	for _, p := range endpointSSHUserPerms {
-		// 查询 Endpoint 对应的 Agent User ID
-		var ep model.Endpoint
-		if err := db.DB.WithContext(ctx).Where("id = ?", p.EndpointID).First(&ep).Error; err == nil {
-			agentUserIDs[ep.UserID] = true
-		}
-	}
-
-	if len(groupIDs) > 0 {
-		var endpointSSHGroupPerms []model.AclEndpointSSHGroupPermission
-		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&endpointSSHGroupPerms)
-		for _, p := range endpointSSHGroupPerms {
-			var ep model.Endpoint
-			if err := db.DB.WithContext(ctx).Where("id = ?", p.EndpointID).First(&ep).Error; err == nil {
-				agentUserIDs[ep.UserID] = true
-			}
-		}
-	}
+	// P12 重构：已废弃，Endpoint SSH 复用 Agent SSH 授权
 
 	// Endpoint K8S API 权限
 	// P11 重构：已废弃，不再查询 Endpoint K8SAPI 权限

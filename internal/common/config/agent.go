@@ -26,10 +26,8 @@ type HealthSection struct {
 }
 
 type AgentSection struct {
-	AgentName  string `toml:"name"`    // 配置文件中使用 name（Agent 名称/区域，如 beijing.beagle）
-	AgentToken string `toml:"token"`   // 配置文件中使用 token
-	Device     string `toml:"device"`  // 设备名（如 beagle-241），用于标识同一 Agent 下的不同设备
-	Server    string `toml:"server"` // Server 地址（HTTP/2统一端口，支持完整URL）
+	AgentToken string `toml:"token"`  // 配置文件中使用 token
+	Server     string `toml:"server"` // Server 地址（HTTP/2统一端口，支持完整URL）
 }
 
 // TunnelSection Agent 端隧道配置（使用 [tunnel] 屏蔽技术细节）
@@ -76,6 +74,7 @@ type RegisterResult struct {
 	HeadscaleURL string // Headscale 控制服务器地址
 	AuthKey      string // Headscale 认证密钥
 	UserName     string // 用户名
+	DeviceName   string // 设备名称（Node.Name，即 DeployToken.Name）
 }
 
 // IsClientMode 判断是否为 Client 模式（CloudIDE 等）
@@ -134,20 +133,6 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 		cfg.Agent.Server = v
 		if deprecated {
 			logDeprecation("AGENT_ADDRESS", "SIGNAL_SERVER")
-		}
-	}
-
-	// 身份
-	if v, deprecated := getEnvWithDeprecation("SIGNAL_NAME", "AGENT_NAME"); v != "" {
-		cfg.Agent.AgentName = v
-		if deprecated {
-			logDeprecation("AGENT_NAME", "SIGNAL_NAME")
-		}
-	}
-	if v, deprecated := getEnvWithDeprecation("SIGNAL_DEVICE", "AGENT_DEVICE"); v != "" {
-		cfg.Agent.Device = v
-		if deprecated {
-			logDeprecation("AGENT_DEVICE", "SIGNAL_DEVICE")
 		}
 	}
 
@@ -233,14 +218,10 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 		}
 	}
 
-	// 如果配置文件不存在，检查是否有足够的环境变量启动
+	// 如果配置文件不存在,检查是否有足够的环境变量启动
 	if !fileLoaded {
-		// 有 Token + Server 即可启动（Server 返回 role 决定行为）
-		if cfg.Agent.AgentToken != "" && cfg.Agent.Server != "" {
-			// Token 模式：不需要 AgentName，Server 注册时返回
-		} else if cfg.Agent.AgentName != "" {
-			// 传统 Agent 模式：需要 AgentName
-		} else {
+		// 有 Token + Server 即可启动
+		if cfg.Agent.AgentToken == "" || cfg.Agent.Server == "" {
 			return nil, err // 返回原始的文件不存在错误
 		}
 	}

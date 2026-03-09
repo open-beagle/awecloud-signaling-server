@@ -105,10 +105,9 @@ Web 管理界面在 ZTNA 架构中承担管理控制台角色。在现有管理�
 │     ├── 服务授权    /acl/services             （不变，AgentService）
 │     ├── 用户授权    /acl/users                （不变）
 │     ├── 分组授权    /acl/groups               （不变）
-│     ├── SSH 授权    /acl/ssh                  （Agent SSH，Headscale ACL 鉴权）
+│     ├── SSH 授权    /acl/ssh                  （Agent SSH + Endpoint SSH，P12 统一）
 │     ├── K8S API 授权    /acl/k8s              （合并展示 Agent + Endpoint K8SAPI）
-│     ├── K8S Service 授权 /acl/k8s-service     （合并展示 Agent + Endpoint K8SService）
-│     └── Endpoint SSH 授权 /acl/endpoint-ssh   （Endpoint SSH，Agent PermissionCache 鉴权）
+│     └── K8S Service 授权 /acl/k8s-service     （合并展示 Agent + Endpoint K8SService）
 ├── 隧道管理                                    （不变）
 │     ├── User 管理   /tunnel/users
 │     ├── Node 管理   /tunnel/nodes

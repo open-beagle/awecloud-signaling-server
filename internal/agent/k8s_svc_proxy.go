@@ -170,8 +170,8 @@ func (p *K8SSVCProxy) SVCProxy(stream pb.AgentService_SVCProxyServer) error {
 // handleEndpointSVCProxy 处理 Endpoint 跳跃路径的 SVCProxy
 // Desktop → Agent SVCProxy(endpoint_name=xxx) → Agent RequestSVCProxy → Endpoint OpenSVCProxy → K8S ClusterIP
 func (p *K8SSVCProxy) handleEndpointSVCProxy(stream pb.AgentService_SVCProxyServer, peerIdentity *PeerIdentity, endpointName, namespace, serviceName, clusterIP string, port int32) error {
-	// 检查 Endpoint K8SService 权限
-	if !p.permCache.CheckEndpointK8SServiceAccess(peerIdentity.UserName, endpointName, namespace, serviceName) {
+	// P10 重构：直接使用 Agent 级别权限检查（不再区分 Endpoint）
+	if !p.permCache.CheckK8SServiceAccess(peerIdentity.UserName, namespace, serviceName) {
 		logger.Warnf("SVCProxy Endpoint 权限拒绝: user=%s, endpoint=%s, ns=%s, svc=%s",
 			peerIdentity.UserName, endpointName, namespace, serviceName)
 		_ = stream.Send(&pb.SVCProxyData{Error: "权限不足"})

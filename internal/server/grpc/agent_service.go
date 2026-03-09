@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -96,47 +97,38 @@ func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
 
 // Register Agent 注册
 func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegisterRequest) (*pb.AgentRegisterResponse, error) {
-	logger.Infof("Agent 注册请求: name=%s, version=%s", req.Name, req.Version)
+	logger.Infof("Agent 注册请求: version=%s", req.Version)
 
-	// 查询 User（Agent 角色）
-	var user model.User
-	if err := db.DB.WithContext(ctx).Where("name = ? AND role = ?", req.Name, model.UserRoleAgent).First(&user).Error; err != nil {
-		logger.Warnf("Agent 用户不存在: %s", req.Name)
+	// 先通过 DeployToken 查询用户
+	var deployToken model.DeployToken
+	if err := db.DB.WithContext(ctx).Where("token = ? AND status = ?", req.Secret, model.DeployTokenStatusBound).First(&deployToken).Error; err != nil {
+		logger.Warnf("DeployToken 不存在或未绑定: %s", req.Secret)
 		return &pb.AgentRegisterResponse{
 			Success: false,
-			Message: "Agent 不存在",
+			Message: "无效的 Token",
 		}, nil
 	}
 
-	// 验证密钥（支持两种方式：user secret 或 deploy token）
-	authenticated := false
+	// 更新 DeployToken 最后使用时间
+	deployToken.UpdateLastUsed()
+	db.DB.WithContext(ctx).Save(&deployToken)
 
-	// 方式1：bcrypt 验证 user secret
-	if user.SecretHash != "" {
-		if err := bcrypt.CompareHashAndPassword([]byte(user.SecretHash), []byte(req.Secret)); err == nil {
-			authenticated = true
-		}
-	}
-
-	// 方式2：deploy token 验证（查询该用户的有效 deploy token）
-	if !authenticated {
-		var deployToken model.DeployToken
-		if err := db.DB.WithContext(ctx).Where(
-			"user_id = ? AND token = ? AND status = ?",
-			user.ID, req.Secret, model.DeployTokenStatusBound,
-		).First(&deployToken).Error; err == nil {
-			authenticated = true
-			// 更新最后使用时间
-			deployToken.UpdateLastUsed()
-			db.DB.WithContext(ctx).Save(&deployToken)
-		}
-	}
-
-	if !authenticated {
-		logger.Warnf("Agent 认证失败: %s", req.Name)
+	// 查询用户
+	var user model.User
+	if err := db.DB.WithContext(ctx).First(&user, deployToken.UserID).Error; err != nil {
+		logger.Warnf("用户不存在: user_id=%d", deployToken.UserID)
 		return &pb.AgentRegisterResponse{
 			Success: false,
-			Message: "认证失败",
+			Message: "用户不存在",
+		}, nil
+	}
+
+	// 验证用户角色
+	if user.Role != model.UserRoleAgent {
+		logger.Warnf("用户角色不是 Agent: user_id=%d, role=%s", user.ID, user.Role)
+		return &pb.AgentRegisterResponse{
+			Success: false,
+			Message: "用户角色不匹配",
 		}, nil
 	}
 
@@ -151,11 +143,8 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 
 	// 查询或创建 Node（Agent 类型按 user_id + type 唯一）
 	var node model.Node
-	// 设备名：优先使用 SystemInfo.Hostname，否则使用 Agent 名称
-	deviceName := req.Name
-	if req.SystemInfo != nil && req.SystemInfo.Hostname != "" {
-		deviceName = req.SystemInfo.Hostname
-	}
+	// Agent 设备名：使用 DeployToken.Name（不使用系统 hostname）
+	deviceName := deployToken.Name
 	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", user.ID, model.NodeTypeAgent).First(&node).Error; err != nil {
 		// 创建新 Node
 		node = model.Node{
@@ -197,24 +186,26 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 
 	// 构建响应
 	resp := &pb.AgentRegisterResponse{
-		Success: true,
-		Message: "注册成功",
-		AgentId: user.ID,
+		Success:    true,
+		Message:    "注册成功",
+		AgentId:    user.ID,
+		UserName:   user.Name,
+		DeviceName: node.Name, // 返回 Node.Name（即 DeployToken.Name）
 	}
 
 	// 创建 Tailscale 预认证密钥
 	if s.headscaleClient != nil && s.config != nil {
-		authKey, serverURL, err := s.createAgentAuthKey(ctx, req.Name, user.ID)
+		authKey, serverURL, err := s.createAgentAuthKey(ctx, user.Name, user.ID)
 		if err != nil {
 			logger.Errorf("创建 Tailscale 预认证密钥失败: %v", err)
 		} else {
 			resp.AuthKey = authKey
 			resp.ServerUrl = serverURL
-			logger.Infof("已为 Agent %s 创建 Tailscale 预认证密钥", req.Name)
+			logger.Infof("已为 Agent %s 创建 Tailscale 预认证密钥", user.Name)
 		}
 	}
 
-	logger.Infof("Agent 注册成功: %s (ID: %d)", req.Name, user.ID)
+	logger.Infof("Agent 注册成功: %s (ID: %d)", user.Name, user.ID)
 	return resp, nil
 }
 
@@ -551,29 +542,36 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		}
 	}
 
-	// 确定 Node 名称
-	nodeName := req.Hostname
+	// 查询或创建 Node（Agent/Desktop 按 user_id + type + name 唯一）
+	// 注意：Node.Name 来自 DeployToken.Name，在 Register 时已设置
+	// 心跳时应该按 user_id + type + name 查询，确保每个 Token 对应独立的 Node
+	var node model.Node
+	nodeName := req.DeviceName // DeviceName 在 Register 时设置为 DeployToken.Name
 	if nodeName == "" {
-		nodeName = user.Name
+		// 兜底：如果 DeviceName 为空（旧版本 Agent），使用 hostname
+		nodeName = req.Hostname
+		if nodeName == "" {
+			nodeName = user.Name
+		}
+		logger.Warnf("心跳时 DeviceName 为空，使用 hostname 作为 Node.Name: user_id=%d, hostname=%s", agentID, nodeName)
 	}
 
-	// 查询或创建 Node（用 user_id + type + name 唯一定位）
-	var node model.Node
 	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ? AND name = ?", agentID, nodeType, nodeName).First(&node).Error; err != nil {
-		// Node 不存在，创建
+		// Node 不存在，创建新 Node
+		// 注意：正常情况下，Node 应该在 Register 时已创建，这里是兜底逻辑
 		now := time.Now()
 		node = model.Node{
 			UserID:        agentID,
 			Name:          nodeName,
 			Type:          nodeType,
-			Hostname:      nodeName,
+			Hostname:      req.Hostname,
 			IP:            req.TunnelIp,
 			LastHeartbeat: &now,
 		}
 		if err := db.DB.WithContext(ctx).Create(&node).Error; err != nil {
 			logger.Errorf("创建 Node 失败: user_id=%d, type=%s, name=%s, err=%v", agentID, nodeType, nodeName, err)
 		} else {
-			logger.Infof("创建 Node: user_id=%d, name=%s, type=%s", agentID, nodeName, nodeType)
+			logger.Infof("心跳时创建 Node: user_id=%d, name=%s, type=%s", agentID, nodeName, nodeType)
 		}
 	}
 
@@ -601,7 +599,7 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	if s.headscaleClient != nil && node.HeadscaleNodeID == 0 {
 		hsUserName := fmt.Sprintf("%s-%s", hsPrefix, user.Name)
 		// 按用户名 + 节点名精确匹配（一个 Headscale 用户下可能有多个节点）
-		hsNode, err := s.headscaleClient.GetNodeByUserAndName(ctx, hsUserName, nodeName)
+		hsNode, err := s.headscaleClient.GetNodeByUserAndName(ctx, hsUserName, node.Name)
 		if err != nil {
 			logger.Warnf("通过 User+Name 查询 Headscale 节点失败: %v", err)
 		} else if hsNode != nil {
@@ -797,9 +795,11 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		resp.K8SServicePermissions = k8sSvcPerms
 	}
 
-	// 查询该 Agent 关联的 Endpoint SSH 授权信息
-	epSSHPerms := s.queryEndpointSSHPermissions(ctx, agentID)
-	resp.EndpointSshPermissions = epSSHPerms
+	// 查询该 Agent 下所有 Endpoint 的 SSH 授权信息（P12 简化：复用 Agent SSH 授权）
+	endpointSSHPerms := s.queryEndpointSSHPermissions(ctx, agentID)
+	if len(endpointSSHPerms) > 0 {
+		resp.EndpointSshPermissions = endpointSSHPerms
+	}
 
 	// 查询该 Agent 关联的 Endpoint K8SAPI 授权信息
 	// P11 重构：Endpoint K8SAPI 权限已废弃，统一使用 Agent 级别权限
@@ -967,6 +967,94 @@ func (s *AgentServiceServer) queryK8SServicePermissions(ctx context.Context, age
 			})
 		}
 	}
+
+	return result
+}
+
+// queryEndpointSSHPermissions 查询 Agent 下所有 Endpoint 的 SSH 授权列表
+// P12 简化：Endpoint SSH 复用 Agent SSH 授权
+// 用户如果有权限 SSH 到某个 Agent，就自动有权限 SSH 到该 Agent 下的所有 Endpoint
+func (s *AgentServiceServer) queryEndpointSSHPermissions(ctx context.Context, agentID uint64) []*pb.EndpointSSHPermission {
+	var result []*pb.EndpointSSHPermission
+
+	// 1. 查询该 Agent 下的所有 Endpoint
+	var endpoints []model.Endpoint
+	if err := db.DB.WithContext(ctx).
+		Where("user_id = ?", agentID).
+		Find(&endpoints).Error; err != nil {
+		logger.Errorf("查询 Endpoint 列表失败: agent_id=%d, err=%v", agentID, err)
+		return nil
+	}
+
+	if len(endpoints) == 0 {
+		return nil
+	}
+
+	// 2. 查询 Agent SSH 用户授权
+	var userPerms []model.AclSSHUserPermission
+	if err := db.DB.WithContext(ctx).Preload("User").
+		Where("target_user_id = ? AND enabled = ?", agentID, true).
+		Find(&userPerms).Error; err != nil {
+		logger.Errorf("查询 SSH 用户授权失败: %v", err)
+		return nil
+	}
+
+	// 3. 查询 Agent SSH 分组授权
+	var groupPerms []model.AclSSHGroupPermission
+	if err := db.DB.WithContext(ctx).
+		Where("target_user_id = ? AND enabled = ?", agentID, true).
+		Find(&groupPerms).Error; err != nil {
+		logger.Errorf("查询 SSH 分组授权失败: %v", err)
+		return nil
+	}
+
+	// 4. 为每个 Endpoint 构建权限列表
+	for _, endpoint := range endpoints {
+		// 4.1 添加用户授权
+		for _, p := range userPerms {
+			if p.User == nil {
+				continue
+			}
+			result = append(result, &pb.EndpointSSHPermission{
+				EndpointId:   endpoint.ID,
+				EndpointName: endpoint.Name,
+				UserId:       p.UserID,
+				UserName:     p.User.Name,
+				SshUsers:     parseJSONStringArray(p.SSHUsers),
+				IsGroup:      false,
+			})
+		}
+
+		// 4.2 添加分组授权（展开分组成员）
+		for _, gp := range groupPerms {
+			sshUsers := parseJSONStringArray(gp.SSHUsers)
+
+			var members []model.GroupMember
+			if err := db.DB.WithContext(ctx).Preload("User").
+				Where("group_id = ?", gp.GroupID).
+				Find(&members).Error; err != nil {
+				logger.Errorf("查询分组成员失败: group_id=%d, err=%v", gp.GroupID, err)
+				continue
+			}
+
+			for _, m := range members {
+				if m.User == nil {
+					continue
+				}
+				result = append(result, &pb.EndpointSSHPermission{
+					EndpointId:   endpoint.ID,
+					EndpointName: endpoint.Name,
+					UserId:       m.UserID,
+					UserName:     m.User.Name,
+					SshUsers:     sshUsers,
+					IsGroup:      true,
+				})
+			}
+		}
+	}
+
+	logger.Debugf("[queryEndpointSSHPermissions] agent_id=%d, endpoints=%d, permissions=%d",
+		agentID, len(endpoints), len(result))
 
 	return result
 }
@@ -1594,109 +1682,6 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 	logger.Infof("Agent Endpoint 上报完成: agent_id=%d, count=%d", agentID, len(reportedNames))
 }
 
-// queryEndpointSSHPermissions 查询 Agent 关联的 Endpoint SSH 授权列表
-func (s *AgentServiceServer) queryEndpointSSHPermissions(ctx context.Context, agentID uint64) []*pb.EndpointSSHPermission {
-	var result []*pb.EndpointSSHPermission
-
-	// 视角1（服务提供方）：查询属于当前 Agent 的 Endpoint，收集其授权用户列表
-	// 适用场景：unicom-08 Agent 拥有 beagle-002 Endpoint，向 Desktop/CloudIDE 用户提供 SSH 服务
-	var endpoints []model.Endpoint
-	if err := db.DB.WithContext(ctx).Where("user_id = ? AND revoked = ? AND status = ? AND ssh_enabled = ?", agentID, false, "online", true).Find(&endpoints).Error; err != nil {
-		return nil
-	}
-
-	for _, ep := range endpoints {
-		// 查询用户授权
-		var userPerms []model.AclEndpointSSHUserPermission
-		if err := db.DB.WithContext(ctx).Preload("User").
-			Where("endpoint_id = ? AND enabled = ?", ep.ID, true).
-			Find(&userPerms).Error; err != nil {
-			continue
-		}
-		for _, p := range userPerms {
-			if p.User == nil {
-				continue
-			}
-			result = append(result, &pb.EndpointSSHPermission{
-				EndpointId:   ep.ID,
-				EndpointName: ep.Name,
-				UserId:       p.UserID,
-				UserName:     p.User.Name,
-				SshUsers:     parseJSONStringArray(p.SSHUsers),
-				IsGroup:      false,
-			})
-		}
-
-		// 查询分组授权，展开成员
-		var groupPerms []model.AclEndpointSSHGroupPermission
-		if err := db.DB.WithContext(ctx).
-			Where("endpoint_id = ? AND enabled = ?", ep.ID, true).
-			Find(&groupPerms).Error; err != nil {
-			continue
-		}
-		for _, gp := range groupPerms {
-			sshUsers := parseJSONStringArray(gp.SSHUsers)
-			var members []model.GroupMember
-			if err := db.DB.WithContext(ctx).Preload("User").
-				Where("group_id = ?", gp.GroupID).Find(&members).Error; err != nil {
-				continue
-			}
-			for _, m := range members {
-				if m.User == nil {
-					continue
-				}
-				result = append(result, &pb.EndpointSSHPermission{
-					EndpointId:   ep.ID,
-					EndpointName: ep.Name,
-					UserId:       m.UserID,
-					UserName:     m.User.Name,
-					SshUsers:     sshUsers,
-					IsGroup:      true,
-				})
-			}
-		}
-	}
-
-	// 视角2（访问方）：查询当前 Agent 的 User 被直接授权访问的 Endpoint SSH 服务
-	// 适用场景：CloudIDE Agent 自身作为访问方，被授权访问其他 Agent 的 Endpoint SSH
-	var selfPerms []model.AclEndpointSSHUserPermission
-	if err := db.DB.WithContext(ctx).Preload("Endpoint").
-		Where("user_id = ? AND enabled = ?", agentID, true).
-		Find(&selfPerms).Error; err == nil {
-		for _, p := range selfPerms {
-			if p.Endpoint == nil || p.Endpoint.Revoked || p.Endpoint.Status != "online" || !p.Endpoint.SSHEnabled {
-				continue
-			}
-			// 避免重复（已在视角1中处理的 Endpoint 跳过）
-			alreadyAdded := false
-			for _, ep := range endpoints {
-				if ep.ID == p.EndpointID {
-					alreadyAdded = true
-					break
-				}
-			}
-			if alreadyAdded {
-				continue
-			}
-			// 查询当前 Agent 的 User 名称
-			var selfUser model.User
-			if err := db.DB.WithContext(ctx).First(&selfUser, agentID).Error; err != nil {
-				continue
-			}
-			result = append(result, &pb.EndpointSSHPermission{
-				EndpointId:   p.EndpointID,
-				EndpointName: p.Endpoint.Name,
-				UserId:       agentID,
-				UserName:     selfUser.Name,
-				SshUsers:     parseJSONStringArray(p.SSHUsers),
-				IsGroup:      false,
-			})
-		}
-	}
-
-	return result
-}
-
 // queryEndpointK8SAPIPermissions 查询 Agent 关联的 Endpoint K8SAPI 授权列表
 // queryEndpointK8SAPIPermissions 查询 Agent 关联的 Endpoint K8SAPI 授权列表
 // P11 重构：已废弃，Endpoint K8SAPI 权限统一使用 Agent 级别权限
@@ -1816,4 +1801,62 @@ func (s *AgentServiceServer) handleK8SServiceDiscovery(ctx context.Context, agen
 
 	logger.Infof("K8S Service 域名处理完成: agent_id=%d, node_id=%d, created/updated=%d, deleted=%d",
 		agentID, nodeID, len(reportedDomains), deletedCount)
+}
+
+// GetUserDeviceInfo 获取用户设备信息（用于 SSH 横幅显示）
+func (s *AgentServiceServer) GetUserDeviceInfo(ctx context.Context, req *pb.GetUserDeviceInfoRequest) (*pb.GetUserDeviceInfoResponse, error) {
+	logger.Debugf("收到用户设备信息查询: user_name=%s, device_ip=%s", req.UserName, req.DeviceIp)
+
+	resp := &pb.GetUserDeviceInfoResponse{
+		UserName:  req.UserName,
+		DeviceIp:  req.DeviceIp,
+	}
+
+	// 1. 查询用户信息（获取 Alias）
+	var user model.User
+	if err := db.DB.WithContext(ctx).Where("name = ? AND role = ?", req.UserName, model.UserRoleClient).First(&user).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			logger.Warnf("用户不存在: user_name=%s", req.UserName)
+			return resp, nil
+		}
+		logger.Errorf("查询用户失败: user_name=%s, err=%v", req.UserName, err)
+		return nil, fmt.Errorf("查询用户失败: %v", err)
+	}
+
+	resp.DisplayName = user.Alias
+
+	// 2. 根据 IP 查询 Node 信息（获取设备名称和操作系统）
+	var node model.Node
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND ip = ? AND type = ?", user.ID, req.DeviceIp, model.NodeTypeDesktop).First(&node).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			logger.Debugf("未找到设备信息: user_id=%d, ip=%s", user.ID, req.DeviceIp)
+			return resp, nil
+		}
+		logger.Errorf("查询设备失败: user_id=%d, ip=%s, err=%v", user.ID, req.DeviceIp, err)
+		return nil, fmt.Errorf("查询设备失败: %v", err)
+	}
+
+	// 3. 解析 SystemInfo JSON 获取操作系统
+	if node.SystemInfo != "" {
+		var sysInfo model.NodeSystemInfo
+		if err := json.Unmarshal([]byte(node.SystemInfo), &sysInfo); err != nil {
+			logger.Warnf("解析设备系统信息失败: node_id=%d, err=%v", node.ID, err)
+		} else {
+			resp.DeviceOs = sysInfo.OS
+			if sysInfo.OSVersion != "" {
+				resp.DeviceOs = fmt.Sprintf("%s %s", sysInfo.OS, sysInfo.OSVersion)
+			}
+		}
+	}
+
+	// 4. 设备名称优先使用 Node.Name，其次使用 Hostname
+	resp.DeviceName = node.Name
+	if resp.DeviceName == "" {
+		resp.DeviceName = node.Hostname
+	}
+
+	logger.Debugf("用户设备信息查询成功: user_name=%s, display_name=%s, device_name=%s, device_os=%s",
+		req.UserName, resp.DisplayName, resp.DeviceName, resp.DeviceOs)
+
+	return resp, nil
 }

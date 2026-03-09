@@ -628,6 +628,7 @@ func (p *K8SSVCProxy) SVCProxy(stream pb.AgentService_SVCProxyServer) error {
 ```
 
 Endpoint 自动选择策略：
+
 - 优先选择有该 Service 发现数据的 Endpoint
 - K8SService 能力已启用的 Endpoint
 - 状态为 online 的 Endpoint
@@ -709,6 +710,9 @@ Endpoint 无法加入 Tailscale 网络，因此由 Agent 完成身份确认和�
 不需要额外端口、不需要内置 SSH Server、不需要签名密钥——
 Endpoint 与 Agent 之间已有经过 token 认证的 gRPC 长连接，这就是信任通道。
 
+P12 简化（重要）：Endpoint SSH 不再有独立授权表，直接复用 Agent SSH 授权（AclSSHPermission）。
+用户如果有权限 SSH 到某个 Agent，就自动有权限 SSH 到该 Agent 下的所有 Endpoint（使用相同的 ssh_users 列表）。
+
 ```
 身份中继流程：
 
@@ -765,8 +769,8 @@ Desktop 用户执行: ssh deploy@web-server-1.beijing.beagle
   4. Agent 查找 EndpointSSH "web-server-1"
        → 找到，状态 online（有活跃 gRPC 连接）
 
-  5. Agent 查询 AclSSHJumpPermission
-       → zhangsan 对 web-server-1 的权限
+  5. Agent 查询 AclSSHPermission（复用 Agent SSH 授权）
+       → zhangsan 对 beijing Agent 的权限
        → 允许，ssh_users: ["root", "deploy"]
        → deploy ∈ 允许列表 → 放行
 
@@ -803,7 +807,7 @@ Agent 从 tsnet 连接中提取对端身份，不需要 Identity Token：
   └── 根据身份查询权限（心跳同步的本地缓存）
 ```
 
-对于 Endpoint SSH 场景，Agent 在确认身份和权限后，直接通过 gRPC 连接
+对于 Endpoint SSH 场景，Agent 在确认身份和权限后（使用 AclSSHPermission），直接通过 gRPC 连接
 向 Endpoint 发送 OpenShell 指令。Endpoint 不需要做身份验证，
 因为 gRPC 连接本身已经过 endpoint_token 认证，Agent 是唯一的指令来源。
 
@@ -866,10 +870,11 @@ Agent 通过 gRPC 心跳从 Server 获取权限数据：
 心跳响应新增字段：
   k8s_permissions:          → 第 3 层，AgentK8SAPI 权限
   k8s_service_permissions:  → 第 3 层，K8S Service 权限（Agent 级别，自动选择实现）
-  ssh_endpoint_permissions: → Endpoint SSH 授权
   k8sapi_endpoint_permissions: → Endpoint K8SAPI 授权
 
 Agent 本地缓存，随心跳刷新（30 秒一次）。
+
+注意：Endpoint SSH 不再有独立的权限字段，直接复用 ssh_permissions（Agent SSH 授权）。
 ```
 
 ## 对象关系总览
@@ -892,7 +897,7 @@ User (agent-beijing)
   │     ├── web-server-1  → 192.168.1.100 (online)
   │     ├── web-server-2  → 192.168.1.101 (online)
   │     └── db-server     → 192.168.1.200 (offline)
-  │     通过 AclSSHJumpPermission 控制
+  │     复用 AclSSHPermission（Agent SSH 授权）
   │
   └── EndpointK8SAPI（新增对象）— 内网 K8S API 跳跃端点
         └── beijing-prod  → 192.168.1.10 (online)
@@ -912,10 +917,9 @@ User (agent-beijing)
   endpoint_server_listen: string → Endpoint gRPC Server 监听地址（如 "0.0.0.0:50052"）
 
 权限数据：
-  ssh_permissions: []            → AgentSSH 权限
+  ssh_permissions: []            → AgentSSH 权限（同时适用于 Endpoint SSH）
   k8s_permissions: []            → AgentK8SAPI 权限
   k8s_service_permissions: []    → K8S Service 权限（Agent 级别，自动选择实现）
-  ssh_endpoint_permissions: []   → Endpoint SSH 授权
   k8sapi_endpoint_permissions: [] → Endpoint K8SAPI 授权
 ```
 

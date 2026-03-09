@@ -58,14 +58,14 @@
           <el-icon><Key /></el-icon>
           <span>{{ t('menu.acl') }}</span>
         </template>
-        <el-menu-item index="/acl/services">
-          {{ t('menu.aclServices') }}
-        </el-menu-item>
         <el-menu-item index="/acl/users">
           {{ t('menu.aclUsers') }}
         </el-menu-item>
         <el-menu-item index="/acl/groups">
           {{ t('menu.aclGroups') }}
+        </el-menu-item>
+        <el-menu-item index="/acl/services">
+          {{ t('menu.aclServices') }}
         </el-menu-item>
         <el-menu-item index="/acl/ssh">
           {{ t('menu.aclSSH') }}
@@ -75,9 +75,6 @@
         </el-menu-item>
         <el-menu-item index="/acl/k8s-service">
           {{ t('menu.aclK8SService') }}
-        </el-menu-item>
-        <el-menu-item index="/acl/endpoint-ssh">
-          {{ t('menu.aclEndpointSSH') }}
         </el-menu-item>
       </el-sub-menu>
       <!-- 隧道管理 -->

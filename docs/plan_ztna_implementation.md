@@ -162,14 +162,13 @@ P0（基础设施）──▶ P1（K8S 能力）──▶ P2（Endpoint 体系�
 
 | 任务                          | 说明                                                   | 估算 |
 | ----------------------------- | ------------------------------------------------------ | ---- |
-| Endpoint 跳跃 ACL 表（6张）   | ssh_jump / k8sapi_jump / k8sservice_jump × user/group  | 1d   |
-| Endpoint SSH 授权 API         | /api/v1/acl/ssh 增强（Agent SSH + Endpoint SSH）       | 2d   |
+| Endpoint 跳跃 ACL 表（4张）   | k8sapi_jump / k8sservice_jump × user/group             | 0.5d |
 | Endpoint K8S API 授权 API     | /api/v1/acl/k8s 增强（Agent K8SAPI + Endpoint K8SAPI） | 1.5d |
 | Endpoint K8S Service 授权 API | /api/v1/acl/k8s-service 增强                           | 1.5d |
-| 心跳响应扩展                  | 新增 ssh/k8sapi/k8sservice_endpoint_permissions 字段   | 1d   |
+| 心跳响应扩展                  | 新增 k8sapi/k8sservice_endpoint_permissions 字段       | 1d   |
 | EndpointK8SServiceCache       | Endpoint 发现的 K8S Service 缓存                       | 1d   |
 
-小计：8d
+小计：5.5d
 
 ### P2-2. Server：操作级审计
 
@@ -244,15 +243,16 @@ P0（基础设施）──▶ P1（K8S 能力）──▶ P2（Endpoint 体系�
 
 | 任务                     | 说明                                                | 估算 |
 | ------------------------ | --------------------------------------------------- | ---- |
-| SSH 授权页面增强         | /acl/ssh 增加 Endpoint SSH 授权 Tab                 | 2d   |
 | K8S API 授权页面增强     | /acl/k8s 增加 Endpoint K8SAPI 授权 Tab              | 2d   |
 | K8S Service 授权页面增强 | /acl/k8s-service 增加 Endpoint K8S Service 授权 Tab | 2d   |
 | 审计日志增强             | 操作类型筛选、Agent/Endpoint 列、详情列             | 2d   |
 | 国际化补充               | Endpoint 授权 + 审计相关翻译                        | 0.5d |
 
-小计：8.5d
+国际化补充 | Endpoint 授权 + 审计相关翻译 | 0.5d |
 
-### P2 合计：60d
+小计：6.5d
+
+### P2 合计：54d
 
 ---
 
@@ -271,9 +271,9 @@ P0（基础设施）──▶ P1（K8S 能力）──▶ P2（Endpoint 体系�
 | ---- | ------------------------------ | ------ |
 | P0   | Desktop tsnet 化 + 域名体系    | 20.5d  |
 | P1   | K8S 能力 + ACL 扩展 + Web 页面 | 53d    |
-| P2   | Endpoint 体系 + 审计增强       | 60d    |
+| P2   | Endpoint 体系 + 审计增强       | 54d    |
 | P3   | AI 审计 + Vaultwarden          | 待评估 |
-| 合计 | P0-P2                          | 133.5d |
+| 合计 | P0-P2                          | 127.5d |
 
 ## 里程碑
 
@@ -302,8 +302,8 @@ P0（基础设施）──▶ P1（K8S 能力）──▶ P2（Endpoint 体系�
 | ---- | ---------------------------------------------------- | ---- |
 | P0   | domain_registry                                      | 1    |
 | P1   | acl*k8s*_*permission (4), endpoint*_ (3)             | 7    |
-| P2   | acl*\*\_jump*\*\_permission (6), operation_audit_log | 7    |
-| 合计 |                                                      | 15   |
+| P2   | acl*\*\_jump*\*\_permission (4), operation_audit_log | 5    |
+| 合计 |                                                      | 13   |
 
 全部通过 GORM AutoMigrate 自动创建，现有 23 张表不做结构变更。
 

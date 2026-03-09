@@ -442,31 +442,6 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.POST("/acl/k8s-service/:id/groups", aclAPI.AddK8SServiceACLGroups)
 					adminAuthGroup.DELETE("/acl/k8s-service/:id/users/:uid", aclAPI.RemoveK8SServiceACLUser)
 					adminAuthGroup.DELETE("/acl/k8s-service/:id/groups/:gid", aclAPI.RemoveK8SServiceACLGroup)
-					// K8S 聚合查询（P9：合并展示 Agent + Endpoint）
-					adminAuthGroup.GET("/acl/k8s-unified", aclAPI.ListK8SUnifiedACL)
-					adminAuthGroup.GET("/acl/k8s-service-unified", aclAPI.ListK8SServiceUnifiedACL)
-
-					// Endpoint SSH 授权
-					adminAuthGroup.GET("/acl/endpoint-ssh", aclAPI.ListEndpointSSHACL)
-					adminAuthGroup.GET("/acl/endpoint-ssh/:id", aclAPI.GetEndpointSSHACL)
-					adminAuthGroup.POST("/acl/endpoint-ssh/:id/users", aclAPI.AddEndpointSSHACLUsers)
-					adminAuthGroup.POST("/acl/endpoint-ssh/:id/groups", aclAPI.AddEndpointSSHACLGroups)
-					adminAuthGroup.DELETE("/acl/endpoint-ssh/:id/users/:uid", aclAPI.RemoveEndpointSSHACLUser)
-					adminAuthGroup.DELETE("/acl/endpoint-ssh/:id/groups/:gid", aclAPI.RemoveEndpointSSHACLGroup)
-					// Endpoint K8SAPI 授权
-					adminAuthGroup.GET("/acl/endpoint-k8sapi", aclAPI.ListEndpointK8SAPIACL)
-					adminAuthGroup.GET("/acl/endpoint-k8sapi/:id", aclAPI.GetEndpointK8SAPIACL)
-					adminAuthGroup.POST("/acl/endpoint-k8sapi/:id/users", aclAPI.AddEndpointK8SAPIACLUsers)
-					adminAuthGroup.POST("/acl/endpoint-k8sapi/:id/groups", aclAPI.AddEndpointK8SAPIACLGroups)
-					adminAuthGroup.DELETE("/acl/endpoint-k8sapi/:id/users/:uid", aclAPI.RemoveEndpointK8SAPIACLUser)
-					adminAuthGroup.DELETE("/acl/endpoint-k8sapi/:id/groups/:gid", aclAPI.RemoveEndpointK8SAPIACLGroup)
-					// Endpoint K8SService 授权
-					adminAuthGroup.GET("/acl/endpoint-k8sservice", aclAPI.ListEndpointK8SServiceACL)
-					adminAuthGroup.GET("/acl/endpoint-k8sservice/:id", aclAPI.GetEndpointK8SServiceACL)
-					adminAuthGroup.POST("/acl/endpoint-k8sservice/:id/users", aclAPI.AddEndpointK8SServiceACLUsers)
-					adminAuthGroup.POST("/acl/endpoint-k8sservice/:id/groups", aclAPI.AddEndpointK8SServiceACLGroups)
-					adminAuthGroup.DELETE("/acl/endpoint-k8sservice/:id/users/:uid", aclAPI.RemoveEndpointK8SServiceACLUser)
-					adminAuthGroup.DELETE("/acl/endpoint-k8sservice/:id/groups/:gid", aclAPI.RemoveEndpointK8SServiceACLGroup)
 
 					// Endpoint 管理（Endpoint 由 Agent 自动发现上报，不支持手动创建）
 					endpointAPI := api.NewEndpointAPI(s.config)

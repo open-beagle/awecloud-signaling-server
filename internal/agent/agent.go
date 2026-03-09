@@ -32,6 +32,8 @@ import (
 type Agent struct {
 	config  *config.AgentConfig
 	version string // Agent版本
+	userName string // 用户名（从注册响应获取）
+	deviceName string // 设备名称（从注册响应获取，即 Node.Name）
 
 	// gRPC连接
 	grpcConn      *grpc.ClientConn
@@ -82,8 +84,11 @@ type Agent struct {
 }
 
 // NewAgent 创建Agent
-func NewAgent(cfg *config.AgentConfig, version string) (*Agent, error) {
+func NewAgent(cfg *config.AgentConfig, version, buildDate string) (*Agent, error) {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// 设置版本信息（供 Endpoint SSH 横幅使用）
+	SetVersionInfo(version, buildDate)
 
 	// 初始化网络检测器
 	lanDetector := NewLANDetector()
@@ -221,6 +226,16 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 	// 标记为 Client 模式
 	a.isClientMode = true
 
+	// 保存设备名称和用户名（从注册响应获取）
+	if regResult.DeviceName != "" {
+		a.deviceName = regResult.DeviceName
+		logger.Infof("设备名称: %s", a.deviceName)
+	}
+	if regResult.UserName != "" {
+		a.userName = regResult.UserName
+		logger.Infof("用户名: %s", a.userName)
+	}
+
 	// 启动健康检查HTTP服务器
 	if err := a.startHealthServer(); err != nil {
 		return fmt.Errorf("启动健康检查服务器失败: %w", err)
@@ -236,7 +251,7 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 	// 启动 Tailscale（仅网络连接）
 	a.tsManager = NewTailscaleManager(a.config, nil, 0, "", a.ctx)
 
-	if err := a.tsManager.Start(regResult.HeadscaleURL, regResult.AuthKey); err != nil {
+	if err := a.tsManager.Start(regResult.HeadscaleURL, regResult.AuthKey, a.deviceName); err != nil {
 		return fmt.Errorf("启动 Tailscale 失败: %w", err)
 	}
 
@@ -481,12 +496,11 @@ func (a *Agent) authInterceptor() grpc.UnaryClientInterceptor {
 
 // register 注册Agent
 func (a *Agent) register() error {
-	logger.Infof("注册Agent: %s (version: %s)", a.config.Agent.AgentName, a.version)
+	logger.Infof("注册Agent (version: %s)", a.version)
 
 	// 构建系统信息
-	// 如果配置了 device，使用 device 作为 hostname；否则使用自动检测的 hostname
-	hostname := a.config.Agent.Device
-	if hostname == "" && a.networkInfo != nil {
+	hostname := ""
+	if a.networkInfo != nil {
 		hostname = a.networkInfo.Hostname
 	}
 
@@ -498,7 +512,7 @@ func (a *Agent) register() error {
 	}
 
 	resp, err := a.grpcClient.Register(a.ctx, &pb.AgentRegisterRequest{
-		Name:       a.config.Agent.AgentName,
+		Name:       "", // 不再传递 name,由 Server 从 Token 获取
 		Secret:     a.config.Agent.AgentToken,
 		Version:    a.version,
 		SystemInfo: systemInfo,
@@ -513,17 +527,29 @@ func (a *Agent) register() error {
 	}
 
 	a.agentID = resp.AgentId
+	
+	// 保存用户名和设备名称（从注册响应获取）
+	if resp.UserName != "" {
+		a.userName = resp.UserName
+		logger.Infof("注册成功，Agent ID: %d, 用户: %s", a.agentID, a.userName)
+	} else {
+		logger.Infof("注册成功，Agent ID: %d", a.agentID)
+	}
+	
+	// 保存设备名称（从 gRPC 注册响应获取，如果有的话）
+	if resp.DeviceName != "" {
+		a.deviceName = resp.DeviceName
+		logger.Infof("设备名称: %s", a.deviceName)
+	}
 
 	// 检查是否返回了 Tailscale 认证信息
 	if resp.ServerUrl != "" && resp.AuthKey != "" {
-		logger.Infof("注册成功，Agent ID: %d，使用 Tailscale 模式", a.agentID)
-
 		// 启动 Tailscale
 		if a.tsManager == nil {
 			a.tsManager = NewTailscaleManager(a.config, a.grpcClient, a.agentID, a.config.Agent.AgentToken, a.ctx)
 		}
 
-		if err := a.tsManager.Start(resp.ServerUrl, resp.AuthKey); err != nil {
+		if err := a.tsManager.Start(resp.ServerUrl, resp.AuthKey, a.deviceName); err != nil {
 			return fmt.Errorf("启动 Tailscale 失败: %w", err)
 		}
 
@@ -573,7 +599,9 @@ func (a *Agent) heartbeatLoop() {
 				if st.Code() == codes.PermissionDenied {
 					logger.Error("========================================")
 					logger.Error("安全提示: 用户已禁用")
-					logger.Errorf("用户: %s", a.config.Agent.AgentName)
+					if a.userName != "" {
+						logger.Errorf("用户: %s", a.userName)
+					}
 					logger.Error("========================================")
 					logger.Info("停止所有服务...")
 
@@ -649,7 +677,9 @@ func (a *Agent) runHeartbeatStream(stream pb.AgentService_HeartbeatClient) {
 					if st.Code() == codes.PermissionDenied {
 						logger.Error("========================================")
 						logger.Error("安全提示: 用户已禁用")
-						logger.Errorf("用户: %s", a.config.Agent.AgentName)
+						if a.userName != "" {
+							logger.Errorf("用户: %s", a.userName)
+						}
 						logger.Error("========================================")
 						logger.Info("停止所有服务...")
 
@@ -710,6 +740,11 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 		AgentId: a.agentID,
 	}
 
+	// 添加设备名称（Node.Name，即 DeployToken.Name）
+	if a.deviceName != "" {
+		req.DeviceName = a.deviceName
+	}
+
 	// 添加 Tailscale 状态
 	if a.tsManager != nil {
 		req.TunnelIp = a.tsManager.GetIP()
@@ -717,9 +752,8 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 	}
 
 	// 添加网络信息
-	// 如果配置了 device，使用 device 作为 hostname
-	hostname := a.config.Agent.Device
-	if hostname == "" && a.networkInfo != nil {
+	hostname := ""
+	if a.networkInfo != nil {
 		hostname = a.networkInfo.Hostname
 	}
 	if hostname != "" {
@@ -822,8 +856,6 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 		a.permCache.UpdateK8SPermissions(resp.K8SPermissions)
 		a.permCache.UpdateK8SServicePermissions(resp.K8SServicePermissions)
 		a.permCache.UpdateEndpointSSHPermissions(resp.EndpointSshPermissions)
-		a.permCache.UpdateEndpointK8SAPIPermissions(resp.EndpointK8SapiPermissions)
-		a.permCache.UpdateEndpointK8SServicePermissions(resp.EndpointK8SservicePermissions)
 	}
 
 	// 同步 Endpoint 能力配置到 EndpointServer（让 Agent 能把 Server 配置下发给 Endpoint）
@@ -984,9 +1016,10 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 
 	var registrations []*pb.DomainRegistration
 
-	// 获取设备名（优先使用配置的 device，否则使用自动检测的 hostname）
-	device := a.config.Agent.Device
+	// 获取设备名（优先使用 deviceName，即 Node.Name/DeployToken.Name）
+	device := a.deviceName
 	if device == "" && a.networkInfo != nil {
+		// 兜底：如果没有 deviceName，使用 hostname（旧版本兼容）
 		device = a.networkInfo.Hostname
 	}
 
@@ -996,7 +1029,7 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		agentIP = a.tsManager.GetIP()
 	}
 
-	// 1. Agent SSH 域名：{device}.{agent_name}{domain_suffix}（如 beagle-242.beijing.beagle）
+	// 1. Agent SSH 域名：{device}.{agent_name}{domain_suffix}（如 ide-chengdu.beijing.beagle）
 	// Client 模式（CloudIDE）默认启用 Tailscale SSH，也需要注册域名
 	if (a.config.Tunnel.EnableSSH || a.isClientMode) && a.tsManager != nil && a.tsManager.IsConnected() && device != "" {
 		// 自动检测系统 SSH 用户
@@ -1019,7 +1052,7 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 			}
 		}
 		registrations = append(registrations, &pb.DomainRegistration{
-			Domain:     device + "." + a.config.Agent.AgentName + a.domainSuffix,
+			Domain:     device + "." + a.userName + a.domainSuffix,
 			Type:       "ssh",
 			TargetIp:   agentIP,
 			TargetPort: 22,
@@ -1034,7 +1067,7 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		for name, running := range a.proxyManager.GetStatus() {
 			if running {
 				registrations = append(registrations, &pb.DomainRegistration{
-					Domain:     name + "." + a.config.Agent.AgentName + a.domainSuffix,
+					Domain:     name + "." + a.userName + a.domainSuffix,
 					Type:       "k8ssvc",
 					TargetIp:   agentIP,
 					TargetPort: int32(a.config.SVC.ListenPortBase), // Agent SVCProxy gRPC 端口（默认 50051）
@@ -1048,7 +1081,7 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 	// Desktop/CloudIDE 通过本地代理访问 6443 端口，本地代理转发到 target_port
 	if a.config.K8S.Enabled && a.k8sAPIProxy != nil && a.tsManager != nil && a.tsManager.IsConnected() {
 		registrations = append(registrations, &pb.DomainRegistration{
-			Domain:     "kubernetes." + a.config.Agent.AgentName + a.domainSuffix,
+			Domain:     "kubernetes." + a.userName + a.domainSuffix,
 			Type:       "k8sapi",
 			TargetIp:   agentIP,
 			TargetPort: int32(a.config.K8S.ListenPort), // Agent 的 K8SAPI 代理端口（50050）
@@ -1063,7 +1096,7 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 			if svc.Alias != "" {
 				prefix = svc.Alias
 			}
-			domain := prefix + "." + svc.Namespace + "." + a.config.Agent.AgentName + a.domainSuffix
+			domain := prefix + "." + svc.Namespace + "." + a.userName + a.domainSuffix
 
 			// 注册域名，包含 Service 的所有端口
 			// TargetPort 使用 Agent SVCProxy gRPC 端口（50051），Service 端口存储在 ServicePorts 字段
@@ -1106,7 +1139,7 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 			port := a.endpointSSHProxy.AllocatePort(ep.Name)
 
 			registrations = append(registrations, &pb.DomainRegistration{
-				Domain:     ep.Name + "." + a.config.Agent.AgentName + a.domainSuffix,
+				Domain:     ep.Name + "." + a.userName + a.domainSuffix,
 				Type:       "ssh",
 				TargetIp:   agentIP,
 				TargetPort: int32(port),
@@ -1396,7 +1429,7 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 			} else {
 				// 启动 Endpoint SSH 代理（在 tsnet 上监听，接收 Desktop SSH 连接）
 				if a.tsManager != nil && a.tsManager.IsConnected() {
-					sshProxy, err := NewEndpointSSHProxy(a.endpointServer, a.tsManager, a.auditCollector, a.permCache, a.config.Tunnel.StateDir, a.ctx)
+					sshProxy, err := NewEndpointSSHProxy(a.endpointServer, a.tsManager, a.auditCollector, a.permCache, a.grpcClient, a.config.Tunnel.StateDir, a.ctx)
 					if err != nil {
 						logger.Warnf("创建 Endpoint SSH 代理失败: %v", err)
 					} else if err := sshProxy.Start(); err != nil {

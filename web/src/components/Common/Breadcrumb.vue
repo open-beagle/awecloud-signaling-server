@@ -125,51 +125,7 @@ const items = computed(() => {
     breadcrumbs.push({ title: `终端详情: ${endpointName}` })
   }
   
-  // 11. Endpoint SSH 授权
-  else if (path === '/acl/endpoint-ssh') {
-    breadcrumbs.push({ title: '授权管理' })
-    breadcrumbs.push({ path: '/acl/endpoint-ssh', title: 'Endpoint SSH 授权' })
-  } else if (path.match(/^\/acl\/endpoint-ssh\/[a-f0-9-]+$/)) {
-    const endpointName = (route.query.name as string) || `#${route.params.id}`
-    breadcrumbs.push({ title: '授权管理' })
-    breadcrumbs.push({ path: '/acl/endpoint-ssh', title: 'Endpoint SSH 授权' })
-    breadcrumbs.push({ title: `授权详情: ${endpointName}` })
-  }
-  
-  // 12. Endpoint K8SAPI 授权（P9：面包屑指向合并列表页）
-  else if (path === '/acl/endpoint-k8sapi') {
-    breadcrumbs.push({ title: '授权管理' })
-    breadcrumbs.push({ path: '/acl/k8s', title: 'K8S API 授权' })
-  } else if (path.match(/^\/acl\/endpoint-k8sapi\/[a-f0-9-]+$/)) {
-    const endpointName = (route.query.name as string) || `#${route.params.id}`
-    breadcrumbs.push({ title: '授权管理' })
-    breadcrumbs.push({ path: '/acl/k8s', title: 'K8S API 授权' })
-    breadcrumbs.push({ title: `Endpoint 授权: ${endpointName}` })
-  }
-  
-  // 13. Endpoint K8SService 授权（P9：面包屑指向合并列表页）
-  else if (path === '/acl/endpoint-k8sservice') {
-    breadcrumbs.push({ title: '授权管理' })
-    breadcrumbs.push({ path: '/acl/k8s-service', title: 'K8S Service 授权' })
-  } else if (path.match(/^\/acl\/endpoint-k8sservice\/[a-f0-9-]+$/)) {
-    const endpointName = (route.query.name as string) || `#${route.params.id}`
-    breadcrumbs.push({ title: '授权管理' })
-    breadcrumbs.push({ path: '/acl/k8s-service', title: 'K8S Service 授权' })
-    breadcrumbs.push({ title: `Endpoint 授权: ${endpointName}` })
-  }
-  
-  // 14. Endpoint 管理（旧路由兼容）
-  else if (path === '/endpoints/ssh') {
-    breadcrumbs.push({ title: 'Endpoint 管理' })
-    breadcrumbs.push({ path: '/endpoints/ssh', title: 'SSH' })
-  } else if (path === '/endpoints/k8sapi') {
-    breadcrumbs.push({ title: 'Endpoint 管理' })
-    breadcrumbs.push({ path: '/endpoints/k8sapi', title: 'K8S API' })
-  } else if (path === '/endpoints/k8sservice') {
-    breadcrumbs.push({ title: 'Endpoint 管理' })
-    breadcrumbs.push({ path: '/endpoints/k8sservice', title: 'K8S Service' })
-  }
-  
+
   // 15. 资源发现
   else if (path === '/resources') {
     breadcrumbs.push({ path: '/resources', title: '资源发现' })

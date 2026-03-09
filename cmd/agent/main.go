@@ -54,8 +54,6 @@ func main() {
 
 	// 部署模式参数
 	deployToken := flag.String("t", "", "部署 Token（用于首次部署或升级）")
-	agentName := flag.String("n", "", "Agent 名称（部署模式必填）")
-	deviceName := flag.String("d", "", "设备名称（部署模式必填）")
 	serverAddr := flag.String("s", "", "Server 地址（部署模式必填）")
 
 	flag.Parse()
@@ -86,17 +84,15 @@ func main() {
 	// 检查是否为部署模式
 	if *deployToken != "" {
 		// 部署模式：使用 Token 向 Server 注册（命令行参数，通常是 install_agent.sh 调用）
-		if *agentName == "" || *deviceName == "" || *serverAddr == "" {
-			log.Fatalf("部署模式需要指定: -n <agent_name> -d <device_name> -s <server_address>")
+		if *serverAddr == "" {
+			log.Fatalf("部署模式需要指定: -s <server_address>")
 		}
 
 		fmt.Printf("进入部署模式...\n")
-		fmt.Printf("Agent Name: %s\n", *agentName)
-		fmt.Printf("Device Name: %s\n", *deviceName)
 		fmt.Printf("Server Address: %s\n", *serverAddr)
 
 		// 向 Server 注册并获取配置
-		cfg, registerResult, err = registerWithToken(*serverAddr, *deployToken, *agentName, *deviceName)
+		cfg, registerResult, err = registerWithToken(*serverAddr, *deployToken)
 		if err != nil {
 			log.Fatalf("部署注册失败: %v", err)
 		}
@@ -115,8 +111,8 @@ func main() {
 		}
 
 		// 检查是否有 SIGNAL_TOKEN 环境变量（Token 自动注册模式，CloudIDE 等场景）
-		if cfg.Agent.AgentToken != "" && cfg.Agent.AgentName == "" {
-			// 有 Token 但没有 AgentName → Token 注册模式
+		if cfg.Agent.AgentToken != "" {
+			// Token 注册模式
 			srvAddr := cfg.Agent.Server
 			if srvAddr == "" && BUILD_URL != "" {
 				srvAddr = BUILD_URL
@@ -130,7 +126,7 @@ func main() {
 			fmt.Printf("Server Address: %s\n", srvAddr)
 			fmt.Printf("Device: %s\n", hostname)
 
-			cfg, registerResult, err = registerWithToken(srvAddr, cfg.Agent.AgentToken, "", hostname)
+			cfg, registerResult, err = registerWithToken(srvAddr, cfg.Agent.AgentToken)
 			if err != nil {
 				log.Fatalf("Token 注册失败: %v", err)
 			}
@@ -153,9 +149,7 @@ func main() {
 
 	// 初始化日志
 	logFile := cfg.Log.File
-	if logFile == "" {
-		logFile = "logs/agent.log"
-	}
+	// 如果配置文件中没有指定日志文件，只输出到标准输出（不创建 logs 目录）
 	if err := logger.InitLogrus(cfg.Log.Level, logFile); err != nil {
 		log.Fatalf("初始化日志失败: %v", err)
 	}
@@ -175,10 +169,10 @@ func main() {
 		logger.Infof("使用默认 Server 地址: http://localhost:8080")
 	}
 
-	logger.Infof("Agent Name: %s", cfg.Agent.AgentName)
 	logger.Infof("Server Address: %s", cfg.Agent.Server)
 
 	// 初始化 OpenTelemetry
+	hostname, _ := os.Hostname()
 	if err := telemetry.Init(telemetry.Config{
 		Endpoint:    cfg.Telemetry.Endpoint,
 		ServiceName: cfg.Telemetry.Name,
@@ -190,7 +184,7 @@ func main() {
 		BuildDate: buildDate,
 		GoVersion: goVersion,
 	}, &telemetry.ProcessAttributes{
-		Node: cfg.Agent.AgentName, // 使用 AgentName 作为节点标识
+		Node: hostname, // 使用 hostname 作为节点标识
 	}); err != nil {
 		logger.Warnf("初始化 OpenTelemetry 失败: %v", err)
 	} else {
@@ -207,7 +201,7 @@ func main() {
 	}
 
 	// 创建并启动Agent
-	agt, err := agent.NewAgent(cfg, version)
+	agt, err := agent.NewAgent(cfg, version, buildDate)
 	if err != nil {
 		logger.Fatalf("创建Agent失败: %v", err)
 	}
@@ -241,6 +235,7 @@ func runSSHChild() {
 		remoteUser string
 		remoteIP   string
 		shell      bool
+		cmd        string // 命令执行模式的命令
 	)
 
 	// 解析参数
@@ -274,6 +269,9 @@ func runSSHChild() {
 				remoteUser = value
 			case "--remote-ip":
 				remoteIP = value
+			case "--cmd":
+				// Tailscale SSH 传递的命令参数
+				cmd = value
 			}
 			continue
 		}
@@ -309,6 +307,10 @@ func runSSHChild() {
 		} else if arg == "--remote-ip" && i+1 < len(os.Args) {
 			remoteIP = os.Args[i+1]
 			i++
+		} else if arg == "--cmd" && i+1 < len(os.Args) {
+			// Tailscale SSH 传递的命令参数
+			cmd = os.Args[i+1]
+			i++
 		} else if arg == "--shell" {
 			shell = true
 		}
@@ -319,43 +321,41 @@ func runSSHChild() {
 		loginShell = "/bin/bash"
 	}
 
-	// 如果指定了 --shell，启动交互式 shell
-	if shell {
-		// 切换用户身份（如果指定了 uid/gid）
-		if err := switchUserIdentity(uid, gid, groups); err != nil {
-			fmt.Fprintf(os.Stderr, "failed to switch user identity: %v\n", err)
-			os.Exit(1)
-		}
+	// 切换用户身份（如果指定了 uid/gid）
+	if err := switchUserIdentity(uid, gid, groups); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to switch user identity: %v\n", err)
+		os.Exit(1)
+	}
 
-		// 设置环境变量
-		env := os.Environ()
-		if homeDir != "" {
-			env = append(env, "HOME="+homeDir)
-		}
-		if localUser != "" {
-			env = append(env, "USER="+localUser)
-			env = append(env, "LOGNAME="+localUser)
-		}
+	// 设置环境变量
+	env := os.Environ()
+	if homeDir != "" {
+		env = append(env, "HOME="+homeDir)
+	}
+	if localUser != "" {
+		env = append(env, "USER="+localUser)
+		env = append(env, "LOGNAME="+localUser)
+	}
 
-		// 切换到用户主目录
-		if homeDir != "" {
-			if err := os.Chdir(homeDir); err != nil {
-				fmt.Fprintf(os.Stderr, "failed to chdir to %s: %v\n", homeDir, err)
-			}
-		}
-
-		// 显示登录横幅
-		printSSHBanner(localUser, remoteUser, remoteIP)
-
-		// 使用平台特定的方式启动 shell
-		if err := execShell(loginShell, env); err != nil {
-			fmt.Fprintf(os.Stderr, "failed to exec shell: %v\n", err)
-			os.Exit(1)
+	// 切换到用户主目录
+	if homeDir != "" {
+		if err := os.Chdir(homeDir); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to chdir to %s: %v\n", homeDir, err)
 		}
 	}
 
-	// 如果没有 --shell 参数，直接退出（不应该到这里）
-	os.Exit(0)
+	// 只在交互式会话（--shell 参数）时显示横幅
+	// 命令执行会话（--cmd 参数）不显示横幅，避免污染命令输出
+	if shell {
+		printSSHBanner(localUser, remoteUser, remoteIP)
+	}
+
+	// 使用平台特定的方式启动 shell
+	// 如果有 --cmd 参数，执行命令；否则启动交互式 shell
+	if err := execShell(loginShell, env, cmd); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to exec shell: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // splitString 分割字符串
@@ -383,19 +383,27 @@ func printSSHBanner(localUser, remoteUser, remoteIP string) {
 	// 提取真实的用户名（去掉 tag: 前缀）
 	displayRemoteUser := extractRealUser(remoteUser)
 
+	// 获取当前时间
+	connectTime := time.Now().Format("2006-01-02 15:04:05")
+
 	fmt.Println("================================================================")
 	fmt.Println("           AWECloud Signaling - SSH Access")
 	fmt.Println("================================================================")
-	fmt.Printf("  Version:     %s\n", version)
-	fmt.Printf("  Build Date:  %s\n", buildDate)
-	fmt.Printf("  Git Commit:  %s\n", gitCommit)
+	fmt.Printf("  Version:      %s\n", version)
+	fmt.Printf("  Build Date:   %s\n", buildDate)
+	fmt.Printf("  Connect Time: %s\n", connectTime)
 	fmt.Println("----------------------------------------------------------------")
+
+	// 构建 Remote User 行
 	if displayRemoteUser != "" {
-		fmt.Printf("  Remote User: %s\n", displayRemoteUser)
+		fmt.Printf("  Remote User:   %s\n", displayRemoteUser)
 	}
+
+	// 构建 Remote Device 行
 	if remoteIP != "" {
-		fmt.Printf("  Remote IP:   %s\n", remoteIP)
+		fmt.Printf("  Remote Device: %s\n", remoteIP)
 	}
+
 	fmt.Println("================================================================")
 	fmt.Println()
 }
@@ -424,7 +432,7 @@ func extractRealUser(remoteUser string) string {
 }
 
 // registerWithToken 使用部署 Token 向 Server 注册
-func registerWithToken(serverAddr, token, agentName, deviceName string) (*config.AgentConfig, *config.RegisterResult, error) {
+func registerWithToken(serverAddr, token string) (*config.AgentConfig, *config.RegisterResult, error) {
 	// 生成设备指纹
 	fingerprint := generateDeviceFingerprint()
 
@@ -432,7 +440,6 @@ func registerWithToken(serverAddr, token, agentName, deviceName string) (*config
 	reqBody := map[string]string{
 		"token":              token,
 		"device_fingerprint": fingerprint,
-		"device_name":        deviceName,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
@@ -473,6 +480,7 @@ func registerWithToken(serverAddr, token, agentName, deviceName string) (*config
 			HeadscaleURL string                 `json:"headscale_url"`
 			AuthKey      string                 `json:"auth_key"`
 			UserName     string                 `json:"user_name"`
+			DeviceName   string                 `json:"device_name"` // 设备名称（Node.Name）
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
@@ -492,34 +500,14 @@ func registerWithToken(serverAddr, token, agentName, deviceName string) (*config
 		HeadscaleURL: result.Data.HeadscaleURL,
 		AuthKey:      result.Data.AuthKey,
 		UserName:     result.Data.UserName,
+		DeviceName:   result.Data.DeviceName, // 保存 Server 返回的设备名称
 	}
 
 	// 构建配置
-	// Agent 模式：从响应的 config 中提取 agent name/device
-	// Client 模式：用 UserName 作为 AgentName（用于域名构建等）
-	cfgAgentName := agentName
-	cfgDevice := deviceName
-	if result.Data.Config != nil {
-		if agentCfg, ok := result.Data.Config["agent"].(map[string]interface{}); ok {
-			if name, ok := agentCfg["name"].(string); ok && cfgAgentName == "" {
-				cfgAgentName = name
-			}
-			if device, ok := agentCfg["device"].(string); ok && cfgDevice == "" {
-				cfgDevice = device
-			}
-		}
-	}
-	// Client 模式兜底：用 UserName 作为 AgentName
-	if cfgAgentName == "" && result.Data.UserName != "" {
-		cfgAgentName = result.Data.UserName
-	}
-
 	cfg := &config.AgentConfig{
 		Agent: config.AgentSection{
-			AgentName:  cfgAgentName,
 			AgentToken: token,
-			Device:     cfgDevice,
-			Server:    serverAddr,
+			Server:     serverAddr,
 		},
 	}
 

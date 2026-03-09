@@ -19,7 +19,8 @@ func switchUserIdentity(uid, gid int, groups []int) error {
 }
 
 // execShell Windows 使用 cmd.exe 或 PowerShell
-func execShell(loginShell string, env []string) error {
+// 如果 cmd 不为空，执行命令；否则启动交互式 shell
+func execShell(loginShell string, env []string, cmdStr string) error {
 	// Windows 不支持 syscall.Exec，使用 exec.Command 替代
 	// 但这不会替换当前进程，而是创建子进程
 
@@ -28,7 +29,15 @@ func execShell(loginShell string, env []string) error {
 		loginShell = "cmd.exe"
 	}
 
-	cmd := exec.Command(loginShell)
+	var cmd *exec.Cmd
+	if cmdStr != "" {
+		// 命令执行模式：使用 /c 参数执行命令
+		cmd = exec.Command(loginShell, "/c", cmdStr)
+	} else {
+		// 交互式模式：启动 shell
+		cmd = exec.Command(loginShell)
+	}
+
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

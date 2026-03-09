@@ -70,7 +70,7 @@ func NewTailscaleManager(cfg *config.AgentConfig, grpcClient pb.AgentServiceClie
 }
 
 // Start 启动 Tailscale 客户端
-func (m *TailscaleManager) Start(controlURL, authKey string) error {
+func (m *TailscaleManager) Start(controlURL, authKey, deviceName string) error {
 	logger.Infof("启动 Tailscale 客户端，连接到: %s", controlURL)
 
 	// 初始化状态目录
@@ -78,17 +78,18 @@ func (m *TailscaleManager) Start(controlURL, authKey string) error {
 		return fmt.Errorf("初始化状态目录失败: %w", err)
 	}
 
-	// 确定 Tailscale 节点名：优先使用配置的 device，否则使用系统 hostname
-	hostname := m.config.Agent.Device
+	// 确定 Tailscale 节点名：优先使用 deviceName（DeployToken.Name），否则使用系统 hostname
+	hostname := deviceName
 	if hostname == "" {
 		var err error
 		hostname, err = os.Hostname()
 		if err != nil {
-			logger.Warnf("获取系统 hostname 失败: %v，使用 Agent 名称", err)
-			hostname = m.config.Agent.AgentName
+			logger.Warnf("获取系统 hostname 失败: %v，使用默认值", err)
+			hostname = "agent"
 		}
+		logger.Warnf("deviceName 为空，使用系统 hostname: %s", hostname)
 	}
-	logger.Infof("Tailscale 节点名: %s", hostname)
+	logger.Infof("Tailscale 节点名: %s (deviceName=%s)", hostname, deviceName)
 
 	// 创建 tsnet.Server
 	m.tsServer = &tsnet.Server{

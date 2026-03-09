@@ -31,6 +31,9 @@ service AgentService {
 
   // SVCProxy - K8S Service 代理（双向流，Desktop → Agent → K8S ClusterIP）
   rpc SVCProxy(stream SVCProxyData) returns (stream SVCProxyData);
+
+  // 获取用户设备信息（用于 SSH 横幅显示）
+  rpc GetUserDeviceInfo(GetUserDeviceInfoRequest) returns (GetUserDeviceInfoResponse);
 }
 
 // ============================================
@@ -75,6 +78,8 @@ message AgentRegisterResponse {
   uint64 agent_id = 3; // Agent ID（Headscale User ID）
   string auth_key = 4; // Tailscale PreAuthKey，用于隧道连接
   string server_url = 5; // Headscale 服务器地址
+  string user_name = 6; // 用户名
+  string device_name = 7; // 设备名称（Node.Name，即 DeployToken.Name）
 }
 
 // ============================================
@@ -134,6 +139,7 @@ message AgentHeartbeatRequest {
   repeated ConnectedEndpoint connected_endpoints = 11; // 已连接的 Endpoint 列表
   // 操作审计记录（Agent 上报）
   repeated OperationAuditRecord audit_records = 12; // 操作审计记录
+  string device_name = 13; // 设备名称（Node.Name，即 DeployToken.Name）
 }
 
 // ConnectedEndpoint Agent 上报的已连接 Endpoint 信息
@@ -266,16 +272,6 @@ message K8SServicePermission {
   bool is_group = 5; // 是否来自分组授权
 }
 
-// EndpointSSHPermission Endpoint SSH 授权信息（心跳响应下发给 Agent）
-message EndpointSSHPermission {
-  string endpoint_id = 1; // Endpoint ID
-  string endpoint_name = 2; // Endpoint 名称
-  uint64 user_id = 3; // 被授权用户 ID
-  string user_name = 4; // 被授权用户名
-  repeated string ssh_users = 5; // 允许的 SSH 登录用户名
-  bool is_group = 6; // 是否来自分组授权
-}
-
 // EndpointK8SAPIPermission Endpoint K8SAPI 授权信息（心跳响应下发给 Agent）
 message EndpointK8SAPIPermission {
   string endpoint_id = 1; // Endpoint ID
@@ -297,6 +293,16 @@ message EndpointK8SServicePermission {
   repeated string namespaces = 5; // 允许的命名空间（空表示全部）
   repeated string service_names = 6; // 允许的 Service 名称（空表示全部）
   bool is_group = 7; // 是否来自分组授权
+}
+
+// EndpointSSHPermission Endpoint SSH 授权信息（心跳响应下发给 Agent）
+message EndpointSSHPermission {
+  string endpoint_id = 1; // Endpoint ID
+  string endpoint_name = 2; // Endpoint 名称
+  uint64 user_id = 3; // 被授权用户 ID
+  string user_name = 4; // 被授权用户名
+  repeated string ssh_users = 5; // 允许的 SSH 用户列表（空表示全部）
+  bool is_group = 6; // 是否来自分组授权
 }
 
 // OperationAuditRecord 操作审计记录（Agent 心跳上报）
@@ -404,5 +410,24 @@ message SVCProxyData {
   bool is_close = 6; // 是否为关闭通知
   string error = 7; // 错误信息（如有）
   // 删除 endpoint_name 字段（P10 重构：Agent 自动选择实现路径）
+}
+
+// ============================================
+// 获取用户设备信息（用于 SSH 横幅显示）
+// ============================================
+
+// GetUserDeviceInfoRequest 获取用户设备信息请求
+message GetUserDeviceInfoRequest {
+  string user_name = 1; // 用户名
+  string device_ip = 2; // 设备 IP（用于匹配具体设备）
+}
+
+// GetUserDeviceInfoResponse 获取用户设备信息响应
+message GetUserDeviceInfoResponse {
+  string user_name = 1; // 用户名
+  string display_name = 2; // 真实姓名（User.Alias，可能为空）
+  string device_name = 3; // 设备名称
+  string device_os = 4; // 操作系统
+  string device_ip = 5; // 设备 IP
 }
 

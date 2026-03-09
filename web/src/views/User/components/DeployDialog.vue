@@ -8,11 +8,14 @@
     <!-- Agent 部署 -->
     <div v-if="user?.role === 'agent'">
       <el-form :model="agentForm" label-width="100px">
-        <el-form-item :label="$t('agent.deviceName')" required>
+        <el-form-item :label="$t('agent.tokenName')" required>
           <el-input
-            v-model="agentForm.deviceName"
-            :placeholder="$t('agent.deviceNamePlaceholder')"
+            v-model="agentForm.name"
+            :placeholder="$t('agent.tokenNamePlaceholder')"
           />
+          <template #extra>
+            <span class="form-item-tip">{{ $t('agent.tokenNameTip') }}</span>
+          </template>
         </el-form-item>
       </el-form>
 
@@ -51,12 +54,9 @@
             v-model="clientForm.name"
             :placeholder="$t('clientToken.tokenNamePlaceholder')"
           />
-        </el-form-item>
-        <el-form-item :label="$t('clientToken.deviceName')" required>
-          <el-input
-            v-model="clientForm.deviceName"
-            :placeholder="$t('clientToken.deviceNamePlaceholder')"
-          />
+          <template #extra>
+            <span class="form-item-tip">{{ $t('clientToken.tokenNameTip') }}</span>
+          </template>
         </el-form-item>
       </el-form>
 
@@ -140,18 +140,18 @@ const visible = computed({
 const generating = ref(false)
 
 // Agent 表单和结果
-const agentForm = ref({ deviceName: '' })
+const agentForm = ref({ name: '' })
 const agentDeployResult = ref<CreateDeployTokenResponse | null>(null)
 
 // Client 表单和结果
-const clientForm = ref({ name: '', deviceName: '' })
+const clientForm = ref({ name: '' })
 const clientTokenResult = ref<CreateDeployTokenResponse | null>(null)
 
 // 监听对话框打开
 watch(visible, (val) => {
   if (val) {
-    agentForm.value = { deviceName: '' }
-    clientForm.value = { name: '', deviceName: '' }
+    agentForm.value = { name: '' }
+    clientForm.value = { name: '' }
     agentDeployResult.value = null
     clientTokenResult.value = null
   }
@@ -164,7 +164,7 @@ const getTitle = () => {
 
 const canGenerate = () => {
   if (props.user?.role === 'agent') {
-    return !!agentForm.value.deviceName
+    return !!agentForm.value.name
   } else if (props.user?.role === 'client') {
     return !!clientForm.value.name
   }
@@ -191,11 +191,11 @@ const handleGenerate = async () => {
 }
 
 const generateAgentDeploy = async () => {
-  if (!props.user || !agentForm.value.deviceName) return
+  if (!props.user || !agentForm.value.name) return
 
   try {
     const res = await createDeployToken(props.user.name, {
-      name: agentForm.value.deviceName
+      name: agentForm.value.name
     })
     if (res.success && res.data) {
       agentDeployResult.value = res.data
@@ -252,8 +252,8 @@ const handleConfirm = () => {
 }
 
 const handleClose = () => {
-  agentForm.value = { deviceName: '' }
-  clientForm.value = { name: '', deviceName: '' }
+  agentForm.value = { name: '' }
+  clientForm.value = { name: '' }
   agentDeployResult.value = null
   clientTokenResult.value = null
 }
@@ -271,5 +271,10 @@ const handleClose = () => {
 .command-label {
   margin-bottom: 8px;
   font-weight: 500;
+}
+
+.form-item-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 </style>
