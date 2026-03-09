@@ -53,7 +53,7 @@ type EndpointSSHProxy struct {
 	endpointServer *EndpointServer
 	tsManager      *TailscaleManager
 	auditCollector *AuditCollector
-	permCache      *PermissionCache // 权限缓存
+	permCache      *PermissionCache      // 权限缓存
 	grpcClient     pb.AgentServiceClient // gRPC 客户端（用于查询用户设备信息）
 	sshConfig      *ssh.ServerConfig
 	hostKey        ssh.Signer
@@ -336,8 +336,8 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 	var execCommand string // exec 模式的命令
 
 	// 处理 SSH 请求（pty-req, shell, exec, window-change 等）
+	isPTY := false // 标记是否为交互式会话（有 PTY）
 	go func() {
-		ptyReceived := false
 		for req := range requests {
 			switch req.Type {
 			case "pty-req":
@@ -351,7 +351,7 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 						rows = uint32(req.Payload[offset+4])<<24 | uint32(req.Payload[offset+5])<<16 | uint32(req.Payload[offset+6])<<8 | uint32(req.Payload[offset+7])
 					}
 				}
-				ptyReceived = true
+				isPTY = true // 收到 pty-req 表示交互式会话
 				if req.WantReply {
 					req.Reply(true, nil)
 				}
@@ -360,7 +360,7 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 				if req.WantReply {
 					req.Reply(true, nil)
 				}
-				if !ptyReceived {
+				if !isPTY {
 					rows, cols = 24, 80
 				}
 				stream, err := p.endpointServer.RequestShell(ctx, endpointName, login, rows, cols, "")
@@ -429,8 +429,9 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 		return
 	}
 
-	// 显示 SSH 横幅（仅在交互式 shell 时显示，exec 模式不显示）
-	if execCommand == "" {
+	// 显示 SSH 横幅（仅在交互式会话时显示，exec 模式不显示）
+	// 判断依据：收到 pty-req 请求表示交互式会话
+	if isPTY {
 		banner := p.buildSSHBanner(ctx, clientUserName, clientIP)
 		if banner != "" {
 			channel.Write([]byte(banner))

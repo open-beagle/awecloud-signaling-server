@@ -41,6 +41,12 @@ func switchUserIdentity(uid, gid int, groups []int) error {
 }
 
 // execShell 使用 syscall.Exec 替换当前进程为 shell
-func execShell(loginShell string, env []string) error {
+// 如果 cmd 不为空，执行命令；否则启动交互式登录 shell
+func execShell(loginShell string, env []string, cmd string) error {
+	if cmd != "" {
+		// 命令执行模式：使用 -c 参数执行命令
+		return syscall.Exec(loginShell, []string{loginShell, "-c", cmd}, env)
+	}
+	// 交互式模式：启动登录 shell
 	return syscall.Exec(loginShell, []string{loginShell, "-l"}, env)
 }

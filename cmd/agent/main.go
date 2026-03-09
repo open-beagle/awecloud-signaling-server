@@ -235,6 +235,7 @@ func runSSHChild() {
 		remoteUser string
 		remoteIP   string
 		shell      bool
+		cmd        string // 命令执行模式的命令
 	)
 
 	// 解析参数
@@ -268,6 +269,9 @@ func runSSHChild() {
 				remoteUser = value
 			case "--remote-ip":
 				remoteIP = value
+			case "--cmd":
+				// Tailscale SSH 传递的命令参数
+				cmd = value
 			}
 			continue
 		}
@@ -303,6 +307,10 @@ func runSSHChild() {
 		} else if arg == "--remote-ip" && i+1 < len(os.Args) {
 			remoteIP = os.Args[i+1]
 			i++
+		} else if arg == "--cmd" && i+1 < len(os.Args) {
+			// Tailscale SSH 传递的命令参数
+			cmd = os.Args[i+1]
+			i++
 		} else if arg == "--shell" {
 			shell = true
 		}
@@ -313,43 +321,41 @@ func runSSHChild() {
 		loginShell = "/bin/bash"
 	}
 
-	// 如果指定了 --shell，启动交互式 shell
-	if shell {
-		// 切换用户身份（如果指定了 uid/gid）
-		if err := switchUserIdentity(uid, gid, groups); err != nil {
-			fmt.Fprintf(os.Stderr, "failed to switch user identity: %v\n", err)
-			os.Exit(1)
-		}
+	// 切换用户身份（如果指定了 uid/gid）
+	if err := switchUserIdentity(uid, gid, groups); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to switch user identity: %v\n", err)
+		os.Exit(1)
+	}
 
-		// 设置环境变量
-		env := os.Environ()
-		if homeDir != "" {
-			env = append(env, "HOME="+homeDir)
-		}
-		if localUser != "" {
-			env = append(env, "USER="+localUser)
-			env = append(env, "LOGNAME="+localUser)
-		}
+	// 设置环境变量
+	env := os.Environ()
+	if homeDir != "" {
+		env = append(env, "HOME="+homeDir)
+	}
+	if localUser != "" {
+		env = append(env, "USER="+localUser)
+		env = append(env, "LOGNAME="+localUser)
+	}
 
-		// 切换到用户主目录
-		if homeDir != "" {
-			if err := os.Chdir(homeDir); err != nil {
-				fmt.Fprintf(os.Stderr, "failed to chdir to %s: %v\n", homeDir, err)
-			}
-		}
-
-		// 显示登录横幅
-		printSSHBanner(localUser, remoteUser, remoteIP)
-
-		// 使用平台特定的方式启动 shell
-		if err := execShell(loginShell, env); err != nil {
-			fmt.Fprintf(os.Stderr, "failed to exec shell: %v\n", err)
-			os.Exit(1)
+	// 切换到用户主目录
+	if homeDir != "" {
+		if err := os.Chdir(homeDir); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to chdir to %s: %v\n", homeDir, err)
 		}
 	}
 
-	// 如果没有 --shell 参数，直接退出（不应该到这里）
-	os.Exit(0)
+	// 只在交互式会话（--shell 参数）时显示横幅
+	// 命令执行会话（--cmd 参数）不显示横幅，避免污染命令输出
+	if shell {
+		printSSHBanner(localUser, remoteUser, remoteIP)
+	}
+
+	// 使用平台特定的方式启动 shell
+	// 如果有 --cmd 参数，执行命令；否则启动交互式 shell
+	if err := execShell(loginShell, env, cmd); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to exec shell: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // splitString 分割字符串
@@ -376,7 +382,7 @@ func splitString(s string, sep rune) []string {
 func printSSHBanner(localUser, remoteUser, remoteIP string) {
 	// 提取真实的用户名（去掉 tag: 前缀）
 	displayRemoteUser := extractRealUser(remoteUser)
-	
+
 	// 获取当前时间
 	connectTime := time.Now().Format("2006-01-02 15:04:05")
 
@@ -387,17 +393,17 @@ func printSSHBanner(localUser, remoteUser, remoteIP string) {
 	fmt.Printf("  Build Date:   %s\n", buildDate)
 	fmt.Printf("  Connect Time: %s\n", connectTime)
 	fmt.Println("----------------------------------------------------------------")
-	
+
 	// 构建 Remote User 行
 	if displayRemoteUser != "" {
 		fmt.Printf("  Remote User:   %s\n", displayRemoteUser)
 	}
-	
+
 	// 构建 Remote Device 行
 	if remoteIP != "" {
 		fmt.Printf("  Remote Device: %s\n", remoteIP)
 	}
-	
+
 	fmt.Println("================================================================")
 	fmt.Println()
 }
@@ -498,7 +504,6 @@ func registerWithToken(serverAddr, token string) (*config.AgentConfig, *config.R
 	}
 
 	// 构建配置
-	// 使用 UserName 作为 AgentName
 	cfg := &config.AgentConfig{
 		Agent: config.AgentSection{
 			AgentToken: token,
