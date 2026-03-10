@@ -167,7 +167,7 @@ func (a *DeployAPI) CreateDeployToken(c *gin.Context) {
 	// Agent 角色生成安装命令
 	if user.Role == model.UserRoleAgent {
 		resp.InstallCommand = fmt.Sprintf(
-			"curl -fsSL %s/api/v1/download/install_agent.sh | sudo bash -s -- \\\n  --deploy \\\n  -t %s \\\n  -s %s",
+			"curl -fsSL %s/api/v1/download/install_agent.sh | sudo bash -s -- --deploy -t %s -s %s",
 			serverAddr, token, serverAddr,
 		)
 	}
@@ -175,7 +175,7 @@ func (a *DeployAPI) CreateDeployToken(c *gin.Context) {
 	// Client 角色生成安装命令（Desktop）
 	if user.Role == model.UserRoleClient {
 		resp.InstallCommand = fmt.Sprintf(
-			"curl -fsSL %s/api/v1/download/install_signal.sh | bash -s -- \\\n  -t %s \\\n  -s %s",
+			"curl -fsSL %s/api/v1/download/install_signal.sh | bash -s -- -t %s -s %s",
 			serverAddr, token, serverAddr,
 		)
 		// 同时保留环境变量配置（兼容旧版）
@@ -276,11 +276,6 @@ func (a *DeployAPI) GetDeployCommand(c *gin.Context) {
 		return
 	}
 
-	if deployToken.Status != model.DeployTokenStatusPending {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("Token 已使用或已撤销"))
-		return
-	}
-
 	serverAddr := a.getServerAddr(c)
 
 	result := map[string]string{}
@@ -288,13 +283,13 @@ func (a *DeployAPI) GetDeployCommand(c *gin.Context) {
 	if deployToken.User != nil && deployToken.User.Role == model.UserRoleAgent {
 		// Agent: 生成安装命令
 		result["install_command"] = fmt.Sprintf(
-			"curl -fsSL %s/api/v1/download/install_agent.sh | sudo bash -s -- \\\n  --deploy \\\n  -t %s \\\n  -s %s",
+			"curl -fsSL %s/api/v1/download/install_agent.sh | sudo bash -s -- --deploy -t %s -s %s",
 			serverAddr, deployToken.Token, serverAddr,
 		)
 	} else {
 		// Client: 生成安装命令（Desktop）
 		result["install_command"] = fmt.Sprintf(
-			"curl -fsSL %s/api/v1/download/install_signal.sh | bash -s -- \\\n  -t %s \\\n  -s %s",
+			"curl -fsSL %s/api/v1/download/install_signal.sh | bash -s -- -t %s -s %s",
 			serverAddr, deployToken.Token, serverAddr,
 		)
 		// 同时保留环境变量配置（兼容旧版）
