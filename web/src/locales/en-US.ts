@@ -145,13 +145,8 @@ export default {
     regenerateSecret: 'Regenerate Secret',
     newSecret: 'New Secret',
     secretWarning: 'Please save this secret carefully, it cannot be viewed again after closing!',
-    version: 'Version',
-    versions: 'Versions',
-    noVersion: 'No version info',
-    upgradeAvailable: 'Update available',
-    latestVersion: 'Latest version',
-    currentVersion: 'Current version',
-    upgradeHint: 'Latest version: {version}, please upgrade'
+    deployCommand: 'Deploy Command',
+    deployCommandTip: 'Copy the following command and run it on the target machine to complete deployment.'
   },
   node: {
     list: 'Node List',

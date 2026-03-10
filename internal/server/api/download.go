@@ -358,6 +358,28 @@ func (a *DownloadAPI) GetAgentInstallScript(c *gin.Context) {
 	c.Redirect(http.StatusFound, baseURL+"install_agent.sh")
 }
 
+// GetSignalInstallScript 获取统一安装脚本（公开接口）
+// GET /api/v1/download/install_signal.sh
+// 重定向到 S3 上的统一安装脚本（支持 Agent 和 Desktop）
+func (a *DownloadAPI) GetSignalInstallScript(c *gin.Context) {
+	// 获取系统配置中的 Agent 下载地址
+	baseURL, err := getAgentDownloadURL(c)
+	if err != nil || baseURL == "" {
+		logger.Warnf("[Download] 获取下载地址失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "下载服务未配置",
+		})
+		return
+	}
+
+	// 重定向到 S3 上的统一安装脚本
+	if !strings.HasSuffix(baseURL, "/") {
+		baseURL += "/"
+	}
+	c.Redirect(http.StatusFound, baseURL+"install_signal.sh")
+}
+
 // GetAgentDownload 获取 Agent 二进制下载（公开接口）
 // GET /api/v1/download/agent?os=linux&arch=amd64&version=v0.1.0
 func (a *DownloadAPI) GetAgentDownload(c *gin.Context) {

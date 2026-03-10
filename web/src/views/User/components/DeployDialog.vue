@@ -68,11 +68,11 @@
         </el-alert>
 
         <div class="command-section">
-          <div class="command-label">{{ $t('clientToken.envConfig') }}:</div>
+          <div class="command-label">{{ $t('agent.installCommand') }}:</div>
           <el-input
-            v-model="clientTokenResult.env_config"
+            v-model="clientTokenResult.install_command"
             type="textarea"
-            :rows="5"
+            :rows="6"
             readonly
           />
           <el-button
@@ -239,7 +239,7 @@ const handleCopyAgent = async () => {
 const handleCopyClient = async () => {
   if (!clientTokenResult.value) return
   try {
-    await navigator.clipboard.writeText(clientTokenResult.value.env_config)
+    await navigator.clipboard.writeText(clientTokenResult.value.install_command)
     ElMessage.success(t('common.copySuccess'))
   } catch {
     ElMessage.error(t('common.copyFailed'))

@@ -313,6 +313,7 @@ func (s *Server) setupRouter() *gin.Engine {
 			v1Group.GET("/public/download/desktop/direct", downloadAPI.GetDesktopDownloadDirect)
 			v1Group.GET("/public/download/desktop/versions", downloadAPI.ListDesktopVersions)
 			v1Group.GET("/download/install_agent.sh", downloadAPI.GetAgentInstallScript)
+			v1Group.GET("/download/install_signal.sh", downloadAPI.GetSignalInstallScript) // 统一安装脚本
 			v1Group.GET("/download/agent", downloadAPI.GetAgentDownload)
 			v1Group.GET("/download/agent/version", downloadAPI.GetAgentVersion)
 			v1Group.GET("/download/install_endpoint.sh", downloadAPI.GetEndpointInstallScript)

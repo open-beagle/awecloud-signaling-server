@@ -94,8 +94,14 @@
             {{ row.bound_at ? formatTime(row.bound_at) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="100" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="150" fixed="right">
           <template #default="{ row }">
+            <el-button
+              size="small"
+              @click="handleViewCommand(row)"
+            >
+              {{ $t('common.view') }}
+            </el-button>
             <el-button
               size="small"
               type="danger"
@@ -128,8 +134,14 @@
             {{ row.bound_at ? formatTime(row.bound_at) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="100" fixed="right">
+        <el-table-column :label="$t('common.actions')" width="150" fixed="right">
           <template #default="{ row }">
+            <el-button
+              size="small"
+              @click="handleViewCommand(row)"
+            >
+              {{ $t('common.view') }}
+            </el-button>
             <el-button
               size="small"
               type="danger"
@@ -177,6 +189,24 @@
 
     <!-- 部署弹窗（Agent 和 Client 通用） -->
     <DeployDialog v-model="showDeployDialog" :user="user" @success="loadDeployHistory" />
+
+    <!-- 查看部署命令弹窗 -->
+    <el-dialog v-model="showCommandDialog" :title="$t('user.deployCommand')" width="600px">
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px">
+        <template #title>{{ $t('user.deployCommandTip') }}</template>
+      </el-alert>
+      <div v-if="deployCommand" class="command-box">
+        <pre>{{ deployCommand }}</pre>
+        <el-button type="primary" @click="copyCommand">{{ $t('common.copy') }}</el-button>
+      </div>
+      <div v-else class="loading-box">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span>{{ $t('common.loading') }}</span>
+      </div>
+      <template #footer>
+        <el-button @click="showCommandDialog = false">{{ $t('common.close') }}</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -184,9 +214,10 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Loading } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import { getUser, updateUser, deleteUser, regenerateUserSecret, type User, type UserDetail, type UserNode } from '@/api/user'
-import { getDeployTokens, revokeDeployToken, type DeployToken } from '@/api/deployToken'
+import { getDeployTokens, revokeDeployToken, getDeployCommand, type DeployToken } from '@/api/deployToken'
 import { formatTime } from '@/utils/time'
 import DeployDialog from './components/DeployDialog.vue'
 
@@ -211,6 +242,10 @@ const tokens = ref<DeployToken[]>([])
 const showDeployDialog = ref(false)
 const deployLoading = ref(false)
 const deployTokens = ref<DeployToken[]>([])
+
+// 查看部署命令
+const showCommandDialog = ref(false)
+const deployCommand = ref('')
 
 const editForm = reactive({
   alias: '',
@@ -446,6 +481,36 @@ const copySecret = async () => {
   }
 }
 
+// 查看部署命令
+const handleViewCommand = async (token: DeployToken) => {
+  showCommandDialog.value = true
+  deployCommand.value = ''
+  
+  try {
+    const res = await getDeployCommand(token.id)
+    if (res.success && res.data) {
+      deployCommand.value = res.data.install_command || res.data.env_config || ''
+    } else {
+      ElMessage.error(res.message || t('common.loadFailed'))
+      showCommandDialog.value = false
+    }
+  } catch (error) {
+    console.error('获取部署命令失败:', error)
+    ElMessage.error(t('common.loadFailed'))
+    showCommandDialog.value = false
+  }
+}
+
+// 复制部署命令
+const copyCommand = async () => {
+  try {
+    await navigator.clipboard.writeText(deployCommand.value)
+    ElMessage.success(t('common.copySuccess'))
+  } catch (error) {
+    ElMessage.error(t('common.copyFailed'))
+  }
+}
+
 onMounted(() => {
   fetchUser()
 })
@@ -476,5 +541,33 @@ onMounted(() => {
 
 .secret-box {
   margin-top: 15px;
+}
+
+.command-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.command-box pre {
+  background: var(--el-fill-color-light);
+  padding: 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 0;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.loading-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 0;
+  color: var(--el-text-color-secondary);
 }
 </style>

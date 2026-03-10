@@ -172,8 +172,13 @@ func (a *DeployAPI) CreateDeployToken(c *gin.Context) {
 		)
 	}
 
-	// Client 角色生成环境变量配置
+	// Client 角色生成安装命令（Desktop）
 	if user.Role == model.UserRoleClient {
+		resp.InstallCommand = fmt.Sprintf(
+			"curl -fsSL %s/api/v1/download/install_signal.sh | bash -s -- \\\n  -t %s \\\n  -s %s",
+			serverAddr, token, serverAddr,
+		)
+		// 同时保留环境变量配置（兼容旧版）
 		resp.EnvConfig = "SIGNAL_TOKEN=" + token + "\n" +
 			"SIGNAL_SERVER=" + serverAddr
 	}
@@ -287,7 +292,12 @@ func (a *DeployAPI) GetDeployCommand(c *gin.Context) {
 			serverAddr, deployToken.Token, serverAddr,
 		)
 	} else {
-		// Client: 生成环境变量配置
+		// Client: 生成安装命令（Desktop）
+		result["install_command"] = fmt.Sprintf(
+			"curl -fsSL %s/api/v1/download/install_signal.sh | bash -s -- \\\n  -t %s \\\n  -s %s",
+			serverAddr, deployToken.Token, serverAddr,
+		)
+		// 同时保留环境变量配置（兼容旧版）
 		result["env_config"] = "SIGNAL_TOKEN=" + deployToken.Token + "\n" +
 			"SIGNAL_SERVER=" + serverAddr
 	}
@@ -333,7 +343,6 @@ func (a *DeployAPI) RevokeDeployToken(c *gin.Context) {
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
 }
-
 
 // --- 统一注册 API ---
 

@@ -86,6 +86,7 @@ if [ "$TARGET" = "all" ] || [ "$TARGET" = "agent" ]; then
     info "--- Agent ---"
     upload_binary "signal_agent"
     upload_install_script "./scripts/install_agent.sh"
+    upload_install_script "./scripts/install_signal.sh"  # Desktop 安装脚本
 
     # 更新 Agent 版本信息
     info "更新 Agent 版本信息..."
@@ -133,6 +134,7 @@ fi
 info "设置公开访问权限..."
 if [ "$TARGET" = "all" ] || [ "$TARGET" = "agent" ]; then
     mc anonymous set download "${S3_BUCKET}/install_agent.sh" > /dev/null 2>&1
+    mc anonymous set download "${S3_BUCKET}/install_signal.sh" > /dev/null 2>&1
     mc anonymous set download "${S3_BUCKET}/signal_agent-version.json" > /dev/null 2>&1
     for arch in $ARCHS; do
         mc anonymous set download "${S3_BUCKET}/signal_agent-${BUILD_VERSION}-linux-${arch}" > /dev/null 2>&1
