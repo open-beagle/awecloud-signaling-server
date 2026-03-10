@@ -74,7 +74,7 @@ export default {
     passwordRequired: '请输入密码'
   },
   app: {
-    title: '信令服务',
+    title: 'MCP 服务 - 信令',
     shortTitle: '信令'
   },
   menu: {

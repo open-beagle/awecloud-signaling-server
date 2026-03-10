@@ -1,3 +1,7 @@
+---
+inclusion: manual
+---
+
 # Go 代码规范
 
 ## Import 分组规范
