@@ -73,7 +73,7 @@ sleep 3 && kubectl --context aliyun --namespace beagle-access rollout restart de
 
 # 输出示例：
 # AWECloud Signaling Server
-# Version:    v0.2.3
+# Version: 0.2.x
 # Git Commit: abc1234
 # Build Date: 2025-11-26_10:30:00
 ```
@@ -134,8 +134,8 @@ kubectl --context aliyun --namespace beagle-access logs -f deployment/signal-ser
 
 ### 镜像标签
 
-- Server: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:v0.2.3`
-- Agent: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:v0.2.3`
+- Server: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:`
+- Agent: `registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:`
 
 ## 架构支持
 
@@ -167,7 +167,7 @@ kubectl --context aliyun --namespace beagle-access logs -f deployment/signal-ser
 - Y: 次版本号（功能增加）
 - Z: 修订号（bug 修复）
 
-当前版本：`v0.2.3`
+当前版本：``
 
 ## Agent 发布到 S3
 
@@ -183,8 +183,8 @@ BUILD_VERSION=$(cat version) bash scripts/push_to_s3.sh
 
 发布内容：
 
-- `agent-v0.2.3-linux-amd64` - Agent 二进制（amd64）
-- `agent-v0.2.3-linux-arm64` - Agent 二进制（arm64）
+- `agent--linux-amd64` - Agent 二进制（amd64）
+- `agent--linux-arm64` - Agent 二进制（arm64）
 - `install.sh` - 一键安装脚本
 - `agent-version.json` - 版本信息
 
