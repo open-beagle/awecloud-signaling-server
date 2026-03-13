@@ -1062,7 +1062,7 @@ func (a *TunnelAPI) SyncTunnelACL(c *gin.Context) {
 		return
 	}
 
-	if err := a.aclSync.SyncACL(ctx); err != nil {
+	if err := a.aclSync.FullSync(ctx); err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("同步 ACL 失败: "+err.Error()))
 		return
 	}

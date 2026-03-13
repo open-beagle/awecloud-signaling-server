@@ -279,7 +279,7 @@ func (a *ACLAPI) AddServiceACLUsers(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -332,7 +332,7 @@ func (a *ACLAPI) AddServiceACLGroups(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -366,7 +366,7 @@ func (a *ACLAPI) RemoveServiceACLUser(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -400,7 +400,7 @@ func (a *ACLAPI) RemoveServiceACLGroup(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -606,7 +606,7 @@ func (a *ACLAPI) AddUserACLUsers(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -659,7 +659,7 @@ func (a *ACLAPI) AddUserACLGroups(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -692,7 +692,7 @@ func (a *ACLAPI) RemoveUserACLUser(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -723,7 +723,7 @@ func (a *ACLAPI) RemoveUserACLGroup(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -940,7 +940,7 @@ func (a *ACLAPI) AddGroupACLUsers(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -988,7 +988,7 @@ func (a *ACLAPI) AddGroupACLGroups(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -1016,7 +1016,7 @@ func (a *ACLAPI) RemoveGroupACLUser(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -1044,7 +1044,7 @@ func (a *ACLAPI) RemoveGroupACLGroup(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -1288,7 +1288,7 @@ func (a *ACLAPI) AddSSHACLUsers(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -1355,7 +1355,7 @@ func (a *ACLAPI) AddSSHACLGroups(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -1383,7 +1383,7 @@ func (a *ACLAPI) RemoveSSHACLUser(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -1411,7 +1411,7 @@ func (a *ACLAPI) RemoveSSHACLGroup(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()

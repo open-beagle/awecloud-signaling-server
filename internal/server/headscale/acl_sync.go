@@ -90,6 +90,28 @@ func (s *ACLSyncService) SyncACL(ctx context.Context) error {
 	return fmt.Errorf("设置 ACL 策略失败（已重试 3 次）: %w", lastErr)
 }
 
+// FullSync 完整同步：先同步 Node Tag，再同步 ACL 规则
+// 所有 API 操作（分组成员变更、ACL 权限变更等）应调用此方法，
+// 确保节点 Tag 和 ACL 规则同时更新，避免 Tag 未同步导致 ACL 规则不生效
+func (s *ACLSyncService) FullSync(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// 先同步 Node Tag（确保节点有正确的分组标签）
+	if err := s.SyncAllNodeTags(ctx); err != nil {
+		logger.Warnf("FullSync: Node Tag 同步失败: %v", err)
+		// 不中断，继续同步 ACL
+	}
+
+	// 再同步 ACL 规则
+	if err := s.SyncACL(ctx); err != nil {
+		return fmt.Errorf("FullSync: ACL 同步失败: %w", err)
+	}
+
+	return nil
+}
+
 // generateACLPolicy 根据数据库配置生成 ACL 策略
 // 使用新的统一模型：User, Node, Group, GroupMember
 // Tag 格式:

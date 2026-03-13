@@ -365,7 +365,7 @@ func (a *ProxyServiceAPI) Delete(c *gin.Context) {
 
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()

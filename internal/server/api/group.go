@@ -288,7 +288,7 @@ func (a *GroupAPINew) Delete(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -374,7 +374,7 @@ func (a *GroupAPINew) AddMembers(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
@@ -413,7 +413,7 @@ func (a *GroupAPINew) RemoveMember(c *gin.Context) {
 	// 同步 ACL
 	if a.aclSync != nil {
 		go func() {
-			if err := a.aclSync.SyncACL(nil); err != nil {
+			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
 			}
 		}()
