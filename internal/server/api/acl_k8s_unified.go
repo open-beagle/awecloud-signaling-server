@@ -122,7 +122,19 @@ func (a *ACLAPI) fillK8SAPIProviderNames(clusterMap map[uint64]*K8SUnifiedACLClu
 
 // collectAgentK8SClusters 收集由 Agent 直接提供 K8S API 的集群
 func (a *ACLAPI) collectAgentK8SClusters(search string, clusterMap map[uint64]*K8SUnifiedACLClusterItem) {
-	// 查询有 K8S 用户授权记录的 Agent User ID
+	// 从 domain_registry 查询所有有 k8sapi 域名的 Agent User ID
+	var domainUserIDs []uint64
+	db.DB.Model(&model.DomainRegistry{}).
+		Where("type = ?", model.DomainTypeK8SAPI).
+		Distinct("user_id").
+		Pluck("user_id", &domainUserIDs)
+
+	agentUserIDs := make(map[uint64]bool)
+	for _, uid := range domainUserIDs {
+		agentUserIDs[uid] = true
+	}
+
+	// 查询授权计数
 	var userCounts []struct {
 		TargetUserID uint64 `gorm:"column:target_user_id"`
 		Count        int64  `gorm:"column:count"`
@@ -132,7 +144,6 @@ func (a *ACLAPI) collectAgentK8SClusters(search string, clusterMap map[uint64]*K
 		Group("target_user_id").Find(&userCounts)
 
 	userCountMap := make(map[uint64]int64)
-	agentUserIDs := make(map[uint64]bool)
 	for _, uc := range userCounts {
 		userCountMap[uc.TargetUserID] = uc.Count
 		agentUserIDs[uc.TargetUserID] = true
