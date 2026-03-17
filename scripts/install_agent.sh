@@ -418,15 +418,18 @@ EOF
         error "需要 curl 或 wget"
     fi
     
-    # 解析响应（Server 返回格式: {"success":true,"data":{"user_role":"agent","config":{"agent":{"name":"..."}}}}）
+    # 解析响应（Server 返回格式: {"success":true,"data":{"user_role":"agent","device_name":"...","user_name":"..."}}）
     local success=$(echo "$response" | grep -o '"success":\s*true' || true)
     if [[ -z "$success" ]]; then
         local message=$(echo "$response" | grep -o '"message":"[^"]*"' | cut -d'"' -f4)
         error "注册失败: ${message:-$response}"
     fi
     
-    # 从 data.config.agent.name 提取 Agent 名称
-    AGENT_NAME=$(echo "$response" | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4)
+    # 从 data.device_name 提取 Agent 名称（优先），回退到 data.user_name
+    AGENT_NAME=$(echo "$response" | grep -o '"device_name":"[^"]*"' | head -1 | cut -d'"' -f4)
+    if [[ -z "$AGENT_NAME" ]]; then
+        AGENT_NAME=$(echo "$response" | grep -o '"user_name":"[^"]*"' | head -1 | cut -d'"' -f4)
+    fi
     
     if [[ -z "$AGENT_NAME" ]]; then
         error "注册响应缺少 Agent 名称"
