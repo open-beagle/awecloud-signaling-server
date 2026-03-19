@@ -145,26 +145,21 @@ rm -f "$BIN_DIR/signal_agent"
 ln -s "$TARGET_BINARY" "$BIN_DIR/signal_agent"
 
 # === 6. 检查环境变量 ===
-CONFIG_FILE="$DATA_DIR/agent.toml"
-
 echo ""
 if [ -z "$SIGNAL_TOKEN" ] || [ -z "$SIGNAL_SERVER" ]; then
-  # 缺少环境变量，检查已有配置文件是否可用
-  if [ -f "$CONFIG_FILE" ] && grep -q 'server' "$CONFIG_FILE"; then
-    echo "[配置] 使用已有配置文件: $CONFIG_FILE"
-  else
-    echo "[跳过] 缺少环境变量 SIGNAL_TOKEN / SIGNAL_SERVER，且无有效配置文件"
-    echo "  二进制已安装: $BIN_DIR/signal_agent"
-    exit 0
-  fi
-else
-  # === 7. 生成本地配置文件 ===
-  SIGNAL_STATE_DIR="$DATA_DIR/tunnel"
-  mkdir -p "$SIGNAL_STATE_DIR"
+  echo "[跳过] 缺少环境变量 SIGNAL_TOKEN / SIGNAL_SERVER"
+  echo "  二进制已安装: $BIN_DIR/signal_agent"
+  exit 0
+fi
 
-  LOG_LEVEL="${SIGNAL_LOG_LEVEL:-info}"
+# === 7. 生成本地配置文件 ===
+CONFIG_FILE="$DATA_DIR/agent.toml"
+SIGNAL_STATE_DIR="$DATA_DIR/tunnel"
+mkdir -p "$SIGNAL_STATE_DIR"
 
-  cat > "$CONFIG_FILE" <<EOF
+LOG_LEVEL="${SIGNAL_LOG_LEVEL:-info}"
+
+cat > "$CONFIG_FILE" <<EOF
 # AWECloud Signaling Agent 配置文件（CloudIDE 自动生成）
 
 [agent]
@@ -185,11 +180,11 @@ level = "$LOG_LEVEL"
 file = "$DATA_DIR/logs/agent.log"
 EOF
 
-  echo "[配置] 已生成: $CONFIG_FILE"
-fi
+echo "[配置] 已生成: $CONFIG_FILE"
 
 # === 8. 启动 Agent ===
-echo "[启动] 配置: $CONFIG_FILE"
+echo "[启动] Server: $SIGNAL_SERVER"
+echo "[启动] Token: ${SIGNAL_TOKEN:0:16}..."
 # 注意：配置文件中已指定日志路径 log.file，nohup 重定向作为备份
 nohup sudo "$BIN_DIR/signal_agent" -c "$CONFIG_FILE" >> "$DATA_DIR/logs/agent.log" 2>&1 &
 AGENT_PID=$!
