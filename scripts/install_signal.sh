@@ -20,6 +20,27 @@ AGENT_VERSION="${SIGNAL_VERSION:-}"  # 留空则自动获取最新版本
 BIN_DIR="$HOME/.local/bin"
 DATA_DIR="$HOME/.local/share/signal"
 
+# === 解析命令行参数（优先级高于环境变量） ===
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -t|--token)
+      SIGNAL_TOKEN="$2"
+      shift 2
+      ;;
+    -s|--server)
+      SIGNAL_SERVER="$2"
+      shift 2
+      ;;
+    -v|--version)
+      AGENT_VERSION="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
 # === 1. 停止旧进程 ===
 echo "=========================================="
 echo "  AWECloud Signaling Agent 安装脚本"
@@ -177,4 +198,19 @@ else
   echo "[启动] ✗ 启动失败"
   tail -n 20 "$DATA_DIR/logs/agent.log" 2>/dev/null || true
   exit 1
+fi
+
+# === 9. 配置 SSH ProxyCommand ===
+SSH_CONFIG="$HOME/.ssh/config"
+if [[ -f "$SSH_CONFIG" ]] && grep -q "signal_agent dial" "$SSH_CONFIG" 2>/dev/null; then
+  echo "[SSH] 已检测到 ProxyCommand 配置，跳过"
+else
+  mkdir -p "$HOME/.ssh"
+  chmod 700 "$HOME/.ssh"
+  echo "" >> "$SSH_CONFIG"
+  echo "# AWECloud Signal Agent - SSH via Tailscale" >> "$SSH_CONFIG"
+  echo "Host *.beagle" >> "$SSH_CONFIG"
+  echo "    ProxyCommand ${BIN_DIR}/signal_agent dial %h %p" >> "$SSH_CONFIG"
+  chmod 600 "$SSH_CONFIG"
+  echo "[SSH] 已添加 ProxyCommand 到 $SSH_CONFIG"
 fi
