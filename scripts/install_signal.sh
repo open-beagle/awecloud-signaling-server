@@ -210,7 +210,7 @@ else
   echo "" >> "$SSH_CONFIG"
   echo "# AWECloud Signal Agent - SSH via Tailscale" >> "$SSH_CONFIG"
   echo "Host *.beagle" >> "$SSH_CONFIG"
-  echo "    ProxyCommand ${BIN_DIR}/signal_agent dial %h %p" >> "$SSH_CONFIG"
+  echo "    ProxyCommand ~/.local/bin/signal_agent dial %h %p" >> "$SSH_CONFIG"
   chmod 600 "$SSH_CONFIG"
   echo "[SSH] 已添加 ProxyCommand 到 $SSH_CONFIG"
 fi
