@@ -1462,12 +1462,16 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 				if err := db.DB.WithContext(ctx).First(&agentNode, "user_id = ? AND type = ?", agentID, model.NodeTypeAgent).Error; err == nil {
 					if err := db.DB.WithContext(ctx).First(&user, agentID).Error; err == nil {
 						// 创建 SSH 域名（使用 Endpoint 的端口）
-						if err := s.domainService.CreateEndpointSSHDomain(ctx, &record, &agentNode, &user); err != nil {
-							logger.Errorf("创建 Endpoint SSH 域名失败: endpoint=%s, err=%v", ep.Name, err)
+						if record.SSHEnabled {
+							if err := s.domainService.CreateEndpointSSHDomain(ctx, &record, &agentNode, &user); err != nil {
+								logger.Errorf("创建 Endpoint SSH 域名失败: endpoint=%s, err=%v", ep.Name, err)
+							}
 						}
 						// 创建 K8SAPI 域名（使用 Endpoint 的端口）
-						if err := s.domainService.CreateEndpointK8SAPIDomain(ctx, &record, &agentNode, &user); err != nil {
-							logger.Errorf("创建 Endpoint K8SAPI 域名失败: endpoint=%s, err=%v", ep.Name, err)
+						if record.K8SAPIEnabled {
+							if err := s.domainService.CreateEndpointK8SAPIDomain(ctx, &record, &agentNode, &user); err != nil {
+								logger.Errorf("创建 Endpoint K8SAPI 域名失败: endpoint=%s, err=%v", ep.Name, err)
+							}
 						}
 					}
 				}
