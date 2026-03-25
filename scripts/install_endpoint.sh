@@ -246,7 +246,7 @@ name = "${ENDPOINT_NAME}"
 # 日志配置
 [log]
 level = "info"
-file = "$DATA_DIR/logs/endpoint.log""
+file = "$DATA_DIR/logs/endpoint.log"
 
 EOF
 
