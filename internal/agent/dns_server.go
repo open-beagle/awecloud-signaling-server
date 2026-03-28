@@ -123,12 +123,16 @@ func (s *DNSServer) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 			}
 		} else {
 			// 非 .beagle 域名或非 A 记录，转发到上游 DNS
-			answers, err := s.forwardToUpstream(question.Name, question.Qtype)
+			in, err := s.forwardToUpstream(question.Name, question.Qtype)
 			if err != nil {
 				logger.Debugf("[DNS] 转发到上游失败 (%s): %v", domain, err)
 				msg.Rcode = dns.RcodeServerFailure
 			} else {
-				msg.Answer = append(msg.Answer, answers...)
+				// 继承上游的响应码和所有的记录（包括 Authority 和 Additional）
+				msg.Rcode = in.Rcode
+				msg.Answer = append(msg.Answer, in.Answer...)
+				msg.Ns = append(msg.Ns, in.Ns...)
+				msg.Extra = append(msg.Extra, in.Extra...)
 			}
 		}
 	}
@@ -140,7 +144,7 @@ func (s *DNSServer) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 }
 
 // forwardToUpstream 转发查询到上游 DNS
-func (s *DNSServer) forwardToUpstream(name string, qtype uint16) ([]dns.RR, error) {
+func (s *DNSServer) forwardToUpstream(name string, qtype uint16) (*dns.Msg, error) {
 	m := new(dns.Msg)
 	m.SetQuestion(name, qtype)
 	m.RecursionDesired = true
@@ -150,9 +154,6 @@ func (s *DNSServer) forwardToUpstream(name string, qtype uint16) ([]dns.RR, erro
 		return nil, fmt.Errorf("查询失败: %w", err)
 	}
 
-	if in.Rcode != dns.RcodeSuccess {
-		return nil, fmt.Errorf("DNS 错误: %s", dns.RcodeToString[in.Rcode])
-	}
-
-	return in.Answer, nil
+	// 直接返回权威响应，包括 NXDOMAIN 等，不再视为错误
+	return in, nil
 }
