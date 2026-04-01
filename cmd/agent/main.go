@@ -36,6 +36,10 @@ var (
 )
 
 func main() {
+	// 禁用 Tailscale 内置的 logtail（避免向 log.tailscale.io 发送遥测数据）
+	// 并防止在 DNS 解析失败时触发到公共 DERP 节点的 bootstrapDNS 请求
+	os.Setenv("TS_NO_LOGS_NO_SUPPORT", "true")
+
 	// 检查是否是 be-child ssh 子命令
 	if len(os.Args) >= 3 && os.Args[1] == "be-child" && os.Args[2] == "ssh" {
 		runSSHChild()
