@@ -73,7 +73,8 @@ type DatabaseSection struct {
 type WebSection struct {
 	ListenAddr           string `toml:"listen_addr"`
 	ListenPort           int    `toml:"listen_port"`
-	WebRoot              string `toml:"web_root"` // 前端静态文件根目录，默认 ./web/dist
+	GrpcPort             int    `toml:"grpc_port"` // 独立 gRPC 端口（可选，默认 9090）
+	WebRoot              string `toml:"web_root"`  // 前端静态文件根目录，默认 ./web/dist
 	DefaultAdminUsername string `toml:"default_admin_username"`
 	DefaultAdminPassword string `toml:"default_admin_password"`
 }
@@ -132,6 +133,9 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 	if cfg.Web.ListenPort == 0 {
 		cfg.Web.ListenPort = 8080
+	}
+	if cfg.Web.GrpcPort == 0 {
+		cfg.Web.GrpcPort = 9090
 	}
 	if cfg.Security.JWTExpireHours == 0 {
 		cfg.Security.JWTExpireHours = 24

@@ -149,9 +149,8 @@ func (s *Server) Run() error {
 	ginRouter := s.setupRouter()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 只检查 Content-Type，不依赖 ProtoMajor
-		// Traefik h2c 转发时可能降级为 HTTP/1.1，导致 ProtoMajor == 1
-		if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+		// HTTP/2 + application/grpc：标准 gRPC（集群内部直连或 h2c 正常工作时）
+		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 			s.grpcServer.ServeHTTP(w, r)
 		} else {
 			ginRouter.ServeHTTP(w, r)
@@ -185,6 +184,19 @@ func (s *Server) Run() error {
 
 		if err := s.httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 			logger.Fatalf("服务器启动失败: %v", err)
+		}
+	}()
+
+	// 启动独立 gRPC 端口（解决反向代理不支持 h2c 转发的问题）
+	grpcAddr := fmt.Sprintf("%s:%d", listenAddr, s.config.Web.GrpcPort)
+	go func() {
+		grpcListener, err := net.Listen("tcp4", grpcAddr)
+		if err != nil {
+			logger.Fatalf("gRPC 监听器创建失败: %v", err)
+		}
+		logger.Infof("gRPC 独立端口启动: %s", grpcAddr)
+		if err := s.grpcServer.Serve(grpcListener); err != nil {
+			logger.Errorf("gRPC 服务错误: %v", err)
 		}
 	}()
 
