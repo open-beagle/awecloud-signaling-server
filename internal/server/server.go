@@ -149,7 +149,9 @@ func (s *Server) Run() error {
 	ginRouter := s.setupRouter()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+		// 只检查 Content-Type，不依赖 ProtoMajor
+		// Traefik h2c 转发时可能降级为 HTTP/1.1，导致 ProtoMajor == 1
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 			s.grpcServer.ServeHTTP(w, r)
 		} else {
 			ginRouter.ServeHTTP(w, r)
