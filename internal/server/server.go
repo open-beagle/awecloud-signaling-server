@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"os"
 	"os/signal"
 	"strings"
@@ -149,9 +151,27 @@ func (s *Server) Run() error {
 	ginRouter := s.setupRouter()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// HTTP/2 + application/grpc：标准 gRPC（集群内部直连或 h2c 正常工作时）
-		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
-			s.grpcServer.ServeHTTP(w, r)
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+			if r.ProtoMajor == 2 {
+				// HTTP/2：标准 gRPC（集群内部直连或 h2c 正常工作时）
+				s.grpcServer.ServeHTTP(w, r)
+			} else {
+				// HTTP/1.1 + application/grpc：反向代理到本地 gRPC 端口
+				// 解决 Traefik h2c 转发降级为 HTTP/1.1 的问题
+				grpcProxy := &httputil.ReverseProxy{
+					Director: func(req *http.Request) {
+						req.URL.Scheme = "http"
+						req.URL.Host = fmt.Sprintf("127.0.0.1:%d", s.config.Web.GrpcPort)
+					},
+					Transport: &http2.Transport{
+						AllowHTTP: true,
+						DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+							return net.Dial(network, addr)
+						},
+					},
+				}
+				grpcProxy.ServeHTTP(w, r)
+			}
 		} else {
 			ginRouter.ServeHTTP(w, r)
 		}
