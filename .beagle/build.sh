@@ -10,7 +10,7 @@ BUILD_TARGETS="${BUILD_TARGETS:-server,agent}"  # 可选: server, agent, 或 ser
 # 版本信息
 BUILD_VERSION="${BUILD_VERSION:-dev}"
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILD_DATE=$(date '+%Y-%m-%d_%H:%M:%S')
+BUILD_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d_%H:%M:%S')
 BUILD_GO=$(go version | awk '{print $3}')
 
 # 输出目录
