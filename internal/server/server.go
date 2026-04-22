@@ -151,6 +151,11 @@ func (s *Server) Run() error {
 	ginRouter := s.setupRouter()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 记录 gRPC 请求的协议信息，用于诊断 Traefik 转发问题
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+			logger.Infof("[gRPC-Debug] proto=%d, method=%s, path=%s, content-type=%s, host=%s",
+				r.ProtoMajor, r.Method, r.URL.Path, r.Header.Get("Content-Type"), r.Host)
+		}
 		if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 			if r.ProtoMajor == 2 {
 				// HTTP/2：标准 gRPC（集群内部直连或 h2c 正常工作时）
@@ -158,6 +163,7 @@ func (s *Server) Run() error {
 			} else {
 				// HTTP/1.1 + application/grpc：反向代理到本地 gRPC 端口
 				// 解决 Traefik h2c 转发降级为 HTTP/1.1 的问题
+				logger.Warnf("[gRPC-Debug] HTTP/1.1 gRPC 请求，代理到本地 %d 端口", s.config.Web.GrpcPort)
 				grpcProxy := &httputil.ReverseProxy{
 					Director: func(req *http.Request) {
 						req.URL.Scheme = "http"
