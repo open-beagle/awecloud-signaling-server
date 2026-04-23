@@ -2348,3 +2348,39 @@ func getNodeStatus(node *model.Node) string {
 	}
 	return "offline"
 }
+
+// ============================================
+// REST API 专用方法（gRPC 降级兜底）
+// ============================================
+
+// HandleDesktopHeartbeatREST REST 心跳处理（替代双向流）
+func (s *DesktopServiceServer) HandleDesktopHeartbeatREST(ctx context.Context, desktopID uint64, tunnelIP string, tunnelConnected bool) {
+	// 查找 node
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, desktopID).Error; err != nil {
+		logger.Errorf("[DesktopREST] 心跳: desktop_id=%d 不存在", desktopID)
+		return
+	}
+
+	s.handleDesktopHeartbeat(ctx, node.ID, &pb.DesktopHeartbeatRequest{
+		DesktopId:       desktopID,
+		TunnelIp:        tunnelIP,
+		TunnelConnected: tunnelConnected,
+	})
+}
+
+// GetDataSnapshotREST REST 数据快照（替代双向流 DataStream）
+func (s *DesktopServiceServer) GetDataSnapshotREST(ctx context.Context, desktopID uint64) (map[string]any, error) {
+	// 查找 node 获取 userID
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, desktopID).Error; err != nil {
+		return nil, fmt.Errorf("desktop_id=%d 不存在", desktopID)
+	}
+
+	return map[string]any{
+		"services":             s.buildServicesData(ctx),
+		"hosts":                s.buildHostsData(ctx, node.UserID),
+		"devices":              s.buildDevicesData(ctx, node.UserID, node.ID),
+		"favorite_service_ids": s.buildFavoritesData(ctx, node.UserID),
+	}, nil
+}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -175,7 +176,6 @@ func (s *DesktopLoginService) CreateLoginSession(deviceFingerprint, deviceName, 
 	return session, "", nil
 }
 
-
 // RegisterSessionStorage 注册会话存储
 func (s *DesktopLoginService) RegisterSessionStorage(sessionID string, storage *auth.MemorySessionStorage) {
 	s.sessionStorageMutex.Lock()
@@ -250,4 +250,48 @@ func (s *DesktopLoginService) LogoutSession(userID uint64) string {
 
 	logger.Infof("用户 Logto 会话已注销: userID=%d, sessionID=%s, logoutURL=%s", userID, sessionID, logoutURL)
 	return logoutURL
+}
+
+// GetLoginResult 非阻塞查询登录结果（REST 轮询用）
+// 返回结果 map 和 error；如果还没有结果返回 error
+func (s *DesktopLoginService) GetLoginResult(sessionID, deviceFingerprint string) (map[string]any, error) {
+	// 查数据库中的会话状态
+	var session model.DesktopLoginSession
+	if err := db.DB.Where("session_id = ?", sessionID).First(&session).Error; err != nil {
+		return nil, fmt.Errorf("会话不存在")
+	}
+
+	// 检查是否过期
+	if time.Now().After(session.ExpiresAt) {
+		return map[string]any{
+			"status":  "expired",
+			"message": "登录会话已过期",
+		}, nil
+	}
+
+	// 检查会话状态
+	switch session.Status {
+	case model.DesktopLoginSessionStatusCompleted:
+		return map[string]any{
+			"status":  "success",
+			"message": "登录成功",
+			"user_id": session.UserID,
+		}, nil
+
+	case model.DesktopLoginSessionStatusFailed:
+		return map[string]any{
+			"status":  "failed",
+			"message": session.ErrorMessage,
+		}, nil
+
+	case model.DesktopLoginSessionStatusExpired:
+		return map[string]any{
+			"status":  "expired",
+			"message": "登录会话已过期",
+		}, nil
+
+	default:
+		// pending 状态
+		return nil, fmt.Errorf("等待登录")
+	}
 }
