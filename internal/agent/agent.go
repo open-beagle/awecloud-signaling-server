@@ -30,9 +30,9 @@ import (
 
 // Agent Agent进程
 type Agent struct {
-	config  *config.AgentConfig
-	version string // Agent版本
-	userName string // 用户名（从注册响应获取）
+	config     *config.AgentConfig
+	version    string // Agent版本
+	userName   string // 用户名（从注册响应获取）
 	deviceName string // 设备名称（从注册响应获取，即 Node.Name）
 
 	// gRPC连接
@@ -527,7 +527,7 @@ func (a *Agent) register() error {
 	}
 
 	a.agentID = resp.AgentId
-	
+
 	// 保存用户名和设备名称（从注册响应获取）
 	if resp.UserName != "" {
 		a.userName = resp.UserName
@@ -535,7 +535,7 @@ func (a *Agent) register() error {
 	} else {
 		logger.Infof("注册成功，Agent ID: %d", a.agentID)
 	}
-	
+
 	// 保存设备名称（从 gRPC 注册响应获取，如果有的话）
 	if resp.DeviceName != "" {
 		a.deviceName = resp.DeviceName
@@ -904,29 +904,29 @@ func (a *Agent) syncEndpointServerConfigs(resp *pb.AgentHeartbeatResponse) {
 			K8SSvcEnabled:    cfg.K8SserviceEnabled,
 			K8SSvcEnabledSet: true,
 		}
-		
+
 		// 预分配端口（即使 Endpoint 尚未连接）
 		// 这样可以避免 buildDomainRegistrations 中 AllocatePort 自动分配导致的端口不一致
 		if cfg.SshEnabled && cfg.SshPort > 0 && a.endpointSSHProxy != nil {
 			if err := a.endpointSSHProxy.AllocateSpecificPort(cfg.EndpointName, uint16(cfg.SshPort)); err != nil {
-				logger.Warnf("[syncEndpointServerConfigs] 预分配 SSH 端口失败: endpoint=%s, port=%d, err=%v", 
+				logger.Warnf("[syncEndpointServerConfigs] 预分配 SSH 端口失败: endpoint=%s, port=%d, err=%v",
 					cfg.EndpointName, cfg.SshPort, err)
 			} else {
-				logger.Debugf("[syncEndpointServerConfigs] 预分配 SSH 端口: endpoint=%s, port=%d", 
+				logger.Debugf("[syncEndpointServerConfigs] 预分配 SSH 端口: endpoint=%s, port=%d",
 					cfg.EndpointName, cfg.SshPort)
 			}
 		}
-		
+
 		if cfg.K8SapiEnabled && cfg.K8SapiPort > 0 && a.endpointK8SAPIProxy != nil {
 			if err := a.endpointK8SAPIProxy.AllocateSpecificPort(cfg.EndpointName, uint16(cfg.K8SapiPort)); err != nil {
-				logger.Warnf("[syncEndpointServerConfigs] 预分配 K8SAPI 端口失败: endpoint=%s, port=%d, err=%v", 
+				logger.Warnf("[syncEndpointServerConfigs] 预分配 K8SAPI 端口失败: endpoint=%s, port=%d, err=%v",
 					cfg.EndpointName, cfg.K8SapiPort, err)
 			} else {
-				logger.Debugf("[syncEndpointServerConfigs] 预分配 K8SAPI 端口: endpoint=%s, port=%d", 
+				logger.Debugf("[syncEndpointServerConfigs] 预分配 K8SAPI 端口: endpoint=%s, port=%d",
 					cfg.EndpointName, cfg.K8SapiPort)
 			}
 		}
-		
+
 		a.endpointServer.UpdateServerConfig(cfg.EndpointName, serverCfg)
 		logger.Infof("同步 Endpoint 配置: name=%s, ssh=%v(port=%d), k8sapi=%v(port=%d), api_server=%s, k8ssvc=%v",
 			cfg.EndpointName, serverCfg.SSHEnabled, serverCfg.SSHPort,
@@ -1286,19 +1286,23 @@ func (a *Agent) startHealthServer() error {
 func (a *Agent) applyCapabilityConfig(cap *pb.AgentCapabilityConfig) {
 	// === SSH ===
 	if cap.SshEnabledSet {
-		oldSSH := a.config.Tunnel.EnableSSH
-		if cap.SshEnabled != oldSSH {
-			a.config.Tunnel.EnableSSH = cap.SshEnabled
-			logger.Infof("远程配置: SSH %s -> %s", boolStr(oldSSH), boolStr(cap.SshEnabled))
-			// 动态开关 SSH
-			if a.tsManager != nil {
-				if cap.SshEnabled {
-					if err := a.tsManager.EnableSSHRemote(); err != nil {
-						logger.Warnf("远程启用 SSH 失败: %v", err)
-					}
-				} else {
-					if err := a.tsManager.DisableSSHRemote(); err != nil {
-						logger.Warnf("远程禁用 SSH 失败: %v", err)
+		if a.isClientMode {
+			logger.Debugf("Client 模式忽略远程 SSH 能力配置，保留本地配置")
+		} else {
+			oldSSH := a.config.Tunnel.EnableSSH
+			if cap.SshEnabled != oldSSH {
+				a.config.Tunnel.EnableSSH = cap.SshEnabled
+				logger.Infof("远程配置: SSH %s -> %s", boolStr(oldSSH), boolStr(cap.SshEnabled))
+				// 动态开关 SSH
+				if a.tsManager != nil {
+					if cap.SshEnabled {
+						if err := a.tsManager.EnableSSHRemote(); err != nil {
+							logger.Warnf("远程启用 SSH 失败: %v", err)
+						}
+					} else {
+						if err := a.tsManager.DisableSSHRemote(); err != nil {
+							logger.Warnf("远程禁用 SSH 失败: %v", err)
+						}
 					}
 				}
 			}

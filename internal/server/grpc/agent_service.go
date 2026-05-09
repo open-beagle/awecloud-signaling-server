@@ -666,14 +666,18 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 	}
 
 	// 构建 Agent 能力配置
-	// SSH：从 User 表读取（User 级别共享）
+	// SSH：仅 Agent 角色从 User 表读取（User 级别共享）；Client/CloudIDE 保持本地配置
 	// K8S/SVC：从 Node 表读取（Node 级别独立）
 	var capUser model.User
 	if err := db.DB.WithContext(ctx).First(&capUser, agentID).Error; err == nil {
-		capConfig := &pb.AgentCapabilityConfig{
-			// SSH：User.SSHEnabled 是 bool 非指针，始终有值，始终下发
-			SshEnabled:    capUser.SSHEnabled,
-			SshEnabledSet: true,
+		capConfig := &pb.AgentCapabilityConfig{}
+
+		// Client/CloudIDE 使用 client token 注册，User.SSHEnabled 默认是 false。
+		// 如果这里下发 SSH=false，会覆盖 CloudIDE 本地 enable_ssh=true，导致
+		// Tailscale SSH 在启动后立刻被关闭，Desktop 连接 100.64.x.x:22 被拒绝。
+		if capUser.Role == model.UserRoleAgent {
+			capConfig.SshEnabled = capUser.SSHEnabled
+			capConfig.SshEnabledSet = true
 		}
 
 		// K8S/SVC：从 Node 表读取
@@ -864,7 +868,7 @@ func (s *AgentServiceServer) queryK8SPermissions(ctx context.Context, agentID ui
 			IsGroup:    false,
 		}
 		result = append(result, perm)
-		logger.Debugf("[queryK8SPermissions] 添加用户权限: user_id=%d, user_name=%s, k8s_groups=%v", 
+		logger.Debugf("[queryK8SPermissions] 添加用户权限: user_id=%d, user_name=%s, k8s_groups=%v",
 			p.UserID, p.User.Name, perm.K8SGroups)
 	}
 
@@ -1812,8 +1816,8 @@ func (s *AgentServiceServer) GetUserDeviceInfo(ctx context.Context, req *pb.GetU
 	logger.Debugf("收到用户设备信息查询: user_name=%s, device_ip=%s", req.UserName, req.DeviceIp)
 
 	resp := &pb.GetUserDeviceInfoResponse{
-		UserName:  req.UserName,
-		DeviceIp:  req.DeviceIp,
+		UserName: req.UserName,
+		DeviceIp: req.DeviceIp,
 	}
 
 	// 1. 查询用户信息（获取 Alias）
