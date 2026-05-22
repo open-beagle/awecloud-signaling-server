@@ -513,6 +513,18 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.DELETE("/acl/k8s-service/:id/groups/:gid", aclAPI.RemoveK8SServiceACLGroup)
 					// K8S Service 统一授权（按集群聚合）
 					adminAuthGroup.GET("/acl/k8s-service-unified", aclAPI.ListK8SServiceUnifiedACL)
+					adminAuthGroup.GET("/acl/endpoint-k8sapi", aclAPI.ListEndpointK8SAPIACL)
+					adminAuthGroup.GET("/acl/endpoint-k8sapi/:id", aclAPI.GetEndpointK8SAPIACL)
+					adminAuthGroup.POST("/acl/endpoint-k8sapi/:id/users", aclAPI.AddEndpointK8SAPIACLUsers)
+					adminAuthGroup.POST("/acl/endpoint-k8sapi/:id/groups", aclAPI.AddEndpointK8SAPIACLGroups)
+					adminAuthGroup.DELETE("/acl/endpoint-k8sapi/:id/users/:uid", aclAPI.RemoveEndpointK8SAPIACLUser)
+					adminAuthGroup.DELETE("/acl/endpoint-k8sapi/:id/groups/:gid", aclAPI.RemoveEndpointK8SAPIACLGroup)
+					adminAuthGroup.GET("/acl/endpoint-k8sservice", aclAPI.ListEndpointK8SServiceACL)
+					adminAuthGroup.GET("/acl/endpoint-k8sservice/:id", aclAPI.GetEndpointK8SServiceACL)
+					adminAuthGroup.POST("/acl/endpoint-k8sservice/:id/users", aclAPI.AddEndpointK8SServiceACLUsers)
+					adminAuthGroup.POST("/acl/endpoint-k8sservice/:id/groups", aclAPI.AddEndpointK8SServiceACLGroups)
+					adminAuthGroup.DELETE("/acl/endpoint-k8sservice/:id/users/:uid", aclAPI.RemoveEndpointK8SServiceACLUser)
+					adminAuthGroup.DELETE("/acl/endpoint-k8sservice/:id/groups/:gid", aclAPI.RemoveEndpointK8SServiceACLGroup)
 
 					// Endpoint 管理（Endpoint 由 Agent 自动发现上报，不支持手动创建）
 					endpointAPI := api.NewEndpointAPI(s.config)
