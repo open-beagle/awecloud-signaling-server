@@ -38,8 +38,8 @@
         </el-table-column>
         <el-table-column :label="$t('domain.user')" min-width="200">
           <template #default="{ row }">
-            <span v-if="row.region">
-              {{ row.region }}
+            <span v-if="getOwnerUserName(row)">
+              {{ getOwnerUserName(row) }}
               <span v-if="row.agent_name"> / {{ row.agent_name }}</span>
               <span v-if="row.endpoint_name"> / {{ row.endpoint_name }}</span>
             </span>
@@ -151,6 +151,11 @@ const getDomainTypeLabel = (type: DomainType) => {
     k8ssvc: t('domain.typeK8SSVC')
   }
   return map[type] || type
+}
+
+const getOwnerUserName = (row: DomainItem) => {
+  const alias = row.user_alias?.trim()
+  return alias || row.region || row.user_name
 }
 
 // 获取域名列表

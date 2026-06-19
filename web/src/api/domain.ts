@@ -14,6 +14,7 @@ export interface DomainItem {
   type: DomainType
   user_id: number
   user_name: string
+  user_alias?: string
   node_id?: number
   device_name?: string    // Node 设备名（Hostname）
   endpoint_id?: string    // Endpoint ID（非空表示 Endpoint 域名）
