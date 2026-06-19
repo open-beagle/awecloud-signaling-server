@@ -33,11 +33,22 @@ const items = computed(() => {
   }
   
   // 2. 设备管理
-  else if (path === '/nodes') {
-    breadcrumbs.push({ path: '/nodes', title: '设备管理' })
+  else if (path === '/nodes' || path === '/nodes/agents') {
+    breadcrumbs.push({ title: '设备管理' })
+    breadcrumbs.push({ path: '/nodes/agents', title: '代理设备' })
+  } else if (path === '/nodes/desktops') {
+    breadcrumbs.push({ title: '设备管理' })
+    breadcrumbs.push({ path: '/nodes/desktops', title: '桌面设备' })
+  } else if (path === '/nodes/all') {
+    breadcrumbs.push({ title: '设备管理' })
+    breadcrumbs.push({ path: '/nodes/all', title: '全部设备' })
   } else if (path.match(/^\/nodes\/\d+$/)) {
     const nodeName = (route.query.name as string) || `#${route.params.id}`
-    breadcrumbs.push({ path: '/nodes', title: '设备管理' })
+    const nodeType = route.query.type as string
+    const listPath = nodeType === 'desktop' ? '/nodes/desktops' : '/nodes/agents'
+    const listTitle = nodeType === 'desktop' ? '桌面设备' : '代理设备'
+    breadcrumbs.push({ title: '设备管理' })
+    breadcrumbs.push({ path: listPath, title: listTitle })
     breadcrumbs.push({ title: `设备详情: ${nodeName}` })
   }
   

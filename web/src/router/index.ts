@@ -37,6 +37,25 @@ const routes: RouteRecordRaw[] = [
       // 设备管理
       {
         path: 'nodes',
+        redirect: '/nodes/agents',
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'nodes/agents',
+        name: 'AgentNodes',
+        component: () => import('@/views/Node/List.vue'),
+        props: { fixedType: 'agent' },
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'nodes/desktops',
+        name: 'DesktopNodes',
+        component: () => import('@/views/Node/List.vue'),
+        props: { fixedType: 'desktop' },
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'nodes/all',
         name: 'Nodes',
         component: () => import('@/views/Node/List.vue'),
         meta: { requiresAuth: true }
