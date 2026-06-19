@@ -31,7 +31,7 @@
         <el-table-column :label="$t('node.user')" min-width="120">
           <template #default="{ row }">
             <router-link v-if="row.user" :to="`/users/${row.user.id}`" class="user-link">
-              {{ row.user.name }}
+              {{ getUserDisplayName(row.user) }}
             </router-link>
             <span v-else>-</span>
           </template>
@@ -111,6 +111,11 @@ const isOnline = (node: Node) => {
   const lastHeartbeat = new Date(node.last_heartbeat).getTime()
   const now = Date.now()
   return now - lastHeartbeat < 60000
+}
+
+const getUserDisplayName = (user: NonNullable<Node['user']>) => {
+  const alias = user.alias?.trim()
+  return alias || user.name
 }
 
 // 获取设备列表
