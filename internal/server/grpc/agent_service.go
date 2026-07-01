@@ -1175,6 +1175,18 @@ func (s *AgentServiceServer) DisconnectAgent(agentID uint64) {
 	}
 }
 
+// DisconnectNode 断开指定 Node 的 Agent 连接
+func (s *AgentServiceServer) DisconnectNode(nodeID uint64) {
+	s.connMutex.Lock()
+	defer s.connMutex.Unlock()
+
+	if conn, exists := s.connections[nodeID]; exists {
+		conn.Cancel()
+		delete(s.connections, nodeID)
+		logger.Infof("已断开 Agent Node 连接: agentId=%d, nodeId=%d", conn.AgentID, nodeID)
+	}
+}
+
 // GetAgentConnection 获取 Agent 连接（返回该 AgentID 下第一个在线连接）
 func (s *AgentServiceServer) GetAgentConnection(agentID uint64) *AgentConnection {
 	s.connMutex.RLock()

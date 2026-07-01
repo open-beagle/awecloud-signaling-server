@@ -427,6 +427,7 @@ func (s *Server) setupRouter() *gin.Engine {
 
 					// 设备管理
 					nodeAPI := api.NewNodeAPI(s.config)
+					nodeAPI.SetAgentService(s.agentService)
 					adminAuthGroup.GET("/nodes", nodeAPI.List)
 					adminAuthGroup.GET("/nodes/:id", nodeAPI.Get)
 					adminAuthGroup.GET("/nodes/:id/capabilities", nodeAPI.GetCapabilities)
