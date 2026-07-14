@@ -4,6 +4,8 @@ package awecloud.signaling;
 
 option go_package = "github.com/open-beagle/awecloud-signaling-server/pkg/proto";
 
+import "pkg/proto/update.proto";
+
 // ============================================
 // EndpointService（Agent 内网 gRPC Server，Endpoint 作为 Client 连接）
 // ============================================
@@ -57,6 +59,8 @@ message EndpointHeartbeatRequest {
   string name = 2; // Endpoint 名称
   repeated EndpointCapabilityInfo capabilities = 3; // 启用的能力列表
   repeated DiscoveredK8SService discovered_services = 4; // Endpoint 发现的 K8S Service
+  string version = 5; // Endpoint 当前运行版本
+  string os = 6; // Endpoint 操作系统
   
   // SSH 能力配置（从 Endpoint 自动检测）
   repeated string ssh_users = 7; // 允许的 SSH 用户列表
@@ -67,6 +71,9 @@ message EndpointHeartbeatRequest {
   // K8S Service 能力配置
   string k8sservice_label_selector = 9; // 标签选择器
   repeated string k8sservice_namespaces = 10; // 命名空间列表
+  string arch = 11; // Endpoint CPU 架构
+  string updater_protocol = 12; // 支持的 updater 协议版本
+  repeated UpdateStatus update_statuses = 13; // Endpoint 更新状态
 }
 
 // EndpointCapabilityInfo Endpoint 单项能力信息
@@ -94,6 +101,7 @@ message EndpointHeartbeatResponse {
   string k8sapi_api_server = 14; // K8S API Server 地址（Server 存储的值）
   bool k8sservice_enabled = 15; // K8S Service 能力是否启用
   bool k8sservice_enabled_set = 16; // k8sservice_enabled 是否有效
+  repeated UpdateDirective update_directives = 17; // Endpoint 更新任务
 }
 
 // ============================================

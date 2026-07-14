@@ -384,6 +384,7 @@ func (s *Server) setupRouter() *gin.Engine {
 			v1Group.GET("/download/agent/version", downloadAPI.GetAgentVersion)
 			v1Group.GET("/download/install_endpoint.sh", downloadAPI.GetEndpointInstallScript)
 			v1Group.GET("/download/endpoint", downloadAPI.GetEndpointDownload)
+			v1Group.GET("/download/endpoint/version", downloadAPI.GetEndpointVersion)
 
 			// 统一注册 API（公开，Agent 和 Client 共用）
 			deployPublicAPI := api.NewDeployAPI(s.config)
@@ -568,6 +569,18 @@ func (s *Server) setupRouter() *gin.Engine {
 					// 版本管理
 					versionAPI := api.NewVersionAPI(s.config)
 					adminAuthGroup.GET("/version/latest", versionAPI.GetLatest)
+
+					// Updater 发布和更新任务管理
+					updaterAPI := api.NewUpdaterAPI()
+					adminAuthGroup.POST("/updater/releases", updaterAPI.CreateRelease)
+					adminAuthGroup.GET("/updater/releases", updaterAPI.ListReleases)
+					adminAuthGroup.GET("/updater/releases/:id", updaterAPI.GetRelease)
+					adminAuthGroup.POST("/updater/releases/:id/publish", updaterAPI.PublishRelease)
+					adminAuthGroup.POST("/updater/tasks", updaterAPI.CreateTask)
+					adminAuthGroup.GET("/updater/tasks", updaterAPI.ListTasks)
+					adminAuthGroup.GET("/updater/tasks/:id", updaterAPI.GetTask)
+					adminAuthGroup.POST("/updater/tasks/:id/retry", updaterAPI.RetryTask)
+					adminAuthGroup.POST("/updater/tasks/:id/cancel", updaterAPI.CancelTask)
 
 					// 隧道管理
 					tunnelAPI := api.NewTunnelAPI(s.config)

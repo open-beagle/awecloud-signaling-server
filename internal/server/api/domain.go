@@ -32,6 +32,7 @@ type DomainListItem struct {
 	Type         model.DomainType   `json:"type"`
 	UserID       uint64             `json:"user_id"`
 	UserName     string             `json:"user_name"`
+	UserAlias    string             `json:"user_alias,omitempty"`
 	NodeID       uint64             `json:"node_id,omitempty"`
 	DeviceName   string             `json:"device_name,omitempty"`   // Node 设备名（Hostname）
 	EndpointID   string             `json:"endpoint_id,omitempty"`   // Endpoint ID（非空表示 Endpoint 域名）
@@ -147,6 +148,7 @@ func (a *DomainAPI) List(c *gin.Context) {
 		}
 		if d.User != nil {
 			item.UserName = d.User.Name
+			item.UserAlias = d.User.Alias
 		}
 		items = append(items, item)
 	}

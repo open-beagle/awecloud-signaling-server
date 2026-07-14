@@ -3,7 +3,7 @@
     <!-- 搜索和筛选 -->
     <el-card class="search-card" shadow="never">
       <el-form :inline="true" :model="searchForm" class="search-form">
-        <el-form-item :label="$t('node.type')">
+        <el-form-item v-if="!props.fixedType" :label="$t('node.type')">
           <el-select v-model="searchForm.type" :placeholder="$t('common.all')" clearable style="width: 120px">
             <el-option :label="$t('node.typeAgent')" value="agent" />
             <el-option :label="$t('node.typeDesktop')" value="desktop" />
@@ -31,7 +31,7 @@
         <el-table-column :label="$t('node.user')" min-width="120">
           <template #default="{ row }">
             <router-link v-if="row.user" :to="`/users/${row.user.id}`" class="user-link">
-              {{ row.user.name }}
+              {{ getUserDisplayName(row.user) }}
             </router-link>
             <span v-else>-</span>
           </template>
@@ -81,12 +81,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
-import { getNodes, deleteNode, type Node } from '@/api/node'
+import { getNodes, deleteNode, type Node, type NodeType } from '@/api/node'
 import { formatTime } from '@/utils/time'
+
+const props = defineProps<{
+  fixedType?: NodeType
+}>()
 
 const { t } = useI18n()
 const router = useRouter()
@@ -113,12 +117,17 @@ const isOnline = (node: Node) => {
   return now - lastHeartbeat < 60000
 }
 
+const getUserDisplayName = (user: NonNullable<Node['user']>) => {
+  const alias = user.alias?.trim()
+  return alias || user.name
+}
+
 // 获取设备列表
 const fetchNodes = async () => {
   loading.value = true
   try {
     const res = await getNodes({
-      type: searchForm.type || undefined,
+      type: props.fixedType || searchForm.type || undefined,
       search: searchForm.search || undefined,
       page: pagination.page,
       size: pagination.size
@@ -142,7 +151,9 @@ const handleSearch = () => {
 
 // 重置
 const handleReset = () => {
-  searchForm.type = ''
+  if (!props.fixedType) {
+    searchForm.type = ''
+  }
   searchForm.search = ''
   pagination.page = 1
   fetchNodes()
@@ -150,7 +161,7 @@ const handleReset = () => {
 
 // 跳转到详情页
 const goDetail = (row: Node) => {
-  router.push({ path: `/nodes/${row.id}`, query: { name: row.name } })
+  router.push({ path: `/nodes/${row.id}`, query: { name: row.name, type: row.type } })
 }
 
 // 删除
@@ -176,6 +187,11 @@ const handleDelete = async (row: Node) => {
 }
 
 onMounted(() => {
+  fetchNodes()
+})
+
+watch(() => props.fixedType, () => {
+  pagination.page = 1
   fetchNodes()
 })
 </script>

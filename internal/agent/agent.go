@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -25,6 +26,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/telemetry"
+	"github.com/open-beagle/awecloud-signaling-server/internal/updater"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
@@ -73,6 +75,7 @@ type Agent struct {
 
 	// 域名后缀（从 Server 心跳响应获取）
 	domainSuffix string
+	updater      *updater.Manager
 
 	// 运行模式标识
 	isClientMode bool // true = Client 模式（CloudIDE 等），false = Agent 模式
@@ -97,7 +100,7 @@ func NewAgent(cfg *config.AgentConfig, version, buildDate string) (*Agent, error
 		networkInfo.LanIP, networkInfo.LanGateway, networkInfo.LanInterface,
 		networkInfo.RuntimeEnv, networkInfo.Hostname)
 
-	return &Agent{
+	agent := &Agent{
 		config:         cfg,
 		version:        version,
 		lanDetector:    lanDetector,
@@ -105,7 +108,14 @@ func NewAgent(cfg *config.AgentConfig, version, buildDate string) (*Agent, error
 		auditCollector: NewAuditCollector(),
 		ctx:            ctx,
 		cancel:         cancel,
-	}, nil
+	}
+	updateManager, err := newAgentUpdateManager(version)
+	if err != nil {
+		logger.Warnf("初始化 Agent updater 失败: %v", err)
+	} else {
+		agent.updater = updateManager
+	}
+	return agent, nil
 }
 
 // Run 运行Agent（Agent 模式：完整的 gRPC 注册 + 心跳 + ProxyManager + VisitorManager）
@@ -504,11 +514,10 @@ func (a *Agent) register() error {
 		hostname = a.networkInfo.Hostname
 	}
 
-	var systemInfo *pb.SystemInfo
-	if hostname != "" {
-		systemInfo = &pb.SystemInfo{
-			Hostname: hostname,
-		}
+	systemInfo := &pb.SystemInfo{
+		Os:       runtime.GOOS,
+		Arch:     runtime.GOARCH,
+		Hostname: hostname,
 	}
 
 	resp, err := a.grpcClient.Register(a.ctx, &pb.AgentRegisterRequest{
@@ -736,8 +745,20 @@ func (a *Agent) runHeartbeatStream(stream pb.AgentService_HeartbeatClient) {
 
 // sendHeartbeat 发送心跳
 func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
+	hostname := ""
+	if a.networkInfo != nil {
+		hostname = a.networkInfo.Hostname
+	}
+
 	req := &pb.AgentHeartbeatRequest{
-		AgentId: a.agentID,
+		AgentId:         a.agentID,
+		Version:         a.version,
+		UpdaterProtocol: "v1",
+		SystemInfo: &pb.SystemInfo{
+			Os:       runtime.GOOS,
+			Arch:     runtime.GOARCH,
+			Hostname: hostname,
+		},
 	}
 
 	// 添加设备名称（Node.Name，即 DeployToken.Name）
@@ -752,10 +773,6 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 	}
 
 	// 添加网络信息
-	hostname := ""
-	if a.networkInfo != nil {
-		hostname = a.networkInfo.Hostname
-	}
 	if hostname != "" {
 		req.Hostname = hostname
 	}
@@ -821,6 +838,11 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 			connEp := &pb.ConnectedEndpoint{
 				Name:               ep.Name,
 				Status:             "online",
+				Version:            ep.Version,
+				Os:                 ep.OS,
+				Arch:               ep.Arch,
+				UpdaterProtocol:    ep.UpdaterProtocol,
+				UpdateStatuses:     ep.UpdateStatuses,
 				DiscoveredServices: ep.DiscoveredServices,
 				// SSH 配置
 				SshUsers: ep.SSHUsers,
@@ -838,6 +860,9 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 	// 上报操作审计记录
 	if a.auditCollector != nil {
 		req.AuditRecords = a.auditCollector.Flush()
+	}
+	if a.updater != nil {
+		req.UpdateStatuses = updateStatusesToProto(a.updater.Statuses())
 	}
 
 	return stream.Send(req)
@@ -861,6 +886,15 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 	// 同步 Endpoint 能力配置到 EndpointServer（让 Agent 能把 Server 配置下发给 Endpoint）
 	if a.endpointServer != nil {
 		a.syncEndpointServerConfigs(resp)
+		a.endpointServer.SetUpdateDirectives(resp.EndpointUpdateDirectives)
+	}
+	if a.updater != nil {
+		for _, directive := range resp.UpdateDirectives {
+			a.updater.Handle(updateDirectiveFromProto(directive))
+		}
+	}
+	if len(resp.UpdateDirectives) > 0 {
+		logger.Infof("收到 %d 个 Agent 更新任务", len(resp.UpdateDirectives))
 	}
 
 	// 处理 Server 远程能力配置（每次心跳都检查，不受 configVersion 控制）

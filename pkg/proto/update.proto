@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package awecloud.signaling;
+
+option go_package = "github.com/open-beagle/awecloud-signaling-server/pkg/proto";
+
+message UpdateDirective {
+  string task_id = 1;
+  string component = 2;
+  string version = 3;
+  string artifact_id = 4;
+  string download_url = 5;
+  string filename = 6;
+  string os = 7;
+  string arch = 8;
+  int64 size = 9;
+  string sha256 = 10;
+  string signature = 11;
+  string key_id = 12;
+  bool force = 13;
+  int64 not_before_unix = 14;
+  int64 deadline_unix = 15;
+  string action = 16;
+  string target_name = 17;
+}
+
+message UpdateStatus {
+  string task_id = 1;
+  string phase = 2;
+  int32 progress = 3;
+  string current_version = 4;
+  int64 sequence = 5;
+  string error_code = 6;
+  string error_message = 7;
+}

@@ -80,6 +80,8 @@ export default {
   menu: {
     users: 'Users',
     nodes: 'Nodes',
+    agentNodes: 'Agent Devices',
+    desktopNodes: 'Desktop Devices',
     groups: 'Groups',
     acl: 'Authorization',
     aclServices: 'Service Auth',

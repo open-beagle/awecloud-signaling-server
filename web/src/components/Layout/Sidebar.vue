@@ -18,12 +18,18 @@
         </template>
       </el-menu-item>
       <!-- 设备管理 -->
-      <el-menu-item index="/nodes">
-        <el-icon><Monitor /></el-icon>
+      <el-sub-menu index="nodes">
         <template #title>
+          <el-icon><Monitor /></el-icon>
           <span>{{ t('menu.nodes') }}</span>
         </template>
-      </el-menu-item>
+        <el-menu-item index="/nodes/agents">
+          {{ t('menu.agentNodes') }}
+        </el-menu-item>
+        <el-menu-item index="/nodes/desktops">
+          {{ t('menu.desktopNodes') }}
+        </el-menu-item>
+      </el-sub-menu>
       <!-- 终端管理 -->
       <el-menu-item index="/endpoints">
         <el-icon><Connection /></el-icon>
@@ -136,7 +142,15 @@ const route = useRoute()
 const { t } = useI18n()
 const appStore = useAppStore()
 
-const activeMenu = computed(() => route.path)
+const activeMenu = computed(() => {
+  if (route.path === '/nodes/desktops' || (route.path.match(/^\/nodes\/\d+$/) && route.query.type === 'desktop')) {
+    return '/nodes/desktops'
+  }
+  if (route.path === '/nodes/agents' || route.path.match(/^\/nodes\/\d+$/)) {
+    return '/nodes/agents'
+  }
+  return route.path
+})
 
 const toggleSidebar = () => {
   appStore.toggleSidebar()

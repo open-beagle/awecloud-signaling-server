@@ -80,6 +80,8 @@ export default {
   menu: {
     users: '用户管理',
     nodes: '设备管理',
+    agentNodes: '代理设备',
+    desktopNodes: '桌面设备',
     endpoints: '终端管理',
     resources: '资源发现',
     domains: '域名管理',

@@ -25,6 +25,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/telemetry"
+	"github.com/open-beagle/awecloud-signaling-server/internal/updater"
 )
 
 var (
@@ -36,6 +37,14 @@ var (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "updater-apply" {
+		if err := updater.RunApplyCLI(os.Args[2:]); err != nil {
+			log.Printf("updater apply failed: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// 禁用 Tailscale 内置的 logtail（避免向 log.tailscale.io 发送遥测数据）
 	// 并防止在 DNS 解析失败时触发到公共 DERP 节点的 bootstrapDNS 请求
 	os.Setenv("TS_NO_LOGS_NO_SUPPORT", "true")
@@ -424,13 +433,13 @@ func extractRealUser(remoteUser string) string {
 	tags := strings.Split(remoteUser, ",")
 	for _, tag := range tags {
 		tag = strings.TrimSpace(tag)
-		
+
 		// 查找以 "tag:client-" 开头的标签（优先）
 		if strings.HasPrefix(tag, "tag:client-") {
 			// 去掉 "tag:client-" 前缀
 			return strings.TrimPrefix(tag, "tag:client-")
 		}
-		
+
 		// 查找以 "tag:desktop-" 开头但不是 "tag:desktop-group-" 的标签
 		if strings.HasPrefix(tag, "tag:desktop-") && !strings.HasPrefix(tag, "tag:desktop-group-") {
 			// 去掉 "tag:desktop-" 前缀

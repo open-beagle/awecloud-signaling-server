@@ -7,12 +7,11 @@
 package proto
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -625,10 +624,14 @@ type AgentHeartbeatRequest struct {
 	// 已连接的 Endpoint 列表（Agent 上报）
 	ConnectedEndpoints []*ConnectedEndpoint `protobuf:"bytes,11,rep,name=connected_endpoints,json=connectedEndpoints,proto3" json:"connected_endpoints,omitempty"` // 已连接的 Endpoint 列表
 	// 操作审计记录（Agent 上报）
-	AuditRecords  []*OperationAuditRecord `protobuf:"bytes,12,rep,name=audit_records,json=auditRecords,proto3" json:"audit_records,omitempty"` // 操作审计记录
-	DeviceName    string                  `protobuf:"bytes,13,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`       // 设备名称（Node.Name，即 DeployToken.Name）
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	AuditRecords    []*OperationAuditRecord `protobuf:"bytes,12,rep,name=audit_records,json=auditRecords,proto3" json:"audit_records,omitempty"`          // 操作审计记录
+	DeviceName      string                  `protobuf:"bytes,13,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`                // 设备名称（Node.Name，即 DeployToken.Name）
+	Version         string                  `protobuf:"bytes,14,opt,name=version,proto3" json:"version,omitempty"`                                        // Agent 当前运行版本
+	SystemInfo      *SystemInfo             `protobuf:"bytes,15,opt,name=system_info,json=systemInfo,proto3" json:"system_info,omitempty"`                // Agent 运行平台信息
+	UpdaterProtocol string                  `protobuf:"bytes,16,opt,name=updater_protocol,json=updaterProtocol,proto3" json:"updater_protocol,omitempty"` // 支持的 updater 协议版本
+	UpdateStatuses  []*UpdateStatus         `protobuf:"bytes,17,rep,name=update_statuses,json=updateStatuses,proto3" json:"update_statuses,omitempty"`    // Agent 自身更新状态
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *AgentHeartbeatRequest) Reset() {
@@ -752,6 +755,34 @@ func (x *AgentHeartbeatRequest) GetDeviceName() string {
 	return ""
 }
 
+func (x *AgentHeartbeatRequest) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *AgentHeartbeatRequest) GetSystemInfo() *SystemInfo {
+	if x != nil {
+		return x.SystemInfo
+	}
+	return nil
+}
+
+func (x *AgentHeartbeatRequest) GetUpdaterProtocol() string {
+	if x != nil {
+		return x.UpdaterProtocol
+	}
+	return ""
+}
+
+func (x *AgentHeartbeatRequest) GetUpdateStatuses() []*UpdateStatus {
+	if x != nil {
+		return x.UpdateStatuses
+	}
+	return nil
+}
+
 // ConnectedEndpoint Agent 上报的已连接 Endpoint 信息
 type ConnectedEndpoint struct {
 	state              protoimpl.MessageState    `protogen:"open.v1"`
@@ -759,6 +790,8 @@ type ConnectedEndpoint struct {
 	Status             string                    `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`                                                   // 状态：online
 	Capabilities       []*EndpointCapabilityInfo `protobuf:"bytes,3,rep,name=capabilities,proto3" json:"capabilities,omitempty"`                                       // 启用的能力列表
 	DiscoveredServices []*DiscoveredK8SService   `protobuf:"bytes,4,rep,name=discovered_services,json=discoveredServices,proto3" json:"discovered_services,omitempty"` // Endpoint 发现的 K8S Service（K8SService 能力时上报）
+	Version            string                    `protobuf:"bytes,5,opt,name=version,proto3" json:"version,omitempty"`                                                 // Endpoint 当前运行版本
+	Os                 string                    `protobuf:"bytes,6,opt,name=os,proto3" json:"os,omitempty"`                                                           // Endpoint 操作系统
 	// SSH 能力配置（从 Endpoint 自动检测）
 	SshUsers []string `protobuf:"bytes,7,rep,name=ssh_users,json=sshUsers,proto3" json:"ssh_users,omitempty"` // 允许的 SSH 用户列表
 	SshPort  uint32   `protobuf:"varint,11,opt,name=ssh_port,json=sshPort,proto3" json:"ssh_port,omitempty"`  // 动态分配的 SSH 端口（0 表示未分配）
@@ -766,8 +799,11 @@ type ConnectedEndpoint struct {
 	K8SapiApiServer string `protobuf:"bytes,8,opt,name=k8sapi_api_server,json=k8sapiApiServer,proto3" json:"k8sapi_api_server,omitempty"` // K8S API Server 地址
 	K8SapiPort      uint32 `protobuf:"varint,12,opt,name=k8sapi_port,json=k8sapiPort,proto3" json:"k8sapi_port,omitempty"`                // 动态分配的 K8SAPI 端口（0 表示未分配）
 	// K8S Service 能力配置
-	K8SserviceLabelSelector string   `protobuf:"bytes,9,opt,name=k8sservice_label_selector,json=k8sserviceLabelSelector,proto3" json:"k8sservice_label_selector,omitempty"` // 标签选择器
-	K8SserviceNamespaces    []string `protobuf:"bytes,10,rep,name=k8sservice_namespaces,json=k8sserviceNamespaces,proto3" json:"k8sservice_namespaces,omitempty"`           // 命名空间列表
+	K8SserviceLabelSelector string          `protobuf:"bytes,9,opt,name=k8sservice_label_selector,json=k8sserviceLabelSelector,proto3" json:"k8sservice_label_selector,omitempty"` // 标签选择器
+	K8SserviceNamespaces    []string        `protobuf:"bytes,10,rep,name=k8sservice_namespaces,json=k8sserviceNamespaces,proto3" json:"k8sservice_namespaces,omitempty"`           // 命名空间列表
+	Arch                    string          `protobuf:"bytes,13,opt,name=arch,proto3" json:"arch,omitempty"`                                                                       // Endpoint CPU 架构
+	UpdateStatuses          []*UpdateStatus `protobuf:"bytes,14,rep,name=update_statuses,json=updateStatuses,proto3" json:"update_statuses,omitempty"`                             // Endpoint 更新状态
+	UpdaterProtocol         string          `protobuf:"bytes,15,opt,name=updater_protocol,json=updaterProtocol,proto3" json:"updater_protocol,omitempty"`                          // Endpoint 支持的 updater 协议版本
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
@@ -830,6 +866,20 @@ func (x *ConnectedEndpoint) GetDiscoveredServices() []*DiscoveredK8SService {
 	return nil
 }
 
+func (x *ConnectedEndpoint) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *ConnectedEndpoint) GetOs() string {
+	if x != nil {
+		return x.Os
+	}
+	return ""
+}
+
 func (x *ConnectedEndpoint) GetSshUsers() []string {
 	if x != nil {
 		return x.SshUsers
@@ -870,6 +920,27 @@ func (x *ConnectedEndpoint) GetK8SserviceNamespaces() []string {
 		return x.K8SserviceNamespaces
 	}
 	return nil
+}
+
+func (x *ConnectedEndpoint) GetArch() string {
+	if x != nil {
+		return x.Arch
+	}
+	return ""
+}
+
+func (x *ConnectedEndpoint) GetUpdateStatuses() []*UpdateStatus {
+	if x != nil {
+		return x.UpdateStatuses
+	}
+	return nil
+}
+
+func (x *ConnectedEndpoint) GetUpdaterProtocol() string {
+	if x != nil {
+		return x.UpdaterProtocol
+	}
+	return ""
 }
 
 // DomainRegistration 域名注册信息（Agent 心跳上报）
@@ -1166,6 +1237,8 @@ type AgentHeartbeatResponse struct {
 	EndpointK8SapiPermissions     []*EndpointK8SAPIPermission     `protobuf:"bytes,10,rep,name=endpoint_k8sapi_permissions,json=endpointK8sapiPermissions,proto3" json:"endpoint_k8sapi_permissions,omitempty"`             // Endpoint K8SAPI 授权列表
 	EndpointK8SservicePermissions []*EndpointK8SServicePermission `protobuf:"bytes,11,rep,name=endpoint_k8sservice_permissions,json=endpointK8sservicePermissions,proto3" json:"endpoint_k8sservice_permissions,omitempty"` // Endpoint K8SService 授权列表
 	EndpointCapabilityConfigs     []*EndpointCapabilityConfig     `protobuf:"bytes,12,rep,name=endpoint_capability_configs,json=endpointCapabilityConfigs,proto3" json:"endpoint_capability_configs,omitempty"`             // Endpoint 能力开关配置（Server 下发）
+	UpdateDirectives              []*UpdateDirective              `protobuf:"bytes,13,rep,name=update_directives,json=updateDirectives,proto3" json:"update_directives,omitempty"`                                          // Agent 自身更新任务
+	EndpointUpdateDirectives      []*UpdateDirective              `protobuf:"bytes,14,rep,name=endpoint_update_directives,json=endpointUpdateDirectives,proto3" json:"endpoint_update_directives,omitempty"`                // 由 Agent 转发给 Endpoint 的更新任务
 	unknownFields                 protoimpl.UnknownFields
 	sizeCache                     protoimpl.SizeCache
 }
@@ -1280,6 +1353,20 @@ func (x *AgentHeartbeatResponse) GetEndpointK8SservicePermissions() []*EndpointK
 func (x *AgentHeartbeatResponse) GetEndpointCapabilityConfigs() []*EndpointCapabilityConfig {
 	if x != nil {
 		return x.EndpointCapabilityConfigs
+	}
+	return nil
+}
+
+func (x *AgentHeartbeatResponse) GetUpdateDirectives() []*UpdateDirective {
+	if x != nil {
+		return x.UpdateDirectives
+	}
+	return nil
+}
+
+func (x *AgentHeartbeatResponse) GetEndpointUpdateDirectives() []*UpdateDirective {
+	if x != nil {
+		return x.EndpointUpdateDirectives
 	}
 	return nil
 }
@@ -2964,7 +3051,7 @@ var File_pkg_proto_agent_proto protoreflect.FileDescriptor
 
 const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x15pkg/proto/agent.proto\x12\x12awecloud.signaling\x1a\x18pkg/proto/endpoint.proto\"\xb7\x01\n" +
+	"\x15pkg/proto/agent.proto\x12\x12awecloud.signaling\x1a\x18pkg/proto/endpoint.proto\x1a\x16pkg/proto/update.proto\"\xb7\x01\n" +
 	"\n" +
 	"SystemInfo\x12\x0e\n" +
 	"\x02os\x18\x01 \x01(\tR\x02os\x12\x1d\n" +
@@ -3017,7 +3104,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\n" +
 	"forward_id\x18\x01 \x01(\tR\tforwardId\x12\x18\n" +
 	"\arunning\x18\x02 \x01(\bR\arunning\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\x84\x06\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xd5\a\n" +
 	"\x15AgentHeartbeatRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\x04R\aagentId\x12\x1b\n" +
 	"\ttunnel_ip\x18\x02 \x01(\tR\btunnelIp\x12)\n" +
@@ -3033,12 +3120,19 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\x13connected_endpoints\x18\v \x03(\v2%.awecloud.signaling.ConnectedEndpointR\x12connectedEndpoints\x12M\n" +
 	"\raudit_records\x18\f \x03(\v2(.awecloud.signaling.OperationAuditRecordR\fauditRecords\x12\x1f\n" +
 	"\vdevice_name\x18\r \x01(\tR\n" +
-	"deviceName\"\xe0\x03\n" +
+	"deviceName\x12\x18\n" +
+	"\aversion\x18\x0e \x01(\tR\aversion\x12?\n" +
+	"\vsystem_info\x18\x0f \x01(\v2\x1e.awecloud.signaling.SystemInfoR\n" +
+	"systemInfo\x12)\n" +
+	"\x10updater_protocol\x18\x10 \x01(\tR\x0fupdaterProtocol\x12I\n" +
+	"\x0fupdate_statuses\x18\x11 \x03(\v2 .awecloud.signaling.UpdateStatusR\x0eupdateStatuses\"\x94\x05\n" +
 	"\x11ConnectedEndpoint\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12N\n" +
 	"\fcapabilities\x18\x03 \x03(\v2*.awecloud.signaling.EndpointCapabilityInfoR\fcapabilities\x12Y\n" +
-	"\x13discovered_services\x18\x04 \x03(\v2(.awecloud.signaling.DiscoveredK8SServiceR\x12discoveredServices\x12\x1b\n" +
+	"\x13discovered_services\x18\x04 \x03(\v2(.awecloud.signaling.DiscoveredK8SServiceR\x12discoveredServices\x12\x18\n" +
+	"\aversion\x18\x05 \x01(\tR\aversion\x12\x0e\n" +
+	"\x02os\x18\x06 \x01(\tR\x02os\x12\x1b\n" +
 	"\tssh_users\x18\a \x03(\tR\bsshUsers\x12\x19\n" +
 	"\bssh_port\x18\v \x01(\rR\asshPort\x12*\n" +
 	"\x11k8sapi_api_server\x18\b \x01(\tR\x0fk8sapiApiServer\x12\x1f\n" +
@@ -3046,7 +3140,10 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"k8sapiPort\x12:\n" +
 	"\x19k8sservice_label_selector\x18\t \x01(\tR\x17k8sserviceLabelSelector\x123\n" +
 	"\x15k8sservice_namespaces\x18\n" +
-	" \x03(\tR\x14k8sserviceNamespaces\"\xbb\x02\n" +
+	" \x03(\tR\x14k8sserviceNamespaces\x12\x12\n" +
+	"\x04arch\x18\r \x01(\tR\x04arch\x12I\n" +
+	"\x0fupdate_statuses\x18\x0e \x03(\v2 .awecloud.signaling.UpdateStatusR\x0eupdateStatuses\x12)\n" +
+	"\x10updater_protocol\x18\x0f \x01(\tR\x0fupdaterProtocol\"\xbb\x02\n" +
 	"\x12DomainRegistration\x12\x16\n" +
 	"\x06domain\x18\x01 \x01(\tR\x06domain\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1b\n" +
@@ -3078,7 +3175,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"sourceAddr\x12\x1f\n" +
 	"\vtarget_addr\x18\x05 \x01(\tR\n" +
 	"targetAddr\x12\x18\n" +
-	"\aenabled\x18\x06 \x01(\bR\aenabled\"\xdd\a\n" +
+	"\aenabled\x18\x06 \x01(\bR\aenabled\"\x92\t\n" +
 	"\x16AgentHeartbeatResponse\x12%\n" +
 	"\x0econfig_version\x18\x01 \x01(\x03R\rconfigVersion\x12=\n" +
 	"\bservices\x18\x02 \x03(\v2!.awecloud.signaling.ServiceConfigR\bservices\x12=\n" +
@@ -3092,7 +3189,9 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\x1bendpoint_k8sapi_permissions\x18\n" +
 	" \x03(\v2,.awecloud.signaling.EndpointK8SAPIPermissionR\x19endpointK8sapiPermissions\x12x\n" +
 	"\x1fendpoint_k8sservice_permissions\x18\v \x03(\v20.awecloud.signaling.EndpointK8SServicePermissionR\x1dendpointK8sservicePermissions\x12l\n" +
-	"\x1bendpoint_capability_configs\x18\f \x03(\v2,.awecloud.signaling.EndpointCapabilityConfigR\x19endpointCapabilityConfigs\"\x9e\x02\n" +
+	"\x1bendpoint_capability_configs\x18\f \x03(\v2,.awecloud.signaling.EndpointCapabilityConfigR\x19endpointCapabilityConfigs\x12P\n" +
+	"\x11update_directives\x18\r \x03(\v2#.awecloud.signaling.UpdateDirectiveR\x10updateDirectives\x12a\n" +
+	"\x1aendpoint_update_directives\x18\x0e \x03(\v2#.awecloud.signaling.UpdateDirectiveR\x18endpointUpdateDirectives\"\x9e\x02\n" +
 	"\x18EndpointCapabilityConfig\x12#\n" +
 	"\rendpoint_name\x18\x01 \x01(\tR\fendpointName\x12\x1f\n" +
 	"\vssh_enabled\x18\x02 \x01(\bR\n" +
@@ -3316,7 +3415,9 @@ var file_pkg_proto_agent_proto_goTypes = []any{
 	(*GetUserDeviceInfoRequest)(nil),     // 33: awecloud.signaling.GetUserDeviceInfoRequest
 	(*GetUserDeviceInfoResponse)(nil),    // 34: awecloud.signaling.GetUserDeviceInfoResponse
 	(*DiscoveredK8SService)(nil),         // 35: awecloud.signaling.DiscoveredK8SService
-	(*EndpointCapabilityInfo)(nil),       // 36: awecloud.signaling.EndpointCapabilityInfo
+	(*UpdateStatus)(nil),                 // 36: awecloud.signaling.UpdateStatus
+	(*EndpointCapabilityInfo)(nil),       // 37: awecloud.signaling.EndpointCapabilityInfo
+	(*UpdateDirective)(nil),              // 38: awecloud.signaling.UpdateDirective
 }
 var file_pkg_proto_agent_proto_depIdxs = []int32{
 	0,  // 0: awecloud.signaling.AgentRegisterRequest.system_info:type_name -> awecloud.signaling.SystemInfo
@@ -3328,44 +3429,49 @@ var file_pkg_proto_agent_proto_depIdxs = []int32{
 	35, // 6: awecloud.signaling.AgentHeartbeatRequest.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
 	9,  // 7: awecloud.signaling.AgentHeartbeatRequest.connected_endpoints:type_name -> awecloud.signaling.ConnectedEndpoint
 	21, // 8: awecloud.signaling.AgentHeartbeatRequest.audit_records:type_name -> awecloud.signaling.OperationAuditRecord
-	36, // 9: awecloud.signaling.ConnectedEndpoint.capabilities:type_name -> awecloud.signaling.EndpointCapabilityInfo
-	35, // 10: awecloud.signaling.ConnectedEndpoint.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
-	11, // 11: awecloud.signaling.AgentHeartbeatResponse.services:type_name -> awecloud.signaling.ServiceConfig
-	12, // 12: awecloud.signaling.AgentHeartbeatResponse.forwards:type_name -> awecloud.signaling.ForwardConfig
-	16, // 13: awecloud.signaling.AgentHeartbeatResponse.k8s_permissions:type_name -> awecloud.signaling.K8SPermission
-	17, // 14: awecloud.signaling.AgentHeartbeatResponse.k8s_service_permissions:type_name -> awecloud.signaling.K8SServicePermission
-	15, // 15: awecloud.signaling.AgentHeartbeatResponse.capability_config:type_name -> awecloud.signaling.AgentCapabilityConfig
-	20, // 16: awecloud.signaling.AgentHeartbeatResponse.endpoint_ssh_permissions:type_name -> awecloud.signaling.EndpointSSHPermission
-	18, // 17: awecloud.signaling.AgentHeartbeatResponse.endpoint_k8sapi_permissions:type_name -> awecloud.signaling.EndpointK8SAPIPermission
-	19, // 18: awecloud.signaling.AgentHeartbeatResponse.endpoint_k8sservice_permissions:type_name -> awecloud.signaling.EndpointK8SServicePermission
-	14, // 19: awecloud.signaling.AgentHeartbeatResponse.endpoint_capability_configs:type_name -> awecloud.signaling.EndpointCapabilityConfig
-	1,  // 20: awecloud.signaling.GetRealtimeStatusResponse.networks:type_name -> awecloud.signaling.NetworkInterface
-	24, // 21: awecloud.signaling.ReportProxyStatusRequest.statuses:type_name -> awecloud.signaling.ProxyStatus
-	27, // 22: awecloud.signaling.ReportVisitorStatusRequest.statuses:type_name -> awecloud.signaling.VisitorStatus
-	1,  // 23: awecloud.signaling.ReportNetworkChangeRequest.networks:type_name -> awecloud.signaling.NetworkInterface
-	2,  // 24: awecloud.signaling.AgentService.Register:input_type -> awecloud.signaling.AgentRegisterRequest
-	4,  // 25: awecloud.signaling.AgentService.Authenticate:input_type -> awecloud.signaling.AgentAuthenticateRequest
-	8,  // 26: awecloud.signaling.AgentService.Heartbeat:input_type -> awecloud.signaling.AgentHeartbeatRequest
-	22, // 27: awecloud.signaling.AgentService.GetRealtimeStatus:input_type -> awecloud.signaling.GetRealtimeStatusRequest
-	25, // 28: awecloud.signaling.AgentService.ReportProxyStatus:input_type -> awecloud.signaling.ReportProxyStatusRequest
-	28, // 29: awecloud.signaling.AgentService.ReportVisitorStatus:input_type -> awecloud.signaling.ReportVisitorStatusRequest
-	30, // 30: awecloud.signaling.AgentService.ReportNetworkChange:input_type -> awecloud.signaling.ReportNetworkChangeRequest
-	32, // 31: awecloud.signaling.AgentService.SVCProxy:input_type -> awecloud.signaling.SVCProxyData
-	33, // 32: awecloud.signaling.AgentService.GetUserDeviceInfo:input_type -> awecloud.signaling.GetUserDeviceInfoRequest
-	3,  // 33: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.AgentRegisterResponse
-	5,  // 34: awecloud.signaling.AgentService.Authenticate:output_type -> awecloud.signaling.AgentAuthenticateResponse
-	13, // 35: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.AgentHeartbeatResponse
-	23, // 36: awecloud.signaling.AgentService.GetRealtimeStatus:output_type -> awecloud.signaling.GetRealtimeStatusResponse
-	26, // 37: awecloud.signaling.AgentService.ReportProxyStatus:output_type -> awecloud.signaling.ReportProxyStatusResponse
-	29, // 38: awecloud.signaling.AgentService.ReportVisitorStatus:output_type -> awecloud.signaling.ReportVisitorStatusResponse
-	31, // 39: awecloud.signaling.AgentService.ReportNetworkChange:output_type -> awecloud.signaling.ReportNetworkChangeResponse
-	32, // 40: awecloud.signaling.AgentService.SVCProxy:output_type -> awecloud.signaling.SVCProxyData
-	34, // 41: awecloud.signaling.AgentService.GetUserDeviceInfo:output_type -> awecloud.signaling.GetUserDeviceInfoResponse
-	33, // [33:42] is the sub-list for method output_type
-	24, // [24:33] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	0,  // 9: awecloud.signaling.AgentHeartbeatRequest.system_info:type_name -> awecloud.signaling.SystemInfo
+	36, // 10: awecloud.signaling.AgentHeartbeatRequest.update_statuses:type_name -> awecloud.signaling.UpdateStatus
+	37, // 11: awecloud.signaling.ConnectedEndpoint.capabilities:type_name -> awecloud.signaling.EndpointCapabilityInfo
+	35, // 12: awecloud.signaling.ConnectedEndpoint.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
+	36, // 13: awecloud.signaling.ConnectedEndpoint.update_statuses:type_name -> awecloud.signaling.UpdateStatus
+	11, // 14: awecloud.signaling.AgentHeartbeatResponse.services:type_name -> awecloud.signaling.ServiceConfig
+	12, // 15: awecloud.signaling.AgentHeartbeatResponse.forwards:type_name -> awecloud.signaling.ForwardConfig
+	16, // 16: awecloud.signaling.AgentHeartbeatResponse.k8s_permissions:type_name -> awecloud.signaling.K8SPermission
+	17, // 17: awecloud.signaling.AgentHeartbeatResponse.k8s_service_permissions:type_name -> awecloud.signaling.K8SServicePermission
+	15, // 18: awecloud.signaling.AgentHeartbeatResponse.capability_config:type_name -> awecloud.signaling.AgentCapabilityConfig
+	20, // 19: awecloud.signaling.AgentHeartbeatResponse.endpoint_ssh_permissions:type_name -> awecloud.signaling.EndpointSSHPermission
+	18, // 20: awecloud.signaling.AgentHeartbeatResponse.endpoint_k8sapi_permissions:type_name -> awecloud.signaling.EndpointK8SAPIPermission
+	19, // 21: awecloud.signaling.AgentHeartbeatResponse.endpoint_k8sservice_permissions:type_name -> awecloud.signaling.EndpointK8SServicePermission
+	14, // 22: awecloud.signaling.AgentHeartbeatResponse.endpoint_capability_configs:type_name -> awecloud.signaling.EndpointCapabilityConfig
+	38, // 23: awecloud.signaling.AgentHeartbeatResponse.update_directives:type_name -> awecloud.signaling.UpdateDirective
+	38, // 24: awecloud.signaling.AgentHeartbeatResponse.endpoint_update_directives:type_name -> awecloud.signaling.UpdateDirective
+	1,  // 25: awecloud.signaling.GetRealtimeStatusResponse.networks:type_name -> awecloud.signaling.NetworkInterface
+	24, // 26: awecloud.signaling.ReportProxyStatusRequest.statuses:type_name -> awecloud.signaling.ProxyStatus
+	27, // 27: awecloud.signaling.ReportVisitorStatusRequest.statuses:type_name -> awecloud.signaling.VisitorStatus
+	1,  // 28: awecloud.signaling.ReportNetworkChangeRequest.networks:type_name -> awecloud.signaling.NetworkInterface
+	2,  // 29: awecloud.signaling.AgentService.Register:input_type -> awecloud.signaling.AgentRegisterRequest
+	4,  // 30: awecloud.signaling.AgentService.Authenticate:input_type -> awecloud.signaling.AgentAuthenticateRequest
+	8,  // 31: awecloud.signaling.AgentService.Heartbeat:input_type -> awecloud.signaling.AgentHeartbeatRequest
+	22, // 32: awecloud.signaling.AgentService.GetRealtimeStatus:input_type -> awecloud.signaling.GetRealtimeStatusRequest
+	25, // 33: awecloud.signaling.AgentService.ReportProxyStatus:input_type -> awecloud.signaling.ReportProxyStatusRequest
+	28, // 34: awecloud.signaling.AgentService.ReportVisitorStatus:input_type -> awecloud.signaling.ReportVisitorStatusRequest
+	30, // 35: awecloud.signaling.AgentService.ReportNetworkChange:input_type -> awecloud.signaling.ReportNetworkChangeRequest
+	32, // 36: awecloud.signaling.AgentService.SVCProxy:input_type -> awecloud.signaling.SVCProxyData
+	33, // 37: awecloud.signaling.AgentService.GetUserDeviceInfo:input_type -> awecloud.signaling.GetUserDeviceInfoRequest
+	3,  // 38: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.AgentRegisterResponse
+	5,  // 39: awecloud.signaling.AgentService.Authenticate:output_type -> awecloud.signaling.AgentAuthenticateResponse
+	13, // 40: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.AgentHeartbeatResponse
+	23, // 41: awecloud.signaling.AgentService.GetRealtimeStatus:output_type -> awecloud.signaling.GetRealtimeStatusResponse
+	26, // 42: awecloud.signaling.AgentService.ReportProxyStatus:output_type -> awecloud.signaling.ReportProxyStatusResponse
+	29, // 43: awecloud.signaling.AgentService.ReportVisitorStatus:output_type -> awecloud.signaling.ReportVisitorStatusResponse
+	31, // 44: awecloud.signaling.AgentService.ReportNetworkChange:output_type -> awecloud.signaling.ReportNetworkChangeResponse
+	32, // 45: awecloud.signaling.AgentService.SVCProxy:output_type -> awecloud.signaling.SVCProxyData
+	34, // 46: awecloud.signaling.AgentService.GetUserDeviceInfo:output_type -> awecloud.signaling.GetUserDeviceInfoResponse
+	38, // [38:47] is the sub-list for method output_type
+	29, // [29:38] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_pkg_proto_agent_proto_init() }
@@ -3374,6 +3480,7 @@ func file_pkg_proto_agent_proto_init() {
 		return
 	}
 	file_pkg_proto_endpoint_proto_init()
+	file_pkg_proto_update_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
