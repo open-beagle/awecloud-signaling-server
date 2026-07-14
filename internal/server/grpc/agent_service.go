@@ -66,6 +66,7 @@ type AgentServiceServer struct {
 	headscaleClient *headscale.Client
 	config          *config.ServerConfig
 	domainService   *service.DomainService
+	updateService   *service.UpdateService
 }
 
 // NewAgentServiceServer 创建 Agent 服务
@@ -75,6 +76,7 @@ func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
 		configVersion: time.Now().Unix(),
 		config:        cfg,
 		domainService: service.NewDomainService(db.DB),
+		updateService: service.NewUpdateService(db.DB),
 	}
 
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
@@ -578,8 +580,26 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	// 更新 Node 信息
 	now := time.Now()
 	updates := map[string]any{
-		"last_heartbeat": now,
-		"ip":             req.TunnelIp,
+		"last_heartbeat":   now,
+		"ip":               req.TunnelIp,
+		"updater_protocol": req.UpdaterProtocol,
+	}
+	if req.Version != "" {
+		updates["version"] = req.Version
+	}
+	if req.SystemInfo != nil {
+		systemInfo := model.NodeSystemInfo{
+			OS:        req.SystemInfo.Os,
+			OSVersion: req.SystemInfo.OsVersion,
+			Arch:      req.SystemInfo.Arch,
+			Hostname:  req.SystemInfo.Hostname,
+			CPU:       req.SystemInfo.Cpu,
+			CPUCores:  int(req.SystemInfo.CpuCores),
+			MemoryGB:  int(req.SystemInfo.MemoryGb),
+		}
+		if data, err := json.Marshal(systemInfo); err == nil {
+			updates["system_info"] = string(data)
+		}
 	}
 
 	if req.Hostname != "" {
@@ -631,6 +651,26 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	// 处理已连接的 Endpoint 上报
 	if len(req.ConnectedEndpoints) > 0 {
 		s.handleConnectedEndpoints(ctx, agentID, node.ID, req.ConnectedEndpoints)
+	}
+
+	if s.updateService != nil {
+		for _, report := range req.UpdateStatuses {
+			if err := s.updateService.Report(ctx, report.TaskId, service.UpdateStatusReporter{
+				Source:     "agent",
+				Component:  model.ComponentAgent,
+				TargetType: model.UpdateTargetNode,
+				TargetID:   fmt.Sprintf("%d", node.ID),
+			}, service.UpdateStatusReport{
+				Phase:          report.Phase,
+				Progress:       int(report.Progress),
+				CurrentVersion: report.CurrentVersion,
+				Sequence:       report.Sequence,
+				ErrorCode:      report.ErrorCode,
+				ErrorMessage:   report.ErrorMessage,
+			}); err != nil {
+				logger.Warnf("处理 Agent 更新状态失败: task_id=%s, err=%v", report.TaskId, err)
+			}
+		}
 	}
 
 	// 处理操作审计记录上报
@@ -836,7 +876,49 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		logger.Errorf("查询 Endpoint 配置失败 (agent_id=%d): %v", agentID, err)
 	}
 
+	if s.updateService != nil {
+		directives, err := s.updateService.DirectivesForNode(ctx, nodeID, model.ComponentAgent)
+		if err != nil {
+			logger.Warnf("查询 Agent 更新任务失败: node_id=%d, err=%v", nodeID, err)
+		} else {
+			for _, directive := range directives {
+				resp.UpdateDirectives = append(resp.UpdateDirectives, toProtoUpdateDirective(directive))
+			}
+		}
+
+		endpointDirectives, err := s.updateService.DirectivesForAgentEndpoints(ctx, agentID)
+		if err != nil {
+			logger.Warnf("查询 Endpoint 更新任务失败: agent_id=%d, err=%v", agentID, err)
+		} else {
+			for _, directive := range endpointDirectives {
+				resp.EndpointUpdateDirectives = append(resp.EndpointUpdateDirectives, toProtoUpdateDirective(directive))
+			}
+		}
+	}
+
 	return stream.Send(resp)
+}
+
+func toProtoUpdateDirective(directive service.UpdateDirective) *pb.UpdateDirective {
+	return &pb.UpdateDirective{
+		TaskId:        directive.TaskID,
+		Component:     directive.Component,
+		Version:       directive.Version,
+		ArtifactId:    directive.ArtifactID,
+		DownloadUrl:   directive.DownloadURL,
+		Filename:      directive.Filename,
+		Os:            directive.OS,
+		Arch:          directive.Arch,
+		Size:          directive.Size,
+		Sha256:        directive.SHA256,
+		Signature:     directive.Signature,
+		KeyId:         directive.KeyID,
+		Force:         directive.Force,
+		NotBeforeUnix: directive.NotBeforeUnix,
+		DeadlineUnix:  directive.DeadlineUnix,
+		Action:        directive.Action,
+		TargetName:    directive.TargetName,
+	}
 }
 
 // queryK8SPermissions 查询 Agent 的 K8S API 授权列表
@@ -1390,6 +1472,7 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 
 	for _, ep := range endpoints {
 		reportedNames[ep.Name] = true
+		endpointID := ""
 
 		// 更新 Endpoint 内存缓存
 		cache.SetEndpointStatus(ep.Name, cache.EndpointStatus{
@@ -1454,6 +1537,10 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 				ID:                      uuid.New().String(),
 				UserID:                  agentID,
 				Name:                    ep.Name,
+				Version:                 ep.Version,
+				UpdaterProtocol:         ep.UpdaterProtocol,
+				OS:                      ep.Os,
+				Arch:                    ep.Arch,
 				Status:                  "online",
 				SSHEnabled:              false,
 				SSHUsers:                sshUsersJSON,
@@ -1468,6 +1555,7 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 			if err := db.DB.WithContext(ctx).Create(&record).Error; err != nil {
 				logger.Errorf("创建 Endpoint 失败: name=%s, err=%v", ep.Name, err)
 			} else {
+				endpointID = record.ID
 				logger.Infof("创建 Endpoint: name=%s, id=%s, ssh_port=%d, k8sapi_port=%d, ssh_users=%v",
 					ep.Name, record.ID, record.SSHPort, record.K8SAPIPort, ep.SshUsers)
 
@@ -1495,7 +1583,18 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 		} else {
 			// 存在，更新状态和配置（不更新能力开关，能力由 Web 界面管理）
 			updates := map[string]any{
-				"status": "online",
+				"status":           "online",
+				"updater_protocol": ep.UpdaterProtocol,
+			}
+			endpointID = existing.ID
+			if ep.Version != "" {
+				updates["version"] = ep.Version
+			}
+			if ep.Os != "" {
+				updates["os"] = ep.Os
+			}
+			if ep.Arch != "" {
+				updates["arch"] = ep.Arch
 			}
 
 			// 自动修复端口（如果端口为 0，说明是旧版本创建的 Endpoint）
@@ -1571,6 +1670,26 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 							logger.Infof("更新 Endpoint K8SAPI 域名端口: endpoint=%s, port=%d", ep.Name, updatedEndpoint.K8SAPIPort)
 						}
 					}
+				}
+			}
+		}
+
+		if endpointID != "" && s.updateService != nil {
+			for _, report := range ep.UpdateStatuses {
+				if err := s.updateService.Report(ctx, report.TaskId, service.UpdateStatusReporter{
+					Source:     "endpoint",
+					Component:  model.ComponentEndpoint,
+					TargetType: model.UpdateTargetEndpoint,
+					TargetID:   endpointID,
+				}, service.UpdateStatusReport{
+					Phase:          report.Phase,
+					Progress:       int(report.Progress),
+					CurrentVersion: report.CurrentVersion,
+					Sequence:       report.Sequence,
+					ErrorCode:      report.ErrorCode,
+					ErrorMessage:   report.ErrorMessage,
+				}); err != nil {
+					logger.Warnf("处理 Endpoint 更新状态失败: endpoint=%s, task_id=%s, err=%v", ep.Name, report.TaskId, err)
 				}
 			}
 		}

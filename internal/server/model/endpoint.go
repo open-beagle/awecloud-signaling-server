@@ -6,13 +6,16 @@ import "time"
 // 一个 Endpoint 节点对应一行记录，SSH/K8SAPI/K8SService 是能力开关字段
 // Endpoint 由 Agent 自动发现上报，不支持手动创建
 type Endpoint struct {
-	ID      string `gorm:"primaryKey;size:36" json:"id"`            // UUID（Server 生成）
-	UserID  uint64 `gorm:"not null;index" json:"user_id"`           // 所属 Agent 的 User ID
-	Name    string `gorm:"size:100;not null" json:"name"`           // 名称（Endpoint 上报）
-	Alias   string `gorm:"size:100" json:"alias"`                   // 别名（Server 可修改）
-	Version string `gorm:"size:50" json:"version"`                  // Endpoint 版本
-	Status  string `gorm:"size:20;default:'offline'" json:"status"` // 状态：online/offline
-	Revoked bool   `gorm:"default:false" json:"revoked"`            // 是否已注销
+	ID              string `gorm:"primaryKey;size:36" json:"id"`            // UUID（Server 生成）
+	UserID          uint64 `gorm:"not null;index" json:"user_id"`           // 所属 Agent 的 User ID
+	Name            string `gorm:"size:100;not null" json:"name"`           // 名称（Endpoint 上报）
+	Alias           string `gorm:"size:100" json:"alias"`                   // 别名（Server 可修改）
+	Version         string `gorm:"size:50" json:"version"`                  // Endpoint 版本
+	UpdaterProtocol string `gorm:"size:16" json:"updater_protocol"`         // Endpoint 支持的 updater 协议版本
+	OS              string `gorm:"size:32" json:"os"`                       // Endpoint 操作系统
+	Arch            string `gorm:"size:32" json:"arch"`                     // Endpoint CPU 架构
+	Status          string `gorm:"size:20;default:'offline'" json:"status"` // 状态：online/offline
+	Revoked         bool   `gorm:"default:false" json:"revoked"`            // 是否已注销
 
 	// SSH 能力
 	SSHEnabled bool   `gorm:"default:false" json:"ssh_enabled"`                 // SSH 能力开关

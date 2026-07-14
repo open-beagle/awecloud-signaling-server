@@ -256,7 +256,7 @@ func (p *K8SAPIProxy) handleUpgrade(w http.ResponseWriter, r *http.Request, apiS
 
 	// 使用 KubeconfigManager 的 rest.Config 创建 TLS 连接
 	restConfig := p.kubeconfigMgr.GetRESTConfig()
-	
+
 	// 创建 TLS 配置
 	tlsConfig, err := rest.TLSConfigFor(restConfig)
 	if err != nil {

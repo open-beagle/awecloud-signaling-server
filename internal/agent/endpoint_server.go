@@ -27,6 +27,10 @@ type EndpointConnection struct {
 	Name               string
 	Token              string
 	Version            string
+	OS                 string
+	Arch               string
+	UpdaterProtocol    string
+	UpdateStatuses     []*pb.UpdateStatus
 	Capabilities       []EndpointCapability       // 多能力列表
 	DiscoveredServices []*pb.DiscoveredK8SService // Endpoint 发现的 K8S Service
 	RemoteIP           string
@@ -143,6 +147,10 @@ type EndpointServer struct {
 	pendingSVCReqs map[string][]*pb.SVCProxyRequest
 	pendingMutex   sync.Mutex
 
+	// Server 下发的 Endpoint 更新任务（endpoint name → directives）
+	updateDirectives map[string][]*pb.UpdateDirective
+	updateMutex      sync.RWMutex
+
 	// Endpoint 代理对象（用于端口分配）
 	sshProxy    *EndpointSSHProxy
 	k8sapiProxy *EndpointK8SAPIProxy
@@ -168,9 +176,32 @@ func NewEndpointServer(listenPort int, token string, parentCtx context.Context) 
 		pendingShellReqs:  make(map[string][]*pb.ShellRequest),
 		pendingK8SAPIReqs: make(map[string][]*pb.K8SAPIProxyRequest),
 		pendingSVCReqs:    make(map[string][]*pb.SVCProxyRequest),
+		updateDirectives:  make(map[string][]*pb.UpdateDirective),
 		ctx:               ctx,
 		cancel:            cancel,
 	}
+}
+
+// SetUpdateDirectives replaces the current desired update task set. Server
+// repeats active directives on every heartbeat, so retaining the latest set
+// lets an Endpoint reconnect without losing its task.
+func (s *EndpointServer) SetUpdateDirectives(directives []*pb.UpdateDirective) {
+	byName := make(map[string][]*pb.UpdateDirective)
+	for _, directive := range directives {
+		if directive == nil || directive.TargetName == "" {
+			continue
+		}
+		byName[directive.TargetName] = append(byName[directive.TargetName], directive)
+	}
+	s.updateMutex.Lock()
+	s.updateDirectives = byName
+	s.updateMutex.Unlock()
+}
+
+func (s *EndpointServer) updateDirectivesFor(name string) []*pb.UpdateDirective {
+	s.updateMutex.RLock()
+	defer s.updateMutex.RUnlock()
+	return append([]*pb.UpdateDirective(nil), s.updateDirectives[name]...)
 }
 
 // UpdateServerConfig 更新 Server 下发的 Endpoint 能力配置
@@ -353,6 +384,11 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 	conn := &EndpointConnection{
 		Name:               name,
 		Token:              firstReq.Token,
+		Version:            firstReq.Version,
+		OS:                 firstReq.Os,
+		Arch:               firstReq.Arch,
+		UpdaterProtocol:    firstReq.UpdaterProtocol,
+		UpdateStatuses:     firstReq.UpdateStatuses,
 		Capabilities:       parseCapabilities(firstReq.Capabilities),
 		DiscoveredServices: firstReq.DiscoveredServices,
 		LastSeen:           time.Now(),
@@ -411,8 +447,9 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 
 	// 发送首次响应（携带 Server 下发的能力配置）
 	firstResp := &pb.EndpointHeartbeatResponse{
-		Success: true,
-		Message: "心跳已建立",
+		Success:          true,
+		Message:          "心跳已建立",
+		UpdateDirectives: s.updateDirectivesFor(name),
 	}
 	if cfg := s.getServerConfig(name); cfg != nil {
 		firstResp.SshEnabled = cfg.SSHEnabled
@@ -441,6 +478,11 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 			}
 
 			conn.LastSeen = time.Now()
+			conn.Version = req.Version
+			conn.OS = req.Os
+			conn.Arch = req.Arch
+			conn.UpdaterProtocol = req.UpdaterProtocol
+			conn.UpdateStatuses = req.UpdateStatuses
 			// 更新能力信息（Endpoint 可能在运行中变更配置）
 			if len(req.Capabilities) > 0 {
 				conn.Capabilities = parseCapabilities(req.Capabilities)
@@ -472,6 +514,7 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 				ShellRequests:       shellReqs,
 				K8SapiProxyRequests: k8sapiReqs,
 				SvcProxyRequests:    svcReqs,
+				UpdateDirectives:    s.updateDirectivesFor(name),
 			}
 			if cfg := s.getServerConfig(name); cfg != nil {
 				resp.SshEnabled = cfg.SSHEnabled

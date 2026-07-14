@@ -447,6 +447,12 @@ var (
 	agentVersionCacheTime  time.Time
 )
 
+var (
+	cachedEndpointVersionInfo *VersionInfo
+	endpointVersionCacheMutex sync.RWMutex
+	endpointVersionCacheTime  time.Time
+)
+
 // getAgentVersionInfo 获取 Agent 版本信息
 func getAgentVersionInfo(baseURL string) *VersionInfo {
 	// 检查缓存
@@ -510,6 +516,66 @@ func getAgentDownloadURL(c *gin.Context) (string, error) {
 	return getClientDownloadURL(c)
 }
 
+// GetEndpointVersion 获取 Endpoint 版本信息（公开接口）
+// GET /api/v1/download/endpoint/version
+func (a *DownloadAPI) GetEndpointVersion(c *gin.Context) {
+	baseURL, err := getAgentDownloadURL(c)
+	if err != nil || baseURL == "" {
+		logger.Warnf("[Download] 获取 Endpoint 下载地址失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "Endpoint 下载服务未配置",
+		})
+		return
+	}
+
+	versionInfo := getEndpointVersionInfo(baseURL)
+	c.JSON(http.StatusOK, gin.H{
+		"success":    true,
+		"version":    versionInfo.Version,
+		"build_date": versionInfo.BuildDate,
+	})
+}
+
+func getEndpointVersionInfo(baseURL string) *VersionInfo {
+	endpointVersionCacheMutex.RLock()
+	if cachedEndpointVersionInfo != nil && time.Since(endpointVersionCacheTime) < versionCacheTTL {
+		info := cachedEndpointVersionInfo
+		endpointVersionCacheMutex.RUnlock()
+		return info
+	}
+	endpointVersionCacheMutex.RUnlock()
+
+	versionURL := strings.TrimSuffix(baseURL, "/") + "/signal_endpoint-version.json"
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(versionURL)
+	if err != nil {
+		logger.Warnf("[Download] 获取 Endpoint 版本信息失败: %v", err)
+		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		logger.Warnf("[Download] 获取 Endpoint 版本信息失败: HTTP %d", resp.StatusCode)
+		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logger.Warnf("[Download] 读取 Endpoint 版本信息失败: %v", err)
+		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+	}
+	var versionInfo VersionInfo
+	if err := json.Unmarshal(body, &versionInfo); err != nil {
+		logger.Warnf("[Download] 解析 Endpoint 版本信息失败: %v", err)
+		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+	}
+
+	endpointVersionCacheMutex.Lock()
+	cachedEndpointVersionInfo = &versionInfo
+	endpointVersionCacheTime = time.Now()
+	endpointVersionCacheMutex.Unlock()
+	return &versionInfo
+}
+
 // ============================================
 // Endpoint 下载相关 API
 // ============================================
@@ -550,9 +616,9 @@ func (a *DownloadAPI) GetEndpointDownload(c *gin.Context) {
 		return
 	}
 
-	// 如果没有指定版本，获取最新版本（和 Agent 同版本）
+	// 如果没有指定版本，获取 Endpoint 专属最新版本
 	if version == "" {
-		versionInfo := getAgentVersionInfo(baseURL)
+		versionInfo := getEndpointVersionInfo(baseURL)
 		version = versionInfo.Version
 	}
 

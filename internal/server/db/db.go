@@ -142,6 +142,12 @@ func autoMigrate() error {
 		// Endpoint 模型（统一表）
 		&model.Endpoint{},
 
+		// Updater 发布和任务模型
+		&model.Release{},
+		&model.Artifact{},
+		&model.UpdateTask{},
+		&model.UpdateEvent{},
+
 		// 操作级审计日志
 		&model.OperationAuditLog{},
 	)
