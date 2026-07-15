@@ -4,7 +4,9 @@ package grpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -653,6 +655,12 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		s.handleConnectedEndpoints(ctx, agentID, node.ID, req.ConnectedEndpoints)
 	}
 
+	// ContainerSSH candidates are runtime evidence. The NodeID comes from the
+	// authenticated heartbeat stream, never from an Agent-supplied field.
+	if len(req.ContainerCandidates) > 0 {
+		s.handleContainerCandidates(ctx, node.ID, req.ContainerCandidates)
+	}
+
 	if s.updateService != nil {
 		for _, report := range req.UpdateStatuses {
 			if err := s.updateService.Report(ctx, report.TaskId, service.UpdateStatusReporter{
@@ -682,6 +690,46 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	// 旧的 DiscoveredServices 字段已废弃，不再处理
 
 	return node.ID
+}
+
+func (s *AgentServiceServer) handleContainerCandidates(ctx context.Context, nodeID uint64, reports []*pb.ContainerDiscoveryCandidate) {
+	now := time.Now()
+	for _, report := range reports {
+		if report == nil || report.PodUid == "" || report.Namespace == "" || report.ContainerName == "" {
+			continue
+		}
+		var candidate model.DiscoveryCandidate
+		err := db.DB.WithContext(ctx).Where("agent_node_id = ? AND pod_uid = ? AND container_name = ?", nodeID, report.PodUid, report.ContainerName).First(&candidate).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			candidate = model.DiscoveryCandidate{ID: uuid.NewString(), AgentNodeID: nodeID, PodUID: report.PodUid, ContainerName: report.ContainerName, Status: model.DiscoveryCandidateObserved}
+		} else if err != nil {
+			logger.Warnf("查询 ContainerSSH Candidate 失败: node_id=%d pod_uid=%s err=%v", nodeID, report.PodUid, err)
+			continue
+		}
+		if candidate.Status == "" || candidate.Status == model.DiscoveryCandidateStale {
+			candidate.Status = model.DiscoveryCandidateObserved
+		}
+		candidate.ProviderHint = strings.TrimSpace(report.ProviderHint)
+		candidate.WorkspaceHint = strings.TrimSpace(report.WorkspaceHint)
+		candidate.GenerationHint = report.GenerationHint
+		candidate.ClusterID = strings.TrimSpace(report.ClusterId)
+		candidate.Namespace = strings.TrimSpace(report.Namespace)
+		candidate.PodName = strings.TrimSpace(report.PodName)
+		candidate.Ready = report.Ready
+		candidate.ObservedAt = now
+		leaseSeconds := int(report.LeaseSeconds)
+		if leaseSeconds <= 0 || leaseSeconds > 24*60*60 {
+			leaseSeconds = 120
+		}
+		expires := now.Add(time.Duration(leaseSeconds) * time.Second)
+		candidate.LeaseExpiresAt = &expires
+		if labelsJSON, marshalErr := json.Marshal(report.Labels); marshalErr == nil {
+			candidate.LabelSnapshot = string(labelsJSON)
+		}
+		if err := db.DB.WithContext(ctx).Save(&candidate).Error; err != nil {
+			logger.Warnf("保存 ContainerSSH Candidate 失败: node_id=%d pod_uid=%s err=%v", nodeID, report.PodUid, err)
+		}
+	}
 }
 
 // sendHeartbeatResponse 发送心跳响应

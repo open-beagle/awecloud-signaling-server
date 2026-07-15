@@ -74,7 +74,7 @@ export default {
     passwordRequired: '请输入密码'
   },
   app: {
-    title: 'MCP 服务 - 信令',
+    title: 'Beagle Signal',
     shortTitle: '信令'
   },
   menu: {

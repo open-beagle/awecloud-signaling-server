@@ -435,10 +435,11 @@ func (a *DesktopRESTAPI) GetResources(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success":     true,
-		"ssh":         resp.Ssh,
-		"k8s_api":     resp.K8SApi,
-		"k8s_service": resp.K8SService,
+		"success":       true,
+		"ssh":           resp.Ssh,
+		"k8s_api":       resp.K8SApi,
+		"k8s_service":   resp.K8SService,
+		"container_ssh": resp.ContainerSsh,
 	})
 }
 

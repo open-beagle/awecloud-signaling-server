@@ -436,6 +436,7 @@ message GetResourcesResponse {
   repeated SSHResource ssh = 1;
   repeated K8SAPIResource k8s_api = 2;
   repeated K8SServiceResource k8s_service = 3;
+  repeated ContainerSSHResource container_ssh = 4;
 }
 
 // ============================================
@@ -492,4 +493,21 @@ message DomainInfo {
 // ListDomainsResponse 列出域名响应
 message ListDomainsResponse {
   repeated DomainInfo domains = 1; // 域名列表
+}
+
+// ContainerSSHResource is the user-visible projection of a unified resource.
+// It intentionally omits Pod UID, Pod IP, Kubernetes credentials and other
+// runtime internals; the connection broker receives those from Server.
+message ContainerSSHResource {
+  string resource_id = 1;
+  string tenant_id = 2;
+  string tenant_name = 3;
+  string display_name = 4;
+  string provider_id = 5;
+  string external_workspace_id = 6;
+  string state = 7;
+  int64 target_revision = 8;
+  uint64 agent_node_id = 9;
+  string cluster_id = 10;
+  string capability = 11;
 }

@@ -82,6 +82,16 @@ func autoMigrate() error {
 		&model.User{},
 		&model.Node{},
 
+		// 统一资源模型
+		&model.Tenant{},
+		&model.TenantMembership{},
+		&model.ProviderTenantBinding{},
+		&model.WorkspaceBinding{},
+		&model.Resource{},
+		&model.ResourceTarget{},
+		&model.AccessGrant{},
+		&model.DiscoveryCandidate{},
+
 		// 分组模型
 		&model.Group{},
 		&model.GroupMember{},

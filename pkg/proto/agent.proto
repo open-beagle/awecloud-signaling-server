@@ -145,6 +145,7 @@ message AgentHeartbeatRequest {
   SystemInfo system_info = 15; // Agent 运行平台信息
   string updater_protocol = 16; // 支持的 updater 协议版本
   repeated UpdateStatus update_statuses = 17; // Agent 自身更新状态
+  repeated ContainerDiscoveryCandidate container_candidates = 18; // ContainerSSH 运行时候选（仅运行态证据）
 }
 
 // ConnectedEndpoint Agent 上报的已连接 Endpoint 信息
@@ -441,4 +442,20 @@ message GetUserDeviceInfoResponse {
   string device_name = 3; // 设备名称
   string device_os = 4; // 操作系统
   string device_ip = 5; // 设备 IP
+}
+
+// ContainerDiscoveryCandidate is runtime evidence only. Server must reconcile
+// it with a trusted Provider Workspace Binding before publishing a Resource.
+message ContainerDiscoveryCandidate {
+  string provider_hint = 1; // 外部 Provider 提示，不代表可信业务归属
+  string workspace_hint = 2; // 外部 Workspace 提示，不代表 Tenant
+  int64 generation_hint = 3; // Provider generation 提示，0 表示未提供
+  string cluster_id = 4;
+  string namespace = 5;
+  string pod_name = 6;
+  string pod_uid = 7;
+  string container_name = 8;
+  bool ready = 9;
+  int32 lease_seconds = 10;
+  map<string, string> labels = 11;
 }

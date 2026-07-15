@@ -624,14 +624,15 @@ type AgentHeartbeatRequest struct {
 	// 已连接的 Endpoint 列表（Agent 上报）
 	ConnectedEndpoints []*ConnectedEndpoint `protobuf:"bytes,11,rep,name=connected_endpoints,json=connectedEndpoints,proto3" json:"connected_endpoints,omitempty"` // 已连接的 Endpoint 列表
 	// 操作审计记录（Agent 上报）
-	AuditRecords    []*OperationAuditRecord `protobuf:"bytes,12,rep,name=audit_records,json=auditRecords,proto3" json:"audit_records,omitempty"`          // 操作审计记录
-	DeviceName      string                  `protobuf:"bytes,13,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`                // 设备名称（Node.Name，即 DeployToken.Name）
-	Version         string                  `protobuf:"bytes,14,opt,name=version,proto3" json:"version,omitempty"`                                        // Agent 当前运行版本
-	SystemInfo      *SystemInfo             `protobuf:"bytes,15,opt,name=system_info,json=systemInfo,proto3" json:"system_info,omitempty"`                // Agent 运行平台信息
-	UpdaterProtocol string                  `protobuf:"bytes,16,opt,name=updater_protocol,json=updaterProtocol,proto3" json:"updater_protocol,omitempty"` // 支持的 updater 协议版本
-	UpdateStatuses  []*UpdateStatus         `protobuf:"bytes,17,rep,name=update_statuses,json=updateStatuses,proto3" json:"update_statuses,omitempty"`    // Agent 自身更新状态
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	AuditRecords        []*OperationAuditRecord        `protobuf:"bytes,12,rep,name=audit_records,json=auditRecords,proto3" json:"audit_records,omitempty"`                      // 操作审计记录
+	DeviceName          string                         `protobuf:"bytes,13,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`                            // 设备名称（Node.Name，即 DeployToken.Name）
+	Version             string                         `protobuf:"bytes,14,opt,name=version,proto3" json:"version,omitempty"`                                                    // Agent 当前运行版本
+	SystemInfo          *SystemInfo                    `protobuf:"bytes,15,opt,name=system_info,json=systemInfo,proto3" json:"system_info,omitempty"`                            // Agent 运行平台信息
+	UpdaterProtocol     string                         `protobuf:"bytes,16,opt,name=updater_protocol,json=updaterProtocol,proto3" json:"updater_protocol,omitempty"`             // 支持的 updater 协议版本
+	UpdateStatuses      []*UpdateStatus                `protobuf:"bytes,17,rep,name=update_statuses,json=updateStatuses,proto3" json:"update_statuses,omitempty"`                // Agent 自身更新状态
+	ContainerCandidates []*ContainerDiscoveryCandidate `protobuf:"bytes,18,rep,name=container_candidates,json=containerCandidates,proto3" json:"container_candidates,omitempty"` // ContainerSSH 运行时候选（仅运行态证据）
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *AgentHeartbeatRequest) Reset() {
@@ -779,6 +780,13 @@ func (x *AgentHeartbeatRequest) GetUpdaterProtocol() string {
 func (x *AgentHeartbeatRequest) GetUpdateStatuses() []*UpdateStatus {
 	if x != nil {
 		return x.UpdateStatuses
+	}
+	return nil
+}
+
+func (x *AgentHeartbeatRequest) GetContainerCandidates() []*ContainerDiscoveryCandidate {
+	if x != nil {
+		return x.ContainerCandidates
 	}
 	return nil
 }
@@ -3047,6 +3055,132 @@ func (x *GetUserDeviceInfoResponse) GetDeviceIp() string {
 	return ""
 }
 
+// ContainerDiscoveryCandidate is runtime evidence only. Server must reconcile
+// it with a trusted Provider Workspace Binding before publishing a Resource.
+type ContainerDiscoveryCandidate struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ProviderHint   string                 `protobuf:"bytes,1,opt,name=provider_hint,json=providerHint,proto3" json:"provider_hint,omitempty"`        // 外部 Provider 提示，不代表可信业务归属
+	WorkspaceHint  string                 `protobuf:"bytes,2,opt,name=workspace_hint,json=workspaceHint,proto3" json:"workspace_hint,omitempty"`     // 外部 Workspace 提示，不代表 Tenant
+	GenerationHint int64                  `protobuf:"varint,3,opt,name=generation_hint,json=generationHint,proto3" json:"generation_hint,omitempty"` // Provider generation 提示，0 表示未提供
+	ClusterId      string                 `protobuf:"bytes,4,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	Namespace      string                 `protobuf:"bytes,5,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	PodName        string                 `protobuf:"bytes,6,opt,name=pod_name,json=podName,proto3" json:"pod_name,omitempty"`
+	PodUid         string                 `protobuf:"bytes,7,opt,name=pod_uid,json=podUid,proto3" json:"pod_uid,omitempty"`
+	ContainerName  string                 `protobuf:"bytes,8,opt,name=container_name,json=containerName,proto3" json:"container_name,omitempty"`
+	Ready          bool                   `protobuf:"varint,9,opt,name=ready,proto3" json:"ready,omitempty"`
+	LeaseSeconds   int32                  `protobuf:"varint,10,opt,name=lease_seconds,json=leaseSeconds,proto3" json:"lease_seconds,omitempty"`
+	Labels         map[string]string      `protobuf:"bytes,11,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ContainerDiscoveryCandidate) Reset() {
+	*x = ContainerDiscoveryCandidate{}
+	mi := &file_pkg_proto_agent_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContainerDiscoveryCandidate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContainerDiscoveryCandidate) ProtoMessage() {}
+
+func (x *ContainerDiscoveryCandidate) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_agent_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContainerDiscoveryCandidate.ProtoReflect.Descriptor instead.
+func (*ContainerDiscoveryCandidate) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_agent_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *ContainerDiscoveryCandidate) GetProviderHint() string {
+	if x != nil {
+		return x.ProviderHint
+	}
+	return ""
+}
+
+func (x *ContainerDiscoveryCandidate) GetWorkspaceHint() string {
+	if x != nil {
+		return x.WorkspaceHint
+	}
+	return ""
+}
+
+func (x *ContainerDiscoveryCandidate) GetGenerationHint() int64 {
+	if x != nil {
+		return x.GenerationHint
+	}
+	return 0
+}
+
+func (x *ContainerDiscoveryCandidate) GetClusterId() string {
+	if x != nil {
+		return x.ClusterId
+	}
+	return ""
+}
+
+func (x *ContainerDiscoveryCandidate) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+func (x *ContainerDiscoveryCandidate) GetPodName() string {
+	if x != nil {
+		return x.PodName
+	}
+	return ""
+}
+
+func (x *ContainerDiscoveryCandidate) GetPodUid() string {
+	if x != nil {
+		return x.PodUid
+	}
+	return ""
+}
+
+func (x *ContainerDiscoveryCandidate) GetContainerName() string {
+	if x != nil {
+		return x.ContainerName
+	}
+	return ""
+}
+
+func (x *ContainerDiscoveryCandidate) GetReady() bool {
+	if x != nil {
+		return x.Ready
+	}
+	return false
+}
+
+func (x *ContainerDiscoveryCandidate) GetLeaseSeconds() int32 {
+	if x != nil {
+		return x.LeaseSeconds
+	}
+	return 0
+}
+
+func (x *ContainerDiscoveryCandidate) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
 var File_pkg_proto_agent_proto protoreflect.FileDescriptor
 
 const file_pkg_proto_agent_proto_rawDesc = "" +
@@ -3104,7 +3238,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\n" +
 	"forward_id\x18\x01 \x01(\tR\tforwardId\x12\x18\n" +
 	"\arunning\x18\x02 \x01(\bR\arunning\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\xd5\a\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xb9\b\n" +
 	"\x15AgentHeartbeatRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\x04R\aagentId\x12\x1b\n" +
 	"\ttunnel_ip\x18\x02 \x01(\tR\btunnelIp\x12)\n" +
@@ -3125,7 +3259,8 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\vsystem_info\x18\x0f \x01(\v2\x1e.awecloud.signaling.SystemInfoR\n" +
 	"systemInfo\x12)\n" +
 	"\x10updater_protocol\x18\x10 \x01(\tR\x0fupdaterProtocol\x12I\n" +
-	"\x0fupdate_statuses\x18\x11 \x03(\v2 .awecloud.signaling.UpdateStatusR\x0eupdateStatuses\"\x94\x05\n" +
+	"\x0fupdate_statuses\x18\x11 \x03(\v2 .awecloud.signaling.UpdateStatusR\x0eupdateStatuses\x12b\n" +
+	"\x14container_candidates\x18\x12 \x03(\v2/.awecloud.signaling.ContainerDiscoveryCandidateR\x13containerCandidates\"\x94\x05\n" +
 	"\x11ConnectedEndpoint\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12N\n" +
@@ -3353,7 +3488,24 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\vdevice_name\x18\x03 \x01(\tR\n" +
 	"deviceName\x12\x1b\n" +
 	"\tdevice_os\x18\x04 \x01(\tR\bdeviceOs\x12\x1b\n" +
-	"\tdevice_ip\x18\x05 \x01(\tR\bdeviceIp2\xde\a\n" +
+	"\tdevice_ip\x18\x05 \x01(\tR\bdeviceIp\"\xf5\x03\n" +
+	"\x1bContainerDiscoveryCandidate\x12#\n" +
+	"\rprovider_hint\x18\x01 \x01(\tR\fproviderHint\x12%\n" +
+	"\x0eworkspace_hint\x18\x02 \x01(\tR\rworkspaceHint\x12'\n" +
+	"\x0fgeneration_hint\x18\x03 \x01(\x03R\x0egenerationHint\x12\x1d\n" +
+	"\n" +
+	"cluster_id\x18\x04 \x01(\tR\tclusterId\x12\x1c\n" +
+	"\tnamespace\x18\x05 \x01(\tR\tnamespace\x12\x19\n" +
+	"\bpod_name\x18\x06 \x01(\tR\apodName\x12\x17\n" +
+	"\apod_uid\x18\a \x01(\tR\x06podUid\x12%\n" +
+	"\x0econtainer_name\x18\b \x01(\tR\rcontainerName\x12\x14\n" +
+	"\x05ready\x18\t \x01(\bR\x05ready\x12#\n" +
+	"\rlease_seconds\x18\n" +
+	" \x01(\x05R\fleaseSeconds\x12S\n" +
+	"\x06labels\x18\v \x03(\v2;.awecloud.signaling.ContainerDiscoveryCandidate.LabelsEntryR\x06labels\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\xde\a\n" +
 	"\fAgentService\x12_\n" +
 	"\bRegister\x12(.awecloud.signaling.AgentRegisterRequest\x1a).awecloud.signaling.AgentRegisterResponse\x12k\n" +
 	"\fAuthenticate\x12,.awecloud.signaling.AgentAuthenticateRequest\x1a-.awecloud.signaling.AgentAuthenticateResponse\x12f\n" +
@@ -3377,7 +3529,7 @@ func file_pkg_proto_agent_proto_rawDescGZIP() []byte {
 	return file_pkg_proto_agent_proto_rawDescData
 }
 
-var file_pkg_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
+var file_pkg_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
 var file_pkg_proto_agent_proto_goTypes = []any{
 	(*SystemInfo)(nil),                   // 0: awecloud.signaling.SystemInfo
 	(*NetworkInterface)(nil),             // 1: awecloud.signaling.NetworkInterface
@@ -3414,10 +3566,12 @@ var file_pkg_proto_agent_proto_goTypes = []any{
 	(*SVCProxyData)(nil),                 // 32: awecloud.signaling.SVCProxyData
 	(*GetUserDeviceInfoRequest)(nil),     // 33: awecloud.signaling.GetUserDeviceInfoRequest
 	(*GetUserDeviceInfoResponse)(nil),    // 34: awecloud.signaling.GetUserDeviceInfoResponse
-	(*DiscoveredK8SService)(nil),         // 35: awecloud.signaling.DiscoveredK8SService
-	(*UpdateStatus)(nil),                 // 36: awecloud.signaling.UpdateStatus
-	(*EndpointCapabilityInfo)(nil),       // 37: awecloud.signaling.EndpointCapabilityInfo
-	(*UpdateDirective)(nil),              // 38: awecloud.signaling.UpdateDirective
+	(*ContainerDiscoveryCandidate)(nil),  // 35: awecloud.signaling.ContainerDiscoveryCandidate
+	nil,                                  // 36: awecloud.signaling.ContainerDiscoveryCandidate.LabelsEntry
+	(*DiscoveredK8SService)(nil),         // 37: awecloud.signaling.DiscoveredK8SService
+	(*UpdateStatus)(nil),                 // 38: awecloud.signaling.UpdateStatus
+	(*EndpointCapabilityInfo)(nil),       // 39: awecloud.signaling.EndpointCapabilityInfo
+	(*UpdateDirective)(nil),              // 40: awecloud.signaling.UpdateDirective
 }
 var file_pkg_proto_agent_proto_depIdxs = []int32{
 	0,  // 0: awecloud.signaling.AgentRegisterRequest.system_info:type_name -> awecloud.signaling.SystemInfo
@@ -3426,52 +3580,54 @@ var file_pkg_proto_agent_proto_depIdxs = []int32{
 	7,  // 3: awecloud.signaling.AgentHeartbeatRequest.forward_status:type_name -> awecloud.signaling.ForwardStatus
 	1,  // 4: awecloud.signaling.AgentHeartbeatRequest.networks:type_name -> awecloud.signaling.NetworkInterface
 	10, // 5: awecloud.signaling.AgentHeartbeatRequest.domain_registrations:type_name -> awecloud.signaling.DomainRegistration
-	35, // 6: awecloud.signaling.AgentHeartbeatRequest.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
+	37, // 6: awecloud.signaling.AgentHeartbeatRequest.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
 	9,  // 7: awecloud.signaling.AgentHeartbeatRequest.connected_endpoints:type_name -> awecloud.signaling.ConnectedEndpoint
 	21, // 8: awecloud.signaling.AgentHeartbeatRequest.audit_records:type_name -> awecloud.signaling.OperationAuditRecord
 	0,  // 9: awecloud.signaling.AgentHeartbeatRequest.system_info:type_name -> awecloud.signaling.SystemInfo
-	36, // 10: awecloud.signaling.AgentHeartbeatRequest.update_statuses:type_name -> awecloud.signaling.UpdateStatus
-	37, // 11: awecloud.signaling.ConnectedEndpoint.capabilities:type_name -> awecloud.signaling.EndpointCapabilityInfo
-	35, // 12: awecloud.signaling.ConnectedEndpoint.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
-	36, // 13: awecloud.signaling.ConnectedEndpoint.update_statuses:type_name -> awecloud.signaling.UpdateStatus
-	11, // 14: awecloud.signaling.AgentHeartbeatResponse.services:type_name -> awecloud.signaling.ServiceConfig
-	12, // 15: awecloud.signaling.AgentHeartbeatResponse.forwards:type_name -> awecloud.signaling.ForwardConfig
-	16, // 16: awecloud.signaling.AgentHeartbeatResponse.k8s_permissions:type_name -> awecloud.signaling.K8SPermission
-	17, // 17: awecloud.signaling.AgentHeartbeatResponse.k8s_service_permissions:type_name -> awecloud.signaling.K8SServicePermission
-	15, // 18: awecloud.signaling.AgentHeartbeatResponse.capability_config:type_name -> awecloud.signaling.AgentCapabilityConfig
-	20, // 19: awecloud.signaling.AgentHeartbeatResponse.endpoint_ssh_permissions:type_name -> awecloud.signaling.EndpointSSHPermission
-	18, // 20: awecloud.signaling.AgentHeartbeatResponse.endpoint_k8sapi_permissions:type_name -> awecloud.signaling.EndpointK8SAPIPermission
-	19, // 21: awecloud.signaling.AgentHeartbeatResponse.endpoint_k8sservice_permissions:type_name -> awecloud.signaling.EndpointK8SServicePermission
-	14, // 22: awecloud.signaling.AgentHeartbeatResponse.endpoint_capability_configs:type_name -> awecloud.signaling.EndpointCapabilityConfig
-	38, // 23: awecloud.signaling.AgentHeartbeatResponse.update_directives:type_name -> awecloud.signaling.UpdateDirective
-	38, // 24: awecloud.signaling.AgentHeartbeatResponse.endpoint_update_directives:type_name -> awecloud.signaling.UpdateDirective
-	1,  // 25: awecloud.signaling.GetRealtimeStatusResponse.networks:type_name -> awecloud.signaling.NetworkInterface
-	24, // 26: awecloud.signaling.ReportProxyStatusRequest.statuses:type_name -> awecloud.signaling.ProxyStatus
-	27, // 27: awecloud.signaling.ReportVisitorStatusRequest.statuses:type_name -> awecloud.signaling.VisitorStatus
-	1,  // 28: awecloud.signaling.ReportNetworkChangeRequest.networks:type_name -> awecloud.signaling.NetworkInterface
-	2,  // 29: awecloud.signaling.AgentService.Register:input_type -> awecloud.signaling.AgentRegisterRequest
-	4,  // 30: awecloud.signaling.AgentService.Authenticate:input_type -> awecloud.signaling.AgentAuthenticateRequest
-	8,  // 31: awecloud.signaling.AgentService.Heartbeat:input_type -> awecloud.signaling.AgentHeartbeatRequest
-	22, // 32: awecloud.signaling.AgentService.GetRealtimeStatus:input_type -> awecloud.signaling.GetRealtimeStatusRequest
-	25, // 33: awecloud.signaling.AgentService.ReportProxyStatus:input_type -> awecloud.signaling.ReportProxyStatusRequest
-	28, // 34: awecloud.signaling.AgentService.ReportVisitorStatus:input_type -> awecloud.signaling.ReportVisitorStatusRequest
-	30, // 35: awecloud.signaling.AgentService.ReportNetworkChange:input_type -> awecloud.signaling.ReportNetworkChangeRequest
-	32, // 36: awecloud.signaling.AgentService.SVCProxy:input_type -> awecloud.signaling.SVCProxyData
-	33, // 37: awecloud.signaling.AgentService.GetUserDeviceInfo:input_type -> awecloud.signaling.GetUserDeviceInfoRequest
-	3,  // 38: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.AgentRegisterResponse
-	5,  // 39: awecloud.signaling.AgentService.Authenticate:output_type -> awecloud.signaling.AgentAuthenticateResponse
-	13, // 40: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.AgentHeartbeatResponse
-	23, // 41: awecloud.signaling.AgentService.GetRealtimeStatus:output_type -> awecloud.signaling.GetRealtimeStatusResponse
-	26, // 42: awecloud.signaling.AgentService.ReportProxyStatus:output_type -> awecloud.signaling.ReportProxyStatusResponse
-	29, // 43: awecloud.signaling.AgentService.ReportVisitorStatus:output_type -> awecloud.signaling.ReportVisitorStatusResponse
-	31, // 44: awecloud.signaling.AgentService.ReportNetworkChange:output_type -> awecloud.signaling.ReportNetworkChangeResponse
-	32, // 45: awecloud.signaling.AgentService.SVCProxy:output_type -> awecloud.signaling.SVCProxyData
-	34, // 46: awecloud.signaling.AgentService.GetUserDeviceInfo:output_type -> awecloud.signaling.GetUserDeviceInfoResponse
-	38, // [38:47] is the sub-list for method output_type
-	29, // [29:38] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	38, // 10: awecloud.signaling.AgentHeartbeatRequest.update_statuses:type_name -> awecloud.signaling.UpdateStatus
+	35, // 11: awecloud.signaling.AgentHeartbeatRequest.container_candidates:type_name -> awecloud.signaling.ContainerDiscoveryCandidate
+	39, // 12: awecloud.signaling.ConnectedEndpoint.capabilities:type_name -> awecloud.signaling.EndpointCapabilityInfo
+	37, // 13: awecloud.signaling.ConnectedEndpoint.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
+	38, // 14: awecloud.signaling.ConnectedEndpoint.update_statuses:type_name -> awecloud.signaling.UpdateStatus
+	11, // 15: awecloud.signaling.AgentHeartbeatResponse.services:type_name -> awecloud.signaling.ServiceConfig
+	12, // 16: awecloud.signaling.AgentHeartbeatResponse.forwards:type_name -> awecloud.signaling.ForwardConfig
+	16, // 17: awecloud.signaling.AgentHeartbeatResponse.k8s_permissions:type_name -> awecloud.signaling.K8SPermission
+	17, // 18: awecloud.signaling.AgentHeartbeatResponse.k8s_service_permissions:type_name -> awecloud.signaling.K8SServicePermission
+	15, // 19: awecloud.signaling.AgentHeartbeatResponse.capability_config:type_name -> awecloud.signaling.AgentCapabilityConfig
+	20, // 20: awecloud.signaling.AgentHeartbeatResponse.endpoint_ssh_permissions:type_name -> awecloud.signaling.EndpointSSHPermission
+	18, // 21: awecloud.signaling.AgentHeartbeatResponse.endpoint_k8sapi_permissions:type_name -> awecloud.signaling.EndpointK8SAPIPermission
+	19, // 22: awecloud.signaling.AgentHeartbeatResponse.endpoint_k8sservice_permissions:type_name -> awecloud.signaling.EndpointK8SServicePermission
+	14, // 23: awecloud.signaling.AgentHeartbeatResponse.endpoint_capability_configs:type_name -> awecloud.signaling.EndpointCapabilityConfig
+	40, // 24: awecloud.signaling.AgentHeartbeatResponse.update_directives:type_name -> awecloud.signaling.UpdateDirective
+	40, // 25: awecloud.signaling.AgentHeartbeatResponse.endpoint_update_directives:type_name -> awecloud.signaling.UpdateDirective
+	1,  // 26: awecloud.signaling.GetRealtimeStatusResponse.networks:type_name -> awecloud.signaling.NetworkInterface
+	24, // 27: awecloud.signaling.ReportProxyStatusRequest.statuses:type_name -> awecloud.signaling.ProxyStatus
+	27, // 28: awecloud.signaling.ReportVisitorStatusRequest.statuses:type_name -> awecloud.signaling.VisitorStatus
+	1,  // 29: awecloud.signaling.ReportNetworkChangeRequest.networks:type_name -> awecloud.signaling.NetworkInterface
+	36, // 30: awecloud.signaling.ContainerDiscoveryCandidate.labels:type_name -> awecloud.signaling.ContainerDiscoveryCandidate.LabelsEntry
+	2,  // 31: awecloud.signaling.AgentService.Register:input_type -> awecloud.signaling.AgentRegisterRequest
+	4,  // 32: awecloud.signaling.AgentService.Authenticate:input_type -> awecloud.signaling.AgentAuthenticateRequest
+	8,  // 33: awecloud.signaling.AgentService.Heartbeat:input_type -> awecloud.signaling.AgentHeartbeatRequest
+	22, // 34: awecloud.signaling.AgentService.GetRealtimeStatus:input_type -> awecloud.signaling.GetRealtimeStatusRequest
+	25, // 35: awecloud.signaling.AgentService.ReportProxyStatus:input_type -> awecloud.signaling.ReportProxyStatusRequest
+	28, // 36: awecloud.signaling.AgentService.ReportVisitorStatus:input_type -> awecloud.signaling.ReportVisitorStatusRequest
+	30, // 37: awecloud.signaling.AgentService.ReportNetworkChange:input_type -> awecloud.signaling.ReportNetworkChangeRequest
+	32, // 38: awecloud.signaling.AgentService.SVCProxy:input_type -> awecloud.signaling.SVCProxyData
+	33, // 39: awecloud.signaling.AgentService.GetUserDeviceInfo:input_type -> awecloud.signaling.GetUserDeviceInfoRequest
+	3,  // 40: awecloud.signaling.AgentService.Register:output_type -> awecloud.signaling.AgentRegisterResponse
+	5,  // 41: awecloud.signaling.AgentService.Authenticate:output_type -> awecloud.signaling.AgentAuthenticateResponse
+	13, // 42: awecloud.signaling.AgentService.Heartbeat:output_type -> awecloud.signaling.AgentHeartbeatResponse
+	23, // 43: awecloud.signaling.AgentService.GetRealtimeStatus:output_type -> awecloud.signaling.GetRealtimeStatusResponse
+	26, // 44: awecloud.signaling.AgentService.ReportProxyStatus:output_type -> awecloud.signaling.ReportProxyStatusResponse
+	29, // 45: awecloud.signaling.AgentService.ReportVisitorStatus:output_type -> awecloud.signaling.ReportVisitorStatusResponse
+	31, // 46: awecloud.signaling.AgentService.ReportNetworkChange:output_type -> awecloud.signaling.ReportNetworkChangeResponse
+	32, // 47: awecloud.signaling.AgentService.SVCProxy:output_type -> awecloud.signaling.SVCProxyData
+	34, // 48: awecloud.signaling.AgentService.GetUserDeviceInfo:output_type -> awecloud.signaling.GetUserDeviceInfoResponse
+	40, // [40:49] is the sub-list for method output_type
+	31, // [31:40] is the sub-list for method input_type
+	31, // [31:31] is the sub-list for extension type_name
+	31, // [31:31] is the sub-list for extension extendee
+	0,  // [0:31] is the sub-list for field type_name
 }
 
 func init() { file_pkg_proto_agent_proto_init() }
@@ -3487,7 +3643,7 @@ func file_pkg_proto_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_agent_proto_rawDesc), len(file_pkg_proto_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   35,
+			NumMessages:   37,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

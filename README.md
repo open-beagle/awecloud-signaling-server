@@ -1,6 +1,6 @@
-# AWECloud Signaling Server
+# Beagle Signal Server
 
-安全的内网穿透访问系统，通过 Tailscale/Headscale 建立安全隧道，允许用户通过 Desktop 客户端访问内网服务。
+面向研发、测试和运维人员的零信任资源访问服务，通过 Tailscale/Headscale 建立安全通道，允许用户使用原生工具访问明确授权的远程资源。
 
 **核心功能**：
 

@@ -74,7 +74,7 @@ export default {
     passwordRequired: 'Password is required'
   },
   app: {
-    title: 'Signaling Server',
+    title: 'Beagle Signal',
     shortTitle: 'Signaling'
   },
   menu: {

@@ -18,7 +18,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/components/Layout/Layout.vue'),
-    redirect: '/users',
+    redirect: '/resources',
     meta: { requiresAuth: true },
     children: [
       // 用户管理
@@ -97,6 +97,18 @@ const routes: RouteRecordRaw[] = [
         path: 'resources',
         name: 'Resources',
         component: () => import('@/views/Resource/List.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'resources/:id',
+        name: 'ResourceDetail',
+        component: () => import('@/views/Resource/Detail.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'resource-candidates',
+        name: 'ResourceCandidates',
+        component: () => import('@/views/Resource/Candidates.vue'),
         meta: { requiresAuth: true }
       },
       // 域名管理
