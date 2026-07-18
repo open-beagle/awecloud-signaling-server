@@ -246,6 +246,20 @@ func (i *K8SServiceInformer) Stop() {
 // createK8SClientset 创建 K8S 客户端
 // 优先级：显式 kubeconfig > InCluster > ~/.kube/config
 func createK8SClientset(kubeconfig string) (kubernetes.Interface, error) {
+	config, err := loadK8SRESTConfig(kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("创建 clientset 失败: %w", err)
+	}
+	return clientset, nil
+}
+
+// loadK8SRESTConfig is shared by discovery and ContainerSSH exec so both use
+// the exact same kubeconfig/in-cluster identity and RBAC boundary.
+func loadK8SRESTConfig(kubeconfig string) (*rest.Config, error) {
 	var config *rest.Config
 	var err error
 
@@ -287,10 +301,5 @@ func createK8SClientset(kubeconfig string) (kubernetes.Interface, error) {
 		}
 	}
 
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("创建 clientset 失败: %w", err)
-	}
-
-	return clientset, nil
+	return config, nil
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -10,8 +11,10 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 )
 
 // WorkspaceBindingAPI manages the trusted business side of ContainerSSH
@@ -112,6 +115,7 @@ func (a *WorkspaceBindingAPI) CreateProviderTenantBinding(c *gin.Context) {
 			return
 		}
 		recordAuditLog(ctx, c, "create_provider_tenant_binding", "provider_tenant_binding", binding.ID, binding.ExternalTenantID, binding)
+		a.reconcileProviderTenant(ctx, binding.ProviderID, binding.ExternalTenantID)
 		c.JSON(http.StatusCreated, NewSuccessResponse(binding))
 		return
 	} else if err != nil {
@@ -127,6 +131,7 @@ func (a *WorkspaceBindingAPI) CreateProviderTenantBinding(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("恢复 Provider 客户绑定失败"))
 		return
 	}
+	a.reconcileProviderTenant(ctx, binding.ProviderID, binding.ExternalTenantID)
 	c.JSON(http.StatusOK, NewSuccessResponse(binding))
 }
 
@@ -289,9 +294,24 @@ func (a *WorkspaceBindingAPI) CreateWorkspaceBinding(c *gin.Context) {
 	} else {
 		recordAuditLog(ctx, c, "update_workspace_binding", "workspace_binding", binding.ID, binding.ExternalWorkspaceID, binding)
 	}
+	a.reconcileWorkspace(ctx, binding.ProviderID, binding.ExternalWorkspaceID)
 	if existingErr != nil {
 		c.JSON(http.StatusCreated, NewSuccessResponse(binding))
 	} else {
 		c.JSON(http.StatusOK, NewSuccessResponse(binding))
+	}
+}
+
+func (a *WorkspaceBindingAPI) reconcileProviderTenant(ctx context.Context, providerID, externalTenantID string) {
+	count, err := service.NewResourceReconciliationService(db.DB).ReconcileProviderTenant(ctx, providerID, externalTenantID)
+	if err != nil {
+		logger.Warnf("Provider Tenant Binding 变更后自动匹配失败: provider=%s external_tenant=%s matched=%d err=%v", providerID, externalTenantID, count, err)
+	}
+}
+
+func (a *WorkspaceBindingAPI) reconcileWorkspace(ctx context.Context, providerID, workspaceID string) {
+	count, err := service.NewResourceReconciliationService(db.DB).ReconcileWorkspace(ctx, providerID, workspaceID)
+	if err != nil {
+		logger.Warnf("Workspace Binding 变更后自动匹配失败: provider=%s workspace=%s matched=%d err=%v", providerID, workspaceID, count, err)
 	}
 }

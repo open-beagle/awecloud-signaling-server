@@ -25,7 +25,7 @@ func TestUnifiedResourceTenantAndGrantBoundaries(t *testing.T) {
 	testDB, err := gorm.Open(sqlite.Open("file:unified_resource_test?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	db.DB = testDB
-	require.NoError(t, testDB.AutoMigrate(&model.User{}, &model.Node{}, &model.Tenant{}, &model.TenantMembership{}, &model.Resource{}, &model.ResourceTarget{}, &model.AccessGrant{}))
+	require.NoError(t, testDB.AutoMigrate(&model.User{}, &model.Node{}, &model.Tenant{}, &model.TenantMembership{}, &model.Resource{}, &model.ResourceTarget{}, &model.AccessGrant{}, &model.ContainerSession{}))
 
 	tenantA := model.Tenant{ID: uuid.NewString(), Key: "tenant-a", Name: "Tenant A", Status: model.TenantStatusActive}
 	tenantB := model.Tenant{ID: uuid.NewString(), Key: "tenant-b", Name: "Tenant B", Status: model.TenantStatusActive}

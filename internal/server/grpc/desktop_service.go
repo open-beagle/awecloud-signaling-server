@@ -1694,6 +1694,7 @@ func (s *DesktopServiceServer) queryContainerSSHResourcesGRPC(ctx context.Contex
 			DisplayName: resource.DisplayName, ProviderId: resource.ProviderID, ExternalWorkspaceId: resource.ExternalWorkspaceID,
 			State: string(resource.State), TargetRevision: resource.TargetRevision, AgentNodeId: resource.AgentNodeID,
 			ClusterId: resource.ClusterID, Capability: string(model.ResourceTypeContainerSSH),
+			ListenPort: uint32(resource.ContainerSSHPort),
 		})
 	}
 	return result

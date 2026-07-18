@@ -65,20 +65,22 @@ type AgentServiceServer struct {
 	requestImmediateReport bool
 	immediateReportMutex   sync.Mutex
 
-	headscaleClient *headscale.Client
-	config          *config.ServerConfig
-	domainService   *service.DomainService
-	updateService   *service.UpdateService
+	headscaleClient    *headscale.Client
+	config             *config.ServerConfig
+	domainService      *service.DomainService
+	updateService      *service.UpdateService
+	resourceReconciler *service.ResourceReconciliationService
 }
 
 // NewAgentServiceServer 创建 Agent 服务
 func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
 	s := &AgentServiceServer{
-		connections:   make(map[uint64]*AgentConnection),
-		configVersion: time.Now().Unix(),
-		config:        cfg,
-		domainService: service.NewDomainService(db.DB),
-		updateService: service.NewUpdateService(db.DB),
+		connections:        make(map[uint64]*AgentConnection),
+		configVersion:      time.Now().Unix(),
+		config:             cfg,
+		domainService:      service.NewDomainService(db.DB),
+		updateService:      service.NewUpdateService(db.DB),
+		resourceReconciler: service.NewResourceReconciliationService(db.DB),
 	}
 
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
@@ -582,9 +584,13 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	// 更新 Node 信息
 	now := time.Now()
 	updates := map[string]any{
-		"last_heartbeat":   now,
-		"ip":               req.TunnelIp,
-		"updater_protocol": req.UpdaterProtocol,
+		"last_heartbeat": now,
+		"ip":             req.TunnelIp,
+	}
+	// Old Agents do not know updater_protocol. Preserve the stored capability
+	// when the optional field is absent instead of downgrading it on heartbeat.
+	if req.UpdaterProtocol != "" {
+		updates["updater_protocol"] = req.UpdaterProtocol
 	}
 	if req.Version != "" {
 		updates["version"] = req.Version
@@ -728,6 +734,14 @@ func (s *AgentServiceServer) handleContainerCandidates(ctx context.Context, node
 		}
 		if err := db.DB.WithContext(ctx).Save(&candidate).Error; err != nil {
 			logger.Warnf("保存 ContainerSSH Candidate 失败: node_id=%d pod_uid=%s err=%v", nodeID, report.PodUid, err)
+			continue
+		}
+		reconciler := s.resourceReconciler
+		if reconciler == nil {
+			reconciler = service.NewResourceReconciliationService(db.DB)
+		}
+		if _, reconcileErr := reconciler.ReconcileCandidate(ctx, candidate.ID); reconcileErr != nil {
+			logger.Warnf("ContainerSSH Candidate 自动匹配失败: candidate_id=%s err=%v", candidate.ID, reconcileErr)
 		}
 	}
 }
@@ -893,6 +907,11 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		resp.EndpointSshPermissions = endpointSSHPerms
 	}
 
+	// ContainerSSH uses an Agent-node-scoped, fully resolved snapshot. It is
+	// sent on every heartbeat so removing a grant, membership, target, or
+	// readiness immediately clears the Agent's local access cache.
+	resp.ContainerSshPermissions = s.queryContainerSSHPermissions(ctx, nodeID)
+
 	// 查询该 Agent 关联的 Endpoint K8SAPI 授权信息
 	// P11 重构：Endpoint K8SAPI 权限已废弃，统一使用 Agent 级别权限
 	// 保留字段以兼容旧版本 Agent，但不再填充数据
@@ -945,6 +964,61 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 	}
 
 	return stream.Send(resp)
+}
+
+func (s *AgentServiceServer) queryContainerSSHPermissions(ctx context.Context, nodeID uint64) []*pb.ContainerSSHPermission {
+	if nodeID == 0 {
+		return nil
+	}
+	now := time.Now()
+	var resources []model.Resource
+	if err := db.DB.WithContext(ctx).
+		Where("agent_node_id = ? AND type = ? AND target_revision > 0 AND state IN ?", nodeID, model.ResourceTypeContainerSSH, []model.ResourceState{model.ResourceStateAvailable, model.ResourceStateDegraded}).
+		Find(&resources).Error; err != nil {
+		logger.Warnf("查询 ContainerSSH Resource 快照失败: node_id=%d err=%v", nodeID, err)
+		return nil
+	}
+
+	result := make([]*pb.ContainerSSHPermission, 0)
+	for _, resource := range resources {
+		var target model.ResourceTarget
+		if err := db.DB.WithContext(ctx).Where("resource_id = ? AND revision = ? AND agent_node_id = ? AND ready = ?", resource.ID, resource.TargetRevision, nodeID, true).First(&target).Error; err != nil {
+			continue
+		}
+		var grants []model.AccessGrant
+		if err := db.DB.WithContext(ctx).Where("resource_id = ? AND tenant_id = ? AND subject_type = ? AND status = ? AND valid_from <= ? AND expires_at > ?", resource.ID, resource.TenantID, "user", "enabled", now, now).Find(&grants).Error; err != nil {
+			logger.Warnf("查询 ContainerSSH Grant 快照失败: resource_id=%s err=%v", resource.ID, err)
+			continue
+		}
+		for _, grant := range grants {
+			if !containsAction(parseJSONStringArray(grant.Actions), "shell") {
+				continue
+			}
+			var user model.User
+			if err := db.DB.WithContext(ctx).Where("id = ? AND enabled = ?", grant.SubjectUserID, true).First(&user).Error; err != nil {
+				continue
+			}
+			var membership model.TenantMembership
+			if err := db.DB.WithContext(ctx).Where("tenant_id = ? AND user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", resource.TenantID, user.ID, true, now).First(&membership).Error; err != nil {
+				continue
+			}
+			result = append(result, &pb.ContainerSSHPermission{
+				UserId: user.ID, UserName: user.Name, ResourceId: resource.ID,
+				Namespace: target.Namespace, PodName: target.PodName, PodUid: target.PodUID, ContainerName: target.ContainerName,
+				TargetRevision: target.Revision, GrantRevision: grant.Revision, MaxSessionSeconds: int32(grant.MaxSessionSeconds), ListenPort: uint32(resource.ContainerSSHPort),
+			})
+		}
+	}
+	return result
+}
+
+func containsAction(actions []string, expected string) bool {
+	for _, action := range actions {
+		if action == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func toProtoUpdateDirective(directive service.UpdateDirective) *pb.UpdateDirective {

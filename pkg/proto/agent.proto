@@ -222,6 +222,7 @@ message AgentHeartbeatResponse {
   repeated EndpointCapabilityConfig endpoint_capability_configs = 12; // Endpoint 能力开关配置（Server 下发）
   repeated UpdateDirective update_directives = 13; // Agent 自身更新任务
   repeated UpdateDirective endpoint_update_directives = 14; // 由 Agent 转发给 Endpoint 的更新任务
+  repeated ContainerSSHPermission container_ssh_permissions = 15; // ContainerSSH 已解析授权快照
 }
 
 // EndpointCapabilityConfig Server 下发给 Agent 的 Endpoint 能力开关配置
@@ -316,6 +317,23 @@ message EndpointSSHPermission {
   string user_name = 4; // 被授权用户名
   repeated string ssh_users = 5; // 允许的 SSH 用户列表（空表示全部）
   bool is_group = 6; // 是否来自分组授权
+}
+
+// ContainerSSHPermission is the complete Agent-local authorization and target
+// binding for one user and one ContainerSSH Resource. The Agent must never
+// accept these Kubernetes coordinates from an SSH client.
+message ContainerSSHPermission {
+  uint64 user_id = 1;
+  string user_name = 2;
+  string resource_id = 3;
+  string namespace = 4;
+  string pod_name = 5;
+  string pod_uid = 6;
+  string container_name = 7;
+  int64 target_revision = 8;
+  int64 grant_revision = 9;
+  int32 max_session_seconds = 10;
+  uint32 listen_port = 11;
 }
 
 // OperationAuditRecord 操作审计记录（Agent 心跳上报）

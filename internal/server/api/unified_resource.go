@@ -234,6 +234,7 @@ func (a *UnifiedResourceAPI) List(c *gin.Context) {
 			}
 		}
 		db.DB.WithContext(ctx).Model(&model.AccessGrant{}).Where("resource_id = ? AND status = ?", resource.ID, "enabled").Count(&item.GrantCount)
+		db.DB.WithContext(ctx).Model(&model.ContainerSession{}).Where("resource_id = ? AND status = ?", resource.ID, model.ContainerSessionActive).Count(&item.SessionCount)
 		items = append(items, item)
 	}
 	c.JSON(http.StatusOK, NewPagedResponse(items, total, page, size))

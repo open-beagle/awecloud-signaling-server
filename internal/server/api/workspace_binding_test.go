@@ -82,6 +82,9 @@ func TestWorkspaceBindingReconcilesCandidateOnlyAfterTrustedBinding(t *testing.T
 		"display_name": "IDE / workspace-a", "owner_user_id": owner.ID, "generation": 1,
 	})
 	require.Equal(t, http.StatusCreated, workspaceResp.Code)
+	require.NoError(t, testDB.First(&candidateResult.Data, "id = ?", candidateResult.Data.ID).Error)
+	require.Equal(t, model.DiscoveryCandidatePublished, candidateResult.Data.Status)
+	require.NotEmpty(t, candidateResult.Data.ResourceID)
 
 	secondReconcile := post("/resource-candidates/"+candidateResult.Data.ID+"/reconcile", nil)
 	require.Equal(t, http.StatusOK, secondReconcile.Code)

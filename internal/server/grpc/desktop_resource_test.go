@@ -29,14 +29,17 @@ func TestDesktopContainerResourcesRequireTenantMembershipAndLiveGrant(t *testing
 	available := model.Resource{ID: uuid.NewString(), TenantID: tenant.ID, Type: model.ResourceTypeContainerSSH, DisplayName: "IDE A", ProviderID: "beagle-ide", ExternalWorkspaceID: "ws-a", State: model.ResourceStateAvailable, TargetRevision: 4, AgentNodeID: 22, ClusterID: "dev"}
 	pending := model.Resource{ID: uuid.NewString(), TenantID: tenant.ID, Type: model.ResourceTypeContainerSSH, DisplayName: "IDE Pending", State: model.ResourceStatePending, TargetRevision: 0}
 	revoked := model.Resource{ID: uuid.NewString(), TenantID: tenant.ID, Type: model.ResourceTypeContainerSSH, DisplayName: "IDE Revoked", State: model.ResourceStateRevoked, TargetRevision: 2}
+	stale := model.Resource{ID: uuid.NewString(), TenantID: tenant.ID, Type: model.ResourceTypeContainerSSH, DisplayName: "IDE Stale", State: model.ResourceStatePending, TargetRevision: 5}
 	require.NoError(t, testDB.Create(&available).Error)
 	require.NoError(t, testDB.Create(&pending).Error)
 	require.NoError(t, testDB.Create(&revoked).Error)
+	require.NoError(t, testDB.Create(&stale).Error)
 	now := time.Now()
 	grants := []model.AccessGrant{
 		{ID: uuid.NewString(), TenantID: tenant.ID, ResourceID: available.ID, SubjectType: "user", SubjectUserID: client.ID, Actions: `["shell"]`, ValidFrom: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour), Status: "enabled"},
 		{ID: uuid.NewString(), TenantID: tenant.ID, ResourceID: pending.ID, SubjectType: "user", SubjectUserID: client.ID, Actions: `["shell"]`, ValidFrom: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour), Status: "enabled"},
 		{ID: uuid.NewString(), TenantID: tenant.ID, ResourceID: revoked.ID, SubjectType: "user", SubjectUserID: client.ID, Actions: `["shell"]`, ValidFrom: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour), Status: "enabled"},
+		{ID: uuid.NewString(), TenantID: tenant.ID, ResourceID: stale.ID, SubjectType: "user", SubjectUserID: client.ID, Actions: `["shell"]`, ValidFrom: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour), Status: "enabled"},
 	}
 	require.NoError(t, testDB.Create(&grants).Error)
 

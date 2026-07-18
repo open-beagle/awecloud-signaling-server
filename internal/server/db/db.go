@@ -91,6 +91,7 @@ func autoMigrate() error {
 		&model.ResourceTarget{},
 		&model.AccessGrant{},
 		&model.DiscoveryCandidate{},
+		&model.ContainerSession{},
 
 		// 分组模型
 		&model.Group{},

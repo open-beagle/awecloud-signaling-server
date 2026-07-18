@@ -53,11 +53,12 @@ type Agent struct {
 	tailscaleIP    string
 
 	// K8S 能力（P1 新增）
-	permCache          *PermissionCache       // 权限缓存
-	k8sAPIProxy        *K8SAPIProxy           // K8S API 反向代理
-	svcInformer        *K8SServiceInformer    // K8S Service Informer
-	svcProxy           *K8SSVCProxy           // K8S Service gRPC 代理
-	containerDiscovery *K8SContainerDiscovery // ContainerSSH Pod 候选发现
+	permCache           *PermissionCache       // 权限缓存
+	k8sAPIProxy         *K8SAPIProxy           // K8S API 反向代理
+	svcInformer         *K8SServiceInformer    // K8S Service Informer
+	svcProxy            *K8SSVCProxy           // K8S Service gRPC 代理
+	containerDiscovery  *K8SContainerDiscovery // ContainerSSH Pod 候选发现
+	containerExecBroker *ContainerExecBroker   // ContainerSSH Kubernetes Exec 数据面
 
 	// Endpoint 能力（P2 新增）
 	endpointServer      *EndpointServer      // Endpoint 内网 gRPC Server
@@ -905,6 +906,7 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 		a.permCache.UpdateK8SPermissions(resp.K8SPermissions)
 		a.permCache.UpdateK8SServicePermissions(resp.K8SServicePermissions)
 		a.permCache.UpdateEndpointSSHPermissions(resp.EndpointSshPermissions)
+		a.permCache.UpdateContainerSSHPermissionsFromProto(resp.ContainerSshPermissions)
 	}
 
 	// 同步 Endpoint 能力配置到 EndpointServer（让 Agent 能把 Server 配置下发给 Endpoint）
@@ -1300,6 +1302,13 @@ func (a *Agent) startK8SContainerDiscovery() error {
 	}
 	discovery.Start()
 	a.containerDiscovery = discovery
+	broker, err := NewContainerExecBrokerFromKubeconfig(a.config.Container.Kubeconfig, a.permCache)
+	if err != nil {
+		discovery.Stop()
+		a.containerDiscovery = nil
+		return fmt.Errorf("创建 ContainerSSH Exec Broker 失败: %w", err)
+	}
+	a.containerExecBroker = broker
 	return nil
 }
 

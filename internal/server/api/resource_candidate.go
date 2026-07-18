@@ -13,10 +13,12 @@ import (
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 )
 
 // ResourceCandidateAPI exposes the safe boundary between Agent discovery and
-// published resources. Agent observations are never published implicitly.
+// published resources. Only the reconciliation service may publish a matched
+// observation after trusted binding checks.
 type ResourceCandidateAPI struct{}
 
 func NewResourceCandidateAPI() *ResourceCandidateAPI { return &ResourceCandidateAPI{} }
@@ -48,10 +50,10 @@ func (a *ResourceCandidateAPI) List(c *gin.Context) {
 	page, size := pageParams(c)
 	// Lease expiry is derived from the last Agent observation. Explicit
 	// conflict/rejected decisions are preserved for operator review.
-	db.DB.WithContext(ctx).Model(&model.DiscoveryCandidate{}).
-		Where("lease_expires_at IS NOT NULL AND lease_expires_at < ? AND status IN ?", time.Now(), []model.DiscoveryCandidateStatus{
-			model.DiscoveryCandidateObserved, model.DiscoveryCandidatePendingClaim,
-		}).Updates(map[string]interface{}{"status": model.DiscoveryCandidateStale})
+	if _, err := service.NewResourceReconciliationService(db.DB).ExpireCandidates(ctx, time.Now()); err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新发现候选租约状态失败"))
+		return
+	}
 	query := db.DB.WithContext(ctx).Model(&model.DiscoveryCandidate{})
 	if state := strings.TrimSpace(c.Query("status")); state != "" {
 		query = query.Where("status = ?", state)
@@ -184,98 +186,27 @@ func (a *ResourceCandidateAPI) Reject(c *gin.Context) {
 // Binding. Unknown workspaces remain PendingClaim and never create a Resource.
 func (a *ResourceCandidateAPI) Reconcile(c *gin.Context) {
 	ctx := c.Request.Context()
-	var candidate model.DiscoveryCandidate
-	if err := db.DB.WithContext(ctx).First(&candidate, "id = ?", c.Param("id")).Error; err != nil {
+	result, err := service.NewResourceReconciliationService(db.DB).ReconcileCandidate(ctx, c.Param("id"))
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, NewErrorResponse("发现候选不存在"))
 			return
 		}
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询发现候选失败"))
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("匹配发现候选失败"))
 		return
 	}
-	if candidate.Status == model.DiscoveryCandidateRejected {
-		c.JSON(http.StatusConflict, NewErrorResponse("已拒绝候选不能重新发布"))
+	status := http.StatusOK
+	if result.Outcome == service.ReconcilePending {
+		status = http.StatusAccepted
+	} else if result.Outcome == service.ReconcileConflict || result.Outcome == service.ReconcileStale {
+		c.JSON(http.StatusConflict, NewErrorResponse(result.Reason))
 		return
 	}
-	if candidate.Status == model.DiscoveryCandidatePublished && candidate.ResourceID != "" {
-		var target model.ResourceTarget
-		if err := db.DB.WithContext(ctx).Where("resource_id = ?", candidate.ResourceID).Order("revision DESC").First(&target).Error; err == nil && target.PodUID == candidate.PodUID && target.ContainerName == candidate.ContainerName && target.Ready == candidate.Ready {
-			c.JSON(http.StatusOK, NewSuccessResponse(candidate))
-			return
-		}
+	if result.Outcome == service.ReconcilePublished && result.Resource != nil {
+		recordAuditLog(ctx, c, "publish_resource_candidate", "resource", result.Resource.ID, result.Resource.DisplayName, map[string]interface{}{
+			"candidate": result.Candidate,
+			"target":    result.Target,
+		})
 	}
-	if candidate.LeaseExpiresAt != nil && candidate.LeaseExpiresAt.Before(time.Now()) {
-		candidate.Status = model.DiscoveryCandidateStale
-		candidate.ConflictReason = "Agent 观测租约已过期"
-		_ = db.DB.WithContext(ctx).Save(&candidate).Error
-		c.JSON(http.StatusConflict, NewErrorResponse(candidate.ConflictReason))
-		return
-	}
-	if strings.TrimSpace(candidate.ProviderHint) == "" || strings.TrimSpace(candidate.WorkspaceHint) == "" {
-		candidate.Status = model.DiscoveryCandidatePendingClaim
-		candidate.ConflictReason = "缺少可信 Provider 或 Workspace Hint"
-		if err := db.DB.WithContext(ctx).Save(&candidate).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, NewErrorResponse("更新候选状态失败"))
-			return
-		}
-		c.JSON(http.StatusAccepted, NewSuccessResponse(candidate))
-		return
-	}
-	var binding model.WorkspaceBinding
-	err := db.DB.WithContext(ctx).Where("provider_id = ? AND external_workspace_id = ?", candidate.ProviderHint, candidate.WorkspaceHint).First(&binding).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		candidate.Status = model.DiscoveryCandidatePendingClaim
-		candidate.ConflictReason = "未找到可信 Workspace Binding"
-		if err := db.DB.WithContext(ctx).Save(&candidate).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, NewErrorResponse("更新候选状态失败"))
-			return
-		}
-		c.JSON(http.StatusAccepted, NewSuccessResponse(candidate))
-		return
-	} else if err != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询 Workspace Binding 失败"))
-		return
-	}
-	if binding.Status != model.WorkspaceBindingActive {
-		candidate.Status = model.DiscoveryCandidateConflict
-		candidate.ConflictReason = "Workspace Binding 已停止或撤销"
-		_ = db.DB.WithContext(ctx).Save(&candidate).Error
-		c.JSON(http.StatusConflict, NewErrorResponse(candidate.ConflictReason))
-		return
-	}
-	if candidate.GenerationHint != 0 && candidate.GenerationHint != binding.Generation {
-		candidate.Status = model.DiscoveryCandidateConflict
-		candidate.ConflictReason = "Workspace generation 与可信绑定不一致"
-		_ = db.DB.WithContext(ctx).Save(&candidate).Error
-		c.JSON(http.StatusConflict, NewErrorResponse(candidate.ConflictReason))
-		return
-	}
-	var resource model.Resource
-	if err := db.DB.WithContext(ctx).First(&resource, "id = ?", binding.ResourceID).Error; err != nil {
-		candidate.Status = model.DiscoveryCandidateConflict
-		candidate.ConflictReason = "Workspace Resource 不存在"
-		_ = db.DB.WithContext(ctx).Save(&candidate).Error
-		c.JSON(http.StatusConflict, NewErrorResponse(candidate.ConflictReason))
-		return
-	}
-	target, status, message := saveResourceTarget(ctx, &resource, targetRequest{
-		AgentNodeID: candidate.AgentNodeID, ClusterID: candidate.ClusterID, Namespace: candidate.Namespace,
-		PodName: candidate.PodName, PodUID: candidate.PodUID, ContainerName: candidate.ContainerName, Ready: candidate.Ready,
-	})
-	if status != http.StatusCreated {
-		candidate.Status = model.DiscoveryCandidateConflict
-		candidate.ConflictReason = message
-		_ = db.DB.WithContext(ctx).Save(&candidate).Error
-		c.JSON(status, NewErrorResponse(message))
-		return
-	}
-	candidate.Status = model.DiscoveryCandidatePublished
-	candidate.ResourceID = binding.ResourceID
-	candidate.ConflictReason = ""
-	if err := db.DB.WithContext(ctx).Save(&candidate).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("发布候选失败"))
-		return
-	}
-	recordAuditLog(ctx, c, "publish_resource_candidate", "resource", resource.ID, resource.DisplayName, map[string]interface{}{"candidate": candidate, "target": target})
-	c.JSON(http.StatusOK, NewSuccessResponse(candidate))
+	c.JSON(status, NewSuccessResponse(result.Candidate))
 }

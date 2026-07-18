@@ -510,4 +510,5 @@ message ContainerSSHResource {
   uint64 agent_node_id = 9;
   string cluster_id = 10;
   string capability = 11;
+  uint32 listen_port = 12;
 }

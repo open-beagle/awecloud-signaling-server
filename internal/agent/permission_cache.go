@@ -26,6 +26,21 @@ type EndpointSSHUserPermission struct {
 	SSHUsers     []string // 允许的 SSH 登录用户名
 }
 
+// ContainerSSHUserPermission is a fully resolved, Agent-local target. It is
+// intentionally keyed by the stable Resource ID so an SSH client can never
+// select a namespace, Pod, container, or command itself.
+type ContainerSSHUserPermission struct {
+	ResourceID        string
+	Namespace         string
+	PodName           string
+	PodUID            string
+	ContainerName     string
+	TargetRevision    int64
+	GrantRevision     int64
+	MaxSessionSeconds int
+	ListenPort        uint16
+}
+
 // PermissionCache Agent 本地权限缓存
 // 从心跳响应中同步，供 K8SAPI 代理和 SVCProxy 鉴权使用
 type PermissionCache struct {
@@ -40,15 +55,82 @@ type PermissionCache struct {
 	// Endpoint SSH 权限：key = user_name, value = 按 endpoint_name 索引的权限列表
 	epSSHPermissions map[string][]*EndpointSSHUserPermission
 	epSSHMutex       sync.RWMutex
+
+	// Container SSH permissions: key = user_name, then stable resource ID.
+	// This cache is designed for full replacement on every heartbeat, so an
+	// empty snapshot immediately removes access.
+	containerSSHPermissions map[string]map[string]*ContainerSSHUserPermission
+	containerSSHMutex       sync.RWMutex
 }
 
 // NewPermissionCache 创建权限缓存
 func NewPermissionCache() *PermissionCache {
 	return &PermissionCache{
-		k8sPermissions:    make(map[string]*K8SUserPermission),
-		k8sSvcPermissions: make(map[string]*K8SServiceUserPermission),
-		epSSHPermissions:  make(map[string][]*EndpointSSHUserPermission),
+		k8sPermissions:          make(map[string]*K8SUserPermission),
+		k8sSvcPermissions:       make(map[string]*K8SServiceUserPermission),
+		epSSHPermissions:        make(map[string][]*EndpointSSHUserPermission),
+		containerSSHPermissions: make(map[string]map[string]*ContainerSSHUserPermission),
 	}
+}
+
+// UpdateContainerSSHPermissions replaces the complete ContainerSSH snapshot.
+// The server-side heartbeat projection is added independently; keeping this
+// API typed lets the broker be tested without accepting untrusted Pod fields.
+func (c *PermissionCache) UpdateContainerSSHPermissions(perms map[string][]*ContainerSSHUserPermission) {
+	c.containerSSHMutex.Lock()
+	defer c.containerSSHMutex.Unlock()
+
+	next := make(map[string]map[string]*ContainerSSHUserPermission, len(perms))
+	for userName, userPerms := range perms {
+		byResource := make(map[string]*ContainerSSHUserPermission, len(userPerms))
+		for _, perm := range userPerms {
+			if perm == nil || perm.ResourceID == "" || perm.Namespace == "" || perm.PodName == "" || perm.PodUID == "" || perm.ContainerName == "" {
+				continue
+			}
+			copy := *perm
+			byResource[copy.ResourceID] = &copy
+		}
+		if len(byResource) > 0 {
+			next[userName] = byResource
+		}
+	}
+	c.containerSSHPermissions = next
+}
+
+// UpdateContainerSSHPermissionsFromProto replaces the complete heartbeat
+// snapshot. Empty input intentionally clears all ContainerSSH permissions.
+func (c *PermissionCache) UpdateContainerSSHPermissionsFromProto(perms []*pb.ContainerSSHPermission) {
+	byUser := make(map[string][]*ContainerSSHUserPermission)
+	for _, perm := range perms {
+		if perm == nil || perm.UserName == "" {
+			continue
+		}
+		byUser[perm.UserName] = append(byUser[perm.UserName], &ContainerSSHUserPermission{
+			ResourceID:        perm.ResourceId,
+			Namespace:         perm.Namespace,
+			PodName:           perm.PodName,
+			PodUID:            perm.PodUid,
+			ContainerName:     perm.ContainerName,
+			TargetRevision:    perm.TargetRevision,
+			GrantRevision:     perm.GrantRevision,
+			MaxSessionSeconds: int(perm.MaxSessionSeconds),
+			ListenPort:        uint16(perm.ListenPort),
+		})
+	}
+	c.UpdateContainerSSHPermissions(byUser)
+}
+
+// CheckContainerSSHAccess returns an immutable copy of the resolved target.
+func (c *PermissionCache) CheckContainerSSHAccess(userName, resourceID string) (*ContainerSSHUserPermission, bool) {
+	c.containerSSHMutex.RLock()
+	defer c.containerSSHMutex.RUnlock()
+
+	perm, ok := c.containerSSHPermissions[userName][resourceID]
+	if !ok {
+		return nil, false
+	}
+	copy := *perm
+	return &copy, true
 }
 
 // UpdateK8SPermissions 从心跳响应更新 K8S API 权限
@@ -70,13 +152,13 @@ func (c *PermissionCache) UpdateK8SPermissions(perms []*pb.K8SPermission) {
 				Namespaces: p.Namespaces,
 			}
 		}
-		logger.Debugf("[PermCache] 添加 K8S 权限: user=%s, groups=%v, namespaces=%v", 
+		logger.Debugf("[PermCache] 添加 K8S 权限: user=%s, groups=%v, namespaces=%v",
 			p.UserName, p.K8SGroups, p.Namespaces)
 	}
 
 	c.k8sPermissions = newPerms
 	logger.Infof("K8S 权限缓存已更新: %d 个用户", len(newPerms))
-	
+
 	// 输出所有用户名，用于调试
 	if len(newPerms) > 0 {
 		userNames := make([]string, 0, len(newPerms))

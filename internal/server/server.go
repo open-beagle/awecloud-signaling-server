@@ -43,10 +43,13 @@ type Server struct {
 	loginService   *service.DesktopLoginService
 	desktopAuthAPI *api.DesktopAuthAPI
 
-	headscaleClient *headscale.Client
-	aclSyncService  *headscale.ACLSyncService
-	aclSyncCtx      context.Context
-	aclSyncCancel   context.CancelFunc
+	headscaleClient       *headscale.Client
+	aclSyncService        *headscale.ACLSyncService
+	aclSyncCtx            context.Context
+	aclSyncCancel         context.CancelFunc
+	reconciliationService *service.ResourceReconciliationService
+	reconciliationCtx     context.Context
+	reconciliationCancel  context.CancelFunc
 }
 
 // GetAgentService 获取 AgentService（供 API 使用）
@@ -82,6 +85,7 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 	var aclSyncService *headscale.ACLSyncService
 	var aclSyncCtx context.Context
 	var aclSyncCancel context.CancelFunc
+	reconciliationCtx, reconciliationCancel := context.WithCancel(context.Background())
 
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
 		logger.Info("初始化 Headscale ACL 同步服务")
@@ -101,11 +105,14 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 	}
 
 	return &Server{
-		config:          cfg,
-		headscaleClient: headscaleClient,
-		aclSyncService:  aclSyncService,
-		aclSyncCtx:      aclSyncCtx,
-		aclSyncCancel:   aclSyncCancel,
+		config:                cfg,
+		headscaleClient:       headscaleClient,
+		aclSyncService:        aclSyncService,
+		aclSyncCtx:            aclSyncCtx,
+		aclSyncCancel:         aclSyncCancel,
+		reconciliationService: service.NewResourceReconciliationService(db.DB),
+		reconciliationCtx:     reconciliationCtx,
+		reconciliationCancel:  reconciliationCancel,
 	}, nil
 }
 
@@ -229,6 +236,9 @@ func (s *Server) Run() error {
 	if s.aclSyncService != nil {
 		go s.aclSyncService.StartPeriodicSync(s.aclSyncCtx)
 	}
+	if s.reconciliationService != nil {
+		go s.reconciliationService.StartPeriodicMaintenance(s.reconciliationCtx)
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -238,6 +248,9 @@ func (s *Server) Run() error {
 
 	if s.aclSyncCancel != nil {
 		s.aclSyncCancel()
+	}
+	if s.reconciliationCancel != nil {
+		s.reconciliationCancel()
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -570,6 +583,11 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.GET("/resources/:id", unifiedResourceAPI.Get)
 					adminAuthGroup.GET("/resources/:id/grants", unifiedResourceAPI.ListGrants)
 					adminAuthGroup.POST("/resources/:id/grants", unifiedResourceAPI.CreateGrant)
+					sessionAPI := api.NewContainerSessionAPI()
+					adminAuthGroup.GET("/sessions", sessionAPI.List)
+					adminAuthGroup.GET("/sessions/:id", sessionAPI.Get)
+					adminAuthGroup.POST("/sessions/:id/revoke", sessionAPI.Revoke)
+					adminAuthGroup.POST("/sessions/:id/force-disconnect", sessionAPI.ForceDisconnect)
 
 					// 审计日志
 					auditAPI := api.NewAuditLogAPI()

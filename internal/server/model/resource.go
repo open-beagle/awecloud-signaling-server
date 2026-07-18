@@ -142,6 +142,7 @@ type Resource struct {
 	PodName             string        `gorm:"size:253" json:"pod_name,omitempty"`
 	PodUID              string        `gorm:"size:100;index" json:"pod_uid,omitempty"`
 	ContainerName       string        `gorm:"size:200" json:"container_name,omitempty"`
+	ContainerSSHPort    uint16        `gorm:"index" json:"container_ssh_port,omitempty"`
 	ShellProfileID      string        `gorm:"size:36" json:"shell_profile_id,omitempty"`
 	TargetRevision      int64         `gorm:"not null;default:0" json:"target_revision"`
 	State               ResourceState `gorm:"size:20;not null;default:'pending';index" json:"state"`
