@@ -228,24 +228,14 @@ jobs:
         env:
           KUBERNETES_SERVER: ${{ secrets.KUBERNETES_ALIYUN_SERVER }}
           KUBERNETES_TOKEN: ${{ secrets.KUBERNETES_ALIYUN_TOKEN }}
-          KUBERNETES_CA: ${{ secrets.KUBERNETES_ALIYUN_CA }}
         run: |
           set -eu
           test -n "$KUBERNETES_SERVER"
           test -n "$KUBERNETES_TOKEN"
 
-          if [ -n "$KUBERNETES_CA" ]; then
-            ca_file="$RUNNER_TEMP/kubernetes-ca.crt"
-            printf '%s\n' "$KUBERNETES_CA" > "$ca_file"
-            kubectl config set-cluster beagle-signal \
-              --server="$KUBERNETES_SERVER" \
-              --certificate-authority="$ca_file" \
-              --embed-certs=true
-          else
-            kubectl config set-cluster beagle-signal \
-              --server="$KUBERNETES_SERVER" \
-              --insecure-skip-tls-verify=true
-          fi
+          kubectl config set-cluster beagle-signal \
+            --server="$KUBERNETES_SERVER" \
+            --insecure-skip-tls-verify=true
 
           kubectl config set-credentials github-actions --token="$KUBERNETES_TOKEN"
           kubectl config set-context beagle-signal \
