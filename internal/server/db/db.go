@@ -93,6 +93,7 @@ func autoMigrate() error {
 		&model.AccessGrant{},
 		&model.DiscoveryCandidate{},
 		&model.ContainerSession{},
+		&model.LegacyResourceClaim{},
 
 		// 分组模型
 		&model.Group{},

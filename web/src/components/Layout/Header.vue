@@ -1,6 +1,7 @@
 <template>
   <div class="header">
     <div class="header-left">
+      <el-button class="mobile-menu" text :icon="Menu" aria-label="打开导航" @click="appStore.toggleMobileSidebar" />
       <Logo :collapsed="false" class="header-logo" />
       <el-select
         v-model="tenantStore.tenantId"
@@ -51,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -59,6 +60,7 @@ import { useAppStore } from '@/stores/app'
 import { useTenantStore } from '@/stores/tenant'
 import { getTenants, type Tenant } from '@/api/resource'
 import { ElMessage } from 'element-plus'
+import { Menu } from '@element-plus/icons-vue'
 import Logo from '@/components/Common/Logo.vue'
 
 const router = useRouter()
@@ -72,10 +74,6 @@ const currentLanguage = computed(() => {
   return locale.value === 'zh-CN' ? '中文' : 'English'
 })
 const roleLabel = computed(() => ({ admin: 'Platform Admin', tenant_admin: 'Tenant Admin', viewer: 'Viewer' }[authStore.role] || authStore.role))
-
-const toggleSidebar = () => {
-  appStore.toggleSidebar()
-}
 
 const handleLanguageChange = (lang: string) => {
   locale.value = lang
@@ -98,7 +96,7 @@ const handleTenantChange = () => {
   tenantStore.setTenant(tenantStore.tenantId)
 }
 
-onMounted(async () => {
+const fetchTenants = async () => {
   try {
     if (!authStore.role) await authStore.loadProfile()
     const res = await getTenants({ page: 1, size: 100, status: 'active' })
@@ -111,7 +109,16 @@ onMounted(async () => {
   } catch (error) {
     console.error('获取客户上下文失败:', error)
   }
+}
+
+const handleTenantCatalogChanged = () => fetchTenants()
+
+onMounted(() => {
+  fetchTenants()
+  window.addEventListener('tenant-catalog-changed', handleTenantCatalogChanged)
 })
+
+onBeforeUnmount(() => window.removeEventListener('tenant-catalog-changed', handleTenantCatalogChanged))
 
 
 </script>
@@ -127,7 +134,7 @@ onMounted(async () => {
 .header-left {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 18px;
 }
 
 .header-logo {
@@ -141,8 +148,10 @@ onMounted(async () => {
 .header-right {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 8px;
 }
+
+.mobile-menu { display: none; width: 36px; height: 36px; font-size: 19px; }
 
 @media (max-width: 900px) {
   .tenant-select {
@@ -167,13 +176,24 @@ onMounted(async () => {
   font-size: 14px;
   padding: 8px 12px;
   border-radius: 4px;
-  transition: all 0.3s;
+  transition: color 0.15s, background-color 0.15s;
 }
 
 .client-download:hover,
 .language-selector:hover,
 .user-info:hover {
   color: var(--primary-color);
-  background-color: #ecf5ff;
+  background-color: var(--primary-lighter);
+}
+
+@media (max-width: 768px) {
+  .mobile-menu { display: inline-flex; }
+  .header-logo :deep(.logo-text) { display: none; }
+  .header-logo :deep(.logo-icon) { width: 34px; height: 34px; }
+  .header-left { gap: 6px; }
+  .tenant-select { width: min(42vw, 180px); }
+  .client-download, .language-selector { display: none; }
+  .user-info { padding: 7px; }
+  .user-info .el-tag { display: none; }
 }
 </style>

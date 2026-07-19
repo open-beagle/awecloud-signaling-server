@@ -2,11 +2,13 @@
 
 [![Build Images](https://github.com/open-beagle/awecloud-signaling-server/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/open-beagle/awecloud-signaling-server/actions/workflows/build.yml)
 
-面向研发、测试和运维人员的零信任资源访问服务，通过 Tailscale/Headscale 建立安全通道，允许用户使用原生工具访问明确授权的远程资源。
+面向研发、测试和运维人员的零信任资源访问服务，通过 Headscale 建立安全通道，允许用户使用原生工具访问明确授权的远程资源。
+
+项目网络控制面、节点注册、ACL 和身份查询统一基于 Headscale，不依赖第三方托管控制面。
 
 **核心功能**：
 
-- 通过 Tailscale/Headscale 建立安全隧道
+- 通过 Headscale 建立安全隧道
 - 设备令牌认证，绑定硬件指纹
 - 服务权限管理（公开/私有/分组访问）
 - 连接审计日志
@@ -21,7 +23,7 @@ awecloud-signaling-server/
 │   └── agent/           # Agent 入口
 ├── internal/            # 内部实现
 │   ├── server/          # Server 实现（API/gRPC/数据库）
-│   ├── agent/           # Agent 实现（Tailscale/代理管理）
+│   ├── agent/           # Agent 实现（Headscale/代理管理）
 │   └── common/          # 公共代码（配置/日志）
 ├── pkg/                 # 公共包
 │   └── proto/           # Protocol Buffers 定义
@@ -43,7 +45,7 @@ awecloud-signaling-server/
 
 **Server**：部署在公有云，作为信令服务器和流量中继，提供 REST API、gRPC 服务和 Web 管理界面。
 
-**Agent**：部署在内网环境，通过 Tailscale 连接到 Server，提供对内网服务的访问。
+**Agent**：部署在内网环境，通过 Headscale 连接到 Server，提供对内网服务的访问。
 
 **Desktop**：桌面客户端应用（独立 Git 仓库），供终端用户访问内网服务。
 
@@ -56,7 +58,7 @@ awecloud-signaling-server/
 - Gin - HTTP 路由和中间件
 - gRPC - Agent/Desktop 通信
 - GORM - ORM，使用 SQLite
-- Tailscale - 网络隧道
+- Headscale - 网络隧道
 
 **Vue 3 + TypeScript**
 

@@ -142,7 +142,10 @@ func tenantAdminRouteAllowed(method, path string) bool {
 		if len(parts) == 1 {
 			return method == http.MethodGet
 		}
-		return len(parts) == 3 && parts[2] == "members" && (method == http.MethodGet || method == http.MethodPost)
+		if len(parts) == 3 && parts[2] == "members" {
+			return method == http.MethodGet || method == http.MethodPost
+		}
+		return len(parts) == 5 && parts[2] == "members" && parts[4] == "disable" && method == http.MethodPost
 	case "groups":
 		if len(parts) == 1 {
 			return method == http.MethodGet || method == http.MethodPost
@@ -157,6 +160,9 @@ func tenantAdminRouteAllowed(method, path string) bool {
 	case "workspace-bindings":
 		return len(parts) == 1 && (method == http.MethodGet || method == http.MethodPost)
 	case "grants":
+		if len(parts) == 1 {
+			return method == http.MethodGet
+		}
 		return len(parts) == 3 && parts[2] == "revoke" && method == http.MethodPost
 	case "resources":
 		if len(parts) == 1 {
@@ -170,6 +176,9 @@ func tenantAdminRouteAllowed(method, path string) bool {
 		}
 		if len(parts) == 3 && parts[2] == "grants" {
 			return method == http.MethodGet || method == http.MethodPost
+		}
+		if len(parts) == 3 && parts[2] == "events" {
+			return method == http.MethodGet
 		}
 		return len(parts) == 3 && parts[2] == "targets" && method == http.MethodPost
 	case "sessions":

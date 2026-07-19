@@ -25,7 +25,7 @@ func TestUnifiedResourceTenantAndGrantBoundaries(t *testing.T) {
 	testDB, err := gorm.Open(sqlite.Open("file:unified_resource_test?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	db.DB = testDB
-	require.NoError(t, testDB.AutoMigrate(&model.User{}, &model.Node{}, &model.Tenant{}, &model.TenantMembership{}, &model.Group{}, &model.GroupMember{}, &model.Resource{}, &model.ResourceTarget{}, &model.AccessGrant{}, &model.ContainerSession{}))
+	require.NoError(t, testDB.AutoMigrate(&model.User{}, &model.Node{}, &model.Tenant{}, &model.TenantMembership{}, &model.Group{}, &model.GroupMember{}, &model.Resource{}, &model.ResourceTarget{}, &model.AccessGrant{}, &model.ContainerSession{}, &model.WorkspaceBinding{}, &model.AuditLog{}))
 
 	tenantA := model.Tenant{ID: uuid.NewString(), Key: "tenant-a", Name: "Tenant A", Status: model.TenantStatusActive}
 	tenantB := model.Tenant{ID: uuid.NewString(), Key: "tenant-b", Name: "Tenant B", Status: model.TenantStatusActive}
@@ -47,9 +47,26 @@ func TestUnifiedResourceTenantAndGrantBoundaries(t *testing.T) {
 	api := NewUnifiedResourceAPI()
 	r := gin.New()
 	r.GET("/resources", api.List)
+	r.GET("/resources/summary", api.Summary)
+	r.GET("/resources/:id/events", api.ListEvents)
+	r.GET("/grants", api.ListAllGrants)
 	r.POST("/resources/:id/grants", api.CreateGrant)
 	r.POST("/grants/:id/revoke", api.RevokeGrant)
 	r.POST("/resources/:id/targets", api.ObserveTarget)
+
+	require.NoError(t, testDB.Create(&model.AuditLog{ActionType: "resource_a_event", TargetType: "resource", TargetID: resourceA.ID, TargetName: resourceA.DisplayName}).Error)
+	require.NoError(t, testDB.Create(&model.AuditLog{ActionType: "resource_b_event", TargetType: "resource", TargetID: resourceB.ID, TargetName: resourceB.DisplayName}).Error)
+	eventResp := httptest.NewRecorder()
+	r.ServeHTTP(eventResp, httptest.NewRequest(http.MethodGet, "/resources/"+resourceA.ID+"/events", nil))
+	require.Equal(t, http.StatusOK, eventResp.Code)
+	var eventBody struct {
+		Total int64           `json:"total"`
+		Data  []resourceEvent `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(eventResp.Body.Bytes(), &eventBody))
+	require.Equal(t, int64(1), eventBody.Total)
+	require.Len(t, eventBody.Data, 1)
+	require.Equal(t, "resource_a_event", eventBody.Data[0].ActionType)
 
 	listReq := httptest.NewRequest(http.MethodGet, "/resources?tenant_id="+tenantA.ID, nil)
 	listResp := httptest.NewRecorder()
@@ -65,6 +82,25 @@ func TestUnifiedResourceTenantAndGrantBoundaries(t *testing.T) {
 	require.Equal(t, int64(1), listBody.Total)
 	require.Len(t, listBody.Data, 1)
 	require.Equal(t, resourceA.ID, listBody.Data[0].ID)
+
+	require.NoError(t, testDB.Create(&model.ContainerSession{
+		ID: uuid.NewString(), TenantID: tenantA.ID, UserID: user.ID, ResourceID: resourceA.ID,
+		Status: model.ContainerSessionActive, StartedAt: time.Now(),
+	}).Error)
+	summaryReq := httptest.NewRequest(http.MethodGet, "/resources/summary?tenant_id="+tenantA.ID, nil)
+	summaryResp := httptest.NewRecorder()
+	r.ServeHTTP(summaryResp, summaryReq)
+	require.Equal(t, http.StatusOK, summaryResp.Code)
+	var summaryBody struct {
+		Success bool            `json:"success"`
+		Data    resourceSummary `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(summaryResp.Body.Bytes(), &summaryBody))
+	require.True(t, summaryBody.Success)
+	require.Equal(t, int64(1), summaryBody.Data.Total)
+	require.Equal(t, int64(1), summaryBody.Data.Available)
+	require.Equal(t, int64(1), summaryBody.Data.ActiveSessions)
+	require.Equal(t, int64(1), summaryBody.Data.ByType[string(model.ResourceTypeContainerSSH)])
 
 	targetPayload := map[string]interface{}{
 		"agent_node_id": agentNode.ID, "cluster_id": "beagle-dev", "namespace": "tenant-a",
@@ -114,6 +150,21 @@ func TestUnifiedResourceTenantAndGrantBoundaries(t *testing.T) {
 	require.NoError(t, json.Unmarshal(grantResp.Body.Bytes(), &createdGrant))
 	require.NotEmpty(t, createdGrant.Data.ID)
 
+	grantListReq := httptest.NewRequest(http.MethodGet, "/grants?tenant_id="+tenantA.ID+"&status=enabled", nil)
+	grantListResp := httptest.NewRecorder()
+	r.ServeHTTP(grantListResp, grantListReq)
+	require.Equal(t, http.StatusOK, grantListResp.Code)
+	var grantListBody struct {
+		Total int64                 `json:"total"`
+		Data  []accessGrantListItem `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(grantListResp.Body.Bytes(), &grantListBody))
+	require.Equal(t, int64(1), grantListBody.Total)
+	require.Len(t, grantListBody.Data, 1)
+	require.Equal(t, tenantA.ID, grantListBody.Data[0].TenantID)
+	require.Equal(t, resourceA.DisplayName, grantListBody.Data[0].ResourceName)
+	require.Equal(t, user.Alias, grantListBody.Data[0].SubjectName)
+
 	otherGrantReq := httptest.NewRequest(http.MethodPost, "/resources/"+resourceB.ID+"/grants", bytes.NewReader(grantJSON))
 	otherGrantReq.Header.Set("Content-Type", "application/json")
 	otherGrantResp := httptest.NewRecorder()
@@ -160,4 +211,31 @@ func TestUnifiedResourceTenantAndGrantBoundaries(t *testing.T) {
 	r.POST("/resources", api.Create)
 	r.ServeHTTP(ownerResp, ownerReq)
 	require.Equal(t, http.StatusBadRequest, ownerResp.Code)
+
+	unsupportedCreate := httptest.NewRequest(http.MethodPost, "/resources", bytes.NewReader([]byte(`{"tenant_id":"`+tenantA.ID+`","type":"host_ssh","display_name":"legacy host"}`)))
+	unsupportedCreate.Header.Set("Content-Type", "application/json")
+	unsupportedCreateResp := httptest.NewRecorder()
+	r.ServeHTTP(unsupportedCreateResp, unsupportedCreate)
+	require.Equal(t, http.StatusConflict, unsupportedCreateResp.Code)
+
+	unsupportedActionJSON, err := json.Marshal(map[string]interface{}{"subject_user_id": user.ID, "actions": []string{"port_forward"}})
+	require.NoError(t, err)
+	unsupportedActionReq := httptest.NewRequest(http.MethodPost, "/resources/"+resourceA.ID+"/grants", bytes.NewReader(unsupportedActionJSON))
+	unsupportedActionReq.Header.Set("Content-Type", "application/json")
+	unsupportedActionResp := httptest.NewRecorder()
+	r.ServeHTTP(unsupportedActionResp, unsupportedActionReq)
+	require.Equal(t, http.StatusBadRequest, unsupportedActionResp.Code)
+
+	legacyResource := model.Resource{ID: uuid.NewString(), TenantID: tenantA.ID, Type: model.ResourceTypeHostSSH, DisplayName: "Legacy Host", State: model.ResourceStatePending}
+	require.NoError(t, testDB.Create(&legacyResource).Error)
+	legacyTargetReq := httptest.NewRequest(http.MethodPost, "/resources/"+legacyResource.ID+"/targets", bytes.NewReader(targetJSON))
+	legacyTargetReq.Header.Set("Content-Type", "application/json")
+	legacyTargetResp := httptest.NewRecorder()
+	r.ServeHTTP(legacyTargetResp, legacyTargetReq)
+	require.Equal(t, http.StatusConflict, legacyTargetResp.Code)
+	legacyGrantReq := httptest.NewRequest(http.MethodPost, "/resources/"+legacyResource.ID+"/grants", bytes.NewReader(grantJSON))
+	legacyGrantReq.Header.Set("Content-Type", "application/json")
+	legacyGrantResp := httptest.NewRecorder()
+	r.ServeHTTP(legacyGrantResp, legacyGrantReq)
+	require.Equal(t, http.StatusConflict, legacyGrantResp.Code)
 }

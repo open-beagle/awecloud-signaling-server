@@ -23,6 +23,12 @@ const routes: RouteRecordRaw[] = [
     children: [
       // 用户管理
       {
+        path: 'tenants',
+        name: 'Tenants',
+        component: () => import('@/views/Tenant/List.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
         path: 'users',
         name: 'Users',
         component: () => import('@/views/User/List.vue'),
@@ -79,6 +85,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Endpoint/Detail.vue'),
         meta: { requiresAuth: true }
       },
+      {
+        path: 'infrastructure/integrations',
+        name: 'Integrations',
+        component: () => import('@/views/Integration/List.vue'),
+        meta: { requiresAuth: true }
+      },
       // 分组管理
       {
         path: 'groups',
@@ -109,6 +121,24 @@ const routes: RouteRecordRaw[] = [
         path: 'resource-candidates',
         name: 'ResourceCandidates',
         component: () => import('@/views/Resource/Candidates.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'legacy-inventory',
+        name: 'LegacyInventory',
+        component: () => import('@/views/LegacyInventory/List.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'access-policies',
+        name: 'AccessPolicies',
+        component: () => import('@/views/AccessPolicy/List.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'sessions',
+        name: 'Sessions',
+        component: () => import('@/views/Session/List.vue'),
         meta: { requiresAuth: true }
       },
       // 域名管理
@@ -266,6 +296,6 @@ router.beforeEach(async (to, _from, next) => {
   next()
 })
 
-const tenantAdminPageAllowed = (path: string) => path === '/resources' || path.startsWith('/resources/') || path === '/groups' || /^\/groups\/\d+\/members$/.test(path)
+const tenantAdminPageAllowed = (path: string) => path === '/resources' || path.startsWith('/resources/') || path === '/access-policies' || path === '/sessions' || path === '/groups' || /^\/groups\/\d+\/members$/.test(path)
 
 export default router

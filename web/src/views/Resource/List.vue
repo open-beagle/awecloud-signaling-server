@@ -8,17 +8,30 @@
       </div>
       <div class="header-actions">
         <el-button :icon="Refresh" :loading="loading" @click="fetchResources">刷新</el-button>
-        <el-button type="primary" :icon="Plus" :disabled="!tenantStore.tenantId || !authStore.canWrite" @click="showCreate = true">登记资源</el-button>
+        <el-button type="primary" :icon="Plus" :disabled="!tenantStore.tenantId || !authStore.canWrite" @click="showCreate = true">登记 ContainerSSH</el-button>
       </div>
     </div>
 
     <div class="summary-strip">
-      <div class="summary-item"><span class="summary-label">当前资源</span><strong>{{ pagination.total }}</strong></div>
-      <div class="summary-item"><span class="summary-label">可用</span><strong class="success">{{ availableCount }}</strong></div>
-      <div class="summary-item"><span class="summary-label">ContainerSSH</span><strong>{{ containerCount }}</strong></div>
-      <div class="summary-item"><span class="summary-label">活动会话</span><strong>{{ sessionCount }}</strong></div>
-      <div class="summary-item"><span class="summary-label">异常目标</span><strong class="danger">{{ degradedCount }}</strong></div>
+      <div class="summary-item"><span class="summary-label">当前资源</span><strong>{{ summary.total }}</strong></div>
+      <div class="summary-item"><span class="summary-label">可用</span><strong class="success">{{ summary.available }}</strong></div>
+      <div class="summary-item"><span class="summary-label">ContainerSSH</span><strong>{{ summary.by_type.container_ssh || 0 }}</strong></div>
+      <div class="summary-item"><span class="summary-label">活动会话</span><strong>{{ summary.active_sessions }}</strong></div>
+      <div class="summary-item"><span class="summary-label">异常目标</span><strong class="danger">{{ summary.degraded }}</strong></div>
     </div>
+
+    <section v-if="showLegacyInventory" class="legacy-band">
+      <div class="legacy-copy">
+        <div class="legacy-title"><el-icon><Warning /></el-icon><strong>存量接入（兼容模式）</strong><el-tag size="small" type="warning" effect="plain">待归属</el-tag></div>
+        <p>这些节点继续使用旧数据和授权链路，尚未绑定 Tenant，也不会自动转换为统一 Resource。</p>
+      </div>
+      <div class="legacy-metrics">
+        <button @click="router.push('/nodes/agents')"><strong>{{ legacyInventory.agents }}</strong><span>Agent</span></button>
+        <button @click="router.push('/nodes/desktops')"><strong>{{ legacyInventory.desktops }}</strong><span>访问设备</span></button>
+        <button @click="router.push('/endpoints')"><strong>{{ legacyInventory.endpoints }}</strong><span>Endpoint</span></button>
+      </div>
+      <el-button :icon="ArrowRight" @click="router.push('/legacy-inventory')">核验与认领</el-button>
+    </section>
 
     <el-card class="resource-surface" shadow="never">
       <div class="resource-tabs">
@@ -62,15 +75,17 @@
         <el-table-column label="" width="64" fixed="right" align="center"><template #default><el-button text :icon="MoreFilled" @click.stop="showActionMessage" /></template></el-table-column>
       </el-table>
 
-      <el-empty v-if="!loading && resources.length === 0" description="当前上下文没有资源" />
+      <el-empty v-if="!loading && resources.length === 0" :description="tenantStore.tenantId ? '当前客户还没有已登记资源' : '尚未建立统一资源目录'">
+        <el-button v-if="authStore.isPlatformAdmin" type="primary" :icon="OfficeBuilding" @click="router.push('/tenants')">初始化客户</el-button>
+      </el-empty>
       <div class="pagination-wrapper"><el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.size" :total="pagination.total" :page-sizes="[20, 50, 100]" layout="total, sizes, prev, pager, next" @size-change="fetchResources" @current-change="fetchResources" /></div>
     </el-card>
 
-    <el-dialog v-model="showCreate" title="登记资源" width="520px">
-      <el-alert title="登记资源必须位于当前客户上下文；Beagle IDE Workspace 应优先通过受信任 Provider API 注册。" type="info" :closable="false" show-icon class="dialog-alert" />
+    <el-dialog v-model="showCreate" title="登记 ContainerSSH" width="520px">
+      <el-alert title="HostSSH、Kubernetes、数据库和 TCP 仍使用兼容入口；完成各自 Target/Action 契约前不能登记为统一资源。" type="warning" :closable="false" show-icon class="dialog-alert" />
       <el-form label-position="top" :model="createForm">
         <el-form-item label="资源名称" required><el-input v-model="createForm.display_name" placeholder="例如：算法开发 IDE" /></el-form-item>
-        <el-form-item label="资源类型" required><el-select v-model="createForm.type" style="width: 100%"><el-option label="ContainerSSH" value="container_ssh" /><el-option label="HostSSH" value="host_ssh" /><el-option label="Kubernetes API" value="kubernetes_api" /><el-option label="DatabaseService" value="database_service" /><el-option label="TCPService" value="tcp_service" /></el-select></el-form-item>
+        <el-form-item label="资源类型"><el-input model-value="ContainerSSH" disabled /></el-form-item>
         <el-form-item label="Provider"><el-input v-model="createForm.provider_id" placeholder="例如：beagle-ide" /></el-form-item>
         <el-form-item label="Workspace ID"><el-input v-model="createForm.external_workspace_id" placeholder="受信任 Provider 的稳定业务 ID" /></el-form-item>
       </el-form>
@@ -83,8 +98,10 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Coin, Connection, Monitor, MoreFilled, Plus, Refresh, Search, Ship, TakeawayBox } from '@element-plus/icons-vue'
-import { createManagedResource, getManagedResources, type Resource, type ResourceType } from '@/api/resource'
+import { ArrowRight, Coin, Connection, Monitor, MoreFilled, OfficeBuilding, Plus, Refresh, Search, Ship, TakeawayBox, Warning } from '@element-plus/icons-vue'
+import { createManagedResource, getManagedResources, getResourceSummary, type Resource, type ResourceSummary, type ResourceType } from '@/api/resource'
+import { getNodes } from '@/api/node'
+import { getEndpoints } from '@/api/endpoint'
 import { useTenantStore } from '@/stores/tenant'
 import { useAuthStore } from '@/stores/auth'
 
@@ -99,36 +116,50 @@ const activeType = ref<ResourceType | ''>('')
 const filters = reactive<{ search: string; state: string }>({ search: '', state: '' })
 const createForm = reactive({ display_name: '', type: 'container_ssh' as ResourceType, provider_id: 'beagle-ide', external_workspace_id: '' })
 const pagination = reactive({ page: 1, size: 20, total: 0 })
-
-const availableCount = computed(() => resources.value.filter(item => item.state === 'available').length)
-const containerCount = computed(() => resources.value.filter(item => item.type === 'container_ssh').length)
-const degradedCount = computed(() => resources.value.filter(item => ['degraded', 'draining'].includes(item.state)).length)
-const sessionCount = computed(() => resources.value.reduce((total, item) => total + (item.session_count || 0), 0))
+const summary = reactive<ResourceSummary>({ total: 0, available: 0, degraded: 0, active_sessions: 0, by_type: {} })
+const legacyInventory = reactive({ agents: 0, desktops: 0, endpoints: 0 })
+const showLegacyInventory = computed(() => authStore.role !== 'tenant_admin' && legacyInventory.agents + legacyInventory.desktops + legacyInventory.endpoints > 0)
 const tabs = computed(() => [
-  { label: '全部', value: '' as ResourceType | '', count: pagination.total },
-  { label: '容器', value: 'container_ssh' as ResourceType, count: countType('container_ssh') },
-  { label: 'SSH 主机', value: 'host_ssh' as ResourceType, count: countType('host_ssh') },
-  { label: 'Kubernetes', value: 'kubernetes_api' as ResourceType, count: countType('kubernetes_api') },
-  { label: '数据库', value: 'database_service' as ResourceType, count: countType('database_service') },
-  { label: 'TCP', value: 'tcp_service' as ResourceType, count: countType('tcp_service') }
+  { label: '全部', value: '' as ResourceType | '', count: summary.total },
+  { label: '容器', value: 'container_ssh' as ResourceType, count: summary.by_type.container_ssh || 0 },
+  { label: 'SSH 主机', value: 'host_ssh' as ResourceType, count: summary.by_type.host_ssh || 0 },
+  { label: 'Kubernetes', value: 'kubernetes_api' as ResourceType, count: summary.by_type.kubernetes_api || 0 },
+  { label: '数据库', value: 'database_service' as ResourceType, count: summary.by_type.database_service || 0 },
+  { label: 'TCP', value: 'tcp_service' as ResourceType, count: summary.by_type.tcp_service || 0 }
 ])
-
-function countType(type: ResourceType) {
-  return resources.value.filter(item => item.type === type).length
-}
 
 const fetchResources = async () => {
   loading.value = true
   try {
-    const res = await getManagedResources({ tenant_id: tenantStore.tenantId || undefined, type: activeType.value || undefined, state: filters.state || undefined, search: filters.search || undefined, page: pagination.page, size: pagination.size })
+    const [res, summaryRes] = await Promise.all([
+      getManagedResources({ tenant_id: tenantStore.tenantId || undefined, type: activeType.value || undefined, state: filters.state || undefined, search: filters.search || undefined, page: pagination.page, size: pagination.size }),
+      getResourceSummary({ tenant_id: tenantStore.tenantId || undefined, state: filters.state || undefined, search: filters.search || undefined })
+    ])
     if (res.success && res.data) {
       resources.value = res.data
       pagination.total = res.total
     }
+    if (summaryRes.success && summaryRes.data) Object.assign(summary, summaryRes.data)
   } catch (error) {
     console.error('获取统一资源失败:', error)
   } finally {
     loading.value = false
+  }
+}
+
+const fetchLegacyInventory = async () => {
+  if (authStore.role === 'tenant_admin') return
+  try {
+    const [agents, desktops, endpoints] = await Promise.all([
+      getNodes({ type: 'agent', page: 1, size: 1 }),
+      getNodes({ type: 'desktop', page: 1, size: 1 }),
+      getEndpoints({ page: 1, size: 1 })
+    ])
+    legacyInventory.agents = agents.total || 0
+    legacyInventory.desktops = desktops.total || 0
+    legacyInventory.endpoints = endpoints.total || 0
+  } catch (error) {
+    console.error('获取存量接入概览失败:', error)
   }
 }
 
@@ -171,7 +202,7 @@ const locationLabel = (row: Resource) => row.type === 'container_ssh' ? `${row.n
 const formatTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
 
 watch(() => tenantStore.tenantId, () => { pagination.page = 1; fetchResources() })
-onMounted(fetchResources)
+onMounted(() => { fetchResources(); fetchLegacyInventory() })
 </script>
 
 <style scoped>
@@ -188,6 +219,14 @@ onMounted(fetchResources)
 .summary-item strong { font-size: 21px; color: var(--text-primary); }
 .summary-item strong.success { color: var(--success-color); }
 .summary-item strong.danger { color: var(--danger-color); }
+.legacy-band { display: grid; grid-template-columns: minmax(280px, 1fr) auto auto; align-items: center; gap: 22px; margin-bottom: 16px; padding: 14px 16px; background: #fffaf0; border: 1px solid #ead7ad; border-radius: 6px; }
+.legacy-title { display: flex; align-items: center; gap: 8px; color: #72521b; }
+.legacy-copy p { margin: 4px 0 0; color: #7a6849; font-size: 12px; }
+.legacy-metrics { display: flex; border-left: 1px solid #ead7ad; border-right: 1px solid #ead7ad; }
+.legacy-metrics button { min-width: 88px; padding: 2px 14px; border: 0; background: transparent; cursor: pointer; }
+.legacy-metrics strong, .legacy-metrics span { display: block; }
+.legacy-metrics strong { color: var(--text-primary); font-size: 18px; }
+.legacy-metrics span { margin-top: 1px; color: var(--text-secondary); font-size: 11px; }
 .resource-surface { border-radius: 6px; }
 .resource-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--border-light); }
 .resource-tab { position: relative; height: 44px; padding: 0 12px; color: var(--text-regular); background: transparent; border: 0; cursor: pointer; white-space: nowrap; }
@@ -213,6 +252,7 @@ onMounted(fetchResources)
 .resource-table strong { color: var(--text-primary); font-weight: 600; }
 .pagination-wrapper { display: flex; justify-content: flex-end; padding-top: 18px; }
 .dialog-alert { margin-bottom: 16px; }
+@media (max-width: 1000px) { .legacy-band { grid-template-columns: 1fr auto; } .legacy-copy { grid-column: 1 / -1; } }
 @media (max-width: 900px) { .summary-strip { grid-template-columns: repeat(3, 1fr); } .summary-item:nth-child(n+4) { border-top: 1px solid var(--border-light); } .search-input { width: 260px; } }
-@media (max-width: 640px) { .page-header { flex-direction: column; } .summary-strip { grid-template-columns: repeat(2, 1fr); } .summary-item:nth-child(odd) { border-right: 1px solid var(--border-light); } .summary-item:nth-child(even) { border-right: 0; } .toolbar { flex-wrap: wrap; } .search-input { width: 100%; } .filter-select { flex: 1; min-width: 120px; } }
+@media (max-width: 640px) { .page-header { flex-direction: column; } .summary-strip { grid-template-columns: repeat(2, 1fr); } .summary-item:nth-child(odd) { border-right: 1px solid var(--border-light); } .summary-item:nth-child(even) { border-right: 0; } .toolbar { flex-wrap: wrap; } .search-input { width: 100%; } .filter-select { flex: 1; min-width: 120px; } .legacy-band { grid-template-columns: 1fr; } .legacy-metrics { justify-content: space-around; border: 0; border-top: 1px solid #ead7ad; border-bottom: 1px solid #ead7ad; padding: 10px 0; } .legacy-metrics button { min-width: 0; padding: 0 8px; } }
 </style>

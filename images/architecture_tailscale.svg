@@ -37,7 +37,7 @@
   
   <!-- 标题 -->
   <text x="600" y="35" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#333">
-    Tailscale 升级架构图
+    Headscale 升级架构图
   </text>
 
   <!-- 互联网云 -->
@@ -63,17 +63,17 @@
     公司内网 (Agent 网段: 100.64.0.0/16)
   </text>
 
-  <!-- Agent (Tailscale) -->
+  <!-- Agent (Headscale) -->
   <rect x="80" y="370" width="140" height="90" rx="8" fill="#fff" stroke="#4caf50" stroke-width="2"/>
   <text x="150" y="395" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#2e7d32">Agent</text>
-  <text x="150" y="412" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">Tailscale Client</text>
+  <text x="150" y="412" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">Headscale Client</text>
   <text x="150" y="428" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#4caf50">100.64.0.1</text>
   <text x="150" y="448" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#888">子网路由器 (固定IP)</text>
 
   <!-- Agent-2 -->
   <rect x="240" y="370" width="140" height="90" rx="8" fill="#fff" stroke="#4caf50" stroke-width="2"/>
   <text x="310" y="395" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#2e7d32">Agent-2</text>
-  <text x="310" y="412" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">Tailscale Client</text>
+  <text x="310" y="412" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">Headscale Client</text>
   <text x="310" y="428" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#4caf50">100.64.0.2</text>
   <text x="310" y="448" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#888">NAS 网关 (固定IP)</text>
 
@@ -105,7 +105,7 @@
   <!-- Desktop (办公) -->
   <rect x="480" y="370" width="120" height="80" rx="8" fill="#fff" stroke="#e91e63" stroke-width="2"/>
   <text x="540" y="395" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#c2185b">Desktop</text>
-  <text x="540" y="412" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">Tailscale Client</text>
+  <text x="540" y="412" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">Headscale Client</text>
   <text x="540" y="428" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#e91e63">100.65.0.1</text>
   <text x="540" y="445" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#888">张三-公司电脑</text>
 
@@ -124,7 +124,7 @@
   <!-- Desktop (家里) -->
   <rect x="830" y="370" width="120" height="80" rx="8" fill="#fff" stroke="#9c27b0" stroke-width="2"/>
   <text x="890" y="395" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#7b1fa2">Desktop</text>
-  <text x="890" y="412" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">Tailscale Client</text>
+  <text x="890" y="412" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#666">Headscale Client</text>
   <text x="890" y="428" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#9c27b0">100.65.0.2</text>
   <text x="890" y="445" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#888">张三-家里电脑</text>
 
