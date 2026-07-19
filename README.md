@@ -1,5 +1,7 @@
 # Beagle Signal Server
 
+[![Build Images](https://github.com/open-beagle/awecloud-signaling-server/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/open-beagle/awecloud-signaling-server/actions/workflows/build.yml)
+
 面向研发、测试和运维人员的零信任资源访问服务，通过 Tailscale/Headscale 建立安全通道，允许用户使用原生工具访问明确授权的远程资源。
 
 **核心功能**：
@@ -49,7 +51,7 @@ awecloud-signaling-server/
 
 ## 开发框架
 
-**Go 1.25+**
+**Go 1.26**
 
 - Gin - HTTP 路由和中间件
 - gRPC - Agent/Desktop 通信
@@ -70,22 +72,68 @@ awecloud-signaling-server/
 
 ### 环境要求
 
-- Go 1.25+
-- Node.js 20+（Web 和 Desktop）
-- Wails CLI（Desktop）
+- Go 1.26
+- Node.js 24（Web）
 
 ### 构建命令
 
 ```bash
-# Server & Agent（日常开发，默认当前架构）
-BUILD_VERSION=$(cat version) bash scripts/build.sh
+# 生成 Protocol Buffers 代码
+bash scripts/generate_proto.sh
 
 # Web 前端
 BUILD_VERSION=$(cat version) bash scripts/build_frontend.sh
 
-# Desktop 客户端
-BUILD_VERSION=$(cat desktop/version) bash scripts/build_desktop.sh
+# Server、Agent、Endpoint（日常开发，默认当前架构）
+BUILD_VERSION=$(cat version) bash scripts/build.sh
+
+# 仅构建 Server
+BUILD_VERSION=$(cat version) bash scripts/build.sh server
+
 ```
+
+Desktop 客户端位于独立仓库，使用其自身的 `version` 和构建说明。
+
+### 流水线构建
+
+GitHub Actions 工作流位于 `.github/workflows/build.yml`，支持以下触发方式：
+
+- 推送到 `main` 分支时自动构建并发布。
+- 在 GitHub Actions 页面使用 `workflow_dispatch` 手动触发。
+
+流水线使用 Go 1.26、Node.js 24，并执行：
+
+1. 构建 Web 管理界面。
+2. 交叉编译 Linux amd64/arm64 的 Server、Agent 和 Endpoint。
+3. 构建并推送 Server、Agent 双架构镜像及 multi-arch manifest。
+4. 上传 Agent、Endpoint 双架构二进制和安装脚本到 S3。
+
+镜像标签读取根目录 `version` 文件：
+
+```txt
+registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:<version>
+registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:<version>
+```
+
+流水线地址：<https://github.com/open-beagle/awecloud-signaling-server/actions/workflows/build.yml>
+
+### 迭代命令
+
+日常开发提交到 `dev`。准备流水线构建时，将 `dev` 合入 `main`；`main` 推送成功后会自动触发构建和发布，再把合并结果快进同步回 `dev`：
+
+```bash
+git switch dev && \
+  git pull --ff-only origin dev && \
+  git switch main && \
+  git pull --ff-only origin main && \
+  git merge dev --no-ff && \
+  git push origin main && \
+  git switch dev && \
+  git merge main --ff-only && \
+  git push origin dev
+```
+
+只需重新运行当前提交的流水线时，在 GitHub Actions 页面选择 `Build Images`，点击 `Run workflow` 并选择目标分支。版本号仍以 `version` 文件为准，流水线不会自动修改版本号。
 
 ### 运行命令
 
