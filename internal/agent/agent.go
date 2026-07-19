@@ -53,10 +53,14 @@ type Agent struct {
 	tailscaleIP    string
 
 	// K8S 能力（P1 新增）
-	permCache   *PermissionCache    // 权限缓存
-	k8sAPIProxy *K8SAPIProxy        // K8S API 反向代理
-	svcInformer *K8SServiceInformer // K8S Service Informer
-	svcProxy    *K8SSVCProxy        // K8S Service gRPC 代理
+	permCache           *PermissionCache       // 权限缓存
+	k8sAPIProxy         *K8SAPIProxy           // K8S API 反向代理
+	svcInformer         *K8SServiceInformer    // K8S Service Informer
+	svcProxy            *K8SSVCProxy           // K8S Service gRPC 代理
+	containerDiscovery  *K8SContainerDiscovery // ContainerSSH Pod 候选发现
+	containerExecBroker *ContainerExecBroker   // ContainerSSH Kubernetes Exec 数据面
+	containerSSHProxy   *ContainerSSHProxy     // ContainerSSH tsnet SSH 入口
+	containerSessions   *ContainerSessionManager
 
 	// Endpoint 能力（P2 新增）
 	endpointServer      *EndpointServer      // Endpoint 内网 gRPC Server
@@ -152,6 +156,11 @@ func (a *Agent) Run() error {
 			logger.Warnf("启动 K8S Service 模块失败: %v", err)
 		}
 	}
+	if a.config.Container.Enabled {
+		if err := a.startK8SContainerDiscovery(); err != nil {
+			logger.Warnf("启动 ContainerSSH Pod 候选发现失败: %v", err)
+		}
+	}
 
 	// 启动 tsnet 诊断（异步，不阻塞启动流程）
 	if a.tsManager != nil {
@@ -193,6 +202,12 @@ func (a *Agent) Run() error {
 	if a.svcInformer != nil {
 		a.svcInformer.Stop()
 	}
+	if a.containerDiscovery != nil {
+		a.containerDiscovery.Stop()
+	}
+	if a.containerSSHProxy != nil {
+		a.containerSSHProxy.Stop()
+	}
 
 	// 停止 Endpoint K8SAPI 代理
 	if a.endpointK8SAPIProxy != nil {
@@ -231,7 +246,7 @@ func (a *Agent) Run() error {
 }
 
 // RunClient 运行 Client 模式（CloudIDE 等场景）
-// 启动 tsnet 连接网络 + SSH + gRPC 心跳（精简版，不需要 ProxyManager/VisitorManager）
+// 启动 tsnet 出站网络和 gRPC 心跳（精简版，不提供容器 SSH 入站）
 func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 	// 标记为 Client 模式
 	a.isClientMode = true
@@ -760,6 +775,10 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 			Hostname: hostname,
 		},
 	}
+	if a.containerExecBroker != nil && a.containerSSHProxy != nil {
+		req.ContainerSshProtocol = "v1"
+		req.ContainerSshSessionEvents = a.containerSessions.EventsForHeartbeat()
+	}
 
 	// 添加设备名称（Node.Name，即 DeployToken.Name）
 	if a.deviceName != "" {
@@ -829,6 +848,21 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 		}
 	}
 
+	// ContainerSSH 候选只携带运行时事实，Server 负责与可信 Workspace
+	// Binding reconciliation；Agent 不提交 Tenant ID，也不直接发布 Resource。
+	if a.containerDiscovery != nil {
+		for _, candidate := range a.containerDiscovery.GetCandidates() {
+			protoCandidate := &pb.ContainerDiscoveryCandidate{
+				ProviderHint: candidate.ProviderHint, WorkspaceHint: candidate.WorkspaceHint,
+				GenerationHint: candidate.GenerationHint, ClusterId: a.config.Telemetry.Cluster,
+				Namespace: candidate.Namespace, PodName: candidate.PodName, PodUid: candidate.PodUID,
+				ContainerName: candidate.ContainerName, Ready: candidate.Ready,
+				LeaseSeconds: int32(candidate.LeaseSeconds), Labels: candidate.Labels,
+			}
+			req.ContainerCandidates = append(req.ContainerCandidates, protoCandidate)
+		}
+	}
+
 	// 构建域名注册列表
 	req.DomainRegistrations = a.buildDomainRegistrations()
 
@@ -881,6 +915,17 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 		a.permCache.UpdateK8SPermissions(resp.K8SPermissions)
 		a.permCache.UpdateK8SServicePermissions(resp.K8SServicePermissions)
 		a.permCache.UpdateEndpointSSHPermissions(resp.EndpointSshPermissions)
+		if resp.ContainerSshProtocol == "v1" {
+			a.permCache.UpdateContainerSSHPermissionsFromProto(resp.ContainerSshPermissions)
+		} else {
+			// An old Server cannot provide an authoritative full snapshot.
+			a.permCache.UpdateContainerSSHPermissionsFromProto(nil)
+		}
+		if a.containerSessions != nil {
+			a.containerSessions.ReconcilePermissions(a.permCache)
+			a.containerSessions.AckEvents(resp.ContainerSshSessionAckEventIds)
+			a.containerSessions.Disconnect(resp.ContainerSshDisconnectSessionIds, "admin_disconnect")
+		}
 	}
 
 	// 同步 Endpoint 能力配置到 EndpointServer（让 Agent 能把 Server 配置下发给 Endpoint）
@@ -1063,6 +1108,10 @@ func (a *Agent) GetVisitorLANIP() string {
 	return a.visitorManager.GetLANIP()
 }
 
+func (a *Agent) shouldRegisterSSHDomain() bool {
+	return a != nil && a.config != nil && a.config.Tunnel.EnableSSH
+}
+
 // buildDomainRegistrations 构建域名注册列表
 // 根据 Agent 当前配置和状态，生成需要上报给 Server 的域名列表
 func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
@@ -1086,9 +1135,9 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		agentIP = a.tsManager.GetIP()
 	}
 
-	// 1. Agent SSH 域名：{device}.{agent_name}{domain_suffix}（如 ide-chengdu.beijing.beagle）
-	// Client 模式（CloudIDE）默认启用 Tailscale SSH，也需要注册域名
-	if (a.config.Tunnel.EnableSSH || a.isClientMode) && a.tsManager != nil && a.tsManager.IsConnected() && device != "" {
+	// 1. Agent SSH 域名：{device}.{agent_name}{domain_suffix}（如 node-1.beijing.beagle）
+	// Client 模式仅在显式启用兼容 SSH 入站时注册；新部署默认只提供出站访问。
+	if a.shouldRegisterSSHDomain() && a.tsManager != nil && a.tsManager.IsConnected() && device != "" {
 		// 自动检测系统 SSH 用户
 		sshUsers := detectSystemSSHUsers()
 		if len(sshUsers) == 0 {
@@ -1262,6 +1311,45 @@ func (a *Agent) startK8SServiceModules() error {
 
 	logger.Infof("K8S SVCProxy 已启动: gRPC 端口=%d (informer=%v)",
 		a.config.SVC.ListenPortBase, a.svcInformer != nil)
+	return nil
+}
+
+func (a *Agent) startK8SContainerDiscovery() error {
+	discovery, err := NewK8SContainerDiscovery(&a.config.Container, a.ctx)
+	if err != nil {
+		return err
+	}
+	discovery.Start()
+	a.containerDiscovery = discovery
+	broker, err := NewContainerExecBrokerFromKubeconfig(a.config.Container.Kubeconfig, a.permCache)
+	if err != nil {
+		discovery.Stop()
+		a.containerDiscovery = nil
+		return fmt.Errorf("创建 ContainerSSH Exec Broker 失败: %w", err)
+	}
+	a.containerExecBroker = broker
+	if a.tsManager == nil || !a.tsManager.IsConnected() {
+		discovery.Stop()
+		a.containerDiscovery = nil
+		a.containerExecBroker = nil
+		return fmt.Errorf("启动 ContainerSSH 入口需要已连接的 Tailscale")
+	}
+	sessions := NewContainerSessionManager()
+	proxy, err := NewContainerSSHProxy(a.tsManager, a.permCache, broker, sessions, a.config.Tunnel.StateDir, a.ctx)
+	if err != nil {
+		discovery.Stop()
+		a.containerDiscovery = nil
+		a.containerExecBroker = nil
+		return fmt.Errorf("创建 ContainerSSH 入口失败: %w", err)
+	}
+	if err := proxy.Start(); err != nil {
+		discovery.Stop()
+		a.containerDiscovery = nil
+		a.containerExecBroker = nil
+		return fmt.Errorf("启动 ContainerSSH 入口失败: %w", err)
+	}
+	a.containerSSHProxy = proxy
+	a.containerSessions = sessions
 	return nil
 }
 

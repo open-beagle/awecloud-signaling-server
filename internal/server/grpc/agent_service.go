@@ -4,7 +4,9 @@ package grpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,20 +65,25 @@ type AgentServiceServer struct {
 	requestImmediateReport bool
 	immediateReportMutex   sync.Mutex
 
-	headscaleClient *headscale.Client
-	config          *config.ServerConfig
-	domainService   *service.DomainService
-	updateService   *service.UpdateService
+	headscaleClient          *headscale.Client
+	config                   *config.ServerConfig
+	domainService            *service.DomainService
+	updateService            *service.UpdateService
+	resourceReconciler       *service.ResourceReconciliationService
+	containerSessionAckMutex sync.Mutex
+	containerSessionAcks     map[uint64][]string
 }
 
 // NewAgentServiceServer 创建 Agent 服务
 func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
 	s := &AgentServiceServer{
-		connections:   make(map[uint64]*AgentConnection),
-		configVersion: time.Now().Unix(),
-		config:        cfg,
-		domainService: service.NewDomainService(db.DB),
-		updateService: service.NewUpdateService(db.DB),
+		connections:          make(map[uint64]*AgentConnection),
+		configVersion:        time.Now().Unix(),
+		config:               cfg,
+		domainService:        service.NewDomainService(db.DB),
+		updateService:        service.NewUpdateService(db.DB),
+		resourceReconciler:   service.NewResourceReconciliationService(db.DB),
+		containerSessionAcks: make(map[uint64][]string),
 	}
 
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
@@ -409,6 +416,9 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 	logger.Infof("Agent 连接注册: agent_id=%d, node_id=%d, hostname=%s", agentID, nodeID, firstReq.Hostname)
 
 	defer func() {
+		s.containerSessionAckMutex.Lock()
+		delete(s.containerSessionAcks, nodeID)
+		s.containerSessionAckMutex.Unlock()
 		s.connMutex.Lock()
 		delete(s.connections, nodeID)
 		s.connMutex.Unlock()
@@ -580,9 +590,17 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	// 更新 Node 信息
 	now := time.Now()
 	updates := map[string]any{
-		"last_heartbeat":   now,
-		"ip":               req.TunnelIp,
-		"updater_protocol": req.UpdaterProtocol,
+		"last_heartbeat": now,
+		"ip":             req.TunnelIp,
+	}
+	// Old Agents do not know updater_protocol. Preserve the stored capability
+	// when the optional field is absent instead of downgrading it on heartbeat.
+	if req.UpdaterProtocol != "" {
+		updates["updater_protocol"] = req.UpdaterProtocol
+	}
+	// Preserve the stored value when an old Agent omits the additive field.
+	if req.ContainerSshProtocol != "" {
+		updates["container_ssh_protocol"] = req.ContainerSshProtocol
 	}
 	if req.Version != "" {
 		updates["version"] = req.Version
@@ -653,6 +671,23 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		s.handleConnectedEndpoints(ctx, agentID, node.ID, req.ConnectedEndpoints)
 	}
 
+	// ContainerSSH candidates are runtime evidence. The NodeID comes from the
+	// authenticated heartbeat stream, never from an Agent-supplied field.
+	if len(req.ContainerCandidates) > 0 {
+		s.handleContainerCandidates(ctx, node.ID, req.ContainerCandidates)
+	}
+	if req.ContainerSshProtocol == "v1" && len(req.ContainerSshSessionEvents) > 0 {
+		acks := s.handleContainerSessionEvents(ctx, node.ID, req.ContainerSshSessionEvents)
+		if len(acks) > 0 {
+			s.containerSessionAckMutex.Lock()
+			if s.containerSessionAcks == nil {
+				s.containerSessionAcks = make(map[uint64][]string)
+			}
+			s.containerSessionAcks[node.ID] = append(s.containerSessionAcks[node.ID], acks...)
+			s.containerSessionAckMutex.Unlock()
+		}
+	}
+
 	if s.updateService != nil {
 		for _, report := range req.UpdateStatuses {
 			if err := s.updateService.Report(ctx, report.TaskId, service.UpdateStatusReporter{
@@ -682,6 +717,54 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	// 旧的 DiscoveredServices 字段已废弃，不再处理
 
 	return node.ID
+}
+
+func (s *AgentServiceServer) handleContainerCandidates(ctx context.Context, nodeID uint64, reports []*pb.ContainerDiscoveryCandidate) {
+	now := time.Now()
+	for _, report := range reports {
+		if report == nil || report.PodUid == "" || report.Namespace == "" || report.ContainerName == "" {
+			continue
+		}
+		var candidate model.DiscoveryCandidate
+		err := db.DB.WithContext(ctx).Where("agent_node_id = ? AND pod_uid = ? AND container_name = ?", nodeID, report.PodUid, report.ContainerName).First(&candidate).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			candidate = model.DiscoveryCandidate{ID: uuid.NewString(), AgentNodeID: nodeID, PodUID: report.PodUid, ContainerName: report.ContainerName, Status: model.DiscoveryCandidateObserved}
+		} else if err != nil {
+			logger.Warnf("查询 ContainerSSH Candidate 失败: node_id=%d pod_uid=%s err=%v", nodeID, report.PodUid, err)
+			continue
+		}
+		if candidate.Status == "" || candidate.Status == model.DiscoveryCandidateStale {
+			candidate.Status = model.DiscoveryCandidateObserved
+		}
+		candidate.ProviderHint = strings.TrimSpace(report.ProviderHint)
+		candidate.WorkspaceHint = strings.TrimSpace(report.WorkspaceHint)
+		candidate.GenerationHint = report.GenerationHint
+		candidate.ClusterID = strings.TrimSpace(report.ClusterId)
+		candidate.Namespace = strings.TrimSpace(report.Namespace)
+		candidate.PodName = strings.TrimSpace(report.PodName)
+		candidate.Ready = report.Ready
+		candidate.ObservedAt = now
+		leaseSeconds := int(report.LeaseSeconds)
+		if leaseSeconds <= 0 || leaseSeconds > 24*60*60 {
+			leaseSeconds = 120
+		}
+		expires := now.Add(time.Duration(leaseSeconds) * time.Second)
+		candidate.LeaseExpiresAt = &expires
+		if labelsJSON, marshalErr := json.Marshal(report.Labels); marshalErr == nil {
+			candidate.LabelSnapshot = string(labelsJSON)
+		}
+		if err := db.DB.WithContext(ctx).Save(&candidate).Error; err != nil {
+			logger.Warnf("保存 ContainerSSH Candidate 失败: node_id=%d pod_uid=%s err=%v", nodeID, report.PodUid, err)
+			continue
+		}
+		reconciler := s.resourceReconciler
+		if reconciler == nil {
+			reconciler = service.NewResourceReconciliationService(db.DB)
+		}
+		if _, reconcileErr := reconciler.ReconcileCandidate(ctx, candidate.ID); reconcileErr != nil {
+			logger.Warnf("ContainerSSH Candidate 自动匹配失败: candidate_id=%s err=%v", candidate.ID, reconcileErr)
+		}
+	}
 }
 
 // sendHeartbeatResponse 发送心跳响应
@@ -845,6 +928,26 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		resp.EndpointSshPermissions = endpointSSHPerms
 	}
 
+	// Only an Agent that explicitly negotiated v1 may interpret an empty list
+	// as a complete revocation snapshot. Old Agents continue unchanged.
+	if nodeID > 0 {
+		var protocol string
+		if err := db.DB.WithContext(ctx).Model(&model.Node{}).Where("id = ?", nodeID).Pluck("container_ssh_protocol", &protocol).Error; err == nil && protocol == "v1" {
+			resp.ContainerSshProtocol = "v1"
+			resp.ContainerSshPermissions = s.queryContainerSSHPermissions(ctx, nodeID)
+			s.containerSessionAckMutex.Lock()
+			resp.ContainerSshSessionAckEventIds = s.containerSessionAcks[nodeID]
+			delete(s.containerSessionAcks, nodeID)
+			s.containerSessionAckMutex.Unlock()
+			var revoked []model.ContainerSession
+			if err := db.DB.WithContext(ctx).Where("agent_node_id = ? AND status = ? AND disconnect_acknowledged_at IS NULL", nodeID, model.ContainerSessionRevoked).Find(&revoked).Error; err == nil {
+				for _, session := range revoked {
+					resp.ContainerSshDisconnectSessionIds = append(resp.ContainerSshDisconnectSessionIds, session.ID)
+				}
+			}
+		}
+	}
+
 	// 查询该 Agent 关联的 Endpoint K8SAPI 授权信息
 	// P11 重构：Endpoint K8SAPI 权限已废弃，统一使用 Agent 级别权限
 	// 保留字段以兼容旧版本 Agent，但不再填充数据
@@ -897,6 +1000,85 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 	}
 
 	return stream.Send(resp)
+}
+
+func (s *AgentServiceServer) queryContainerSSHPermissions(ctx context.Context, nodeID uint64) []*pb.ContainerSSHPermission {
+	if nodeID == 0 {
+		return nil
+	}
+	now := time.Now()
+	var resources []model.Resource
+	if err := db.DB.WithContext(ctx).
+		Where("agent_node_id = ? AND type = ? AND target_revision > 0 AND state IN ?", nodeID, model.ResourceTypeContainerSSH, []model.ResourceState{model.ResourceStateAvailable, model.ResourceStateDegraded}).
+		Find(&resources).Error; err != nil {
+		logger.Warnf("查询 ContainerSSH Resource 快照失败: node_id=%d err=%v", nodeID, err)
+		return nil
+	}
+
+	result := make([]*pb.ContainerSSHPermission, 0)
+	for _, resource := range resources {
+		var target model.ResourceTarget
+		if err := db.DB.WithContext(ctx).Where("resource_id = ? AND revision = ? AND agent_node_id = ? AND ready = ?", resource.ID, resource.TargetRevision, nodeID, true).First(&target).Error; err != nil {
+			continue
+		}
+		var grants []model.AccessGrant
+		if err := db.DB.WithContext(ctx).Where("resource_id = ? AND tenant_id = ? AND subject_type IN ? AND status = ? AND valid_from <= ? AND expires_at > ?", resource.ID, resource.TenantID, []string{"user", "group"}, "enabled", now, now).Order("subject_type DESC").Find(&grants).Error; err != nil {
+			logger.Warnf("查询 ContainerSSH Grant 快照失败: resource_id=%s err=%v", resource.ID, err)
+			continue
+		}
+		resolved := make(map[uint64]*pb.ContainerSSHPermission)
+		for _, grant := range grants {
+			if !containsAction(parseJSONStringArray(grant.Actions), "shell") {
+				continue
+			}
+			userIDs := []uint64{grant.SubjectUserID}
+			if grant.SubjectType == "group" {
+				if grant.SubjectGroupID == nil {
+					continue
+				}
+				var group model.Group
+				if err := db.DB.WithContext(ctx).Where("id = ? AND tenant_id = ?", *grant.SubjectGroupID, resource.TenantID).First(&group).Error; err != nil {
+					continue
+				}
+				userIDs = nil
+				if err := db.DB.WithContext(ctx).Model(&model.GroupMember{}).Where("group_id = ?", group.ID).Pluck("user_id", &userIDs).Error; err != nil {
+					continue
+				}
+			}
+			for _, userID := range userIDs {
+				var user model.User
+				if err := db.DB.WithContext(ctx).Where("id = ? AND enabled = ?", userID, true).First(&user).Error; err != nil {
+					continue
+				}
+				var membership model.TenantMembership
+				if err := db.DB.WithContext(ctx).Where("tenant_id = ? AND user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", resource.TenantID, user.ID, true, now).First(&membership).Error; err != nil {
+					continue
+				}
+				permission := &pb.ContainerSSHPermission{
+					UserId: user.ID, UserName: user.Name, ResourceId: resource.ID,
+					Namespace: target.Namespace, PodName: target.PodName, PodUid: target.PodUID, ContainerName: target.ContainerName,
+					TargetRevision: target.Revision, GrantRevision: grant.Revision, MaxSessionSeconds: int32(grant.MaxSessionSeconds), ListenPort: uint32(resource.ContainerSSHPort),
+				}
+				current, exists := resolved[user.ID]
+				if !exists || permission.GrantRevision > current.GrantRevision {
+					resolved[user.ID] = permission
+				}
+			}
+		}
+		for _, permission := range resolved {
+			result = append(result, permission)
+		}
+	}
+	return result
+}
+
+func containsAction(actions []string, expected string) bool {
+	for _, action := range actions {
+		if action == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func toProtoUpdateDirective(directive service.UpdateDirective) *pb.UpdateDirective {

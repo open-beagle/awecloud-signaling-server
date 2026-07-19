@@ -18,7 +18,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/components/Layout/Layout.vue'),
-    redirect: '/users',
+    redirect: '/resources',
     meta: { requiresAuth: true },
     children: [
       // 用户管理
@@ -97,6 +97,18 @@ const routes: RouteRecordRaw[] = [
         path: 'resources',
         name: 'Resources',
         component: () => import('@/views/Resource/List.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'resources/:id',
+        name: 'ResourceDetail',
+        component: () => import('@/views/Resource/Detail.vue'),
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'resource-candidates',
+        name: 'ResourceCandidates',
+        component: () => import('@/views/Resource/Candidates.vue'),
         meta: { requiresAuth: true }
       },
       // 域名管理
@@ -237,14 +249,23 @@ const router = createRouter({
 })
 
 // 路由守卫
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
-  
+
   if (to.meta.requiresAuth !== false && !authStore.isAuthenticated) {
     next({ name: 'Login', query: { redirect: to.fullPath } })
-  } else {
-    next()
+	return
   }
+  if (authStore.isAuthenticated && !authStore.role) {
+    try { await authStore.loadProfile() } catch { return }
+  }
+  if (authStore.role === 'tenant_admin' && !tenantAdminPageAllowed(to.path)) {
+    next('/resources')
+    return
+  }
+  next()
 })
+
+const tenantAdminPageAllowed = (path: string) => path === '/resources' || path.startsWith('/resources/') || path === '/groups' || /^\/groups\/\d+\/members$/.test(path)
 
 export default router

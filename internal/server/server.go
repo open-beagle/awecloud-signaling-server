@@ -43,10 +43,13 @@ type Server struct {
 	loginService   *service.DesktopLoginService
 	desktopAuthAPI *api.DesktopAuthAPI
 
-	headscaleClient *headscale.Client
-	aclSyncService  *headscale.ACLSyncService
-	aclSyncCtx      context.Context
-	aclSyncCancel   context.CancelFunc
+	headscaleClient       *headscale.Client
+	aclSyncService        *headscale.ACLSyncService
+	aclSyncCtx            context.Context
+	aclSyncCancel         context.CancelFunc
+	reconciliationService *service.ResourceReconciliationService
+	reconciliationCtx     context.Context
+	reconciliationCancel  context.CancelFunc
 }
 
 // GetAgentService 获取 AgentService（供 API 使用）
@@ -82,6 +85,7 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 	var aclSyncService *headscale.ACLSyncService
 	var aclSyncCtx context.Context
 	var aclSyncCancel context.CancelFunc
+	reconciliationCtx, reconciliationCancel := context.WithCancel(context.Background())
 
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
 		logger.Info("初始化 Headscale ACL 同步服务")
@@ -101,11 +105,14 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 	}
 
 	return &Server{
-		config:          cfg,
-		headscaleClient: headscaleClient,
-		aclSyncService:  aclSyncService,
-		aclSyncCtx:      aclSyncCtx,
-		aclSyncCancel:   aclSyncCancel,
+		config:                cfg,
+		headscaleClient:       headscaleClient,
+		aclSyncService:        aclSyncService,
+		aclSyncCtx:            aclSyncCtx,
+		aclSyncCancel:         aclSyncCancel,
+		reconciliationService: service.NewResourceReconciliationService(db.DB),
+		reconciliationCtx:     reconciliationCtx,
+		reconciliationCancel:  reconciliationCancel,
 	}, nil
 }
 
@@ -229,6 +236,9 @@ func (s *Server) Run() error {
 	if s.aclSyncService != nil {
 		go s.aclSyncService.StartPeriodicSync(s.aclSyncCtx)
 	}
+	if s.reconciliationService != nil {
+		go s.reconciliationService.StartPeriodicMaintenance(s.reconciliationCtx)
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -238,6 +248,9 @@ func (s *Server) Run() error {
 
 	if s.aclSyncCancel != nil {
 		s.aclSyncCancel()
+	}
+	if s.reconciliationCancel != nil {
+		s.reconciliationCancel()
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -280,7 +293,7 @@ func (s *Server) setupRouter() *gin.Engine {
 	router.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, X-Tenant-ID, Authorization, accept, origin, Cache-Control, X-Requested-With")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
 
 		if c.Request.Method == "OPTIONS" {
@@ -401,6 +414,7 @@ func (s *Server) setupRouter() *gin.Engine {
 
 				adminAuthGroup := adminGroup.Group("")
 				adminAuthGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret))
+				adminAuthGroup.Use(api.ManagementAuthorizationMiddleware())
 				{
 					adminAuthGroup.GET("/auth/me", adminAPI.GetMe)
 					adminAuthGroup.PUT("/auth/password", adminAPI.ChangePassword)
@@ -548,8 +562,35 @@ func (s *Server) setupRouter() *gin.Engine {
 					// 资源发现（管理员查看 K8S Service 发现数据）
 					resourceAPI := api.NewResourceAPI(s.config)
 					resourceAPI.SetImmediateReportNotifier(s.agentService)
+					unifiedResourceAPI := api.NewUnifiedResourceAPI()
+					candidateAPI := api.NewResourceCandidateAPI()
+					adminAuthGroup.GET("/tenants", unifiedResourceAPI.ListTenants)
+					adminAuthGroup.POST("/tenants", unifiedResourceAPI.CreateTenant)
+					adminAuthGroup.GET("/tenants/:id/members", unifiedResourceAPI.ListTenantMembers)
+					adminAuthGroup.POST("/tenants/:id/members", unifiedResourceAPI.AddTenantMember)
+					adminAuthGroup.GET("/resources", unifiedResourceAPI.List)
+					adminAuthGroup.POST("/resources", unifiedResourceAPI.Create)
+					adminAuthGroup.POST("/resources/:id/targets", unifiedResourceAPI.ObserveTarget)
+					adminAuthGroup.GET("/resource-candidates", candidateAPI.List)
+					adminAuthGroup.POST("/resource-candidates", candidateAPI.Observe)
+					adminAuthGroup.POST("/resource-candidates/:id/reject", candidateAPI.Reject)
+					adminAuthGroup.POST("/resource-candidates/:id/reconcile", candidateAPI.Reconcile)
+					workspaceBindingAPI := api.NewWorkspaceBindingAPI()
+					adminAuthGroup.GET("/provider-tenant-bindings", workspaceBindingAPI.ListProviderTenantBindings)
+					adminAuthGroup.POST("/provider-tenant-bindings", workspaceBindingAPI.CreateProviderTenantBinding)
+					adminAuthGroup.GET("/workspace-bindings", workspaceBindingAPI.ListWorkspaceBindings)
+					adminAuthGroup.POST("/workspace-bindings", workspaceBindingAPI.CreateWorkspaceBinding)
 					adminAuthGroup.GET("/resources/k8s-services", resourceAPI.GetK8SServiceDiscoveries)
 					adminAuthGroup.POST("/resources/sync", resourceAPI.SyncK8SServiceDiscovery)
+					adminAuthGroup.GET("/resources/:id", unifiedResourceAPI.Get)
+					adminAuthGroup.GET("/resources/:id/grants", unifiedResourceAPI.ListGrants)
+					adminAuthGroup.POST("/resources/:id/grants", unifiedResourceAPI.CreateGrant)
+					adminAuthGroup.POST("/grants/:id/revoke", unifiedResourceAPI.RevokeGrant)
+					sessionAPI := api.NewContainerSessionAPI()
+					adminAuthGroup.GET("/sessions", sessionAPI.List)
+					adminAuthGroup.GET("/sessions/:id", sessionAPI.Get)
+					adminAuthGroup.POST("/sessions/:id/revoke", sessionAPI.Revoke)
+					adminAuthGroup.POST("/sessions/:id/force-disconnect", sessionAPI.ForceDisconnect)
 
 					// 审计日志
 					auditAPI := api.NewAuditLogAPI()

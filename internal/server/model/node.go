@@ -13,20 +13,21 @@ const (
 // Node 设备模型
 // 统一 Agent 设备和 Desktop 设备
 type Node struct {
-	ID              uint64     `gorm:"primaryKey;autoIncrement" json:"id"`                                               // 自增主键
-	UserID          uint64     `gorm:"not null;index;uniqueIndex:uk_node_user_type_name,priority:1" json:"user_id"`      // 所属用户 ID
-	Name            string     `gorm:"size:100;not null;uniqueIndex:uk_node_user_type_name,priority:3" json:"name"`      // 设备名称
-	Type            NodeType   `gorm:"size:20;not null;index;uniqueIndex:uk_node_user_type_name,priority:2" json:"type"` // 类型：agent / desktop
-	HeadscaleNodeID uint64     `gorm:"index" json:"headscale_node_id"`                                                   // Headscale Node ID（外部系统 ID）
-	IP              string     `gorm:"size:50" json:"ip"`                                                                // 隧道 IP
-	Version         string     `gorm:"size:50" json:"version"`                                                           // 版本号
-	UpdaterProtocol string     `gorm:"size:16" json:"updater_protocol"`                                                  // 支持的 updater 协议版本
-	Hostname        string     `gorm:"size:100" json:"hostname"`                                                         // 主机名
-	SystemInfo      string     `gorm:"type:text" json:"system_info"`                                                     // 系统信息 JSON
-	SecretHash      string     `gorm:"size:255" json:"-"`                                                                // 设备认证密钥哈希（Desktop 用）
-	LastHeartbeat   *time.Time `json:"last_heartbeat"`                                                                   // 最后心跳时间
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ID                   uint64     `gorm:"primaryKey;autoIncrement" json:"id"`                                               // 自增主键
+	UserID               uint64     `gorm:"not null;index;uniqueIndex:uk_node_user_type_name,priority:1" json:"user_id"`      // 所属用户 ID
+	Name                 string     `gorm:"size:100;not null;uniqueIndex:uk_node_user_type_name,priority:3" json:"name"`      // 设备名称
+	Type                 NodeType   `gorm:"size:20;not null;index;uniqueIndex:uk_node_user_type_name,priority:2" json:"type"` // 类型：agent / desktop
+	HeadscaleNodeID      uint64     `gorm:"index" json:"headscale_node_id"`                                                   // Headscale Node ID（外部系统 ID）
+	IP                   string     `gorm:"size:50" json:"ip"`                                                                // 隧道 IP
+	Version              string     `gorm:"size:50" json:"version"`                                                           // 版本号
+	UpdaterProtocol      string     `gorm:"size:16" json:"updater_protocol"`                                                  // 支持的 updater 协议版本
+	ContainerSSHProtocol string     `gorm:"size:16" json:"container_ssh_protocol"`                                            // 支持的 ContainerSSH 协议版本
+	Hostname             string     `gorm:"size:100" json:"hostname"`                                                         // 主机名
+	SystemInfo           string     `gorm:"type:text" json:"system_info"`                                                     // 系统信息 JSON
+	SecretHash           string     `gorm:"size:255" json:"-"`                                                                // 设备认证密钥哈希（Desktop 用）
+	LastHeartbeat        *time.Time `json:"last_heartbeat"`                                                                   // 最后心跳时间
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
 
 	// Agent 远程能力配置（Server 远程控制，nil=未设置，由 Agent 本地配置决定）
 	// 每个 Node 独立配置，互不影响

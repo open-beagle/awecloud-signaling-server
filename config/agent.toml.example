@@ -160,3 +160,15 @@ namespaces = []
 
 # tsnet gRPC 监听端口（默认 50051）
 listen_port_base = 50051
+
+# ContainerSSH Pod 候选发现（默认关闭）
+# 只有带此 Label 的 Pod 才会作为运行时候选上报，不会自动发布为资源。
+[container]
+enabled = false
+kubeconfig = ""
+label_selector = "signal.beagle.io/container-ssh=true"
+namespaces = []
+provider_label = "beagle.io/provider"
+workspace_label = "beagle.io/workspace"
+generation_label = "beagle.io/workspace-generation"
+lease_seconds = 120

@@ -79,8 +79,20 @@ func autoMigrate() error {
 	err := DB.AutoMigrate(
 		// 基础模型
 		&model.Admin{},
+		&model.AdminTenantMembership{},
 		&model.User{},
 		&model.Node{},
+
+		// 统一资源模型
+		&model.Tenant{},
+		&model.TenantMembership{},
+		&model.ProviderTenantBinding{},
+		&model.WorkspaceBinding{},
+		&model.Resource{},
+		&model.ResourceTarget{},
+		&model.AccessGrant{},
+		&model.DiscoveryCandidate{},
+		&model.ContainerSession{},
 
 		// 分组模型
 		&model.Group{},

@@ -1637,10 +1637,103 @@ func (s *DesktopServiceServer) GetResources(ctx context.Context, req *pb.GetReso
 	// 3. 查询 K8S Service 资源
 	resp.K8SService = s.queryK8SServiceResourcesGRPC(ctx, clientID, groupIDs)
 
-	logger.Infof("Desktop %d 资源发现: SSH=%d, K8SAPI=%d, K8SService=%d",
-		req.DesktopId, len(resp.Ssh), len(resp.K8SApi), len(resp.K8SService))
+	// 4. 查询统一 ContainerSSH 资源。该投影只基于当前用户有效的
+	// Tenant Membership + AccessGrant，不复用平台管理员资源目录。
+	resp.ContainerSsh = s.queryContainerSSHResourcesGRPC(ctx, clientID, groupIDs)
+
+	logger.Infof("Desktop %d 资源发现: SSH=%d, K8SAPI=%d, K8SService=%d, ContainerSSH=%d",
+		req.DesktopId, len(resp.Ssh), len(resp.K8SApi), len(resp.K8SService), len(resp.ContainerSsh))
 
 	return resp, nil
+}
+
+func (s *DesktopServiceServer) queryContainerSSHResourcesGRPC(ctx context.Context, clientID uint64, groupIDs []int64) []*pb.ContainerSSHResource {
+	now := time.Now()
+	var memberships []model.TenantMembership
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", clientID, true, now).Find(&memberships).Error; err != nil || len(memberships) == 0 {
+		return nil
+	}
+	tenantIDs := make([]string, 0, len(memberships))
+	for _, membership := range memberships {
+		tenantIDs = append(tenantIDs, membership.TenantID)
+	}
+	var tenants []model.Tenant
+	db.DB.WithContext(ctx).Where("id IN ? AND status = ?", tenantIDs, model.TenantStatusActive).Find(&tenants)
+	activeTenantIDs := make([]string, 0, len(tenants))
+	tenantNames := make(map[string]string, len(tenants))
+	for _, tenant := range tenants {
+		activeTenantIDs = append(activeTenantIDs, tenant.ID)
+		tenantNames[tenant.ID] = tenant.Name
+	}
+	if len(activeTenantIDs) == 0 {
+		return nil
+	}
+	grantQuery := db.DB.WithContext(ctx).Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND expires_at > ?", activeTenantIDs, "enabled", now, now).
+		Where("(subject_type = ? AND subject_user_id = ?)", "user", clientID)
+	if len(groupIDs) > 0 {
+		grantQuery = db.DB.WithContext(ctx).Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND expires_at > ?", activeTenantIDs, "enabled", now, now).
+			Where("(subject_type = ? AND subject_user_id = ?) OR (subject_type = ? AND subject_group_id IN ?)", "user", clientID, "group", groupIDs)
+	}
+	var grants []model.AccessGrant
+	if err := grantQuery.Find(&grants).Error; err != nil {
+		return nil
+	}
+	resourceIDs := make([]string, 0, len(grants))
+	seen := make(map[string]struct{}, len(grants))
+	for _, grant := range grants {
+		if grant.SubjectType == "group" && !grpcGroupGrantMatchesTenant(ctx, grant) {
+			continue
+		}
+		if !containsAction(parseJSONStringArray(grant.Actions), "shell") {
+			continue
+		}
+		if _, exists := seen[grant.ResourceID]; !exists {
+			seen[grant.ResourceID] = struct{}{}
+			resourceIDs = append(resourceIDs, grant.ResourceID)
+		}
+	}
+	if len(resourceIDs) == 0 {
+		return nil
+	}
+	var resources []model.Resource
+	if err := db.DB.WithContext(ctx).Where("id IN ? AND type = ? AND target_revision > 0 AND state IN ?", resourceIDs, model.ResourceTypeContainerSSH, []model.ResourceState{model.ResourceStateAvailable, model.ResourceStateDegraded}).Order("display_name ASC").Find(&resources).Error; err != nil {
+		return nil
+	}
+	result := make([]*pb.ContainerSSHResource, 0, len(resources))
+	domainSuffix := model.DefaultDomainSuffix
+	var domainConfig model.SystemConfig
+	if err := db.DB.WithContext(ctx).Where("key = ?", model.ConfigDomainSuffix).First(&domainConfig).Error; err == nil && domainConfig.Value != "" {
+		domainSuffix = domainConfig.Value
+	}
+	if !strings.HasPrefix(domainSuffix, ".") {
+		domainSuffix = "." + domainSuffix
+	}
+	for _, resource := range resources {
+		if resource.ContainerSSHPort == 0 {
+			continue
+		}
+		var agentNode model.Node
+		if err := db.DB.WithContext(ctx).Where("id = ? AND type = ? AND ip <> ?", resource.AgentNodeID, model.NodeTypeAgent, "").First(&agentNode).Error; err != nil {
+			continue
+		}
+		result = append(result, &pb.ContainerSSHResource{
+			ResourceId: resource.ID, TenantId: resource.TenantID, TenantName: tenantNames[resource.TenantID],
+			DisplayName: resource.DisplayName, ProviderId: resource.ProviderID, ExternalWorkspaceId: resource.ExternalWorkspaceID,
+			State: string(resource.State), TargetRevision: resource.TargetRevision, AgentNodeId: resource.AgentNodeID,
+			ClusterId: resource.ClusterID, Capability: string(model.ResourceTypeContainerSSH),
+			ListenPort: uint32(resource.ContainerSSHPort),
+			Domain:     resource.ID + ".container" + domainSuffix, AgentIp: agentNode.IP, SshUser: "container",
+		})
+	}
+	return result
+}
+
+func grpcGroupGrantMatchesTenant(ctx context.Context, grant model.AccessGrant) bool {
+	if grant.SubjectGroupID == nil || grant.TenantID == "" {
+		return false
+	}
+	var group model.Group
+	return db.DB.WithContext(ctx).Where("id = ? AND tenant_id = ?", *grant.SubjectGroupID, grant.TenantID).First(&group).Error == nil
 }
 
 // querySSHResourcesGRPC 查询 SSH 资源（gRPC 版本）
