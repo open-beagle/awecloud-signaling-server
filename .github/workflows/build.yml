@@ -10,6 +10,8 @@ jobs:
   build:
     name: Build Images
     runs-on: ubuntu-latest
+    outputs:
+      build_version: ${{ steps.version.outputs.BUILD_VERSION }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -211,3 +213,51 @@ jobs:
         env:
           S3_ACCESS_KEY_ALIYUN: ${{ secrets.S3_ACCESS_KEY_ALIYUN }}
           S3_SECRET_KEY_ALIYUN: ${{ secrets.S3_SECRET_KEY_ALIYUN }}
+
+  deploy:
+    name: Deploy Server to Kubernetes
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure Kubernetes access
+        env:
+          KUBERNETES_SERVER: ${{ secrets.KUBERNETES_ALIYUN_SERVER }}
+          KUBERNETES_TOKEN: ${{ secrets.KUBERNETES_ALIYUN_TOKEN }}
+          KUBERNETES_CA: ${{ secrets.KUBERNETES_ALIYUN_CA }}
+        run: |
+          set -eu
+          test -n "$KUBERNETES_SERVER"
+          test -n "$KUBERNETES_TOKEN"
+
+          if [ -n "$KUBERNETES_CA" ]; then
+            ca_file="$RUNNER_TEMP/kubernetes-ca.crt"
+            printf '%s\n' "$KUBERNETES_CA" > "$ca_file"
+            kubectl config set-cluster beagle-signal \
+              --server="$KUBERNETES_SERVER" \
+              --certificate-authority="$ca_file" \
+              --embed-certs=true
+          else
+            kubectl config set-cluster beagle-signal \
+              --server="$KUBERNETES_SERVER" \
+              --insecure-skip-tls-verify=true
+          fi
+
+          kubectl config set-credentials github-actions --token="$KUBERNETES_TOKEN"
+          kubectl config set-context beagle-signal \
+            --cluster=beagle-signal \
+            --user=github-actions \
+            --namespace=beagle-access
+          kubectl config use-context beagle-signal
+
+      - name: Update Server deployment
+        run: |
+          image="registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:${{ needs.build.outputs.build_version }}"
+          kubectl set image deployment/signal-server server="$image"
+          kubectl rollout restart deployment/signal-server
+          kubectl rollout status deployment/signal-server --timeout=5m
+          kubectl get deployment/signal-server -o jsonpath='{.spec.template.spec.containers[?(@.name=="server")].image}{"\n"}'

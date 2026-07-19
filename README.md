@@ -109,6 +109,7 @@ GitHub Actions 工作流位于 `.github/workflows/build.yml`，支持以下触�
 2. 交叉编译 Linux amd64/arm64 的 Server、Agent 和 Endpoint。
 3. 构建并推送 Server、Agent 双架构镜像及 multi-arch manifest。
 4. 上传 Agent、Endpoint 双架构二进制和安装脚本到 S3。
+5. 将 `beagle-access/signal-server` 更新到本次 Server 镜像，并等待 Kubernetes 滚动发布完成。
 
 镜像标签读取根目录 `version` 文件：
 
