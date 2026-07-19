@@ -1,6 +1,10 @@
 <template>
   <div class="login-container">
-    <el-card class="login-card">
+    <main class="login-panel">
+      <div class="brand-lockup">
+        <img src="@/assets/logo.png" alt="Beagle Signal" />
+        <div><strong>Beagle Signal</strong><span>管理控制台</span></div>
+      </div>
       <h1 class="login-title">{{ t('login.title') }}</h1>
       <el-form
         ref="formRef"
@@ -55,7 +59,7 @@
           </el-button>
         </el-form-item>
       </el-form>
-    </el-card>
+    </main>
   </div>
 </template>
 
@@ -120,18 +124,63 @@ const handleDownloadClient = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 24px;
+  background: var(--bg-page);
 }
 
-.login-card {
-  width: 400px;
-  padding: 20px;
+.login-panel {
+  width: min(100%, 400px);
+  padding: 30px 32px 24px;
+  background: #fff;
+  border: 1px solid var(--border-light);
+  border-top: 3px solid var(--primary-color);
+  border-radius: 6px;
+  box-shadow: 0 14px 36px rgba(34, 45, 67, 0.08);
+}
+
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.brand-lockup img {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+}
+
+.brand-lockup strong,
+.brand-lockup span {
+  display: block;
+}
+
+.brand-lockup strong {
+  color: var(--text-primary);
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.brand-lockup span {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .login-title {
-  text-align: center;
-  margin-bottom: 30px;
+  margin: 0 0 22px;
   color: var(--text-primary);
-  font-size: 24px;
+  font-size: 20px;
+  line-height: 28px;
+}
+
+.login-panel :deep(.el-form-item:last-child) {
+  margin-bottom: 0;
+}
+
+@media (max-width: 480px) {
+  .login-container { padding: 16px; align-items: flex-start; padding-top: 10vh; }
+  .login-panel { padding: 26px 22px 20px; }
 }
 </style>

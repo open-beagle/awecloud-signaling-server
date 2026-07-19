@@ -5,7 +5,7 @@
     <el-card v-if="detail" class="hero-card" shadow="never">
       <div class="hero-top">
         <div class="hero-title"><span class="type-icon" :class="`type-${detail.resource.type}`"><el-icon><component :is="resourceIcon" /></el-icon></span><div><div class="title-line"><h1>{{ detail.resource.display_name }}</h1><el-tag size="small" :type="stateTag">{{ stateLabel }}</el-tag></div><div class="meta-line">{{ typeLabel }} · {{ detail.resource.id }} · {{ detail.resource.provider_id || '管理 API' }}</div></div></div>
-        <div class="hero-actions"><el-button :icon="CopyDocument" @click="copyConnection">复制连接信息</el-button><el-button type="danger" plain :icon="CircleClose">撤销资源</el-button></div>
+        <div class="hero-actions"><el-tag effect="plain">连接入口待 Resource Entry 发布</el-tag></div>
       </div>
       <div class="hero-stats"><div><label>客户</label><strong>{{ detail.tenant.name }}</strong></div><div><label>Owner</label><strong>{{ ownerName }}</strong></div><div><label>Workspace</label><strong>{{ detail.resource.external_workspace_id || '-' }}</strong></div><div><label>Target Revision</label><strong>{{ detail.resource.target_revision }}</strong></div><div><label>更新</label><strong>{{ formatTime(detail.resource.updated_at) }}</strong></div></div>
     </el-card>
@@ -18,10 +18,12 @@
           <section v-if="detail.resource.type === 'container_ssh'" class="detail-section"><div class="section-head"><div><h2>访问能力</h2><p>第一阶段只允许固定交互式 Shell。</p></div></div><el-descriptions :column="3" border><el-descriptions-item label="Shell Profile">{{ detail.resource.shell_profile_id || '默认 Shell Profile' }}</el-descriptions-item><el-descriptions-item label="最大会话">8 小时</el-descriptions-item><el-descriptions-item label="额外能力">无</el-descriptions-item></el-descriptions></section>
         </el-tab-pane>
         <el-tab-pane :label="`访问策略 ${detail.grants.length}`" name="access">
+          <el-alert v-if="detail.resource.type !== 'container_ssh'" title="该资源类型的统一授权契约尚未启用，请使用高级诊断中的兼容授权入口。" type="warning" show-icon :closable="false" class="diagnostic-alert" />
           <div class="tab-head"><div><h2>访问策略</h2><p>Subject、Resource 和 Grant 必须位于同一客户边界。</p></div><el-button type="primary" :icon="Plus" :disabled="!canManage" @click="openGrantDialog">添加授权</el-button></div>
           <el-table :data="detail.grants" stripe><el-table-column label="授权对象" min-width="180"><template #default="{ row }"><strong>{{ subjectName(row) }}</strong><span class="cell-secondary">{{ row.subject_type === 'user' ? '直接授权' : '用户组授权' }}</span></template></el-table-column><el-table-column label="Action" width="130"><template #default="{ row }"><el-tag size="small" type="success">{{ actionsLabel(row.actions) }}</el-tag></template></el-table-column><el-table-column label="有效期" width="190"><template #default="{ row }">{{ formatTime(row.valid_from) }}<span class="cell-secondary">至 {{ formatTime(row.expires_at) }}</span></template></el-table-column><el-table-column label="状态" width="110"><template #default="{ row }"><el-tag size="small" :type="row.status === 'enabled' ? 'success' : 'info'">{{ row.status === 'enabled' ? '生效中' : '已撤销' }}</el-tag></template></el-table-column><el-table-column label="" width="80" align="right"><template #default="{ row }"><el-button v-if="row.status === 'enabled'" type="danger" link :disabled="!canManage" @click="revokeGrant(row)">撤销</el-button></template></el-table-column></el-table><el-empty v-if="!detail.grants.length" description="暂无访问策略" />
         </el-tab-pane>
-        <el-tab-pane label="事件" name="events"><el-empty description="资源事件将在 reconciliation 和会话模型接入后展示" /></el-tab-pane>
+        <el-tab-pane label="会话" name="sessions"><div class="tab-head"><div><h2>资源会话</h2><p>查看当前和最近连接，并在明确客户上下文中强制断开。</p></div><el-button @click="router.push(`/sessions?resource_id=${detail.resource.id}`)">查看会话</el-button></div></el-tab-pane>
+        <el-tab-pane :label="`事件 ${events.length}`" name="events"><el-table v-loading="loadingEvents" :data="events" stripe><el-table-column label="事件" min-width="230"><template #default="{ row }"><strong>{{ eventLabel(row.action_type) }}</strong><span class="cell-secondary">{{ row.target_type }} · {{ row.target_name || row.target_id }}</span></template></el-table-column><el-table-column label="时间" width="190"><template #default="{ row }">{{ formatTime(row.created_at) }}</template></el-table-column><el-table-column label="审计详情" min-width="320"><template #default="{ row }"><code class="event-detail">{{ eventDetail(row.detail) }}</code></template></el-table-column></el-table><el-empty v-if="!loadingEvents && !events.length" description="暂无资源事件" /></el-tab-pane>
         <el-tab-pane label="诊断" name="diagnostics"><el-alert title="诊断字段只读，不能通过页面绕过 Provider 或 Agent 绑定流程。" type="info" show-icon :closable="false" class="diagnostic-alert" /><el-descriptions v-if="detail" :column="3" border><el-descriptions-item label="Resource ID"><span class="mono">{{ detail.resource.id }}</span></el-descriptions-item><el-descriptions-item label="Target Revision">{{ detail.resource.target_revision }}</el-descriptions-item><el-descriptions-item label="Pod IP">不向 Desktop 返回</el-descriptions-item><el-descriptions-item label="Agent 内部端口">由 Resource Entry 管理</el-descriptions-item><el-descriptions-item label="Runtime Target"><span class="mono">{{ detail.target?.pod_uid || '-' }}</span></el-descriptions-item></el-descriptions></el-tab-pane>
       </el-tabs>
     </el-card>
@@ -43,14 +45,16 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CircleClose, Coin, Connection, CopyDocument, Monitor, Plus, Ship, TakeawayBox } from '@element-plus/icons-vue'
-import { createResourceGrant, getManagedResource, getTenantMembers, revokeResourceGrant, type AccessGrant, type ResourceDetail, type ResourceType, type TenantMember } from '@/api/resource'
+import { Coin, Connection, Monitor, Plus, Ship, TakeawayBox } from '@element-plus/icons-vue'
+import { createResourceGrant, getManagedResource, getResourceEvents, getTenantMembers, revokeResourceGrant, type AccessGrant, type ResourceDetail, type ResourceEvent, type ResourceType, type TenantMember } from '@/api/resource'
 import { getGroups, type Group } from '@/api/group'
 import { useAuthStore } from '@/stores/auth'
 import { useTenantStore } from '@/stores/tenant'
 
 const route = useRoute()
+const router = useRouter()
 const authStore = useAuthStore()
 const tenantStore = useTenantStore()
 const loading = ref(false)
@@ -59,10 +63,12 @@ const showGrant = ref(false)
 const activeTab = ref('overview')
 const detail = ref<ResourceDetail | null>(null)
 const loadingSubjects = ref(false)
+const loadingEvents = ref(false)
+const events = ref<ResourceEvent[]>([])
 const members = ref<TenantMember[]>([])
 const groups = ref<Group[]>([])
 const grantForm = reactive<{ subject_type: 'user' | 'group'; subject_user_id?: number; subject_group_id?: number; actions: string[]; expires_at?: string }>({ subject_type: 'user', subject_user_id: undefined, subject_group_id: undefined, actions: ['shell'], expires_at: undefined })
-const canManage = computed(() => authStore.canWrite && !!detail.value && tenantStore.tenantId === detail.value.resource.tenant_id)
+const canManage = computed(() => authStore.canWrite && detail.value?.resource.type === 'container_ssh' && tenantStore.tenantId === detail.value.resource.tenant_id)
 
 const fetchDetail = async () => {
   loading.value = true
@@ -72,6 +78,11 @@ const fetchDetail = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const fetchEvents = async () => {
+  loadingEvents.value = true
+  try { const res = await getResourceEvents(String(route.params.id), { page: 1, size: 100 }); events.value = res.success && res.data ? res.data : [] } finally { loadingEvents.value = false }
 }
 
 const createGrant = async () => {
@@ -129,9 +140,9 @@ const ownerName = computed(() => detail.value?.resource.owner_user_id ? `User ${
 const formatTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
 const subjectName = (grant: AccessGrant) => grant.subject_type === 'user' ? `User ${grant.subject_user_id}` : `Group ${grant.subject_group_id}`
 const actionsLabel = (value: string) => { try { return (JSON.parse(value) as string[]).join(' / ') } catch { return value || '-' } }
-const copyConnection = async () => { await navigator.clipboard?.writeText(detail.value?.resource.display_name || ''); ElMessage.success('资源名称已复制') }
-
-onMounted(fetchDetail)
+const eventLabel = (value: string) => ({ create_resource: '创建资源', create_workspace_binding: '绑定 Workspace', update_workspace_binding: '更新 Workspace', publish_resource_candidate: '发布发现候选', observe_resource_target: '更新运行目标', create_access_grant: '创建访问策略', revoke_access_grant: '撤销访问策略', revoke_container_session: '撤销会话', force_disconnect_container_session: '强制断开会话' }[value] || value)
+const eventDetail = (value?: string) => { if (!value) return '-'; try { const parsed = JSON.parse(value); return parsed.reason || parsed.close_reason || parsed.grant_id || '已记录结构化审计详情' } catch { return value } }
+onMounted(() => { fetchDetail(); fetchEvents() })
 </script>
 
 <style scoped>
@@ -164,5 +175,6 @@ h1 { margin: 0; font-size: 22px; }
 .cell-secondary { display: block; color: var(--text-secondary); font-size: 11px; margin-top: 2px; }
 .mono { font-family: Consolas, monospace; font-size: 12px; }
 .diagnostic-alert, .dialog-alert { margin-bottom: 16px; }
+.event-detail { display: block; max-width: 100%; overflow: hidden; color: var(--text-regular); font-family: Consolas, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 760px) { .hero-top, .tab-head, .section-head { align-items: flex-start; flex-direction: column; } .hero-actions { flex-wrap: wrap; } .hero-stats { grid-template-columns: repeat(2, 1fr); gap: 14px 0; } .hero-stats > div, .hero-stats > div:first-child { padding: 0 10px; border-right: 1px solid var(--border-light); } .hero-stats > div:nth-child(even) { border-right: 0; } }
 </style>

@@ -22,7 +22,7 @@
 
 #### `network.toml`
 
-- **用途**: Tailscale 网段规划
+- **用途**: Headscale 网段规划
 - **包含**: Agent/Desktop/Server 的 IP 网段分配
 - **特点**:
   - 设计时确定，编译时 Copy 到镜像
@@ -72,6 +72,7 @@ data:
     listen_addr = "0.0.0.0"
     listen_port = 8080
 
+    # 遗留兼容配置段名称，控制面始终使用 Headscale
     [tailscale]
     headscale_url = "http://headscale:8080"
 

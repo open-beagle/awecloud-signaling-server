@@ -6,7 +6,7 @@
         <h1 class="page-title">发现候选</h1>
         <p class="page-subtitle">Agent 发现只提供运行时证据，匹配可信 Workspace 前不会进入资源目录。</p>
       </div>
-      <el-button :icon="Refresh" :loading="loading" @click="fetchCandidates">刷新</el-button>
+      <div class="header-actions"><el-button :icon="Link" @click="router.push('/infrastructure/integrations')">可信绑定</el-button><el-button :icon="Refresh" :loading="loading" @click="fetchCandidates">刷新</el-button></div>
     </div>
 
     <el-alert class="boundary-alert" title="候选没有客户归属，也不能直接授权。只有受信任 Provider 完成 Workspace 绑定后，才会发布为 Resource。" type="info" show-icon :closable="false" />
@@ -57,11 +57,13 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Search } from '@element-plus/icons-vue'
+import { Link, Refresh, Search } from '@element-plus/icons-vue'
 import { getResourceCandidates, reconcileResourceCandidate, rejectResourceCandidate, type DiscoveryCandidate, type DiscoveryCandidateStatus } from '@/api/resource'
 
 const loading = ref(false)
+const router = useRouter()
 const candidates = ref<DiscoveryCandidate[]>([])
 const filters = reactive<{ search: string; status?: DiscoveryCandidateStatus }>({ search: '', status: undefined })
 const pagination = reactive({ page: 1, size: 20, total: 0 })
@@ -101,7 +103,9 @@ onMounted(fetchCandidates)
 
 <style scoped>
 .candidate-page { width: 100%; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 18px; }
+.page-header, .header-actions { display: flex; }
+.page-header { justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 18px; }
+.header-actions { gap: 8px; }
 .eyebrow, .summary-label, .cell-secondary, .target-cell span { color: var(--text-secondary); font-size: 12px; }
 .page-title { margin: 0; color: var(--text-primary); font-size: 24px; line-height: 32px; }
 .page-subtitle { margin: 5px 0 0; color: var(--text-regular); font-size: 13px; }

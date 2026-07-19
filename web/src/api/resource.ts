@@ -81,6 +81,31 @@ export interface AccessGrant {
   status: string
   created_at: string
   updated_at: string
+  resource_name?: string
+  resource_type?: ResourceType
+  tenant_name?: string
+  subject_name?: string
+}
+
+export type ContainerSessionStatus = 'active' | 'ended' | 'revoked' | 'rejected'
+
+export interface ContainerSession {
+  id: string
+  tenant_id: string
+  user_id: number
+  device_id?: number
+  resource_id: string
+  resource_name?: string
+  user_name?: string
+  workspace_id?: string
+  grant_revision: number
+  target_revision: number
+  agent_node_id?: number
+  status: ContainerSessionStatus
+  started_at: string
+  ended_at?: string
+  result?: string
+  close_reason?: string
 }
 
 export interface ResourceDetail {
@@ -88,6 +113,24 @@ export interface ResourceDetail {
   tenant: Tenant
   target?: ResourceTarget
   grants: AccessGrant[]
+}
+
+export interface ResourceSummary {
+  total: number
+  available: number
+  degraded: number
+  active_sessions: number
+  by_type: Partial<Record<ResourceType, number>>
+}
+
+export interface ResourceEvent {
+  id: number
+  action_type: string
+  target_type: string
+  target_id: string
+  target_name: string
+  detail?: string
+  created_at: string
 }
 
 export interface ProviderTenantBinding {
@@ -113,6 +156,21 @@ export interface WorkspaceBinding {
   generation: number
   status: 'active' | 'stopped' | 'revoked'
   expires_at?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface LegacyResourceClaim {
+  id: string
+  source_type: 'agent_node' | 'endpoint'
+  source_id: string
+  source_name: string
+  source_state: string
+  tenant_id: string
+  tenant_name: string
+  status: 'active' | 'revoked'
+  claimed_by: number
+  claim_reason?: string
   created_at: string
   updated_at: string
 }
@@ -150,8 +208,16 @@ export const createTenant = (data: { key: string; name: string }) => {
   return request.post<any, ApiResponse<Tenant>>('/api/v1/admin/tenants', data)
 }
 
+export const addTenantMember = (tenantId: string, data: { user_id: number; role: 'member' | 'tenant_admin' | 'viewer' }) => {
+  return request.post<any, ApiResponse<TenantMember>>(`/api/v1/admin/tenants/${tenantId}/members`, data, { headers: { 'X-Tenant-ID': tenantId } })
+}
+
 export const getTenantMembers = (tenantId: string) => {
-  return request.get<any, ApiResponse<TenantMember[]>>(`/api/v1/admin/tenants/${tenantId}/members`)
+  return request.get<any, ApiResponse<TenantMember[]>>(`/api/v1/admin/tenants/${tenantId}/members`, { headers: { 'X-Tenant-ID': tenantId } })
+}
+
+export const disableTenantMember = (tenantId: string, userId: number) => {
+  return request.post<any, ApiResponse<TenantMember>>(`/api/v1/admin/tenants/${tenantId}/members/${userId}/disable`, undefined, { headers: { 'X-Tenant-ID': tenantId } })
 }
 
 export const getProviderTenantBindings = (params?: { provider_id?: string; status?: string; page?: number; size?: number }) => {
@@ -179,6 +245,18 @@ export const createWorkspaceBinding = (data: {
   return request.post<any, ApiResponse<WorkspaceBinding>>('/api/v1/admin/workspace-bindings', data)
 }
 
+export const getLegacyResourceClaims = (params?: { source_type?: string; tenant_id?: string; status?: string; page?: number; size?: number }) => {
+  return request.get<any, PagedResponse<LegacyResourceClaim[]>>('/api/v1/admin/legacy-resource-claims', { params })
+}
+
+export const claimLegacyResource = (data: { source_type: 'agent_node' | 'endpoint'; source_id: string; tenant_id: string; reason: string }) => {
+  return request.post<any, ApiResponse<LegacyResourceClaim>>('/api/v1/admin/legacy-resource-claims', data)
+}
+
+export const revokeLegacyResourceClaim = (id: string) => {
+  return request.post<any, ApiResponse<LegacyResourceClaim>>(`/api/v1/admin/legacy-resource-claims/${id}/revoke`, {})
+}
+
 export const getManagedResources = (params?: {
   tenant_id?: string
   type?: ResourceType
@@ -190,8 +268,16 @@ export const getManagedResources = (params?: {
   return request.get<any, PagedResponse<Resource[]>>('/api/v1/admin/resources', { params })
 }
 
+export const getResourceSummary = (params?: { tenant_id?: string; state?: ResourceState; search?: string }) => {
+  return request.get<any, ApiResponse<ResourceSummary>>('/api/v1/admin/resources/summary', { params })
+}
+
 export const getManagedResource = (id: string) => {
   return request.get<any, ApiResponse<ResourceDetail>>(`/api/v1/admin/resources/${id}`)
+}
+
+export const getResourceEvents = (id: string, params?: { page?: number; size?: number }) => {
+  return request.get<any, PagedResponse<ResourceEvent[]>>(`/api/v1/admin/resources/${id}/events`, { params })
 }
 
 export const observeResourceTarget = (id: string, data: {
@@ -229,6 +315,22 @@ export const createResourceGrant = (id: string, data: {
 
 export const revokeResourceGrant = (id: string) => {
   return request.post<any, ApiResponse<AccessGrant>>(`/api/v1/admin/grants/${id}/revoke`)
+}
+
+export const getAccessGrants = (params?: { tenant_id?: string; resource_id?: string; subject_type?: string; status?: string; page?: number; size?: number }) => {
+  return request.get<any, PagedResponse<AccessGrant[]>>('/api/v1/admin/grants', { params })
+}
+
+export const getSessions = (params?: { tenant_id?: string; resource_id?: string; user_id?: number; status?: ContainerSessionStatus; page?: number; size?: number }) => {
+  return request.get<any, PagedResponse<ContainerSession[]>>('/api/v1/admin/sessions', { params })
+}
+
+export const revokeSession = (id: string, reason: string) => {
+  return request.post<any, ApiResponse<ContainerSession>>(`/api/v1/admin/sessions/${id}/revoke`, { reason })
+}
+
+export const forceDisconnectSession = (id: string, reason: string) => {
+  return request.post<any, ApiResponse<ContainerSession>>(`/api/v1/admin/sessions/${id}/force-disconnect`, { reason })
 }
 
 export const getResourceCandidates = (params?: { status?: DiscoveryCandidateStatus; search?: string; page?: number; size?: number }) => {

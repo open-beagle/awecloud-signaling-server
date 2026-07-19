@@ -9,52 +9,47 @@ body,
 #app {
   width: 100%;
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-    sans-serif;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', Roboto, Arial, sans-serif;
+  color: var(--text-primary);
+  background: var(--bg-page);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
-/* 自定义配色 - 清爽蓝主题 */
 :root {
-  /* 主色调 - 统一使用 Element Plus 默认蓝 */
-  --primary-color: #409eff;
-  --primary-light: #79bbff;
-  --primary-lighter: #a0cfff;
-  --primary-dark: #337ecc;
-
-  /* 功能色 */
-  --success-color: #67c23a;
-  --warning-color: #e6a23c;
-  --danger-color: #f56c6c;
-  --info-color: #909399;
-
-  /* 中性色 - 文字 */
-  --text-primary: #303133; /* 主要文字 */
-  --text-regular: #606266; /* 常规文字 */
-  --text-secondary: #909399; /* 次要文字 */
-  --text-placeholder: #c0c4cc; /* 占位文字 */
-
-  /* 中性色 - 边框 */
-  --border-base: #dcdfe6;
-  --border-light: #e4e7ed;
-  --border-lighter: #ebeef5;
-  --border-extra-light: #f2f6fc;
-
-  /* 背景色 */
+  --primary-color: #3159a6;
+  --primary-light: #5275ba;
+  --primary-lighter: #e8eef9;
+  --primary-dark: #244783;
+  --success-color: #287a5d;
+  --warning-color: #b7791f;
+  --danger-color: #c2414b;
+  --info-color: #657084;
+  --text-primary: #202631;
+  --text-regular: #4f5969;
+  --text-secondary: #778195;
+  --text-placeholder: #a3aab7;
+  --border-base: #d5dae3;
+  --border-light: #e1e5eb;
+  --border-lighter: #eaedf1;
+  --border-extra-light: #f3f5f7;
   --bg-color: #ffffff;
-  --bg-page: #f0f2f5;
+  --bg-page: #f4f6f8;
+  --bg-subtle: #f8f9fb;
   --bg-overlay: rgba(0, 0, 0, 0.5);
-
-  /* 侧边栏专用色 */
-  --sidebar-bg: #1a1f2e;
-  --sidebar-text: #ffffff;
-  --sidebar-text-active: #409eff;
-  --sidebar-hover-bg: rgba(255, 255, 255, 0.1);
-  --sidebar-active-bg: rgba(64, 158, 255, 0.15);
-
-  /* 兼容旧变量名 */
+  --sidebar-bg: #ffffff;
+  --sidebar-text: var(--text-regular);
+  --sidebar-text-active: var(--primary-color);
+  --sidebar-hover-bg: #f1f4f9;
+  --sidebar-active-bg: #e8eef9;
   --card-bg: var(--bg-color);
   --text-tertiary: var(--text-secondary);
   --border-color: var(--border-base);
+  --el-color-primary: var(--primary-color);
+  --el-color-success: var(--success-color);
+  --el-color-warning: var(--warning-color);
+  --el-color-danger: var(--danger-color);
+  --el-border-radius-base: 4px;
 }
 
 /* Element Plus 主题覆盖 */
@@ -65,8 +60,8 @@ body,
 
 .el-button--primary:hover,
 .el-button--primary:focus {
-  background-color: #3a7bc8;
-  border-color: #3a7bc8;
+  background-color: var(--primary-dark);
+  border-color: var(--primary-dark);
 }
 
 /* 滚动条样式 */
@@ -76,26 +71,27 @@ body,
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
+  background: #c4cad4;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
+  background: #a8b0bd;
 }
 
 /* 卡片样式优化 */
 .el-card {
-  border-radius: 4px;
-  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  border-color: var(--border-light);
+  border-radius: 6px;
+  box-shadow: none;
 }
 
 .el-card.is-never-shadow {
-  box-shadow: 0 1px 4px 0 rgba(0, 0, 0, 0.08);
+  box-shadow: none;
 }
 
 /* 表格样式优化 */
@@ -104,13 +100,13 @@ body,
 }
 
 .el-table th {
-  background-color: #fafafa;
+  background-color: var(--bg-subtle);
   color: var(--text-primary);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .el-table .el-table__cell {
-  padding: 12px 0;
+  padding: 10px 0;
 }
 
 .el-table--border .el-table__cell {
@@ -118,13 +114,13 @@ body,
 }
 
 .el-table--striped .el-table__row--striped {
-  background-color: #fafafa;
+  background-color: #fafbfc;
 }
 
 /* 表单样式优化 */
 .el-form-item__label {
-  color: var(--text-secondary);
-  font-weight: 400;
+  color: var(--text-regular);
+  font-weight: 500;
 }
 
 .el-input__inner,
@@ -140,7 +136,7 @@ body,
 /* 按钮样式优化 */
 .el-button {
   border-radius: 4px;
-  font-weight: 400;
+  font-weight: 500;
 }
 
 .el-button + .el-button {
@@ -169,6 +165,22 @@ body,
 /* 加载动画优化 */
 .el-loading-mask {
   background-color: rgba(255, 255, 255, 0.8);
+}
+
+.el-dialog,
+.el-drawer {
+  border-radius: 6px;
+}
+
+.el-dialog__header,
+.el-drawer__header {
+  border-bottom: 1px solid var(--border-light);
+  padding-bottom: 16px;
+}
+
+.el-dialog__footer {
+  border-top: 1px solid var(--border-light);
+  padding-top: 16px;
 }
 
 /* 工具类 */

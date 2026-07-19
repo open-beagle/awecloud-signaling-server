@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -103,4 +105,58 @@ func TestTenantMemberListDoesNotExposeAnotherTenant(t *testing.T) {
 	deniedResp := httptest.NewRecorder()
 	router.ServeHTTP(deniedResp, deniedReq)
 	require.Equal(t, http.StatusForbidden, deniedResp.Code)
+}
+
+func TestTenantMemberDisableRestorePreservesMembership(t *testing.T) {
+	oldDB := db.DB
+	t.Cleanup(func() { db.DB = oldDB })
+	database, err := gorm.Open(sqlite.Open("file:tenant_member_lifecycle_test?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	db.DB = database
+	require.NoError(t, database.AutoMigrate(&model.Admin{}, &model.AdminTenantMembership{}, &model.User{}, &model.Tenant{}, &model.TenantMembership{}, &model.AuditLog{}))
+
+	tenantA := model.Tenant{ID: uuid.NewString(), Key: "tenant-lifecycle-a", Name: "Tenant Lifecycle A", Status: model.TenantStatusActive}
+	tenantB := model.Tenant{ID: uuid.NewString(), Key: "tenant-lifecycle-b", Name: "Tenant Lifecycle B", Status: model.TenantStatusActive}
+	admin := model.Admin{Username: "tenant-member-lifecycle", PasswordHash: "test", Role: "tenant_admin"}
+	user := model.User{Name: "lifecycle-user", Role: model.UserRoleClient, SecretHash: "test", Enabled: true}
+	require.NoError(t, database.Create(&tenantA).Error)
+	require.NoError(t, database.Create(&tenantB).Error)
+	require.NoError(t, database.Create(&admin).Error)
+	require.NoError(t, database.Create(&user).Error)
+	require.NoError(t, database.Create(&model.AdminTenantMembership{AdminID: admin.ID, TenantID: tenantA.ID, Role: "tenant_admin", Enabled: true}).Error)
+	require.NoError(t, database.Create(&model.TenantMembership{TenantID: tenantA.ID, UserID: user.ID, Role: "member", Enabled: true}).Error)
+
+	api := NewUnifiedResourceAPI()
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("admin_id", admin.ID) })
+	router.POST("/tenants/:id/members", api.AddTenantMember)
+	router.POST("/tenants/:id/members/:user_id/disable", api.DisableTenantMember)
+
+	disableReq := httptest.NewRequest(http.MethodPost, "/tenants/"+tenantA.ID+"/members/"+strconv.FormatUint(user.ID, 10)+"/disable", nil)
+	disableReq.Header.Set("X-Tenant-ID", tenantA.ID)
+	disableResp := httptest.NewRecorder()
+	router.ServeHTTP(disableResp, disableReq)
+	require.Equal(t, http.StatusOK, disableResp.Code)
+	var membership model.TenantMembership
+	require.NoError(t, database.First(&membership, "tenant_id = ? AND user_id = ?", tenantA.ID, user.ID).Error)
+	require.False(t, membership.Enabled)
+	var membershipCount int64
+	require.NoError(t, database.Model(&model.TenantMembership{}).Where("tenant_id = ? AND user_id = ?", tenantA.ID, user.ID).Count(&membershipCount).Error)
+	require.Equal(t, int64(1), membershipCount)
+
+	crossTenantReq := httptest.NewRequest(http.MethodPost, "/tenants/"+tenantB.ID+"/members/"+strconv.FormatUint(user.ID, 10)+"/disable", nil)
+	crossTenantReq.Header.Set("X-Tenant-ID", tenantB.ID)
+	crossTenantResp := httptest.NewRecorder()
+	router.ServeHTTP(crossTenantResp, crossTenantReq)
+	require.Equal(t, http.StatusForbidden, crossTenantResp.Code)
+
+	restoreBody := bytes.NewBufferString(`{"user_id":` + strconv.FormatUint(user.ID, 10) + `,"role":"member"}`)
+	restoreReq := httptest.NewRequest(http.MethodPost, "/tenants/"+tenantA.ID+"/members", restoreBody)
+	restoreReq.Header.Set("Content-Type", "application/json")
+	restoreReq.Header.Set("X-Tenant-ID", tenantA.ID)
+	restoreResp := httptest.NewRecorder()
+	router.ServeHTTP(restoreResp, restoreReq)
+	require.Equal(t, http.StatusCreated, restoreResp.Code)
+	require.NoError(t, database.First(&membership, "tenant_id = ? AND user_id = ?", tenantA.ID, user.ID).Error)
+	require.True(t, membership.Enabled)
 }
