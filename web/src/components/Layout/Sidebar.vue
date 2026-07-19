@@ -3,27 +3,29 @@
     <el-menu :default-active="activeMenu" :collapse="appStore.sidebarCollapsed" :collapse-transition="false" router unique-opened>
       <div class="nav-section">资源</div>
       <el-menu-item index="/resources"><el-icon><Box /></el-icon><template #title>资源目录</template></el-menu-item>
-      <el-menu-item index="/resource-candidates"><el-icon><Search /></el-icon><template #title>发现候选</template></el-menu-item>
+      <el-menu-item v-if="!isTenantAdmin" index="/resource-candidates"><el-icon><Search /></el-icon><template #title>发现候选</template></el-menu-item>
 
       <div class="nav-section">客户与成员</div>
-      <el-menu-item index="/users"><el-icon><User /></el-icon><template #title>成员</template></el-menu-item>
+      <el-menu-item v-if="!isTenantAdmin" index="/users"><el-icon><User /></el-icon><template #title>成员</template></el-menu-item>
       <el-menu-item index="/groups"><el-icon><UserFilled /></el-icon><template #title>用户组</template></el-menu-item>
-      <el-menu-item index="/nodes/desktops"><el-icon><Iphone /></el-icon><template #title>访问设备</template></el-menu-item>
+      <el-menu-item v-if="!isTenantAdmin" index="/nodes/desktops"><el-icon><Iphone /></el-icon><template #title>访问设备</template></el-menu-item>
 
-      <div class="nav-section">基础设施</div>
-      <el-menu-item index="/nodes/agents"><el-icon><Monitor /></el-icon><template #title>Agent</template></el-menu-item>
-      <el-menu-item index="/endpoints"><el-icon><Connection /></el-icon><template #title>Endpoint</template></el-menu-item>
+      <template v-if="!isTenantAdmin">
+        <div class="nav-section">基础设施</div>
+        <el-menu-item index="/nodes/agents"><el-icon><Monitor /></el-icon><template #title>Agent</template></el-menu-item>
+        <el-menu-item index="/endpoints"><el-icon><Connection /></el-icon><template #title>Endpoint</template></el-menu-item>
 
-      <div class="nav-section">治理</div>
-      <el-menu-item index="/audit-logs"><el-icon><Document /></el-icon><template #title>审计</template></el-menu-item>
-      <el-menu-item index="/system/config"><el-icon><Setting /></el-icon><template #title>系统设置</template></el-menu-item>
+        <div class="nav-section">治理</div>
+        <el-menu-item index="/audit-logs"><el-icon><Document /></el-icon><template #title>审计</template></el-menu-item>
+        <el-menu-item index="/system/config"><el-icon><Setting /></el-icon><template #title>系统设置</template></el-menu-item>
 
-      <el-sub-menu index="diagnostics">
-        <template #title><el-icon><Tools /></el-icon><span>高级诊断</span></template>
-        <el-menu-item index="/domains">连接入口</el-menu-item>
-        <el-menu-item index="/acl/ssh">旧授权视图</el-menu-item>
-        <el-menu-item index="/tunnel/acl">网络策略</el-menu-item>
-      </el-sub-menu>
+        <el-sub-menu index="diagnostics">
+          <template #title><el-icon><Tools /></el-icon><span>高级诊断</span></template>
+          <el-menu-item index="/domains">连接入口</el-menu-item>
+          <el-menu-item index="/acl/ssh">旧授权视图</el-menu-item>
+          <el-menu-item index="/tunnel/acl">网络策略</el-menu-item>
+        </el-sub-menu>
+      </template>
     </el-menu>
     <div class="sidebar-footer" @click="toggleSidebar"><el-icon class="collapse-icon"><Fold v-if="!appStore.sidebarCollapsed" /><Expand v-else /></el-icon></div>
   </div>
@@ -33,9 +35,12 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
 const appStore = useAppStore()
+const authStore = useAuthStore()
+const isTenantAdmin = computed(() => authStore.role === 'tenant_admin')
 const activeMenu = computed(() => {
   if (route.path.startsWith('/resources')) return '/resources'
   if (route.path.startsWith('/resource-candidates')) return '/resource-candidates'

@@ -23,41 +23,103 @@ func ServeContainerSSHSession(ctx context.Context, channel ssh.Channel, requests
 	}
 	defer channel.Close()
 
+	sessionCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	resize := make(chan ContainerTerminalSize, 1)
+	defer close(resize)
+	result := make(chan error, 1)
 	rows, cols := uint16(24), uint16(80)
-	for request := range requests {
-		switch request.Type {
-		case "pty-req":
-			parsedRows, parsedCols, ok := parsePTYSize(request.Payload)
+	shellStarted := false
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-result:
+			return err
+		case request, ok := <-requests:
 			if !ok {
+				return fmt.Errorf("ContainerSSH session closed before shell completed")
+			}
+			switch request.Type {
+			case "pty-req":
+				if shellStarted {
+					if request.WantReply {
+						request.Reply(false, nil)
+					}
+					continue
+				}
+				parsedRows, parsedCols, ok := parsePTYSize(request.Payload)
+				if !ok {
+					if request.WantReply {
+						request.Reply(false, nil)
+					}
+					continue
+				}
+				rows, cols = parsedRows, parsedCols
+				if request.WantReply {
+					request.Reply(true, nil)
+				}
+			case "shell":
+				if shellStarted {
+					if request.WantReply {
+						request.Reply(false, nil)
+					}
+					continue
+				}
+				shellStarted = true
+				initialRows, initialCols := rows, cols
+				if request.WantReply {
+					request.Reply(true, nil)
+				}
+				go func() {
+					result <- opener.OpenShell(sessionCtx, userName, resourceID, ContainerExecStream{
+						Stdin: channel, Stdout: channel, Stderr: channel.Stderr(), Rows: initialRows, Cols: initialCols, Resize: resize,
+					})
+				}()
+			case "window-change":
+				parsedRows, parsedCols, ok := parseWindowSize(request.Payload)
+				if !ok || !shellStarted {
+					if request.WantReply {
+						request.Reply(false, nil)
+					}
+					continue
+				}
+				offerTerminalSize(resize, ContainerTerminalSize{Rows: parsedRows, Cols: parsedCols})
+				if request.WantReply {
+					request.Reply(true, nil)
+				}
+			default:
 				if request.WantReply {
 					request.Reply(false, nil)
 				}
-				continue
-			}
-			rows, cols = parsedRows, parsedCols
-			if request.WantReply {
-				request.Reply(true, nil)
-			}
-		case "shell":
-			if request.WantReply {
-				request.Reply(true, nil)
-			}
-			return opener.OpenShell(ctx, userName, resourceID, ContainerExecStream{
-				Stdin: channel, Stdout: channel, Stderr: channel.Stderr(), Rows: rows, Cols: cols,
-			})
-		case "window-change":
-			// The initial PTY size is applied by the current remotecommand stream.
-			// A later revision will pass resize events through a TerminalSizeQueue.
-			if request.WantReply {
-				request.Reply(true, nil)
-			}
-		default:
-			if request.WantReply {
-				request.Reply(false, nil)
 			}
 		}
 	}
-	return fmt.Errorf("ContainerSSH session closed before shell request")
+}
+
+func offerTerminalSize(queue chan ContainerTerminalSize, size ContainerTerminalSize) {
+	select {
+	case queue <- size:
+		return
+	default:
+	}
+	select {
+	case <-queue:
+	default:
+	}
+	queue <- size
+}
+
+func parseWindowSize(payload []byte) (rows, cols uint16, ok bool) {
+	if len(payload) < 8 {
+		return 0, 0, false
+	}
+	columns := binary.BigEndian.Uint32(payload[:4])
+	lineRows := binary.BigEndian.Uint32(payload[4:8])
+	if columns == 0 || lineRows == 0 || columns > 65535 || lineRows > 65535 {
+		return 0, 0, false
+	}
+	return uint16(lineRows), uint16(columns), true
 }
 
 // parsePTYSize extracts columns and rows from RFC 4254 pty-req payload.

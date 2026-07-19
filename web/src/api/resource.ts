@@ -15,6 +15,15 @@ export interface Tenant {
   updated_at: string
 }
 
+export interface TenantMember {
+  user_id: number
+  name: string
+  alias?: string
+  role: string
+  enabled: boolean
+  expires_at?: string
+}
+
 export interface Resource {
   id: string
   tenant_id: string
@@ -141,6 +150,10 @@ export const createTenant = (data: { key: string; name: string }) => {
   return request.post<any, ApiResponse<Tenant>>('/api/v1/admin/tenants', data)
 }
 
+export const getTenantMembers = (tenantId: string) => {
+  return request.get<any, ApiResponse<TenantMember[]>>(`/api/v1/admin/tenants/${tenantId}/members`)
+}
+
 export const getProviderTenantBindings = (params?: { provider_id?: string; status?: string; page?: number; size?: number }) => {
   return request.get<any, PagedResponse<ProviderTenantBinding[]>>('/api/v1/admin/provider-tenant-bindings', { params })
 }
@@ -202,7 +215,9 @@ export const getResourceGrants = (id: string) => {
 }
 
 export const createResourceGrant = (id: string, data: {
-  subject_user_id: number
+  subject_type?: 'user' | 'group'
+  subject_user_id?: number
+  subject_group_id?: number
   actions?: string[]
   shell_profile_id?: string
   valid_from?: string
@@ -210,6 +225,10 @@ export const createResourceGrant = (id: string, data: {
   max_session_seconds?: number
 }) => {
   return request.post<any, ApiResponse<AccessGrant>>(`/api/v1/admin/resources/${id}/grants`, data)
+}
+
+export const revokeResourceGrant = (id: string) => {
+  return request.post<any, ApiResponse<AccessGrant>>(`/api/v1/admin/grants/${id}/revoke`)
 }
 
 export const getResourceCandidates = (params?: { status?: DiscoveryCandidateStatus; search?: string; page?: number; size?: number }) => {

@@ -25,7 +25,7 @@ func TestUnifiedResourceTenantAndGrantBoundaries(t *testing.T) {
 	testDB, err := gorm.Open(sqlite.Open("file:unified_resource_test?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	db.DB = testDB
-	require.NoError(t, testDB.AutoMigrate(&model.User{}, &model.Node{}, &model.Tenant{}, &model.TenantMembership{}, &model.Resource{}, &model.ResourceTarget{}, &model.AccessGrant{}, &model.ContainerSession{}))
+	require.NoError(t, testDB.AutoMigrate(&model.User{}, &model.Node{}, &model.Tenant{}, &model.TenantMembership{}, &model.Group{}, &model.GroupMember{}, &model.Resource{}, &model.ResourceTarget{}, &model.AccessGrant{}, &model.ContainerSession{}))
 
 	tenantA := model.Tenant{ID: uuid.NewString(), Key: "tenant-a", Name: "Tenant A", Status: model.TenantStatusActive}
 	tenantB := model.Tenant{ID: uuid.NewString(), Key: "tenant-b", Name: "Tenant B", Status: model.TenantStatusActive}
@@ -48,6 +48,7 @@ func TestUnifiedResourceTenantAndGrantBoundaries(t *testing.T) {
 	r := gin.New()
 	r.GET("/resources", api.List)
 	r.POST("/resources/:id/grants", api.CreateGrant)
+	r.POST("/grants/:id/revoke", api.RevokeGrant)
 	r.POST("/resources/:id/targets", api.ObserveTarget)
 
 	listReq := httptest.NewRequest(http.MethodGet, "/resources?tenant_id="+tenantA.ID, nil)
@@ -84,6 +85,8 @@ func TestUnifiedResourceTenantAndGrantBoundaries(t *testing.T) {
 	var updatedResource model.Resource
 	require.NoError(t, testDB.First(&updatedResource, "id = ?", resourceA.ID).Error)
 	require.Equal(t, model.ResourceStateAvailable, updatedResource.State)
+	require.Equal(t, uint16(50200), updatedResource.ContainerSSHPort)
+	require.Equal(t, agentNode.ID, updatedResource.AgentNodeID)
 
 	conflictReq := httptest.NewRequest(http.MethodPost, "/resources/"+resourceB.ID+"/targets", bytes.NewReader(targetJSON))
 	conflictReq.Header.Set("Content-Type", "application/json")
@@ -105,12 +108,51 @@ func TestUnifiedResourceTenantAndGrantBoundaries(t *testing.T) {
 	grantResp := httptest.NewRecorder()
 	r.ServeHTTP(grantResp, grantReq)
 	require.Equal(t, http.StatusCreated, grantResp.Code)
+	var createdGrant struct {
+		Data model.AccessGrant `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(grantResp.Body.Bytes(), &createdGrant))
+	require.NotEmpty(t, createdGrant.Data.ID)
 
 	otherGrantReq := httptest.NewRequest(http.MethodPost, "/resources/"+resourceB.ID+"/grants", bytes.NewReader(grantJSON))
 	otherGrantReq.Header.Set("Content-Type", "application/json")
 	otherGrantResp := httptest.NewRecorder()
 	r.ServeHTTP(otherGrantResp, otherGrantReq)
 	require.Equal(t, http.StatusForbidden, otherGrantResp.Code)
+
+	tenantGroup := model.Group{TenantID: tenantA.ID, Name: "tenant-a-developers"}
+	crossTenantGroup := model.Group{TenantID: tenantB.ID, Name: "tenant-b-developers"}
+	legacyGroup := model.Group{Name: "legacy-global-group"}
+	require.NoError(t, testDB.Create(&tenantGroup).Error)
+	require.NoError(t, testDB.Create(&crossTenantGroup).Error)
+	require.NoError(t, testDB.Create(&legacyGroup).Error)
+	for _, tc := range []struct {
+		groupID int64
+		want    int
+	}{
+		{groupID: tenantGroup.ID, want: http.StatusCreated},
+		{groupID: crossTenantGroup.ID, want: http.StatusForbidden},
+		{groupID: legacyGroup.ID, want: http.StatusForbidden},
+	} {
+		payload, err := json.Marshal(map[string]interface{}{"subject_group_id": tc.groupID, "actions": []string{"shell"}})
+		require.NoError(t, err)
+		req := httptest.NewRequest(http.MethodPost, "/resources/"+resourceA.ID+"/grants", bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		resp := httptest.NewRecorder()
+		r.ServeHTTP(resp, req)
+		require.Equal(t, tc.want, resp.Code)
+	}
+
+	revokeResp := httptest.NewRecorder()
+	r.ServeHTTP(revokeResp, httptest.NewRequest(http.MethodPost, "/grants/"+createdGrant.Data.ID+"/revoke", nil))
+	require.Equal(t, http.StatusOK, revokeResp.Code)
+	var revokedGrant model.AccessGrant
+	require.NoError(t, testDB.First(&revokedGrant, "id = ?", createdGrant.Data.ID).Error)
+	require.Equal(t, "revoked", revokedGrant.Status)
+	require.Equal(t, int64(2), revokedGrant.Revision)
+	repeatRevoke := httptest.NewRecorder()
+	r.ServeHTTP(repeatRevoke, httptest.NewRequest(http.MethodPost, "/grants/"+createdGrant.Data.ID+"/revoke", nil))
+	require.Equal(t, http.StatusConflict, repeatRevoke.Code)
 
 	ownerReq := httptest.NewRequest(http.MethodPost, "/resources", bytes.NewReader([]byte(`{"tenant_id":"`+tenantA.ID+`","type":"container_ssh","display_name":"cross-tenant owner","owner_user_id":9999}`)))
 	ownerReq.Header.Set("Content-Type", "application/json")

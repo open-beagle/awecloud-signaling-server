@@ -2993,6 +2993,9 @@ type ContainerSSHResource struct {
 	ClusterId           string                 `protobuf:"bytes,10,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
 	Capability          string                 `protobuf:"bytes,11,opt,name=capability,proto3" json:"capability,omitempty"`
 	ListenPort          uint32                 `protobuf:"varint,12,opt,name=listen_port,json=listenPort,proto3" json:"listen_port,omitempty"`
+	Domain              string                 `protobuf:"bytes,13,opt,name=domain,proto3" json:"domain,omitempty"`
+	AgentIp             string                 `protobuf:"bytes,14,opt,name=agent_ip,json=agentIp,proto3" json:"agent_ip,omitempty"`
+	SshUser             string                 `protobuf:"bytes,15,opt,name=ssh_user,json=sshUser,proto3" json:"ssh_user,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -3109,6 +3112,27 @@ func (x *ContainerSSHResource) GetListenPort() uint32 {
 		return x.ListenPort
 	}
 	return 0
+}
+
+func (x *ContainerSSHResource) GetDomain() string {
+	if x != nil {
+		return x.Domain
+	}
+	return ""
+}
+
+func (x *ContainerSSHResource) GetAgentIp() string {
+	if x != nil {
+		return x.AgentIp
+	}
+	return ""
+}
+
+func (x *ContainerSSHResource) GetSshUser() string {
+	if x != nil {
+		return x.SshUser
+	}
+	return ""
 }
 
 var File_pkg_proto_desktop_proto protoreflect.FileDescriptor
@@ -3358,7 +3382,7 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\tssh_users\x18\n" +
 	" \x03(\tR\bsshUsers\"O\n" +
 	"\x13ListDomainsResponse\x128\n" +
-	"\adomains\x18\x01 \x03(\v2\x1e.awecloud.signaling.DomainInfoR\adomains\"\xb0\x03\n" +
+	"\adomains\x18\x01 \x03(\v2\x1e.awecloud.signaling.DomainInfoR\adomains\"\xfe\x03\n" +
 	"\x14ContainerSSHResource\x12\x1f\n" +
 	"\vresource_id\x18\x01 \x01(\tR\n" +
 	"resourceId\x12\x1b\n" +
@@ -3379,7 +3403,10 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"capability\x18\v \x01(\tR\n" +
 	"capability\x12\x1f\n" +
 	"\vlisten_port\x18\f \x01(\rR\n" +
-	"listenPort*\xcc\x01\n" +
+	"listenPort\x12\x16\n" +
+	"\x06domain\x18\r \x01(\tR\x06domain\x12\x19\n" +
+	"\bagent_ip\x18\x0e \x01(\tR\aagentIp\x12\x19\n" +
+	"\bssh_user\x18\x0f \x01(\tR\asshUser*\xcc\x01\n" +
 	"\x0fDesktopDataType\x12!\n" +
 	"\x1dDESKTOP_DATA_TYPE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15DESKTOP_DATA_TYPE_ALL\x10\x01\x12\x1e\n" +

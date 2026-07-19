@@ -30,7 +30,7 @@ func TestContainerExecBrokerValidatesAuthorizedReadyPod(t *testing.T) {
 	})
 	cache := NewPermissionCache()
 	cache.UpdateContainerSSHPermissions(map[string][]*ContainerSSHUserPermission{
-		"alice": {{ResourceID: "resource-a", Namespace: "dev", PodName: "workspace-0", PodUID: "pod-uid-a", ContainerName: "workspace", TargetRevision: 3, GrantRevision: 4}},
+		"alice": {{ResourceID: "resource-a", Namespace: "dev", PodName: "workspace-0", PodUID: "pod-uid-a", ContainerName: "workspace", TargetRevision: 3, GrantRevision: 4, ListenPort: 50200}},
 	})
 	executor := &recordingContainerExecutor{}
 	broker := NewContainerExecBroker(client, cache, executor)
@@ -48,7 +48,7 @@ func TestContainerExecBrokerRejectsChangedPodUIDWithoutExecuting(t *testing.T) {
 	})
 	cache := NewPermissionCache()
 	cache.UpdateContainerSSHPermissions(map[string][]*ContainerSSHUserPermission{
-		"alice": {{ResourceID: "resource-a", Namespace: "dev", PodName: "workspace-0", PodUID: "old-uid", ContainerName: "workspace"}},
+		"alice": {{ResourceID: "resource-a", Namespace: "dev", PodName: "workspace-0", PodUID: "old-uid", ContainerName: "workspace", ListenPort: 50200}},
 	})
 	executor := &recordingContainerExecutor{}
 
@@ -71,7 +71,7 @@ func TestContainerExecBrokerRejectsUnknownResource(t *testing.T) {
 func TestContainerSSHPermissionsEmptySnapshotRevokesAccess(t *testing.T) {
 	cache := NewPermissionCache()
 	cache.UpdateContainerSSHPermissions(map[string][]*ContainerSSHUserPermission{
-		"alice": {{ResourceID: "resource-a", Namespace: "dev", PodName: "workspace-0", PodUID: "pod-uid-a", ContainerName: "workspace"}},
+		"alice": {{ResourceID: "resource-a", Namespace: "dev", PodName: "workspace-0", PodUID: "pod-uid-a", ContainerName: "workspace", ListenPort: 50200}},
 	})
 	require.True(t, func() bool {
 		_, allowed := cache.CheckContainerSSHAccess("alice", "resource-a")

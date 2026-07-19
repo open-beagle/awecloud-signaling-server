@@ -79,6 +79,7 @@ func autoMigrate() error {
 	err := DB.AutoMigrate(
 		// 基础模型
 		&model.Admin{},
+		&model.AdminTenantMembership{},
 		&model.User{},
 		&model.Node{},
 

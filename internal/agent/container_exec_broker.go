@@ -21,6 +21,12 @@ type ContainerExecStream struct {
 	Stderr io.Writer
 	Rows   uint16
 	Cols   uint16
+	Resize <-chan ContainerTerminalSize
+}
+
+type ContainerTerminalSize struct {
+	Rows uint16
+	Cols uint16
 }
 
 // ContainerExecutor is kept small so the authorization and target-validation

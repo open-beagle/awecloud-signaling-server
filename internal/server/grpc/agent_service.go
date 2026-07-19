@@ -65,22 +65,25 @@ type AgentServiceServer struct {
 	requestImmediateReport bool
 	immediateReportMutex   sync.Mutex
 
-	headscaleClient    *headscale.Client
-	config             *config.ServerConfig
-	domainService      *service.DomainService
-	updateService      *service.UpdateService
-	resourceReconciler *service.ResourceReconciliationService
+	headscaleClient          *headscale.Client
+	config                   *config.ServerConfig
+	domainService            *service.DomainService
+	updateService            *service.UpdateService
+	resourceReconciler       *service.ResourceReconciliationService
+	containerSessionAckMutex sync.Mutex
+	containerSessionAcks     map[uint64][]string
 }
 
 // NewAgentServiceServer 创建 Agent 服务
 func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
 	s := &AgentServiceServer{
-		connections:        make(map[uint64]*AgentConnection),
-		configVersion:      time.Now().Unix(),
-		config:             cfg,
-		domainService:      service.NewDomainService(db.DB),
-		updateService:      service.NewUpdateService(db.DB),
-		resourceReconciler: service.NewResourceReconciliationService(db.DB),
+		connections:          make(map[uint64]*AgentConnection),
+		configVersion:        time.Now().Unix(),
+		config:               cfg,
+		domainService:        service.NewDomainService(db.DB),
+		updateService:        service.NewUpdateService(db.DB),
+		resourceReconciler:   service.NewResourceReconciliationService(db.DB),
+		containerSessionAcks: make(map[uint64][]string),
 	}
 
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
@@ -413,6 +416,9 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 	logger.Infof("Agent 连接注册: agent_id=%d, node_id=%d, hostname=%s", agentID, nodeID, firstReq.Hostname)
 
 	defer func() {
+		s.containerSessionAckMutex.Lock()
+		delete(s.containerSessionAcks, nodeID)
+		s.containerSessionAckMutex.Unlock()
 		s.connMutex.Lock()
 		delete(s.connections, nodeID)
 		s.connMutex.Unlock()
@@ -592,6 +598,10 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	if req.UpdaterProtocol != "" {
 		updates["updater_protocol"] = req.UpdaterProtocol
 	}
+	// Preserve the stored value when an old Agent omits the additive field.
+	if req.ContainerSshProtocol != "" {
+		updates["container_ssh_protocol"] = req.ContainerSshProtocol
+	}
 	if req.Version != "" {
 		updates["version"] = req.Version
 	}
@@ -665,6 +675,17 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	// authenticated heartbeat stream, never from an Agent-supplied field.
 	if len(req.ContainerCandidates) > 0 {
 		s.handleContainerCandidates(ctx, node.ID, req.ContainerCandidates)
+	}
+	if req.ContainerSshProtocol == "v1" && len(req.ContainerSshSessionEvents) > 0 {
+		acks := s.handleContainerSessionEvents(ctx, node.ID, req.ContainerSshSessionEvents)
+		if len(acks) > 0 {
+			s.containerSessionAckMutex.Lock()
+			if s.containerSessionAcks == nil {
+				s.containerSessionAcks = make(map[uint64][]string)
+			}
+			s.containerSessionAcks[node.ID] = append(s.containerSessionAcks[node.ID], acks...)
+			s.containerSessionAckMutex.Unlock()
+		}
 	}
 
 	if s.updateService != nil {
@@ -907,10 +928,25 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		resp.EndpointSshPermissions = endpointSSHPerms
 	}
 
-	// ContainerSSH uses an Agent-node-scoped, fully resolved snapshot. It is
-	// sent on every heartbeat so removing a grant, membership, target, or
-	// readiness immediately clears the Agent's local access cache.
-	resp.ContainerSshPermissions = s.queryContainerSSHPermissions(ctx, nodeID)
+	// Only an Agent that explicitly negotiated v1 may interpret an empty list
+	// as a complete revocation snapshot. Old Agents continue unchanged.
+	if nodeID > 0 {
+		var protocol string
+		if err := db.DB.WithContext(ctx).Model(&model.Node{}).Where("id = ?", nodeID).Pluck("container_ssh_protocol", &protocol).Error; err == nil && protocol == "v1" {
+			resp.ContainerSshProtocol = "v1"
+			resp.ContainerSshPermissions = s.queryContainerSSHPermissions(ctx, nodeID)
+			s.containerSessionAckMutex.Lock()
+			resp.ContainerSshSessionAckEventIds = s.containerSessionAcks[nodeID]
+			delete(s.containerSessionAcks, nodeID)
+			s.containerSessionAckMutex.Unlock()
+			var revoked []model.ContainerSession
+			if err := db.DB.WithContext(ctx).Where("agent_node_id = ? AND status = ? AND disconnect_acknowledged_at IS NULL", nodeID, model.ContainerSessionRevoked).Find(&revoked).Error; err == nil {
+				for _, session := range revoked {
+					resp.ContainerSshDisconnectSessionIds = append(resp.ContainerSshDisconnectSessionIds, session.ID)
+				}
+			}
+		}
+	}
 
 	// 查询该 Agent 关联的 Endpoint K8SAPI 授权信息
 	// P11 重构：Endpoint K8SAPI 权限已废弃，统一使用 Agent 级别权限
@@ -986,27 +1022,51 @@ func (s *AgentServiceServer) queryContainerSSHPermissions(ctx context.Context, n
 			continue
 		}
 		var grants []model.AccessGrant
-		if err := db.DB.WithContext(ctx).Where("resource_id = ? AND tenant_id = ? AND subject_type = ? AND status = ? AND valid_from <= ? AND expires_at > ?", resource.ID, resource.TenantID, "user", "enabled", now, now).Find(&grants).Error; err != nil {
+		if err := db.DB.WithContext(ctx).Where("resource_id = ? AND tenant_id = ? AND subject_type IN ? AND status = ? AND valid_from <= ? AND expires_at > ?", resource.ID, resource.TenantID, []string{"user", "group"}, "enabled", now, now).Order("subject_type DESC").Find(&grants).Error; err != nil {
 			logger.Warnf("查询 ContainerSSH Grant 快照失败: resource_id=%s err=%v", resource.ID, err)
 			continue
 		}
+		resolved := make(map[uint64]*pb.ContainerSSHPermission)
 		for _, grant := range grants {
 			if !containsAction(parseJSONStringArray(grant.Actions), "shell") {
 				continue
 			}
-			var user model.User
-			if err := db.DB.WithContext(ctx).Where("id = ? AND enabled = ?", grant.SubjectUserID, true).First(&user).Error; err != nil {
-				continue
+			userIDs := []uint64{grant.SubjectUserID}
+			if grant.SubjectType == "group" {
+				if grant.SubjectGroupID == nil {
+					continue
+				}
+				var group model.Group
+				if err := db.DB.WithContext(ctx).Where("id = ? AND tenant_id = ?", *grant.SubjectGroupID, resource.TenantID).First(&group).Error; err != nil {
+					continue
+				}
+				userIDs = nil
+				if err := db.DB.WithContext(ctx).Model(&model.GroupMember{}).Where("group_id = ?", group.ID).Pluck("user_id", &userIDs).Error; err != nil {
+					continue
+				}
 			}
-			var membership model.TenantMembership
-			if err := db.DB.WithContext(ctx).Where("tenant_id = ? AND user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", resource.TenantID, user.ID, true, now).First(&membership).Error; err != nil {
-				continue
+			for _, userID := range userIDs {
+				var user model.User
+				if err := db.DB.WithContext(ctx).Where("id = ? AND enabled = ?", userID, true).First(&user).Error; err != nil {
+					continue
+				}
+				var membership model.TenantMembership
+				if err := db.DB.WithContext(ctx).Where("tenant_id = ? AND user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", resource.TenantID, user.ID, true, now).First(&membership).Error; err != nil {
+					continue
+				}
+				permission := &pb.ContainerSSHPermission{
+					UserId: user.ID, UserName: user.Name, ResourceId: resource.ID,
+					Namespace: target.Namespace, PodName: target.PodName, PodUid: target.PodUID, ContainerName: target.ContainerName,
+					TargetRevision: target.Revision, GrantRevision: grant.Revision, MaxSessionSeconds: int32(grant.MaxSessionSeconds), ListenPort: uint32(resource.ContainerSSHPort),
+				}
+				current, exists := resolved[user.ID]
+				if !exists || permission.GrantRevision > current.GrantRevision {
+					resolved[user.ID] = permission
+				}
 			}
-			result = append(result, &pb.ContainerSSHPermission{
-				UserId: user.ID, UserName: user.Name, ResourceId: resource.ID,
-				Namespace: target.Namespace, PodName: target.PodName, PodUid: target.PodUID, ContainerName: target.ContainerName,
-				TargetRevision: target.Revision, GrantRevision: grant.Revision, MaxSessionSeconds: int32(grant.MaxSessionSeconds), ListenPort: uint32(resource.ContainerSSHPort),
-			})
+		}
+		for _, permission := range resolved {
+			result = append(result, permission)
 		}
 	}
 	return result

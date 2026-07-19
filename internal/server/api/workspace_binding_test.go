@@ -123,6 +123,20 @@ func TestWorkspaceBindingReconcilesCandidateOnlyAfterTrustedBinding(t *testing.T
 		"display_name": "IDE / workspace-a", "owner_user_id": owner.ID, "generation": 2,
 	})
 	require.Equal(t, http.StatusOK, newGeneration.Code)
+	require.NoError(t, testDB.First(&resource, "id = ?", published.Data.ResourceID).Error)
+	require.Equal(t, int64(2), resource.TargetRevision)
+	require.Equal(t, "pod-a-recreated", resource.PodUID)
+	require.Equal(t, "ide-a-recreated", resource.PodName)
+	var targetCount int64
+	require.NoError(t, testDB.Model(&model.ResourceTarget{}).Where("resource_id = ?", resource.ID).Count(&targetCount).Error)
+	require.Equal(t, int64(2), targetCount)
+	var oldTarget, newTarget model.ResourceTarget
+	require.NoError(t, testDB.First(&oldTarget, "resource_id = ? AND revision = ?", resource.ID, 1).Error)
+	require.NoError(t, testDB.First(&newTarget, "resource_id = ? AND revision = ?", resource.ID, 2).Error)
+	require.Equal(t, "pod-a", oldTarget.PodUID)
+	require.Equal(t, "pod-a-recreated", newTarget.PodUID)
+	require.NoError(t, testDB.First(&newCandidateResult.Data, "id = ?", newCandidateResult.Data.ID).Error)
+	require.Equal(t, model.DiscoveryCandidatePublished, newCandidateResult.Data.Status)
 	olderGeneration := post("/workspace-bindings", map[string]interface{}{
 		"provider_id": "beagle-ide", "external_tenant_id": "customer-acme", "external_workspace_id": "workspace-a",
 		"display_name": "IDE / workspace-a", "owner_user_id": owner.ID, "generation": 1,

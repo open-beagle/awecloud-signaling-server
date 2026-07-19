@@ -59,6 +59,8 @@ type Agent struct {
 	svcProxy            *K8SSVCProxy           // K8S Service gRPC 代理
 	containerDiscovery  *K8SContainerDiscovery // ContainerSSH Pod 候选发现
 	containerExecBroker *ContainerExecBroker   // ContainerSSH Kubernetes Exec 数据面
+	containerSSHProxy   *ContainerSSHProxy     // ContainerSSH tsnet SSH 入口
+	containerSessions   *ContainerSessionManager
 
 	// Endpoint 能力（P2 新增）
 	endpointServer      *EndpointServer      // Endpoint 内网 gRPC Server
@@ -202,6 +204,9 @@ func (a *Agent) Run() error {
 	}
 	if a.containerDiscovery != nil {
 		a.containerDiscovery.Stop()
+	}
+	if a.containerSSHProxy != nil {
+		a.containerSSHProxy.Stop()
 	}
 
 	// 停止 Endpoint K8SAPI 代理
@@ -770,6 +775,10 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 			Hostname: hostname,
 		},
 	}
+	if a.containerExecBroker != nil && a.containerSSHProxy != nil {
+		req.ContainerSshProtocol = "v1"
+		req.ContainerSshSessionEvents = a.containerSessions.EventsForHeartbeat()
+	}
 
 	// 添加设备名称（Node.Name，即 DeployToken.Name）
 	if a.deviceName != "" {
@@ -906,7 +915,17 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 		a.permCache.UpdateK8SPermissions(resp.K8SPermissions)
 		a.permCache.UpdateK8SServicePermissions(resp.K8SServicePermissions)
 		a.permCache.UpdateEndpointSSHPermissions(resp.EndpointSshPermissions)
-		a.permCache.UpdateContainerSSHPermissionsFromProto(resp.ContainerSshPermissions)
+		if resp.ContainerSshProtocol == "v1" {
+			a.permCache.UpdateContainerSSHPermissionsFromProto(resp.ContainerSshPermissions)
+		} else {
+			// An old Server cannot provide an authoritative full snapshot.
+			a.permCache.UpdateContainerSSHPermissionsFromProto(nil)
+		}
+		if a.containerSessions != nil {
+			a.containerSessions.ReconcilePermissions(a.permCache)
+			a.containerSessions.AckEvents(resp.ContainerSshSessionAckEventIds)
+			a.containerSessions.Disconnect(resp.ContainerSshDisconnectSessionIds, "admin_disconnect")
+		}
 	}
 
 	// 同步 Endpoint 能力配置到 EndpointServer（让 Agent 能把 Server 配置下发给 Endpoint）
@@ -1309,6 +1328,28 @@ func (a *Agent) startK8SContainerDiscovery() error {
 		return fmt.Errorf("创建 ContainerSSH Exec Broker 失败: %w", err)
 	}
 	a.containerExecBroker = broker
+	if a.tsManager == nil || !a.tsManager.IsConnected() {
+		discovery.Stop()
+		a.containerDiscovery = nil
+		a.containerExecBroker = nil
+		return fmt.Errorf("启动 ContainerSSH 入口需要已连接的 Tailscale")
+	}
+	sessions := NewContainerSessionManager()
+	proxy, err := NewContainerSSHProxy(a.tsManager, a.permCache, broker, sessions, a.config.Tunnel.StateDir, a.ctx)
+	if err != nil {
+		discovery.Stop()
+		a.containerDiscovery = nil
+		a.containerExecBroker = nil
+		return fmt.Errorf("创建 ContainerSSH 入口失败: %w", err)
+	}
+	if err := proxy.Start(); err != nil {
+		discovery.Stop()
+		a.containerDiscovery = nil
+		a.containerExecBroker = nil
+		return fmt.Errorf("启动 ContainerSSH 入口失败: %w", err)
+	}
+	a.containerSSHProxy = proxy
+	a.containerSessions = sessions
 	return nil
 }
 

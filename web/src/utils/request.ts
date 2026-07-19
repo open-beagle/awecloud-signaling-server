@@ -20,6 +20,11 @@ service.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
+    const tenantId = localStorage.getItem('tenant_context')
+    const isTenantCatalog = config.method?.toLowerCase() === 'get' && config.url === '/api/v1/admin/tenants'
+    if (tenantId && !isTenantCatalog) {
+      config.headers['X-Tenant-ID'] = tenantId
+    }
     return config
   },
   (error) => {
@@ -43,6 +48,8 @@ service.interceptors.response.use(
       if (status === 401) {
         ElMessage.error('未授权，请重新登录')
         localStorage.removeItem('token')
+        localStorage.removeItem('admin_role')
+        localStorage.removeItem('tenant_context')
         router.push('/login')
       } else if (status === 403) {
         ElMessage.error('没有权限访问此资源')

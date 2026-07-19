@@ -52,6 +52,9 @@ type workspaceBindingListItem struct {
 }
 
 func (a *WorkspaceBindingAPI) ListProviderTenantBindings(c *gin.Context) {
+	if !requirePlatformAccess(c, false) {
+		return
+	}
 	ctx := c.Request.Context()
 	page, size := pageParams(c)
 	query := db.DB.WithContext(ctx).Model(&model.ProviderTenantBinding{})
@@ -84,6 +87,9 @@ func (a *WorkspaceBindingAPI) ListProviderTenantBindings(c *gin.Context) {
 }
 
 func (a *WorkspaceBindingAPI) CreateProviderTenantBinding(c *gin.Context) {
+	if !requirePlatformAccess(c, true) {
+		return
+	}
 	ctx := c.Request.Context()
 	var req providerTenantBindingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -95,6 +101,9 @@ func (a *WorkspaceBindingAPI) CreateProviderTenantBinding(c *gin.Context) {
 	req.TenantID = strings.TrimSpace(req.TenantID)
 	if req.ProviderID == "" || req.ExternalTenantID == "" || req.TenantID == "" {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("Provider、外部客户和内部客户不能为空"))
+		return
+	}
+	if !requireTenantAccess(c, req.TenantID, true) {
 		return
 	}
 	var tenant model.Tenant
@@ -139,8 +148,12 @@ func (a *WorkspaceBindingAPI) ListWorkspaceBindings(c *gin.Context) {
 	ctx := c.Request.Context()
 	page, size := pageParams(c)
 	query := db.DB.WithContext(ctx).Model(&model.WorkspaceBinding{})
-	if tenantID := strings.TrimSpace(c.Query("tenant_id")); tenantID != "" {
-		query = query.Where("tenant_id = ?", tenantID)
+	tenantIDs, unrestricted, ok := tenantReadScope(c)
+	if !ok {
+		return
+	}
+	if !unrestricted {
+		query = query.Where("tenant_id IN ?", tenantIDs)
 	}
 	if providerID := strings.TrimSpace(c.Query("provider_id")); providerID != "" {
 		query = query.Where("provider_id = ?", providerID)
@@ -198,6 +211,9 @@ func (a *WorkspaceBindingAPI) CreateWorkspaceBinding(c *gin.Context) {
 	var tenantBinding model.ProviderTenantBinding
 	if err := db.DB.WithContext(ctx).Where("provider_id = ? AND external_tenant_id = ? AND status = ?", req.ProviderID, req.ExternalTenantID, model.ProviderBindingActive).First(&tenantBinding).Error; err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("Provider 外部客户尚未绑定可信 Tenant"))
+		return
+	}
+	if !requireTenantAccess(c, tenantBinding.TenantID, true) {
 		return
 	}
 	var tenant model.Tenant

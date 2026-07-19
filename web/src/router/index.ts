@@ -249,14 +249,23 @@ const router = createRouter({
 })
 
 // 路由守卫
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
-  
+
   if (to.meta.requiresAuth !== false && !authStore.isAuthenticated) {
     next({ name: 'Login', query: { redirect: to.fullPath } })
-  } else {
-    next()
+	return
   }
+  if (authStore.isAuthenticated && !authStore.role) {
+    try { await authStore.loadProfile() } catch { return }
+  }
+  if (authStore.role === 'tenant_admin' && !tenantAdminPageAllowed(to.path)) {
+    next('/resources')
+    return
+  }
+  next()
 })
+
+const tenantAdminPageAllowed = (path: string) => path === '/resources' || path.startsWith('/resources/') || path === '/groups' || /^\/groups\/\d+\/members$/.test(path)
 
 export default router

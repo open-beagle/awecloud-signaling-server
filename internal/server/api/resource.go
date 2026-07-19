@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -91,6 +92,10 @@ type ContainerSSHResource struct {
 	AgentNodeID         uint64 `json:"agent_node_id"`
 	ClusterID           string `json:"cluster_id"`
 	Capability          string `json:"capability"`
+	ListenPort          uint16 `json:"listen_port"`
+	Domain              string `json:"domain"`
+	AgentIP             string `json:"agent_ip"`
+	SSHUser             string `json:"ssh_user"`
 }
 
 // GetResources 查询当前用户可访问的资源列表
@@ -130,12 +135,12 @@ func (a *ResourceAPI) GetResources(c *gin.Context) {
 
 	// 3. 查询 K8S Service 资源
 	result.K8SService = a.queryK8SServiceResources(ctx, clientID, groupIDs)
-	result.ContainerSSH = a.queryContainerSSHResources(clientID)
+	result.ContainerSSH = a.queryContainerSSHResources(clientID, groupIDs)
 
 	c.JSON(http.StatusOK, NewSuccessResponse(result))
 }
 
-func (a *ResourceAPI) queryContainerSSHResources(clientID uint64) []ContainerSSHResource {
+func (a *ResourceAPI) queryContainerSSHResources(clientID uint64, groupIDs []int64) []ContainerSSHResource {
 	now := time.Now()
 	var memberships []model.TenantMembership
 	db.DB.Where("user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", clientID, true, now).Find(&memberships)
@@ -157,11 +162,23 @@ func (a *ResourceAPI) queryContainerSSHResources(clientID uint64) []ContainerSSH
 		tenantNames[tenant.ID] = tenant.Name
 		activeTenantIDs = append(activeTenantIDs, tenant.ID)
 	}
+	grantQuery := db.DB.Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND expires_at > ?", activeTenantIDs, "enabled", now, now).
+		Where("(subject_type = ? AND subject_user_id = ?)", "user", clientID)
+	if len(groupIDs) > 0 {
+		grantQuery = db.DB.Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND expires_at > ?", activeTenantIDs, "enabled", now, now).
+			Where("(subject_type = ? AND subject_user_id = ?) OR (subject_type = ? AND subject_group_id IN ?)", "user", clientID, "group", groupIDs)
+	}
 	var grants []model.AccessGrant
-	db.DB.Where("tenant_id IN ? AND subject_type = ? AND subject_user_id = ? AND status = ? AND valid_from <= ? AND expires_at > ?", activeTenantIDs, "user", clientID, "enabled", now, now).Find(&grants)
+	grantQuery.Find(&grants)
 	resourceIDs := make([]string, 0, len(grants))
 	seen := make(map[string]struct{}, len(grants))
 	for _, grant := range grants {
+		if grant.SubjectType == "group" && !groupGrantMatchesTenant(grant) {
+			continue
+		}
+		if !resourceContainsAction(parseJSONStringArray(grant.Actions), "shell") {
+			continue
+		}
 		if _, exists := seen[grant.ResourceID]; !exists {
 			seen[grant.ResourceID] = struct{}{}
 			resourceIDs = append(resourceIDs, grant.ResourceID)
@@ -173,14 +190,47 @@ func (a *ResourceAPI) queryContainerSSHResources(clientID uint64) []ContainerSSH
 	var resources []model.Resource
 	db.DB.Where("id IN ? AND type = ? AND target_revision > 0 AND state IN ?", resourceIDs, model.ResourceTypeContainerSSH, []model.ResourceState{model.ResourceStateAvailable, model.ResourceStateDegraded}).Order("display_name ASC").Find(&resources)
 	result := make([]ContainerSSHResource, 0, len(resources))
+	domainSuffix := model.DefaultDomainSuffix
+	var domainConfig model.SystemConfig
+	if err := db.DB.Where("key = ?", model.ConfigDomainSuffix).First(&domainConfig).Error; err == nil && domainConfig.Value != "" {
+		domainSuffix = domainConfig.Value
+	}
+	if !strings.HasPrefix(domainSuffix, ".") {
+		domainSuffix = "." + domainSuffix
+	}
 	for _, resource := range resources {
+		if resource.ContainerSSHPort == 0 {
+			continue
+		}
+		var agentNode model.Node
+		if err := db.DB.Where("id = ? AND type = ? AND ip <> ?", resource.AgentNodeID, model.NodeTypeAgent, "").First(&agentNode).Error; err != nil {
+			continue
+		}
 		result = append(result, ContainerSSHResource{
 			ResourceID: resource.ID, TenantID: resource.TenantID, TenantName: tenantNames[resource.TenantID], DisplayName: resource.DisplayName,
 			ProviderID: resource.ProviderID, ExternalWorkspaceID: resource.ExternalWorkspaceID, State: string(resource.State), TargetRevision: resource.TargetRevision,
 			AgentNodeID: resource.AgentNodeID, ClusterID: resource.ClusterID, Capability: string(model.ResourceTypeContainerSSH),
+			ListenPort: resource.ContainerSSHPort, Domain: resource.ID + ".container" + domainSuffix, AgentIP: agentNode.IP, SSHUser: "container",
 		})
 	}
 	return result
+}
+
+func groupGrantMatchesTenant(grant model.AccessGrant) bool {
+	if grant.SubjectGroupID == nil || grant.TenantID == "" {
+		return false
+	}
+	var group model.Group
+	return db.DB.Where("id = ? AND tenant_id = ?", *grant.SubjectGroupID, grant.TenantID).First(&group).Error == nil
+}
+
+func resourceContainsAction(actions []string, expected string) bool {
+	for _, action := range actions {
+		if action == expected {
+			return true
+		}
+	}
+	return false
 }
 
 // querySSHResources 查询用户可访问的 SSH 资源

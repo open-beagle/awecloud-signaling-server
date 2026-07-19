@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 )
 
 // UnifiedResourceAPI exposes the first control-plane slice used by the new
@@ -53,6 +54,7 @@ type resourceRequest struct {
 type grantRequest struct {
 	SubjectType       string    `json:"subject_type"`
 	SubjectUserID     uint64    `json:"subject_user_id"`
+	SubjectGroupID    *int64    `json:"subject_group_id"`
 	Actions           []string  `json:"actions"`
 	ShellProfileID    string    `json:"shell_profile_id"`
 	ValidFrom         time.Time `json:"valid_from"`
@@ -76,6 +78,15 @@ type tenantListItem struct {
 	ResourceCount int64 `json:"resource_count"`
 }
 
+type tenantMemberListItem struct {
+	UserID    uint64     `json:"user_id"`
+	Name      string     `json:"name"`
+	Alias     string     `json:"alias"`
+	Role      string     `json:"role"`
+	Enabled   bool       `json:"enabled"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
 type resourceListItem struct {
 	model.Resource
 	TenantName   string `json:"tenant_name"`
@@ -96,6 +107,13 @@ func (a *UnifiedResourceAPI) ListTenants(c *gin.Context) {
 	ctx := c.Request.Context()
 	page, size := pageParams(c)
 	query := db.DB.WithContext(ctx).Model(&model.Tenant{})
+	tenantIDs, unrestricted, ok := tenantReadScope(c)
+	if !ok {
+		return
+	}
+	if !unrestricted {
+		query = query.Where("id IN ?", tenantIDs)
+	}
 	if search := strings.TrimSpace(c.Query("search")); search != "" {
 		like := "%" + search + "%"
 		query = query.Where("key LIKE ? OR name LIKE ?", like, like)
@@ -128,6 +146,9 @@ func (a *UnifiedResourceAPI) ListTenants(c *gin.Context) {
 // CreateTenant creates a customer boundary. The caller remains responsible
 // for adding an initial membership through the member endpoint.
 func (a *UnifiedResourceAPI) CreateTenant(c *gin.Context) {
+	if !requirePlatformAccess(c, true) {
+		return
+	}
 	var req tenantRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("客户标识和名称不能为空"))
@@ -155,6 +176,9 @@ func (a *UnifiedResourceAPI) CreateTenant(c *gin.Context) {
 // AddTenantMember connects an existing global user to a tenant.
 func (a *UnifiedResourceAPI) AddTenantMember(c *gin.Context) {
 	tenantID := c.Param("id")
+	if !requireTenantAccess(c, tenantID, true) {
+		return
+	}
 	var tenant model.Tenant
 	if err := db.DB.WithContext(c.Request.Context()).First(&tenant, "id = ?", tenantID).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("客户不存在"))
@@ -187,6 +211,32 @@ func (a *UnifiedResourceAPI) AddTenantMember(c *gin.Context) {
 	c.JSON(http.StatusCreated, NewSuccessResponse(membership))
 }
 
+// ListTenantMembers returns only active business identities in one Tenant.
+// It is safe for Tenant Admin selectors and does not expose the global user directory.
+func (a *UnifiedResourceAPI) ListTenantMembers(c *gin.Context) {
+	tenantID := c.Param("id")
+	if !requireTenantAccess(c, tenantID, false) {
+		return
+	}
+	var memberships []model.TenantMembership
+	if err := db.DB.WithContext(c.Request.Context()).Where("tenant_id = ?", tenantID).Order("created_at ASC").Find(&memberships).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询客户成员失败"))
+		return
+	}
+	items := make([]tenantMemberListItem, 0, len(memberships))
+	for _, membership := range memberships {
+		var user model.User
+		if err := db.DB.WithContext(c.Request.Context()).First(&user, membership.UserID).Error; err != nil {
+			continue
+		}
+		items = append(items, tenantMemberListItem{
+			UserID: user.ID, Name: user.Name, Alias: user.Alias, Role: membership.Role,
+			Enabled: membership.Enabled && user.Enabled, ExpiresAt: membership.ExpiresAt,
+		})
+	}
+	c.JSON(http.StatusOK, NewSuccessResponse(items))
+}
+
 // List returns resources in the selected tenant context. Omitting tenant_id
 // is allowed for Platform Admin inventory views and remains read-only at the
 // UI layer until a concrete tenant is selected.
@@ -194,8 +244,12 @@ func (a *UnifiedResourceAPI) List(c *gin.Context) {
 	ctx := c.Request.Context()
 	page, size := pageParams(c)
 	query := db.DB.WithContext(ctx).Model(&model.Resource{})
-	if tenantID := c.Query("tenant_id"); tenantID != "" {
-		query = query.Where("tenant_id = ?", tenantID)
+	tenantIDs, unrestricted, ok := tenantReadScope(c)
+	if !ok {
+		return
+	}
+	if !unrestricted {
+		query = query.Where("tenant_id IN ?", tenantIDs)
 	}
 	if resourceType := c.Query("type"); resourceType != "" {
 		query = query.Where("type = ?", resourceType)
@@ -252,6 +306,9 @@ func (a *UnifiedResourceAPI) Get(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询资源失败"))
 		return
 	}
+	if !requireTenantAccess(c, resource.TenantID, false) {
+		return
+	}
 	var tenant model.Tenant
 	if err := db.DB.WithContext(ctx).First(&tenant, "id = ?", resource.TenantID).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("资源客户不存在"))
@@ -280,6 +337,9 @@ func (a *UnifiedResourceAPI) Create(c *gin.Context) {
 	}
 	if !validResourceType(req.Type) {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("不支持的资源类型"))
+		return
+	}
+	if !requireTenantAccess(c, req.TenantID, true) {
 		return
 	}
 	var tenant model.Tenant
@@ -335,6 +395,9 @@ func (a *UnifiedResourceAPI) ObserveTarget(c *gin.Context) {
 		c.JSON(http.StatusNotFound, NewErrorResponse("资源不存在"))
 		return
 	}
+	if !requireTenantAccess(c, resource.TenantID, true) {
+		return
+	}
 	var req targetRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("运行目标格式无效"))
@@ -383,6 +446,11 @@ func saveResourceTarget(ctx context.Context, resource *model.Resource, req targe
 		if err := tx.Create(&target).Error; err != nil {
 			return err
 		}
+		if resource.Type == model.ResourceTypeContainerSSH {
+			if err := service.EnsureContainerSSHPort(tx, resource, req.AgentNodeID); err != nil {
+				return err
+			}
+		}
 		state := model.ResourceStateDegraded
 		if req.Ready {
 			state = model.ResourceStateAvailable
@@ -405,6 +473,9 @@ func (a *UnifiedResourceAPI) ListGrants(c *gin.Context) {
 		c.JSON(http.StatusNotFound, NewErrorResponse("资源不存在"))
 		return
 	}
+	if !requireTenantAccess(c, resource.TenantID, false) {
+		return
+	}
 	var grants []model.AccessGrant
 	if err := db.DB.WithContext(c.Request.Context()).Where("resource_id = ?", resource.ID).Order("created_at DESC").Find(&grants).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询访问策略失败"))
@@ -413,8 +484,7 @@ func (a *UnifiedResourceAPI) ListGrants(c *gin.Context) {
 	c.JSON(http.StatusOK, NewSuccessResponse(grants))
 }
 
-// CreateGrant currently supports direct User grants. Group grants are kept in
-// the schema but remain disabled until Group receives a tenant boundary.
+// CreateGrant supports either a direct User grant or a tenant-scoped Group.
 func (a *UnifiedResourceAPI) CreateGrant(c *gin.Context) {
 	ctx := c.Request.Context()
 	var resource model.Resource
@@ -422,15 +492,48 @@ func (a *UnifiedResourceAPI) CreateGrant(c *gin.Context) {
 		c.JSON(http.StatusNotFound, NewErrorResponse("资源不存在"))
 		return
 	}
-	var req grantRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.SubjectUserID == 0 {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("当前阶段必须指定用户"))
+	if !requireTenantAccess(c, resource.TenantID, true) {
 		return
 	}
-	var membership model.TenantMembership
-	if err := db.DB.WithContext(ctx).Where("tenant_id = ? AND user_id = ? AND enabled = ?", resource.TenantID, req.SubjectUserID, true).First(&membership).Error; err != nil {
-		c.JSON(http.StatusForbidden, NewErrorResponse("用户不属于资源客户或成员已禁用"))
+	var req grantRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("访问策略参数无效"))
 		return
+	}
+	hasUser := req.SubjectUserID != 0
+	hasGroup := req.SubjectGroupID != nil && *req.SubjectGroupID != 0
+	if hasUser == hasGroup {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("必须且只能指定一个用户或分组"))
+		return
+	}
+	subjectType := strings.TrimSpace(req.SubjectType)
+	if subjectType == "" {
+		if hasGroup {
+			subjectType = "group"
+		} else {
+			subjectType = "user"
+		}
+	}
+	if (subjectType != "user" || !hasUser) && (subjectType != "group" || !hasGroup) {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("授权主体类型与主体 ID 不匹配"))
+		return
+	}
+	if subjectType == "user" {
+		var membership model.TenantMembership
+		if err := db.DB.WithContext(ctx).Where("tenant_id = ? AND user_id = ? AND enabled = ?", resource.TenantID, req.SubjectUserID, true).First(&membership).Error; err != nil {
+			c.JSON(http.StatusForbidden, NewErrorResponse("用户不属于资源客户或成员已禁用"))
+			return
+		}
+	} else {
+		var group model.Group
+		if err := db.DB.WithContext(ctx).First(&group, *req.SubjectGroupID).Error; err != nil {
+			c.JSON(http.StatusBadRequest, NewErrorResponse("分组不存在"))
+			return
+		}
+		if group.TenantID == "" || group.TenantID != resource.TenantID {
+			c.JSON(http.StatusForbidden, NewErrorResponse("分组不属于资源客户，旧版全局分组不能用于统一资源授权"))
+			return
+		}
 	}
 	if len(req.Actions) == 0 {
 		req.Actions = []string{"shell"}
@@ -449,13 +552,56 @@ func (a *UnifiedResourceAPI) CreateGrant(c *gin.Context) {
 		req.MaxSessionSeconds = 8 * 60 * 60
 	}
 	actions, _ := json.Marshal(req.Actions)
-	grant := model.AccessGrant{ID: uuid.NewString(), TenantID: resource.TenantID, ResourceID: resource.ID, SubjectType: "user", SubjectUserID: req.SubjectUserID, Actions: string(actions), ShellProfileID: req.ShellProfileID, ValidFrom: req.ValidFrom, ExpiresAt: req.ExpiresAt, MaxSessionSeconds: req.MaxSessionSeconds, Revision: 1, Status: "enabled"}
+	grant := model.AccessGrant{ID: uuid.NewString(), TenantID: resource.TenantID, ResourceID: resource.ID, SubjectType: subjectType, SubjectUserID: req.SubjectUserID, Actions: string(actions), ShellProfileID: req.ShellProfileID, ValidFrom: req.ValidFrom, ExpiresAt: req.ExpiresAt, MaxSessionSeconds: req.MaxSessionSeconds, Revision: 1, Status: "enabled"}
+	if subjectType == "group" {
+		grant.SubjectGroupID = req.SubjectGroupID
+	}
 	if err := db.DB.WithContext(ctx).Create(&grant).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("创建访问策略失败"))
 		return
 	}
 	recordAuditLog(ctx, c, "create_access_grant", "resource", resource.ID, resource.DisplayName, grant)
 	c.JSON(http.StatusCreated, NewSuccessResponse(grant))
+}
+
+// RevokeGrant preserves the authorization record for audit while removing it
+// from the next authoritative Agent and Desktop projections.
+func (a *UnifiedResourceAPI) RevokeGrant(c *gin.Context) {
+	ctx := c.Request.Context()
+	var grant model.AccessGrant
+	if err := db.DB.WithContext(ctx).First(&grant, "id = ?", c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("访问策略不存在"))
+		return
+	}
+	var resource model.Resource
+	if err := db.DB.WithContext(ctx).First(&resource, "id = ? AND tenant_id = ?", grant.ResourceID, grant.TenantID).Error; err != nil {
+		c.JSON(http.StatusConflict, NewErrorResponse("访问策略关联资源不存在或客户不一致"))
+		return
+	}
+	if !requireTenantAccess(c, grant.TenantID, true) {
+		return
+	}
+	if grant.Status != "enabled" {
+		c.JSON(http.StatusConflict, NewErrorResponse("访问策略已撤销"))
+		return
+	}
+	result := db.DB.WithContext(ctx).Model(&model.AccessGrant{}).
+		Where("id = ? AND status = ?", grant.ID, "enabled").
+		Updates(map[string]interface{}{"status": "revoked", "revision": gorm.Expr("revision + 1")})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("撤销访问策略失败"))
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusConflict, NewErrorResponse("访问策略已撤销"))
+		return
+	}
+	recordAuditLog(ctx, c, "revoke_access_grant", "resource", resource.ID, resource.DisplayName, map[string]interface{}{"grant_id": grant.ID})
+	if err := db.DB.WithContext(ctx).First(&grant, "id = ?", grant.ID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("读取撤销结果失败"))
+		return
+	}
+	c.JSON(http.StatusOK, NewSuccessResponse(grant))
 }
 
 func pageParams(c *gin.Context) (int, int) {

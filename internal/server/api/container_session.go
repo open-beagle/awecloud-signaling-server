@@ -36,6 +36,13 @@ func (a *ContainerSessionAPI) List(c *gin.Context) {
 	ctx := c.Request.Context()
 	page, size := pageParams(c)
 	query := db.DB.WithContext(ctx).Model(&model.ContainerSession{})
+	tenantIDs, unrestricted, ok := tenantReadScope(c)
+	if !ok {
+		return
+	}
+	if !unrestricted {
+		query = query.Where("tenant_id IN ?", tenantIDs)
+	}
 	if status := strings.TrimSpace(c.Query("status")); status != "" {
 		query = query.Where("status = ?", status)
 	}
@@ -93,6 +100,9 @@ func (a *ContainerSessionAPI) Get(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询 ContainerSSH 会话失败"))
 		return
 	}
+	if !requireTenantAccess(c, session.TenantID, false) {
+		return
+	}
 	detail := containerSessionDetail{Session: session}
 	var resource model.Resource
 	if err := db.DB.WithContext(ctx).First(&resource, "id = ?", session.ResourceID).Error; err == nil {
@@ -124,8 +134,16 @@ func (a *ContainerSessionAPI) close(c *gin.Context, action, defaultReason string
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询 ContainerSSH 会话失败"))
 		return
 	}
+	if !requireTenantAccess(c, session.TenantID, true) {
+		return
+	}
 	if session.Status != model.ContainerSessionActive {
 		c.JSON(http.StatusConflict, NewErrorResponse("会话已结束，不能重复关闭"))
+		return
+	}
+	var agentNode model.Node
+	if session.AgentNodeID == 0 || db.DB.WithContext(ctx).First(&agentNode, session.AgentNodeID).Error != nil || agentNode.ContainerSSHProtocol != "v1" {
+		c.JSON(http.StatusConflict, NewErrorResponse("当前 Agent 不支持 ContainerSSH 远程断开"))
 		return
 	}
 	var body struct {

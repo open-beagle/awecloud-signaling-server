@@ -116,10 +116,28 @@ func (s *ResourceReconciliationService) ExpireCandidates(ctx context.Context, no
 				return err
 			}
 			if wasPublished && resourceID != "" {
-				if err := tx.Model(&model.Resource{}).
-					Where("id = ? AND state IN ?", resourceID, []model.ResourceState{model.ResourceStateAvailable, model.ResourceStateDegraded}).
-					Update("state", model.ResourceStatePending).Error; err != nil {
+				var otherLive int64
+				if err := tx.Model(&model.DiscoveryCandidate{}).
+					Where("resource_id = ? AND id <> ? AND status = ? AND (lease_expires_at IS NULL OR lease_expires_at >= ?)", resourceID, candidate.ID, model.DiscoveryCandidatePublished, now).
+					Count(&otherLive).Error; err != nil {
 					return err
+				}
+				shouldHide := otherLive == 0
+				if !shouldHide {
+					var resource model.Resource
+					if err := tx.First(&resource, "id = ?", resourceID).Error; err != nil {
+						return err
+					}
+					shouldHide = resource.AgentNodeID == candidate.AgentNodeID && resource.ClusterID == candidate.ClusterID &&
+						resource.Namespace == candidate.Namespace && resource.PodName == candidate.PodName &&
+						resource.PodUID == candidate.PodUID && resource.ContainerName == candidate.ContainerName
+				}
+				if shouldHide {
+					if err := tx.Model(&model.Resource{}).
+						Where("id = ? AND state IN ?", resourceID, []model.ResourceState{model.ResourceStateAvailable, model.ResourceStateDegraded}).
+						Update("state", model.ResourceStatePending).Error; err != nil {
+						return err
+					}
 				}
 			}
 			return nil
@@ -276,7 +294,7 @@ func (s *ResourceReconciliationService) ReconcileCandidate(ctx context.Context, 
 		if outcome == ReconcilePublished {
 			updates["target_revision"] = target.Revision
 		}
-		if err := EnsureContainerSSHPort(tx, &resource); err != nil {
+		if err := EnsureContainerSSHPort(tx, &resource, candidate.AgentNodeID); err != nil {
 			return fmt.Errorf("分配 ContainerSSH 端口失败: %w", err)
 		}
 		if err := tx.Model(&resource).Updates(updates).Error; err != nil {

@@ -30,3 +30,23 @@ func TestParsePTYSizeRejectsMalformedOrOversizedRequest(t *testing.T) {
 	_, _, ok = parsePTYSize(payload)
 	require.False(t, ok)
 }
+
+func TestParseWindowSize(t *testing.T) {
+	payload := make([]byte, 8)
+	binary.BigEndian.PutUint32(payload[:4], 160)
+	binary.BigEndian.PutUint32(payload[4:], 50)
+	rows, cols, ok := parseWindowSize(payload)
+	require.True(t, ok)
+	require.Equal(t, uint16(50), rows)
+	require.Equal(t, uint16(160), cols)
+}
+
+func TestParseWindowSizeRejectsMalformedOrOversizedRequest(t *testing.T) {
+	_, _, ok := parseWindowSize([]byte{0, 0, 0, 1})
+	require.False(t, ok)
+	payload := make([]byte, 8)
+	binary.BigEndian.PutUint32(payload[:4], 70000)
+	binary.BigEndian.PutUint32(payload[4:], 24)
+	_, _, ok = parseWindowSize(payload)
+	require.False(t, ok)
+}

@@ -75,17 +75,20 @@ func TestLegacyAgentHeartbeatWithoutContainerCandidatesRemainsCompatible(t *test
 	require.Equal(t, "legacy-host", node.Name)
 	require.Equal(t, "old-agent", node.Version)
 	require.Equal(t, "", node.UpdaterProtocol)
+	require.Equal(t, "", node.ContainerSSHProtocol)
 	var candidates int64
 	require.NoError(t, testDB.Model(&model.DiscoveryCandidate{}).Count(&candidates).Error)
 	require.Zero(t, candidates)
 
 	node.UpdaterProtocol = "v1"
+	node.ContainerSSHProtocol = "v1"
 	require.NoError(t, testDB.Save(&node).Error)
 	server.handleHeartbeat(context.Background(), agent.ID, &pb.AgentHeartbeatRequest{
 		TunnelIp: "100.64.0.20", Hostname: "legacy-host", Version: "old-agent",
 	})
 	require.NoError(t, testDB.First(&node, nodeID).Error)
 	require.Equal(t, "v1", node.UpdaterProtocol)
+	require.Equal(t, "v1", node.ContainerSSHProtocol)
 }
 
 func TestHandleContainerCandidatesAutomaticallyPublishesAndIsIdempotent(t *testing.T) {

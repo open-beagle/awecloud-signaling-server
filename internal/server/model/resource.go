@@ -136,13 +136,13 @@ type Resource struct {
 	ExternalWorkspaceID string        `gorm:"size:200;index" json:"external_workspace_id,omitempty"`
 	OwnerUserID         uint64        `gorm:"index" json:"owner_user_id,omitempty"`
 	OwnerGroupID        *int64        `gorm:"index" json:"owner_group_id,omitempty"`
-	AgentNodeID         uint64        `gorm:"index" json:"agent_node_id,omitempty"`
+	AgentNodeID         uint64        `gorm:"index;uniqueIndex:uk_agent_container_ssh_port,where:container_ssh_port > 0,priority:1" json:"agent_node_id,omitempty"`
 	ClusterID           string        `gorm:"size:200" json:"cluster_id,omitempty"`
 	Namespace           string        `gorm:"size:200" json:"namespace,omitempty"`
 	PodName             string        `gorm:"size:253" json:"pod_name,omitempty"`
 	PodUID              string        `gorm:"size:100;index" json:"pod_uid,omitempty"`
 	ContainerName       string        `gorm:"size:200" json:"container_name,omitempty"`
-	ContainerSSHPort    uint16        `gorm:"index" json:"container_ssh_port,omitempty"`
+	ContainerSSHPort    uint16        `gorm:"index;uniqueIndex:uk_agent_container_ssh_port,where:container_ssh_port > 0,priority:2" json:"container_ssh_port,omitempty"`
 	ShellProfileID      string        `gorm:"size:36" json:"shell_profile_id,omitempty"`
 	TargetRevision      int64         `gorm:"not null;default:0" json:"target_revision"`
 	State               ResourceState `gorm:"size:20;not null;default:'pending';index" json:"state"`

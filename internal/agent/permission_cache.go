@@ -30,6 +30,7 @@ type EndpointSSHUserPermission struct {
 // intentionally keyed by the stable Resource ID so an SSH client can never
 // select a namespace, Pod, container, or command itself.
 type ContainerSSHUserPermission struct {
+	UserID            uint64
 	ResourceID        string
 	Namespace         string
 	PodName           string
@@ -60,6 +61,7 @@ type PermissionCache struct {
 	// This cache is designed for full replacement on every heartbeat, so an
 	// empty snapshot immediately removes access.
 	containerSSHPermissions map[string]map[string]*ContainerSSHUserPermission
+	containerSSHRoutes      map[uint16]string
 	containerSSHMutex       sync.RWMutex
 }
 
@@ -70,6 +72,7 @@ func NewPermissionCache() *PermissionCache {
 		k8sSvcPermissions:       make(map[string]*K8SServiceUserPermission),
 		epSSHPermissions:        make(map[string][]*EndpointSSHUserPermission),
 		containerSSHPermissions: make(map[string]map[string]*ContainerSSHUserPermission),
+		containerSSHRoutes:      make(map[uint16]string),
 	}
 }
 
@@ -81,20 +84,32 @@ func (c *PermissionCache) UpdateContainerSSHPermissions(perms map[string][]*Cont
 	defer c.containerSSHMutex.Unlock()
 
 	next := make(map[string]map[string]*ContainerSSHUserPermission, len(perms))
+	routes := make(map[uint16]string)
+	conflictedPorts := make(map[uint16]bool)
 	for userName, userPerms := range perms {
 		byResource := make(map[string]*ContainerSSHUserPermission, len(userPerms))
 		for _, perm := range userPerms {
-			if perm == nil || perm.ResourceID == "" || perm.Namespace == "" || perm.PodName == "" || perm.PodUID == "" || perm.ContainerName == "" {
+			if perm == nil || perm.ResourceID == "" || perm.Namespace == "" || perm.PodName == "" || perm.PodUID == "" || perm.ContainerName == "" || perm.ListenPort == 0 {
 				continue
 			}
 			copy := *perm
 			byResource[copy.ResourceID] = &copy
+			if existing, ok := routes[copy.ListenPort]; ok && existing != copy.ResourceID {
+				conflictedPorts[copy.ListenPort] = true
+			} else {
+				routes[copy.ListenPort] = copy.ResourceID
+			}
 		}
 		if len(byResource) > 0 {
 			next[userName] = byResource
 		}
 	}
+	for port := range conflictedPorts {
+		delete(routes, port)
+		logger.Warnf("[PermCache] ContainerSSH 端口快照冲突，拒绝路由: port=%d", port)
+	}
 	c.containerSSHPermissions = next
+	c.containerSSHRoutes = routes
 }
 
 // UpdateContainerSSHPermissionsFromProto replaces the complete heartbeat
@@ -106,6 +121,7 @@ func (c *PermissionCache) UpdateContainerSSHPermissionsFromProto(perms []*pb.Con
 			continue
 		}
 		byUser[perm.UserName] = append(byUser[perm.UserName], &ContainerSSHUserPermission{
+			UserID:            perm.UserId,
 			ResourceID:        perm.ResourceId,
 			Namespace:         perm.Namespace,
 			PodName:           perm.PodName,
@@ -131,6 +147,15 @@ func (c *PermissionCache) CheckContainerSSHAccess(userName, resourceID string) (
 	}
 	copy := *perm
 	return &copy, true
+}
+
+// ResolveContainerSSHRoute resolves only trusted Server snapshot metadata.
+// User authorization is checked separately by ContainerExecBroker.
+func (c *PermissionCache) ResolveContainerSSHRoute(listenPort uint16) (string, bool) {
+	c.containerSSHMutex.RLock()
+	defer c.containerSSHMutex.RUnlock()
+	resourceID, ok := c.containerSSHRoutes[listenPort]
+	return resourceID, ok
 }
 
 // UpdateK8SPermissions 从心跳响应更新 K8S API 权限

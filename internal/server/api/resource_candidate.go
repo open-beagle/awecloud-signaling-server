@@ -46,6 +46,9 @@ type resourceCandidateListItem struct {
 // List returns runtime candidates. A Tenant filter is intentionally not
 // accepted because candidates have no trusted tenant assignment yet.
 func (a *ResourceCandidateAPI) List(c *gin.Context) {
+	if !requirePlatformAccess(c, false) {
+		return
+	}
 	ctx := c.Request.Context()
 	page, size := pageParams(c)
 	// Lease expiry is derived from the last Agent observation. Explicit
@@ -90,6 +93,9 @@ func (a *ResourceCandidateAPI) List(c *gin.Context) {
 // Observe upserts one runtime observation. It only changes the candidate and
 // cannot create or mutate a Resource.
 func (a *ResourceCandidateAPI) Observe(c *gin.Context) {
+	if !requirePlatformAccess(c, true) {
+		return
+	}
 	ctx := c.Request.Context()
 	var req resourceCandidateRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.AgentNodeID == 0 || strings.TrimSpace(req.Namespace) == "" || strings.TrimSpace(req.PodUID) == "" || strings.TrimSpace(req.ContainerName) == "" {
@@ -146,6 +152,9 @@ func (a *ResourceCandidateAPI) Observe(c *gin.Context) {
 // Reject marks a candidate as an explicit operator decision. It still does
 // not delete the observation, preserving the audit trail and runtime key.
 func (a *ResourceCandidateAPI) Reject(c *gin.Context) {
+	if !requirePlatformAccess(c, true) {
+		return
+	}
 	ctx := c.Request.Context()
 	var candidate model.DiscoveryCandidate
 	if err := db.DB.WithContext(ctx).First(&candidate, "id = ?", c.Param("id")).Error; err != nil {
@@ -185,6 +194,9 @@ func (a *ResourceCandidateAPI) Reject(c *gin.Context) {
 // Reconcile matches an untrusted runtime observation to a trusted Workspace
 // Binding. Unknown workspaces remain PendingClaim and never create a Resource.
 func (a *ResourceCandidateAPI) Reconcile(c *gin.Context) {
+	if !requirePlatformAccess(c, true) {
+		return
+	}
 	ctx := c.Request.Context()
 	result, err := service.NewResourceReconciliationService(db.DB).ReconcileCandidate(ctx, c.Param("id"))
 	if err != nil {

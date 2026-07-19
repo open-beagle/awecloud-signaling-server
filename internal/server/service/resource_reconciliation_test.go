@@ -60,3 +60,47 @@ func TestExpireCandidatesMarksOnlyLeaseExpiredObservations(t *testing.T) {
 	require.NoError(t, database.First(&resource, "id = ?", resource.ID).Error)
 	require.Equal(t, model.ResourceStatePending, resource.State)
 }
+
+func TestExpireOldPodCandidateDoesNotHideCurrentRecreatedPod(t *testing.T) {
+	database, err := gorm.Open(sqlite.Open("file:resource_reconciliation_recreated_pod_expire_test?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, database.AutoMigrate(&model.DiscoveryCandidate{}, &model.Resource{}))
+
+	now := time.Now().UTC()
+	expired := now.Add(-time.Minute)
+	future := now.Add(time.Minute)
+	resource := model.Resource{
+		ID: uuid.NewString(), TenantID: uuid.NewString(), Type: model.ResourceTypeContainerSSH,
+		DisplayName: "Recreated IDE", State: model.ResourceStateAvailable, TargetRevision: 2,
+		AgentNodeID: 1, ClusterID: "dev", Namespace: "acme", PodName: "ide-new",
+		PodUID: "pod-new", ContainerName: "workspace",
+	}
+	require.NoError(t, database.Create(&resource).Error)
+	oldCandidate := model.DiscoveryCandidate{
+		ID: uuid.NewString(), AgentNodeID: 1, ClusterID: "dev", Namespace: "acme", PodName: "ide-old",
+		PodUID: "pod-old", ContainerName: "workspace", Status: model.DiscoveryCandidatePublished,
+		LeaseExpiresAt: &expired, ResourceID: resource.ID,
+	}
+	currentCandidate := model.DiscoveryCandidate{
+		ID: uuid.NewString(), AgentNodeID: 1, ClusterID: "dev", Namespace: "acme", PodName: "ide-new",
+		PodUID: "pod-new", ContainerName: "workspace", Status: model.DiscoveryCandidatePublished,
+		LeaseExpiresAt: &future, ResourceID: resource.ID,
+	}
+	require.NoError(t, database.Create(&oldCandidate).Error)
+	require.NoError(t, database.Create(&currentCandidate).Error)
+
+	service := NewResourceReconciliationService(database)
+	count, err := service.ExpireCandidates(context.Background(), now)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count)
+	require.NoError(t, database.First(&resource, "id = ?", resource.ID).Error)
+	require.Equal(t, model.ResourceStateAvailable, resource.State)
+
+	currentCandidate.LeaseExpiresAt = &expired
+	require.NoError(t, database.Model(&currentCandidate).Update("lease_expires_at", expired).Error)
+	count, err = service.ExpireCandidates(context.Background(), now)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count)
+	require.NoError(t, database.First(&resource, "id = ?", resource.ID).Error)
+	require.Equal(t, model.ResourceStatePending, resource.State)
+}

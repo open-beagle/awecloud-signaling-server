@@ -8,7 +8,7 @@
       </div>
       <div class="header-actions">
         <el-button :icon="Refresh" :loading="loading" @click="fetchResources">刷新</el-button>
-        <el-button type="primary" :icon="Plus" :disabled="!tenantStore.tenantId" @click="showCreate = true">登记资源</el-button>
+        <el-button type="primary" :icon="Plus" :disabled="!tenantStore.tenantId || !authStore.canWrite" @click="showCreate = true">登记资源</el-button>
       </div>
     </div>
 
@@ -86,9 +86,11 @@ import { ElMessage } from 'element-plus'
 import { Coin, Connection, Monitor, MoreFilled, Plus, Refresh, Search, Ship, TakeawayBox } from '@element-plus/icons-vue'
 import { createManagedResource, getManagedResources, type Resource, type ResourceType } from '@/api/resource'
 import { useTenantStore } from '@/stores/tenant'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const tenantStore = useTenantStore()
+const authStore = useAuthStore()
 const loading = ref(false)
 const creating = ref(false)
 const showCreate = ref(false)

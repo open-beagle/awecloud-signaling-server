@@ -146,6 +146,8 @@ message AgentHeartbeatRequest {
   string updater_protocol = 16; // 支持的 updater 协议版本
   repeated UpdateStatus update_statuses = 17; // Agent 自身更新状态
   repeated ContainerDiscoveryCandidate container_candidates = 18; // ContainerSSH 运行时候选（仅运行态证据）
+  string container_ssh_protocol = 19; // 支持的 ContainerSSH 协议版本；空表示不支持
+  repeated ContainerSSHSessionEvent container_ssh_session_events = 20; // 幂等会话生命周期事件
 }
 
 // ConnectedEndpoint Agent 上报的已连接 Endpoint 信息
@@ -223,6 +225,9 @@ message AgentHeartbeatResponse {
   repeated UpdateDirective update_directives = 13; // Agent 自身更新任务
   repeated UpdateDirective endpoint_update_directives = 14; // 由 Agent 转发给 Endpoint 的更新任务
   repeated ContainerSSHPermission container_ssh_permissions = 15; // ContainerSSH 已解析授权快照
+  string container_ssh_protocol = 16; // Server 确认的 ContainerSSH 协议版本；空表示不得启用入口
+  repeated string container_ssh_disconnect_session_ids = 17; // 待强制断开的活动 Session ID
+  repeated string container_ssh_session_ack_event_ids = 18; // Server 已持久化的 Session Event ID
 }
 
 // EndpointCapabilityConfig Server 下发给 Agent 的 Endpoint 能力开关配置
@@ -334,6 +339,23 @@ message ContainerSSHPermission {
   int64 grant_revision = 9;
   int32 max_session_seconds = 10;
   uint32 listen_port = 11;
+}
+
+message ContainerSSHSessionEvent {
+  string event_id = 1;
+  string session_id = 2;
+  string phase = 3; // started / ended
+  uint64 user_id = 4;
+  string user_name = 5;
+  uint64 device_node_id = 6; // WhoIs 返回的 Headscale Node ID
+  string resource_id = 7;
+  int64 target_revision = 8;
+  int64 grant_revision = 9;
+  string pod_uid = 10;
+  string container_name = 11;
+  int64 occurred_at = 12;
+  string result = 13;
+  string close_reason = 14;
 }
 
 // OperationAuditRecord 操作审计记录（Agent 心跳上报）

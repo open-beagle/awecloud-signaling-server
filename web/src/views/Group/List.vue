@@ -11,7 +11,7 @@
           <el-button @click="handleReset">{{ $t('common.reset') }}</el-button>
         </el-form-item>
         <el-form-item style="float: right">
-          <el-button type="primary" @click="showCreateDialog = true">
+          <el-button type="primary" :disabled="!canCreate" @click="showCreateDialog = true">
             <el-icon><Plus /></el-icon>
             {{ $t('group.create') }}
           </el-button>
@@ -29,6 +29,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="description" :label="$t('group.description')" min-width="200" />
+        <el-table-column label="客户范围" min-width="150"><template #default="{ row }"><span>{{ tenantName(row.tenant_id) }}</span></template></el-table-column>
         <el-table-column prop="member_count" :label="$t('group.memberCount')" width="100" align="center">
           <template #default="{ row }">
             <el-tag type="primary" size="small">{{ row.member_count || 0 }}</el-tag>
@@ -42,8 +43,8 @@
         <el-table-column :label="$t('common.actions')" width="200" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="handleViewMembers(row)">{{ $t('group.members') }}</el-button>
-            <el-button type="primary" link size="small" @click="handleEdit(row)">{{ $t('common.edit') }}</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">{{ $t('common.delete') }}</el-button>
+            <el-button type="primary" link size="small" :disabled="!canManage(row)" @click="handleEdit(row)">{{ $t('common.edit') }}</el-button>
+            <el-button type="danger" link size="small" :disabled="!canManage(row)" @click="handleDelete(row)">{{ $t('common.delete') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -81,7 +82,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
@@ -89,9 +90,16 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { getGroups, createGroup, updateGroup, deleteGroup, type Group } from '@/api/group'
 import { formatTime } from '@/utils/time'
+import { useAuthStore } from '@/stores/auth'
+import { useTenantStore } from '@/stores/tenant'
+import { getTenants, type Tenant } from '@/api/resource'
 
 const { t } = useI18n()
 const router = useRouter()
+const authStore = useAuthStore()
+const tenantStore = useTenantStore()
+const tenants = ref<Tenant[]>([])
+const canCreate = computed(() => authStore.canWrite && (authStore.isPlatformAdmin || !!tenantStore.tenantId))
 
 const loading = ref(false)
 const groups = ref<Group[]>([])
@@ -124,6 +132,7 @@ const fetchGroups = async () => {
   loading.value = true
   try {
     const res = await getGroups({
+      tenant_id: tenantStore.tenantId || undefined,
       search: searchForm.search || undefined,
       page: pagination.page,
       size: pagination.size
@@ -200,7 +209,7 @@ const handleSubmit = async () => {
       if (editingGroup.value) {
         res = await updateGroup(editingGroup.value.id, form)
       } else {
-        res = await createGroup(form)
+        res = await createGroup({ ...form, tenant_id: tenantStore.tenantId || undefined })
       }
       
       if (res.success) {
@@ -218,6 +227,9 @@ const handleSubmit = async () => {
   })
 }
 
+const canManage = (group: Group) => authStore.canWrite && (group.tenant_id ? tenantStore.tenantId === group.tenant_id : authStore.isPlatformAdmin)
+const tenantName = (tenantId?: string) => tenantId ? (tenants.value.find(tenant => tenant.id === tenantId)?.name || tenantId) : '平台全局（旧版）'
+
 // 关闭弹窗
 const handleCloseDialog = () => {
   showCreateDialog.value = false
@@ -229,7 +241,9 @@ const handleCloseDialog = () => {
 
 onMounted(() => {
   fetchGroups()
+  getTenants({ page: 1, size: 100 }).then(res => { if (res.success && res.data) tenants.value = res.data })
 })
+watch(() => tenantStore.tenantId, () => { pagination.page = 1; fetchGroups() })
 </script>
 
 <style scoped>

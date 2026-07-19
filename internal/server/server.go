@@ -293,7 +293,7 @@ func (s *Server) setupRouter() *gin.Engine {
 	router.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, X-Tenant-ID, Authorization, accept, origin, Cache-Control, X-Requested-With")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
 
 		if c.Request.Method == "OPTIONS" {
@@ -414,6 +414,7 @@ func (s *Server) setupRouter() *gin.Engine {
 
 				adminAuthGroup := adminGroup.Group("")
 				adminAuthGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret))
+				adminAuthGroup.Use(api.ManagementAuthorizationMiddleware())
 				{
 					adminAuthGroup.GET("/auth/me", adminAPI.GetMe)
 					adminAuthGroup.PUT("/auth/password", adminAPI.ChangePassword)
@@ -565,6 +566,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					candidateAPI := api.NewResourceCandidateAPI()
 					adminAuthGroup.GET("/tenants", unifiedResourceAPI.ListTenants)
 					adminAuthGroup.POST("/tenants", unifiedResourceAPI.CreateTenant)
+					adminAuthGroup.GET("/tenants/:id/members", unifiedResourceAPI.ListTenantMembers)
 					adminAuthGroup.POST("/tenants/:id/members", unifiedResourceAPI.AddTenantMember)
 					adminAuthGroup.GET("/resources", unifiedResourceAPI.List)
 					adminAuthGroup.POST("/resources", unifiedResourceAPI.Create)
@@ -583,6 +585,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.GET("/resources/:id", unifiedResourceAPI.Get)
 					adminAuthGroup.GET("/resources/:id/grants", unifiedResourceAPI.ListGrants)
 					adminAuthGroup.POST("/resources/:id/grants", unifiedResourceAPI.CreateGrant)
+					adminAuthGroup.POST("/grants/:id/revoke", unifiedResourceAPI.RevokeGrant)
 					sessionAPI := api.NewContainerSessionAPI()
 					adminAuthGroup.GET("/sessions", sessionAPI.List)
 					adminAuthGroup.GET("/sessions/:id", sessionAPI.Get)

@@ -35,6 +35,7 @@
         <span class="user-info">
           <el-icon><User /></el-icon>
           {{ authStore.username }}
+          <el-tag v-if="authStore.role" size="small" effect="plain">{{ roleLabel }}</el-tag>
         </span>
         <template #dropdown>
           <el-dropdown-menu>
@@ -70,6 +71,7 @@ const tenants = ref<Tenant[]>([])
 const currentLanguage = computed(() => {
   return locale.value === 'zh-CN' ? '中文' : 'English'
 })
+const roleLabel = computed(() => ({ admin: 'Platform Admin', tenant_admin: 'Tenant Admin', viewer: 'Viewer' }[authStore.role] || authStore.role))
 
 const toggleSidebar = () => {
   appStore.toggleSidebar()
@@ -98,8 +100,14 @@ const handleTenantChange = () => {
 
 onMounted(async () => {
   try {
+    if (!authStore.role) await authStore.loadProfile()
     const res = await getTenants({ page: 1, size: 100, status: 'active' })
-    if (res.success && res.data) tenants.value = res.data
+    if (res.success && res.data) {
+      tenants.value = res.data
+      if (tenantStore.tenantId && !tenants.value.some(tenant => tenant.id === tenantStore.tenantId)) {
+        tenantStore.setTenant('')
+      }
+    }
   } catch (error) {
     console.error('获取客户上下文失败:', error)
   }

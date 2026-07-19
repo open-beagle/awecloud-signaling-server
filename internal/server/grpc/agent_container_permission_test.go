@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
 func TestContainerSSHPermissionsAreAgentScopedAndRequireLiveShellGrant(t *testing.T) {
@@ -20,7 +21,7 @@ func TestContainerSSHPermissionsAreAgentScopedAndRequireLiveShellGrant(t *testin
 	testDB, err := gorm.Open(sqlite.Open("file:agent_container_permissions_test?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	db.DB = testDB
-	require.NoError(t, testDB.AutoMigrate(&model.User{}, &model.Tenant{}, &model.TenantMembership{}, &model.Resource{}, &model.ResourceTarget{}, &model.AccessGrant{}))
+	require.NoError(t, testDB.AutoMigrate(&model.User{}, &model.Tenant{}, &model.TenantMembership{}, &model.Group{}, &model.GroupMember{}, &model.Resource{}, &model.ResourceTarget{}, &model.AccessGrant{}))
 
 	now := time.Now()
 	user := model.User{Name: "desktop-user", Role: model.UserRoleClient, SecretHash: "test", Enabled: true}
@@ -28,6 +29,13 @@ func TestContainerSSHPermissionsAreAgentScopedAndRequireLiveShellGrant(t *testin
 	tenant := model.Tenant{ID: uuid.NewString(), Key: "acme", Name: "Acme", Status: model.TenantStatusActive}
 	require.NoError(t, testDB.Create(&tenant).Error)
 	require.NoError(t, testDB.Create(&model.TenantMembership{TenantID: tenant.ID, UserID: user.ID, Enabled: true}).Error)
+	groupUser := model.User{Name: "group-user", Role: model.UserRoleClient, SecretHash: "test", Enabled: true}
+	require.NoError(t, testDB.Create(&groupUser).Error)
+	require.NoError(t, testDB.Create(&model.TenantMembership{TenantID: tenant.ID, UserID: groupUser.ID, Enabled: true}).Error)
+	group := model.Group{TenantID: tenant.ID, Name: "developers"}
+	require.NoError(t, testDB.Create(&group).Error)
+	groupMember := model.GroupMember{GroupID: group.ID, UserID: groupUser.ID}
+	require.NoError(t, testDB.Create(&groupMember).Error)
 
 	allowed := newContainerPermissionResource(11, "pod-a", true)
 	otherAgent := newContainerPermissionResource(12, "pod-b", true)
@@ -44,16 +52,41 @@ func TestContainerSSHPermissionsAreAgentScopedAndRequireLiveShellGrant(t *testin
 		grant := model.AccessGrant{ID: uuid.NewString(), TenantID: tenant.ID, ResourceID: resource.ID, SubjectType: "user", SubjectUserID: user.ID, Actions: `["shell"]`, ValidFrom: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour), MaxSessionSeconds: 600, Revision: 7, Status: "enabled"}
 		require.NoError(t, testDB.Create(&grant).Error)
 	}
+	require.NoError(t, testDB.Create(&model.AccessGrant{ID: uuid.NewString(), TenantID: tenant.ID, ResourceID: allowed.ID, SubjectType: "group", SubjectGroupID: &group.ID, Actions: `["shell"]`, ValidFrom: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour), MaxSessionSeconds: 300, Revision: 8, Status: "enabled"}).Error)
 	var readyTargets int64
 	require.NoError(t, testDB.Model(&model.ResourceTarget{}).Where("resource_id = ? AND revision = ? AND agent_node_id = ? AND ready = ?", allowed.ID, allowed.TargetRevision, allowed.AgentNodeID, true).Count(&readyTargets).Error)
 	require.Equal(t, int64(1), readyTargets)
 
 	result := (&AgentServiceServer{}).queryContainerSSHPermissions(context.Background(), 11)
+	require.Len(t, result, 2)
+	byUser := make(map[string]*pb.ContainerSSHPermission, len(result))
+	for _, permission := range result {
+		byUser[permission.UserName] = permission
+	}
+	require.Equal(t, allowed.ID, byUser["desktop-user"].ResourceId)
+	require.Equal(t, int64(7), byUser["desktop-user"].GrantRevision)
+	require.Equal(t, int32(600), byUser["desktop-user"].MaxSessionSeconds)
+	require.Equal(t, int64(8), byUser["group-user"].GrantRevision)
+
+	require.NoError(t, testDB.Delete(&groupMember).Error)
+	result = (&AgentServiceServer{}).queryContainerSSHPermissions(context.Background(), 11)
 	require.Len(t, result, 1)
-	require.Equal(t, allowed.ID, result[0].ResourceId)
 	require.Equal(t, "desktop-user", result[0].UserName)
-	require.Equal(t, int64(7), result[0].GrantRevision)
-	require.Equal(t, int32(600), result[0].MaxSessionSeconds)
+
+	newTarget := model.ResourceTarget{ResourceID: allowed.ID, Revision: 3, AgentNodeID: allowed.AgentNodeID, Namespace: "dev", PodName: "pod-a-recreated", PodUID: "pod-a-recreated-uid", ContainerName: allowed.ContainerName, Ready: true, ObservedAt: now.Add(time.Minute)}
+	require.NoError(t, testDB.Create(&newTarget).Error)
+	require.NoError(t, testDB.Model(&model.Resource{}).Where("id = ?", allowed.ID).Updates(map[string]interface{}{
+		"target_revision": int64(3), "pod_name": newTarget.PodName, "pod_uid": newTarget.PodUID,
+	}).Error)
+	result = (&AgentServiceServer{}).queryContainerSSHPermissions(context.Background(), 11)
+	require.Len(t, result, 1)
+	require.Equal(t, int64(3), result[0].TargetRevision)
+	require.Equal(t, "pod-a-recreated", result[0].PodName)
+	require.Equal(t, "pod-a-recreated-uid", result[0].PodUid)
+
+	require.NoError(t, testDB.Model(&model.AccessGrant{}).Where("resource_id = ? AND subject_type = ?", allowed.ID, "user").Update("status", "revoked").Error)
+	result = (&AgentServiceServer{}).queryContainerSSHPermissions(context.Background(), 11)
+	require.Empty(t, result)
 }
 
 func newContainerPermissionResource(agentNodeID uint64, suffix string, ready bool) model.Resource {

@@ -46,7 +46,7 @@ func (e *KubernetesContainerExecutor) Execute(ctx context.Context, target *Conta
 		Stdout:            stream.Stdout,
 		Stderr:            stream.Stderr,
 		Tty:               true,
-		TerminalSizeQueue: singleTerminalSize(stream.Rows, stream.Cols),
+		TerminalSizeQueue: newTerminalSizeQueue(stream.Rows, stream.Cols, stream.Resize),
 	})
 }
 
@@ -68,26 +68,34 @@ func (e *KubernetesContainerExecutor) execURL(target *ContainerSSHUserPermission
 }
 
 type terminalSizeQueue struct {
-	size *remotecommand.TerminalSize
+	initial *remotecommand.TerminalSize
+	resize  <-chan ContainerTerminalSize
 }
 
-func singleTerminalSize(rows, cols uint16) remotecommand.TerminalSizeQueue {
+func newTerminalSizeQueue(rows, cols uint16, resize <-chan ContainerTerminalSize) remotecommand.TerminalSizeQueue {
 	if rows == 0 {
 		rows = 24
 	}
 	if cols == 0 {
 		cols = 80
 	}
-	return &terminalSizeQueue{size: &remotecommand.TerminalSize{Width: cols, Height: rows}}
+	return &terminalSizeQueue{initial: &remotecommand.TerminalSize{Width: cols, Height: rows}, resize: resize}
 }
 
 func (q *terminalSizeQueue) Next() *remotecommand.TerminalSize {
-	if q.size == nil {
+	if q.initial != nil {
+		size := q.initial
+		q.initial = nil
+		return size
+	}
+	if q.resize == nil {
 		return nil
 	}
-	size := q.size
-	q.size = nil
-	return size
+	size, ok := <-q.resize
+	if !ok {
+		return nil
+	}
+	return &remotecommand.TerminalSize{Width: size.Cols, Height: size.Rows}
 }
 
 var _ ContainerExecutor = (*KubernetesContainerExecutor)(nil)
