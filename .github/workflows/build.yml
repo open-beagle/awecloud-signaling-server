@@ -145,21 +145,21 @@ jobs:
         run: |
           mc alias set aliyun --api=S3v4 ${{ secrets.S3_ENDPOINT_ALIYUN }} \
             ${{ secrets.S3_ACCESS_KEY_ALIYUN }} ${{ secrets.S3_SECRET_KEY_ALIYUN }}
-          
+
           VERSION="${{ steps.version.outputs.BUILD_VERSION }}"
           S3_BUCKET="aliyun/vscode/awecloud-signaling"
-          
+
           # 上传 Agent 安装脚本
           echo "Uploading install_agent.sh..."
           mc cp scripts/install_agent.sh "${S3_BUCKET}/install_agent.sh"
-          
+
           # 上传 Agent 二进制
           echo "Uploading signal_agent-${VERSION}-linux-amd64..."
           mc cp bin/signal_agent-linux-amd64 "${S3_BUCKET}/signal_agent-${VERSION}-linux-amd64"
-          
+
           echo "Uploading signal_agent-${VERSION}-linux-arm64..."
           mc cp bin/signal_agent-linux-arm64 "${S3_BUCKET}/signal_agent-${VERSION}-linux-arm64"
-          
+
           # 创建 Agent 版本信息文件
           cat > signal_agent-version.json << EOF
           {
@@ -182,18 +182,18 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.BUILD_VERSION }}"
           S3_BUCKET="aliyun/vscode/awecloud-signaling"
-          
+
           # 上传 Endpoint 安装脚本
           echo "Uploading install_endpoint.sh..."
           mc cp scripts/install_endpoint.sh "${S3_BUCKET}/install_endpoint.sh"
-          
+
           # 上传 Endpoint 二进制
           echo "Uploading signal_endpoint-${VERSION}-linux-amd64..."
           mc cp bin/signal_endpoint-linux-amd64 "${S3_BUCKET}/signal_endpoint-${VERSION}-linux-amd64"
-          
+
           echo "Uploading signal_endpoint-${VERSION}-linux-arm64..."
           mc cp bin/signal_endpoint-linux-arm64 "${S3_BUCKET}/signal_endpoint-${VERSION}-linux-arm64"
-          
+
           # 创建 Endpoint 版本信息文件
           cat > signal_endpoint-version.json << EOF
           {
@@ -206,7 +206,7 @@ jobs:
           }
           EOF
           mc cp signal_endpoint-version.json "${S3_BUCKET}/signal_endpoint-version.json"
-          
+
           echo "Endpoint ${VERSION} uploaded successfully!"
         env:
           S3_ACCESS_KEY_ALIYUN: ${{ secrets.S3_ACCESS_KEY_ALIYUN }}
