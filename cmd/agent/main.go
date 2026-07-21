@@ -147,15 +147,7 @@ func main() {
 			// 合并环境变量中的其他配置（SSH、SOCKS 等）
 			envCfg, _ := config.LoadAgentConfig(*configPath)
 			if envCfg != nil {
-				cfg.Tunnel.EnableSSH = envCfg.Tunnel.EnableSSH
-				cfg.Tunnel.StateDir = envCfg.Tunnel.StateDir
-				cfg.Tunnel.StateSyncInterval = envCfg.Tunnel.StateSyncInterval
-				cfg.CloudIDE = envCfg.CloudIDE
-				cfg.Health = envCfg.Health
-				cfg.Log = envCfg.Log
-				cfg.Telemetry = envCfg.Telemetry
-				cfg.K8S = envCfg.K8S
-				cfg.SVC = envCfg.SVC
+				mergeLocalAgentConfig(cfg, envCfg)
 			}
 		}
 	}
@@ -232,6 +224,19 @@ func main() {
 			logger.Fatalf("Agent运行失败: %v", err)
 		}
 	}
+}
+
+func mergeLocalAgentConfig(cfg, local *config.AgentConfig) {
+	cfg.Tunnel.EnableSSH = local.Tunnel.EnableSSH
+	cfg.Tunnel.StateDir = local.Tunnel.StateDir
+	cfg.Tunnel.StateSyncInterval = local.Tunnel.StateSyncInterval
+	cfg.CloudIDE = local.CloudIDE
+	cfg.Health = local.Health
+	cfg.Log = local.Log
+	cfg.Telemetry = local.Telemetry
+	cfg.K8S = local.K8S
+	cfg.SVC = local.SVC
+	cfg.Container = local.Container
 }
 
 // runSSHChild 处理 be-child ssh 子命令
