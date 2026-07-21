@@ -31,7 +31,7 @@ func currentAdmin(c *gin.Context) (*model.Admin, bool, bool) {
 		return &model.Admin{Role: "admin"}, true, true
 	}
 	var admin model.Admin
-	if err := db.DB.WithContext(c.Request.Context()).First(&admin, adminID).Error; err != nil {
+	if err := db.DB.WithContext(c.Request.Context()).Where("id = ? AND enabled = ?", adminID, true).First(&admin).Error; err != nil {
 		c.JSON(http.StatusUnauthorized, NewErrorResponse("管理员身份无效"))
 		return nil, false, false
 	}
@@ -44,6 +44,22 @@ func requirePlatformAccess(c *gin.Context, write bool) bool {
 		return false
 	}
 	if debug || admin.Role == "admin" || (!write && admin.Role == "viewer") {
+		return true
+	}
+	c.JSON(http.StatusForbidden, NewErrorResponse("需要 Platform Admin 权限"))
+	return false
+}
+
+func requirePlatformAdmin(c *gin.Context) bool {
+	admin, debug, ok := currentAdmin(c)
+	if !ok {
+		return false
+	}
+	if debug {
+		c.JSON(http.StatusUnauthorized, NewErrorResponse("管理账号操作必须使用 Platform Admin 身份认证"))
+		return false
+	}
+	if admin.Role == "admin" {
 		return true
 	}
 	c.JSON(http.StatusForbidden, NewErrorResponse("需要 Platform Admin 权限"))

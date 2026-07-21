@@ -202,6 +202,7 @@ func CreateDefaultAdmin(username, password string) error {
 	admin := &model.Admin{
 		Username:     username,
 		PasswordHash: string(hash),
+		Enabled:      true,
 	}
 
 	if err := DB.WithContext(ctx).Create(admin).Error; err != nil {

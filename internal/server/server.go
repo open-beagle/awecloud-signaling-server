@@ -419,6 +419,17 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.GET("/auth/me", adminAPI.GetMe)
 					adminAuthGroup.PUT("/auth/password", adminAPI.ChangePassword)
 
+					// 管理账号与 Tenant 管理范围（Platform Admin 专属）
+					managementAccountAPI := api.NewManagementAccountAPI()
+					adminAuthGroup.GET("/management-accounts", managementAccountAPI.List)
+					adminAuthGroup.POST("/management-accounts", managementAccountAPI.Create)
+					adminAuthGroup.POST("/management-accounts/:id/password", managementAccountAPI.ResetPassword)
+					adminAuthGroup.POST("/management-accounts/:id/enable", managementAccountAPI.Enable)
+					adminAuthGroup.POST("/management-accounts/:id/disable", managementAccountAPI.Disable)
+					adminAuthGroup.GET("/management-accounts/:id/tenant-memberships", managementAccountAPI.ListTenantMemberships)
+					adminAuthGroup.POST("/management-accounts/:id/tenant-memberships", managementAccountAPI.BindTenant)
+					adminAuthGroup.POST("/management-accounts/:id/tenant-memberships/:tenant_id/disable", managementAccountAPI.DisableTenantMembership)
+
 					// 用户管理
 					userAPI := api.NewUserAPI(s.config)
 					userAPI.SetAgentService(s.agentService)

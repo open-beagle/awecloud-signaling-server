@@ -100,7 +100,7 @@ func ManagementAuthorizationMiddleware() gin.HandlerFunc {
 			return
 		}
 		var admin model.Admin
-		if err := db.DB.WithContext(c.Request.Context()).First(&admin, adminID).Error; err != nil {
+		if err := db.DB.WithContext(c.Request.Context()).Where("id = ? AND enabled = ?", adminID, true).First(&admin).Error; err != nil {
 			c.JSON(http.StatusUnauthorized, NewErrorResponse("管理员身份无效"))
 			c.Abort()
 			return
@@ -110,8 +110,9 @@ func ManagementAuthorizationMiddleware() gin.HandlerFunc {
 		case "admin":
 			allowed = true
 		case "viewer":
-			allowed = c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead || c.Request.Method == http.MethodOptions ||
-				(c.Request.Method == http.MethodPut && c.Request.URL.Path == "/api/v1/admin/auth/password")
+			isManagementAccountRoute := strings.HasPrefix(c.Request.URL.Path, "/api/v1/admin/management-accounts")
+			allowed = !isManagementAccountRoute && (c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead || c.Request.Method == http.MethodOptions ||
+				(c.Request.Method == http.MethodPut && c.Request.URL.Path == "/api/v1/admin/auth/password"))
 		case "tenant_admin":
 			allowed = tenantAdminRouteAllowed(c.Request.Method, c.Request.URL.Path)
 		}
