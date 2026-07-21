@@ -8,6 +8,7 @@ type Admin struct {
 	Username     string    `gorm:"uniqueIndex;size:50;not null" json:"username"` // 用户名，唯一索引
 	PasswordHash string    `gorm:"size:255;not null" json:"-"`                   // 密码（加密存储）
 	Role         string    `gorm:"size:20;not null;default:'admin'" json:"role"` // admin / viewer / tenant_admin
+	Enabled      bool      `gorm:"not null;default:true;index" json:"enabled"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

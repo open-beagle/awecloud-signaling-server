@@ -52,6 +52,7 @@ func TestManagementAuthorizationRoleMatrix(t *testing.T) {
 	}{
 		{name: "platform legacy write", admin: admins["platform"].ID, method: http.MethodPost, path: "/api/v1/admin/users", want: http.StatusNoContent},
 		{name: "viewer legacy read", admin: admins["viewer"].ID, method: http.MethodGet, path: "/api/v1/admin/nodes", want: http.StatusNoContent},
+		{name: "viewer management accounts denied", admin: admins["viewer"].ID, method: http.MethodGet, path: "/api/v1/admin/management-accounts", want: http.StatusForbidden},
 		{name: "viewer legacy write denied", admin: admins["viewer"].ID, method: http.MethodDelete, path: "/api/v1/admin/nodes/1", want: http.StatusForbidden},
 		{name: "viewer own password", admin: admins["viewer"].ID, method: http.MethodPut, path: "/api/v1/admin/auth/password", want: http.StatusNoContent},
 		{name: "tenant resource grant", admin: admins["tenant"].ID, method: http.MethodPost, path: "/api/v1/admin/resources/resource-a/grants", want: http.StatusNoContent},

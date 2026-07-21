@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/BurntSushi/toml"
@@ -159,6 +160,18 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 	if token := os.Getenv("TOKEN"); token != "" {
 		cfg.Server.Token = token
+	}
+	if username := os.Getenv("ADMIN_USERNAME"); username != "" {
+		cfg.Web.DefaultAdminUsername = username
+	}
+	if password := os.Getenv("ADMIN_PASSWORD"); password != "" {
+		cfg.Web.DefaultAdminPassword = password
+	}
+	if cfg.Web.DefaultAdminUsername == "" {
+		return nil, fmt.Errorf("ADMIN_USERNAME is required when web.default_admin_username is not configured")
+	}
+	if cfg.Web.DefaultAdminPassword == "" {
+		return nil, fmt.Errorf("ADMIN_PASSWORD is required when web.default_admin_password is not configured")
 	}
 
 	// Tailscale 配置默认值
