@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	v1 "github.com/juanfont/headscale/gen/go/headscale/v1"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -345,31 +346,32 @@ func (s *DesktopServiceServer) handleDesktopHeartbeat(ctx context.Context, nodeI
 		"ip":             req.TunnelIp,
 	}
 
-	// 如果 Headscale 客户端可用，查询并更新 HeadscaleNodeID
+	// Resolve the current Headscale node by the reported tunnel IP on every
+	// connected heartbeat. A Desktop can be reinstalled or moved between
+	// Headscale nodes while keeping the same database Node record.
 	if s.headscaleClient != nil {
-		// 只有当 HeadscaleNodeID 为 0 时才查询 Headscale
-		if node.HeadscaleNodeID == 0 {
-			// 查询 User 获取名称
-			var user model.User
-			if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err == nil {
-				// Headscale User 命名规则: client-{name}
-				hsUserName := fmt.Sprintf("client-%s", user.Name)
-				// 按用户名 + 节点名精确匹配（一个 Headscale 用户下可能有多个节点）
+		var user model.User
+		if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err == nil {
+			hsUserName := fmt.Sprintf("client-%s", user.Name)
+			tunnelIP := strings.TrimSpace(req.TunnelIp)
+			if req.TunnelConnected && tunnelIP != "" {
+				hsNode, err := s.headscaleClient.GetNodeByIP(ctx, tunnelIP)
+				if err != nil {
+					logger.Warnf("通过隧道 IP 查询 Desktop Headscale 节点失败: ip=%s err=%v", tunnelIP, err)
+				} else if validDesktopHeadscaleNode(hsNode, hsUserName, tunnelIP) {
+					updates["headscale_node_id"] = hsNode.Id
+					if node.HeadscaleNodeID != hsNode.Id {
+						logger.Infof("Desktop %d 更新 Headscale 节点: %d -> %d, ip=%s, user=%s", nodeID, node.HeadscaleNodeID, hsNode.Id, tunnelIP, hsUserName)
+					}
+				} else if hsNode != nil {
+					logger.Warnf("拒绝绑定不匹配的 Desktop Headscale 节点: desktop=%d headscale_node=%d ip=%s expected_user=%s", nodeID, hsNode.Id, tunnelIP, hsUserName)
+				}
+			} else if node.HeadscaleNodeID == 0 {
 				hsNode, err := s.headscaleClient.GetNodeByUserAndName(ctx, hsUserName, node.Name)
 				if err != nil {
 					logger.Warnf("通过 User+Name 查询 Headscale 节点失败: %v", err)
-				} else if hsNode != nil {
+				} else if hsNode != nil && hsNode.User != nil && hsNode.User.Name == hsUserName {
 					updates["headscale_node_id"] = hsNode.Id
-					logger.Infof("Desktop %d 关联 Headscale 节点: id=%d, name=%s, ip=%v, user=%s", nodeID, hsNode.Id, hsNode.GivenName, hsNode.IpAddresses, hsUserName)
-				} else {
-					// 精确匹配失败，回退到第一个节点（兼容单节点场景）
-					hsNodeFallback, err := s.headscaleClient.GetNodeByUser(ctx, hsUserName)
-					if err != nil {
-						logger.Warnf("通过 User 查询 Headscale 节点失败: %v", err)
-					} else if hsNodeFallback != nil {
-						updates["headscale_node_id"] = hsNodeFallback.Id
-						logger.Infof("Desktop %d 关联 Headscale 节点(回退): id=%d, name=%s, ip=%v, user=%s", nodeID, hsNodeFallback.Id, hsNodeFallback.GivenName, hsNodeFallback.IpAddresses, hsUserName)
-					}
 				}
 			}
 		}
@@ -382,6 +384,18 @@ func (s *DesktopServiceServer) handleDesktopHeartbeat(ctx context.Context, nodeI
 	if result.Error != nil {
 		logger.Errorf("Desktop 心跳更新失败: %v", result.Error)
 	}
+}
+
+func validDesktopHeadscaleNode(node *v1.Node, expectedUser, tunnelIP string) bool {
+	if node == nil || node.Id == 0 || node.User == nil || node.User.Name != expectedUser {
+		return false
+	}
+	for _, nodeIP := range node.IpAddresses {
+		if nodeIP == tunnelIP {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *DesktopServiceServer) sendDesktopHeartbeatResponse(ctx context.Context, stream pb.DesktopService_HeartbeatServer, userID uint64) error {
