@@ -228,10 +228,10 @@ onMounted(() => { fetchResources(); fetchLegacyInventory() })
 .legacy-metrics strong { color: var(--text-primary); font-size: 18px; }
 .legacy-metrics span { margin-top: 1px; color: var(--text-secondary); font-size: 11px; }
 .resource-surface { border-radius: 6px; }
-.resource-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--border-light); }
+.resource-tabs { display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden; border-bottom: 1px solid var(--border-light); }
 .resource-tab { position: relative; height: 44px; padding: 0 12px; color: var(--text-regular); background: transparent; border: 0; cursor: pointer; white-space: nowrap; }
 .resource-tab.active { color: var(--primary-color); font-weight: 600; }
-.resource-tab.active::after { position: absolute; right: 8px; bottom: -1px; left: 8px; height: 2px; background: var(--primary-color); content: ''; }
+.resource-tab.active::after { position: absolute; right: 8px; bottom: 0; left: 8px; height: 2px; background: var(--primary-color); content: ''; }
 .resource-tab span { display: inline-block; min-width: 18px; margin-left: 5px; padding: 1px 5px; border-radius: 4px; color: var(--text-secondary); background: var(--bg-page); font-size: 11px; }
 .toolbar { display: flex; align-items: center; gap: 10px; padding: 12px 0; }
 .search-input { width: 340px; }
