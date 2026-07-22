@@ -94,7 +94,12 @@ func (d *K8SContainerDiscovery) refresh() {
 		}
 		for i := range pods.Items {
 			pod := &pods.Items[i]
-			for _, container := range pod.Spec.Containers {
+			containers := d.selectedContainers(pod)
+			if len(containers) == 0 {
+				logger.Warnf("ContainerSSH 指定容器不存在: namespace=%s pod=%s label=%s", pod.Namespace, pod.Name, d.config.ContainerNameLabel)
+				continue
+			}
+			for _, container := range containers {
 				candidate := d.convertPod(pod, container.Name)
 				found[pod.Namespace+"/"+string(pod.UID)+"/"+container.Name] = candidate
 			}
@@ -103,6 +108,23 @@ func (d *K8SContainerDiscovery) refresh() {
 	d.mutex.Lock()
 	d.candidates = found
 	d.mutex.Unlock()
+}
+
+func (d *K8SContainerDiscovery) selectedContainers(pod *corev1.Pod) []corev1.Container {
+	label := strings.TrimSpace(d.config.ContainerNameLabel)
+	if label == "" {
+		return pod.Spec.Containers
+	}
+	requested := strings.TrimSpace(pod.Labels[label])
+	if requested == "" {
+		return pod.Spec.Containers
+	}
+	for _, container := range pod.Spec.Containers {
+		if container.Name == requested {
+			return []corev1.Container{container}
+		}
+	}
+	return nil
 }
 
 func (d *K8SContainerDiscovery) convertPod(pod *corev1.Pod, containerName string) *DiscoveredContainer {

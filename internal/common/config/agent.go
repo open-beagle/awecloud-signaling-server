@@ -71,14 +71,15 @@ type SVCSection struct {
 // A restrictive label selector is required so ordinary cluster Pods are not
 // treated as SSH candidates.
 type ContainerSection struct {
-	Enabled         bool     `toml:"enabled"`
-	Kubeconfig      string   `toml:"kubeconfig"`
-	LabelSelector   string   `toml:"label_selector"`
-	Namespaces      []string `toml:"namespaces"`
-	ProviderLabel   string   `toml:"provider_label"`
-	WorkspaceLabel  string   `toml:"workspace_label"`
-	GenerationLabel string   `toml:"generation_label"`
-	LeaseSeconds    int      `toml:"lease_seconds"`
+	Enabled            bool     `toml:"enabled"`
+	Kubeconfig         string   `toml:"kubeconfig"`
+	LabelSelector      string   `toml:"label_selector"`
+	Namespaces         []string `toml:"namespaces"`
+	ProviderLabel      string   `toml:"provider_label"`
+	WorkspaceLabel     string   `toml:"workspace_label"`
+	GenerationLabel    string   `toml:"generation_label"`
+	ContainerNameLabel string   `toml:"container_name_label"`
+	LeaseSeconds       int      `toml:"lease_seconds"`
 }
 
 // RegisterResult 统一注册接口的响应结果
@@ -243,6 +244,9 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	if v := os.Getenv("SIGNAL_CONTAINER_GENERATION_LABEL"); v != "" {
 		cfg.Container.GenerationLabel = v
 	}
+	if v := os.Getenv("SIGNAL_CONTAINER_NAME_LABEL"); v != "" {
+		cfg.Container.ContainerNameLabel = v
+	}
 	if v := os.Getenv("SIGNAL_CONTAINER_LEASE_SECONDS"); v != "" {
 		if seconds, err := strconv.Atoi(v); err == nil {
 			cfg.Container.LeaseSeconds = seconds
@@ -323,6 +327,9 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	}
 	if cfg.Container.GenerationLabel == "" {
 		cfg.Container.GenerationLabel = "beagle.io/workspace-generation"
+	}
+	if cfg.Container.ContainerNameLabel == "" {
+		cfg.Container.ContainerNameLabel = "beagle.io/container"
 	}
 	if cfg.Container.LeaseSeconds <= 0 {
 		cfg.Container.LeaseSeconds = 120

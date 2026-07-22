@@ -32,3 +32,19 @@ func TestContainerDiscoveryConvertsOptedInPodEvidence(t *testing.T) {
 	require.Equal(t, "acme", candidate.Namespace)
 	require.Equal(t, "acme", candidate.Labels["team"])
 }
+
+func TestContainerDiscoverySelectsExplicitContainer(t *testing.T) {
+	discovery := &K8SContainerDiscovery{config: &config.ContainerSection{ContainerNameLabel: "container"}}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"container": "ide"}},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "ide"}, {Name: "sync"}}},
+	}
+
+	require.Equal(t, []corev1.Container{{Name: "ide"}}, discovery.selectedContainers(pod))
+
+	delete(pod.Labels, "container")
+	require.Equal(t, pod.Spec.Containers, discovery.selectedContainers(pod))
+
+	pod.Labels["container"] = "missing"
+	require.Empty(t, discovery.selectedContainers(pod))
+}

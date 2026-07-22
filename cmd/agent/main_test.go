@@ -13,14 +13,15 @@ func TestMergeLocalAgentConfigPreservesContainerSSHConfig(t *testing.T) {
 	}
 	local := &config.AgentConfig{
 		Container: config.ContainerSection{
-			Enabled:         true,
-			Kubeconfig:      "/root/.kube/config",
-			LabelSelector:   "signal.beagle.io/container-ssh=true",
-			Namespaces:      []string{"acceptance"},
-			ProviderLabel:   "beagle.io/provider",
-			WorkspaceLabel:  "beagle.io/workspace",
-			GenerationLabel: "beagle.io/workspace-generation",
-			LeaseSeconds:    120,
+			Enabled:            true,
+			Kubeconfig:         "/root/.kube/config",
+			LabelSelector:      "signal.beagle.io/container-ssh=true",
+			Namespaces:         []string{"acceptance"},
+			ProviderLabel:      "beagle.io/provider",
+			WorkspaceLabel:     "beagle.io/workspace",
+			GenerationLabel:    "beagle.io/workspace-generation",
+			ContainerNameLabel: "beagle.io/container",
+			LeaseSeconds:       120,
 		},
 	}
 
