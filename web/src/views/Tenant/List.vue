@@ -42,7 +42,7 @@
     </el-dialog>
 
     <el-drawer v-model="showMembers" :title="`${selectedTenant?.name || ''} · 成员`" size="560px">
-      <div class="member-toolbar"><el-button type="primary" :icon="Plus" @click="openAddMember">加入现有人员</el-button></div>
+      <div class="member-toolbar"><el-button type="primary" :icon="Plus" :disabled="!authStore.canWrite" @click="openAddMember">加入现有人员</el-button></div>
       <el-table v-loading="loadingMembers" :data="members">
         <el-table-column label="人员" min-width="220"><template #default="{ row }"><strong>{{ row.alias || row.name }}</strong><span class="secondary">{{ row.name }}</span></template></el-table-column>
         <el-table-column prop="role" label="客户角色" width="140" />
@@ -57,7 +57,7 @@
         <el-form-item label="人员" required><el-select v-model="memberForm.user_id" filterable style="width: 100%" placeholder="选择已启用的 Desktop 用户"><el-option v-for="user in users" :key="user.id" :value="user.id" :label="user.alias ? `${user.alias} (${user.name})` : user.name" /></el-select></el-form-item>
         <el-form-item label="客户角色"><el-select v-model="memberForm.role" style="width: 100%"><el-option label="成员" value="member" /><el-option label="客户管理员" value="tenant_admin" /><el-option label="只读成员" value="viewer" /></el-select></el-form-item>
       </el-form>
-      <template #footer><el-button @click="showAddMember = false">取消</el-button><el-button type="primary" :loading="addingMember" @click="handleAddMember">确认加入</el-button></template>
+      <template #footer><el-button @click="showAddMember = false">取消</el-button><el-button type="primary" :loading="addingMember" :disabled="!authStore.canWrite" @click="handleAddMember">确认加入</el-button></template>
     </el-dialog>
   </div>
 </template>
@@ -118,11 +118,13 @@ const openMembers = async (tenant: Tenant) => {
   try { const res = await getTenantMembers(tenant.id); members.value = res.success && res.data ? res.data : [] } finally { loadingMembers.value = false }
 }
 const openAddMember = async () => {
+  if (!authStore.canWrite) return
   showAddMember.value = true
   const res = await getUsers({ role: 'client', enabled: 'true', page: 1, size: 100 })
   users.value = res.success && res.data ? res.data : []
 }
 const handleAddMember = async () => {
+  if (!authStore.canWrite) return
   if (!selectedTenant.value || !memberForm.user_id) return ElMessage.warning('请选择人员')
   addingMember.value = true
   try {

@@ -47,7 +47,7 @@
         </el-table-column>
         <el-table-column label="状态" width="125"><template #default="{ row }"><el-tag size="small" :type="stateTag(row.status)">{{ stateLabel(row.status) }}</el-tag><span v-if="row.conflict_reason" class="cell-secondary">{{ row.conflict_reason }}</span></template></el-table-column>
         <el-table-column label="最近观测" width="165"><template #default="{ row }">{{ formatTime(row.observed_at) }}<span class="cell-secondary">{{ row.ready ? 'Ready' : 'Not Ready' }}</span></template></el-table-column>
-        <el-table-column label="操作" width="160" fixed="right"><template #default="{ row }"><el-button v-if="['observed', 'pending_claim', 'conflict'].includes(row.status)" link type="primary" @click="handleReconcile(row)">重新匹配</el-button><el-button v-if="!['rejected', 'published'].includes(row.status)" link type="danger" @click="handleReject(row)">拒绝</el-button><span v-if="['rejected', 'published', 'stale'].includes(row.status)" class="muted">只读</span></template></el-table-column>
+        <el-table-column label="操作" width="160" fixed="right"><template #default="{ row }"><el-button v-if="['observed', 'pending_claim', 'conflict'].includes(row.status)" link type="primary" :disabled="!authStore.canWrite" @click="handleReconcile(row)">重新匹配</el-button><el-button v-if="!['rejected', 'published'].includes(row.status)" link type="danger" :disabled="!authStore.canWrite" @click="handleReject(row)">拒绝</el-button><span v-if="['rejected', 'published', 'stale'].includes(row.status)" class="muted">只读</span></template></el-table-column>
       </el-table>
       <el-empty v-if="!loading && !candidates.length" description="暂无发现候选" />
       <div class="pagination-wrapper"><el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.size" layout="total, prev, pager, next" :total="pagination.total" @current-change="fetchCandidates" /></div>
@@ -61,9 +61,11 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Link, Refresh, Search } from '@element-plus/icons-vue'
 import { getResourceCandidates, reconcileResourceCandidate, rejectResourceCandidate, type DiscoveryCandidate, type DiscoveryCandidateStatus } from '@/api/resource'
+import { useAuthStore } from '@/stores/auth'
 
 const loading = ref(false)
 const router = useRouter()
+const authStore = useAuthStore()
 const candidates = ref<DiscoveryCandidate[]>([])
 const filters = reactive<{ search: string; status?: DiscoveryCandidateStatus }>({ search: '', status: undefined })
 const pagination = reactive({ page: 1, size: 20, total: 0 })
@@ -83,6 +85,7 @@ const stateLabel = (status: string) => ({ observed: '待处理', pending_claim: 
 const stateTag = (status: string) => ({ observed: 'warning', pending_claim: 'warning', conflict: 'danger', stale: 'info', rejected: 'info', published: 'success' }[status] || 'info') as any
 const formatTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
 const handleReject = async (candidate: DiscoveryCandidate) => {
+  if (!authStore.canWrite) return
   try {
     await ElMessageBox.confirm(`拒绝 ${candidate.pod_name || candidate.pod_uid}？该候选仍会保留在审计记录中。`, '拒绝发现候选', { type: 'warning', confirmButtonText: '拒绝', cancelButtonText: '取消' })
     const res = await rejectResourceCandidate(candidate.id, '管理员拒绝，等待可信 Workspace 绑定')
@@ -90,6 +93,7 @@ const handleReject = async (candidate: DiscoveryCandidate) => {
   } catch { /* user cancelled */ }
 }
 const handleReconcile = async (candidate: DiscoveryCandidate) => {
+  if (!authStore.canWrite) return
   try {
     const res = await reconcileResourceCandidate(candidate.id)
     if (res.success) {
