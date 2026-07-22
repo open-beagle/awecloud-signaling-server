@@ -171,4 +171,5 @@ namespaces = []
 provider_label = "beagle.io/provider"
 workspace_label = "beagle.io/workspace"
 generation_label = "beagle.io/workspace-generation"
+container_name_label = "beagle.io/container"
 lease_seconds = 120
