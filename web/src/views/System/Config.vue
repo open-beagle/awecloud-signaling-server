@@ -11,6 +11,7 @@
         ref="formRef"
         :model="form"
         label-width="200px"
+        :disabled="!authStore.canWrite"
       >
         <!-- 基础配置 -->
         <div class="config-section">
@@ -121,7 +122,7 @@
         </div>
 
         <el-form-item>
-          <el-button type="primary" :loading="saving" @click="handleSave">
+          <el-button type="primary" :loading="saving" :disabled="!authStore.canWrite" @click="handleSave">
             保存
           </el-button>
         </el-form-item>
@@ -135,8 +136,10 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getSystemConfig, updateSystemConfig } from '@/api/system'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
+const authStore = useAuthStore()
 const formRef = ref()
 const saving = ref(false)
 
@@ -204,6 +207,7 @@ const validateIPPrefix = (ipPrefix: string): boolean => {
 }
 
 const handleSave = async () => {
+  if (!authStore.canWrite) return
   // 验证版本号格式（支持可选的 v 或 V 前缀）
   const versionRegex = /^[vV]?\d+\.\d+\.\d+$/
   if (form.value.desktop_min_version && !versionRegex.test(form.value.desktop_min_version)) {
