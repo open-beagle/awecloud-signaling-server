@@ -392,35 +392,36 @@ func (a *GroupAPINew) AddMembers(c *gin.Context) {
 		return
 	}
 
-	// 批量添加成员
+	// Validate the complete batch before writing anything. Partial additions
+	// with a generic success response hide invalid cross-Tenant input.
 	for _, userID := range req.UserIDs {
-		// 验证用户存在
 		var user model.User
 		if err := db.DB.WithContext(ctx).First(&user, userID).Error; err != nil {
-			continue // 用户不存在，跳过
+			c.JSON(http.StatusBadRequest, NewErrorResponse("用户不存在"))
+			return
 		}
 		if group.TenantID != "" {
 			var membership model.TenantMembership
 			if err := db.DB.WithContext(ctx).Where("tenant_id = ? AND user_id = ? AND enabled = ?", group.TenantID, userID, true).First(&membership).Error; err != nil {
-				continue
+				c.JSON(http.StatusForbidden, NewErrorResponse("用户不属于分组客户或成员已停用"))
+				return
 			}
 		}
+	}
 
-		// 检查是否已是成员
-		var existing model.GroupMember
-		if err := db.DB.WithContext(ctx).Where("group_id = ? AND user_id = ?", groupID, userID).First(&existing).Error; err == nil {
-			continue // 已是成员，跳过
+	created := 0
+	for _, userID := range req.UserIDs {
+		member := model.GroupMember{GroupID: groupID, UserID: userID}
+		result := db.DB.WithContext(ctx).Where("group_id = ? AND user_id = ?", groupID, userID).FirstOrCreate(&member)
+		if result.Error != nil {
+			c.JSON(http.StatusInternalServerError, NewErrorResponse("添加分组成员失败"))
+			return
 		}
-
-		member := &model.GroupMember{
-			GroupID: groupID,
-			UserID:  userID,
-		}
-		db.DB.WithContext(ctx).Create(member)
+		created += int(result.RowsAffected)
 	}
 
 	// 同步 ACL
-	if a.aclSync != nil {
+	if created > 0 && a.aclSync != nil {
 		go func() {
 			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
@@ -428,7 +429,7 @@ func (a *GroupAPINew) AddMembers(c *gin.Context) {
 		}()
 	}
 
-	logger.Infof("添加分组成员: group_id=%d, user_ids=%v", groupID, req.UserIDs)
+	logger.Infof("添加分组成员: group_id=%d, user_ids=%v, created=%d", groupID, req.UserIDs, created)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("添加成功", nil))
 }
