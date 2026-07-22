@@ -598,10 +598,14 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	if req.UpdaterProtocol != "" {
 		updates["updater_protocol"] = req.UpdaterProtocol
 	}
-	// Preserve the stored value when an old Agent omits the additive field.
-	if req.ContainerSshProtocol != "" {
-		updates["container_ssh_protocol"] = req.ContainerSshProtocol
+	// ContainerSSH is a strict per-heartbeat capability negotiation. An old or
+	// downgraded Agent omitting v1 must immediately lose permission snapshots
+	// and remote-disconnect directives; a stale stored v1 is not authoritative.
+	containerSSHProtocol := ""
+	if req.ContainerSshProtocol == "v1" {
+		containerSSHProtocol = "v1"
 	}
+	updates["container_ssh_protocol"] = containerSSHProtocol
 	if req.Version != "" {
 		updates["version"] = req.Version
 	}
