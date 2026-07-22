@@ -88,7 +88,7 @@ func TestLegacyAgentHeartbeatWithoutContainerCandidatesRemainsCompatible(t *test
 	})
 	require.NoError(t, testDB.First(&node, nodeID).Error)
 	require.Equal(t, "v1", node.UpdaterProtocol)
-	require.Equal(t, "v1", node.ContainerSSHProtocol)
+	require.Equal(t, "", node.ContainerSSHProtocol)
 }
 
 func TestHandleContainerCandidatesAutomaticallyPublishesAndIsIdempotent(t *testing.T) {
