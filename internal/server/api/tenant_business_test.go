@@ -46,7 +46,12 @@ func TestTenantMemberDevicesAndAuditStayInsideTenant(t *testing.T) {
 	require.NoError(t, database.Create(&model.TenantMembership{TenantID: tenantA.ID, UserID: userA.ID, Role: "member", Enabled: true}).Error)
 	require.NoError(t, database.Create(&model.TenantMembership{TenantID: tenantB.ID, UserID: userB.ID, Role: "member", Enabled: true}).Error)
 	now := time.Now()
-	require.NoError(t, database.Create(&model.Node{UserID: userA.ID, Name: "desktop-a", Type: model.NodeTypeDesktop, LastHeartbeat: &now}).Error)
+	onlineOlder := now.Add(-time.Minute)
+	offlineRecent := now.Add(-3 * time.Minute)
+	require.NoError(t, database.Create(&model.Node{UserID: userA.ID, Name: "desktop-online-newer", Type: model.NodeTypeDesktop, LastHeartbeat: &now}).Error)
+	require.NoError(t, database.Create(&model.Node{UserID: userA.ID, Name: "desktop-online-older", Type: model.NodeTypeDesktop, LastHeartbeat: &onlineOlder}).Error)
+	require.NoError(t, database.Create(&model.Node{UserID: userA.ID, Name: "desktop-offline", Type: model.NodeTypeDesktop, LastHeartbeat: &offlineRecent}).Error)
+	require.NoError(t, database.Create(&model.Node{UserID: userA.ID, Name: "desktop-never-online", Type: model.NodeTypeDesktop}).Error)
 	require.NoError(t, database.Create(&model.Node{UserID: userB.ID, Name: "desktop-b", Type: model.NodeTypeDesktop, LastHeartbeat: &now}).Error)
 	require.NoError(t, database.Create(&model.Node{UserID: userA.ID, Name: "agent-a", Type: model.NodeTypeAgent, LastHeartbeat: &now}).Error)
 	require.NoError(t, database.Create(&model.AuditLog{TenantID: tenantA.ID, ActorAdminID: admin.ID, ActorUsername: admin.Username, ActionType: "tenant_a_action", TargetType: "tenant", TargetID: tenantA.ID, TargetName: tenantA.Name}).Error)
@@ -82,10 +87,18 @@ func TestTenantMemberDevicesAndAuditStayInsideTenant(t *testing.T) {
 		Total int64                    `json:"total"`
 	}
 	require.NoError(t, json.Unmarshal(devices.Body.Bytes(), &deviceBody))
-	require.Equal(t, int64(1), deviceBody.Total)
-	require.Len(t, deviceBody.Data, 1)
-	require.Equal(t, "desktop-a", deviceBody.Data[0].DeviceName)
+	require.Equal(t, int64(4), deviceBody.Total)
+	require.Len(t, deviceBody.Data, 4)
+	require.Equal(t, []string{"desktop-online-newer", "desktop-online-older", "desktop-offline", "desktop-never-online"}, []string{
+		deviceBody.Data[0].DeviceName,
+		deviceBody.Data[1].DeviceName,
+		deviceBody.Data[2].DeviceName,
+		deviceBody.Data[3].DeviceName,
+	})
 	require.True(t, deviceBody.Data[0].Online)
+	require.True(t, deviceBody.Data[1].Online)
+	require.False(t, deviceBody.Data[2].Online)
+	require.False(t, deviceBody.Data[3].Online)
 
 	audits := request("/tenants/"+tenantA.ID+"/audit-logs", tenantA.ID, false)
 	require.Equal(t, http.StatusOK, audits.Code)

@@ -132,7 +132,7 @@ const revokeGrant = async (grant: AccessGrant) => {
   }
 }
 
-const typeLabel = computed(() => ({ container_ssh: 'ContainerSSH', host_ssh: 'HostSSH', kubernetes_api: 'KubernetesAPI', database_service: 'DatabaseService', tcp_service: 'TCPService' }[detail.value?.resource.type || ''] || detail.value?.resource.type || '-'))
+const typeLabel = computed(() => ({ container_ssh: 'ContainerSSH', host_ssh: '主机', kubernetes_api: 'KubernetesAPI', database_service: 'DatabaseService', tcp_service: 'TCPService' }[detail.value?.resource.type || ''] || detail.value?.resource.type || '-'))
 const stateLabel = computed(() => ({ pending: '待发布', available: '可用', degraded: '异常', draining: '排空中', stopped: '已停止', revoked: '已撤销' }[detail.value?.resource.state || ''] || detail.value?.resource.state || '-'))
 const stateTag = computed(() => ({ available: 'success', degraded: 'danger', draining: 'warning', stopped: 'info', revoked: 'info', pending: 'warning' }[detail.value?.resource.state || ''] || 'info') as any)
 const resourceIcon = computed(() => ({ container_ssh: TakeawayBox, host_ssh: Monitor, kubernetes_api: Ship, database_service: Coin, tcp_service: Connection }[detail.value?.resource.type || ''] || TakeawayBox))

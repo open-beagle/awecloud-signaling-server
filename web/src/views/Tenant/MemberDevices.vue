@@ -12,10 +12,16 @@
     </div>
     <el-table v-loading="loading" :data="devices" empty-text="当前租户还没有成员设备">
       <el-table-column label="成员" min-width="180"><template #default="scope"><strong>{{ scope.row.user_alias || scope.row.user_name }}</strong><div class="secondary">{{ scope.row.user_name }}</div></template></el-table-column>
-      <el-table-column prop="device_name" label="设备" min-width="180" />
-      <el-table-column prop="hostname" label="主机名" min-width="180" show-overflow-tooltip />
-      <el-table-column prop="ip" label="安全网络 IP" width="150" />
-      <el-table-column prop="version" label="客户端版本" width="130" />
+      <el-table-column label="设备" min-width="360">
+        <template #default="scope">
+          <div class="device-name">{{ scope.row.device_name || '-' }}</div>
+          <div class="device-details">
+            <span>主机名：{{ scope.row.hostname || '-' }}</span>
+            <span>IP：{{ scope.row.ip || '-' }}</span>
+            <span>版本：{{ scope.row.version || '-' }}</span>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="110"><template #default="scope"><el-tag size="small" effect="plain" :type="scope.row.online ? 'success' : 'info'">{{ scope.row.online ? '在线' : '离线' }}</el-tag></template></el-table-column>
       <el-table-column label="最后心跳" min-width="180"><template #default="scope">{{ formatTime(scope.row.last_heartbeat) }}</template></el-table-column>
     </el-table>
@@ -57,5 +63,7 @@ h1 { margin: 0; color: var(--text-primary); font-size: 24px; line-height: 32px; 
 .page-header p { margin: 5px 0 0; color: var(--text-secondary); font-size: 13px; }
 .filters { display: flex; width: min(420px, 100%); margin-bottom: 12px; }
 .secondary { margin-top: 2px; color: var(--text-secondary); font-size: 12px; }
+.device-name { color: var(--text-primary); font-weight: 600; }
+.device-details { display: flex; flex-wrap: wrap; gap: 2px 16px; margin-top: 4px; color: var(--text-secondary); font-size: 12px; line-height: 18px; }
 .pagination { display: flex; justify-content: flex-end; padding-top: 14px; }
 </style>

@@ -44,7 +44,7 @@ const items = ref<Resource[]>([])
 const filters = reactive<{ search: string; type: ResourceType | ''; state: ResourceState | '' }>({ search: '', type: '', state: '' })
 const pagination = reactive({ page: 1, size: 20, total: 0 })
 const summary = reactive<ResourceSummary>({ total: 0, available: 0, degraded: 0, active_sessions: 0, by_type: {} })
-const typeOptions: { label: string; value: ResourceType }[] = [{ label: 'ContainerSSH', value: 'container_ssh' }, { label: 'SSH 主机', value: 'host_ssh' }, { label: 'Kubernetes API', value: 'kubernetes_api' }, { label: '数据库服务', value: 'database_service' }, { label: 'TCP 服务', value: 'tcp_service' }]
+const typeOptions: { label: string; value: ResourceType }[] = [{ label: 'ContainerSSH', value: 'container_ssh' }, { label: '主机', value: 'host_ssh' }, { label: 'Kubernetes API', value: 'kubernetes_api' }, { label: '数据库服务', value: 'database_service' }, { label: 'TCP 服务', value: 'tcp_service' }]
 const load = async () => {
   loading.value = true
   try {
