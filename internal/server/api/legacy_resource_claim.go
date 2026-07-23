@@ -82,7 +82,7 @@ func (a *LegacyResourceClaimAPI) Claim(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("存量对象、Tenant 和认领原因不能为空"))
 		return
 	}
-	if !requireTenantAccess(c, req.TenantID, true) {
+	if !requireTenantPermission(c, req.TenantID, PermissionTenantResourcesWrite) {
 		return
 	}
 	var tenant model.Tenant
@@ -145,7 +145,7 @@ func (a *LegacyResourceClaimAPI) Revoke(c *gin.Context) {
 		c.JSON(http.StatusNotFound, NewErrorResponse("存量归属不存在"))
 		return
 	}
-	if !requireTenantAccess(c, claim.TenantID, true) {
+	if !requireTenantPermission(c, claim.TenantID, PermissionTenantResourcesWrite) {
 		return
 	}
 	if claim.Status != "active" {

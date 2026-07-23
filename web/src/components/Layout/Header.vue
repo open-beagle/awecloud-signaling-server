@@ -3,17 +3,6 @@
     <div class="header-left">
       <el-button class="mobile-menu" text :icon="Menu" aria-label="打开导航" @click="appStore.toggleMobileSidebar" />
       <Logo :collapsed="false" class="header-logo" />
-      <el-select
-        v-model="tenantStore.tenantId"
-        class="tenant-select"
-        size="small"
-        placeholder="全部客户（只读）"
-        clearable
-        @change="handleTenantChange"
-      >
-        <el-option label="全部客户（只读）" value="" />
-        <el-option v-for="tenant in tenants" :key="tenant.id" :label="tenant.name" :value="tenant.id" />
-      </el-select>
     </div>
     <div class="header-right">
       <span class="client-download" @click="handleDownloadClient">
@@ -52,13 +41,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
-import { useTenantStore } from '@/stores/tenant'
-import { getTenants, type Tenant } from '@/api/resource'
 import { ElMessage } from 'element-plus'
 import { Menu } from '@element-plus/icons-vue'
 import Logo from '@/components/Common/Logo.vue'
@@ -67,8 +54,6 @@ const router = useRouter()
 const { t, locale } = useI18n()
 const authStore = useAuthStore()
 const appStore = useAppStore()
-const tenantStore = useTenantStore()
-const tenants = ref<Tenant[]>([])
 
 const currentLanguage = computed(() => {
   return locale.value === 'zh-CN' ? '中文' : 'English'
@@ -92,35 +77,6 @@ const handleDownloadClient = () => {
   window.open('/download', '_blank')
 }
 
-const handleTenantChange = () => {
-  tenantStore.setTenant(tenantStore.tenantId)
-}
-
-const fetchTenants = async () => {
-  try {
-    if (!authStore.role) await authStore.loadProfile()
-    const res = await getTenants({ page: 1, size: 100, status: 'active' })
-    if (res.success && res.data) {
-      tenants.value = res.data
-      if (tenantStore.tenantId && !tenants.value.some(tenant => tenant.id === tenantStore.tenantId)) {
-        tenantStore.setTenant('')
-      }
-    }
-  } catch (error) {
-    console.error('获取客户上下文失败:', error)
-  }
-}
-
-const handleTenantCatalogChanged = () => fetchTenants()
-
-onMounted(() => {
-  fetchTenants()
-  window.addEventListener('tenant-catalog-changed', handleTenantCatalogChanged)
-})
-
-onBeforeUnmount(() => window.removeEventListener('tenant-catalog-changed', handleTenantCatalogChanged))
-
-
 </script>
 
 <style scoped>
@@ -141,10 +97,6 @@ onBeforeUnmount(() => window.removeEventListener('tenant-catalog-changed', handl
   padding: 0;
 }
 
-.tenant-select {
-  width: 220px;
-}
-
 .header-right {
   display: flex;
   align-items: center;
@@ -152,18 +104,6 @@ onBeforeUnmount(() => window.removeEventListener('tenant-catalog-changed', handl
 }
 
 .mobile-menu { display: none; width: 36px; height: 36px; font-size: 19px; }
-
-@media (max-width: 900px) {
-  .tenant-select {
-    width: 180px;
-  }
-}
-
-@media (max-width: 640px) {
-  .tenant-select {
-    width: 150px;
-  }
-}
 
 .client-download,
 .language-selector,
@@ -191,7 +131,6 @@ onBeforeUnmount(() => window.removeEventListener('tenant-catalog-changed', handl
   .header-logo :deep(.logo-text) { display: none; }
   .header-logo :deep(.logo-icon) { width: 34px; height: 34px; }
   .header-left { gap: 6px; }
-  .tenant-select { width: min(42vw, 180px); }
   .client-download, .language-selector { display: none; }
   .user-info { padding: 7px; }
   .user-info .el-tag { display: none; }

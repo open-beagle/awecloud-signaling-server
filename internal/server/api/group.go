@@ -65,7 +65,7 @@ func (a *GroupAPINew) List(c *gin.Context) {
 	}
 
 	query := db.DB.WithContext(ctx).Model(&model.Group{})
-	tenantIDs, unrestricted, ok := tenantReadScope(c)
+	tenantIDs, unrestricted, ok := tenantReadScope(c, PermissionTenantGroupsRead)
 	if !ok {
 		return
 	}
@@ -212,7 +212,7 @@ func (a *GroupAPINew) Create(c *gin.Context) {
 		req.TenantID = selected
 	}
 	if req.TenantID != "" {
-		if !requireTenantAccess(c, req.TenantID, true) {
+		if !requireTenantPermission(c, req.TenantID, PermissionTenantGroupsWrite) {
 			return
 		}
 	} else if !requirePlatformAccess(c, true) {
@@ -239,6 +239,7 @@ func (a *GroupAPINew) Create(c *gin.Context) {
 	}
 
 	logger.Infof("创建分组: id=%d, name=%s", group.ID, group.Name)
+	recordAuditLog(ctx, c, "create_tenant_group", "group", strconv.FormatInt(group.ID, 10), group.Name, group)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("创建成功", group))
 }
@@ -282,6 +283,7 @@ func (a *GroupAPINew) Update(c *gin.Context) {
 	}
 
 	logger.Infof("更新分组: id=%d", id)
+	recordAuditLog(ctx, c, "update_tenant_group", "group", strconv.FormatInt(group.ID, 10), group.Name, group)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("更新成功", nil))
 }
@@ -331,6 +333,7 @@ func (a *GroupAPINew) Delete(c *gin.Context) {
 	}
 
 	logger.Infof("删除分组: id=%d, name=%s", id, group.Name)
+	recordAuditLog(ctx, c, "delete_tenant_group", "group", strconv.FormatInt(group.ID, 10), group.Name, map[string]interface{}{"tenant_id": group.TenantID})
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
 }
@@ -354,7 +357,14 @@ func (a *GroupAPINew) GetMembers(c *gin.Context) {
 	}
 
 	var members []model.GroupMember
-	if err := db.DB.WithContext(ctx).Preload("User").Where("group_id = ?", id).Find(&members).Error; err != nil {
+	membersQuery := db.DB.WithContext(ctx).Model(&model.GroupMember{}).Preload("User").Where("group_member.group_id = ?", id)
+	if group.TenantID != "" {
+		membersQuery = membersQuery.
+			Joins("JOIN tenant_membership AS tm ON tm.user_id = group_member.user_id AND tm.tenant_id = ?", group.TenantID).
+			Joins("JOIN user AS active_user ON active_user.id = group_member.user_id").
+			Where("tm.enabled = ? AND active_user.enabled = ? AND (tm.expires_at IS NULL OR tm.expires_at > ?)", true, true, time.Now())
+	}
+	if err := membersQuery.Find(&members).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
 		return
 	}
@@ -400,10 +410,14 @@ func (a *GroupAPINew) AddMembers(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, NewErrorResponse("用户不存在"))
 			return
 		}
+		if !user.Enabled {
+			c.JSON(http.StatusForbidden, NewErrorResponse("用户已停用"))
+			return
+		}
 		if group.TenantID != "" {
 			var membership model.TenantMembership
-			if err := db.DB.WithContext(ctx).Where("tenant_id = ? AND user_id = ? AND enabled = ?", group.TenantID, userID, true).First(&membership).Error; err != nil {
-				c.JSON(http.StatusForbidden, NewErrorResponse("用户不属于分组客户或成员已停用"))
+			if err := db.DB.WithContext(ctx).Where("tenant_id = ? AND user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", group.TenantID, userID, true, time.Now()).First(&membership).Error; err != nil {
+				c.JSON(http.StatusForbidden, NewErrorResponse("用户不属于分组租户、成员已停用或已过期"))
 				return
 			}
 		}
@@ -430,6 +444,7 @@ func (a *GroupAPINew) AddMembers(c *gin.Context) {
 	}
 
 	logger.Infof("添加分组成员: group_id=%d, user_ids=%v, created=%d", groupID, req.UserIDs, created)
+	recordAuditLog(ctx, c, "add_tenant_group_members", "group", strconv.FormatInt(group.ID, 10), group.Name, map[string]interface{}{"user_ids": req.UserIDs})
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("添加成功", nil))
 }
@@ -477,6 +492,7 @@ func (a *GroupAPINew) RemoveMember(c *gin.Context) {
 	}
 
 	logger.Infof("移除分组成员: group_id=%d, user_id=%d", groupID, userID)
+	recordAuditLog(ctx, c, "remove_tenant_group_member", "group", strconv.FormatInt(group.ID, 10), group.Name, map[string]interface{}{"user_id": userID})
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("移除成功", nil))
 }
@@ -488,5 +504,9 @@ func requireGroupAccess(c *gin.Context, group *model.Group, write bool) bool {
 	if group.TenantID == "" {
 		return requirePlatformAccess(c, write)
 	}
-	return requireTenantAccess(c, group.TenantID, write)
+	permission := PermissionTenantGroupsRead
+	if write {
+		permission = PermissionTenantGroupsWrite
+	}
+	return requireTenantPermission(c, group.TenantID, permission)
 }

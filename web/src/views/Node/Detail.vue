@@ -20,7 +20,7 @@
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item :label="$t('node.user')">
-            <router-link v-if="node.user" :to="`/users/${node.user.id}`" class="user-link">
+            <router-link v-if="node.user" :to="`/platform-identities/${node.user.id}`" class="user-link">
               {{ node.user.name }}
             </router-link>
             <span v-else>-</span>

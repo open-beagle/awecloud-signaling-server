@@ -29,6 +29,7 @@ func TestManagementAuthorizationRoleMatrix(t *testing.T) {
 		"platform": {Username: "platform-route", PasswordHash: "test", Role: "admin"},
 		"viewer":   {Username: "viewer-route", PasswordHash: "test", Role: "viewer"},
 		"tenant":   {Username: "tenant-route", PasswordHash: "test", Role: "tenant_admin"},
+		"none":     {Username: "none-route", PasswordHash: "test", Role: "none"},
 	}
 	for key, admin := range admins {
 		require.NoError(t, database.Create(&admin).Error)
@@ -63,7 +64,19 @@ func TestManagementAuthorizationRoleMatrix(t *testing.T) {
 		{name: "tenant group membership", admin: admins["tenant"].ID, method: http.MethodPost, path: "/api/v1/admin/groups/7/members", want: http.StatusNoContent},
 		{name: "tenant member directory", admin: admins["tenant"].ID, method: http.MethodGet, path: "/api/v1/admin/tenants/tenant-a/members", want: http.StatusNoContent},
 		{name: "tenant disable member", admin: admins["tenant"].ID, method: http.MethodPost, path: "/api/v1/admin/tenants/tenant-a/members/7/disable", want: http.StatusNoContent},
+		{name: "tenant member devices", admin: admins["tenant"].ID, method: http.MethodGet, path: "/api/v1/admin/tenants/tenant-a/member-devices", want: http.StatusNoContent},
+		{name: "tenant audit logs", admin: admins["tenant"].ID, method: http.MethodGet, path: "/api/v1/admin/tenants/tenant-a/audit-logs", want: http.StatusNoContent},
+		{name: "tenant settings read", admin: admins["tenant"].ID, method: http.MethodGet, path: "/api/v1/admin/tenants/tenant-a/settings", want: http.StatusNoContent},
+		{name: "tenant settings write", admin: admins["tenant"].ID, method: http.MethodPut, path: "/api/v1/admin/tenants/tenant-a/settings", want: http.StatusNoContent},
+		{name: "tenant overview", admin: admins["tenant"].ID, method: http.MethodGet, path: "/api/v1/admin/tenants/tenant-a/overview", want: http.StatusNoContent},
+		{name: "tenant platform overview denied", admin: admins["tenant"].ID, method: http.MethodGet, path: "/api/v1/admin/overview/platform", want: http.StatusForbidden},
+		{name: "tenant context catalog", admin: admins["tenant"].ID, method: http.MethodGet, path: "/api/v1/admin/tenant-contexts", want: http.StatusNoContent},
+		{name: "tenant context detail", admin: admins["tenant"].ID, method: http.MethodGet, path: "/api/v1/admin/tenant-contexts/tenant-a", want: http.StatusNoContent},
+		{name: "canonical none tenant context", admin: admins["none"].ID, method: http.MethodGet, path: "/api/v1/admin/tenant-contexts", want: http.StatusNoContent},
+		{name: "canonical none platform admins denied", admin: admins["none"].ID, method: http.MethodGet, path: "/api/v1/admin/platform-admins", want: http.StatusForbidden},
+		{name: "tenant context write denied", admin: admins["tenant"].ID, method: http.MethodPost, path: "/api/v1/admin/tenant-contexts", want: http.StatusForbidden},
 		{name: "tenant cannot create tenant", admin: admins["tenant"].ID, method: http.MethodPost, path: "/api/v1/admin/tenants", want: http.StatusForbidden},
+		{name: "tenant cannot manage admin memberships", admin: admins["tenant"].ID, method: http.MethodGet, path: "/api/v1/admin/tenant-admin-memberships", want: http.StatusForbidden},
 		{name: "tenant legacy users denied", admin: admins["tenant"].ID, method: http.MethodGet, path: "/api/v1/admin/users", want: http.StatusForbidden},
 		{name: "tenant candidates denied", admin: admins["tenant"].ID, method: http.MethodGet, path: "/api/v1/admin/resource-candidates", want: http.StatusForbidden},
 		{name: "tenant legacy claims denied", admin: admins["tenant"].ID, method: http.MethodGet, path: "/api/v1/admin/legacy-resource-claims", want: http.StatusForbidden},
@@ -95,7 +108,7 @@ func TestManagementAuthorizationWithSignedJWT(t *testing.T) {
 
 	const secret = "management-role-test-secret"
 	router := gin.New()
-	router.Use(AuthMiddleware(secret), ManagementAuthorizationMiddleware())
+	router.Use(AuthMiddleware(secret, false), ManagementAuthorizationMiddleware())
 	router.POST("/api/v1/admin/users", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 
 	tokenFor := func(admin model.Admin) string {
@@ -116,4 +129,19 @@ func TestManagementAuthorizationWithSignedJWT(t *testing.T) {
 	}
 	require.Equal(t, http.StatusNoContent, request(platform))
 	require.Equal(t, http.StatusForbidden, request(tenantAdmin))
+}
+
+func TestLocalhostAdminDebugRequiresExplicitEnablement(t *testing.T) {
+	request := func(enabled bool) int {
+		router := gin.New()
+		router.Use(AuthMiddleware("localhost-debug-test", enabled))
+		router.GET("/api/v1/admin/ping", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/ping", nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		return resp.Code
+	}
+	require.Equal(t, http.StatusUnauthorized, request(false))
+	require.Equal(t, http.StatusNoContent, request(true))
 }

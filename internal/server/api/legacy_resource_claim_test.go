@@ -26,7 +26,7 @@ func TestLegacyResourceClaimIsExplicitAndDoesNotGrantAccess(t *testing.T) {
 	require.NoError(t, err)
 	db.DB = database
 	require.NoError(t, database.AutoMigrate(
-		&model.Admin{}, &model.Tenant{}, &model.User{}, &model.Node{}, &model.Endpoint{},
+		&model.Admin{}, &model.AdminTenantMembership{}, &model.Tenant{}, &model.User{}, &model.Node{}, &model.Endpoint{},
 		&model.LegacyResourceClaim{}, &model.Resource{}, &model.AccessGrant{}, &model.AuditLog{},
 	))
 	admin := model.Admin{Username: "legacy-claim-admin", PasswordHash: "test", Role: "admin"}
@@ -35,6 +35,8 @@ func TestLegacyResourceClaimIsExplicitAndDoesNotGrantAccess(t *testing.T) {
 	tenantB := model.Tenant{ID: uuid.NewString(), Key: "legacy-b", Name: "Legacy B", Status: model.TenantStatusActive}
 	require.NoError(t, database.Create(&tenantA).Error)
 	require.NoError(t, database.Create(&tenantB).Error)
+	require.NoError(t, database.Create(&model.AdminTenantMembership{AdminID: admin.ID, TenantID: tenantA.ID, Role: string(model.TenantManagementRoleAdmin), Enabled: true}).Error)
+	require.NoError(t, database.Create(&model.AdminTenantMembership{AdminID: admin.ID, TenantID: tenantB.ID, Role: string(model.TenantManagementRoleAdmin), Enabled: true}).Error)
 	agentUser := model.User{Name: "legacy-agent", Role: model.UserRoleAgent, SecretHash: "test", Enabled: true}
 	require.NoError(t, database.Create(&agentUser).Error)
 	now := time.Now()

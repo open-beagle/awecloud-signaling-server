@@ -27,7 +27,7 @@
       </div>
       <div class="legacy-metrics">
         <button @click="router.push('/nodes/agents')"><strong>{{ legacyInventory.agents }}</strong><span>Agent</span></button>
-        <button @click="router.push('/nodes/desktops')"><strong>{{ legacyInventory.desktops }}</strong><span>访问设备</span></button>
+        <button @click="router.push('/diagnostics/desktop-nodes')"><strong>{{ legacyInventory.desktops }}</strong><span>访问设备</span></button>
         <button @click="router.push('/endpoints')"><strong>{{ legacyInventory.endpoints }}</strong><span>Endpoint</span></button>
       </div>
       <el-button :icon="ArrowRight" @click="router.push('/legacy-inventory')">核验与认领</el-button>

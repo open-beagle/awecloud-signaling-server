@@ -36,7 +36,7 @@ func (a *ContainerSessionAPI) List(c *gin.Context) {
 	ctx := c.Request.Context()
 	page, size := pageParams(c)
 	query := db.DB.WithContext(ctx).Model(&model.ContainerSession{})
-	tenantIDs, unrestricted, ok := tenantReadScope(c)
+	tenantIDs, unrestricted, ok := tenantReadScope(c, PermissionTenantSessionsRead)
 	if !ok {
 		return
 	}
@@ -100,7 +100,7 @@ func (a *ContainerSessionAPI) Get(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询 ContainerSSH 会话失败"))
 		return
 	}
-	if !requireTenantAccess(c, session.TenantID, false) {
+	if !requireTenantPermission(c, session.TenantID, PermissionTenantSessionsRead) {
 		return
 	}
 	detail := containerSessionDetail{Session: session}
@@ -134,7 +134,7 @@ func (a *ContainerSessionAPI) close(c *gin.Context, action, defaultReason string
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询 ContainerSSH 会话失败"))
 		return
 	}
-	if !requireTenantAccess(c, session.TenantID, true) {
+	if !requireTenantPermission(c, session.TenantID, PermissionTenantSessionsDisconnect) {
 		return
 	}
 	if session.Status != model.ContainerSessionActive {
