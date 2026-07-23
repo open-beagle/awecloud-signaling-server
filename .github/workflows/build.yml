@@ -1,6 +1,7 @@
 name: Build Images
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -9,9 +10,11 @@ jobs:
   build:
     name: Build Images
     runs-on: ubuntu-latest
+    outputs:
+      build_version: ${{ steps.version.outputs.BUILD_VERSION }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0 # 获取完整的 git 历史，确保 BUILD_NUMBER 正确
 
@@ -20,9 +23,9 @@ jobs:
         run: echo "BUILD_VERSION=$(cat version)" >> $GITHUB_OUTPUT
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
           cache-dependency-path: web/package-lock.json
 
@@ -30,9 +33,15 @@ jobs:
         run: BUILD_VERSION=${{ steps.version.outputs.BUILD_VERSION }} bash ./scripts/build_frontend.sh
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.26"
+
+      - name: Show toolchain versions
+        run: |
+          go version
+          node --version
+          npm --version
 
       - name: Cross Build Server, Agent and Endpoint
         run: |
@@ -43,15 +52,15 @@ jobs:
           bash scripts/build.sh
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login to Aliyun Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: registry.cn-qingdao.aliyuncs.com
           username: ${{ secrets.REGISTRY_USER_ALIYUN }}
@@ -59,7 +68,7 @@ jobs:
 
       # Server Images
       - name: Build Server AMD64 image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./.beagle/server.dockerfile
@@ -73,7 +82,7 @@ jobs:
             VERSION=${{ steps.version.outputs.BUILD_VERSION }}
 
       - name: Build Server ARM64 image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./.beagle/server.dockerfile
@@ -94,7 +103,7 @@ jobs:
 
       # Agent Images
       - name: Build Agent AMD64 image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./.beagle/agent.dockerfile
@@ -108,7 +117,7 @@ jobs:
             VERSION=${{ steps.version.outputs.BUILD_VERSION }}
 
       - name: Build Agent ARM64 image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./.beagle/agent.dockerfile
@@ -138,21 +147,21 @@ jobs:
         run: |
           mc alias set aliyun --api=S3v4 ${{ secrets.S3_ENDPOINT_ALIYUN }} \
             ${{ secrets.S3_ACCESS_KEY_ALIYUN }} ${{ secrets.S3_SECRET_KEY_ALIYUN }}
-          
+
           VERSION="${{ steps.version.outputs.BUILD_VERSION }}"
           S3_BUCKET="aliyun/vscode/awecloud-signaling"
-          
+
           # 上传 Agent 安装脚本
           echo "Uploading install_agent.sh..."
           mc cp scripts/install_agent.sh "${S3_BUCKET}/install_agent.sh"
-          
+
           # 上传 Agent 二进制
           echo "Uploading signal_agent-${VERSION}-linux-amd64..."
           mc cp bin/signal_agent-linux-amd64 "${S3_BUCKET}/signal_agent-${VERSION}-linux-amd64"
-          
+
           echo "Uploading signal_agent-${VERSION}-linux-arm64..."
           mc cp bin/signal_agent-linux-arm64 "${S3_BUCKET}/signal_agent-${VERSION}-linux-arm64"
-          
+
           # 创建 Agent 版本信息文件
           cat > signal_agent-version.json << EOF
           {
@@ -175,18 +184,18 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.BUILD_VERSION }}"
           S3_BUCKET="aliyun/vscode/awecloud-signaling"
-          
+
           # 上传 Endpoint 安装脚本
           echo "Uploading install_endpoint.sh..."
           mc cp scripts/install_endpoint.sh "${S3_BUCKET}/install_endpoint.sh"
-          
+
           # 上传 Endpoint 二进制
           echo "Uploading signal_endpoint-${VERSION}-linux-amd64..."
           mc cp bin/signal_endpoint-linux-amd64 "${S3_BUCKET}/signal_endpoint-${VERSION}-linux-amd64"
-          
+
           echo "Uploading signal_endpoint-${VERSION}-linux-arm64..."
           mc cp bin/signal_endpoint-linux-arm64 "${S3_BUCKET}/signal_endpoint-${VERSION}-linux-arm64"
-          
+
           # 创建 Endpoint 版本信息文件
           cat > signal_endpoint-version.json << EOF
           {
@@ -199,8 +208,46 @@ jobs:
           }
           EOF
           mc cp signal_endpoint-version.json "${S3_BUCKET}/signal_endpoint-version.json"
-          
+
           echo "Endpoint ${VERSION} uploaded successfully!"
         env:
           S3_ACCESS_KEY_ALIYUN: ${{ secrets.S3_ACCESS_KEY_ALIYUN }}
           S3_SECRET_KEY_ALIYUN: ${{ secrets.S3_SECRET_KEY_ALIYUN }}
+
+  deploy:
+    name: Deploy Server to Kubernetes
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure Kubernetes access
+        env:
+          KUBERNETES_SERVER: ${{ secrets.KUBERNETES_ALIYUN_SERVER }}
+          KUBERNETES_TOKEN: ${{ secrets.KUBERNETES_ALIYUN_TOKEN }}
+        run: |
+          set -eu
+          test -n "$KUBERNETES_SERVER"
+          test -n "$KUBERNETES_TOKEN"
+
+          kubectl config set-cluster beagle-signal \
+            --server="$KUBERNETES_SERVER" \
+            --insecure-skip-tls-verify=true
+
+          kubectl config set-credentials github-actions --token="$KUBERNETES_TOKEN"
+          kubectl config set-context beagle-signal \
+            --cluster=beagle-signal \
+            --user=github-actions \
+            --namespace=beagle-access
+          kubectl config use-context beagle-signal
+
+      - name: Update Server deployment
+        run: |
+          image="registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:${{ needs.build.outputs.build_version }}"
+          kubectl set image deployment/signal-server server="$image"
+          kubectl rollout restart deployment/signal-server
+          kubectl rollout status deployment/signal-server --timeout=5m
+          kubectl get deployment/signal-server -o jsonpath='{.spec.template.spec.containers[?(@.name=="server")].image}{"\n"}'

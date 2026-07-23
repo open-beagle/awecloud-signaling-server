@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -25,14 +26,15 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/telemetry"
+	"github.com/open-beagle/awecloud-signaling-server/internal/updater"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
 // Agent Agent进程
 type Agent struct {
-	config  *config.AgentConfig
-	version string // Agent版本
-	userName string // 用户名（从注册响应获取）
+	config     *config.AgentConfig
+	version    string // Agent版本
+	userName   string // 用户名（从注册响应获取）
 	deviceName string // 设备名称（从注册响应获取，即 Node.Name）
 
 	// gRPC连接
@@ -51,10 +53,14 @@ type Agent struct {
 	tailscaleIP    string
 
 	// K8S 能力（P1 新增）
-	permCache   *PermissionCache    // 权限缓存
-	k8sAPIProxy *K8SAPIProxy        // K8S API 反向代理
-	svcInformer *K8SServiceInformer // K8S Service Informer
-	svcProxy    *K8SSVCProxy        // K8S Service gRPC 代理
+	permCache           *PermissionCache       // 权限缓存
+	k8sAPIProxy         *K8SAPIProxy           // K8S API 反向代理
+	svcInformer         *K8SServiceInformer    // K8S Service Informer
+	svcProxy            *K8SSVCProxy           // K8S Service gRPC 代理
+	containerDiscovery  *K8SContainerDiscovery // ContainerSSH Pod 候选发现
+	containerExecBroker *ContainerExecBroker   // ContainerSSH Kubernetes Exec 数据面
+	containerSSHProxy   *ContainerSSHProxy     // ContainerSSH tsnet SSH 入口
+	containerSessions   *ContainerSessionManager
 
 	// Endpoint 能力（P2 新增）
 	endpointServer      *EndpointServer      // Endpoint 内网 gRPC Server
@@ -73,6 +79,7 @@ type Agent struct {
 
 	// 域名后缀（从 Server 心跳响应获取）
 	domainSuffix string
+	updater      *updater.Manager
 
 	// 运行模式标识
 	isClientMode bool // true = Client 模式（CloudIDE 等），false = Agent 模式
@@ -97,7 +104,7 @@ func NewAgent(cfg *config.AgentConfig, version, buildDate string) (*Agent, error
 		networkInfo.LanIP, networkInfo.LanGateway, networkInfo.LanInterface,
 		networkInfo.RuntimeEnv, networkInfo.Hostname)
 
-	return &Agent{
+	agent := &Agent{
 		config:         cfg,
 		version:        version,
 		lanDetector:    lanDetector,
@@ -105,7 +112,14 @@ func NewAgent(cfg *config.AgentConfig, version, buildDate string) (*Agent, error
 		auditCollector: NewAuditCollector(),
 		ctx:            ctx,
 		cancel:         cancel,
-	}, nil
+	}
+	updateManager, err := newAgentUpdateManager(version)
+	if err != nil {
+		logger.Warnf("初始化 Agent updater 失败: %v", err)
+	} else {
+		agent.updater = updateManager
+	}
+	return agent, nil
 }
 
 // Run 运行Agent（Agent 模式：完整的 gRPC 注册 + 心跳 + ProxyManager + VisitorManager）
@@ -140,6 +154,11 @@ func (a *Agent) Run() error {
 	if a.config.SVC.Enabled {
 		if err := a.startK8SServiceModules(); err != nil {
 			logger.Warnf("启动 K8S Service 模块失败: %v", err)
+		}
+	}
+	if a.config.Container.Enabled {
+		if err := a.startK8SContainerDiscovery(); err != nil {
+			logger.Warnf("启动 ContainerSSH Pod 候选发现失败: %v", err)
 		}
 	}
 
@@ -183,6 +202,12 @@ func (a *Agent) Run() error {
 	if a.svcInformer != nil {
 		a.svcInformer.Stop()
 	}
+	if a.containerDiscovery != nil {
+		a.containerDiscovery.Stop()
+	}
+	if a.containerSSHProxy != nil {
+		a.containerSSHProxy.Stop()
+	}
 
 	// 停止 Endpoint K8SAPI 代理
 	if a.endpointK8SAPIProxy != nil {
@@ -221,7 +246,7 @@ func (a *Agent) Run() error {
 }
 
 // RunClient 运行 Client 模式（CloudIDE 等场景）
-// 启动 tsnet 连接网络 + SSH + gRPC 心跳（精简版，不需要 ProxyManager/VisitorManager）
+// 启动 tsnet 出站网络和 gRPC 心跳（精简版，不提供容器 SSH 入站）
 func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 	// 标记为 Client 模式
 	a.isClientMode = true
@@ -504,11 +529,10 @@ func (a *Agent) register() error {
 		hostname = a.networkInfo.Hostname
 	}
 
-	var systemInfo *pb.SystemInfo
-	if hostname != "" {
-		systemInfo = &pb.SystemInfo{
-			Hostname: hostname,
-		}
+	systemInfo := &pb.SystemInfo{
+		Os:       runtime.GOOS,
+		Arch:     runtime.GOARCH,
+		Hostname: hostname,
 	}
 
 	resp, err := a.grpcClient.Register(a.ctx, &pb.AgentRegisterRequest{
@@ -527,7 +551,7 @@ func (a *Agent) register() error {
 	}
 
 	a.agentID = resp.AgentId
-	
+
 	// 保存用户名和设备名称（从注册响应获取）
 	if resp.UserName != "" {
 		a.userName = resp.UserName
@@ -535,7 +559,7 @@ func (a *Agent) register() error {
 	} else {
 		logger.Infof("注册成功，Agent ID: %d", a.agentID)
 	}
-	
+
 	// 保存设备名称（从 gRPC 注册响应获取，如果有的话）
 	if resp.DeviceName != "" {
 		a.deviceName = resp.DeviceName
@@ -736,8 +760,24 @@ func (a *Agent) runHeartbeatStream(stream pb.AgentService_HeartbeatClient) {
 
 // sendHeartbeat 发送心跳
 func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
+	hostname := ""
+	if a.networkInfo != nil {
+		hostname = a.networkInfo.Hostname
+	}
+
 	req := &pb.AgentHeartbeatRequest{
-		AgentId: a.agentID,
+		AgentId:         a.agentID,
+		Version:         a.version,
+		UpdaterProtocol: "v1",
+		SystemInfo: &pb.SystemInfo{
+			Os:       runtime.GOOS,
+			Arch:     runtime.GOARCH,
+			Hostname: hostname,
+		},
+	}
+	if a.containerExecBroker != nil && a.containerSSHProxy != nil {
+		req.ContainerSshProtocol = "v1"
+		req.ContainerSshSessionEvents = a.containerSessions.EventsForHeartbeat()
 	}
 
 	// 添加设备名称（Node.Name，即 DeployToken.Name）
@@ -752,10 +792,6 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 	}
 
 	// 添加网络信息
-	hostname := ""
-	if a.networkInfo != nil {
-		hostname = a.networkInfo.Hostname
-	}
 	if hostname != "" {
 		req.Hostname = hostname
 	}
@@ -812,6 +848,21 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 		}
 	}
 
+	// ContainerSSH 候选只携带运行时事实，Server 负责与可信 Workspace
+	// Binding reconciliation；Agent 不提交 Tenant ID，也不直接发布 Resource。
+	if a.containerDiscovery != nil {
+		for _, candidate := range a.containerDiscovery.GetCandidates() {
+			protoCandidate := &pb.ContainerDiscoveryCandidate{
+				ProviderHint: candidate.ProviderHint, WorkspaceHint: candidate.WorkspaceHint,
+				GenerationHint: candidate.GenerationHint, ClusterId: a.config.Telemetry.Cluster,
+				Namespace: candidate.Namespace, PodName: candidate.PodName, PodUid: candidate.PodUID,
+				ContainerName: candidate.ContainerName, Ready: candidate.Ready,
+				LeaseSeconds: int32(candidate.LeaseSeconds), Labels: candidate.Labels,
+			}
+			req.ContainerCandidates = append(req.ContainerCandidates, protoCandidate)
+		}
+	}
+
 	// 构建域名注册列表
 	req.DomainRegistrations = a.buildDomainRegistrations()
 
@@ -821,6 +872,11 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 			connEp := &pb.ConnectedEndpoint{
 				Name:               ep.Name,
 				Status:             "online",
+				Version:            ep.Version,
+				Os:                 ep.OS,
+				Arch:               ep.Arch,
+				UpdaterProtocol:    ep.UpdaterProtocol,
+				UpdateStatuses:     ep.UpdateStatuses,
 				DiscoveredServices: ep.DiscoveredServices,
 				// SSH 配置
 				SshUsers: ep.SSHUsers,
@@ -839,6 +895,9 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 	if a.auditCollector != nil {
 		req.AuditRecords = a.auditCollector.Flush()
 	}
+	if a.updater != nil {
+		req.UpdateStatuses = updateStatusesToProto(a.updater.Statuses())
+	}
 
 	return stream.Send(req)
 }
@@ -856,11 +915,31 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 		a.permCache.UpdateK8SPermissions(resp.K8SPermissions)
 		a.permCache.UpdateK8SServicePermissions(resp.K8SServicePermissions)
 		a.permCache.UpdateEndpointSSHPermissions(resp.EndpointSshPermissions)
+		if resp.ContainerSshProtocol == "v1" {
+			a.permCache.UpdateContainerSSHPermissionsFromProto(resp.ContainerSshPermissions)
+		} else {
+			// An old Server cannot provide an authoritative full snapshot.
+			a.permCache.UpdateContainerSSHPermissionsFromProto(nil)
+		}
+		if a.containerSessions != nil {
+			a.containerSessions.ReconcilePermissions(a.permCache)
+			a.containerSessions.AckEvents(resp.ContainerSshSessionAckEventIds)
+			a.containerSessions.Disconnect(resp.ContainerSshDisconnectSessionIds, "admin_disconnect")
+		}
 	}
 
 	// 同步 Endpoint 能力配置到 EndpointServer（让 Agent 能把 Server 配置下发给 Endpoint）
 	if a.endpointServer != nil {
 		a.syncEndpointServerConfigs(resp)
+		a.endpointServer.SetUpdateDirectives(resp.EndpointUpdateDirectives)
+	}
+	if a.updater != nil {
+		for _, directive := range resp.UpdateDirectives {
+			a.updater.Handle(updateDirectiveFromProto(directive))
+		}
+	}
+	if len(resp.UpdateDirectives) > 0 {
+		logger.Infof("收到 %d 个 Agent 更新任务", len(resp.UpdateDirectives))
 	}
 
 	// 处理 Server 远程能力配置（每次心跳都检查，不受 configVersion 控制）
@@ -904,29 +983,29 @@ func (a *Agent) syncEndpointServerConfigs(resp *pb.AgentHeartbeatResponse) {
 			K8SSvcEnabled:    cfg.K8SserviceEnabled,
 			K8SSvcEnabledSet: true,
 		}
-		
+
 		// 预分配端口（即使 Endpoint 尚未连接）
 		// 这样可以避免 buildDomainRegistrations 中 AllocatePort 自动分配导致的端口不一致
 		if cfg.SshEnabled && cfg.SshPort > 0 && a.endpointSSHProxy != nil {
 			if err := a.endpointSSHProxy.AllocateSpecificPort(cfg.EndpointName, uint16(cfg.SshPort)); err != nil {
-				logger.Warnf("[syncEndpointServerConfigs] 预分配 SSH 端口失败: endpoint=%s, port=%d, err=%v", 
+				logger.Warnf("[syncEndpointServerConfigs] 预分配 SSH 端口失败: endpoint=%s, port=%d, err=%v",
 					cfg.EndpointName, cfg.SshPort, err)
 			} else {
-				logger.Debugf("[syncEndpointServerConfigs] 预分配 SSH 端口: endpoint=%s, port=%d", 
+				logger.Debugf("[syncEndpointServerConfigs] 预分配 SSH 端口: endpoint=%s, port=%d",
 					cfg.EndpointName, cfg.SshPort)
 			}
 		}
-		
+
 		if cfg.K8SapiEnabled && cfg.K8SapiPort > 0 && a.endpointK8SAPIProxy != nil {
 			if err := a.endpointK8SAPIProxy.AllocateSpecificPort(cfg.EndpointName, uint16(cfg.K8SapiPort)); err != nil {
-				logger.Warnf("[syncEndpointServerConfigs] 预分配 K8SAPI 端口失败: endpoint=%s, port=%d, err=%v", 
+				logger.Warnf("[syncEndpointServerConfigs] 预分配 K8SAPI 端口失败: endpoint=%s, port=%d, err=%v",
 					cfg.EndpointName, cfg.K8SapiPort, err)
 			} else {
-				logger.Debugf("[syncEndpointServerConfigs] 预分配 K8SAPI 端口: endpoint=%s, port=%d", 
+				logger.Debugf("[syncEndpointServerConfigs] 预分配 K8SAPI 端口: endpoint=%s, port=%d",
 					cfg.EndpointName, cfg.K8SapiPort)
 			}
 		}
-		
+
 		a.endpointServer.UpdateServerConfig(cfg.EndpointName, serverCfg)
 		logger.Infof("同步 Endpoint 配置: name=%s, ssh=%v(port=%d), k8sapi=%v(port=%d), api_server=%s, k8ssvc=%v",
 			cfg.EndpointName, serverCfg.SSHEnabled, serverCfg.SSHPort,
@@ -1029,6 +1108,10 @@ func (a *Agent) GetVisitorLANIP() string {
 	return a.visitorManager.GetLANIP()
 }
 
+func (a *Agent) shouldRegisterSSHDomain() bool {
+	return a != nil && a.config != nil && a.config.Tunnel.EnableSSH
+}
+
 // buildDomainRegistrations 构建域名注册列表
 // 根据 Agent 当前配置和状态，生成需要上报给 Server 的域名列表
 func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
@@ -1052,9 +1135,9 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		agentIP = a.tsManager.GetIP()
 	}
 
-	// 1. Agent SSH 域名：{device}.{agent_name}{domain_suffix}（如 ide-chengdu.beijing.beagle）
-	// Client 模式（CloudIDE）默认启用 Tailscale SSH，也需要注册域名
-	if (a.config.Tunnel.EnableSSH || a.isClientMode) && a.tsManager != nil && a.tsManager.IsConnected() && device != "" {
+	// 1. Agent SSH 域名：{device}.{agent_name}{domain_suffix}（如 node-1.beijing.beagle）
+	// Client 模式仅在显式启用兼容 SSH 入站时注册；新部署默认只提供出站访问。
+	if a.shouldRegisterSSHDomain() && a.tsManager != nil && a.tsManager.IsConnected() && device != "" {
 		// 自动检测系统 SSH 用户
 		sshUsers := detectSystemSSHUsers()
 		if len(sshUsers) == 0 {
@@ -1231,6 +1314,45 @@ func (a *Agent) startK8SServiceModules() error {
 	return nil
 }
 
+func (a *Agent) startK8SContainerDiscovery() error {
+	discovery, err := NewK8SContainerDiscovery(&a.config.Container, a.ctx)
+	if err != nil {
+		return err
+	}
+	discovery.Start()
+	a.containerDiscovery = discovery
+	broker, err := NewContainerExecBrokerFromKubeconfig(a.config.Container.Kubeconfig, a.permCache)
+	if err != nil {
+		discovery.Stop()
+		a.containerDiscovery = nil
+		return fmt.Errorf("创建 ContainerSSH Exec Broker 失败: %w", err)
+	}
+	a.containerExecBroker = broker
+	if a.tsManager == nil || !a.tsManager.IsConnected() {
+		discovery.Stop()
+		a.containerDiscovery = nil
+		a.containerExecBroker = nil
+		return fmt.Errorf("启动 ContainerSSH 入口需要已连接的 Tailscale")
+	}
+	sessions := NewContainerSessionManager()
+	proxy, err := NewContainerSSHProxy(a.tsManager, a.permCache, broker, sessions, a.config.Tunnel.StateDir, a.ctx)
+	if err != nil {
+		discovery.Stop()
+		a.containerDiscovery = nil
+		a.containerExecBroker = nil
+		return fmt.Errorf("创建 ContainerSSH 入口失败: %w", err)
+	}
+	if err := proxy.Start(); err != nil {
+		discovery.Stop()
+		a.containerDiscovery = nil
+		a.containerExecBroker = nil
+		return fmt.Errorf("启动 ContainerSSH 入口失败: %w", err)
+	}
+	a.containerSSHProxy = proxy
+	a.containerSessions = sessions
+	return nil
+}
+
 // startHealthServer 启动健康检查HTTP服务器
 func (a *Agent) startHealthServer() error {
 	gin.SetMode(gin.ReleaseMode)
@@ -1286,19 +1408,23 @@ func (a *Agent) startHealthServer() error {
 func (a *Agent) applyCapabilityConfig(cap *pb.AgentCapabilityConfig) {
 	// === SSH ===
 	if cap.SshEnabledSet {
-		oldSSH := a.config.Tunnel.EnableSSH
-		if cap.SshEnabled != oldSSH {
-			a.config.Tunnel.EnableSSH = cap.SshEnabled
-			logger.Infof("远程配置: SSH %s -> %s", boolStr(oldSSH), boolStr(cap.SshEnabled))
-			// 动态开关 SSH
-			if a.tsManager != nil {
-				if cap.SshEnabled {
-					if err := a.tsManager.EnableSSHRemote(); err != nil {
-						logger.Warnf("远程启用 SSH 失败: %v", err)
-					}
-				} else {
-					if err := a.tsManager.DisableSSHRemote(); err != nil {
-						logger.Warnf("远程禁用 SSH 失败: %v", err)
+		if a.isClientMode {
+			logger.Debugf("Client 模式忽略远程 SSH 能力配置，保留本地配置")
+		} else {
+			oldSSH := a.config.Tunnel.EnableSSH
+			if cap.SshEnabled != oldSSH {
+				a.config.Tunnel.EnableSSH = cap.SshEnabled
+				logger.Infof("远程配置: SSH %s -> %s", boolStr(oldSSH), boolStr(cap.SshEnabled))
+				// 动态开关 SSH
+				if a.tsManager != nil {
+					if cap.SshEnabled {
+						if err := a.tsManager.EnableSSHRemote(); err != nil {
+							logger.Warnf("远程启用 SSH 失败: %v", err)
+						}
+					} else {
+						if err := a.tsManager.DisableSSHRemote(); err != nil {
+							logger.Warnf("远程禁用 SSH 失败: %v", err)
+						}
 					}
 				}
 			}

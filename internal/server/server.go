@@ -43,10 +43,13 @@ type Server struct {
 	loginService   *service.DesktopLoginService
 	desktopAuthAPI *api.DesktopAuthAPI
 
-	headscaleClient *headscale.Client
-	aclSyncService  *headscale.ACLSyncService
-	aclSyncCtx      context.Context
-	aclSyncCancel   context.CancelFunc
+	headscaleClient       *headscale.Client
+	aclSyncService        *headscale.ACLSyncService
+	aclSyncCtx            context.Context
+	aclSyncCancel         context.CancelFunc
+	reconciliationService *service.ResourceReconciliationService
+	reconciliationCtx     context.Context
+	reconciliationCancel  context.CancelFunc
 }
 
 // GetAgentService 获取 AgentService（供 API 使用）
@@ -82,6 +85,7 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 	var aclSyncService *headscale.ACLSyncService
 	var aclSyncCtx context.Context
 	var aclSyncCancel context.CancelFunc
+	reconciliationCtx, reconciliationCancel := context.WithCancel(context.Background())
 
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
 		logger.Info("初始化 Headscale ACL 同步服务")
@@ -101,11 +105,14 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 	}
 
 	return &Server{
-		config:          cfg,
-		headscaleClient: headscaleClient,
-		aclSyncService:  aclSyncService,
-		aclSyncCtx:      aclSyncCtx,
-		aclSyncCancel:   aclSyncCancel,
+		config:                cfg,
+		headscaleClient:       headscaleClient,
+		aclSyncService:        aclSyncService,
+		aclSyncCtx:            aclSyncCtx,
+		aclSyncCancel:         aclSyncCancel,
+		reconciliationService: service.NewResourceReconciliationService(db.DB),
+		reconciliationCtx:     reconciliationCtx,
+		reconciliationCancel:  reconciliationCancel,
 	}, nil
 }
 
@@ -229,6 +236,9 @@ func (s *Server) Run() error {
 	if s.aclSyncService != nil {
 		go s.aclSyncService.StartPeriodicSync(s.aclSyncCtx)
 	}
+	if s.reconciliationService != nil {
+		go s.reconciliationService.StartPeriodicMaintenance(s.reconciliationCtx)
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -238,6 +248,9 @@ func (s *Server) Run() error {
 
 	if s.aclSyncCancel != nil {
 		s.aclSyncCancel()
+	}
+	if s.reconciliationCancel != nil {
+		s.reconciliationCancel()
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -280,7 +293,7 @@ func (s *Server) setupRouter() *gin.Engine {
 	router.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, X-Tenant-ID, Authorization, accept, origin, Cache-Control, X-Requested-With")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
 
 		if c.Request.Method == "OPTIONS" {
@@ -384,6 +397,7 @@ func (s *Server) setupRouter() *gin.Engine {
 			v1Group.GET("/download/agent/version", downloadAPI.GetAgentVersion)
 			v1Group.GET("/download/install_endpoint.sh", downloadAPI.GetEndpointInstallScript)
 			v1Group.GET("/download/endpoint", downloadAPI.GetEndpointDownload)
+			v1Group.GET("/download/endpoint/version", downloadAPI.GetEndpointVersion)
 
 			// 统一注册 API（公开，Agent 和 Client 共用）
 			deployPublicAPI := api.NewDeployAPI(s.config)
@@ -399,10 +413,22 @@ func (s *Server) setupRouter() *gin.Engine {
 				adminGroup.POST("/auth/logout", adminAPI.Logout)
 
 				adminAuthGroup := adminGroup.Group("")
-				adminAuthGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret))
+				adminAuthGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret, s.config.Security.AllowLocalhostAdminDebug))
+				adminAuthGroup.Use(api.ManagementAuthorizationMiddleware())
 				{
 					adminAuthGroup.GET("/auth/me", adminAPI.GetMe)
 					adminAuthGroup.PUT("/auth/password", adminAPI.ChangePassword)
+
+					// 管理账号与 Tenant 管理范围（Platform Admin 专属）
+					managementAccountAPI := api.NewManagementAccountAPI()
+					adminAuthGroup.GET("/management-accounts", managementAccountAPI.List)
+					adminAuthGroup.POST("/management-accounts", managementAccountAPI.Create)
+					adminAuthGroup.POST("/management-accounts/:id/password", managementAccountAPI.ResetPassword)
+					adminAuthGroup.POST("/management-accounts/:id/enable", managementAccountAPI.Enable)
+					adminAuthGroup.POST("/management-accounts/:id/disable", managementAccountAPI.Disable)
+					adminAuthGroup.GET("/management-accounts/:id/tenant-memberships", managementAccountAPI.ListTenantMemberships)
+					adminAuthGroup.POST("/management-accounts/:id/tenant-memberships", managementAccountAPI.BindTenant)
+					adminAuthGroup.POST("/management-accounts/:id/tenant-memberships/:tenant_id/disable", managementAccountAPI.DisableTenantMembership)
 
 					// 用户管理
 					userAPI := api.NewUserAPI(s.config)
@@ -427,6 +453,7 @@ func (s *Server) setupRouter() *gin.Engine {
 
 					// 设备管理
 					nodeAPI := api.NewNodeAPI(s.config)
+					nodeAPI.SetAgentService(s.agentService)
 					adminAuthGroup.GET("/nodes", nodeAPI.List)
 					adminAuthGroup.GET("/nodes/:id", nodeAPI.Get)
 					adminAuthGroup.GET("/nodes/:id/capabilities", nodeAPI.GetCapabilities)
@@ -513,6 +540,18 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.DELETE("/acl/k8s-service/:id/groups/:gid", aclAPI.RemoveK8SServiceACLGroup)
 					// K8S Service 统一授权（按集群聚合）
 					adminAuthGroup.GET("/acl/k8s-service-unified", aclAPI.ListK8SServiceUnifiedACL)
+					adminAuthGroup.GET("/acl/endpoint-k8sapi", aclAPI.ListEndpointK8SAPIACL)
+					adminAuthGroup.GET("/acl/endpoint-k8sapi/:id", aclAPI.GetEndpointK8SAPIACL)
+					adminAuthGroup.POST("/acl/endpoint-k8sapi/:id/users", aclAPI.AddEndpointK8SAPIACLUsers)
+					adminAuthGroup.POST("/acl/endpoint-k8sapi/:id/groups", aclAPI.AddEndpointK8SAPIACLGroups)
+					adminAuthGroup.DELETE("/acl/endpoint-k8sapi/:id/users/:uid", aclAPI.RemoveEndpointK8SAPIACLUser)
+					adminAuthGroup.DELETE("/acl/endpoint-k8sapi/:id/groups/:gid", aclAPI.RemoveEndpointK8SAPIACLGroup)
+					adminAuthGroup.GET("/acl/endpoint-k8sservice", aclAPI.ListEndpointK8SServiceACL)
+					adminAuthGroup.GET("/acl/endpoint-k8sservice/:id", aclAPI.GetEndpointK8SServiceACL)
+					adminAuthGroup.POST("/acl/endpoint-k8sservice/:id/users", aclAPI.AddEndpointK8SServiceACLUsers)
+					adminAuthGroup.POST("/acl/endpoint-k8sservice/:id/groups", aclAPI.AddEndpointK8SServiceACLGroups)
+					adminAuthGroup.DELETE("/acl/endpoint-k8sservice/:id/users/:uid", aclAPI.RemoveEndpointK8SServiceACLUser)
+					adminAuthGroup.DELETE("/acl/endpoint-k8sservice/:id/groups/:gid", aclAPI.RemoveEndpointK8SServiceACLGroup)
 
 					// Endpoint 管理（Endpoint 由 Agent 自动发现上报，不支持手动创建）
 					endpointAPI := api.NewEndpointAPI(s.config)
@@ -534,8 +573,66 @@ func (s *Server) setupRouter() *gin.Engine {
 					// 资源发现（管理员查看 K8S Service 发现数据）
 					resourceAPI := api.NewResourceAPI(s.config)
 					resourceAPI.SetImmediateReportNotifier(s.agentService)
+					unifiedResourceAPI := api.NewUnifiedResourceAPI()
+					candidateAPI := api.NewResourceCandidateAPI()
+					legacyClaimAPI := api.NewLegacyResourceClaimAPI()
+					tenantContextAPI := api.NewTenantContextAPI()
+					tenantBusinessAPI := api.NewTenantBusinessAPI()
+					tenantSettingsAPI := api.NewTenantSettingsAPI()
+					tenantAdminMembershipAPI := api.NewTenantAdminMembershipAPI()
+					overviewAPI := api.NewOverviewAPI()
+					platformAdminAPI := api.NewPlatformAdminAPI()
+					adminAuthGroup.GET("/overview/platform", overviewAPI.Platform)
+					adminAuthGroup.GET("/platform-admins", platformAdminAPI.List)
+					adminAuthGroup.POST("/platform-admins", platformAdminAPI.Create)
+					adminAuthGroup.PUT("/platform-admins/:id", platformAdminAPI.Update)
+					adminAuthGroup.GET("/platform/resources", unifiedResourceAPI.List)
+					adminAuthGroup.GET("/platform/resources/summary", unifiedResourceAPI.Summary)
+					adminAuthGroup.GET("/tenant-contexts", tenantContextAPI.List)
+					adminAuthGroup.GET("/tenant-contexts/:id", tenantContextAPI.Get)
+					adminAuthGroup.GET("/tenant-admin-memberships", tenantAdminMembershipAPI.List)
+					adminAuthGroup.GET("/tenant-admin-memberships/options", tenantAdminMembershipAPI.ListAdminOptions)
+					adminAuthGroup.POST("/tenant-admin-memberships", tenantAdminMembershipAPI.Create)
+					adminAuthGroup.PUT("/tenant-admin-memberships/:id", tenantAdminMembershipAPI.Update)
+					adminAuthGroup.GET("/tenants", unifiedResourceAPI.ListTenants)
+					adminAuthGroup.POST("/tenants", unifiedResourceAPI.CreateTenant)
+					adminAuthGroup.GET("/tenants/:id/overview", overviewAPI.Tenant)
+					adminAuthGroup.GET("/tenants/:id/settings", tenantSettingsAPI.Get)
+					adminAuthGroup.PUT("/tenants/:id/settings", tenantSettingsAPI.Update)
+					adminAuthGroup.GET("/tenants/:id/members", unifiedResourceAPI.ListTenantMembers)
+					adminAuthGroup.POST("/tenants/:id/members", unifiedResourceAPI.AddTenantMember)
+					adminAuthGroup.POST("/tenants/:id/members/:user_id/disable", unifiedResourceAPI.DisableTenantMember)
+					adminAuthGroup.GET("/tenants/:id/member-devices", tenantBusinessAPI.ListMemberDevices)
+					adminAuthGroup.GET("/tenants/:id/audit-logs", tenantBusinessAPI.ListAuditLogs)
+					adminAuthGroup.GET("/resources", unifiedResourceAPI.List)
+					adminAuthGroup.GET("/resources/summary", unifiedResourceAPI.Summary)
+					adminAuthGroup.POST("/resources", unifiedResourceAPI.Create)
+					adminAuthGroup.POST("/resources/:id/targets", unifiedResourceAPI.ObserveTarget)
+					adminAuthGroup.GET("/resource-candidates", candidateAPI.List)
+					adminAuthGroup.POST("/resource-candidates", candidateAPI.Observe)
+					adminAuthGroup.POST("/resource-candidates/:id/reject", candidateAPI.Reject)
+					adminAuthGroup.POST("/resource-candidates/:id/reconcile", candidateAPI.Reconcile)
+					adminAuthGroup.GET("/legacy-resource-claims", legacyClaimAPI.List)
+					adminAuthGroup.POST("/legacy-resource-claims", legacyClaimAPI.Claim)
+					adminAuthGroup.POST("/legacy-resource-claims/:id/revoke", legacyClaimAPI.Revoke)
+					workspaceBindingAPI := api.NewWorkspaceBindingAPI()
+					adminAuthGroup.GET("/provider-tenant-bindings", workspaceBindingAPI.ListProviderTenantBindings)
+					adminAuthGroup.POST("/provider-tenant-bindings", workspaceBindingAPI.CreateProviderTenantBinding)
+					adminAuthGroup.GET("/workspace-bindings", workspaceBindingAPI.ListWorkspaceBindings)
+					adminAuthGroup.POST("/workspace-bindings", workspaceBindingAPI.CreateWorkspaceBinding)
 					adminAuthGroup.GET("/resources/k8s-services", resourceAPI.GetK8SServiceDiscoveries)
 					adminAuthGroup.POST("/resources/sync", resourceAPI.SyncK8SServiceDiscovery)
+					adminAuthGroup.GET("/resources/:id", unifiedResourceAPI.Get)
+					adminAuthGroup.GET("/resources/:id/events", unifiedResourceAPI.ListEvents)
+					adminAuthGroup.GET("/resources/:id/grants", unifiedResourceAPI.ListGrants)
+					adminAuthGroup.POST("/resources/:id/grants", unifiedResourceAPI.CreateGrant)
+					adminAuthGroup.GET("/grants", unifiedResourceAPI.ListAllGrants)
+					adminAuthGroup.POST("/grants/:id/revoke", unifiedResourceAPI.RevokeGrant)
+					sessionAPI := api.NewContainerSessionAPI()
+					adminAuthGroup.GET("/sessions", sessionAPI.List)
+					adminAuthGroup.GET("/sessions/:id", sessionAPI.Get)
+					adminAuthGroup.POST("/sessions/:id/revoke", sessionAPI.Revoke)
+					adminAuthGroup.POST("/sessions/:id/force-disconnect", sessionAPI.ForceDisconnect)
 
 					// 审计日志
 					auditAPI := api.NewAuditLogAPI()
@@ -555,6 +652,18 @@ func (s *Server) setupRouter() *gin.Engine {
 					// 版本管理
 					versionAPI := api.NewVersionAPI(s.config)
 					adminAuthGroup.GET("/version/latest", versionAPI.GetLatest)
+
+					// Updater 发布和更新任务管理
+					updaterAPI := api.NewUpdaterAPI()
+					adminAuthGroup.POST("/updater/releases", updaterAPI.CreateRelease)
+					adminAuthGroup.GET("/updater/releases", updaterAPI.ListReleases)
+					adminAuthGroup.GET("/updater/releases/:id", updaterAPI.GetRelease)
+					adminAuthGroup.POST("/updater/releases/:id/publish", updaterAPI.PublishRelease)
+					adminAuthGroup.POST("/updater/tasks", updaterAPI.CreateTask)
+					adminAuthGroup.GET("/updater/tasks", updaterAPI.ListTasks)
+					adminAuthGroup.GET("/updater/tasks/:id", updaterAPI.GetTask)
+					adminAuthGroup.POST("/updater/tasks/:id/retry", updaterAPI.RetryTask)
+					adminAuthGroup.POST("/updater/tasks/:id/cancel", updaterAPI.CancelTask)
 
 					// 隧道管理
 					tunnelAPI := api.NewTunnelAPI(s.config)

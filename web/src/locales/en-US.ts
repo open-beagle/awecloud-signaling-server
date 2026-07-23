@@ -74,12 +74,14 @@ export default {
     passwordRequired: 'Password is required'
   },
   app: {
-    title: 'Signaling Server',
+    title: 'Beagle Signal',
     shortTitle: 'Signaling'
   },
   menu: {
     users: 'Users',
     nodes: 'Nodes',
+    agentNodes: 'Agent Devices',
+    desktopNodes: 'Desktop Devices',
     groups: 'Groups',
     acl: 'Authorization',
     aclServices: 'Service Auth',

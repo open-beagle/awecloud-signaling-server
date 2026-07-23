@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -13,51 +14,36 @@ import (
 
 // GetLatestVersions 获取最新版本信息
 // @Summary 获取最新版本
-// @Description 获取 Agent/Desktop/Endpoint 的最新版本号（从已连接客户端统计）
+// @Description 获取 Agent/Desktop/Endpoint 的最新已发布版本号
 // @Tags 版本管理
 // @Produce json
 // @Success 200 {object} map[string]interface{}
 // @Router /api/v1/admin/version/latest [get]
 func GetLatestVersions(c *gin.Context) {
-	// 统计 Agent 最新版本（从 nodes 表）
-	var agentLatest string
-	err := db.DB.Model(&model.Node{}).
-		Where("version IS NOT NULL AND version != ''").
-		Order("version DESC").
-		Limit(1).
-		Pluck("version", &agentLatest).Error
-
-	if err != nil && err != gorm.ErrRecordNotFound {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   "查询 Agent 版本失败",
-		})
-		return
+	versions := map[string]string{
+		"agent":    "",
+		"desktop":  "",
+		"endpoint": "",
 	}
-
-	// 统计 Endpoint 最新版本（从 endpoints 表）
-	var endpointLatest string
-	err = db.DB.Model(&model.Endpoint{}).
-		Where("version IS NOT NULL AND version != ''").
-		Order("version DESC").
-		Limit(1).
-		Pluck("version", &endpointLatest).Error
-
-	if err != nil && err != gorm.ErrRecordNotFound {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   "查询 Endpoint 版本失败",
-		})
-		return
+	for _, component := range []model.Component{model.ComponentAgent, model.ComponentDesktop, model.ComponentEndpoint} {
+		var release model.Release
+		err := db.DB.Where("component = ? AND status = ?", component, model.ReleaseStatusPublished).
+			Order("published_at DESC, created_at DESC").First(&release).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"error":   "查询已发布版本失败",
+			})
+			return
+		}
+		if err == nil {
+			versions[string(component)] = release.Version
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data": gin.H{
-			"agent":    agentLatest,
-			"desktop":  "", // Desktop 暂不实现
-			"endpoint": endpointLatest,
-		},
+		"data":    versions,
 	})
 }
 

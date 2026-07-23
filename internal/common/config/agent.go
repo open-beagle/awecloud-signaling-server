@@ -16,9 +16,10 @@ type AgentConfig struct {
 	Health    HealthSection    `toml:"health"`
 	Log       LogConfig        `toml:"log"`
 	Telemetry TelemetrySection `toml:"telemetry"`
-	CloudIDE  CloudIDESection  `toml:"cloudide"` // CloudIDE 专属配置
-	K8S       K8SSection       `toml:"k8s"`      // K8S API 代理配置
-	SVC       SVCSection       `toml:"svc"`      // K8S Service 发现配置
+	CloudIDE  CloudIDESection  `toml:"cloudide"`  // CloudIDE 专属配置
+	K8S       K8SSection       `toml:"k8s"`       // K8S API 代理配置
+	SVC       SVCSection       `toml:"svc"`       // K8S Service 发现配置
+	Container ContainerSection `toml:"container"` // ContainerSSH 候选发现配置
 }
 
 type HealthSection struct {
@@ -64,6 +65,21 @@ type SVCSection struct {
 	LabelSelector  string   `toml:"label_selector"`   // Service 标签选择器（如 "signal.beagle.io/expose=true"）
 	Namespaces     []string `toml:"namespaces"`       // 监听的命名空间列表（空表示全部）
 	ListenPortBase int      `toml:"listen_port_base"` // tsnet gRPC 监听端口，默认 50051
+}
+
+// ContainerSection controls the opt-in Pod discovery used for ContainerSSH.
+// A restrictive label selector is required so ordinary cluster Pods are not
+// treated as SSH candidates.
+type ContainerSection struct {
+	Enabled            bool     `toml:"enabled"`
+	Kubeconfig         string   `toml:"kubeconfig"`
+	LabelSelector      string   `toml:"label_selector"`
+	Namespaces         []string `toml:"namespaces"`
+	ProviderLabel      string   `toml:"provider_label"`
+	WorkspaceLabel     string   `toml:"workspace_label"`
+	GenerationLabel    string   `toml:"generation_label"`
+	ContainerNameLabel string   `toml:"container_name_label"`
+	LeaseSeconds       int      `toml:"lease_seconds"`
 }
 
 // RegisterResult 统一注册接口的响应结果
@@ -206,6 +222,37 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 		}
 	}
 
+	// ContainerSSH Pod discovery
+	if v := os.Getenv("SIGNAL_CONTAINER_ENABLED"); v != "" {
+		cfg.Container.Enabled = envBool(v)
+	}
+	if v := os.Getenv("SIGNAL_CONTAINER_KUBECONFIG"); v != "" {
+		cfg.Container.Kubeconfig = v
+	}
+	if v := os.Getenv("SIGNAL_CONTAINER_LABEL_SELECTOR"); v != "" {
+		cfg.Container.LabelSelector = v
+	}
+	if v := os.Getenv("SIGNAL_CONTAINER_NAMESPACES"); v != "" {
+		cfg.Container.Namespaces = strings.Split(v, ",")
+	}
+	if v := os.Getenv("SIGNAL_CONTAINER_PROVIDER_LABEL"); v != "" {
+		cfg.Container.ProviderLabel = v
+	}
+	if v := os.Getenv("SIGNAL_CONTAINER_WORKSPACE_LABEL"); v != "" {
+		cfg.Container.WorkspaceLabel = v
+	}
+	if v := os.Getenv("SIGNAL_CONTAINER_GENERATION_LABEL"); v != "" {
+		cfg.Container.GenerationLabel = v
+	}
+	if v := os.Getenv("SIGNAL_CONTAINER_NAME_LABEL"); v != "" {
+		cfg.Container.ContainerNameLabel = v
+	}
+	if v := os.Getenv("SIGNAL_CONTAINER_LEASE_SECONDS"); v != "" {
+		if seconds, err := strconv.Atoi(v); err == nil {
+			cfg.Container.LeaseSeconds = seconds
+		}
+	}
+
 	// 日志
 	if v := os.Getenv("SIGNAL_LOG_LEVEL"); v != "" {
 		cfg.Log.Level = v
@@ -263,6 +310,29 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	}
 	if cfg.SVC.ListenPortBase == 0 {
 		cfg.SVC.ListenPortBase = 50051
+	}
+
+	// ContainerSSH discovery defaults are deliberately opt-in and restrictive.
+	if cfg.Container.LabelSelector == "" {
+		cfg.Container.LabelSelector = "signal.beagle.io/container-ssh=true"
+	}
+	if cfg.Container.Kubeconfig == "" {
+		cfg.Container.Kubeconfig = "~/.kube/config"
+	}
+	if cfg.Container.ProviderLabel == "" {
+		cfg.Container.ProviderLabel = "beagle.io/provider"
+	}
+	if cfg.Container.WorkspaceLabel == "" {
+		cfg.Container.WorkspaceLabel = "beagle.io/workspace"
+	}
+	if cfg.Container.GenerationLabel == "" {
+		cfg.Container.GenerationLabel = "beagle.io/workspace-generation"
+	}
+	if cfg.Container.ContainerNameLabel == "" {
+		cfg.Container.ContainerNameLabel = "beagle.io/container"
+	}
+	if cfg.Container.LeaseSeconds <= 0 {
+		cfg.Container.LeaseSeconds = 120
 	}
 
 	// Telemetry 默认值

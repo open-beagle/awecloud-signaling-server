@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/cache"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
@@ -231,13 +232,13 @@ func (a *ACLAPI) ListK8SServiceUnifiedACL(c *gin.Context) {
 		size = 20
 	}
 
-	clusterMap := make(map[uint64]*K8SServiceUnifiedACLClusterItem)
+	clusterMap := make(map[string]*K8SServiceUnifiedACLClusterItem)
 
 	if typeFilter == "all" || typeFilter == "agent" {
 		a.collectAgentK8SServiceClusters(search, clusterMap)
 	}
 	if typeFilter == "all" || typeFilter == "endpoint" {
-		a.collectEndpointK8SServiceClusters(search, clusterMap)
+		a.collectDiscoveredEndpointK8SServiceClusters(search, clusterMap)
 	}
 
 	// 从 domain_registry 获取服务提供者名称
@@ -266,14 +267,19 @@ func (a *ACLAPI) ListK8SServiceUnifiedACL(c *gin.Context) {
 }
 
 // fillK8SServiceProviderNames 从 domain_registry 查询 k8ssvc 类型记录，填充服务提供者名称
-func (a *ACLAPI) fillK8SServiceProviderNames(clusterMap map[uint64]*K8SServiceUnifiedACLClusterItem) {
+func (a *ACLAPI) fillK8SServiceProviderNames(clusterMap map[string]*K8SServiceUnifiedACLClusterItem) {
 	if len(clusterMap) == 0 {
 		return
 	}
 
 	userIDs := make([]uint64, 0, len(clusterMap))
-	for uid := range clusterMap {
-		userIDs = append(userIDs, uid)
+	for _, item := range clusterMap {
+		if item.ProviderType == "agent" && item.ProviderName == "" {
+			userIDs = append(userIDs, item.ID)
+		}
+	}
+	if len(userIDs) == 0 {
+		return
 	}
 
 	// k8ssvc 可能有多条记录（每个 service 一条），取第一条即可获取 Node/Endpoint 信息
@@ -291,30 +297,35 @@ func (a *ACLAPI) fillK8SServiceProviderNames(clusterMap map[uint64]*K8SServiceUn
 		}
 		seen[dr.UserID] = true
 
-		item, ok := clusterMap[dr.UserID]
-		if !ok {
-			continue
-		}
-
 		nodeName := ""
 		if dr.Node != nil {
 			nodeName = dr.Node.Name
 		}
 
+		providerName := ""
 		if dr.EndpointID != "" {
 			if nodeName != "" {
-				item.ProviderName = nodeName + " / " + dr.EndpointID
+				providerName = nodeName + " / " + dr.EndpointID
 			} else {
-				item.ProviderName = dr.EndpointID
+				providerName = dr.EndpointID
 			}
 		} else if nodeName != "" {
-			item.ProviderName = nodeName
+			providerName = nodeName
+		}
+		if providerName == "" {
+			continue
+		}
+
+		for _, item := range clusterMap {
+			if item.ID == dr.UserID && item.ProviderType == "agent" && item.ProviderName == "" {
+				item.ProviderName = providerName
+			}
 		}
 	}
 }
 
 // collectAgentK8SServiceClusters 收集由 Agent 直接提供 K8S Service 的集群
-func (a *ACLAPI) collectAgentK8SServiceClusters(search string, clusterMap map[uint64]*K8SServiceUnifiedACLClusterItem) {
+func (a *ACLAPI) collectAgentK8SServiceClusters(search string, clusterMap map[string]*K8SServiceUnifiedACLClusterItem) {
 	var userCounts []struct {
 		TargetUserID uint64 `gorm:"column:target_user_id"`
 		Count        int64  `gorm:"column:count"`
@@ -344,6 +355,15 @@ func (a *ACLAPI) collectAgentK8SServiceClusters(search string, clusterMap map[ui
 		agentUserIDs[gc.TargetUserID] = true
 	}
 
+	for agentID, services := range cache.GetAllK8SServiceDiscovery() {
+		for _, svc := range services {
+			if svc.EndpointName == "" {
+				agentUserIDs[agentID] = true
+				break
+			}
+		}
+	}
+
 	if len(agentUserIDs) == 0 {
 		return
 	}
@@ -364,7 +384,7 @@ func (a *ACLAPI) collectAgentK8SServiceClusters(search string, clusterMap map[ui
 	}
 
 	for _, user := range users {
-		clusterMap[user.ID] = &K8SServiceUnifiedACLClusterItem{
+		clusterMap["agent:"+strconv.FormatUint(user.ID, 10)] = &K8SServiceUnifiedACLClusterItem{
 			ID:           user.ID,
 			Name:         user.Name,
 			Alias:        user.Alias,
@@ -381,6 +401,114 @@ func (a *ACLAPI) collectAgentK8SServiceClusters(search string, clusterMap map[ui
 func (a *ACLAPI) collectEndpointK8SServiceClusters(search string, clusterMap map[uint64]*K8SServiceUnifiedACLClusterItem) {
 	// P10 重构：Endpoint K8SService 权限已废弃，不再收集
 	// 保留方法以兼容旧代码，但不执行任何操作
+}
+
+func (a *ACLAPI) collectDiscoveredEndpointK8SServiceClusters(search string, clusterMap map[string]*K8SServiceUnifiedACLClusterItem) {
+	discoveries := cache.GetAllK8SServiceDiscovery()
+	if len(discoveries) == 0 {
+		return
+	}
+
+	endpointNamesByAgent := make(map[uint64]map[string]bool)
+	agentIDs := make([]uint64, 0, len(discoveries))
+	for agentID, services := range discoveries {
+		for _, svc := range services {
+			if svc.EndpointName == "" {
+				continue
+			}
+			if endpointNamesByAgent[agentID] == nil {
+				endpointNamesByAgent[agentID] = make(map[string]bool)
+				agentIDs = append(agentIDs, agentID)
+			}
+			endpointNamesByAgent[agentID][svc.EndpointName] = true
+		}
+	}
+	if len(endpointNamesByAgent) == 0 {
+		return
+	}
+
+	var endpoints []model.Endpoint
+	if err := db.DB.Preload("User").
+		Where("user_id IN ? AND revoked = ? AND k8sservice_enabled = ?", agentIDs, false, true).
+		Find(&endpoints).Error; err != nil {
+		return
+	}
+
+	agentIDSet := make(map[uint64]bool)
+	for _, endpoint := range endpoints {
+		if endpointNamesByAgent[endpoint.UserID][endpoint.Name] {
+			agentIDSet[endpoint.UserID] = true
+		}
+	}
+	if len(agentIDSet) == 0 {
+		return
+	}
+
+	permissionAgentIDs := make([]uint64, 0, len(agentIDSet))
+	for agentID := range agentIDSet {
+		permissionAgentIDs = append(permissionAgentIDs, agentID)
+	}
+
+	var userCounts []struct {
+		TargetUserID uint64 `gorm:"column:target_user_id"`
+		Count        int64  `gorm:"column:count"`
+	}
+	db.DB.Model(&model.AclK8SServiceUserPermission{}).
+		Select("target_user_id, COUNT(*) as count").
+		Where("target_user_id IN ?", permissionAgentIDs).
+		Group("target_user_id").Find(&userCounts)
+
+	userCountMap := make(map[uint64]int64)
+	for _, uc := range userCounts {
+		userCountMap[uc.TargetUserID] = uc.Count
+	}
+
+	var groupCounts []struct {
+		TargetUserID uint64 `gorm:"column:target_user_id"`
+		Count        int64  `gorm:"column:count"`
+	}
+	db.DB.Model(&model.AclK8SServiceGroupPermission{}).
+		Select("target_user_id, COUNT(*) as count").
+		Where("target_user_id IN ?", permissionAgentIDs).
+		Group("target_user_id").Find(&groupCounts)
+
+	groupCountMap := make(map[uint64]int64)
+	for _, gc := range groupCounts {
+		groupCountMap[gc.TargetUserID] = gc.Count
+	}
+
+	for _, endpoint := range endpoints {
+		if !endpointNamesByAgent[endpoint.UserID][endpoint.Name] {
+			continue
+		}
+
+		agentName := ""
+		agentAlias := ""
+		if endpoint.User != nil {
+			agentName = endpoint.User.Name
+			agentAlias = endpoint.User.Alias
+		}
+
+		if search != "" &&
+			!containsIgnoreCase(endpoint.Name, search) &&
+			!containsIgnoreCase(endpoint.Alias, search) &&
+			!containsIgnoreCase(agentName, search) &&
+			!containsIgnoreCase(agentAlias, search) {
+			continue
+		}
+
+		clusterMap["endpoint:"+endpoint.ID] = &K8SServiceUnifiedACLClusterItem{
+			ID:           endpoint.UserID,
+			Name:         agentName,
+			Alias:        agentAlias,
+			ProviderType: "endpoint",
+			ProviderID:   endpoint.ID,
+			ProviderName: endpoint.Name,
+			UserCount:    userCountMap[endpoint.UserID],
+			GroupCount:   groupCountMap[endpoint.UserID],
+			CreatedAt:    endpoint.CreatedAt,
+		}
+	}
 }
 
 // containsIgnoreCase 不区分大小写的字符串包含检查

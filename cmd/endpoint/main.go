@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/banner"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
+	"github.com/open-beagle/awecloud-signaling-server/internal/updater"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
@@ -66,6 +68,14 @@ type SVCConfig struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "updater-apply" {
+		if err := updater.RunApplyCLI(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "updater apply failed: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	configPath := flag.String("c", "config/endpoint.toml", "配置文件路径")
 	showVersion := flag.Bool("v", false, "显示版本信息")
 	showVersionLong := flag.Bool("version", false, "显示版本信息")
@@ -114,6 +124,18 @@ func main() {
 	logger.Infof("Endpoint 名称: %s", cfg.Agent.Name)
 	logger.Infof("Agent 地址: %s", cfg.Agent.Address)
 
+	updateManager, err := updater.NewManager(updater.Config{
+		Component:       "endpoint",
+		CurrentVersion:  version,
+		StateDir:        "/etc/kubernetes/data/signaling/updater/endpoint",
+		CurrentLink:     "/opt/bin/signal_endpoint",
+		ServiceName:     "signal-endpoint",
+		PublicKeyBase64: os.Getenv("SIGNAL_UPDATER_PUBLIC_KEY"),
+	})
+	if err != nil {
+		logger.Fatalf("初始化 Endpoint updater 失败: %v", err)
+	}
+
 	// 能力配置（可选，也可以完全由 Web 界面管理）
 	if !cfg.SSH.Enabled && !cfg.K8S.Enabled && !cfg.SVC.Enabled {
 		logger.Warnf("本地未启用任何能力，将由 Web 界面管理能力配置")
@@ -134,7 +156,7 @@ func main() {
 	defer cancel()
 
 	// 启动连接循环（自动重连）
-	go connectLoop(ctx, cfg)
+	go connectLoop(ctx, cfg, updateManager)
 
 	// 等待中断信号
 	quit := make(chan os.Signal, 1)
@@ -171,12 +193,45 @@ func buildCapabilities(cfg *EndpointConfig) []*pb.EndpointCapabilityInfo {
 	return caps
 }
 
+func updateDirectiveFromProto(directive *pb.UpdateDirective) updater.Directive {
+	return updater.Directive{
+		TaskID:        directive.TaskId,
+		Component:     directive.Component,
+		Version:       directive.Version,
+		DownloadURL:   directive.DownloadUrl,
+		Filename:      directive.Filename,
+		Size:          directive.Size,
+		SHA256:        directive.Sha256,
+		Signature:     directive.Signature,
+		KeyID:         directive.KeyId,
+		NotBeforeUnix: directive.NotBeforeUnix,
+		DeadlineUnix:  directive.DeadlineUnix,
+	}
+}
+
+func toProtoUpdateStatuses(statuses []updater.Status) []*pb.UpdateStatus {
+	result := make([]*pb.UpdateStatus, 0, len(statuses))
+	for _, status := range statuses {
+		result = append(result, &pb.UpdateStatus{
+			TaskId:         status.TaskID,
+			Phase:          status.Phase,
+			Progress:       int32(status.Progress),
+			CurrentVersion: status.CurrentVersion,
+			Sequence:       status.Sequence,
+			ErrorCode:      status.ErrorCode,
+			ErrorMessage:   status.ErrorMessage,
+		})
+	}
+	return result
+}
+
 // buildConnectedEndpoint 根据配置构建 ConnectedEndpoint 消息（用于心跳上报）
 func buildConnectedEndpoint(cfg *EndpointConfig, discovery *K8SServiceDiscovery) *pb.ConnectedEndpoint {
 	ep := &pb.ConnectedEndpoint{
-		Name:         cfg.Agent.Name,
-		Status:       "online",
-		Capabilities: buildCapabilities(cfg),
+		Name:            cfg.Agent.Name,
+		Status:          "online",
+		Capabilities:    buildCapabilities(cfg),
+		UpdaterProtocol: "v1",
 	}
 
 	// SSH 用户列表
@@ -202,7 +257,7 @@ func buildConnectedEndpoint(cfg *EndpointConfig, discovery *K8SServiceDiscovery)
 }
 
 // connectLoop 连接 Agent 的主循环（自动重连）
-func connectLoop(ctx context.Context, cfg *EndpointConfig) {
+func connectLoop(ctx context.Context, cfg *EndpointConfig, updateManager *updater.Manager) {
 	retryDelay := 5 * time.Second
 	maxRetryDelay := 60 * time.Second
 
@@ -215,7 +270,7 @@ func connectLoop(ctx context.Context, cfg *EndpointConfig) {
 
 		logger.Infof("连接 Agent: %s", cfg.Agent.Address)
 
-		err := connectAndRun(ctx, cfg)
+		err := connectAndRun(ctx, cfg, updateManager)
 		if err != nil {
 			logger.Warnf("连接断开: %v", err)
 		}
@@ -233,7 +288,7 @@ func connectLoop(ctx context.Context, cfg *EndpointConfig) {
 }
 
 // connectAndRun 连接 Agent 并运行注册 + 心跳
-func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
+func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *updater.Manager) error {
 	// 建立 gRPC 连接（内网明文）
 	conn, err := grpc.NewClient(cfg.Agent.Address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -298,10 +353,15 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 
 	// 发送首次心跳（携带能力信息和配置）
 	heartbeatReq := &pb.EndpointHeartbeatRequest{
-		Token:        cfg.Agent.Token,
-		Name:         cfg.Agent.Name,
-		Capabilities: caps,
-		SshUsers:     sshUsers, // 始终上报 SSH 用户列表
+		Token:           cfg.Agent.Token,
+		Name:            cfg.Agent.Name,
+		Capabilities:    caps,
+		SshUsers:        sshUsers, // 始终上报 SSH 用户列表
+		Version:         version,
+		Os:              runtime.GOOS,
+		Arch:            runtime.GOARCH,
+		UpdaterProtocol: "v1",
+		UpdateStatuses:  toProtoUpdateStatuses(updateManager.Statuses()),
 	}
 	// 添加 K8S API 配置（始终上报，无论是否启用）
 	if cfg.K8S.APIServer != "" {
@@ -319,7 +379,7 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 	// 接收首次响应（带超时）
 	respChan := make(chan *pb.EndpointHeartbeatResponse, 1)
 	errChan := make(chan error, 1)
-	
+
 	go func() {
 		resp, err := stream.Recv()
 		if err != nil {
@@ -328,7 +388,7 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 		}
 		respChan <- resp
 	}()
-	
+
 	var resp *pb.EndpointHeartbeatResponse
 	select {
 	case resp = <-respChan:
@@ -349,6 +409,9 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 
 	// 处理首次响应中 Server 下发的能力配置（如果没有超时）
 	if resp != nil {
+		for _, directive := range resp.UpdateDirectives {
+			updateManager.Handle(updateDirectiveFromProto(directive))
+		}
 		if resp.SshEnabledSet {
 			cfg.SSH.Enabled = resp.SshEnabled
 		}
@@ -368,14 +431,14 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 		logger.Infof("Server 下发能力配置: ssh=%v, k8sapi=%v(api_server=%s), k8ssvc=%v",
 			cfg.SSH.Enabled, cfg.K8S.Enabled, cfg.K8S.APIServer, cfg.SVC.Enabled)
 	}
-	
+
 	// 重新构建能力列表（基于 Server 下发的配置或默认配置）
 	caps = buildCapabilities(cfg)
 
 	// 启动 K8S Service 自动发现（根据 Server 下发的配置）
 	var discovery *K8SServiceDiscovery
 	var discoveryMu sync.Mutex // 保护 discovery 的并发访问
-	
+
 	// stopDiscovery 停止 K8S Service 自动发现
 	stopDiscovery := func() {
 		discoveryMu.Lock()
@@ -386,7 +449,7 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 			discovery = nil
 		}
 	}
-	
+
 	// startDiscovery 启动 K8S Service 自动发现
 	startDiscovery := func() {
 		discoveryMu.Lock()
@@ -407,12 +470,12 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 			logger.Infof("K8S Service 自动发现已启动")
 		}
 	}
-	
+
 	// Bug 1 修复：根据 Server 下发的配置启动服务模块（而不是本地配置）
 	if cfg.SVC.Enabled {
 		startDiscovery()
 	}
-	
+
 	defer func() {
 		stopDiscovery()
 	}()
@@ -432,6 +495,9 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 				recvDone <- err
 				return
 			}
+			for _, directive := range resp.UpdateDirectives {
+				updateManager.Handle(updateDirectiveFromProto(directive))
+			}
 
 			// 处理 Server 下发的能力配置（更新运行时配置）
 			if resp.SshEnabledSet {
@@ -444,24 +510,24 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 					cfg.K8S.APIServer = resp.K8SapiApiServer
 				}
 			}
-			
+
 			// Bug 2 修复：响应 Server 的配置变更，动态启动或停止服务模块
 			if resp.K8SserviceEnabledSet {
 				prevEnabled := cfg.SVC.Enabled
 				cfg.SVC.Enabled = resp.K8SserviceEnabled
-				
+
 				// 如果 Server 下发了 api_server，更新配置
 				if resp.K8SapiApiServer != "" {
 					cfg.K8S.APIServer = resp.K8SapiApiServer
 				}
-				
+
 				// 根据配置变更，动态启动或停止服务模块
 				if cfg.SVC.Enabled {
 					// 应该启用：检查是否已启动
 					discoveryMu.Lock()
 					isRunning := (discovery != nil)
 					discoveryMu.Unlock()
-					
+
 					if !isRunning {
 						logger.Infof("Server 下发 K8S Service 能力已启用，动态启动自动发现")
 						go startDiscovery()
@@ -473,7 +539,7 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 					discoveryMu.Lock()
 					isRunning := (discovery != nil)
 					discoveryMu.Unlock()
-					
+
 					if isRunning {
 						logger.Infof("Server 下发 K8S Service 能力已禁用，停止自动发现")
 						go stopDiscovery()
@@ -514,10 +580,15 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig) error {
 			return fmt.Errorf("心跳流断开: %w", err)
 		case <-ticker.C:
 			heartbeatReq := &pb.EndpointHeartbeatRequest{
-				Token:        cfg.Agent.Token,
-				Name:         cfg.Agent.Name,
-				Capabilities: caps,
-				SshUsers:     sshUsers, // 始终上报 SSH 用户列表
+				Token:           cfg.Agent.Token,
+				Name:            cfg.Agent.Name,
+				Capabilities:    caps,
+				SshUsers:        sshUsers, // 始终上报 SSH 用户列表
+				Version:         version,
+				Os:              runtime.GOOS,
+				Arch:            runtime.GOARCH,
+				UpdaterProtocol: "v1",
+				UpdateStatuses:  toProtoUpdateStatuses(updateManager.Statuses()),
 			}
 			// 添加 K8S API 配置（始终上报，无论是否启用）
 			if cfg.K8S.APIServer != "" {

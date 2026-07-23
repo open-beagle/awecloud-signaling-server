@@ -5,6 +5,7 @@ package awecloud.signaling;
 option go_package = "github.com/open-beagle/awecloud-signaling-server/pkg/proto";
 
 import "pkg/proto/endpoint.proto";
+import "pkg/proto/update.proto";
 
 // AgentService Agent 管理服务
 service AgentService {
@@ -140,6 +141,13 @@ message AgentHeartbeatRequest {
   // 操作审计记录（Agent 上报）
   repeated OperationAuditRecord audit_records = 12; // 操作审计记录
   string device_name = 13; // 设备名称（Node.Name，即 DeployToken.Name）
+  string version = 14; // Agent 当前运行版本
+  SystemInfo system_info = 15; // Agent 运行平台信息
+  string updater_protocol = 16; // 支持的 updater 协议版本
+  repeated UpdateStatus update_statuses = 17; // Agent 自身更新状态
+  repeated ContainerDiscoveryCandidate container_candidates = 18; // ContainerSSH 运行时候选（仅运行态证据）
+  string container_ssh_protocol = 19; // 支持的 ContainerSSH 协议版本；空表示不支持
+  repeated ContainerSSHSessionEvent container_ssh_session_events = 20; // 幂等会话生命周期事件
 }
 
 // ConnectedEndpoint Agent 上报的已连接 Endpoint 信息
@@ -148,6 +156,8 @@ message ConnectedEndpoint {
   string status = 2; // 状态：online
   repeated EndpointCapabilityInfo capabilities = 3; // 启用的能力列表
   repeated DiscoveredK8SService discovered_services = 4; // Endpoint 发现的 K8S Service（K8SService 能力时上报）
+  string version = 5; // Endpoint 当前运行版本
+  string os = 6; // Endpoint 操作系统
   
   // SSH 能力配置（从 Endpoint 自动检测）
   repeated string ssh_users = 7; // 允许的 SSH 用户列表
@@ -160,6 +170,9 @@ message ConnectedEndpoint {
   // K8S Service 能力配置
   string k8sservice_label_selector = 9; // 标签选择器
   repeated string k8sservice_namespaces = 10; // 命名空间列表
+  string arch = 13; // Endpoint CPU 架构
+  repeated UpdateStatus update_statuses = 14; // Endpoint 更新状态
+  string updater_protocol = 15; // Endpoint 支持的 updater 协议版本
 }
 
 // DomainRegistration 域名注册信息（Agent 心跳上报）
@@ -209,6 +222,12 @@ message AgentHeartbeatResponse {
   repeated EndpointK8SAPIPermission endpoint_k8sapi_permissions = 10; // Endpoint K8SAPI 授权列表
   repeated EndpointK8SServicePermission endpoint_k8sservice_permissions = 11; // Endpoint K8SService 授权列表
   repeated EndpointCapabilityConfig endpoint_capability_configs = 12; // Endpoint 能力开关配置（Server 下发）
+  repeated UpdateDirective update_directives = 13; // Agent 自身更新任务
+  repeated UpdateDirective endpoint_update_directives = 14; // 由 Agent 转发给 Endpoint 的更新任务
+  repeated ContainerSSHPermission container_ssh_permissions = 15; // ContainerSSH 已解析授权快照
+  string container_ssh_protocol = 16; // Server 确认的 ContainerSSH 协议版本；空表示不得启用入口
+  repeated string container_ssh_disconnect_session_ids = 17; // 待强制断开的活动 Session ID
+  repeated string container_ssh_session_ack_event_ids = 18; // Server 已持久化的 Session Event ID
 }
 
 // EndpointCapabilityConfig Server 下发给 Agent 的 Endpoint 能力开关配置
@@ -303,6 +322,40 @@ message EndpointSSHPermission {
   string user_name = 4; // 被授权用户名
   repeated string ssh_users = 5; // 允许的 SSH 用户列表（空表示全部）
   bool is_group = 6; // 是否来自分组授权
+}
+
+// ContainerSSHPermission is the complete Agent-local authorization and target
+// binding for one user and one ContainerSSH Resource. The Agent must never
+// accept these Kubernetes coordinates from an SSH client.
+message ContainerSSHPermission {
+  uint64 user_id = 1;
+  string user_name = 2;
+  string resource_id = 3;
+  string namespace = 4;
+  string pod_name = 5;
+  string pod_uid = 6;
+  string container_name = 7;
+  int64 target_revision = 8;
+  int64 grant_revision = 9;
+  int32 max_session_seconds = 10;
+  uint32 listen_port = 11;
+}
+
+message ContainerSSHSessionEvent {
+  string event_id = 1;
+  string session_id = 2;
+  string phase = 3; // started / ended
+  uint64 user_id = 4;
+  string user_name = 5;
+  uint64 device_node_id = 6; // WhoIs 返回的 Headscale Node ID
+  string resource_id = 7;
+  int64 target_revision = 8;
+  int64 grant_revision = 9;
+  string pod_uid = 10;
+  string container_name = 11;
+  int64 occurred_at = 12;
+  string result = 13;
+  string close_reason = 14;
 }
 
 // OperationAuditRecord 操作审计记录（Agent 心跳上报）
@@ -431,3 +484,18 @@ message GetUserDeviceInfoResponse {
   string device_ip = 5; // 设备 IP
 }
 
+// ContainerDiscoveryCandidate is runtime evidence only. Server must reconcile
+// it with a trusted Provider Workspace Binding before publishing a Resource.
+message ContainerDiscoveryCandidate {
+  string provider_hint = 1; // 外部 Provider 提示，不代表可信业务归属
+  string workspace_hint = 2; // 外部 Workspace 提示，不代表 Tenant
+  int64 generation_hint = 3; // Provider generation 提示，0 表示未提供
+  string cluster_id = 4;
+  string namespace = 5;
+  string pod_name = 6;
+  string pod_uid = 7;
+  string container_name = 8;
+  bool ready = 9;
+  int32 lease_seconds = 10;
+  map<string, string> labels = 11;
+}

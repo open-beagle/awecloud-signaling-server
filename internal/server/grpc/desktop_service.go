@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	v1 "github.com/juanfont/headscale/gen/go/headscale/v1"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -345,31 +346,32 @@ func (s *DesktopServiceServer) handleDesktopHeartbeat(ctx context.Context, nodeI
 		"ip":             req.TunnelIp,
 	}
 
-	// 如果 Headscale 客户端可用，查询并更新 HeadscaleNodeID
+	// Resolve the current Headscale node by the reported tunnel IP on every
+	// connected heartbeat. A Desktop can be reinstalled or moved between
+	// Headscale nodes while keeping the same database Node record.
 	if s.headscaleClient != nil {
-		// 只有当 HeadscaleNodeID 为 0 时才查询 Headscale
-		if node.HeadscaleNodeID == 0 {
-			// 查询 User 获取名称
-			var user model.User
-			if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err == nil {
-				// Headscale User 命名规则: client-{name}
-				hsUserName := fmt.Sprintf("client-%s", user.Name)
-				// 按用户名 + 节点名精确匹配（一个 Headscale 用户下可能有多个节点）
+		var user model.User
+		if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err == nil {
+			hsUserName := fmt.Sprintf("client-%s", user.Name)
+			tunnelIP := strings.TrimSpace(req.TunnelIp)
+			if req.TunnelConnected && tunnelIP != "" {
+				hsNode, err := s.headscaleClient.GetNodeByIP(ctx, tunnelIP)
+				if err != nil {
+					logger.Warnf("通过隧道 IP 查询 Desktop Headscale 节点失败: ip=%s err=%v", tunnelIP, err)
+				} else if validDesktopHeadscaleNode(hsNode, hsUserName, tunnelIP) {
+					updates["headscale_node_id"] = hsNode.Id
+					if node.HeadscaleNodeID != hsNode.Id {
+						logger.Infof("Desktop %d 更新 Headscale 节点: %d -> %d, ip=%s, user=%s", nodeID, node.HeadscaleNodeID, hsNode.Id, tunnelIP, hsUserName)
+					}
+				} else if hsNode != nil {
+					logger.Warnf("拒绝绑定不匹配的 Desktop Headscale 节点: desktop=%d headscale_node=%d ip=%s expected_user=%s", nodeID, hsNode.Id, tunnelIP, hsUserName)
+				}
+			} else if node.HeadscaleNodeID == 0 {
 				hsNode, err := s.headscaleClient.GetNodeByUserAndName(ctx, hsUserName, node.Name)
 				if err != nil {
 					logger.Warnf("通过 User+Name 查询 Headscale 节点失败: %v", err)
-				} else if hsNode != nil {
+				} else if hsNode != nil && hsNode.User != nil && hsNode.User.Name == hsUserName {
 					updates["headscale_node_id"] = hsNode.Id
-					logger.Infof("Desktop %d 关联 Headscale 节点: id=%d, name=%s, ip=%v, user=%s", nodeID, hsNode.Id, hsNode.GivenName, hsNode.IpAddresses, hsUserName)
-				} else {
-					// 精确匹配失败，回退到第一个节点（兼容单节点场景）
-					hsNodeFallback, err := s.headscaleClient.GetNodeByUser(ctx, hsUserName)
-					if err != nil {
-						logger.Warnf("通过 User 查询 Headscale 节点失败: %v", err)
-					} else if hsNodeFallback != nil {
-						updates["headscale_node_id"] = hsNodeFallback.Id
-						logger.Infof("Desktop %d 关联 Headscale 节点(回退): id=%d, name=%s, ip=%v, user=%s", nodeID, hsNodeFallback.Id, hsNodeFallback.GivenName, hsNodeFallback.IpAddresses, hsUserName)
-					}
 				}
 			}
 		}
@@ -382,6 +384,18 @@ func (s *DesktopServiceServer) handleDesktopHeartbeat(ctx context.Context, nodeI
 	if result.Error != nil {
 		logger.Errorf("Desktop 心跳更新失败: %v", result.Error)
 	}
+}
+
+func validDesktopHeadscaleNode(node *v1.Node, expectedUser, tunnelIP string) bool {
+	if node == nil || node.Id == 0 || node.User == nil || node.User.Name != expectedUser {
+		return false
+	}
+	for _, nodeIP := range node.IpAddresses {
+		if nodeIP == tunnelIP {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *DesktopServiceServer) sendDesktopHeartbeatResponse(ctx context.Context, stream pb.DesktopService_HeartbeatServer, userID uint64) error {
@@ -1637,10 +1651,103 @@ func (s *DesktopServiceServer) GetResources(ctx context.Context, req *pb.GetReso
 	// 3. 查询 K8S Service 资源
 	resp.K8SService = s.queryK8SServiceResourcesGRPC(ctx, clientID, groupIDs)
 
-	logger.Infof("Desktop %d 资源发现: SSH=%d, K8SAPI=%d, K8SService=%d",
-		req.DesktopId, len(resp.Ssh), len(resp.K8SApi), len(resp.K8SService))
+	// 4. 查询统一 ContainerSSH 资源。该投影只基于当前用户有效的
+	// Tenant Membership + AccessGrant，不复用平台管理员资源目录。
+	resp.ContainerSsh = s.queryContainerSSHResourcesGRPC(ctx, clientID, groupIDs)
+
+	logger.Infof("Desktop %d 资源发现: SSH=%d, K8SAPI=%d, K8SService=%d, ContainerSSH=%d",
+		req.DesktopId, len(resp.Ssh), len(resp.K8SApi), len(resp.K8SService), len(resp.ContainerSsh))
 
 	return resp, nil
+}
+
+func (s *DesktopServiceServer) queryContainerSSHResourcesGRPC(ctx context.Context, clientID uint64, groupIDs []int64) []*pb.ContainerSSHResource {
+	now := time.Now()
+	var memberships []model.TenantMembership
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", clientID, true, now).Find(&memberships).Error; err != nil || len(memberships) == 0 {
+		return nil
+	}
+	tenantIDs := make([]string, 0, len(memberships))
+	for _, membership := range memberships {
+		tenantIDs = append(tenantIDs, membership.TenantID)
+	}
+	var tenants []model.Tenant
+	db.DB.WithContext(ctx).Where("id IN ? AND status = ?", tenantIDs, model.TenantStatusActive).Find(&tenants)
+	activeTenantIDs := make([]string, 0, len(tenants))
+	tenantNames := make(map[string]string, len(tenants))
+	for _, tenant := range tenants {
+		activeTenantIDs = append(activeTenantIDs, tenant.ID)
+		tenantNames[tenant.ID] = tenant.Name
+	}
+	if len(activeTenantIDs) == 0 {
+		return nil
+	}
+	grantQuery := db.DB.WithContext(ctx).Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND expires_at > ?", activeTenantIDs, "enabled", now, now).
+		Where("(subject_type = ? AND subject_user_id = ?)", "user", clientID)
+	if len(groupIDs) > 0 {
+		grantQuery = db.DB.WithContext(ctx).Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND expires_at > ?", activeTenantIDs, "enabled", now, now).
+			Where("(subject_type = ? AND subject_user_id = ?) OR (subject_type = ? AND subject_group_id IN ?)", "user", clientID, "group", groupIDs)
+	}
+	var grants []model.AccessGrant
+	if err := grantQuery.Find(&grants).Error; err != nil {
+		return nil
+	}
+	resourceIDs := make([]string, 0, len(grants))
+	seen := make(map[string]struct{}, len(grants))
+	for _, grant := range grants {
+		if grant.SubjectType == "group" && !grpcGroupGrantMatchesTenant(ctx, grant) {
+			continue
+		}
+		if !containsAction(parseJSONStringArray(grant.Actions), "shell") {
+			continue
+		}
+		if _, exists := seen[grant.ResourceID]; !exists {
+			seen[grant.ResourceID] = struct{}{}
+			resourceIDs = append(resourceIDs, grant.ResourceID)
+		}
+	}
+	if len(resourceIDs) == 0 {
+		return nil
+	}
+	var resources []model.Resource
+	if err := db.DB.WithContext(ctx).Where("id IN ? AND type = ? AND target_revision > 0 AND state IN ?", resourceIDs, model.ResourceTypeContainerSSH, []model.ResourceState{model.ResourceStateAvailable, model.ResourceStateDegraded}).Order("display_name ASC").Find(&resources).Error; err != nil {
+		return nil
+	}
+	result := make([]*pb.ContainerSSHResource, 0, len(resources))
+	domainSuffix := model.DefaultDomainSuffix
+	var domainConfig model.SystemConfig
+	if err := db.DB.WithContext(ctx).Where("key = ?", model.ConfigDomainSuffix).First(&domainConfig).Error; err == nil && domainConfig.Value != "" {
+		domainSuffix = domainConfig.Value
+	}
+	if !strings.HasPrefix(domainSuffix, ".") {
+		domainSuffix = "." + domainSuffix
+	}
+	for _, resource := range resources {
+		if resource.ContainerSSHPort == 0 {
+			continue
+		}
+		var agentNode model.Node
+		if err := db.DB.WithContext(ctx).Where("id = ? AND type = ? AND ip <> ?", resource.AgentNodeID, model.NodeTypeAgent, "").First(&agentNode).Error; err != nil {
+			continue
+		}
+		result = append(result, &pb.ContainerSSHResource{
+			ResourceId: resource.ID, TenantId: resource.TenantID, TenantName: tenantNames[resource.TenantID],
+			DisplayName: resource.DisplayName, ProviderId: resource.ProviderID, ExternalWorkspaceId: resource.ExternalWorkspaceID,
+			State: string(resource.State), TargetRevision: resource.TargetRevision, AgentNodeId: resource.AgentNodeID,
+			ClusterId: resource.ClusterID, Capability: string(model.ResourceTypeContainerSSH),
+			ListenPort: uint32(resource.ContainerSSHPort),
+			Domain:     resource.ID + ".container" + domainSuffix, AgentIp: agentNode.IP, SshUser: "container",
+		})
+	}
+	return result
+}
+
+func grpcGroupGrantMatchesTenant(ctx context.Context, grant model.AccessGrant) bool {
+	if grant.SubjectGroupID == nil || grant.TenantID == "" {
+		return false
+	}
+	var group model.Group
+	return db.DB.WithContext(ctx).Where("id = ? AND tenant_id = ?", *grant.SubjectGroupID, grant.TenantID).First(&group).Error == nil
 }
 
 // querySSHResourcesGRPC 查询 SSH 资源（gRPC 版本）

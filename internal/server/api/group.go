@@ -42,6 +42,7 @@ func NewGroupAPINew(cfg *config.ServerConfig) *GroupAPINew {
 // GroupListItem 分组列表项
 type GroupListItem struct {
 	ID          int64     `json:"id"`
+	TenantID    string    `json:"tenant_id,omitempty"`
 	Name        string    `json:"name"`
 	Alias       string    `json:"alias"`
 	Description string    `json:"description"`
@@ -64,6 +65,13 @@ func (a *GroupAPINew) List(c *gin.Context) {
 	}
 
 	query := db.DB.WithContext(ctx).Model(&model.Group{})
+	tenantIDs, unrestricted, ok := tenantReadScope(c, PermissionTenantGroupsRead)
+	if !ok {
+		return
+	}
+	if !unrestricted {
+		query = query.Where("tenant_id IN ?", tenantIDs)
+	}
 	if search != "" {
 		query = query.Where("name LIKE ? OR alias LIKE ?", "%"+search+"%", "%"+search+"%")
 	}
@@ -96,6 +104,7 @@ func (a *GroupAPINew) List(c *gin.Context) {
 	for i, g := range groups {
 		result[i] = GroupListItem{
 			ID:          g.ID,
+			TenantID:    g.TenantID,
 			Name:        g.Name,
 			Alias:       g.Alias,
 			Description: g.Description,
@@ -110,6 +119,7 @@ func (a *GroupAPINew) List(c *gin.Context) {
 // GroupDetail 分组详情
 type GroupDetail struct {
 	ID          int64             `json:"id"`
+	TenantID    string            `json:"tenant_id,omitempty"`
 	Name        string            `json:"name"`
 	Alias       string            `json:"alias"`
 	Description string            `json:"description"`
@@ -142,6 +152,9 @@ func (a *GroupAPINew) Get(c *gin.Context) {
 		c.JSON(http.StatusNotFound, NewErrorResponse("分组不存在"))
 		return
 	}
+	if !requireGroupAccess(c, &group, false) {
+		return
+	}
 
 	// 查询成员列表
 	var members []model.GroupMember
@@ -162,6 +175,7 @@ func (a *GroupAPINew) Get(c *gin.Context) {
 
 	result := GroupDetail{
 		ID:          group.ID,
+		TenantID:    group.TenantID,
 		Name:        group.Name,
 		Alias:       group.Alias,
 		Description: group.Description,
@@ -176,6 +190,7 @@ func (a *GroupAPINew) Get(c *gin.Context) {
 
 // CreateGroupRequest 创建分组请求
 type CreateGroupRequest struct {
+	TenantID    string `json:"tenant_id"`
 	Name        string `json:"name" binding:"required"`
 	Alias       string `json:"alias"`
 	Description string `json:"description"`
@@ -189,6 +204,20 @@ func (a *GroupAPINew) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
 		return
 	}
+	selected, ok := selectedTenantID(c)
+	if !ok {
+		return
+	}
+	if req.TenantID == "" {
+		req.TenantID = selected
+	}
+	if req.TenantID != "" {
+		if !requireTenantPermission(c, req.TenantID, PermissionTenantGroupsWrite) {
+			return
+		}
+	} else if !requirePlatformAccess(c, true) {
+		return
+	}
 
 	// 检查名称是否已存在
 	var existing model.Group
@@ -198,6 +227,7 @@ func (a *GroupAPINew) Create(c *gin.Context) {
 	}
 
 	group := &model.Group{
+		TenantID:    req.TenantID,
 		Name:        req.Name,
 		Alias:       req.Alias,
 		Description: req.Description,
@@ -209,6 +239,7 @@ func (a *GroupAPINew) Create(c *gin.Context) {
 	}
 
 	logger.Infof("创建分组: id=%d, name=%s", group.ID, group.Name)
+	recordAuditLog(ctx, c, "create_tenant_group", "group", strconv.FormatInt(group.ID, 10), group.Name, group)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("创建成功", group))
 }
@@ -239,6 +270,9 @@ func (a *GroupAPINew) Update(c *gin.Context) {
 		c.JSON(http.StatusNotFound, NewErrorResponse("分组不存在"))
 		return
 	}
+	if !requireGroupAccess(c, &group, true) {
+		return
+	}
 
 	group.Alias = req.Alias
 	group.Description = req.Description
@@ -249,6 +283,7 @@ func (a *GroupAPINew) Update(c *gin.Context) {
 	}
 
 	logger.Infof("更新分组: id=%d", id)
+	recordAuditLog(ctx, c, "update_tenant_group", "group", strconv.FormatInt(group.ID, 10), group.Name, group)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("更新成功", nil))
 }
@@ -265,6 +300,9 @@ func (a *GroupAPINew) Delete(c *gin.Context) {
 	var group model.Group
 	if err := db.DB.WithContext(ctx).First(&group, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("分组不存在"))
+		return
+	}
+	if !requireGroupAccess(c, &group, true) {
 		return
 	}
 
@@ -295,6 +333,7 @@ func (a *GroupAPINew) Delete(c *gin.Context) {
 	}
 
 	logger.Infof("删除分组: id=%d, name=%s", id, group.Name)
+	recordAuditLog(ctx, c, "delete_tenant_group", "group", strconv.FormatInt(group.ID, 10), group.Name, map[string]interface{}{"tenant_id": group.TenantID})
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
 }
@@ -313,9 +352,19 @@ func (a *GroupAPINew) GetMembers(c *gin.Context) {
 		c.JSON(http.StatusNotFound, NewErrorResponse("分组不存在"))
 		return
 	}
+	if !requireGroupAccess(c, &group, false) {
+		return
+	}
 
 	var members []model.GroupMember
-	if err := db.DB.WithContext(ctx).Preload("User").Where("group_id = ?", id).Find(&members).Error; err != nil {
+	membersQuery := db.DB.WithContext(ctx).Model(&model.GroupMember{}).Preload("User").Where("group_member.group_id = ?", id)
+	if group.TenantID != "" {
+		membersQuery = membersQuery.
+			Joins("JOIN tenant_membership AS tm ON tm.user_id = group_member.user_id AND tm.tenant_id = ?", group.TenantID).
+			Joins("JOIN user AS active_user ON active_user.id = group_member.user_id").
+			Where("tm.enabled = ? AND active_user.enabled = ? AND (tm.expires_at IS NULL OR tm.expires_at > ?)", true, true, time.Now())
+	}
+	if err := membersQuery.Find(&members).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询失败"))
 		return
 	}
@@ -349,30 +398,43 @@ func (a *GroupAPINew) AddMembers(c *gin.Context) {
 		c.JSON(http.StatusNotFound, NewErrorResponse("分组不存在"))
 		return
 	}
+	if !requireGroupAccess(c, &group, true) {
+		return
+	}
 
-	// 批量添加成员
+	// Validate the complete batch before writing anything. Partial additions
+	// with a generic success response hide invalid cross-Tenant input.
 	for _, userID := range req.UserIDs {
-		// 验证用户存在
 		var user model.User
 		if err := db.DB.WithContext(ctx).First(&user, userID).Error; err != nil {
-			continue // 用户不存在，跳过
+			c.JSON(http.StatusBadRequest, NewErrorResponse("用户不存在"))
+			return
 		}
+		if !user.Enabled {
+			continue
+		}
+		if group.TenantID != "" {
+			var membership model.TenantMembership
+			if err := db.DB.WithContext(ctx).Where("tenant_id = ? AND user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", group.TenantID, userID, true, time.Now()).First(&membership).Error; err != nil {
+				c.JSON(http.StatusForbidden, NewErrorResponse("用户不属于分组租户、成员已停用或已过期"))
+				return
+			}
+		}
+	}
 
-		// 检查是否已是成员
-		var existing model.GroupMember
-		if err := db.DB.WithContext(ctx).Where("group_id = ? AND user_id = ?", groupID, userID).First(&existing).Error; err == nil {
-			continue // 已是成员，跳过
+	created := 0
+	for _, userID := range req.UserIDs {
+		member := model.GroupMember{GroupID: groupID, UserID: userID}
+		result := db.DB.WithContext(ctx).Where("group_id = ? AND user_id = ?", groupID, userID).FirstOrCreate(&member)
+		if result.Error != nil {
+			c.JSON(http.StatusInternalServerError, NewErrorResponse("添加分组成员失败"))
+			return
 		}
-
-		member := &model.GroupMember{
-			GroupID: groupID,
-			UserID:  userID,
-		}
-		db.DB.WithContext(ctx).Create(member)
+		created += int(result.RowsAffected)
 	}
 
 	// 同步 ACL
-	if a.aclSync != nil {
+	if created > 0 && a.aclSync != nil {
 		go func() {
 			if err := a.aclSync.FullSync(nil); err != nil {
 				logger.Warnf("同步 ACL 失败: %v", err)
@@ -380,7 +442,8 @@ func (a *GroupAPINew) AddMembers(c *gin.Context) {
 		}()
 	}
 
-	logger.Infof("添加分组成员: group_id=%d, user_ids=%v", groupID, req.UserIDs)
+	logger.Infof("添加分组成员: group_id=%d, user_ids=%v, created=%d", groupID, req.UserIDs, created)
+	recordAuditLog(ctx, c, "add_tenant_group_members", "group", strconv.FormatInt(group.ID, 10), group.Name, map[string]interface{}{"user_ids": req.UserIDs})
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("添加成功", nil))
 }
@@ -397,6 +460,14 @@ func (a *GroupAPINew) RemoveMember(c *gin.Context) {
 	userID, err := strconv.ParseUint(c.Param("uid"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的用户 ID"))
+		return
+	}
+	var group model.Group
+	if err := db.DB.WithContext(ctx).First(&group, groupID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("分组不存在"))
+		return
+	}
+	if !requireGroupAccess(c, &group, true) {
 		return
 	}
 
@@ -420,6 +491,21 @@ func (a *GroupAPINew) RemoveMember(c *gin.Context) {
 	}
 
 	logger.Infof("移除分组成员: group_id=%d, user_id=%d", groupID, userID)
+	recordAuditLog(ctx, c, "remove_tenant_group_member", "group", strconv.FormatInt(group.ID, 10), group.Name, map[string]interface{}{"user_id": userID})
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("移除成功", nil))
+}
+
+func requireGroupAccess(c *gin.Context, group *model.Group, write bool) bool {
+	if group == nil {
+		return false
+	}
+	if group.TenantID == "" {
+		return requirePlatformAccess(c, write)
+	}
+	permission := PermissionTenantGroupsRead
+	if write {
+		permission = PermissionTenantGroupsWrite
+	}
+	return requireTenantPermission(c, group.TenantID, permission)
 }

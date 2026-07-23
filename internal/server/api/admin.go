@@ -42,6 +42,7 @@ type AdminInfo struct {
 	ID        int64     `json:"id"`
 	Username  string    `json:"username"`
 	Role      string    `json:"role"`
+	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -56,7 +57,7 @@ func (a *AdminAPI) Login(c *gin.Context) {
 
 	// 查询管理员
 	var admin model.Admin
-	if err := db.DB.WithContext(ctx).Where("username = ?", req.Username).First(&admin).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Where("username = ? AND enabled = ?", req.Username, true).First(&admin).Error; err != nil {
 		c.JSON(http.StatusUnauthorized, NewErrorResponse("用户名或密码错误"))
 		return
 	}
@@ -90,6 +91,7 @@ func (a *AdminAPI) Login(c *gin.Context) {
 			ID:        admin.ID,
 			Username:  admin.Username,
 			Role:      admin.Role,
+			Enabled:   admin.Enabled,
 			CreatedAt: admin.CreatedAt,
 		},
 	}))
@@ -111,7 +113,7 @@ func (a *AdminAPI) GetMe(c *gin.Context) {
 	}
 
 	var admin model.Admin
-	if err := db.DB.WithContext(ctx).First(&admin, adminID).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Where("id = ? AND enabled = ?", adminID, true).First(&admin).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("管理员不存在"))
 		return
 	}
@@ -120,6 +122,7 @@ func (a *AdminAPI) GetMe(c *gin.Context) {
 		ID:        admin.ID,
 		Username:  admin.Username,
 		Role:      admin.Role,
+		Enabled:   admin.Enabled,
 		CreatedAt: admin.CreatedAt,
 	}))
 }

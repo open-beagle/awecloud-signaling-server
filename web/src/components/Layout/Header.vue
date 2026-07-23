@@ -1,6 +1,7 @@
 <template>
   <div class="header">
     <div class="header-left">
+      <el-button class="mobile-menu" text :icon="Menu" aria-label="打开导航" @click="appStore.toggleMobileSidebar" />
       <Logo :collapsed="false" class="header-logo" />
     </div>
     <div class="header-right">
@@ -24,6 +25,7 @@
         <span class="user-info">
           <el-icon><User /></el-icon>
           {{ authStore.username }}
+          <el-tag v-if="authStore.role" size="small" effect="plain">{{ roleLabel }}</el-tag>
         </span>
         <template #dropdown>
           <el-dropdown-menu>
@@ -45,6 +47,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { ElMessage } from 'element-plus'
+import { Menu } from '@element-plus/icons-vue'
 import Logo from '@/components/Common/Logo.vue'
 
 const router = useRouter()
@@ -55,10 +58,7 @@ const appStore = useAppStore()
 const currentLanguage = computed(() => {
   return locale.value === 'zh-CN' ? '中文' : 'English'
 })
-
-const toggleSidebar = () => {
-  appStore.toggleSidebar()
-}
+const roleLabel = computed(() => ({ admin: 'Platform Admin', tenant_admin: 'Tenant Admin', viewer: 'Viewer' }[authStore.role] || authStore.role))
 
 const handleLanguageChange = (lang: string) => {
   locale.value = lang
@@ -77,7 +77,6 @@ const handleDownloadClient = () => {
   window.open('/download', '_blank')
 }
 
-
 </script>
 
 <style scoped>
@@ -91,6 +90,7 @@ const handleDownloadClient = () => {
 .header-left {
   display: flex;
   align-items: center;
+  gap: 18px;
 }
 
 .header-logo {
@@ -100,8 +100,10 @@ const handleDownloadClient = () => {
 .header-right {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 8px;
 }
+
+.mobile-menu { display: none; width: 36px; height: 36px; font-size: 19px; }
 
 .client-download,
 .language-selector,
@@ -114,13 +116,23 @@ const handleDownloadClient = () => {
   font-size: 14px;
   padding: 8px 12px;
   border-radius: 4px;
-  transition: all 0.3s;
+  transition: color 0.15s, background-color 0.15s;
 }
 
 .client-download:hover,
 .language-selector:hover,
 .user-info:hover {
   color: var(--primary-color);
-  background-color: #ecf5ff;
+  background-color: var(--primary-lighter);
+}
+
+@media (max-width: 768px) {
+  .mobile-menu { display: inline-flex; }
+  .header-logo :deep(.logo-text) { display: none; }
+  .header-logo :deep(.logo-icon) { width: 34px; height: 34px; }
+  .header-left { gap: 6px; }
+  .client-download, .language-selector { display: none; }
+  .user-info { padding: 7px; }
+  .user-info .el-tag { display: none; }
 }
 </style>

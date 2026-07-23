@@ -1,7 +1,9 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -80,8 +82,9 @@ type WebSection struct {
 }
 
 type SecuritySection struct {
-	JWTSecret      string `toml:"jwt_secret"`
-	JWTExpireHours int    `toml:"jwt_expire_hours"`
+	JWTSecret                string `toml:"jwt_secret"`
+	JWTExpireHours           int    `toml:"jwt_expire_hours"`
+	AllowLocalhostAdminDebug bool   `toml:"allow_localhost_admin_debug"`
 }
 
 type LogConfig struct {
@@ -157,8 +160,24 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	if jwtSecret := os.Getenv("JWT_SECRET"); jwtSecret != "" {
 		cfg.Security.JWTSecret = jwtSecret
 	}
+	if value := strings.TrimSpace(os.Getenv("SIGNAL_ALLOW_LOCALHOST_ADMIN_DEBUG")); value != "" {
+		value = strings.ToLower(value)
+		cfg.Security.AllowLocalhostAdminDebug = value == "1" || value == "true" || value == "yes"
+	}
 	if token := os.Getenv("TOKEN"); token != "" {
 		cfg.Server.Token = token
+	}
+	if username := os.Getenv("ADMIN_USERNAME"); username != "" {
+		cfg.Web.DefaultAdminUsername = username
+	}
+	if password := os.Getenv("ADMIN_PASSWORD"); password != "" {
+		cfg.Web.DefaultAdminPassword = password
+	}
+	if cfg.Web.DefaultAdminUsername == "" {
+		return nil, fmt.Errorf("ADMIN_USERNAME is required when web.default_admin_username is not configured")
+	}
+	if cfg.Web.DefaultAdminPassword == "" {
+		return nil, fmt.Errorf("ADMIN_PASSWORD is required when web.default_admin_password is not configured")
 	}
 
 	// Tailscale 配置默认值

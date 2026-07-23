@@ -15,7 +15,7 @@
   <rect width="1200" height="900" fill="#f8f9fa"/>
 
   <!-- 标题 -->
-  <text x="600" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#333">Tailscale 多租户安全架构</text>
+  <text x="600" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#333">Headscale 多租户安全架构</text>
 
   <!-- Headscale 控制平面 -->
   <rect x="400" y="70" width="400" height="120" rx="10" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
@@ -41,7 +41,7 @@
 
   <!-- 分隔线 -->
   <line x1="50" y1="220" x2="1150" y2="220" stroke="#ddd" stroke-width="2" stroke-dasharray="5,5"/>
-  <text x="600" y="240" text-anchor="middle" font-size="14" fill="#999">Tailscale 网络层 (WireGuard)</text>
+  <text x="600" y="240" text-anchor="middle" font-size="14" fill="#999">Headscale 网络层 (WireGuard)</text>
 
   <!-- 内网 Agent 区域 -->
   <rect x="50" y="270" width="350" height="280" rx="10" fill="#e8f5e9" stroke="#4caf50" stroke-width="2"/>

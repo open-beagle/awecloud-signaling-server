@@ -49,7 +49,7 @@ defineProps<{
   font-size: 18px;
   font-weight: 600;
   color: #303133;
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
   white-space: nowrap;
 }
 

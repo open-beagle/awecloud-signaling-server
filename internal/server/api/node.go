@@ -12,7 +12,9 @@ import (
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/cache"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
+	grpcserver "github.com/open-beagle/awecloud-signaling-server/internal/server/grpc"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
@@ -23,6 +25,7 @@ type NodeAPI struct {
 	config        *config.ServerConfig
 	hsClient      *headscale.Client
 	domainService *service.DomainService
+	agentService  *grpcserver.AgentServiceServer
 }
 
 // NewNodeAPI 创建 NodeAPI
@@ -45,6 +48,11 @@ func NewNodeAPI(cfg *config.ServerConfig) *NodeAPI {
 	}
 
 	return api
+}
+
+// SetAgentService 设置 AgentService，用于删除设备时清理在线连接
+func (a *NodeAPI) SetAgentService(service *grpcserver.AgentServiceServer) {
+	a.agentService = service
 }
 
 // NodeUserInfo 设备关联的用户信息
@@ -554,6 +562,14 @@ func (a *NodeAPI) Delete(c *gin.Context) {
 	if err := db.DB.WithContext(ctx).First(&node, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("设备不存在"))
 		return
+	}
+
+	if node.Type == model.NodeTypeAgent {
+		if a.agentService != nil {
+			a.agentService.DisconnectNode(node.ID)
+		}
+		cache.DeleteNodeStatus(node.ID)
+		cache.ClearK8SServiceDiscovery(node.UserID)
 	}
 
 	// 删除该 Node 的所有域名

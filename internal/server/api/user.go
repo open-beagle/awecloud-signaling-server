@@ -60,22 +60,22 @@ func (a *UserAPI) SetDesktopService(service *grpcserver.DesktopServiceServer) {
 
 // UserListItem 用户列表项
 type UserListItem struct {
-	ID           uint64           `json:"id"`
-	Name         string           `json:"name"`
-	Alias        string           `json:"alias"`
-	Role         string           `json:"role"`
-	NodeCount    int64            `json:"node_count"`    // 设备数量
-	OnlineCount  int64            `json:"online_count"`  // 在线设备数量
-	ServiceCount int64            `json:"service_count"` // 服务数量（仅 Agent）
-	GroupCount   int64            `json:"group_count"`   // 分组数量
-	Status       string           `json:"status"`
-	SSHEnabled   bool             `json:"ssh_enabled"` // SSH 是否启用（仅 Agent）
-	Enabled      bool             `json:"enabled"`     // 是否启用
-	Source       model.UserSource `json:"source"`      // 来源：manual / logto
-	LastOnline   string           `json:"last_online"`
-	Versions     []string         `json:"versions"`     // 设备版本列表（去重）
-	LatestVersion string          `json:"latest_version"` // 最新版本号
-	CreatedAt    time.Time        `json:"created_at"`
+	ID            uint64           `json:"id"`
+	Name          string           `json:"name"`
+	Alias         string           `json:"alias"`
+	Role          string           `json:"role"`
+	NodeCount     int64            `json:"node_count"`    // 设备数量
+	OnlineCount   int64            `json:"online_count"`  // 在线设备数量
+	ServiceCount  int64            `json:"service_count"` // 服务数量（仅 Agent）
+	GroupCount    int64            `json:"group_count"`   // 分组数量
+	Status        string           `json:"status"`
+	SSHEnabled    bool             `json:"ssh_enabled"` // SSH 是否启用（仅 Agent）
+	Enabled       bool             `json:"enabled"`     // 是否启用
+	Source        model.UserSource `json:"source"`      // 来源：manual / logto
+	LastOnline    string           `json:"last_online"`
+	Versions      []string         `json:"versions"`       // 设备版本列表（去重）
+	LatestVersion string           `json:"latest_version"` // 最新版本号
+	CreatedAt     time.Time        `json:"created_at"`
 }
 
 // List 获取用户列表
@@ -763,7 +763,7 @@ func (a *UserAPI) disconnectUserConnections(ctx context.Context, userID uint64, 
 		if a.agentService != nil {
 			for _, node := range nodes {
 				if node.Type == model.NodeTypeAgent {
-					a.agentService.DisconnectAgent(node.ID)
+					a.agentService.DisconnectNode(node.ID)
 					logger.Infof("已断开 Agent 设备连接: nodeId=%d, nodeName=%s", node.ID, node.Name)
 				}
 			}

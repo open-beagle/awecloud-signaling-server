@@ -55,7 +55,7 @@ state_sync_interval = 5
 enable_ssh = false
 
 # Visitor 配置（服务访问）
-# Visitor 在局域网 IP 上监听端口，将流量通过 Tailscale VPN 转发到其他节点暴露的服务
+# Visitor 在局域网 IP 上监听端口，将流量通过 Headscale 私有网络转发到其他节点暴露的服务
 [visitor]
 # 可选，手动指定监听地址，留空则自动检测局域网 IP
 # 自动检测会过滤虚拟网卡（Docker、K8s CNI、VMware 等），优先选择物理网卡
@@ -160,3 +160,16 @@ namespaces = []
 
 # tsnet gRPC 监听端口（默认 50051）
 listen_port_base = 50051
+
+# ContainerSSH Pod 候选发现（默认关闭）
+# 只有带此 Label 的 Pod 才会作为运行时候选上报，不会自动发布为资源。
+[container]
+enabled = false
+kubeconfig = ""
+label_selector = "signal.beagle.io/container-ssh=true"
+namespaces = []
+provider_label = "beagle.io/provider"
+workspace_label = "beagle.io/workspace"
+generation_label = "beagle.io/workspace-generation"
+container_name_label = "beagle.io/container"
+lease_seconds = 120

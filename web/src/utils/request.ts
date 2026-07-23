@@ -20,6 +20,12 @@ service.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
+    const tenantId = localStorage.getItem('tenant_context')
+		const contextFreePaths = ['/api/v1/admin/tenants', '/api/v1/admin/tenant-contexts', '/api/v1/admin/tenant-admin-memberships', '/api/v1/admin/overview', '/api/v1/admin/platform-admins', '/api/v1/admin/platform']
+		const isContextFree = config.method?.toLowerCase() === 'get' && contextFreePaths.some(path => config.url === path || config.url?.startsWith(`${path}/`))
+		if (tenantId && !isContextFree) {
+      config.headers['X-Tenant-ID'] = tenantId
+    }
     return config
   },
   (error) => {
@@ -39,13 +45,21 @@ service.interceptors.response.use(
   (error) => {
     if (error.response) {
       const { status, data } = error.response
+		const invalidTenantCodes = ['TENANT_CONTEXT_UNAVAILABLE', 'PERMISSION_REVISION_STALE', 'ADMIN_DISABLED']
+		if (invalidTenantCodes.includes(data?.code)) {
+			localStorage.removeItem('tenant_context')
+			window.dispatchEvent(new CustomEvent('tenant-context-invalid', { detail: { code: data.code } }))
+		}
       
       if (status === 401) {
         ElMessage.error('未授权，请重新登录')
         localStorage.removeItem('token')
-        router.push('/login')
+        localStorage.removeItem('admin_role')
+        localStorage.removeItem('tenant_context')
+		window.dispatchEvent(new Event('admin-session-cleared'))
+		if (router.currentRoute.value.name !== 'Login') router.push('/login')
       } else if (status === 403) {
-        ElMessage.error('没有权限访问此资源')
+			ElMessage.error(data?.message || '没有权限访问此资源')
       } else if (status === 404) {
         ElMessage.error('请求的资源不存在')
       } else if (status === 409) {

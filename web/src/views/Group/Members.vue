@@ -21,7 +21,7 @@
       <template #header>
         <div class="card-header">
           <span>{{ $t('group.memberList') }} ({{ members.length }})</span>
-          <el-button type="primary" size="small" @click="showAddDialog = true">
+          <el-button type="primary" size="small" :disabled="!canManage" @click="showAddDialog = true">
             <el-icon><Plus /></el-icon>
             {{ $t('group.addMember') }}
           </el-button>
@@ -44,7 +44,7 @@
         </el-table-column>
         <el-table-column :label="$t('common.actions')" width="100" fixed="right">
           <template #default="{ row }">
-            <el-button type="danger" link size="small" @click="handleRemove(row)">{{ $t('group.removeMember') }}</el-button>
+            <el-button type="danger" link size="small" :disabled="!canManage" @click="handleRemove(row)">{{ $t('group.removeMember') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -87,11 +87,16 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { getGroup, getGroupMembers, addGroupMember, removeGroupMember, type Group, type GroupMember } from '@/api/group'
 import { getUsers, type User } from '@/api/user'
+import { getTenantMembers, type TenantMember } from '@/api/resource'
 import { formatTime } from '@/utils/time'
+import { useAuthStore } from '@/stores/auth'
+import { useTenantStore } from '@/stores/tenant'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
+const tenantStore = useTenantStore()
 
 const groupId = Number(route.params.id)
 const loading = ref(false)
@@ -100,6 +105,7 @@ const submitting = ref(false)
 const group = ref<Group | null>(null)
 const members = ref<GroupMember[]>([])
 const users = ref<User[]>([])
+const tenantMembers = ref<TenantMember[]>([])
 const showAddDialog = ref(false)
 const formRef = ref<FormInstance>()
 
@@ -114,8 +120,12 @@ const rules: FormRules = {
 // 可选用户（排除已是成员的）
 const availableUsers = computed(() => {
   const memberUserIds = members.value.map(m => m.user_id)
-  return users.value.filter(u => !memberUserIds.includes(u.id))
+  if (group.value?.tenant_id) {
+    return tenantMembers.value.filter(member => member.enabled && !memberUserIds.includes(member.user_id)).map(member => ({ id: member.user_id, name: member.name, alias: member.alias }))
+  }
+  return users.value.filter(user => !memberUserIds.includes(user.id))
 })
+const canManage = computed(() => authStore.canWrite && !!group.value && (group.value.tenant_id ? tenantStore.tenantId === group.value.tenant_id : authStore.isPlatformAdmin))
 
 // 获取分组信息
 const fetchGroup = async () => {
@@ -123,6 +133,7 @@ const fetchGroup = async () => {
     const res = await getGroup(groupId)
     if (res.success && res.data) {
       group.value = res.data
+      await fetchUsers()
     }
   } catch (error) {
     console.error('获取分组信息失败:', error)
@@ -148,9 +159,12 @@ const fetchMembers = async () => {
 const fetchUsers = async () => {
   loadingUsers.value = true
   try {
-    const res = await getUsers({ size: 1000 })
-    if (res.success && res.data) {
-      users.value = res.data
+    if (group.value?.tenant_id) {
+      const res = await getTenantMembers(group.value.tenant_id)
+      if (res.success && res.data) tenantMembers.value = res.data
+    } else if (authStore.isPlatformAdmin) {
+      const res = await getUsers({ size: 1000 })
+      if (res.success && res.data) users.value = res.data
     }
   } catch (error) {
     console.error('获取用户列表失败:', error)
@@ -218,7 +232,6 @@ const handleCloseDialog = () => {
 onMounted(() => {
   fetchGroup()
   fetchMembers()
-  fetchUsers()
 })
 </script>
 

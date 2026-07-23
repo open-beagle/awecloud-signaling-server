@@ -4,7 +4,9 @@ package grpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,18 +65,25 @@ type AgentServiceServer struct {
 	requestImmediateReport bool
 	immediateReportMutex   sync.Mutex
 
-	headscaleClient *headscale.Client
-	config          *config.ServerConfig
-	domainService   *service.DomainService
+	headscaleClient          *headscale.Client
+	config                   *config.ServerConfig
+	domainService            *service.DomainService
+	updateService            *service.UpdateService
+	resourceReconciler       *service.ResourceReconciliationService
+	containerSessionAckMutex sync.Mutex
+	containerSessionAcks     map[uint64][]string
 }
 
 // NewAgentServiceServer 创建 Agent 服务
 func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
 	s := &AgentServiceServer{
-		connections:   make(map[uint64]*AgentConnection),
-		configVersion: time.Now().Unix(),
-		config:        cfg,
-		domainService: service.NewDomainService(db.DB),
+		connections:          make(map[uint64]*AgentConnection),
+		configVersion:        time.Now().Unix(),
+		config:               cfg,
+		domainService:        service.NewDomainService(db.DB),
+		updateService:        service.NewUpdateService(db.DB),
+		resourceReconciler:   service.NewResourceReconciliationService(db.DB),
+		containerSessionAcks: make(map[uint64][]string),
 	}
 
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
@@ -407,6 +416,9 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 	logger.Infof("Agent 连接注册: agent_id=%d, node_id=%d, hostname=%s", agentID, nodeID, firstReq.Hostname)
 
 	defer func() {
+		s.containerSessionAckMutex.Lock()
+		delete(s.containerSessionAcks, nodeID)
+		s.containerSessionAckMutex.Unlock()
 		s.connMutex.Lock()
 		delete(s.connections, nodeID)
 		s.connMutex.Unlock()
@@ -581,6 +593,36 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		"last_heartbeat": now,
 		"ip":             req.TunnelIp,
 	}
+	// Old Agents do not know updater_protocol. Preserve the stored capability
+	// when the optional field is absent instead of downgrading it on heartbeat.
+	if req.UpdaterProtocol != "" {
+		updates["updater_protocol"] = req.UpdaterProtocol
+	}
+	// ContainerSSH is a strict per-heartbeat capability negotiation. An old or
+	// downgraded Agent omitting v1 must immediately lose permission snapshots
+	// and remote-disconnect directives; a stale stored v1 is not authoritative.
+	containerSSHProtocol := ""
+	if req.ContainerSshProtocol == "v1" {
+		containerSSHProtocol = "v1"
+	}
+	updates["container_ssh_protocol"] = containerSSHProtocol
+	if req.Version != "" {
+		updates["version"] = req.Version
+	}
+	if req.SystemInfo != nil {
+		systemInfo := model.NodeSystemInfo{
+			OS:        req.SystemInfo.Os,
+			OSVersion: req.SystemInfo.OsVersion,
+			Arch:      req.SystemInfo.Arch,
+			Hostname:  req.SystemInfo.Hostname,
+			CPU:       req.SystemInfo.Cpu,
+			CPUCores:  int(req.SystemInfo.CpuCores),
+			MemoryGB:  int(req.SystemInfo.MemoryGb),
+		}
+		if data, err := json.Marshal(systemInfo); err == nil {
+			updates["system_info"] = string(data)
+		}
+	}
 
 	if req.Hostname != "" {
 		updates["hostname"] = req.Hostname
@@ -633,6 +675,43 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		s.handleConnectedEndpoints(ctx, agentID, node.ID, req.ConnectedEndpoints)
 	}
 
+	// ContainerSSH candidates are runtime evidence. The NodeID comes from the
+	// authenticated heartbeat stream, never from an Agent-supplied field.
+	if len(req.ContainerCandidates) > 0 {
+		s.handleContainerCandidates(ctx, node.ID, req.ContainerCandidates)
+	}
+	if req.ContainerSshProtocol == "v1" && len(req.ContainerSshSessionEvents) > 0 {
+		acks := s.handleContainerSessionEvents(ctx, node.ID, req.ContainerSshSessionEvents)
+		if len(acks) > 0 {
+			s.containerSessionAckMutex.Lock()
+			if s.containerSessionAcks == nil {
+				s.containerSessionAcks = make(map[uint64][]string)
+			}
+			s.containerSessionAcks[node.ID] = append(s.containerSessionAcks[node.ID], acks...)
+			s.containerSessionAckMutex.Unlock()
+		}
+	}
+
+	if s.updateService != nil {
+		for _, report := range req.UpdateStatuses {
+			if err := s.updateService.Report(ctx, report.TaskId, service.UpdateStatusReporter{
+				Source:     "agent",
+				Component:  model.ComponentAgent,
+				TargetType: model.UpdateTargetNode,
+				TargetID:   fmt.Sprintf("%d", node.ID),
+			}, service.UpdateStatusReport{
+				Phase:          report.Phase,
+				Progress:       int(report.Progress),
+				CurrentVersion: report.CurrentVersion,
+				Sequence:       report.Sequence,
+				ErrorCode:      report.ErrorCode,
+				ErrorMessage:   report.ErrorMessage,
+			}); err != nil {
+				logger.Warnf("处理 Agent 更新状态失败: task_id=%s, err=%v", report.TaskId, err)
+			}
+		}
+	}
+
 	// 处理操作审计记录上报
 	if len(req.AuditRecords) > 0 {
 		s.handleAuditRecords(ctx, agentID, req.AuditRecords)
@@ -642,6 +721,54 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	// 旧的 DiscoveredServices 字段已废弃，不再处理
 
 	return node.ID
+}
+
+func (s *AgentServiceServer) handleContainerCandidates(ctx context.Context, nodeID uint64, reports []*pb.ContainerDiscoveryCandidate) {
+	now := time.Now()
+	for _, report := range reports {
+		if report == nil || report.PodUid == "" || report.Namespace == "" || report.ContainerName == "" {
+			continue
+		}
+		var candidate model.DiscoveryCandidate
+		err := db.DB.WithContext(ctx).Where("agent_node_id = ? AND pod_uid = ? AND container_name = ?", nodeID, report.PodUid, report.ContainerName).First(&candidate).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			candidate = model.DiscoveryCandidate{ID: uuid.NewString(), AgentNodeID: nodeID, PodUID: report.PodUid, ContainerName: report.ContainerName, Status: model.DiscoveryCandidateObserved}
+		} else if err != nil {
+			logger.Warnf("查询 ContainerSSH Candidate 失败: node_id=%d pod_uid=%s err=%v", nodeID, report.PodUid, err)
+			continue
+		}
+		if candidate.Status == "" || candidate.Status == model.DiscoveryCandidateStale {
+			candidate.Status = model.DiscoveryCandidateObserved
+		}
+		candidate.ProviderHint = strings.TrimSpace(report.ProviderHint)
+		candidate.WorkspaceHint = strings.TrimSpace(report.WorkspaceHint)
+		candidate.GenerationHint = report.GenerationHint
+		candidate.ClusterID = strings.TrimSpace(report.ClusterId)
+		candidate.Namespace = strings.TrimSpace(report.Namespace)
+		candidate.PodName = strings.TrimSpace(report.PodName)
+		candidate.Ready = report.Ready
+		candidate.ObservedAt = now
+		leaseSeconds := int(report.LeaseSeconds)
+		if leaseSeconds <= 0 || leaseSeconds > 24*60*60 {
+			leaseSeconds = 120
+		}
+		expires := now.Add(time.Duration(leaseSeconds) * time.Second)
+		candidate.LeaseExpiresAt = &expires
+		if labelsJSON, marshalErr := json.Marshal(report.Labels); marshalErr == nil {
+			candidate.LabelSnapshot = string(labelsJSON)
+		}
+		if err := db.DB.WithContext(ctx).Save(&candidate).Error; err != nil {
+			logger.Warnf("保存 ContainerSSH Candidate 失败: node_id=%d pod_uid=%s err=%v", nodeID, report.PodUid, err)
+			continue
+		}
+		reconciler := s.resourceReconciler
+		if reconciler == nil {
+			reconciler = service.NewResourceReconciliationService(db.DB)
+		}
+		if _, reconcileErr := reconciler.ReconcileCandidate(ctx, candidate.ID); reconcileErr != nil {
+			logger.Warnf("ContainerSSH Candidate 自动匹配失败: candidate_id=%s err=%v", candidate.ID, reconcileErr)
+		}
+	}
 }
 
 // sendHeartbeatResponse 发送心跳响应
@@ -666,14 +793,18 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 	}
 
 	// 构建 Agent 能力配置
-	// SSH：从 User 表读取（User 级别共享）
+	// SSH：仅 Agent 角色从 User 表读取（User 级别共享）；Client/CloudIDE 保持本地配置
 	// K8S/SVC：从 Node 表读取（Node 级别独立）
 	var capUser model.User
 	if err := db.DB.WithContext(ctx).First(&capUser, agentID).Error; err == nil {
-		capConfig := &pb.AgentCapabilityConfig{
-			// SSH：User.SSHEnabled 是 bool 非指针，始终有值，始终下发
-			SshEnabled:    capUser.SSHEnabled,
-			SshEnabledSet: true,
+		capConfig := &pb.AgentCapabilityConfig{}
+
+		// Client/CloudIDE 使用 client token 注册，User.SSHEnabled 默认是 false。
+		// 如果这里下发 SSH=false，会覆盖 CloudIDE 本地 enable_ssh=true，导致
+		// Tailscale SSH 在启动后立刻被关闭，Desktop 连接 100.64.x.x:22 被拒绝。
+		if capUser.Role == model.UserRoleAgent {
+			capConfig.SshEnabled = capUser.SSHEnabled
+			capConfig.SshEnabledSet = true
 		}
 
 		// K8S/SVC：从 Node 表读取
@@ -801,6 +932,26 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		resp.EndpointSshPermissions = endpointSSHPerms
 	}
 
+	// Only an Agent that explicitly negotiated v1 may interpret an empty list
+	// as a complete revocation snapshot. Old Agents continue unchanged.
+	if nodeID > 0 {
+		var protocol string
+		if err := db.DB.WithContext(ctx).Model(&model.Node{}).Where("id = ?", nodeID).Pluck("container_ssh_protocol", &protocol).Error; err == nil && protocol == "v1" {
+			resp.ContainerSshProtocol = "v1"
+			resp.ContainerSshPermissions = s.queryContainerSSHPermissions(ctx, nodeID)
+			s.containerSessionAckMutex.Lock()
+			resp.ContainerSshSessionAckEventIds = s.containerSessionAcks[nodeID]
+			delete(s.containerSessionAcks, nodeID)
+			s.containerSessionAckMutex.Unlock()
+			var revoked []model.ContainerSession
+			if err := db.DB.WithContext(ctx).Where("agent_node_id = ? AND status = ? AND disconnect_acknowledged_at IS NULL", nodeID, model.ContainerSessionRevoked).Find(&revoked).Error; err == nil {
+				for _, session := range revoked {
+					resp.ContainerSshDisconnectSessionIds = append(resp.ContainerSshDisconnectSessionIds, session.ID)
+				}
+			}
+		}
+	}
+
 	// 查询该 Agent 关联的 Endpoint K8SAPI 授权信息
 	// P11 重构：Endpoint K8SAPI 权限已废弃，统一使用 Agent 级别权限
 	// 保留字段以兼容旧版本 Agent，但不再填充数据
@@ -832,7 +983,128 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		logger.Errorf("查询 Endpoint 配置失败 (agent_id=%d): %v", agentID, err)
 	}
 
+	if s.updateService != nil {
+		directives, err := s.updateService.DirectivesForNode(ctx, nodeID, model.ComponentAgent)
+		if err != nil {
+			logger.Warnf("查询 Agent 更新任务失败: node_id=%d, err=%v", nodeID, err)
+		} else {
+			for _, directive := range directives {
+				resp.UpdateDirectives = append(resp.UpdateDirectives, toProtoUpdateDirective(directive))
+			}
+		}
+
+		endpointDirectives, err := s.updateService.DirectivesForAgentEndpoints(ctx, agentID)
+		if err != nil {
+			logger.Warnf("查询 Endpoint 更新任务失败: agent_id=%d, err=%v", agentID, err)
+		} else {
+			for _, directive := range endpointDirectives {
+				resp.EndpointUpdateDirectives = append(resp.EndpointUpdateDirectives, toProtoUpdateDirective(directive))
+			}
+		}
+	}
+
 	return stream.Send(resp)
+}
+
+func (s *AgentServiceServer) queryContainerSSHPermissions(ctx context.Context, nodeID uint64) []*pb.ContainerSSHPermission {
+	if nodeID == 0 {
+		return nil
+	}
+	now := time.Now()
+	var resources []model.Resource
+	if err := db.DB.WithContext(ctx).
+		Where("agent_node_id = ? AND type = ? AND target_revision > 0 AND state IN ?", nodeID, model.ResourceTypeContainerSSH, []model.ResourceState{model.ResourceStateAvailable, model.ResourceStateDegraded}).
+		Find(&resources).Error; err != nil {
+		logger.Warnf("查询 ContainerSSH Resource 快照失败: node_id=%d err=%v", nodeID, err)
+		return nil
+	}
+
+	result := make([]*pb.ContainerSSHPermission, 0)
+	for _, resource := range resources {
+		var target model.ResourceTarget
+		if err := db.DB.WithContext(ctx).Where("resource_id = ? AND revision = ? AND agent_node_id = ? AND ready = ?", resource.ID, resource.TargetRevision, nodeID, true).First(&target).Error; err != nil {
+			continue
+		}
+		var grants []model.AccessGrant
+		if err := db.DB.WithContext(ctx).Where("resource_id = ? AND tenant_id = ? AND subject_type IN ? AND status = ? AND valid_from <= ? AND expires_at > ?", resource.ID, resource.TenantID, []string{"user", "group"}, "enabled", now, now).Order("subject_type DESC").Find(&grants).Error; err != nil {
+			logger.Warnf("查询 ContainerSSH Grant 快照失败: resource_id=%s err=%v", resource.ID, err)
+			continue
+		}
+		resolved := make(map[uint64]*pb.ContainerSSHPermission)
+		for _, grant := range grants {
+			if !containsAction(parseJSONStringArray(grant.Actions), "shell") {
+				continue
+			}
+			userIDs := []uint64{grant.SubjectUserID}
+			if grant.SubjectType == "group" {
+				if grant.SubjectGroupID == nil {
+					continue
+				}
+				var group model.Group
+				if err := db.DB.WithContext(ctx).Where("id = ? AND tenant_id = ?", *grant.SubjectGroupID, resource.TenantID).First(&group).Error; err != nil {
+					continue
+				}
+				userIDs = nil
+				if err := db.DB.WithContext(ctx).Model(&model.GroupMember{}).Where("group_id = ?", group.ID).Pluck("user_id", &userIDs).Error; err != nil {
+					continue
+				}
+			}
+			for _, userID := range userIDs {
+				var user model.User
+				if err := db.DB.WithContext(ctx).Where("id = ? AND enabled = ?", userID, true).First(&user).Error; err != nil {
+					continue
+				}
+				var membership model.TenantMembership
+				if err := db.DB.WithContext(ctx).Where("tenant_id = ? AND user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", resource.TenantID, user.ID, true, now).First(&membership).Error; err != nil {
+					continue
+				}
+				permission := &pb.ContainerSSHPermission{
+					UserId: user.ID, UserName: user.Name, ResourceId: resource.ID,
+					Namespace: target.Namespace, PodName: target.PodName, PodUid: target.PodUID, ContainerName: target.ContainerName,
+					TargetRevision: target.Revision, GrantRevision: grant.Revision, MaxSessionSeconds: int32(grant.MaxSessionSeconds), ListenPort: uint32(resource.ContainerSSHPort),
+				}
+				current, exists := resolved[user.ID]
+				if !exists || permission.GrantRevision > current.GrantRevision {
+					resolved[user.ID] = permission
+				}
+			}
+		}
+		for _, permission := range resolved {
+			result = append(result, permission)
+		}
+	}
+	return result
+}
+
+func containsAction(actions []string, expected string) bool {
+	for _, action := range actions {
+		if action == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func toProtoUpdateDirective(directive service.UpdateDirective) *pb.UpdateDirective {
+	return &pb.UpdateDirective{
+		TaskId:        directive.TaskID,
+		Component:     directive.Component,
+		Version:       directive.Version,
+		ArtifactId:    directive.ArtifactID,
+		DownloadUrl:   directive.DownloadURL,
+		Filename:      directive.Filename,
+		Os:            directive.OS,
+		Arch:          directive.Arch,
+		Size:          directive.Size,
+		Sha256:        directive.SHA256,
+		Signature:     directive.Signature,
+		KeyId:         directive.KeyID,
+		Force:         directive.Force,
+		NotBeforeUnix: directive.NotBeforeUnix,
+		DeadlineUnix:  directive.DeadlineUnix,
+		Action:        directive.Action,
+		TargetName:    directive.TargetName,
+	}
 }
 
 // queryK8SPermissions 查询 Agent 的 K8S API 授权列表
@@ -864,7 +1136,7 @@ func (s *AgentServiceServer) queryK8SPermissions(ctx context.Context, agentID ui
 			IsGroup:    false,
 		}
 		result = append(result, perm)
-		logger.Debugf("[queryK8SPermissions] 添加用户权限: user_id=%d, user_name=%s, k8s_groups=%v", 
+		logger.Debugf("[queryK8SPermissions] 添加用户权限: user_id=%d, user_name=%s, k8s_groups=%v",
 			p.UserID, p.User.Name, perm.K8SGroups)
 	}
 
@@ -1171,6 +1443,18 @@ func (s *AgentServiceServer) DisconnectAgent(agentID uint64) {
 	}
 }
 
+// DisconnectNode 断开指定 Node 的 Agent 连接
+func (s *AgentServiceServer) DisconnectNode(nodeID uint64) {
+	s.connMutex.Lock()
+	defer s.connMutex.Unlock()
+
+	if conn, exists := s.connections[nodeID]; exists {
+		conn.Cancel()
+		delete(s.connections, nodeID)
+		logger.Infof("已断开 Agent Node 连接: agentId=%d, nodeId=%d", conn.AgentID, nodeID)
+	}
+}
+
 // GetAgentConnection 获取 Agent 连接（返回该 AgentID 下第一个在线连接）
 func (s *AgentServiceServer) GetAgentConnection(agentID uint64) *AgentConnection {
 	s.connMutex.RLock()
@@ -1374,6 +1658,7 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 
 	for _, ep := range endpoints {
 		reportedNames[ep.Name] = true
+		endpointID := ""
 
 		// 更新 Endpoint 内存缓存
 		cache.SetEndpointStatus(ep.Name, cache.EndpointStatus{
@@ -1438,6 +1723,10 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 				ID:                      uuid.New().String(),
 				UserID:                  agentID,
 				Name:                    ep.Name,
+				Version:                 ep.Version,
+				UpdaterProtocol:         ep.UpdaterProtocol,
+				OS:                      ep.Os,
+				Arch:                    ep.Arch,
 				Status:                  "online",
 				SSHEnabled:              false,
 				SSHUsers:                sshUsersJSON,
@@ -1452,6 +1741,7 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 			if err := db.DB.WithContext(ctx).Create(&record).Error; err != nil {
 				logger.Errorf("创建 Endpoint 失败: name=%s, err=%v", ep.Name, err)
 			} else {
+				endpointID = record.ID
 				logger.Infof("创建 Endpoint: name=%s, id=%s, ssh_port=%d, k8sapi_port=%d, ssh_users=%v",
 					ep.Name, record.ID, record.SSHPort, record.K8SAPIPort, ep.SshUsers)
 
@@ -1479,7 +1769,18 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 		} else {
 			// 存在，更新状态和配置（不更新能力开关，能力由 Web 界面管理）
 			updates := map[string]any{
-				"status": "online",
+				"status":           "online",
+				"updater_protocol": ep.UpdaterProtocol,
+			}
+			endpointID = existing.ID
+			if ep.Version != "" {
+				updates["version"] = ep.Version
+			}
+			if ep.Os != "" {
+				updates["os"] = ep.Os
+			}
+			if ep.Arch != "" {
+				updates["arch"] = ep.Arch
 			}
 
 			// 自动修复端口（如果端口为 0，说明是旧版本创建的 Endpoint）
@@ -1555,6 +1856,26 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 							logger.Infof("更新 Endpoint K8SAPI 域名端口: endpoint=%s, port=%d", ep.Name, updatedEndpoint.K8SAPIPort)
 						}
 					}
+				}
+			}
+		}
+
+		if endpointID != "" && s.updateService != nil {
+			for _, report := range ep.UpdateStatuses {
+				if err := s.updateService.Report(ctx, report.TaskId, service.UpdateStatusReporter{
+					Source:     "endpoint",
+					Component:  model.ComponentEndpoint,
+					TargetType: model.UpdateTargetEndpoint,
+					TargetID:   endpointID,
+				}, service.UpdateStatusReport{
+					Phase:          report.Phase,
+					Progress:       int(report.Progress),
+					CurrentVersion: report.CurrentVersion,
+					Sequence:       report.Sequence,
+					ErrorCode:      report.ErrorCode,
+					ErrorMessage:   report.ErrorMessage,
+				}); err != nil {
+					logger.Warnf("处理 Endpoint 更新状态失败: endpoint=%s, task_id=%s, err=%v", ep.Name, report.TaskId, err)
 				}
 			}
 		}
@@ -1812,8 +2133,8 @@ func (s *AgentServiceServer) GetUserDeviceInfo(ctx context.Context, req *pb.GetU
 	logger.Debugf("收到用户设备信息查询: user_name=%s, device_ip=%s", req.UserName, req.DeviceIp)
 
 	resp := &pb.GetUserDeviceInfoResponse{
-		UserName:  req.UserName,
-		DeviceIp:  req.DeviceIp,
+		UserName: req.UserName,
+		DeviceIp: req.DeviceIp,
 	}
 
 	// 1. 查询用户信息（获取 Alias）

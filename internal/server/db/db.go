@@ -79,8 +79,21 @@ func autoMigrate() error {
 	err := DB.AutoMigrate(
 		// 基础模型
 		&model.Admin{},
+		&model.AdminTenantMembership{},
 		&model.User{},
 		&model.Node{},
+
+		// 统一资源模型
+		&model.Tenant{},
+		&model.TenantMembership{},
+		&model.ProviderTenantBinding{},
+		&model.WorkspaceBinding{},
+		&model.Resource{},
+		&model.ResourceTarget{},
+		&model.AccessGrant{},
+		&model.DiscoveryCandidate{},
+		&model.ContainerSession{},
+		&model.LegacyResourceClaim{},
 
 		// 分组模型
 		&model.Group{},
@@ -142,6 +155,12 @@ func autoMigrate() error {
 		// Endpoint 模型（统一表）
 		&model.Endpoint{},
 
+		// Updater 发布和任务模型
+		&model.Release{},
+		&model.Artifact{},
+		&model.UpdateTask{},
+		&model.UpdateEvent{},
+
 		// 操作级审计日志
 		&model.OperationAuditLog{},
 	)
@@ -183,6 +202,7 @@ func CreateDefaultAdmin(username, password string) error {
 	admin := &model.Admin{
 		Username:     username,
 		PasswordHash: string(hash),
+		Enabled:      true,
 	}
 
 	if err := DB.WithContext(ctx).Create(admin).Error; err != nil {

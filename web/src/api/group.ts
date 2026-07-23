@@ -4,6 +4,7 @@ import type { ApiResponse, PagedResponse } from '@/types/models'
 // 分组模型
 export interface Group {
   id: number
+  tenant_id?: string
   name: string
   alias?: string
   description?: string
@@ -27,7 +28,7 @@ export interface GroupMember {
 }
 
 // 获取分组列表
-export const getGroups = (params?: { search?: string; page?: number; size?: number }) => {
+export const getGroups = (params?: { tenant_id?: string; search?: string; page?: number; size?: number }) => {
   return request.get<any, PagedResponse<Group[]>>('/api/v1/admin/groups', { params })
 }
 
@@ -37,7 +38,7 @@ export const getGroup = (id: number) => {
 }
 
 // 创建分组
-export const createGroup = (data: { name: string; alias?: string; description?: string }) => {
+export const createGroup = (data: { tenant_id?: string; name: string; alias?: string; description?: string }) => {
   return request.post<any, ApiResponse<Group>>('/api/v1/admin/groups', data)
 }
 
