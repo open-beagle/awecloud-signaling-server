@@ -82,4 +82,14 @@ func TestEnsureBeagleWorkspaceMigratesOnlyUnscopedDesktopUsers(t *testing.T) {
 	var workspaceCount int64
 	require.NoError(t, database.Model(&model.Tenant{}).Where("key = ?", beagleWorkspaceKey).Count(&workspaceCount).Error)
 	require.Equal(t, int64(1), workspaceCount)
+
+	require.NoError(t, database.Model(&workspace).Update("name", legacyBeagleWorkspaceName).Error)
+	require.NoError(t, EnsureBeagleWorkspace(admin.Username))
+	require.NoError(t, database.First(&workspace, "id = ?", workspace.ID).Error)
+	require.Equal(t, beagleWorkspaceName, workspace.Name)
+
+	require.NoError(t, database.Model(&workspace).Update("name", "自定义租户名称").Error)
+	require.NoError(t, EnsureBeagleWorkspace(admin.Username))
+	require.NoError(t, database.First(&workspace, "id = ?", workspace.ID).Error)
+	require.Equal(t, "自定义租户名称", workspace.Name)
 }
