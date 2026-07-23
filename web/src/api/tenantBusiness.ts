@@ -33,7 +33,13 @@ export interface TenantAuditLog {
 }
 
 export const getTenantMemberDevices = (tenantId: string, params: { search?: string; page: number; size: number }) =>
-  request.get<any, PagedResponse<TenantMemberDevice[]>>(`/api/v1/admin/tenants/${tenantId}/member-devices`, { params })
+  request.get<any, PagedResponse<TenantMemberDevice[]>>(`/api/v1/admin/tenants/${tenantId}/member-devices`, {
+    params,
+    headers: { 'X-Tenant-ID': tenantId },
+  })
 
 export const getTenantAuditLogs = (tenantId: string, params: { search?: string; action_type?: string; page: number; size: number }) =>
-  request.get<any, PagedResponse<TenantAuditLog[]>>(`/api/v1/admin/tenants/${tenantId}/audit-logs`, { params })
+  request.get<any, PagedResponse<TenantAuditLog[]>>(`/api/v1/admin/tenants/${tenantId}/audit-logs`, {
+    params,
+    headers: { 'X-Tenant-ID': tenantId },
+  })

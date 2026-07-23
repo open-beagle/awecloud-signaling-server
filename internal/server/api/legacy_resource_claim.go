@@ -82,9 +82,6 @@ func (a *LegacyResourceClaimAPI) Claim(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("存量对象、Tenant 和认领原因不能为空"))
 		return
 	}
-	if !requireTenantPermission(c, req.TenantID, PermissionTenantResourcesWrite) {
-		return
-	}
 	var tenant model.Tenant
 	if err := db.DB.WithContext(c.Request.Context()).First(&tenant, "id = ?", req.TenantID).Error; err != nil || tenant.Status != model.TenantStatusActive {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("Tenant 不存在或不可用"))
@@ -143,9 +140,6 @@ func (a *LegacyResourceClaimAPI) Revoke(c *gin.Context) {
 	var claim model.LegacyResourceClaim
 	if err := db.DB.WithContext(c.Request.Context()).First(&claim, "id = ?", c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse("存量归属不存在"))
-		return
-	}
-	if !requireTenantPermission(c, claim.TenantID, PermissionTenantResourcesWrite) {
 		return
 	}
 	if claim.Status != "active" {
