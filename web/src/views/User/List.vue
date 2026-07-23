@@ -1,5 +1,13 @@
 <template>
   <div class="user-list">
+    <div class="page-header">
+      <div>
+        <div class="eyebrow">兼容身份治理</div>
+        <h1>访问主体目录</h1>
+        <p>管理 Agent 与 Desktop 使用的全局 User 身份。它不同于平台管理账号，也不等同于租户成员关系。</p>
+      </div>
+    </div>
+    <el-alert class="identity-alert" title="此目录保留旧连接、部署令牌与授权链路；租户资源资格仍由租户成员和访问策略决定。" type="info" show-icon :closable="false" />
     <!-- 搜索和筛选 -->
     <el-card class="search-card" shadow="never">
       <el-form :inline="true" :model="searchForm" class="search-form">
@@ -196,12 +204,12 @@ const handleReset = () => {
 
 // 查看详情
 const handleView = (row: User) => {
-  router.push(`/users/${row.name}`)
+  router.push(`/platform-identities/${row.name}`)
 }
 
 // 编辑
 const handleEdit = (row: User) => {
-  router.push(`/users/${row.name}?edit=true`)
+  router.push(`/platform-identities/${row.name}?edit=true`)
 }
 
 // 删除
@@ -320,6 +328,33 @@ onMounted(() => {
 <style scoped>
 .user-list {
   width: 100%;
+}
+
+.page-header {
+  margin-bottom: 14px;
+}
+
+.eyebrow {
+  margin-bottom: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.page-header h1 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 24px;
+  line-height: 32px;
+}
+
+.page-header p {
+  margin: 5px 0 0;
+  color: var(--text-regular);
+  font-size: 13px;
+}
+
+.identity-alert {
+  margin-bottom: 14px;
 }
 
 .search-card {

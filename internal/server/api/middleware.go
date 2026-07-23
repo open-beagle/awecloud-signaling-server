@@ -12,7 +12,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
-func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
+func AuthMiddleware(jwtSecret string, allowLocalhostDebug bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 调试模式：允许从 localhost 访问时跳过认证
 		// 这样可以在容器内部使用 curl http://127.0.0.1:8080 调用管理 API
@@ -27,7 +27,7 @@ func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
 			remoteAddr == "127.0.0.1" || remoteAddr == "[::1]" ||
 			strings.HasPrefix(remoteAddr, "127.0.0.1:") || strings.HasPrefix(remoteAddr, "[::1]:")
 
-		if isLocalhost {
+		if allowLocalhostDebug && isLocalhost {
 			// 设置默认的管理员信息（用于日志记录）
 			c.Set("admin_id", float64(0))
 			c.Set("username", "localhost-debug")
@@ -105,19 +105,26 @@ func ManagementAuthorizationMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		if !admin.Enabled {
+			codedError(c, http.StatusForbidden, ErrorCodeAdminDisabled, "管理员身份已停用")
+			c.Abort()
+			return
+		}
 		allowed := false
-		switch admin.Role {
-		case "admin":
+		switch model.NormalizePlatformRole(admin.Role) {
+		case model.PlatformRoleAdmin:
 			allowed = true
-		case "viewer":
+		case model.PlatformRoleViewer:
 			isManagementAccountRoute := strings.HasPrefix(c.Request.URL.Path, "/api/v1/admin/management-accounts")
 			allowed = !isManagementAccountRoute && (c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead || c.Request.Method == http.MethodOptions ||
 				(c.Request.Method == http.MethodPut && c.Request.URL.Path == "/api/v1/admin/auth/password"))
-		case "tenant_admin":
-			allowed = tenantAdminRouteAllowed(c.Request.Method, c.Request.URL.Path)
+		case model.PlatformRoleNone:
+			if admin.Role == string(model.PlatformRoleNone) || model.NormalizeTenantManagementRole(admin.Role) == model.TenantManagementRoleAdmin {
+				allowed = tenantAdminRouteAllowed(c.Request.Method, c.Request.URL.Path)
+			}
 		}
 		if !allowed {
-			c.JSON(http.StatusForbidden, NewErrorResponse("当前管理角色不能访问该平台级接口"))
+			codedError(c, http.StatusForbidden, ErrorCodePlatformPermissionDenied, "当前管理角色不能访问该平台级接口")
 			c.Abort()
 			return
 		}
@@ -146,7 +153,18 @@ func tenantAdminRouteAllowed(method, path string) bool {
 		if len(parts) == 3 && parts[2] == "members" {
 			return method == http.MethodGet || method == http.MethodPost
 		}
+		if len(parts) == 3 && (parts[2] == "member-devices" || parts[2] == "audit-logs") {
+			return method == http.MethodGet
+		}
+		if len(parts) == 3 && parts[2] == "settings" {
+			return method == http.MethodGet || method == http.MethodPut
+		}
+		if len(parts) == 3 && parts[2] == "overview" {
+			return method == http.MethodGet
+		}
 		return len(parts) == 5 && parts[2] == "members" && parts[4] == "disable" && method == http.MethodPost
+	case "tenant-contexts":
+		return method == http.MethodGet && (len(parts) == 1 || len(parts) == 2)
 	case "groups":
 		if len(parts) == 1 {
 			return method == http.MethodGet || method == http.MethodPost

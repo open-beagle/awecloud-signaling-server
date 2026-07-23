@@ -10,6 +10,8 @@ listen_port = 8080
 [security]
 jwt_secret = "your-secret-key-change-in-production"
 jwt_expire_hours = 24
+# 仅限本地隔离开发环境。生产环境保持 false。
+allow_localhost_admin_debug = false
 
 # 数据库配置
 [database]

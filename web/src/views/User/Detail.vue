@@ -460,7 +460,7 @@ const handleDelete = async () => {
     const res = await deleteUser(user.value.name)
     if (res.success) {
       ElMessage.success(t('common.deleteSuccess'))
-      router.push('/users')
+      router.push('/platform-identities')
     } else {
       ElMessage.error(res.message || t('common.deleteFailed'))
     }

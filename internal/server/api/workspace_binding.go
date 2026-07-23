@@ -103,7 +103,7 @@ func (a *WorkspaceBindingAPI) CreateProviderTenantBinding(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("Provider、外部客户和内部客户不能为空"))
 		return
 	}
-	if !requireTenantAccess(c, req.TenantID, true) {
+	if !requireTenantPermission(c, req.TenantID, PermissionTenantResourcesWrite) {
 		return
 	}
 	var tenant model.Tenant
@@ -148,7 +148,7 @@ func (a *WorkspaceBindingAPI) ListWorkspaceBindings(c *gin.Context) {
 	ctx := c.Request.Context()
 	page, size := pageParams(c)
 	query := db.DB.WithContext(ctx).Model(&model.WorkspaceBinding{})
-	tenantIDs, unrestricted, ok := tenantReadScope(c)
+	tenantIDs, unrestricted, ok := tenantReadScope(c, PermissionTenantResourcesRead)
 	if !ok {
 		return
 	}
@@ -213,7 +213,7 @@ func (a *WorkspaceBindingAPI) CreateWorkspaceBinding(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("Provider 外部客户尚未绑定可信 Tenant"))
 		return
 	}
-	if !requireTenantAccess(c, tenantBinding.TenantID, true) {
+	if !requireTenantPermission(c, tenantBinding.TenantID, PermissionTenantResourcesWrite) {
 		return
 	}
 	var tenant model.Tenant

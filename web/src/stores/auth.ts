@@ -8,6 +8,16 @@ export const useAuthStore = defineStore('auth', () => {
   const username = ref(localStorage.getItem('username') || '')
   const role = ref(localStorage.getItem('admin_role') || '')
 
+	const clearSession = () => {
+		token.value = ''
+		username.value = ''
+		role.value = ''
+		localStorage.removeItem('token')
+		localStorage.removeItem('username')
+		localStorage.removeItem('admin_role')
+		localStorage.removeItem('tenant_context')
+	}
+
   const login = async (data: LoginRequest) => {
     const res = await loginApi(data)
     // 后端返回格式: { success: true, data: { token: "...", admin: {...} } }
@@ -30,13 +40,8 @@ export const useAuthStore = defineStore('auth', () => {
     } catch (error) {
       // ignore
     }
-    token.value = ''
-    username.value = ''
-    role.value = ''
-    localStorage.removeItem('token')
-    localStorage.removeItem('username')
-    localStorage.removeItem('admin_role')
-    localStorage.removeItem('tenant_context')
+		clearSession()
+		window.dispatchEvent(new Event('admin-session-cleared'))
   }
 
 
@@ -53,7 +58,13 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => !!token.value)
   const canWrite = computed(() => role.value === 'admin' || role.value === 'tenant_admin')
-  const isPlatformAdmin = computed(() => role.value === 'admin')
+  const isPlatformAdmin = computed(() => ['admin', 'platform_admin'].includes(role.value))
+	const hasPlatformScope = computed(() => ['admin', 'viewer', 'platform_admin', 'platform_viewer'].includes(role.value))
+	const canPlatform = (write = false) => write
+		? ['admin', 'platform_admin'].includes(role.value)
+		: hasPlatformScope.value
+
+	window.addEventListener('admin-session-cleared', clearSession)
 
   return {
     token,
@@ -64,6 +75,8 @@ export const useAuthStore = defineStore('auth', () => {
     loadProfile,
     isAuthenticated,
     canWrite,
-    isPlatformAdmin
+		isPlatformAdmin,
+		hasPlatformScope,
+		canPlatform
   }
 })

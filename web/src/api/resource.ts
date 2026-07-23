@@ -208,7 +208,7 @@ export const createTenant = (data: { key: string; name: string }) => {
   return request.post<any, ApiResponse<Tenant>>('/api/v1/admin/tenants', data)
 }
 
-export const addTenantMember = (tenantId: string, data: { user_id: number; role: 'member' | 'tenant_admin' | 'viewer' }) => {
+export const addTenantMember = (tenantId: string, data: { user_id: number; role: 'member' | 'viewer' }) => {
   return request.post<any, ApiResponse<TenantMember>>(`/api/v1/admin/tenants/${tenantId}/members`, data, { headers: { 'X-Tenant-ID': tenantId } })
 }
 
@@ -271,6 +271,12 @@ export const getManagedResources = (params?: {
 export const getResourceSummary = (params?: { tenant_id?: string; state?: ResourceState; search?: string }) => {
   return request.get<any, ApiResponse<ResourceSummary>>('/api/v1/admin/resources/summary', { params })
 }
+
+export const getPlatformResources = (params?: { type?: ResourceType; state?: ResourceState; search?: string; page?: number; size?: number }) =>
+  request.get<any, PagedResponse<Resource[]>>('/api/v1/admin/platform/resources', { params })
+
+export const getPlatformResourceSummary = (params?: { state?: ResourceState; search?: string }) =>
+  request.get<any, ApiResponse<ResourceSummary>>('/api/v1/admin/platform/resources/summary', { params })
 
 export const getManagedResource = (id: string) => {
   return request.get<any, ApiResponse<ResourceDetail>>(`/api/v1/admin/resources/${id}`)

@@ -59,15 +59,25 @@ const (
 // AuditLog 审计日志模型
 // 记录所有管理操作的审计信息
 type AuditLog struct {
-	ID         int64     `gorm:"primaryKey" json:"id"`
-	UserID     int64     `gorm:"index:idx_audit_user" json:"user_id"`       // 执行操作的用户ID
-	UserType   string    `gorm:"size:20;default:admin" json:"user_type"`    // 用户类型：admin/desktop
-	ActionType string    `gorm:"size:50;index;not null" json:"action_type"` // 操作类型
-	TargetType string    `gorm:"size:50;not null" json:"target_type"`       // 目标类型 (agent, client, service, etc.)
-	TargetID   string    `gorm:"size:100;not null" json:"target_id"`        // 目标ID
-	TargetName string    `gorm:"size:200;not null" json:"target_name"`      // 目标名称
-	Detail     string    `gorm:"type:text" json:"detail"`                   // 操作详情 (JSON格式)
-	CreatedAt  time.Time `gorm:"autoCreateTime;index:idx_audit_logs_created_at" json:"created_at"`
+	ID                 int64     `gorm:"primaryKey" json:"id"`
+	UserID             int64     `gorm:"index:idx_audit_user" json:"user_id"` // 兼容字段，等同于 ActorAdminID
+	UserType           string    `gorm:"size:20;default:admin" json:"user_type"`
+	ActorAdminID       int64     `gorm:"index:idx_audit_actor_admin" json:"actor_admin_id"`
+	ActorUsername      string    `gorm:"size:100" json:"actor_username"`
+	PlatformRole       string    `gorm:"size:30" json:"platform_role"`
+	TenantID           string    `gorm:"size:64;index:idx_audit_tenant" json:"tenant_id"`
+	TenantRole         string    `gorm:"size:30" json:"tenant_role"`
+	RequiredPermission string    `gorm:"size:80" json:"required_permission"`
+	PermissionRevision int64     `json:"permission_revision"`
+	RequestID          string    `gorm:"size:64;index:idx_audit_request" json:"request_id"`
+	SourceIP           string    `gorm:"size:64" json:"source_ip"`
+	UserAgent          string    `gorm:"size:512" json:"user_agent"`
+	ActionType         string    `gorm:"size:50;index;not null" json:"action_type"`
+	TargetType         string    `gorm:"size:50;not null" json:"target_type"`
+	TargetID           string    `gorm:"size:100;not null" json:"target_id"`
+	TargetName         string    `gorm:"size:200;not null" json:"target_name"`
+	Detail             string    `gorm:"type:text" json:"detail"`
+	CreatedAt          time.Time `gorm:"autoCreateTime;index:idx_audit_logs_created_at" json:"created_at"`
 }
 
 // TableName 指定表名
