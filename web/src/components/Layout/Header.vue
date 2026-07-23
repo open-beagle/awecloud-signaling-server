@@ -58,7 +58,14 @@ const appStore = useAppStore()
 const currentLanguage = computed(() => {
   return locale.value === 'zh-CN' ? '中文' : 'English'
 })
-const roleLabel = computed(() => ({ admin: 'Platform Admin', tenant_admin: 'Tenant Admin', viewer: 'Viewer' }[authStore.role] || authStore.role))
+const roleLabel = computed(() => ({
+  admin: '平台管理员',
+  platform_admin: '平台管理员',
+  viewer: '平台观察员',
+  platform_viewer: '平台观察员',
+  tenant_admin: '租户管理员',
+  none: '无平台角色',
+}[authStore.role] || authStore.role))
 
 const handleLanguageChange = (lang: string) => {
   locale.value = lang
@@ -133,6 +140,5 @@ const handleDownloadClient = () => {
   .header-left { gap: 6px; }
   .client-download, .language-selector { display: none; }
   .user-info { padding: 7px; }
-  .user-info .el-tag { display: none; }
 }
 </style>

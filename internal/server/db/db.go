@@ -25,8 +25,9 @@ import (
 var DB *gorm.DB
 
 const (
-	beagleWorkspaceKey  = "beagle"
-	beagleWorkspaceName = "Beagle 工作空间"
+	beagleWorkspaceKey        = "beagle"
+	beagleWorkspaceName       = "Beagle"
+	legacyBeagleWorkspaceName = "Beagle 工作空间"
 )
 
 // InitDB 初始化数据库
@@ -230,7 +231,7 @@ func EnsureBeagleWorkspace(adminUsername string) error {
 		var admin model.Admin
 		if err := tx.Where("username = ?", adminUsername).First(&admin).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				logger.Warnf("默认管理员 %s 不存在，跳过 Beagle 工作空间初始化", adminUsername)
+				logger.Warnf("默认管理员 %s 不存在，跳过 Beagle 默认租户初始化", adminUsername)
 				return nil
 			}
 			return fmt.Errorf("查询默认管理员失败: %w", err)
@@ -239,7 +240,7 @@ func EnsureBeagleWorkspace(adminUsername string) error {
 		var tenant model.Tenant
 		if err := tx.Where("key = ?", beagleWorkspaceKey).First(&tenant).Error; err != nil {
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return fmt.Errorf("查询 Beagle 工作空间失败: %w", err)
+				return fmt.Errorf("查询 Beagle 默认租户失败: %w", err)
 			}
 			tenant = model.Tenant{
 				ID:     uuid.NewString(),
@@ -248,8 +249,13 @@ func EnsureBeagleWorkspace(adminUsername string) error {
 				Status: model.TenantStatusActive,
 			}
 			if err := tx.Create(&tenant).Error; err != nil {
-				return fmt.Errorf("创建 Beagle 工作空间失败: %w", err)
+				return fmt.Errorf("创建 Beagle 默认租户失败: %w", err)
 			}
+		} else if tenant.Name == legacyBeagleWorkspaceName {
+			if err := tx.Model(&tenant).Update("name", beagleWorkspaceName).Error; err != nil {
+				return fmt.Errorf("更新 Beagle 默认租户名称失败: %w", err)
+			}
+			tenant.Name = beagleWorkspaceName
 		}
 
 		var adminMembership model.AdminTenantMembership
@@ -263,10 +269,10 @@ func EnsureBeagleWorkspace(adminUsername string) error {
 				PermissionRevision: 1,
 			}
 			if err := tx.Create(&adminMembership).Error; err != nil {
-				return fmt.Errorf("授权默认管理员管理 Beagle 工作空间失败: %w", err)
+				return fmt.Errorf("授权默认管理员管理 Beagle 默认租户失败: %w", err)
 			}
 		} else if err != nil {
-			return fmt.Errorf("查询 Beagle 工作空间管理员授权失败: %w", err)
+			return fmt.Errorf("查询 Beagle 默认租户管理员授权失败: %w", err)
 		}
 
 		var users []model.User
@@ -286,7 +292,7 @@ func EnsureBeagleWorkspace(adminUsername string) error {
 				Enabled:  true,
 			}
 			if err := tx.Create(&membership).Error; err != nil {
-				return fmt.Errorf("将用户 %d 加入 Beagle 工作空间失败: %w", user.ID, err)
+				return fmt.Errorf("将用户 %d 加入 Beagle 默认租户失败: %w", user.ID, err)
 			}
 			migratedUsers++
 		}
@@ -297,7 +303,7 @@ func EnsureBeagleWorkspace(adminUsername string) error {
 		return err
 	}
 
-	logger.Infof("Beagle 工作空间初始化完成: admin=%s, migrated_users=%d", adminUsername, migratedUsers)
+	logger.Infof("Beagle 默认租户初始化完成: admin=%s, migrated_users=%d", adminUsername, migratedUsers)
 	return nil
 }
 

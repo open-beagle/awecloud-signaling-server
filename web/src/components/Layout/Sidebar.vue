@@ -1,12 +1,5 @@
 <template>
   <div class="sidebar">
-    <div class="identity-panel" :class="{ collapsed: appStore.sidebarCollapsed }">
-      <el-icon class="identity-icon"><User /></el-icon>
-      <div v-if="!appStore.sidebarCollapsed" class="identity-copy">
-        <strong>{{ authStore.username }}</strong>
-        <span>{{ platformRoleLabel }}</span>
-      </div>
-    </div>
 		<div v-if="tenantStore.current" class="tenant-context" :class="{ collapsed: appStore.sidebarCollapsed }">
 			<el-icon><OfficeBuilding /></el-icon>
 			<div v-if="!appStore.sidebarCollapsed" class="tenant-context-copy">
@@ -17,33 +10,30 @@
 
     <el-menu :default-active="activeMenu" :collapse="appStore.sidebarCollapsed" :collapse-transition="false" router unique-opened>
       <template v-if="tenantStore.current">
-        <div v-if="!appStore.sidebarCollapsed" class="scope-heading">
-          <span>租户侧菜单</span>
-          <small>当前租户业务空间</small>
-        </div>
-        <div v-if="!appStore.sidebarCollapsed" class="nav-section">业务</div>
 				<el-menu-item v-if="tenantStore.canTenant('tenant.overview.read')" index="/tenant-overview"><el-icon><DataAnalysis /></el-icon><template #title>租户概览</template></el-menu-item>
-        <el-menu-item v-if="tenantStore.canTenant('tenant.resources.read')" index="/resources"><el-icon><Box /></el-icon><template #title>资源目录</template></el-menu-item>
+
+        <div v-if="!appStore.sidebarCollapsed && hasTenantOrganizationMenu" class="nav-section">组织</div>
         <el-menu-item v-if="tenantStore.canTenant('tenant.members.read')" index="/tenant-members"><el-icon><UserFilled /></el-icon><template #title>租户成员</template></el-menu-item>
         <el-menu-item v-if="tenantStore.canTenant('tenant.groups.read')" index="/groups"><el-icon><Collection /></el-icon><template #title>用户组</template></el-menu-item>
 				<el-menu-item v-if="tenantStore.canTenant('tenant.devices.read')" index="/tenant-member-devices"><el-icon><Monitor /></el-icon><template #title>成员设备</template></el-menu-item>
+
+        <div v-if="!appStore.sidebarCollapsed && hasTenantResourceMenu" class="nav-section">资源与访问</div>
+        <el-menu-item v-if="tenantStore.canTenant('tenant.resources.read')" index="/resources"><el-icon><Box /></el-icon><template #title>资源目录</template></el-menu-item>
         <el-menu-item v-if="tenantStore.canTenant('tenant.grants.read')" index="/access-policies"><el-icon><Key /></el-icon><template #title>访问策略</template></el-menu-item>
         <el-menu-item v-if="tenantStore.canTenant('tenant.sessions.read')" index="/sessions"><el-icon><Clock /></el-icon><template #title>活动会话</template></el-menu-item>
+
+				<div v-if="!appStore.sidebarCollapsed && hasTenantGovernanceMenu" class="nav-section">租户治理</div>
 				<el-menu-item v-if="tenantStore.canTenant('tenant.audit.read')" index="/tenant-audit"><el-icon><DocumentChecked /></el-icon><template #title>租户审计</template></el-menu-item>
 				<el-menu-item v-if="tenantStore.canTenant('tenant.settings.read')" index="/tenant-settings"><el-icon><Setting /></el-icon><template #title>租户设置</template></el-menu-item>
       </template>
 
       <div v-else-if="!tenantStore.loading && !appStore.sidebarCollapsed" class="tenant-empty">
         <strong>无租户管理权限</strong>
-        <span>当前身份没有可进入的租户业务空间。</span>
+        <span>当前身份没有可管理的租户。</span>
       </div>
 
       <template v-if="authStore.hasPlatformScope">
         <div class="scope-divider" />
-        <div v-if="!appStore.sidebarCollapsed" class="scope-heading">
-          <span>管理员侧菜单</span>
-          <small>平台治理与基础设施</small>
-        </div>
 				<el-menu-item index="/platform-overview"><el-icon><DataAnalysis /></el-icon><template #title>平台概览</template></el-menu-item>
 
         <div v-if="!appStore.sidebarCollapsed" class="nav-section">租户治理</div>
@@ -96,8 +86,10 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const tenantStore = useTenantStore()
 
-const platformRoleLabel = computed(() => ({ admin: '平台管理员', platform_admin: '平台管理员', viewer: '平台观察员', platform_viewer: '平台观察员', tenant_admin: '租户管理员' }[authStore.role] || authStore.role))
 const tenantRoleLabel = computed(() => ({ tenant_admin: '租户管理员', security_auditor: '安全审计员', tenant_viewer: '租户观察员' }[tenantStore.tenantRole] || tenantStore.tenantRole))
+const hasTenantOrganizationMenu = computed(() => ['tenant.members.read', 'tenant.groups.read', 'tenant.devices.read'].some(permission => tenantStore.canTenant(permission)))
+const hasTenantResourceMenu = computed(() => ['tenant.resources.read', 'tenant.grants.read', 'tenant.sessions.read'].some(permission => tenantStore.canTenant(permission)))
+const hasTenantGovernanceMenu = computed(() => ['tenant.audit.read', 'tenant.settings.read'].some(permission => tenantStore.canTenant(permission)))
 const activeMenu = computed(() => {
 	if (route.path.startsWith('/tenant-overview')) return '/tenant-overview'
 	if (route.path.startsWith('/platform-overview')) return '/platform-overview'
@@ -140,15 +132,12 @@ watch(() => route.fullPath, () => appStore.closeMobileSidebar())
 
 <style scoped>
 .sidebar { height: 100%; display: flex; flex-direction: column; overflow: hidden; background: #fff; border-right: 1px solid var(--border-light); }
-.identity-panel, .tenant-context { display: flex; align-items: center; gap: 10px; margin: 10px; padding: 10px; border: 1px solid var(--border-light); border-radius: 6px; background: #f8fafc; }
-.identity-panel.collapsed, .tenant-context.collapsed { justify-content: center; margin: 8px 6px; padding: 9px 0; }
-.identity-icon, .tenant-context > .el-icon { flex: 0 0 auto; color: var(--primary-color); font-size: 18px; }
-.identity-copy, .tenant-context-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.identity-copy strong, .tenant-context-copy strong { overflow: hidden; color: var(--text-primary); font-size: 13px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
-.identity-copy span, .tenant-context-copy span { color: var(--text-secondary); font-size: 11px; line-height: 16px; }
-.scope-heading { display: flex; flex-direction: column; gap: 1px; padding: 8px 20px 2px; }
-.scope-heading span { color: var(--text-primary); font-size: 12px; font-weight: 700; }
-.scope-heading small { color: var(--text-secondary); font-size: 10px; }
+.tenant-context { display: flex; align-items: center; gap: 10px; margin: 10px; padding: 10px; border: 1px solid var(--border-light); border-radius: 6px; background: #f8fafc; }
+.tenant-context.collapsed { justify-content: center; margin: 8px 6px; padding: 9px 0; }
+.tenant-context > .el-icon { flex: 0 0 auto; color: var(--primary-color); font-size: 18px; }
+.tenant-context-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tenant-context-copy strong { overflow: hidden; color: var(--text-primary); font-size: 13px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.tenant-context-copy span { color: var(--text-secondary); font-size: 11px; line-height: 16px; }
 .scope-divider { height: 1px; margin: 12px 10px 4px; background: var(--border-light); }
 .tenant-empty { display: flex; flex-direction: column; gap: 4px; margin: 12px 10px; padding: 12px; border: 1px solid #d9e1ec; border-radius: 6px; background: #f8fafc; }
 .tenant-empty strong { color: var(--text-primary); font-size: 12px; }
