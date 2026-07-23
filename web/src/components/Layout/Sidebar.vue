@@ -13,8 +13,8 @@
 				<el-menu-item v-if="tenantStore.canTenant('tenant.overview.read')" index="/tenant-overview"><el-icon><DataAnalysis /></el-icon><template #title>租户概览</template></el-menu-item>
 
         <div v-if="!appStore.sidebarCollapsed && hasTenantOrganizationMenu" class="nav-section">组织</div>
-        <el-menu-item v-if="tenantStore.canTenant('tenant.members.read')" index="/tenant-members"><el-icon><UserFilled /></el-icon><template #title>租户成员</template></el-menu-item>
-        <el-menu-item v-if="tenantStore.canTenant('tenant.groups.read')" index="/groups"><el-icon><Collection /></el-icon><template #title>用户组</template></el-menu-item>
+        <el-menu-item v-if="tenantStore.canTenant('tenant.members.read')" index="/tenant-members"><el-icon><UserFilled /></el-icon><template #title>成员</template></el-menu-item>
+        <el-menu-item v-if="tenantStore.canTenant('tenant.groups.read')" index="/groups"><el-icon><Collection /></el-icon><template #title>成员分组</template></el-menu-item>
 				<el-menu-item v-if="tenantStore.canTenant('tenant.devices.read')" index="/tenant-member-devices"><el-icon><Monitor /></el-icon><template #title>成员设备</template></el-menu-item>
 
         <div v-if="!appStore.sidebarCollapsed && hasTenantResourceMenu" class="nav-section">资源与访问</div>
@@ -39,12 +39,12 @@
         <div v-if="!appStore.sidebarCollapsed" class="nav-section">租户治理</div>
         <el-menu-item index="/tenant-switch"><el-icon><Switch /></el-icon><template #title>租户切换</template></el-menu-item>
         <el-menu-item index="/tenants"><el-icon><OfficeBuilding /></el-icon><template #title>租户管理</template></el-menu-item>
-				<el-menu-item index="/tenant-admin-memberships"><el-icon><Avatar /></el-icon><template #title>租户管理员授权</template></el-menu-item>
+				<el-menu-item index="/tenant-admin-memberships"><el-icon><Avatar /></el-icon><template #title>租户授权</template></el-menu-item>
 
         <div v-if="!appStore.sidebarCollapsed" class="nav-section">资源治理</div>
         <el-menu-item index="/resource-candidates"><el-icon><Search /></el-icon><template #title>发现候选</template></el-menu-item>
         <el-menu-item index="/legacy-inventory"><el-icon><Finished /></el-icon><template #title>存量认领</template></el-menu-item>
-				<el-menu-item index="/platform-resources"><el-icon><Box /></el-icon><template #title>全局资源目录</template></el-menu-item>
+				<el-menu-item index="/platform-resources"><el-icon><Box /></el-icon><template #title>全局资源</template></el-menu-item>
 
         <div v-if="!appStore.sidebarCollapsed" class="nav-section">基础设施</div>
         <el-menu-item index="/nodes/agents"><el-icon><Monitor /></el-icon><template #title>Agent</template></el-menu-item>
@@ -52,8 +52,8 @@
         <el-menu-item index="/infrastructure/integrations"><el-icon><Link /></el-icon><template #title>集成</template></el-menu-item>
 
         <div v-if="!appStore.sidebarCollapsed" class="nav-section">平台治理</div>
-				<el-menu-item index="/platform-admins"><el-icon><UserFilled /></el-icon><template #title>平台管理账号</template></el-menu-item>
-				<el-menu-item index="/platform-identities"><el-icon><User /></el-icon><template #title>访问主体目录</template></el-menu-item>
+				<el-menu-item index="/platform-admins"><el-icon><UserFilled /></el-icon><template #title>管理账号</template></el-menu-item>
+				<el-menu-item index="/platform-identities"><el-icon><User /></el-icon><template #title>访问主体</template></el-menu-item>
         <el-menu-item index="/platform-audit"><el-icon><Document /></el-icon><template #title>平台审计</template></el-menu-item>
         <el-menu-item index="/system/config"><el-icon><Setting /></el-icon><template #title>系统设置</template></el-menu-item>
         <el-sub-menu index="diagnostics">
@@ -61,8 +61,8 @@
           <el-menu-item index="/domains">连接入口</el-menu-item>
           <el-menu-item index="/diagnostics/desktop-nodes">Desktop 节点</el-menu-item>
           <el-menu-item index="/diagnostics/nodes">全部节点</el-menu-item>
-          <el-menu-item index="/diagnostics/operation-audit">连接操作审计</el-menu-item>
-          <el-menu-item index="/acl/ssh">旧授权视图</el-menu-item>
+          <el-menu-item index="/diagnostics/operation-audit">操作审计</el-menu-item>
+          <el-menu-item index="/acl/ssh">旧版授权</el-menu-item>
           <el-menu-item index="/tunnel/acl">网络策略</el-menu-item>
         </el-sub-menu>
       </template>
