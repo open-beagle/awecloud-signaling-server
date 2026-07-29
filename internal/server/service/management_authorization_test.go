@@ -33,7 +33,7 @@ func newManagementAuthorizationFixture(t *testing.T) managementAuthorizationFixt
 	require.NoError(t, database.AutoMigrate(
 		&model.Admin{}, &model.User{}, &model.UserIdentityProfile{}, &model.UserAuthenticationLink{},
 		&model.PlatformRoleMembership{}, &model.ResourceProvider{}, &model.AdminProviderMembership{},
-		&model.Tenant{}, &model.TenantMembership{}, &model.UserTenantManagementMembership{},
+		&model.Tenant{}, &model.TenantMembership{}, &model.UserTenantManagementMembership{}, &model.ProviderTenantBinding{},
 	))
 	now := time.Date(2026, 7, 29, 9, 0, 0, 0, time.UTC)
 	admin := model.Admin{Username: "legacy-admin", PasswordHash: "fixture", Role: "admin", Enabled: true}
@@ -123,6 +123,21 @@ func TestManagementContextsUseIndependentMemberships(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, AuthorizeManagementPermission(tenantContext, PermissionTenantResourcesRead))
 	require.ErrorIs(t, AuthorizeManagementPermission(tenantContext, PermissionTenantResourcesWrite), ErrManagementPermissionDenied)
+}
+
+func TestProviderContextRejectsLegacyIntegrationProviderID(t *testing.T) {
+	fixture := newManagementAuthorizationFixture(t)
+	legacyProviderID := fixture.provider.Key
+	require.NotEqual(t, fixture.provider.ID, legacyProviderID)
+	require.NoError(t, fixture.database.Create(&model.ProviderTenantBinding{
+		ID: uuid.NewString(), ProviderID: legacyProviderID, ExternalTenantID: "external-tenant-a",
+		TenantID: fixture.tenant.ID, Status: model.ProviderBindingActive,
+	}).Error)
+
+	_, err := ResolveManagementContext(
+		fixture.database, fixture.actor.ID, model.ManagementScopeProvider, legacyProviderID, fixture.now, false,
+	)
+	require.ErrorIs(t, err, ErrManagementScopeInvalid)
 }
 
 func TestTenantMemberDoesNotGainManagementPermissions(t *testing.T) {

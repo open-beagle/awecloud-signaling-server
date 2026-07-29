@@ -186,6 +186,16 @@ func TestManagementContextV2RejectsCrossScopeIDsAndLegacyHeader(t *testing.T) {
 	require.Equal(t, ErrorCodeManagementObjectMissing, errorBody.Code)
 	require.Equal(t, requestID, errorBody.RequestID)
 
+	legacyProviderID := fixture.provider.Key
+	require.NotEqual(t, fixture.provider.ID, legacyProviderID)
+	legacyScope := fixture.managementRequest(http.MethodGet, "/management/contexts/current", login.Token, map[string]string{
+		HeaderManagementScopeType: string(model.ManagementScopeProvider),
+		HeaderManagementScopeID:   legacyProviderID,
+	})
+	require.Equal(t, http.StatusNotFound, legacyScope.Code, legacyScope.Body.String())
+	require.NoError(t, json.Unmarshal(legacyScope.Body.Bytes(), &errorBody))
+	require.Equal(t, ErrorCodeManagementObjectMissing, errorBody.Code)
+
 	conflict := fixture.managementRequest(http.MethodGet, "/management/contexts/current", login.Token, map[string]string{
 		HeaderManagementScopeType: string(model.ManagementScopeTenant),
 		HeaderManagementScopeID:   fixture.tenant.ID,
