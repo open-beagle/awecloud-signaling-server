@@ -30,21 +30,24 @@ type TenantMemberDeviceItem struct {
 }
 
 type TenantAuditItem struct {
-	ID                 int64     `json:"id"`
-	ActorAdminID       int64     `json:"actor_admin_id"`
-	ActorUsername      string    `json:"actor_username"`
-	PlatformRole       string    `json:"platform_role"`
-	TenantRole         string    `json:"tenant_role"`
-	RequiredPermission string    `json:"required_permission"`
-	PermissionRevision int64     `json:"permission_revision"`
-	ActionType         string    `json:"action_type"`
-	TargetType         string    `json:"target_type"`
-	TargetID           string    `json:"target_id"`
-	TargetName         string    `json:"target_name"`
-	RequestID          string    `json:"request_id"`
-	SourceIP           string    `json:"source_ip"`
-	Detail             string    `json:"detail,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
+	ID                  int64     `json:"id"`
+	ActorAdminID        int64     `json:"actor_admin_id"`
+	ActorUsername       string    `json:"actor_username"`
+	ActorUserID         uint64    `json:"actor_user_id"`
+	EffectiveUserID     uint64    `json:"effective_user_id"`
+	SimulationSessionID string    `json:"simulation_session_id"`
+	PlatformRole        string    `json:"platform_role"`
+	TenantRole          string    `json:"tenant_role"`
+	RequiredPermission  string    `json:"required_permission"`
+	PermissionRevision  int64     `json:"permission_revision"`
+	ActionType          string    `json:"action_type"`
+	TargetType          string    `json:"target_type"`
+	TargetID            string    `json:"target_id"`
+	TargetName          string    `json:"target_name"`
+	RequestID           string    `json:"request_id"`
+	SourceIP            string    `json:"source_ip"`
+	Detail              string    `json:"detail,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 func (a *TenantBusinessAPI) ListMemberDevices(c *gin.Context) {
@@ -126,6 +129,7 @@ func (a *TenantBusinessAPI) ListAuditLogs(c *gin.Context) {
 	for _, log := range logs {
 		items = append(items, TenantAuditItem{
 			ID: log.ID, ActorAdminID: log.ActorAdminID, ActorUsername: log.ActorUsername, PlatformRole: log.PlatformRole,
+			ActorUserID: log.ActorUserID, EffectiveUserID: log.EffectiveUserID, SimulationSessionID: log.SimulationSessionID,
 			TenantRole: log.TenantRole, RequiredPermission: log.RequiredPermission, PermissionRevision: log.PermissionRevision,
 			ActionType: log.ActionType, TargetType: log.TargetType, TargetID: log.TargetID, TargetName: log.TargetName,
 			RequestID: log.RequestID, SourceIP: log.SourceIP, Detail: log.Detail, CreatedAt: log.CreatedAt,

@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 )
 
 const (
@@ -337,7 +338,13 @@ func (a *ManagementAccountAPI) ResetPassword(c *gin.Context) {
 		c.JSON(http.StatusNotFound, NewErrorResponse("管理账号不存在"))
 		return
 	}
-	if err := db.DB.WithContext(c.Request.Context()).Model(&account).Update("password_hash", string(hash)).Error; err != nil {
+	err = db.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&account).Update("password_hash", string(hash)).Error; err != nil {
+			return err
+		}
+		return service.BumpLegacyAdminCredentialRevision(tx, account.ID)
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("重置密码失败"))
 		return
 	}

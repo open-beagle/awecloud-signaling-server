@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -14,6 +15,8 @@ var (
 	ErrResourceIdentityInvalid   = errors.New("invalid resource identity input")
 	ErrResourceIdentityReference = errors.New("resource identity reference not found")
 	ErrUserSimulationNotAllowed  = errors.New("user simulation not allowed")
+	ErrUserSimulationInactive    = errors.New("user simulation session is inactive")
+	ErrUserSimulationVersion     = errors.New("user simulation row version conflict")
 )
 
 func CreateUserIdentityProfile(database *gorm.DB, profile *model.UserIdentityProfile) error {
@@ -103,7 +106,7 @@ func CreateUserSimulationSession(database *gorm.DB, session *model.UserSimulatio
 	if session == nil || session.ID == "" || session.ActorUserID == 0 || session.EffectiveUserID == 0 || session.ScopeID == "" ||
 		validateRequired("reason", session.Reason, 500) != nil || validateRequired("created_request_id", session.CreatedRequestID, 64) != nil ||
 		session.Status != model.UserSimulationSessionActive || session.StartedAt.IsZero() || !session.StartedAt.Before(session.ExpiresAt) ||
-		session.EndedAt != nil || session.PermissionRevision <= 0 || session.RowVersion <= 0 {
+		session.EndedAt != nil || session.EndReason != "" || session.PermissionRevision <= 0 || session.RowVersion <= 0 {
 		return ErrResourceIdentityInvalid
 	}
 	return database.Transaction(func(tx *gorm.DB) error {
@@ -136,6 +139,159 @@ func CreateUserSimulationSession(database *gorm.DB, session *model.UserSimulatio
 		}
 		return tx.Create(session).Error
 	})
+}
+
+func ResolveUserSimulationSession(database *gorm.DB, sessionID string, actorUserID uint64, at time.Time) (*model.UserSimulationSession, *ManagementAuthorizationContext, error) {
+	if database == nil || strings.TrimSpace(sessionID) == "" || actorUserID == 0 || at.IsZero() {
+		return nil, nil, ErrResourceIdentityInvalid
+	}
+	var session model.UserSimulationSession
+	var context *ManagementAuthorizationContext
+	var resolutionErr error
+	err := database.Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&session, "id = ?", strings.TrimSpace(sessionID)).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				resolutionErr = ErrUserSimulationNotAllowed
+				return nil
+			}
+			return err
+		}
+		if session.ActorUserID != actorUserID {
+			resolutionErr = ErrUserSimulationNotAllowed
+			return nil
+		}
+		if session.Status != model.UserSimulationSessionActive || session.EndedAt != nil {
+			resolutionErr = ErrUserSimulationInactive
+			return nil
+		}
+		if !at.Before(session.ExpiresAt) {
+			if err := endUserSimulationSession(tx, &session, model.UserSimulationSessionExpired, "expired", at); err != nil {
+				return err
+			}
+			resolutionErr = ErrUserSimulationInactive
+			return nil
+		}
+
+		actorContext, err := ResolveManagementContext(tx, actorUserID, model.ManagementScopePlatform, "", at, false)
+		if err == nil {
+			err = AuthorizeManagementPermission(actorContext, PermissionPlatformUserSimulationsWrite)
+		}
+		if err != nil {
+			if endErr := endUserSimulationSession(tx, &session, model.UserSimulationSessionRevoked, "actor_permission_invalid", at); endErr != nil {
+				return endErr
+			}
+			resolutionErr = ErrUserSimulationNotAllowed
+			return nil
+		}
+
+		scopeType := model.ManagementScopeType(session.ScopeType)
+		context, err = ResolveManagementContext(tx, session.EffectiveUserID, scopeType, session.ScopeID, at, true)
+		if err != nil || context.ScopeStatus != "active" {
+			if endErr := endUserSimulationSession(tx, &session, model.UserSimulationSessionRevoked, "effective_context_invalid", at); endErr != nil {
+				return endErr
+			}
+			resolutionErr = ErrUserSimulationNotAllowed
+			return nil
+		}
+		context.ActorUserID = actorUserID
+		context.EffectiveUserID = session.EffectiveUserID
+		context.SimulationSessionID = session.ID
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if resolutionErr != nil {
+		return &session, nil, resolutionErr
+	}
+	return &session, context, nil
+}
+
+func ListUserSimulationSessions(database *gorm.DB, at time.Time) ([]model.UserSimulationSession, error) {
+	if database == nil || at.IsZero() {
+		return nil, ErrResourceIdentityInvalid
+	}
+	var sessions []model.UserSimulationSession
+	err := database.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.UserSimulationSession{}).
+			Where("status = ? AND expires_at <= ?", model.UserSimulationSessionActive, at).
+			Updates(map[string]any{
+				"status":      model.UserSimulationSessionExpired,
+				"ended_at":    at,
+				"end_reason":  "expired",
+				"row_version": gorm.Expr("row_version + 1"),
+			}).Error; err != nil {
+			return err
+		}
+		return tx.Order("started_at DESC, id ASC").Find(&sessions).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return sessions, nil
+}
+
+func RevokeUserSimulationSession(database *gorm.DB, sessionID string, actorUserID uint64, expectedRowVersion int64, reason string, at time.Time) (*model.UserSimulationSession, error) {
+	if database == nil || strings.TrimSpace(sessionID) == "" || actorUserID == 0 || expectedRowVersion <= 0 ||
+		validateRequired("reason", reason, 100) != nil || at.IsZero() {
+		return nil, ErrResourceIdentityInvalid
+	}
+	var session model.UserSimulationSession
+	var lifecycleErr error
+	err := database.Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&session, "id = ?", strings.TrimSpace(sessionID)).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrUserSimulationNotAllowed
+			}
+			return err
+		}
+		if session.ActorUserID != actorUserID {
+			return ErrUserSimulationNotAllowed
+		}
+		if session.Status != model.UserSimulationSessionActive || session.EndedAt != nil {
+			return ErrUserSimulationInactive
+		}
+		if at.Before(session.StartedAt) {
+			return ErrResourceIdentityInvalid
+		}
+		if !at.Before(session.ExpiresAt) {
+			if err := endUserSimulationSession(tx, &session, model.UserSimulationSessionExpired, "expired", at); err != nil {
+				return err
+			}
+			lifecycleErr = ErrUserSimulationInactive
+			return nil
+		}
+		if session.RowVersion != expectedRowVersion {
+			return ErrUserSimulationVersion
+		}
+		return endUserSimulationSession(tx, &session, model.UserSimulationSessionRevoked, strings.TrimSpace(reason), at)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if lifecycleErr != nil {
+		return &session, lifecycleErr
+	}
+	return &session, nil
+}
+
+func endUserSimulationSession(database *gorm.DB, session *model.UserSimulationSession, status model.UserSimulationSessionStatus, reason string, at time.Time) error {
+	result := database.Model(&model.UserSimulationSession{}).
+		Where("id = ? AND status = ? AND row_version = ?", session.ID, model.UserSimulationSessionActive, session.RowVersion).
+		Updates(map[string]any{
+			"status": status, "ended_at": at, "end_reason": reason, "row_version": gorm.Expr("row_version + 1"),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrUserSimulationVersion
+	}
+	session.Status = status
+	session.EndedAt = &at
+	session.EndReason = reason
+	session.RowVersion++
+	return nil
 }
 
 func requireEnabledSimulationUser(database *gorm.DB, userID uint64) error {

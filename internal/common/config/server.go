@@ -128,6 +128,7 @@ type WebSection struct {
 type SecuritySection struct {
 	JWTSecret                string `toml:"jwt_secret"`
 	JWTExpireHours           int    `toml:"jwt_expire_hours"`
+	UserSimulationMaxHours   int    `toml:"user_simulation_max_hours"`
 	AllowLocalhostAdminDebug bool   `toml:"allow_localhost_admin_debug"`
 }
 
@@ -186,6 +187,9 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 	if cfg.Security.JWTExpireHours == 0 {
 		cfg.Security.JWTExpireHours = 24
+	}
+	if cfg.Security.UserSimulationMaxHours <= 0 {
+		cfg.Security.UserSimulationMaxHours = 8
 	}
 	if cfg.Web.WebRoot == "" {
 		cfg.Web.WebRoot = "./web/dist"

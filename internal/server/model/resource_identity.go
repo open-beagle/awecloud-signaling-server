@@ -26,6 +26,14 @@ const (
 	ProviderManagementRoleViewer   ProviderManagementRole = "provider_viewer"
 )
 
+type ManagementScopeType string
+
+const (
+	ManagementScopePlatform ManagementScopeType = "platform"
+	ManagementScopeProvider ManagementScopeType = "provider"
+	ManagementScopeTenant   ManagementScopeType = "tenant"
+)
+
 type UserSimulationScopeType string
 
 const (
@@ -166,6 +174,7 @@ type UserSimulationSession struct {
 	StartedAt          time.Time                   `gorm:"not null;index" json:"started_at"`
 	ExpiresAt          time.Time                   `gorm:"not null;index;check:chk_user_simulation_interval,expires_at > started_at" json:"expires_at"`
 	EndedAt            *time.Time                  `gorm:"check:chk_user_simulation_ended_at,ended_at IS NULL OR ended_at >= started_at" json:"ended_at,omitempty"`
+	EndReason          string                      `gorm:"size:100" json:"end_reason,omitempty"`
 	CreatedRequestID   string                      `gorm:"size:64;not null;index" json:"created_request_id"`
 	PermissionRevision int64                       `gorm:"not null;default:1;check:chk_user_simulation_permission_revision,permission_revision > 0" json:"permission_revision"`
 	RowVersion         int64                       `gorm:"not null;default:1;check:chk_user_simulation_row_version,row_version > 0" json:"row_version"`

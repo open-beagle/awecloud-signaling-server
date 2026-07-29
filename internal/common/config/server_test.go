@@ -25,6 +25,9 @@ func TestLoadServerConfigAdminCredentialsFromEnvironment(t *testing.T) {
 	if cfg.Web.DefaultAdminPassword != "env-password" {
 		t.Fatalf("password = %q, want env-password", cfg.Web.DefaultAdminPassword)
 	}
+	if cfg.Security.UserSimulationMaxHours != 8 {
+		t.Fatalf("user simulation max hours = %d, want 8", cfg.Security.UserSimulationMaxHours)
+	}
 }
 
 func TestLoadServerConfigRequiresAdminCredentials(t *testing.T) {

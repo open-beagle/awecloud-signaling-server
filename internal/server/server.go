@@ -297,7 +297,7 @@ func (s *Server) setupRouter() *gin.Engine {
 	router.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, X-Tenant-ID, X-Management-Scope-Type, X-Management-Scope-ID, X-Request-ID, Idempotency-Key, If-Match, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, X-Tenant-ID, X-Management-Scope-Type, X-Management-Scope-ID, X-User-Simulation-ID, X-Request-ID, Idempotency-Key, If-Match, Authorization, accept, origin, Cache-Control, X-Requested-With")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
 		c.Writer.Header().Set("Access-Control-Expose-Headers", "X-Request-ID, ETag")
 
@@ -410,6 +410,21 @@ func (s *Server) setupRouter() *gin.Engine {
 			// 兼容旧版 Agent 注册接口（deprecated）
 			v1Group.POST("/agent/register", deployPublicAPI.RegisterCompat)
 
+			// 新管理上下文 API。默认关闭，只接受显式映射后的统一 User。
+			managementGroup := v1Group.Group("/management")
+			managementGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret, s.config.Security.AllowLocalhostAdminDebug))
+			managementGroup.Use(api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureManagementContextV2, false))
+			managementGroup.Use(api.UnifiedManagementIdentityMiddleware())
+			{
+				managementContextAPI := api.NewManagementContextAPI()
+				managementGroup.GET("/contexts", managementContextAPI.List)
+				managementGroup.GET("/contexts/current", managementContextAPI.Current)
+				userSimulationAPI := api.NewUserSimulationAPI(s.config.Security.UserSimulationMaxHours)
+				managementGroup.GET("/user-simulations", api.RequireManagementPermission(service.PermissionPlatformUserSimulationsRead), userSimulationAPI.List)
+				managementGroup.POST("/user-simulations", api.ForbidUserSimulation(), api.RequireManagementPermission(service.PermissionPlatformUserSimulationsWrite), api.RequireIdempotencyKey(), userSimulationAPI.Create)
+				managementGroup.POST("/user-simulations/:id/revoke", api.RequireManagementPermission(service.PermissionPlatformUserSimulationsWrite), api.RequireIfMatch(), userSimulationAPI.Revoke)
+			}
+
 			// 管理员 API
 			adminGroup := v1Group.Group("/admin")
 			{
@@ -419,6 +434,7 @@ func (s *Server) setupRouter() *gin.Engine {
 
 				adminAuthGroup := adminGroup.Group("")
 				adminAuthGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret, s.config.Security.AllowLocalhostAdminDebug))
+				adminAuthGroup.Use(api.ForbidUserSimulation())
 				adminAuthGroup.Use(api.ManagementAuthorizationMiddleware())
 				{
 					adminAuthGroup.GET("/auth/me", adminAPI.GetMe)

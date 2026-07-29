@@ -83,6 +83,9 @@ func AuthMiddleware(jwtSecret string, allowLocalhostDebug bool) gin.HandlerFunc 
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
 			c.Set("admin_id", claims["admin_id"])
 			c.Set("username", claims["username"])
+			c.Set("user_id", claims["user_id"])
+			c.Set("auth_revision", claims["auth_revision"])
+			c.Set("credential_revision", claims["credential_revision"])
 		}
 
 		c.Next()
