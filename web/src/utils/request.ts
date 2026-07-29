@@ -21,11 +21,13 @@ service.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`
     }
     const tenantId = localStorage.getItem('tenant_context')
+		const activeWorkspace = localStorage.getItem('management_workspace')
+		const isManagementRequest = config.url === '/api/v1/management' || config.url?.startsWith('/api/v1/management/')
 		const contextFreePaths = ['/api/v1/admin/tenants', '/api/v1/admin/tenant-contexts', '/api/v1/admin/tenant-admin-memberships', '/api/v1/admin/overview', '/api/v1/admin/platform-admins', '/api/v1/admin/platform']
 		const platformResourcePaths = ['/api/v1/admin/nodes', '/api/v1/admin/endpoints', '/api/v1/admin/legacy-resource-claims']
 		const isPlatformResource = platformResourcePaths.some(path => config.url === path || config.url?.startsWith(`${path}/`))
 		const isContextFree = isPlatformResource || (config.method?.toLowerCase() === 'get' && contextFreePaths.some(path => config.url === path || config.url?.startsWith(`${path}/`)))
-		if (tenantId && !isContextFree) {
+		if (tenantId && activeWorkspace === 'tenant' && !isContextFree && !isManagementRequest) {
       config.headers['X-Tenant-ID'] = tenantId
     }
     return config
@@ -58,6 +60,8 @@ service.interceptors.response.use(
         localStorage.removeItem('token')
         localStorage.removeItem('admin_role')
         localStorage.removeItem('tenant_context')
+		localStorage.removeItem('management_workspace')
+		localStorage.removeItem('provider_context')
 		window.dispatchEvent(new Event('admin-session-cleared'))
 		if (router.currentRoute.value.name !== 'Login') router.push('/login')
       } else if (status === 403) {

@@ -2,6 +2,13 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useTenantStore } from '@/stores/tenant'
+import { useWorkspaceStore, workspaceHome } from '@/stores/workspace'
+import type { ManagementWorkspace } from '@/api/managementContext'
+
+const storedWorkspace = (): ManagementWorkspace => {
+	const value = localStorage.getItem('management_workspace')
+	return value === 'tenant' || value === 'provider' || value === 'platform' ? value : 'platform'
+}
 
 const routes: RouteRecordRaw[] = [
   {
@@ -19,16 +26,32 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/components/Layout/Layout.vue'),
-    redirect: () => ['admin', 'viewer', 'platform_admin', 'platform_viewer'].includes(localStorage.getItem('admin_role') || '')
-      ? '/platform-overview'
-      : '/tenant-overview',
+    redirect: '/workspace-entry',
     meta: { requiresAuth: true },
     children: [
+		{
+			path: 'workspace-entry',
+			name: 'WorkspaceEntry',
+			component: () => import('@/views/Workspace/Unavailable.vue'),
+			meta: { requiresAuth: true, scope: 'any', workspace: 'any', menuDomain: 'any' }
+		},
+		{
+			path: 'workspace-unavailable',
+			name: 'WorkspaceUnavailable',
+			component: () => import('@/views/Workspace/Unavailable.vue'),
+			meta: { requiresAuth: true, scope: 'any', workspace: 'any', menuDomain: 'any' }
+		},
 		{
 			path: 'platform-overview',
 			name: 'PlatformOverview',
 			component: () => import('@/views/Platform/Overview.vue'),
 			meta: { requiresAuth: true, scope: 'platform', menuDomain: 'platform' }
+		},
+		{
+			path: 'provider-overview',
+			name: 'ProviderOverview',
+			component: () => import('@/views/Provider/Overview.vue'),
+			meta: { requiresAuth: true, scope: 'provider', workspace: 'provider', permission: 'provider.overview.read', menuDomain: 'provider' }
 		},
 		{
 			path: 'tenant-overview',
@@ -370,6 +393,7 @@ type BreadcrumbMetaItem = { title: string; path?: string }
 
 const breadcrumbByRouteName: Record<string, BreadcrumbMetaItem[]> = {
 	PlatformOverview: [{ title: '管理员' }, { title: '平台概览' }],
+	ProviderOverview: [{ title: '资源业务' }, { title: '资源概览' }],
 	TenantOverview: [{ title: '租户业务' }, { title: '租户概览' }],
 	TenantSwitch: [{ title: '管理员' }, { title: '租户切换' }],
 	TenantMembers: [{ title: '租户业务' }, { title: '成员' }],
@@ -423,10 +447,12 @@ const normalizeProtectedRouteMetadata = (records: RouteRecordRaw[]) => {
 	for (const route of records) {
 		if (route.meta?.requiresAuth !== false) {
 			const routeName = typeof route.name === 'string' ? route.name : ''
+			const workspace = route.meta?.workspace || route.meta?.scope || 'platform'
 			route.meta = {
 				...route.meta,
-				scope: route.meta?.scope || 'platform',
-				menuDomain: route.meta?.menuDomain || (route.meta?.scope === 'tenant' ? 'tenant' : 'platform'),
+				scope: route.meta?.scope || workspace,
+				workspace,
+				menuDomain: route.meta?.menuDomain || workspace,
 				...(breadcrumbByRouteName[routeName] ? { breadcrumb: breadcrumbByRouteName[routeName] } : {})
 			}
 		}
@@ -445,6 +471,7 @@ const router = createRouter({
 router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
 	const tenantStore = useTenantStore()
+	const workspaceStore = useWorkspaceStore()
 
 	if (to.meta.requiresAuth === false) {
 		next()
@@ -454,60 +481,88 @@ router.beforeEach(async (to, _from, next) => {
     next({ name: 'Login', query: { redirect: to.fullPath } })
 	return
   }
-  if (!authStore.role) {
+	if (!authStore.role) {
     try { await authStore.loadProfile() } catch { return }
   }
-	const scope = to.meta.scope || 'platform'
-	if (scope === 'platform' && !authStore.hasPlatformScope) {
-		try { await tenantStore.loadContexts() } catch { next(false); return }
-		next(firstTenantDestination(tenantStore))
+	try { await workspaceStore.loadContexts() } catch { next(false); return }
+	if (to.name === 'WorkspaceEntry') {
+		const initialWorkspace = workspaceStore.currentWorkspace || storedWorkspace()
+		next(workspaceStore.hasContext(initialWorkspace)
+			? workspaceHome(initialWorkspace)
+			: { name: 'WorkspaceUnavailable', query: { workspace: initialWorkspace }, replace: true })
 		return
 	}
-	if (scope === 'tenant') {
+
+	if (to.name === 'WorkspaceUnavailable') {
+		const requested = typeof to.query.workspace === 'string' ? to.query.workspace : workspaceStore.currentWorkspace
+		if (requested === 'tenant' || requested === 'provider' || requested === 'platform') workspaceStore.activateWorkspace(requested)
+		next()
+		return
+	}
+
+	const workspace = (to.meta.workspace || to.meta.scope || 'platform') as ManagementWorkspace
+	workspaceStore.activateWorkspace(workspace)
+	if (!workspaceStore.hasContext(workspace)) {
+		next({ name: 'WorkspaceUnavailable', query: { workspace }, replace: true })
+		return
+	}
+
+	if (workspace === 'tenant') {
+		const selectedTenantId = workspaceStore.selectedContextId('tenant')
+		if (selectedTenantId && tenantStore.tenantId !== selectedTenantId) tenantStore.syncTenantContext(selectedTenantId)
 		try { await tenantStore.loadContexts() } catch { next(false); return }
 		if (!tenantStore.current) {
-			if (authStore.hasPlatformScope) next('/tenant-switch')
-			else next(false)
+			next({ name: 'WorkspaceUnavailable', query: { workspace: 'tenant' }, replace: true })
 			return
 		}
-		const permission = typeof to.meta.permission === 'string' ? to.meta.permission : ''
-		if (permission && !tenantStore.canTenant(permission)) {
-			next(firstTenantDestination(tenantStore))
-			return
+	}
+	const permission = typeof to.meta.permission === 'string' ? to.meta.permission : ''
+	if (permission && !workspaceStore.can(permission)) {
+		if (workspace === 'tenant') {
+			next(firstTenantDestination(tenantStore, workspaceStore))
+		} else {
+			next({ name: 'WorkspaceUnavailable', query: { workspace }, replace: true })
 		}
+		return
 	}
   next()
 })
 
-const firstTenantDestination = (tenantStore: ReturnType<typeof useTenantStore>) => {
-	if (tenantStore.canTenant('tenant.overview.read')) return '/tenant-overview'
-	if (tenantStore.canTenant('tenant.resources.read')) return '/resources'
-	if (tenantStore.canTenant('tenant.members.read')) return '/tenant-members'
-	if (tenantStore.canTenant('tenant.groups.read')) return '/groups'
-	if (tenantStore.canTenant('tenant.devices.read')) return '/tenant-member-devices'
-	if (tenantStore.canTenant('tenant.grants.read')) return '/access-policies'
-	if (tenantStore.canTenant('tenant.sessions.read')) return '/sessions'
-	if (tenantStore.canTenant('tenant.audit.read')) return '/tenant-audit'
-	if (tenantStore.canTenant('tenant.settings.read')) return '/tenant-settings'
-	return '/login'
+const firstTenantDestination = (
+	tenantStore: ReturnType<typeof useTenantStore>,
+	workspaceStore = useWorkspaceStore()
+) => {
+	const can = (permission: string) => workspaceStore.can(permission) && tenantStore.canTenant(permission)
+	if (can('tenant.overview.read')) return '/tenant-overview'
+	if (can('tenant.resources.read')) return '/resources'
+	if (can('tenant.members.read')) return '/tenant-members'
+	if (can('tenant.groups.read')) return '/groups'
+	if (can('tenant.devices.read')) return '/tenant-member-devices'
+	if (can('tenant.grants.read')) return '/access-policies'
+	if (can('tenant.sessions.read')) return '/sessions'
+	if (can('tenant.audit.read')) return '/tenant-audit'
+	if (can('tenant.settings.read')) return '/tenant-settings'
+	return { name: 'WorkspaceUnavailable', query: { workspace: 'tenant' } }
 }
 
 const recoverTenantRoute = async () => {
 	if (router.currentRoute.value.meta.scope !== 'tenant') return
-	const authStore = useAuthStore()
 	const tenantStore = useTenantStore()
+	const workspaceStore = useWorkspaceStore()
+	try { await workspaceStore.loadContexts(true) } catch { return }
 	try { await tenantStore.loadContexts(true) } catch { return }
 	if (!tenantStore.current) {
-		await router.replace(authStore.hasPlatformScope ? '/tenant-switch' : '/login')
+		await router.replace({ name: 'WorkspaceUnavailable', query: { workspace: 'tenant' } })
 		return
 	}
 	const permission = router.currentRoute.value.meta.permission
 	if (typeof permission === 'string' && !tenantStore.canTenant(permission)) {
-		await router.replace(firstTenantDestination(tenantStore))
+		await router.replace(firstTenantDestination(tenantStore, workspaceStore))
 	}
 }
 
 window.addEventListener('tenant-context-invalid', () => { recoverTenantRoute() })
 window.addEventListener('tenant-context-changed', () => { recoverTenantRoute() })
+window.addEventListener('management-context-changed', () => { recoverTenantRoute() })
 
 export default router

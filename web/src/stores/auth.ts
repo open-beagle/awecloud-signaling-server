@@ -16,6 +16,8 @@ export const useAuthStore = defineStore('auth', () => {
 		localStorage.removeItem('username')
 		localStorage.removeItem('admin_role')
 		localStorage.removeItem('tenant_context')
+		localStorage.removeItem('management_workspace')
+		localStorage.removeItem('provider_context')
 	}
 
   const login = async (data: LoginRequest) => {

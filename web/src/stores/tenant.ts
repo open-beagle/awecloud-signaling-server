@@ -27,6 +27,15 @@ export const useTenantStore = defineStore('tenant', () => {
 		contextRevision.value++
 	}
 
+	const syncTenantContext = (value: string) => {
+		const previous = tenantId.value
+		if (value === previous) return
+		persistTenant(value)
+		invalid.value = false
+		contextRevision.value++
+		window.dispatchEvent(new CustomEvent('tenant-context-changed', { detail: { previous, current: value } }))
+	}
+
 	const reset = () => {
 		persistTenant('')
 		contexts.value = []
@@ -92,6 +101,7 @@ export const useTenantStore = defineStore('tenant', () => {
 		contextRevision,
 		loadContexts,
 		selectTenant,
+		syncTenantContext,
 		clearTenantState,
 		reset,
 		canTenant
