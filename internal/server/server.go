@@ -290,14 +290,16 @@ func (s *Server) customLogger() gin.HandlerFunc {
 func (s *Server) setupRouter() *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(api.RequestMetadataMiddleware())
 	router.Use(s.customLogger())
 
 	// CORS 中间件 - 允许所有来源的请求
 	router.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, X-Tenant-ID, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, X-Tenant-ID, X-Management-Scope-Type, X-Management-Scope-ID, X-Request-ID, Idempotency-Key, If-Match, Authorization, accept, origin, Cache-Control, X-Requested-With")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
+		c.Writer.Header().Set("Access-Control-Expose-Headers", "X-Request-ID, ETag")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)

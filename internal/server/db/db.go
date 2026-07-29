@@ -103,6 +103,22 @@ func autoMigrate() error {
 		&model.ContainerSession{},
 		&model.LegacyResourceClaim{},
 
+		// 新资源业务迁移、幂等与事务 Outbox 基础
+		&model.MigrationBatch{},
+		&model.MigrationSourceMapping{},
+		&model.APIIdempotencyRecord{},
+		&model.OutboxEvent{},
+		&model.ConsumerRevision{},
+
+		// 新资源业务目标身份与管理关系（M1-A，仅新增 Schema）
+		&model.UserIdentityProfile{},
+		&model.UserAuthenticationLink{},
+		&model.PlatformRoleMembership{},
+		&model.ResourceProvider{},
+		&model.AdminProviderMembership{},
+		&model.UserTenantManagementMembership{},
+		&model.UserSimulationSession{},
+
 		// 分组模型
 		&model.Group{},
 		&model.GroupMember{},

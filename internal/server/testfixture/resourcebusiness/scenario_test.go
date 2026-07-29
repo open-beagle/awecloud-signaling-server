@@ -1,0 +1,110 @@
+package resourcebusiness
+
+import (
+	"database/sql"
+	"os"
+	"path/filepath"
+	"testing"
+
+	_ "modernc.org/sqlite"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestCatalogContainsValidAnonymousScenarios(t *testing.T) {
+	require.Equal(t, []string{
+		ScenarioEmpty,
+		ScenarioSingleProviderTenant,
+		ScenarioProviderIdentityConflict,
+		ScenarioDualTenantScopes,
+		ScenarioScopeTimeConflict,
+		ScenarioAdminUserSameName,
+		ScenarioLegacyAmbiguity,
+		ScenarioRuntimeEvolution,
+	}, Names())
+
+	for _, name := range Names() {
+		t.Run(name, func(t *testing.T) {
+			scenario, err := Load(name)
+			require.NoError(t, err)
+			require.NoError(t, Validate(scenario))
+			require.False(t, ContainsSensitiveFixtureText(scenario))
+		})
+	}
+	_, err := Load("not-registered")
+	require.Error(t, err)
+}
+
+func TestScenarioFactsCoverM0DMatrix(t *testing.T) {
+	empty := MustLoad(ScenarioEmpty)
+	require.Empty(t, empty.Providers)
+	require.Empty(t, empty.Tenants)
+
+	normal := MustLoad(ScenarioSingleProviderTenant)
+	require.Len(t, normal.Providers, 1)
+	require.Len(t, normal.Tenants, 1)
+	require.True(t, normal.Sessions[0].ExpectedPermitted)
+
+	providerConflict := MustLoad(ScenarioProviderIdentityConflict)
+	require.Len(t, providerConflict.Providers, 2)
+	require.Equal(t, providerConflict.Providers[0].StableIdentity, providerConflict.Providers[1].StableIdentity)
+	require.True(t, HasIssue(providerConflict, "PROVIDER_STABLE_IDENTITY_CONFLICT"))
+
+	dualTenant := MustLoad(ScenarioDualTenantScopes)
+	require.Len(t, dualTenant.Tenants, 2)
+	require.NotEqual(t, dualTenant.Scopes[0].TenantID, dualTenant.Scopes[1].TenantID)
+	require.NotEqual(t, dualTenant.Scopes[0].Namespace, dualTenant.Scopes[1].Namespace)
+
+	scopeConflict := MustLoad(ScenarioScopeTimeConflict)
+	require.Equal(t, "cluster", scopeConflict.Scopes[0].Kind)
+	require.Equal(t, scopeConflict.Scopes[0].ID, scopeConflict.Scopes[1].ParentID)
+	require.True(t, scopeConflict.Scopes[1].StartsAt.Before(scopeConflict.Scopes[0].EndsAt))
+
+	sameName := MustLoad(ScenarioAdminUserSameName)
+	require.Equal(t, sameName.Identities[0].NameToken, sameName.Identities[1].NameToken)
+	require.NotEqual(t, sameName.Identities[0].ProofToken, sameName.Identities[1].ProofToken)
+
+	legacy := MustLoad(ScenarioLegacyAmbiguity)
+	require.True(t, legacy.Grants[0].Ambiguous)
+	require.False(t, legacy.Grants[0].Traceable)
+	require.Equal(t, "tenant_admin", legacy.Grants[0].LegacyRole)
+
+	runtime := MustLoad(ScenarioRuntimeEvolution)
+	require.Equal(t, runtime.Workloads[0].StableKey, normal.Workloads[0].StableKey)
+	require.NotEqual(t, runtime.Workloads[0].PreviousPodUID, runtime.Workloads[0].PodUID)
+	require.Equal(t, []int{443, 8443, 9443}, runtime.Services[0].Ports)
+	for _, session := range runtime.Sessions {
+		require.False(t, session.ExpectedPermitted)
+		require.NotEmpty(t, session.BlockReason)
+	}
+}
+
+func TestLoadReturnsIndependentScenarioCopies(t *testing.T) {
+	first := MustLoad(ScenarioRuntimeEvolution)
+	second := MustLoad(ScenarioRuntimeEvolution)
+	first.Services[0].Ports[0] = 1
+	first.Issues[0] = "changed"
+	require.Equal(t, 443, second.Services[0].Ports[0])
+	require.NotEqual(t, first.Issues[0], second.Issues[0])
+}
+
+func TestCreateCompatibilityDatabaseUsesExplicitNewPath(t *testing.T) {
+	for _, name := range Names() {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "fixture.db")
+			require.NoError(t, CreateCompatibilityDatabase(path, MustLoad(name)))
+			info, err := os.Stat(path)
+			require.NoError(t, err)
+			require.Greater(t, info.Size(), int64(0))
+
+			database, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
+			require.NoError(t, err)
+			var tableCount int
+			require.NoError(t, database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'`).Scan(&tableCount))
+			require.Equal(t, len(compatibilitySchema), tableCount)
+			require.NoError(t, database.Close())
+
+			require.Error(t, CreateCompatibilityDatabase(path, MustLoad(name)))
+		})
+	}
+}

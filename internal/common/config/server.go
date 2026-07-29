@@ -9,14 +9,58 @@ import (
 )
 
 type ServerConfig struct {
-	Server    ServerSection    `toml:"server"`
-	Database  DatabaseSection  `toml:"database"`
-	Web       WebSection       `toml:"web"`
-	Security  SecuritySection  `toml:"security"`
-	Log       LogConfig        `toml:"log"`
-	Tailscale TailscaleSection `toml:"tailscale"`
-	Telemetry TelemetrySection `toml:"telemetry"`
-	Logto     LogtoSection     `toml:"logto"`
+	Server       ServerSection       `toml:"server"`
+	Database     DatabaseSection     `toml:"database"`
+	Web          WebSection          `toml:"web"`
+	Security     SecuritySection     `toml:"security"`
+	FeatureFlags FeatureFlagsSection `toml:"feature_flags"`
+	Log          LogConfig           `toml:"log"`
+	Tailscale    TailscaleSection    `toml:"tailscale"`
+	Telemetry    TelemetrySection    `toml:"telemetry"`
+	Logto        LogtoSection        `toml:"logto"`
+}
+
+type FeatureFlag string
+
+const (
+	FeatureResourceModelWrite     FeatureFlag = "resource_model_write"
+	FeatureResourceReconciliation FeatureFlag = "resource_reconciliation"
+	FeatureManagementContextV2    FeatureFlag = "management_context_v2"
+	FeatureManagementWebV2        FeatureFlag = "management_web_v2"
+	FeatureTenantResourceReadV2   FeatureFlag = "tenant_resource_read_v2"
+	FeatureSessionAuthorizationV2 FeatureFlag = "session_authorization_v2"
+	FeatureLegacyWriteFreeze      FeatureFlag = "legacy_write_freeze"
+)
+
+type FeatureFlagsSection struct {
+	ResourceModelWrite     bool `toml:"resource_model_write"`
+	ResourceReconciliation bool `toml:"resource_reconciliation"`
+	ManagementContextV2    bool `toml:"management_context_v2"`
+	ManagementWebV2        bool `toml:"management_web_v2"`
+	TenantResourceReadV2   bool `toml:"tenant_resource_read_v2"`
+	SessionAuthorizationV2 bool `toml:"session_authorization_v2"`
+	LegacyWriteFreeze      bool `toml:"legacy_write_freeze"`
+}
+
+func (f FeatureFlagsSection) Enabled(flag FeatureFlag) bool {
+	switch flag {
+	case FeatureResourceModelWrite:
+		return f.ResourceModelWrite
+	case FeatureResourceReconciliation:
+		return f.ResourceReconciliation
+	case FeatureManagementContextV2:
+		return f.ManagementContextV2
+	case FeatureManagementWebV2:
+		return f.ManagementWebV2
+	case FeatureTenantResourceReadV2:
+		return f.TenantResourceReadV2
+	case FeatureSessionAuthorizationV2:
+		return f.SessionAuthorizationV2
+	case FeatureLegacyWriteFreeze:
+		return f.LegacyWriteFreeze
+	default:
+		return false
+	}
 }
 
 // TelemetrySection OpenTelemetry 配置
@@ -161,9 +205,15 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 		cfg.Security.JWTSecret = jwtSecret
 	}
 	if value := strings.TrimSpace(os.Getenv("SIGNAL_ALLOW_LOCALHOST_ADMIN_DEBUG")); value != "" {
-		value = strings.ToLower(value)
-		cfg.Security.AllowLocalhostAdminDebug = value == "1" || value == "true" || value == "yes"
+		cfg.Security.AllowLocalhostAdminDebug = parseBool(value)
 	}
+	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureResourceModelWrite, "SIGNAL_FEATURE_RESOURCE_MODEL_WRITE")
+	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureResourceReconciliation, "SIGNAL_FEATURE_RESOURCE_RECONCILIATION")
+	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureManagementContextV2, "SIGNAL_FEATURE_MANAGEMENT_CONTEXT_V2")
+	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureManagementWebV2, "SIGNAL_FEATURE_MANAGEMENT_WEB_V2")
+	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureTenantResourceReadV2, "SIGNAL_FEATURE_TENANT_RESOURCE_READ_V2")
+	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureSessionAuthorizationV2, "SIGNAL_FEATURE_SESSION_AUTHORIZATION_V2")
+	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureLegacyWriteFreeze, "SIGNAL_FEATURE_LEGACY_WRITE_FREEZE")
 	if token := os.Getenv("TOKEN"); token != "" {
 		cfg.Server.Token = token
 	}
@@ -251,4 +301,37 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 
 	return &cfg, nil
+}
+
+func applyFeatureFlagEnv(flags *FeatureFlagsSection, flag FeatureFlag, key string) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return
+	}
+	enabled := parseBool(value)
+	switch flag {
+	case FeatureResourceModelWrite:
+		flags.ResourceModelWrite = enabled
+	case FeatureResourceReconciliation:
+		flags.ResourceReconciliation = enabled
+	case FeatureManagementContextV2:
+		flags.ManagementContextV2 = enabled
+	case FeatureManagementWebV2:
+		flags.ManagementWebV2 = enabled
+	case FeatureTenantResourceReadV2:
+		flags.TenantResourceReadV2 = enabled
+	case FeatureSessionAuthorizationV2:
+		flags.SessionAuthorizationV2 = enabled
+	case FeatureLegacyWriteFreeze:
+		flags.LegacyWriteFreeze = enabled
+	}
+}
+
+func parseBool(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }

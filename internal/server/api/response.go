@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
@@ -77,6 +79,13 @@ func NewPagedResponse(data interface{}, total int64, page, size int) PagedRespon
 
 // recordAuditLog 记录审计日志
 func recordAuditLog(ctx context.Context, c *gin.Context, actionType, targetType, targetID, targetName string, detail interface{}) {
+	_ = recordAuditLogStrict(ctx, c, actionType, targetType, targetID, targetName, detail)
+}
+
+func recordAuditLogStrict(ctx context.Context, c *gin.Context, actionType, targetType, targetID, targetName string, detail interface{}) error {
+	if db.DB == nil {
+		return fmt.Errorf("audit database is not initialized")
+	}
 	userID := getAdminIDFromContext(c)
 	actorUsername := ""
 	platformRole := ""
@@ -94,9 +103,11 @@ func recordAuditLog(ctx context.Context, c *gin.Context, actionType, targetType,
 
 	var detailStr string
 	if detail != nil {
-		if data, err := json.Marshal(detail); err == nil {
-			detailStr = string(data)
+		data, err := json.Marshal(detail)
+		if err != nil {
+			return fmt.Errorf("marshal audit detail: %w", err)
 		}
+		detailStr = string(data)
 	}
 
 	log := &model.AuditLog{
@@ -119,7 +130,22 @@ func recordAuditLog(ctx context.Context, c *gin.Context, actionType, targetType,
 		Detail:             detailStr,
 	}
 
-	db.DB.WithContext(ctx).Create(log)
+	return db.DB.WithContext(ctx).Create(log).Error
+}
+
+func requestID(c *gin.Context) string {
+	if value, exists := c.Get(contextRequestID); exists {
+		if result, ok := value.(string); ok && result != "" {
+			return result
+		}
+	}
+	value := singleSafeHeader(c, HeaderRequestID, 64)
+	if value == "" {
+		value = uuid.NewString()
+	}
+	c.Set(contextRequestID, value)
+	c.Header(HeaderRequestID, value)
+	return value
 }
 
 func stringContextValue(value interface{}) string {

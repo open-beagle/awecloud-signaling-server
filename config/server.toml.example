@@ -13,6 +13,16 @@ jwt_expire_hours = 24
 # 仅限本地隔离开发环境。生产环境保持 false。
 allow_localhost_admin_debug = false
 
+# 新资源业务 Feature Flags。默认全部关闭；启用前必须满足对应里程碑退出条件。
+[feature_flags]
+resource_model_write = false
+resource_reconciliation = false
+management_context_v2 = false
+management_web_v2 = false
+tenant_resource_read_v2 = false
+session_authorization_v2 = false
+legacy_write_freeze = false
+
 # 数据库配置
 [database]
 type = "sqlite"

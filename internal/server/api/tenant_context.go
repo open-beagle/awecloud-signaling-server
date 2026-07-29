@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
@@ -39,15 +38,6 @@ type TenantContextItem struct {
 type TenantContextAPI struct{}
 
 func NewTenantContextAPI() *TenantContextAPI { return &TenantContextAPI{} }
-
-func requestID(c *gin.Context) string {
-	value := strings.TrimSpace(c.GetHeader("X-Request-ID"))
-	if value == "" {
-		value = uuid.NewString()
-	}
-	c.Header("X-Request-ID", value)
-	return value
-}
 
 func codedError(c *gin.Context, status int, code, message string) {
 	c.JSON(status, NewCodedErrorResponse(code, message, requestID(c)))
