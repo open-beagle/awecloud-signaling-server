@@ -99,19 +99,26 @@ func (a *PlatformAdminAPI) Create(c *gin.Context) {
 		enabled = *req.Enabled
 	}
 	admin := model.Admin{Username: req.Username, PasswordHash: string(hash), Role: string(role), Enabled: enabled}
-	if err := db.DB.WithContext(c.Request.Context()).Create(&admin).Error; err != nil {
+	err = db.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&admin).Error; err != nil {
+			return err
+		}
+		if !enabled {
+			if err := tx.Model(&admin).Update("enabled", false).Error; err != nil {
+				return err
+			}
+			admin.Enabled = false
+		}
+		_, err := db.SyncLegacyAdminIdentity(tx, admin.ID, "platform administrator created")
+		return err
+	})
+	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			c.JSON(http.StatusConflict, NewErrorResponse("平台管理账号已存在"))
 			return
 		}
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("创建平台管理账号失败"))
 		return
-	}
-	if !enabled {
-		if err := db.DB.WithContext(c.Request.Context()).Model(&admin).Update("enabled", false).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, NewErrorResponse("创建平台管理账号失败"))
-			return
-		}
 	}
 	recordAuditLog(c.Request.Context(), c, "create_platform_admin", "admin", strconv.FormatInt(admin.ID, 10), admin.Username, map[string]interface{}{"platform_role": role, "enabled": enabled})
 	c.JSON(http.StatusCreated, NewSuccessResponse(platformAdminResponse(admin)))
@@ -150,7 +157,14 @@ func (a *PlatformAdminAPI) Update(c *gin.Context) {
 		return
 	}
 	before := platformAdminResponse(admin)
-	if err := db.DB.WithContext(c.Request.Context()).Model(&admin).Updates(map[string]interface{}{"role": string(role), "enabled": *req.Enabled}).Error; err != nil {
+	err = db.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&admin).Updates(map[string]interface{}{"role": string(role), "enabled": *req.Enabled}).Error; err != nil {
+			return err
+		}
+		_, err := db.SyncLegacyAdminIdentity(tx, admin.ID, "platform administrator updated")
+		return err
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新平台管理账号失败"))
 		return
 	}

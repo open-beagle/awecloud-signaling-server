@@ -296,6 +296,10 @@ func EnsureBeagleWorkspace(adminUsername string) error {
 			Select("scoped_user.*").
 			Joins("LEFT JOIN tenant_membership AS membership ON membership.user_id = scoped_user.id").
 			Where("scoped_user.role = ? AND membership.id IS NULL", model.UserRoleClient).
+			Where(`NOT EXISTS (
+				SELECT 1 FROM user_authentication_link AS authentication_link
+				WHERE authentication_link.user_id = scoped_user.id AND authentication_link.provider_type = ?
+			)`, model.AuthenticationProviderLegacyAdmin).
 			Find(&users).Error; err != nil {
 			return fmt.Errorf("查询未归属 Desktop 用户失败: %w", err)
 		}

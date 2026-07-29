@@ -334,7 +334,9 @@ func (a *UnifiedResourceAPI) List(c *gin.Context) {
 		}
 		if resource.OwnerUserID != 0 {
 			var user model.User
-			if err := db.DB.WithContext(ctx).First(&user, resource.OwnerUserID).Error; err == nil {
+			if err := db.DB.WithContext(ctx).
+				Joins("JOIN tenant_membership ON tenant_membership.user_id = user.id AND tenant_membership.tenant_id = ?", resource.TenantID).
+				First(&user, "user.id = ?", resource.OwnerUserID).Error; err == nil {
 				item.OwnerName = user.Alias
 				if item.OwnerName == "" {
 					item.OwnerName = user.Name
@@ -400,16 +402,21 @@ func (a *UnifiedResourceAPI) Summary(c *gin.Context) {
 // Get returns one resource, its latest target and access grants.
 func (a *UnifiedResourceAPI) Get(c *gin.Context) {
 	ctx := c.Request.Context()
+	tenantID, unrestricted, ok := tenantObjectScope(c, PermissionTenantResourcesRead)
+	if !ok {
+		return
+	}
 	var resource model.Resource
-	if err := db.DB.WithContext(ctx).First(&resource, "id = ?", c.Param("id")).Error; err != nil {
+	query := db.DB.WithContext(ctx).Where("id = ?", c.Param("id"))
+	if !unrestricted {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+	if err := query.First(&resource).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, NewErrorResponse("资源不存在"))
+			codedError(c, http.StatusNotFound, ErrorCodeTenantObjectNotFound, "当前租户范围内对象不存在")
 			return
 		}
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询资源失败"))
-		return
-	}
-	if !requireTenantPermission(c, resource.TenantID, PermissionTenantResourcesRead) {
 		return
 	}
 	var tenant model.Tenant
@@ -434,12 +441,17 @@ func (a *UnifiedResourceAPI) Get(c *gin.Context) {
 // Resource scope is checked before any audit row is queried.
 func (a *UnifiedResourceAPI) ListEvents(c *gin.Context) {
 	ctx := c.Request.Context()
-	var resource model.Resource
-	if err := db.DB.WithContext(ctx).First(&resource, "id = ?", c.Param("id")).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("资源不存在"))
+	tenantID, unrestricted, ok := tenantObjectScope(c, PermissionTenantAuditRead)
+	if !ok {
 		return
 	}
-	if !requireTenantPermission(c, resource.TenantID, PermissionTenantAuditRead) {
+	var resource model.Resource
+	resourceQuery := db.DB.WithContext(ctx).Where("id = ?", c.Param("id"))
+	if !unrestricted {
+		resourceQuery = resourceQuery.Where("tenant_id = ?", tenantID)
+	}
+	if err := resourceQuery.First(&resource).Error; err != nil {
+		codedError(c, http.StatusNotFound, ErrorCodeTenantObjectNotFound, "当前租户范围内对象不存在")
 		return
 	}
 	page, size := pageParams(c)
@@ -544,12 +556,17 @@ func (a *UnifiedResourceAPI) Create(c *gin.Context) {
 // Resource and its Agent proof.
 func (a *UnifiedResourceAPI) ObserveTarget(c *gin.Context) {
 	ctx := c.Request.Context()
-	var resource model.Resource
-	if err := db.DB.WithContext(ctx).First(&resource, "id = ?", c.Param("id")).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("资源不存在"))
+	tenantID, unrestricted, ok := tenantObjectScope(c, PermissionTenantResourcesWrite)
+	if !ok {
 		return
 	}
-	if !requireTenantPermission(c, resource.TenantID, PermissionTenantResourcesWrite) {
+	var resource model.Resource
+	query := db.DB.WithContext(ctx).Where("id = ?", c.Param("id"))
+	if !unrestricted {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+	if err := query.First(&resource).Error; err != nil {
+		codedError(c, http.StatusNotFound, ErrorCodeTenantObjectNotFound, "当前租户范围内对象不存在")
 		return
 	}
 	if resource.Type != model.ResourceTypeContainerSSH {
@@ -626,12 +643,17 @@ func saveResourceTarget(ctx context.Context, resource *model.Resource, req targe
 
 // ListGrants lists grants for a resource after enforcing the resource scope.
 func (a *UnifiedResourceAPI) ListGrants(c *gin.Context) {
-	var resource model.Resource
-	if err := db.DB.WithContext(c.Request.Context()).First(&resource, "id = ?", c.Param("id")).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("资源不存在"))
+	tenantID, unrestricted, ok := tenantObjectScope(c, PermissionTenantGrantsRead)
+	if !ok {
 		return
 	}
-	if !requireTenantPermission(c, resource.TenantID, PermissionTenantGrantsRead) {
+	var resource model.Resource
+	query := db.DB.WithContext(c.Request.Context()).Where("id = ?", c.Param("id"))
+	if !unrestricted {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+	if err := query.First(&resource).Error; err != nil {
+		codedError(c, http.StatusNotFound, ErrorCodeTenantObjectNotFound, "当前租户范围内对象不存在")
 		return
 	}
 	var grants []model.AccessGrant
@@ -688,7 +710,9 @@ func (a *UnifiedResourceAPI) ListAllGrants(c *gin.Context) {
 		}
 		if grant.SubjectType == "user" && grant.SubjectUserID != 0 {
 			var user model.User
-			if err := db.DB.WithContext(ctx).First(&user, grant.SubjectUserID).Error; err == nil {
+			if err := db.DB.WithContext(ctx).
+				Joins("JOIN tenant_membership ON tenant_membership.user_id = user.id AND tenant_membership.tenant_id = ?", grant.TenantID).
+				First(&user, "user.id = ?", grant.SubjectUserID).Error; err == nil {
 				item.SubjectName = user.Alias
 				if item.SubjectName == "" {
 					item.SubjectName = user.Name
@@ -696,7 +720,7 @@ func (a *UnifiedResourceAPI) ListAllGrants(c *gin.Context) {
 			}
 		} else if grant.SubjectType == "group" && grant.SubjectGroupID != nil {
 			var group model.Group
-			if err := db.DB.WithContext(ctx).First(&group, *grant.SubjectGroupID).Error; err == nil {
+			if err := db.DB.WithContext(ctx).First(&group, "id = ? AND tenant_id = ?", *grant.SubjectGroupID, grant.TenantID).Error; err == nil {
 				item.SubjectName = group.Alias
 				if item.SubjectName == "" {
 					item.SubjectName = group.Name
@@ -711,12 +735,17 @@ func (a *UnifiedResourceAPI) ListAllGrants(c *gin.Context) {
 // CreateGrant supports either a direct User grant or a tenant-scoped Group.
 func (a *UnifiedResourceAPI) CreateGrant(c *gin.Context) {
 	ctx := c.Request.Context()
-	var resource model.Resource
-	if err := db.DB.WithContext(ctx).First(&resource, "id = ?", c.Param("id")).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("资源不存在"))
+	tenantID, unrestricted, ok := tenantObjectScope(c, PermissionTenantGrantsWrite)
+	if !ok {
 		return
 	}
-	if !requireTenantPermission(c, resource.TenantID, PermissionTenantGrantsWrite) {
+	var resource model.Resource
+	query := db.DB.WithContext(ctx).Where("id = ?", c.Param("id"))
+	if !unrestricted {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+	if err := query.First(&resource).Error; err != nil {
+		codedError(c, http.StatusNotFound, ErrorCodeTenantObjectNotFound, "当前租户范围内对象不存在")
 		return
 	}
 	if resource.Type != model.ResourceTypeContainerSSH {
@@ -800,17 +829,22 @@ func (a *UnifiedResourceAPI) CreateGrant(c *gin.Context) {
 // from the next authoritative Agent and Desktop projections.
 func (a *UnifiedResourceAPI) RevokeGrant(c *gin.Context) {
 	ctx := c.Request.Context()
+	tenantID, unrestricted, ok := tenantObjectScope(c, PermissionTenantGrantsWrite)
+	if !ok {
+		return
+	}
 	var grant model.AccessGrant
-	if err := db.DB.WithContext(ctx).First(&grant, "id = ?", c.Param("id")).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("访问策略不存在"))
+	query := db.DB.WithContext(ctx).Where("id = ?", c.Param("id"))
+	if !unrestricted {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+	if err := query.First(&grant).Error; err != nil {
+		codedError(c, http.StatusNotFound, ErrorCodeTenantObjectNotFound, "当前租户范围内对象不存在")
 		return
 	}
 	var resource model.Resource
 	if err := db.DB.WithContext(ctx).First(&resource, "id = ? AND tenant_id = ?", grant.ResourceID, grant.TenantID).Error; err != nil {
 		c.JSON(http.StatusConflict, NewErrorResponse("访问策略关联资源不存在或租户不一致"))
-		return
-	}
-	if !requireTenantPermission(c, grant.TenantID, PermissionTenantGrantsWrite) {
 		return
 	}
 	if grant.Status != "enabled" {

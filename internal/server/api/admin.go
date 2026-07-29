@@ -188,6 +188,9 @@ func (a *AdminAPI) ChangePassword(c *gin.Context) {
 		if err := tx.Model(&admin).Update("password_hash", string(newHash)).Error; err != nil {
 			return err
 		}
+		if _, err := db.SyncLegacyAdminIdentity(tx, admin.ID, "management account password changed"); err != nil {
+			return err
+		}
 		return service.BumpLegacyAdminCredentialRevision(tx, admin.ID)
 	})
 	if err != nil {

@@ -43,7 +43,7 @@ func newManagementContextAPIFixture(t *testing.T) managementContextAPIFixture {
 	require.NoError(t, err)
 	db.DB = database
 	require.NoError(t, database.AutoMigrate(
-		&model.Admin{}, &model.User{}, &model.UserIdentityProfile{}, &model.UserAuthenticationLink{},
+		&model.Admin{}, &model.AdminTenantMembership{}, &model.User{}, &model.UserIdentityProfile{}, &model.UserAuthenticationLink{},
 		&model.PlatformRoleMembership{}, &model.ResourceProvider{}, &model.AdminProviderMembership{},
 		&model.Tenant{}, &model.TenantMembership{}, &model.UserTenantManagementMembership{},
 		&model.UserSimulationSession{}, &model.APIIdempotencyRecord{}, &model.AuditLog{},
@@ -91,6 +91,10 @@ func newManagementContextAPIFixture(t *testing.T) managementContextAPIFixture {
 	legacyAuthenticated := router.Group("")
 	legacyAuthenticated.Use(AuthMiddleware(cfg.Security.JWTSecret, false))
 	legacyAuthenticated.PUT("/password", ForbidUserSimulation(), adminAPI.ChangePassword)
+	legacyAuthenticated.POST("/legacy-audit", func(c *gin.Context) {
+		recordAuditLog(c.Request.Context(), c, "legacy_business_write", "fixture", "fixture-1", "Fixture", nil)
+		c.Status(http.StatusNoContent)
+	})
 	management := router.Group("/management")
 	management.Use(AuthMiddleware(cfg.Security.JWTSecret, false))
 	management.Use(UnifiedManagementIdentityMiddleware())
@@ -228,6 +232,19 @@ func TestManagementContextV2CredentialRevisionInvalidatesOldToken(t *testing.T) 
 	require.NoError(t, fixture.database.Where("provider_type = ? AND provider_subject = ?",
 		model.AuthenticationProviderLegacyAdmin, strconv.FormatInt(fixture.admin.ID, 10)).First(&link).Error)
 	require.Equal(t, int64(4), link.CredentialRevision)
+}
+
+func TestLegacyAuthenticatedWritePersistsUnifiedActorAndEffectiveUser(t *testing.T) {
+	fixture := newManagementContextAPIFixture(t)
+	login := fixture.login(t, fixture.admin.Username)
+	response := fixture.managementRequest(http.MethodPost, "/legacy-audit", login.Token, nil)
+	require.Equal(t, http.StatusNoContent, response.Code, response.Body.String())
+
+	var audit model.AuditLog
+	require.NoError(t, fixture.database.First(&audit, "action_type = ?", "legacy_business_write").Error)
+	require.Equal(t, fixture.admin.ID, audit.ActorAdminID)
+	require.Equal(t, fixture.user.ID, audit.ActorUserID)
+	require.Equal(t, fixture.user.ID, audit.EffectiveUserID)
 }
 
 func TestManagementContextV2FeatureFlagFailsClosedBeforeIdentityMapping(t *testing.T) {

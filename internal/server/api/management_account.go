@@ -291,7 +291,8 @@ func (a *ManagementAccountAPI) Create(c *gin.Context) {
 				return err
 			}
 		}
-		return nil
+		_, err := db.SyncLegacyAdminIdentity(tx, account.ID, "management account created")
+		return err
 	})
 	if errors.Is(err, errTenantUnavailable) {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("Tenant 不存在或未启用"))
@@ -342,6 +343,9 @@ func (a *ManagementAccountAPI) ResetPassword(c *gin.Context) {
 		if err := tx.Model(&account).Update("password_hash", string(hash)).Error; err != nil {
 			return err
 		}
+		if _, err := db.SyncLegacyAdminIdentity(tx, account.ID, "management account password reset"); err != nil {
+			return err
+		}
 		return service.BumpLegacyAdminCredentialRevision(tx, account.ID)
 	})
 	if err != nil {
@@ -365,11 +369,20 @@ func (a *ManagementAccountAPI) Enable(c *gin.Context) {
 		c.JSON(http.StatusNotFound, NewErrorResponse("管理账号不存在"))
 		return
 	}
-	if !account.Enabled {
-		if err := db.DB.WithContext(c.Request.Context()).Model(&account).Update("enabled", true).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, NewErrorResponse("恢复管理账号失败"))
-			return
+	wasDisabled := !account.Enabled
+	if err := db.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if wasDisabled {
+			if err := tx.Model(&account).Update("enabled", true).Error; err != nil {
+				return err
+			}
 		}
+		_, err := db.SyncLegacyAdminIdentity(tx, account.ID, "management account enabled")
+		return err
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("恢复管理账号失败"))
+		return
+	}
+	if wasDisabled {
 		recordAuditLog(c.Request.Context(), c, "enable_management_account", "management_account", strconv.FormatInt(account.ID, 10), account.Username, nil)
 	}
 	view, err := managementAccountViewByID(db.DB.WithContext(c.Request.Context()), id)
@@ -399,7 +412,8 @@ func (a *ManagementAccountAPI) Disable(c *gin.Context) {
 			return err
 		}
 		if !account.Enabled {
-			return nil
+			_, err := db.SyncLegacyAdminIdentity(tx, account.ID, "management account disabled")
+			return err
 		}
 		wasEnabled = true
 		if account.Role == managementRoleAdmin {
@@ -411,7 +425,11 @@ func (a *ManagementAccountAPI) Disable(c *gin.Context) {
 				return errLastPlatformAdmin
 			}
 		}
-		return tx.Model(&account).Update("enabled", false).Error
+		if err := tx.Model(&account).Update("enabled", false).Error; err != nil {
+			return err
+		}
+		_, err := db.SyncLegacyAdminIdentity(tx, account.ID, "management account disabled")
+		return err
 	})
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusNotFound, NewErrorResponse("管理账号不存在"))
@@ -494,9 +512,30 @@ func (a *ManagementAccountAPI) BindTenant(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("Tenant 不存在或未启用"))
 		return
 	}
-	membership := model.AdminTenantMembership{AdminID: id, TenantID: req.TenantID, Role: req.Role, Enabled: true}
-	if err := db.DB.WithContext(c.Request.Context()).Where("admin_id = ? AND tenant_id = ?", id, req.TenantID).
-		Assign(map[string]interface{}{"role": req.Role, "enabled": true}).FirstOrCreate(&membership).Error; err != nil {
+	membership := model.AdminTenantMembership{AdminID: id, TenantID: req.TenantID, Role: req.Role, Enabled: true, PermissionRevision: 1}
+	if err := db.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		var current model.AdminTenantMembership
+		err := tx.Where("admin_id = ? AND tenant_id = ?", id, req.TenantID).First(&current).Error
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			if err := tx.Create(&membership).Error; err != nil {
+				return err
+			}
+		case err != nil:
+			return err
+		default:
+			membership = current
+			if current.Role != req.Role || !current.Enabled {
+				if err := tx.Model(&current).Updates(map[string]interface{}{
+					"role": req.Role, "enabled": true, "permission_revision": gorm.Expr("permission_revision + 1"),
+				}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		_, err = db.SyncLegacyAdminIdentity(tx, account.ID, "management account tenant bound")
+		return err
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("绑定 Tenant 管理范围失败"))
 		return
 	}
@@ -532,11 +571,22 @@ func (a *ManagementAccountAPI) DisableTenantMembership(c *gin.Context) {
 		c.JSON(http.StatusNotFound, NewErrorResponse("Tenant 管理范围不存在"))
 		return
 	}
-	if membership.Enabled {
-		if err := db.DB.WithContext(c.Request.Context()).Model(&membership).Update("enabled", false).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, NewErrorResponse("停用 Tenant 管理范围失败"))
-			return
+	wasEnabled := membership.Enabled
+	if err := db.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if wasEnabled {
+			if err := tx.Model(&membership).Updates(map[string]interface{}{
+				"enabled": false, "permission_revision": gorm.Expr("permission_revision + 1"),
+			}).Error; err != nil {
+				return err
+			}
 		}
+		_, err := db.SyncLegacyAdminIdentity(tx, account.ID, "management account tenant disabled")
+		return err
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("停用 Tenant 管理范围失败"))
+		return
+	}
+	if wasEnabled {
 		recordAuditLog(c.Request.Context(), c, "disable_management_account_tenant", "management_account", strconv.FormatInt(account.ID, 10), account.Username, map[string]string{"tenant_id": tenantID})
 	}
 	view, err := managementAccountViewByID(db.DB.WithContext(c.Request.Context()), id)

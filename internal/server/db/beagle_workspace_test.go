@@ -19,7 +19,8 @@ func TestEnsureBeagleWorkspaceMigratesOnlyUnscopedDesktopUsers(t *testing.T) {
 	DB = database
 	require.NoError(t, database.AutoMigrate(
 		&model.Admin{}, &model.AdminTenantMembership{}, &model.User{},
-		&model.Tenant{}, &model.TenantMembership{},
+		&model.Tenant{}, &model.TenantMembership{}, &model.UserIdentityProfile{},
+		&model.UserAuthenticationLink{}, &model.PlatformRoleMembership{}, &model.UserTenantManagementMembership{},
 	))
 
 	admin := model.Admin{Username: "admin", PasswordHash: "test", Role: "admin", Enabled: true}
@@ -39,6 +40,8 @@ func TestEnsureBeagleWorkspaceMigratesOnlyUnscopedDesktopUsers(t *testing.T) {
 	require.NoError(t, database.Create(&model.TenantMembership{
 		TenantID: existingTenant.ID, UserID: assigned.ID, Role: "viewer", Enabled: true,
 	}).Error)
+	managementUserID, err := SyncLegacyAdminIdentity(database, admin.ID, "test bootstrap")
+	require.NoError(t, err)
 
 	require.NoError(t, EnsureBeagleWorkspace(admin.Username))
 
@@ -63,6 +66,7 @@ func TestEnsureBeagleWorkspaceMigratesOnlyUnscopedDesktopUsers(t *testing.T) {
 	assertWorkspaceMembership(disabled.ID, 1)
 	assertWorkspaceMembership(assigned.ID, 0)
 	assertWorkspaceMembership(agent.ID, 0)
+	assertWorkspaceMembership(managementUserID, 0)
 
 	var assignedMembership model.TenantMembership
 	require.NoError(t, database.Where("tenant_id = ? AND user_id = ?", existingTenant.ID, assigned.ID).First(&assignedMembership).Error)

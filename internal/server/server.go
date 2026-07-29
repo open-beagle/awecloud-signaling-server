@@ -83,6 +83,9 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 	if err := db.EnsureBeagleWorkspace(cfg.Web.DefaultAdminUsername); err != nil {
 		return nil, fmt.Errorf("初始化 Beagle 默认租户失败: %w", err)
 	}
+	if err := db.EnsureDefaultAdminIdentity(cfg.Web.DefaultAdminUsername); err != nil {
+		return nil, fmt.Errorf("初始化默认管理员统一身份失败: %w", err)
+	}
 
 	var headscaleClient *headscale.Client
 	var aclSyncService *headscale.ACLSyncService

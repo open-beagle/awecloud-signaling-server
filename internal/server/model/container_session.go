@@ -20,6 +20,9 @@ type ContainerSession struct {
 	ID                       string                 `gorm:"primaryKey;size:36" json:"id"`
 	TenantID                 string                 `gorm:"size:36;not null;index" json:"tenant_id"`
 	UserID                   uint64                 `gorm:"not null;index" json:"user_id"`
+	ActorUserID              uint64                 `gorm:"index" json:"actor_user_id,omitempty"`
+	EffectiveUserID          uint64                 `gorm:"index" json:"effective_user_id,omitempty"`
+	SimulationSessionID      string                 `gorm:"size:36;index" json:"simulation_session_id,omitempty"`
 	DeviceID                 uint64                 `gorm:"index" json:"device_id,omitempty"`
 	ResourceID               string                 `gorm:"size:36;not null;index" json:"resource_id"`
 	WorkspaceID              string                 `gorm:"size:200;index" json:"workspace_id,omitempty"`
