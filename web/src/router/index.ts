@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import type { RouteRecordRaw } from 'vue-router'
+import type { RouteLocationNormalizedLoaded, RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useTenantStore } from '@/stores/tenant'
 import { useWorkspaceStore, workspaceHome } from '@/stores/workspace'
@@ -390,8 +390,14 @@ const routes: RouteRecordRaw[] = [
 ]
 
 type BreadcrumbMetaItem = { title: string; path?: string }
+type BreadcrumbMeta = BreadcrumbMetaItem[] | ((route: RouteLocationNormalizedLoaded) => BreadcrumbMetaItem[])
 
-const breadcrumbByRouteName: Record<string, BreadcrumbMetaItem[]> = {
+const breadcrumbByRouteName: Record<string, BreadcrumbMeta> = {
+	WorkspaceUnavailable: route => {
+		const workspace = route.query.workspace
+		const label = workspace === 'tenant' ? '租户' : workspace === 'provider' ? '资源' : workspace === 'platform' ? '平台' : '工作空间'
+		return [{ title: '工作空间' }, { title: `${label}业务不可用` }]
+	},
 	PlatformOverview: [{ title: '管理员' }, { title: '平台概览' }],
 	ProviderOverview: [{ title: '资源业务' }, { title: '资源概览' }],
 	TenantOverview: [{ title: '租户业务' }, { title: '租户概览' }],
@@ -400,7 +406,7 @@ const breadcrumbByRouteName: Record<string, BreadcrumbMetaItem[]> = {
 	TenantMemberDevices: [{ title: '租户业务' }, { title: '成员设备' }],
 	TenantAudit: [{ title: '租户业务' }, { title: '租户审计' }],
 	TenantSettings: [{ title: '租户业务' }, { title: '租户设置' }],
-	Tenants: [{ title: '租户治理' }, { title: '租户管理' }],
+	Tenants: [{ title: '组织治理' }, { title: '组织管理' }],
 	TenantAdminMemberships: [{ title: '租户治理' }, { title: '租户管理员授权' }],
 	PlatformAdmins: [{ title: '平台治理' }, { title: '平台管理账号' }],
 	PlatformIdentities: [{ title: '平台治理' }, { title: '访问主体目录', path: '/platform-identities' }],
@@ -408,27 +414,31 @@ const breadcrumbByRouteName: Record<string, BreadcrumbMetaItem[]> = {
 	AgentNodes: [{ title: '设备管理' }, { title: '代理设备', path: '/nodes/agents' }],
 	DiagnosticDesktopNodes: [{ title: '高级诊断' }, { title: 'Desktop 节点', path: '/diagnostics/desktop-nodes' }],
 	DiagnosticNodes: [{ title: '高级诊断' }, { title: '全部节点', path: '/diagnostics/nodes' }],
-	NodeDetail: [{ title: '设备管理' }, { title: '设备详情' }],
+	NodeDetail: route => {
+		if (route.query.source === 'desktop') return [{ title: '高级诊断' }, { title: 'Desktop 节点', path: '/diagnostics/desktop-nodes' }, { title: '节点详情' }]
+		if (route.query.source === 'all') return [{ title: '高级诊断' }, { title: '全部节点', path: '/diagnostics/nodes' }, { title: '节点详情' }]
+		return [{ title: '设备管理' }, { title: '代理设备', path: '/nodes/agents' }, { title: '节点详情' }]
+	},
 	Endpoints: [{ title: '终端管理', path: '/endpoints' }],
 	EndpointDetail: [{ title: '终端管理', path: '/endpoints' }, { title: '终端详情' }],
 	Integrations: [{ title: '基础设施' }, { title: '集成' }],
 	Groups: [{ title: '租户业务' }, { title: '成员分组', path: '/groups' }],
-	GroupMembers: [{ title: '成员分组', path: '/groups' }, { title: '成员管理' }],
+	GroupMembers: [{ title: '租户业务' }, { title: '成员分组', path: '/groups' }, { title: '成员管理' }],
 	Resources: [{ title: '租户业务' }, { title: '资源目录' }],
-	ResourceDetail: [{ title: '资源目录', path: '/resources' }, { title: '资源详情' }],
+	ResourceDetail: [{ title: '租户业务' }, { title: '资源目录', path: '/resources' }, { title: '资源详情' }],
 	ResourceCandidates: [{ title: '资源治理' }, { title: '发现候选' }],
 	PlatformResources: [{ title: '资源治理' }, { title: '全局资源目录' }],
 	LegacyInventory: [{ title: '资源治理' }, { title: '存量认领' }],
-	AccessPolicies: [{ title: '租户业务' }, { title: '访问策略' }],
-	Sessions: [{ title: '租户业务' }, { title: '活动会话' }],
-	Domains: [{ title: '域名管理', path: '/domains' }],
+	AccessPolicies: [{ title: '租户业务' }, { title: '访问授权' }],
+	Sessions: [{ title: '租户业务' }, { title: '访问会话' }],
+	Domains: [{ title: '高级诊断' }, { title: '域名管理', path: '/domains' }],
 	ACLServices: [{ title: '授权管理' }, { title: '服务授权', path: '/acl/services' }],
 	ACLServiceDetail: [{ title: '服务授权', path: '/acl/services' }, { title: '授权详情' }],
 	ACLUsers: [{ title: '授权管理' }, { title: '用户授权', path: '/acl/users' }],
 	ACLUserDetail: [{ title: '用户授权', path: '/acl/users' }, { title: '授权详情' }],
 	ACLGroups: [{ title: '授权管理' }, { title: '分组授权', path: '/acl/groups' }],
 	ACLGroupDetail: [{ title: '分组授权', path: '/acl/groups' }, { title: '授权详情' }],
-	ACLSSH: [{ title: '授权管理' }, { title: 'SSH 授权', path: '/acl/ssh' }],
+	ACLSSH: [{ title: '高级诊断' }, { title: 'SSH 授权', path: '/acl/ssh' }],
 	ACLSSHDetail: [{ title: 'SSH 授权', path: '/acl/ssh' }, { title: '授权详情' }],
 	ACLK8S: [{ title: '授权管理' }, { title: 'Kubernetes 授权', path: '/acl/k8s' }],
 	ACLK8SDetail: [{ title: 'Kubernetes 授权', path: '/acl/k8s' }, { title: '授权详情' }],
@@ -436,11 +446,11 @@ const breadcrumbByRouteName: Record<string, BreadcrumbMetaItem[]> = {
 	ACLK8SServiceDetail: [{ title: 'Kubernetes Service 授权', path: '/acl/k8s-service' }, { title: '授权详情' }],
 	TunnelUsers: [{ title: '隧道管理' }, { title: 'User 管理' }],
 	TunnelNodes: [{ title: '隧道管理' }, { title: 'Node 管理' }],
-	TunnelACL: [{ title: '隧道管理' }, { title: 'ACL 管理' }],
+	TunnelACL: [{ title: '高级诊断' }, { title: 'ACL 管理' }],
 	TunnelSSH: [{ title: '隧道管理' }, { title: 'SSH 策略' }],
 	PlatformAudit: [{ title: '平台治理' }, { title: '平台审计' }],
 	DiagnosticOperationAudit: [{ title: '高级诊断' }, { title: '连接操作审计' }],
-	SystemConfig: [{ title: '系统配置' }]
+	SystemConfig: [{ title: '平台治理' }, { title: '系统配置' }]
 }
 
 const normalizeProtectedRouteMetadata = (records: RouteRecordRaw[]) => {

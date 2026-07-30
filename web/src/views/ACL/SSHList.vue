@@ -1,5 +1,7 @@
 <template>
   <div class="acl-ssh-list">
+    <PageHeader title="SSH 授权" description="查看 Agent 与用户、成员分组之间的兼容 SSH 授权关系。" />
+
     <!-- 搜索 -->
     <el-card class="search-card" shadow="never">
       <el-form :inline="true" :model="searchForm" class="search-form">
@@ -84,6 +86,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getSSHACLList, type SSHACLItem } from '@/api/acl'
 import { formatTime } from '@/utils/time'
+import PageHeader from '@/components/Common/PageHeader.vue'
 
 const router = useRouter()
 

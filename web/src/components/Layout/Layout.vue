@@ -9,7 +9,7 @@
       </el-aside>
       <button v-if="appStore.mobileSidebarOpen" class="mobile-backdrop" aria-label="关闭导航" @click="appStore.closeMobileSidebar" />
       <el-main class="layout-main">
-        <Breadcrumb v-if="showLegacyBreadcrumb" />
+        <Breadcrumb />
         <router-view />
       </el-main>
     </el-container>
@@ -18,20 +18,16 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import Header from './Header.vue'
 import Sidebar from './Sidebar.vue'
 import Breadcrumb from '@/components/Common/Breadcrumb.vue'
 
 const appStore = useAppStore()
-const route = useRoute()
 
 const sidebarWidth = computed(() => {
   return appStore.sidebarCollapsed ? '64px' : '200px'
 })
-const modernPaths = ['/resources', '/resource-candidates', '/legacy-inventory', '/access-policies', '/sessions', '/tenants', '/infrastructure/integrations']
-const showLegacyBreadcrumb = computed(() => !modernPaths.some(path => route.path === path || route.path.startsWith(`${path}/`)))
 </script>
 
 <style scoped>

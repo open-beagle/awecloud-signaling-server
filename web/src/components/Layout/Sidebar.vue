@@ -65,18 +65,18 @@
         <el-menu-item v-if="workspaceStore.can('platform.allocations.read')" disabled><el-icon><Connection /></el-icon><template #title>资源分配</template></el-menu-item>
         <div v-if="!appStore.sidebarCollapsed" class="nav-section">平台治理</div>
         <el-menu-item v-if="workspaceStore.can('platform.identities.read')" index="/platform-identities"><el-icon><User /></el-icon><template #title>主体目录</template></el-menu-item>
-        <el-menu-item v-if="workspaceStore.can('platform.memberships.read')" index="/platform-admins"><el-icon><UserFilled /></el-icon><template #title>平台管理员</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('platform.memberships.read')" index="/platform-admins"><el-icon><UserFilled /></el-icon><template #title>平台管理账号</template></el-menu-item>
         <el-menu-item v-if="workspaceStore.can('platform.user_simulations.read')" disabled><el-icon><Switch /></el-icon><template #title>用户模拟</template></el-menu-item>
         <el-menu-item v-if="workspaceStore.can('platform.audit.read')" index="/platform-audit"><el-icon><Document /></el-icon><template #title>审计日志</template></el-menu-item>
-        <el-menu-item v-if="workspaceStore.can('platform.settings.read')" index="/system/config"><el-icon><Setting /></el-icon><template #title>系统设置</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('platform.settings.read')" index="/system/config"><el-icon><Setting /></el-icon><template #title>系统配置</template></el-menu-item>
         <el-sub-menu index="diagnostics">
           <template #title><el-icon><Tools /></el-icon><span>高级诊断</span></template>
-          <el-menu-item index="/domains">连接入口</el-menu-item>
+          <el-menu-item index="/domains">域名管理</el-menu-item>
           <el-menu-item index="/diagnostics/desktop-nodes">Desktop 节点</el-menu-item>
           <el-menu-item index="/diagnostics/nodes">全部节点</el-menu-item>
-          <el-menu-item index="/diagnostics/operation-audit">操作审计</el-menu-item>
-          <el-menu-item index="/acl/ssh">旧版授权</el-menu-item>
-          <el-menu-item index="/tunnel/acl">网络策略</el-menu-item>
+          <el-menu-item index="/diagnostics/operation-audit">连接操作审计</el-menu-item>
+          <el-menu-item index="/acl/ssh">SSH 授权</el-menu-item>
+          <el-menu-item index="/tunnel/acl">ACL 管理</el-menu-item>
         </el-sub-menu>
       </template>
     </el-menu>
@@ -122,11 +122,17 @@ const activeMenu = computed(() => {
   if (route.path.startsWith('/platform-audit')) return '/platform-audit'
   if (route.path.startsWith('/platform-resources')) return '/platform-resources'
   if (route.path.startsWith('/resources')) return '/resources'
+  if (route.path.startsWith('/groups')) return '/groups'
   if (route.path.startsWith('/tenant-members')) return '/tenant-members'
   if (route.path.startsWith('/tenant-member-devices')) return '/tenant-member-devices'
   if (route.path.startsWith('/tenant-audit')) return '/tenant-audit'
   if (route.path.startsWith('/tenant-settings')) return '/tenant-settings'
-  if (route.path.startsWith('/acl') || route.path.startsWith('/tunnel')) return '/acl/ssh'
+  if (route.path.startsWith('/nodes/')) {
+    if (route.query.source === 'desktop') return '/diagnostics/desktop-nodes'
+    if (route.query.source === 'all') return '/diagnostics/nodes'
+  }
+  if (route.path.startsWith('/tunnel/acl')) return '/tunnel/acl'
+  if (route.path.startsWith('/acl/ssh')) return '/acl/ssh'
   return route.path
 })
 

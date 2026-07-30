@@ -1,12 +1,11 @@
 <template>
   <div class="system-config">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <span class="card-title">系统配置</span>
-        </div>
+    <PageHeader title="系统配置" description="维护客户端下载、网络接入和认证有效期等平台级配置。">
+      <template #actions>
+        <el-button type="primary" :loading="saving" :disabled="!authStore.canWrite" @click="handleSave">保存</el-button>
       </template>
-
+    </PageHeader>
+    <el-card>
       <el-form
         ref="formRef"
         :model="form"
@@ -137,6 +136,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getSystemConfig, updateSystemConfig } from '@/api/system'
 import { useAuthStore } from '@/stores/auth'
+import PageHeader from '@/components/Common/PageHeader.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -258,18 +258,6 @@ const handleSave = async () => {
 <style scoped>
 .system-config {
   width: 100%;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.card-title {
-  font-size: 18px;
-  font-weight: 500;
-  color: var(--text-primary);
 }
 
 .config-section {

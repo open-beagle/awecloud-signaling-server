@@ -1,9 +1,8 @@
 <template>
   <div class="policy-page">
-    <div class="page-header">
-      <div><div class="eyebrow">资源授权</div><h1>访问策略</h1><p>跨资源查询直接授权和用户组授权。新增策略应从资源详情发起。</p></div>
-      <el-button :icon="Refresh" :loading="loading" @click="fetchPolicies">刷新</el-button>
-    </div>
+    <PageHeader title="访问授权" eyebrow="资源授权" description="跨资源查询直接授权和用户组授权。新增授权应从资源详情发起。">
+      <template #actions><el-button :icon="Refresh" :loading="loading" @click="fetchPolicies">刷新</el-button></template>
+    </PageHeader>
     <div class="surface">
       <div class="toolbar">
         <el-select v-model="filters.status" clearable placeholder="全部状态" @change="handleFilter"><el-option label="生效中" value="enabled" /><el-option label="已撤销" value="revoked" /></el-select>
@@ -30,6 +29,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
+import PageHeader from '@/components/Common/PageHeader.vue'
 import { getAccessGrants, revokeResourceGrant, type AccessGrant, type ResourceType } from '@/api/resource'
 import { useAuthStore } from '@/stores/auth'
 import { useTenantStore } from '@/stores/tenant'
@@ -55,5 +55,5 @@ onMounted(fetchPolicies)
 </script>
 
 <style scoped>
-.policy-page { width: 100%; }.page-header,.toolbar { display:flex;align-items:center; }.page-header { justify-content:space-between;align-items:flex-start;gap:24px;margin-bottom:18px; }.eyebrow,.secondary,.count { color:var(--text-secondary);font-size:12px; }.eyebrow { margin-bottom:5px; }h1 { margin:0;font-size:24px;line-height:32px; }.page-header p { margin:5px 0 0;color:var(--text-regular);font-size:13px; }.surface { overflow:hidden;background:#fff;border:1px solid var(--border-light);border-radius:6px; }.toolbar { gap:10px;padding:14px 16px;border-bottom:1px solid var(--border-light); }.toolbar .el-select { width:150px; }.spacer { flex:1; }.secondary { display:block;margin-top:3px; }.el-tag + .el-tag { margin-left:4px; }.pagination { display:flex;justify-content:flex-end;padding:16px; }@media(max-width:700px){.page-header{flex-direction:column}.toolbar{flex-wrap:wrap}.spacer{display:none}}
+    .policy-page { width: 100%; }.toolbar { display:flex;align-items:center; }.secondary,.count { color:var(--text-secondary);font-size:12px; }.surface { overflow:hidden;background:#fff;border:1px solid var(--border-light);border-radius:6px; }.toolbar { gap:10px;padding:14px 16px;border-bottom:1px solid var(--border-light); }.toolbar .el-select { width:150px; }.spacer { flex:1; }.secondary { display:block;margin-top:3px; }.el-tag + .el-tag { margin-left:4px; }.pagination { display:flex;justify-content:flex-end;padding:16px; }@media(max-width:700px){.toolbar{flex-wrap:wrap}.spacer{display:none}}
 </style>
