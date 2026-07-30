@@ -96,6 +96,7 @@ type TailscaleSection struct {
 	HeadscaleURL       string `toml:"headscale_url"`        // Headscale API 地址（Server 访问）
 	HeadscaleAPIKey    string `toml:"headscale_api_key"`    // Headscale API 密钥（从环境变量获取）
 	HeadscalePublicURL string `toml:"headscale_public_url"` // Headscale 公网地址（Agent/Desktop 访问）
+	HeadscaleAutoSync  bool   `toml:"headscale_auto_sync"`  // 是否在启动时及每 5 分钟全量同步 ACL/Tag
 	// User 字段已废弃，每个 Agent/Desktop 使用独立的 User
 	// Agent User: agent-{agent_name}
 	// Desktop User: desktop-{client_id}
@@ -138,7 +139,11 @@ type LogConfig struct {
 }
 
 func LoadServerConfig(path string) (*ServerConfig, error) {
-	var cfg ServerConfig
+	cfg := ServerConfig{
+		Tailscale: TailscaleSection{
+			HeadscaleAutoSync: true,
+		},
+	}
 
 	// 读取配置文件
 	data, err := os.ReadFile(path)
@@ -252,6 +257,9 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 	if headscaleAPIKey := os.Getenv("HEADSCALE_API_KEY"); headscaleAPIKey != "" {
 		cfg.Tailscale.HeadscaleAPIKey = headscaleAPIKey
+	}
+	if value := strings.TrimSpace(os.Getenv("HEADSCALE_AUTO_SYNC")); value != "" {
+		cfg.Tailscale.HeadscaleAutoSync = parseBool(value)
 	}
 
 	// Telemetry 默认值

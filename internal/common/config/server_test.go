@@ -28,6 +28,28 @@ func TestLoadServerConfigAdminCredentialsFromEnvironment(t *testing.T) {
 	if cfg.Security.UserSimulationMaxHours != 8 {
 		t.Fatalf("user simulation max hours = %d, want 8", cfg.Security.UserSimulationMaxHours)
 	}
+	if !cfg.Tailscale.HeadscaleAutoSync {
+		t.Fatal("headscale auto sync must default to enabled for compatibility")
+	}
+}
+
+func TestLoadServerConfigHeadscaleAutoSyncOverride(t *testing.T) {
+	t.Setenv("ADMIN_USERNAME", "env-admin")
+	t.Setenv("ADMIN_PASSWORD", "env-password")
+	t.Setenv("HEADSCALE_AUTO_SYNC", "false")
+
+	path := filepath.Join(t.TempDir(), "server.toml")
+	if err := os.WriteFile(path, []byte("[web]\nlisten_port = 8080\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Tailscale.HeadscaleAutoSync {
+		t.Fatal("HEADSCALE_AUTO_SYNC=false must disable automatic synchronization")
+	}
 }
 
 func TestLoadServerConfigRequiresAdminCredentials(t *testing.T) {

@@ -240,7 +240,11 @@ func (s *Server) Run() error {
 	}()
 
 	if s.aclSyncService != nil {
-		go s.aclSyncService.StartPeriodicSync(s.aclSyncCtx)
+		if s.config.Tailscale.HeadscaleAutoSync {
+			go s.aclSyncService.StartPeriodicSync(s.aclSyncCtx)
+		} else {
+			logger.Info("Headscale ACL/Tag 自动同步已禁用，显式 Headscale API 仍可用")
+		}
 	}
 	if s.reconciliationService != nil {
 		go s.reconciliationService.StartPeriodicMaintenance(s.reconciliationCtx)
