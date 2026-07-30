@@ -26,7 +26,7 @@
       </button>
       <el-dropdown @command="handleLanguageChange">
         <button class="header-action language-selector" type="button">
-          <el-icon><Globe /></el-icon>
+          <el-icon><Compass /></el-icon>
           <span>{{ currentLanguage }}</span>
         </button>
         <template #dropdown>
@@ -36,14 +36,22 @@
           </el-dropdown-menu>
         </template>
       </el-dropdown>
-      <el-dropdown @command="handleCommand">
+      <el-dropdown trigger="click" @command="handleCommand">
         <button class="header-action user-info" type="button" aria-label="用户菜单">
-          <el-icon><User /></el-icon>
-          <span class="username">{{ authStore.username }}</span>
-          <el-tag v-if="authStore.role" class="role-tag" size="small" effect="plain">{{ roleLabel }}</el-tag>
+          <span class="user-avatar">{{ userInitial }}</span>
+          <span class="identity-copy">
+            <strong class="username">{{ authStore.username }}</strong>
+            <span class="role-text">{{ roleLabel }}</span>
+          </span>
+          <span class="dropdown-caret">▼</span>
         </button>
         <template #dropdown>
           <el-dropdown-menu>
+            <el-dropdown-item v-if="authStore.isPlatformAdmin" disabled>
+              <el-icon><Switch /></el-icon>
+              切换用户
+              <el-tag class="pending-tag" size="small" type="info" effect="plain">待开放</el-tag>
+            </el-dropdown-item>
             <el-dropdown-item command="logout">
               <el-icon><SwitchButton /></el-icon>
               {{ t('common.logout') }}
@@ -80,6 +88,7 @@ const workspaces: Array<{ value: ManagementWorkspace; label: string }> = [
 ]
 
 const currentLanguage = computed(() => locale.value === 'zh-CN' ? '中文' : 'English')
+const userInitial = computed(() => authStore.username.trim().slice(0, 1).toUpperCase() || 'U')
 const roleLabel = computed(() => ({
   admin: '平台管理员',
   platform_admin: '平台管理员',
@@ -120,42 +129,51 @@ const handleDownloadClient = () => window.open('/download', '_blank')
 </script>
 
 <style scoped>
-.header { width: 100%; display: grid; grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr); align-items: center; gap: 16px; }
+.header { width: 100%; height: 100%; display: grid; grid-template-columns: auto minmax(240px, 1fr) auto; align-items: stretch; }
 .header-left, .header-right { display: flex; align-items: center; min-width: 0; }
-.header-left { gap: 18px; }
+.header-left { gap: 12px; padding-right: 18px; border-right: 1px solid var(--border-lighter); }
 .header-right { justify-content: flex-end; gap: 4px; }
 .header-logo { padding: 0; }
 .mobile-menu { display: none; width: 36px; height: 36px; flex: 0 0 36px; font-size: 19px; }
-.workspace-switcher { display: grid; grid-template-columns: repeat(3, 64px); height: 34px; padding: 3px; border: 1px solid var(--border-base); border-radius: 6px; background: var(--bg-subtle); }
-.workspace-switcher button { border: 0; border-radius: 4px; background: transparent; color: var(--text-regular); cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; letter-spacing: 0; }
+.workspace-switcher { display: flex; min-width: 0; height: 100%; align-items: stretch; justify-content: flex-start; }
+.workspace-switcher button { position: relative; min-width: 82px; padding: 0 20px; border: 0; background: transparent; color: var(--text-regular); cursor: pointer; font: inherit; font-size: 14px; font-weight: 600; letter-spacing: 0; }
 .workspace-switcher button:hover:not(:disabled) { color: var(--primary-color); background: var(--primary-lighter); }
-.workspace-switcher button.active { background: #fff; color: var(--primary-color); box-shadow: 0 0 0 1px var(--border-light); }
+.workspace-switcher button.active { color: var(--primary-color); }
+.workspace-switcher button.active::after { position: absolute; right: 18px; bottom: 0; left: 18px; height: 3px; background: var(--primary-color); content: ''; }
 .workspace-switcher button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
 .workspace-switcher button:disabled { cursor: not-allowed; opacity: 0.48; }
 .header-action { display: flex; align-items: center; gap: 5px; min-width: 36px; min-height: 36px; padding: 7px 10px; border: 0; border-radius: 4px; background: transparent; color: var(--text-primary); cursor: pointer; font: inherit; font-size: 14px; letter-spacing: 0; }
 .header-action:hover { color: var(--primary-color); background: var(--primary-lighter); }
 .header-action:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
-.user-info { max-width: 260px; }
+.user-info { max-width: 230px; text-align: left; }
+.user-avatar { display: inline-grid; width: 26px; height: 26px; flex: 0 0 26px; place-items: center; border-radius: 50%; background: #e3e8f0; color: #354052; font-size: 12px; font-weight: 700; }
+.identity-copy { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; line-height: 16px; }
 .username { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.identity-copy strong { max-width: 130px; font-size: 13px; }
+.role-text { color: var(--text-secondary); font-size: 11px; white-space: nowrap; }
+.dropdown-caret { color: var(--text-secondary); font-size: 9px; }
+.pending-tag { margin-left: 10px; }
 
 @media (max-width: 1040px) {
-  .header { grid-template-columns: minmax(100px, 1fr) auto minmax(100px, 1fr); gap: 10px; }
-  .client-download span, .language-selector span, .role-tag { display: none; }
+  .header { grid-template-columns: auto minmax(220px, 1fr) auto; }
+  .client-download span, .language-selector span, .role-text { display: none; }
+  .identity-copy { line-height: 20px; }
 }
 
 @media (max-width: 768px) {
-  .header { grid-template-columns: 72px minmax(168px, 1fr) 40px; gap: 6px; }
+  .header { grid-template-columns: minmax(0, 1fr) 44px; grid-template-rows: 54px 50px; }
   .mobile-menu { display: inline-flex; }
-  .header-logo :deep(.logo-text) { display: none; }
   .header-logo :deep(.logo-icon) { width: 30px; height: 30px; }
   .header-left { gap: 3px; }
-  .workspace-switcher { width: 100%; grid-template-columns: repeat(3, minmax(50px, 1fr)); }
-  .client-download, .language-selector, .username, .role-tag { display: none; }
+  .workspace-switcher { grid-column: 1 / -1; grid-row: 2; width: 100%; border-top: 1px solid var(--border-lighter); }
+  .workspace-switcher button { min-width: 0; flex: 1; padding: 0 8px; }
+  .header-right { grid-column: 2; grid-row: 1; }
+  .client-download, .language-selector, .identity-copy, .dropdown-caret { display: none; }
   .header-action { width: 36px; padding: 7px; justify-content: center; }
+  .user-info { width: 36px; }
 }
 
 @media (max-width: 390px) {
-  .header { grid-template-columns: 42px minmax(162px, 1fr) 36px; }
-  .header-logo { display: none; }
+  .header-logo :deep(.logo-text) { font-size: 15px; }
 }
 </style>
