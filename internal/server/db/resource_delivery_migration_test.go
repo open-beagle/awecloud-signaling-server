@@ -46,6 +46,8 @@ func TestInitDBRegistersResourceDeliveryTables(t *testing.T) {
 		&model.PlatformResourceSource{},
 		&model.NamespaceObservation{},
 		&model.ResourceScope{},
+		&model.ResourceAllocation{},
+		&model.ResourceAllocationItem{},
 	} {
 		require.True(t, DB.Migrator().HasTable(table))
 	}
@@ -87,6 +89,7 @@ func TestInitDBAddsM1ATablesWithoutChangingLegacyRows(t *testing.T) {
 		&model.ResourceProvider{}, &model.AdminProviderMembership{}, &model.UserTenantManagementMembership{}, &model.UserSimulationSession{},
 		&model.TechnicalResource{}, &model.TechnicalResourceBinding{}, &model.SupplyInventoryReceipt{}, &model.SupplyCandidate{},
 		&model.PlatformResource{}, &model.PlatformResourceSource{}, &model.NamespaceObservation{}, &model.ResourceScope{},
+		&model.ResourceAllocation{}, &model.ResourceAllocationItem{},
 	} {
 		require.True(t, DB.Migrator().HasTable(table))
 	}
@@ -96,6 +99,11 @@ func TestInitDBAddsM1ATablesWithoutChangingLegacyRows(t *testing.T) {
 	var technicalResourceCount int64
 	require.NoError(t, DB.Model(&model.TechnicalResource{}).Count(&technicalResourceCount).Error)
 	require.Zero(t, technicalResourceCount)
+	var allocationCount, allocationItemCount int64
+	require.NoError(t, DB.Model(&model.ResourceAllocation{}).Count(&allocationCount).Error)
+	require.NoError(t, DB.Model(&model.ResourceAllocationItem{}).Count(&allocationItemCount).Error)
+	require.Zero(t, allocationCount)
+	require.Zero(t, allocationItemCount)
 }
 
 func TestInitDBEnforcesS2RelationshipsWithoutGlobalForeignKeys(t *testing.T) {

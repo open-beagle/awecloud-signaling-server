@@ -19,6 +19,7 @@ allow_localhost_admin_debug = false
 [feature_flags]
 resource_model_write = false
 resource_reconciliation = false
+resource_allocation = false
 management_context_v2 = false
 management_web_v2 = false
 tenant_resource_read_v2 = false

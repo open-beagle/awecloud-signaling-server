@@ -49,6 +49,7 @@ type Server struct {
 	aclSyncCancel                 context.CancelFunc
 	reconciliationService         *service.ResourceReconciliationService
 	providerReconciliationService *service.ProviderSupplyReconciliationService
+	allocationExpiryService       *service.PlatformAllocationExpiryService
 	reconciliationCtx             context.Context
 	reconciliationCancel          context.CancelFunc
 }
@@ -119,6 +120,7 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 		aclSyncCancel:                 aclSyncCancel,
 		reconciliationService:         service.NewResourceReconciliationService(db.DB),
 		providerReconciliationService: service.NewProviderSupplyReconciliationService(db.DB),
+		allocationExpiryService:       service.NewPlatformAllocationExpiryService(db.DB),
 		reconciliationCtx:             reconciliationCtx,
 		reconciliationCancel:          reconciliationCancel,
 	}, nil
@@ -255,6 +257,11 @@ func (s *Server) Run() error {
 		go s.providerReconciliationService.StartPeriodicMaintenance(s.reconciliationCtx)
 	} else {
 		logger.Info("Provider Supply 租约对账已禁用")
+	}
+	if s.allocationExpiryService != nil && s.config.FeatureFlags.ResourceModelWrite && s.config.FeatureFlags.ResourceAllocation {
+		go s.allocationExpiryService.StartPeriodicExpiration(s.reconciliationCtx)
+	} else {
+		logger.Info("Platform Allocation 到期任务已禁用")
 	}
 
 	quit := make(chan os.Signal, 1)
@@ -439,9 +446,20 @@ func (s *Server) setupRouter() *gin.Engine {
 				managementGroup.POST("/user-simulations/:id/revoke", api.RequireManagementPermission(service.PermissionPlatformUserSimulationsWrite), api.RequireIfMatch(), userSimulationAPI.Revoke)
 
 				platformSupplyAPI := api.NewPlatformSupplyAPI()
+				platformAllocationAPI := api.NewPlatformAllocationAPI()
 				platformGroup := managementGroup.Group("/platform")
 				{
 					platformGroup.GET("/supply-conflicts", api.RequireManagementPermission(service.PermissionPlatformResourcesRead), platformSupplyAPI.ListConflicts)
+					platformGroup.GET("/allocations", api.RequireManagementPermission(service.PermissionPlatformAllocationsRead), platformAllocationAPI.List)
+					platformGroup.GET("/allocations/:id", api.RequireManagementPermission(service.PermissionPlatformAllocationsRead), platformAllocationAPI.Get)
+					platformGroup.POST("/allocations", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIdempotencyKey(), platformAllocationAPI.Create)
+					platformGroup.PATCH("/allocations/:id", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), platformAllocationAPI.Update)
+					platformGroup.POST("/allocations/:id/schedule", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), platformAllocationAPI.Schedule)
+					platformGroup.POST("/allocations/:id/activate", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), platformAllocationAPI.Activate)
+					platformGroup.POST("/allocations/:id/suspend", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), platformAllocationAPI.Suspend)
+					platformGroup.POST("/allocations/:id/resume", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), platformAllocationAPI.Resume)
+					platformGroup.POST("/allocations/:id/revoke", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), platformAllocationAPI.Revoke)
+					platformGroup.POST("/allocations/:id/renew", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), platformAllocationAPI.Renew)
 				}
 
 				providerSupplyAPI := api.NewProviderSupplyAPI()

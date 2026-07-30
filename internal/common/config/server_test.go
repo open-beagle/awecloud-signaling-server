@@ -70,6 +70,7 @@ func TestResourceFeatureFlagsDefaultOffAndEnvironmentOverrides(t *testing.T) {
 	for _, key := range []string{
 		"SIGNAL_FEATURE_RESOURCE_MODEL_WRITE",
 		"SIGNAL_FEATURE_RESOURCE_RECONCILIATION",
+		"SIGNAL_FEATURE_RESOURCE_ALLOCATION",
 		"SIGNAL_FEATURE_MANAGEMENT_CONTEXT_V2",
 		"SIGNAL_FEATURE_MANAGEMENT_WEB_V2",
 		"SIGNAL_FEATURE_TENANT_RESOURCE_READ_V2",
@@ -93,6 +94,7 @@ func TestResourceFeatureFlagsDefaultOffAndEnvironmentOverrides(t *testing.T) {
 	for _, flag := range []FeatureFlag{
 		FeatureResourceModelWrite,
 		FeatureResourceReconciliation,
+		FeatureResourceAllocation,
 		FeatureManagementContextV2,
 		FeatureManagementWebV2,
 		FeatureTenantResourceReadV2,
@@ -109,6 +111,7 @@ func TestResourceFeatureFlagsDefaultOffAndEnvironmentOverrides(t *testing.T) {
 		t.Fatalf("rewrite config: %v", err)
 	}
 	t.Setenv("SIGNAL_FEATURE_RESOURCE_MODEL_WRITE", "false")
+	t.Setenv("SIGNAL_FEATURE_RESOURCE_ALLOCATION", "true")
 	t.Setenv("SIGNAL_FEATURE_TENANT_RESOURCE_READ_V2", "yes")
 	cfg, err = LoadServerConfig(path)
 	if err != nil {
@@ -122,6 +125,9 @@ func TestResourceFeatureFlagsDefaultOffAndEnvironmentOverrides(t *testing.T) {
 	}
 	if !cfg.FeatureFlags.TenantResourceReadV2 {
 		t.Fatal("environment must be able to enable a feature flag")
+	}
+	if !cfg.FeatureFlags.ResourceAllocation {
+		t.Fatal("environment must be able to enable the allocation feature flag")
 	}
 	if cfg.FeatureFlags.Enabled(FeatureFlag("unknown")) {
 		t.Fatal("unknown feature flag must fail closed")

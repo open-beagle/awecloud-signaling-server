@@ -483,5 +483,5 @@ func isDatabaseConstraintError(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "constraint") || strings.Contains(message, "unique") || strings.Contains(message, "s2_")
+	return strings.Contains(message, "constraint") || strings.Contains(message, "unique") || strings.Contains(message, "s2_") || strings.Contains(message, "s3_")
 }

@@ -25,6 +25,7 @@ type FeatureFlag string
 const (
 	FeatureResourceModelWrite     FeatureFlag = "resource_model_write"
 	FeatureResourceReconciliation FeatureFlag = "resource_reconciliation"
+	FeatureResourceAllocation     FeatureFlag = "resource_allocation"
 	FeatureManagementContextV2    FeatureFlag = "management_context_v2"
 	FeatureManagementWebV2        FeatureFlag = "management_web_v2"
 	FeatureTenantResourceReadV2   FeatureFlag = "tenant_resource_read_v2"
@@ -35,6 +36,7 @@ const (
 type FeatureFlagsSection struct {
 	ResourceModelWrite     bool `toml:"resource_model_write"`
 	ResourceReconciliation bool `toml:"resource_reconciliation"`
+	ResourceAllocation     bool `toml:"resource_allocation"`
 	ManagementContextV2    bool `toml:"management_context_v2"`
 	ManagementWebV2        bool `toml:"management_web_v2"`
 	TenantResourceReadV2   bool `toml:"tenant_resource_read_v2"`
@@ -48,6 +50,8 @@ func (f FeatureFlagsSection) Enabled(flag FeatureFlag) bool {
 		return f.ResourceModelWrite
 	case FeatureResourceReconciliation:
 		return f.ResourceReconciliation
+	case FeatureResourceAllocation:
+		return f.ResourceAllocation
 	case FeatureManagementContextV2:
 		return f.ManagementContextV2
 	case FeatureManagementWebV2:
@@ -218,6 +222,7 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureResourceModelWrite, "SIGNAL_FEATURE_RESOURCE_MODEL_WRITE")
 	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureResourceReconciliation, "SIGNAL_FEATURE_RESOURCE_RECONCILIATION")
+	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureResourceAllocation, "SIGNAL_FEATURE_RESOURCE_ALLOCATION")
 	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureManagementContextV2, "SIGNAL_FEATURE_MANAGEMENT_CONTEXT_V2")
 	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureManagementWebV2, "SIGNAL_FEATURE_MANAGEMENT_WEB_V2")
 	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureTenantResourceReadV2, "SIGNAL_FEATURE_TENANT_RESOURCE_READ_V2")
@@ -326,6 +331,8 @@ func applyFeatureFlagEnv(flags *FeatureFlagsSection, flag FeatureFlag, key strin
 		flags.ResourceModelWrite = enabled
 	case FeatureResourceReconciliation:
 		flags.ResourceReconciliation = enabled
+	case FeatureResourceAllocation:
+		flags.ResourceAllocation = enabled
 	case FeatureManagementContextV2:
 		flags.ManagementContextV2 = enabled
 	case FeatureManagementWebV2:

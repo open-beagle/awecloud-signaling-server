@@ -129,6 +129,10 @@ func autoMigrate() error {
 		&model.NamespaceObservation{},
 		&model.ResourceScope{},
 
+		// Platform 资源分配（S3，新增 Schema，业务入口仍由 Feature Flag 关闭）
+		&model.ResourceAllocation{},
+		&model.ResourceAllocationItem{},
+
 		// 分组模型
 		&model.Group{},
 		&model.GroupMember{},
@@ -207,7 +211,10 @@ func autoMigrate() error {
 		}
 	}
 
-	return ensureProviderSupplyConstraints(DB)
+	if err := ensureProviderSupplyConstraints(DB); err != nil {
+		return err
+	}
+	return ensurePlatformAllocationConstraints(DB)
 }
 
 // CreateDefaultAdmin 创建默认管理员
