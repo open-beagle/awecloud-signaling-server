@@ -97,16 +97,17 @@ type rawStreamSession struct {
 
 // EndpointServerConfig Server 下发的 Endpoint 能力配置（按 endpoint name 存储）
 type EndpointServerConfig struct {
-	SSHEnabled       bool
-	SSHEnabledSet    bool
-	SSHPort          uint32 // 新增：Server 预分配的 SSH 端口
-	K8SAPIEnabled    bool
-	K8SAPIEnabledSet bool
-	K8SAPIPort       uint32 // 新增：Server 预分配的 K8SAPI 端口
-	K8SAPIApiServer  string
-	K8SSvcEnabled    bool
-	K8SSvcEnabledSet bool
-	SupplyInventory  *pb.SupplyInventoryConfig
+	SSHEnabled        bool
+	SSHEnabledSet     bool
+	SSHPort           uint32 // 新增：Server 预分配的 SSH 端口
+	K8SAPIEnabled     bool
+	K8SAPIEnabledSet  bool
+	K8SAPIPort        uint32 // 新增：Server 预分配的 K8SAPI 端口
+	K8SAPIApiServer   string
+	K8SSvcEnabled     bool
+	K8SSvcEnabledSet  bool
+	SupplyInventory   *pb.SupplyInventoryConfig
+	WorkloadInventory *pb.WorkloadInventoryConfig
 }
 
 // EndpointServer Agent 内网 gRPC Server，接受 Endpoint 连接
@@ -149,11 +150,13 @@ type EndpointServer struct {
 	pendingMutex   sync.Mutex
 
 	// Server 下发的 Endpoint 更新任务（endpoint name → directives）
-	updateDirectives       map[string][]*pb.UpdateDirective
-	updateMutex            sync.RWMutex
-	supplyInventoryClient  pb.AgentServiceClient
-	supplyInventoryStreams map[string]bool
-	supplyInventoryMutex   sync.Mutex
+	updateDirectives         map[string][]*pb.UpdateDirective
+	updateMutex              sync.RWMutex
+	supplyInventoryClient    pb.AgentServiceClient
+	supplyInventoryStreams   map[string]bool
+	supplyInventoryMutex     sync.Mutex
+	workloadInventoryStreams map[string]bool
+	workloadInventoryMutex   sync.Mutex
 
 	// Endpoint 代理对象（用于端口分配）
 	sshProxy    *EndpointSSHProxy
@@ -169,21 +172,22 @@ type EndpointServer struct {
 func NewEndpointServer(listenPort int, token string, parentCtx context.Context) *EndpointServer {
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &EndpointServer{
-		listenPort:             listenPort,
-		token:                  token,
-		connections:            make(map[string]*EndpointConnection),
-		serverConfigs:          make(map[string]*EndpointServerConfig),
-		shellSessions:          make(map[string]*shellSession),
-		k8sapiSessions:         make(map[string]*k8sapiSession),
-		svcProxySessions:       make(map[string]*svcProxySession),
-		rawStreamSessions:      make(map[string]*rawStreamSession),
-		pendingShellReqs:       make(map[string][]*pb.ShellRequest),
-		pendingK8SAPIReqs:      make(map[string][]*pb.K8SAPIProxyRequest),
-		pendingSVCReqs:         make(map[string][]*pb.SVCProxyRequest),
-		updateDirectives:       make(map[string][]*pb.UpdateDirective),
-		supplyInventoryStreams: make(map[string]bool),
-		ctx:                    ctx,
-		cancel:                 cancel,
+		listenPort:               listenPort,
+		token:                    token,
+		connections:              make(map[string]*EndpointConnection),
+		serverConfigs:            make(map[string]*EndpointServerConfig),
+		shellSessions:            make(map[string]*shellSession),
+		k8sapiSessions:           make(map[string]*k8sapiSession),
+		svcProxySessions:         make(map[string]*svcProxySession),
+		rawStreamSessions:        make(map[string]*rawStreamSession),
+		pendingShellReqs:         make(map[string][]*pb.ShellRequest),
+		pendingK8SAPIReqs:        make(map[string][]*pb.K8SAPIProxyRequest),
+		pendingSVCReqs:           make(map[string][]*pb.SVCProxyRequest),
+		updateDirectives:         make(map[string][]*pb.UpdateDirective),
+		supplyInventoryStreams:   make(map[string]bool),
+		workloadInventoryStreams: make(map[string]bool),
+		ctx:                      ctx,
+		cancel:                   cancel,
 	}
 }
 
@@ -191,6 +195,12 @@ func (s *EndpointServer) SetSupplyInventoryClient(client pb.AgentServiceClient) 
 	s.supplyInventoryMutex.Lock()
 	s.supplyInventoryClient = client
 	s.supplyInventoryMutex.Unlock()
+}
+
+func (s *EndpointServer) getSupplyInventoryClient() pb.AgentServiceClient {
+	s.supplyInventoryMutex.Lock()
+	defer s.supplyInventoryMutex.Unlock()
+	return s.supplyInventoryClient
 }
 
 // SetUpdateDirectives replaces the current desired update task set. Server
@@ -471,6 +481,7 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 		firstResp.K8SserviceEnabled = cfg.K8SSvcEnabled
 		firstResp.K8SserviceEnabledSet = cfg.K8SSvcEnabledSet
 		firstResp.SupplyInventoryConfig = cfg.SupplyInventory
+		firstResp.WorkloadInventoryConfig = cfg.WorkloadInventory
 	}
 	if err := stream.Send(firstResp); err != nil {
 		return err
@@ -537,6 +548,7 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 				resp.K8SserviceEnabled = cfg.K8SSvcEnabled
 				resp.K8SserviceEnabledSet = cfg.K8SSvcEnabledSet
 				resp.SupplyInventoryConfig = cfg.SupplyInventory
+				resp.WorkloadInventoryConfig = cfg.WorkloadInventory
 			}
 			if err := stream.Send(resp); err != nil {
 				return err

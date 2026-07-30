@@ -981,16 +981,17 @@ func (a *Agent) syncEndpointServerConfigs(resp *pb.AgentHeartbeatResponse) {
 	logger.Infof("收到 Server 下发的 Endpoint 配置，共 %d 个", len(resp.EndpointCapabilityConfigs))
 	for _, cfg := range resp.EndpointCapabilityConfigs {
 		serverCfg := &EndpointServerConfig{
-			SSHEnabled:       cfg.SshEnabled,
-			SSHEnabledSet:    true,
-			SSHPort:          cfg.SshPort, // 新增：解析端口字段
-			K8SAPIEnabled:    cfg.K8SapiEnabled,
-			K8SAPIEnabledSet: true,
-			K8SAPIPort:       cfg.K8SapiPort, // 新增：解析端口字段
-			K8SAPIApiServer:  cfg.K8SapiApiServer,
-			K8SSvcEnabled:    cfg.K8SserviceEnabled,
-			K8SSvcEnabledSet: true,
-			SupplyInventory:  cfg.SupplyInventoryConfig,
+			SSHEnabled:        cfg.SshEnabled,
+			SSHEnabledSet:     true,
+			SSHPort:           cfg.SshPort, // 新增：解析端口字段
+			K8SAPIEnabled:     cfg.K8SapiEnabled,
+			K8SAPIEnabledSet:  true,
+			K8SAPIPort:        cfg.K8SapiPort, // 新增：解析端口字段
+			K8SAPIApiServer:   cfg.K8SapiApiServer,
+			K8SSvcEnabled:     cfg.K8SserviceEnabled,
+			K8SSvcEnabledSet:  true,
+			SupplyInventory:   cfg.SupplyInventoryConfig,
+			WorkloadInventory: cfg.WorkloadInventoryConfig,
 		}
 
 		// 预分配端口（即使 Endpoint 尚未连接）

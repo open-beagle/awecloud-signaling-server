@@ -10,7 +10,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
-const PlatformAllocationOutboxConsumer = "resource_authorization_projection"
+const PlatformAllocationOutboxConsumer = TenantResourceProjectionConsumer
 
 var platformAllocationEventTypes = []string{
 	"resource_allocation.created",

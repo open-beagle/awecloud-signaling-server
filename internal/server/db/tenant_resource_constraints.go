@@ -108,7 +108,6 @@ const workloadObservationSourceTriggerBody = `
 const workloadObservationSourceUpdateTriggerBody = workloadObservationSourceTriggerBody + `
 	SELECT CASE WHEN NEW.workload_observation_id IS NOT OLD.workload_observation_id
 		OR NEW.source_technical_resource_id IS NOT OLD.source_technical_resource_id
-		OR NEW.source_epoch IS NOT OLD.source_epoch
 		THEN RAISE(ABORT, 'S4_WORKLOAD_SOURCE_IDENTITY_IMMUTABLE') END;
 	SELECT CASE WHEN NEW.source_revision NOT IN (OLD.source_revision, OLD.source_revision + 1)
 		OR NEW.row_version <> OLD.row_version + 1
@@ -232,7 +231,6 @@ const tenantResourceTargetRevisionInsertTriggerBody = `
 			AND NEW.target_type = observation.kind
 			AND NEW.observation_revision = observation.observed_revision
 			AND NEW.source_revision = source.source_revision
-			AND NEW.source_revision = evidence.source_revision
 			AND ((resource.type = 'container_service' AND NEW.target_type = 'service_port')
 				OR (resource.type = 'container_ssh' AND NEW.target_type = 'container'))
 	) THEN RAISE(ABORT, 'S4_TARGET_REVISION_CHAIN_MISMATCH') END;
@@ -427,6 +425,9 @@ const resourceSessionTerminationUpdateTriggerBody = `
 func ensureTenantResourceConstraints(database *gorm.DB) error {
 	return database.Transaction(func(tx *gorm.DB) error {
 		for _, trigger := range tenantResourceTriggers {
+			if err := tx.Exec("DROP TRIGGER IF EXISTS " + trigger.name).Error; err != nil {
+				return fmt.Errorf("drop Tenant resource constraint trigger %s: %w", trigger.name, err)
+			}
 			statement := fmt.Sprintf(
 				"CREATE TRIGGER IF NOT EXISTS %s BEFORE %s ON %s FOR EACH ROW BEGIN %s END",
 				trigger.name,

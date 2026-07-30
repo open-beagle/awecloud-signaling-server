@@ -71,6 +71,7 @@ type AgentServiceServer struct {
 	updateService            *service.UpdateService
 	resourceReconciler       *service.ResourceReconciliationService
 	providerSupply           *service.ProviderSupplyService
+	workloadInventory        *service.WorkloadInventoryService
 	containerSessionAckMutex sync.Mutex
 	containerSessionAcks     map[uint64][]string
 }
@@ -85,6 +86,7 @@ func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
 		updateService:        service.NewUpdateService(db.DB),
 		resourceReconciler:   service.NewResourceReconciliationService(db.DB),
 		providerSupply:       service.NewProviderSupplyService(db.DB),
+		workloadInventory:    service.NewWorkloadInventoryService(db.DB),
 		containerSessionAcks: make(map[uint64][]string),
 	}
 
@@ -796,6 +798,7 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 	supplyInventoryAuthorized := s.authorizeSupplyInventoryNegotiation(ctx, nodeID)
 	if supplyInventoryAuthorized {
 		resp.SupplyInventoryConfig = s.supplyInventoryConfigForBinding(ctx, model.TechnicalResourceBindingLegacyNode, fmt.Sprintf("%d", nodeID))
+		resp.WorkloadInventoryConfig = s.workloadInventoryConfigForBinding(ctx, model.TechnicalResourceBindingLegacyNode, nodeSourceID(nodeID))
 	}
 
 	// 构建 Agent 能力配置
@@ -985,6 +988,7 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 			}
 			if supplyInventoryAuthorized {
 				endpointConfig.SupplyInventoryConfig = s.supplyInventoryConfigForBinding(ctx, model.TechnicalResourceBindingLegacyEndpoint, ep.ID)
+				endpointConfig.WorkloadInventoryConfig = s.workloadInventoryConfigForBinding(ctx, model.TechnicalResourceBindingLegacyEndpoint, ep.ID)
 			}
 			resp.EndpointCapabilityConfigs = append(resp.EndpointCapabilityConfigs, endpointConfig)
 		}

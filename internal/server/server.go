@@ -50,6 +50,7 @@ type Server struct {
 	reconciliationService         *service.ResourceReconciliationService
 	providerReconciliationService *service.ProviderSupplyReconciliationService
 	allocationExpiryService       *service.PlatformAllocationExpiryService
+	workloadReconciliationService *service.WorkloadReconciliationService
 	reconciliationCtx             context.Context
 	reconciliationCancel          context.CancelFunc
 }
@@ -121,6 +122,7 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 		reconciliationService:         service.NewResourceReconciliationService(db.DB),
 		providerReconciliationService: service.NewProviderSupplyReconciliationService(db.DB),
 		allocationExpiryService:       service.NewPlatformAllocationExpiryService(db.DB),
+		workloadReconciliationService: service.NewWorkloadReconciliationService(db.DB),
 		reconciliationCtx:             reconciliationCtx,
 		reconciliationCancel:          reconciliationCancel,
 	}, nil
@@ -262,6 +264,12 @@ func (s *Server) Run() error {
 		go s.allocationExpiryService.StartPeriodicExpiration(s.reconciliationCtx)
 	} else {
 		logger.Info("Platform Allocation 到期任务已禁用")
+	}
+	if s.workloadReconciliationService != nil && s.config.FeatureFlags.ResourceModelWrite &&
+		s.config.FeatureFlags.ResourceReconciliation && s.config.FeatureFlags.ResourceAllocation {
+		go s.workloadReconciliationService.StartPeriodicMaintenance(s.reconciliationCtx)
+	} else {
+		logger.Info("Workload/Tenant Resource 对账已禁用")
 	}
 
 	quit := make(chan os.Signal, 1)

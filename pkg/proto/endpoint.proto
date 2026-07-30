@@ -22,6 +22,9 @@ service EndpointService {
   // 上报完整供给清单；Endpoint 身份由既有 Endpoint Token 验证。
   rpc ReportSupplyInventory(stream SupplyInventoryEnvelope) returns (stream SupplyInventoryAck);
 
+  // 上报 Namespace 内工作负载清单；Endpoint 身份由既有 Endpoint Token 验证。
+  rpc ReportWorkloadInventory(stream WorkloadInventoryEnvelope) returns (stream WorkloadInventoryAck);
+
   // OpenShell - Agent 指令 Endpoint 开启 shell 会话（gRPC 双向流）
   rpc OpenShell(stream ShellData) returns (stream ShellData);
 
@@ -107,6 +110,7 @@ message EndpointHeartbeatResponse {
   bool k8sservice_enabled_set = 16; // k8sservice_enabled 是否有效
   repeated UpdateDirective update_directives = 17; // Endpoint 更新任务
   SupplyInventoryConfig supply_inventory_config = 18; // Server 授权的库存上报配置；空表示不支持或未启用
+  WorkloadInventoryConfig workload_inventory_config = 19; // Server 授权的工作负载上报配置
 }
 
 // SupplyInventoryConfig 是 Server 下发的可信上报映射，不由采集载荷声明。
@@ -159,6 +163,71 @@ message SupplyInventoryAck {
   uint32 retry_after_seconds = 5;
   bool replay = 6;
   bool snapshot_committed = 7;
+}
+
+// WorkloadInventoryConfig 是 Server 下发的可信来源映射。Token 仍使用既有连接凭据。
+message WorkloadInventoryConfig {
+  bool enabled = 1;
+  string protocol_version = 2;
+  string technical_resource_id = 3;
+  int64 credential_revision = 4;
+  string capability = 5;
+}
+
+// WorkloadInventoryEnvelope 固定承载一个 Namespace 和一种工作负载类型的快照批次。
+// Provider、Tenant、Allocation、Resource、Grant、Session 和内部 Scope ID 不属于该协议。
+message WorkloadInventoryEnvelope {
+  uint32 schema_version = 1;
+  string source_epoch = 2;
+  uint64 sequence = 3;
+  string snapshot_id = 4;
+  uint32 batch_index = 5;
+  uint32 batch_count = 6;
+  google.protobuf.Timestamp observed_at = 7;
+  google.protobuf.Timestamp sent_at = 8;
+  string payload_hash = 9;
+  string source_technical_resource_id = 10; // 仅由 Agent 在 Endpoint 转发时填充
+  int64 credential_revision = 11;
+  string cluster_identity_digest = 12;
+  string namespace_uid = 13;
+  string namespace_name = 14;
+  string snapshot_kind = 15; // service_port / container
+  repeated WorkloadServicePort service_ports = 16;
+  repeated WorkloadContainer containers = 17;
+}
+
+message WorkloadServicePort {
+  string service_uid = 1;
+  string service_name = 2;
+  string cluster_ip = 3;
+  string port_name = 4;
+  uint32 port_number = 5;
+  string protocol = 6;
+  bool ready = 7;
+  map<string, string> labels_allowlist = 8;
+}
+
+message WorkloadContainer {
+  string workload_uid = 1;
+  string workload_kind = 2;
+  string workload_name = 3;
+  string pod_uid = 4;
+  string pod_name = 5;
+  string container_name = 6;
+  bool ready = 7;
+  map<string, string> labels_allowlist = 8;
+}
+
+message WorkloadInventoryAck {
+  uint64 accepted_sequence = 1;
+  string snapshot_id = 2;
+  uint32 batch_index = 3;
+  string result_code = 4;
+  bool replayed = 5;
+  bool committed = 6;
+  bool retryable = 7;
+  uint32 retry_after_ms = 8;
+  google.protobuf.Timestamp server_received_at = 9;
 }
 
 // ============================================
