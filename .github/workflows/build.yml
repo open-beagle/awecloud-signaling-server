@@ -1,4 +1,4 @@
-name: Build ZTNA Server RC
+name: Build ZTNA Server
 
 on:
   workflow_dispatch:
@@ -51,8 +51,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          echo "build_version=v1.0.0-rc.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
-          echo "git_tag=git-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "build_version=v1.0.0" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -101,9 +100,7 @@ jobs:
           file: ./.beagle/server.dockerfile
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ env.IMAGE_REPOSITORY }}:${{ steps.version.outputs.build_version }}
-            ${{ env.IMAGE_REPOSITORY }}:${{ steps.version.outputs.git_tag }}
+          tags: ${{ env.IMAGE_REPOSITORY }}:${{ steps.version.outputs.build_version }}
           build-args: |
             BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-amd64
             AUTHOR=${{ github.repository_owner }}
@@ -112,13 +109,11 @@ jobs:
       - name: Publish build summary
         env:
           BUILD_VERSION: ${{ steps.version.outputs.build_version }}
-          GIT_TAG: ${{ steps.version.outputs.git_tag }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         run: |
           {
             echo "### ZTNA Server image"
             echo
             echo "- Version: \`${BUILD_VERSION}\`"
-            echo "- Commit tag: \`${GIT_TAG}\`"
             echo "- Digest: \`${IMAGE_DIGEST}\`"
           } >> "$GITHUB_STEP_SUMMARY"
