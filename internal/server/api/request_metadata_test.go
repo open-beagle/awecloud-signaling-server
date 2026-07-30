@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
@@ -128,6 +129,12 @@ func TestDisabledFeatureAuditsWriteRejectionAndFailsClosed(t *testing.T) {
 	})
 	request := httptest.NewRequest(http.MethodPost, "/new-resource", nil)
 	request.Header.Set(HeaderIdempotencyKey, "new-resource-1")
+	traceID, err := trace.TraceIDFromHex("102030405060708090a0b0c0d0e0f001")
+	require.NoError(t, err)
+	spanID, err := trace.SpanIDFromHex("1020304050607080")
+	require.NoError(t, err)
+	spanContext := trace.NewSpanContext(trace.SpanContextConfig{TraceID: traceID, SpanID: spanID, TraceFlags: trace.FlagsSampled})
+	request = request.WithContext(trace.ContextWithSpanContext(request.Context(), spanContext))
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	require.Equal(t, http.StatusServiceUnavailable, response.Code)
@@ -138,6 +145,7 @@ func TestDisabledFeatureAuditsWriteRejectionAndFailsClosed(t *testing.T) {
 	require.Equal(t, "feature_flag_write_rejected", audit.ActionType)
 	require.Equal(t, string(config.FeatureResourceModelWrite), audit.TargetID)
 	require.Equal(t, response.Header().Get(HeaderRequestID), audit.RequestID)
+	require.Equal(t, traceID.String(), audit.TraceID)
 	require.Contains(t, audit.Detail, "new-resource-1")
 
 	db.DB = nil

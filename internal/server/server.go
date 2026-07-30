@@ -51,6 +51,7 @@ type Server struct {
 	providerReconciliationService *service.ProviderSupplyReconciliationService
 	allocationExpiryService       *service.PlatformAllocationExpiryService
 	workloadReconciliationService *service.WorkloadReconciliationService
+	tenantAuthorizationService    *service.TenantAuthorizationMaintenanceService
 	reconciliationCtx             context.Context
 	reconciliationCancel          context.CancelFunc
 }
@@ -123,12 +124,22 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 		providerReconciliationService: service.NewProviderSupplyReconciliationService(db.DB),
 		allocationExpiryService:       service.NewPlatformAllocationExpiryService(db.DB),
 		workloadReconciliationService: service.NewWorkloadReconciliationService(db.DB),
+		tenantAuthorizationService:    service.NewTenantAuthorizationMaintenanceService(db.DB),
 		reconciliationCtx:             reconciliationCtx,
 		reconciliationCancel:          reconciliationCancel,
 	}, nil
 }
 
 func (s *Server) Run() error {
+	if s.tenantAuthorizationService != nil && !s.config.FeatureFlags.SessionAuthorizationV2 {
+		count, err := s.tenantAuthorizationService.DrainSessionsWhenAuthorizationDisabled(context.Background())
+		if err != nil {
+			return fmt.Errorf("关闭存量 Tenant ResourceSession 失败: %w", err)
+		}
+		if count > 0 {
+			logger.Infof("session_authorization_v2 已关闭，存量 Tenant ResourceSession 已进入 ending: count=%d", count)
+		}
+	}
 	switch s.config.Log.Level {
 	case "debug":
 		gin.SetMode(gin.DebugMode)
@@ -270,6 +281,13 @@ func (s *Server) Run() error {
 		go s.workloadReconciliationService.StartPeriodicMaintenance(s.reconciliationCtx)
 	} else {
 		logger.Info("Workload/Tenant Resource 对账已禁用")
+	}
+	if s.tenantAuthorizationService != nil && s.config.FeatureFlags.ManagementContextV2 &&
+		s.config.FeatureFlags.TenantResourceReadV2 && s.config.FeatureFlags.ResourceModelWrite &&
+		s.config.FeatureFlags.SessionAuthorizationV2 {
+		go s.tenantAuthorizationService.StartPeriodicGrantExpiration(s.reconciliationCtx)
+	} else {
+		logger.Info("Tenant AccessGrant 到期任务已禁用")
 	}
 
 	quit := make(chan os.Signal, 1)
@@ -500,6 +518,37 @@ func (s *Server) setupRouter() *gin.Engine {
 					providerGroup.POST("/scopes/:id/suspend", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetResourceScopeLifecycle(model.ResourceScopeSuspended, "suspend_resource_scope"))
 					providerGroup.POST("/scopes/:id/resume", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetResourceScopeLifecycle(model.ResourceScopeActive, "resume_resource_scope"))
 					providerGroup.POST("/scopes/:id/retire", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetResourceScopeLifecycle(model.ResourceScopeRetired, "retire_resource_scope"))
+				}
+
+				tenantResourceAPI := api.NewTenantResourceManagementAPI()
+				tenantGrantAPI := api.NewTenantAccessGrantAPI()
+				resourceSessionAPI := api.NewResourceSessionManagementAPI()
+				tenantGroup := managementGroup.Group("/tenants/:tenant_id")
+				tenantGroup.Use(api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureTenantResourceReadV2, false))
+				{
+					tenantGroup.GET("/resource-candidates", api.RequireManagementPermission(service.PermissionTenantResourcesRead), tenantResourceAPI.ListCandidates)
+					tenantGroup.GET("/resource-candidates/:resource_id", api.RequireManagementPermission(service.PermissionTenantResourcesRead), tenantResourceAPI.GetCandidate)
+					tenantGroup.POST("/resource-candidates/:resource_id/publish", api.RequireManagementPermission(service.PermissionTenantResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), tenantResourceAPI.PublishCandidate)
+					tenantGroup.POST("/resource-candidates/:resource_id/reject", api.RequireManagementPermission(service.PermissionTenantResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), tenantResourceAPI.RejectCandidate)
+
+					tenantGroup.GET("/resources", api.RequireManagementPermission(service.PermissionTenantResourcesRead), tenantResourceAPI.ListResources)
+					tenantGroup.GET("/resources/:id", api.RequireManagementPermission(service.PermissionTenantResourcesRead), tenantResourceAPI.GetResource)
+					tenantGroup.PATCH("/resources/:id", api.RequireManagementPermission(service.PermissionTenantResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), tenantResourceAPI.UpdateResource)
+					tenantGroup.POST("/resources/:id/hide", api.RequireManagementPermission(service.PermissionTenantResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), tenantResourceAPI.HideResource)
+					tenantGroup.POST("/resources/:id/show", api.RequireManagementPermission(service.PermissionTenantResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), tenantResourceAPI.ShowResource)
+
+					tenantGroup.GET("/grants", api.RequireManagementPermission(service.PermissionTenantGrantsRead), tenantGrantAPI.List)
+					tenantGroup.POST("/grants", api.RequireManagementPermission(service.PermissionTenantGrantsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIdempotencyKey(), tenantGrantAPI.Create)
+					tenantGroup.GET("/grants/:id", api.RequireManagementPermission(service.PermissionTenantGrantsRead), tenantGrantAPI.Get)
+					tenantGroup.PATCH("/grants/:id", api.RequireManagementPermission(service.PermissionTenantGrantsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), tenantGrantAPI.Update)
+					tenantGroup.POST("/grants/:id/suspend", api.RequireManagementPermission(service.PermissionTenantGrantsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), tenantGrantAPI.Suspend)
+					tenantGroup.POST("/grants/:id/resume", api.RequireManagementPermission(service.PermissionTenantGrantsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), tenantGrantAPI.Resume)
+					tenantGroup.POST("/grants/:id/revoke", api.RequireManagementPermission(service.PermissionTenantGrantsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), tenantGrantAPI.Revoke)
+
+					tenantGroup.GET("/sessions", api.RequireManagementPermission(service.PermissionTenantSessionsRead), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureSessionAuthorizationV2, false), resourceSessionAPI.List)
+					tenantGroup.GET("/sessions/:id", api.RequireManagementPermission(service.PermissionTenantSessionsRead), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureSessionAuthorizationV2, false), resourceSessionAPI.Get)
+					tenantGroup.POST("/sessions", api.RequireManagementPermission(service.PermissionTenantSessionsRead), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureSessionAuthorizationV2, true), api.RequireIdempotencyKey(), resourceSessionAPI.Create)
+					tenantGroup.POST("/sessions/:id/terminate", api.RequireManagementPermission(service.PermissionTenantSessionsTerminate), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureSessionAuthorizationV2, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), resourceSessionAPI.Terminate)
 				}
 			}
 

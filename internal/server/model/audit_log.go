@@ -75,6 +75,7 @@ type AuditLog struct {
 	RequiredPermission  string    `gorm:"size:80" json:"required_permission"`
 	PermissionRevision  int64     `json:"permission_revision"`
 	RequestID           string    `gorm:"size:64;index:idx_audit_request" json:"request_id"`
+	TraceID             string    `gorm:"size:32;index:idx_audit_trace" json:"trace_id,omitempty"`
 	SourceIP            string    `gorm:"size:64" json:"source_ip"`
 	UserAgent           string    `gorm:"size:512" json:"user_agent"`
 	ActionType          string    `gorm:"size:50;index;not null" json:"action_type"`

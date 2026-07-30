@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/trace"
 	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
@@ -136,6 +137,7 @@ func recordAuditLogStrictWithDB(ctx context.Context, database *gorm.DB, c *gin.C
 		RequiredPermission:  stringContextValue(requiredPermission),
 		PermissionRevision:  int64ContextValue(permissionRevision),
 		RequestID:           requestID(c),
+		TraceID:             auditTraceID(ctx),
 		SourceIP:            c.ClientIP(),
 		UserAgent:           c.Request.UserAgent(),
 		ActionType:          actionType,
@@ -146,6 +148,14 @@ func recordAuditLogStrictWithDB(ctx context.Context, database *gorm.DB, c *gin.C
 	}
 
 	return database.WithContext(ctx).Create(log).Error
+}
+
+func auditTraceID(ctx context.Context) string {
+	spanContext := trace.SpanContextFromContext(ctx)
+	if !spanContext.IsValid() {
+		return ""
+	}
+	return spanContext.TraceID().String()
 }
 
 func requestID(c *gin.Context) string {
