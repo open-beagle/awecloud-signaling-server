@@ -19,15 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentService_Register_FullMethodName            = "/awecloud.signaling.AgentService/Register"
-	AgentService_Authenticate_FullMethodName        = "/awecloud.signaling.AgentService/Authenticate"
-	AgentService_Heartbeat_FullMethodName           = "/awecloud.signaling.AgentService/Heartbeat"
-	AgentService_GetRealtimeStatus_FullMethodName   = "/awecloud.signaling.AgentService/GetRealtimeStatus"
-	AgentService_ReportProxyStatus_FullMethodName   = "/awecloud.signaling.AgentService/ReportProxyStatus"
-	AgentService_ReportVisitorStatus_FullMethodName = "/awecloud.signaling.AgentService/ReportVisitorStatus"
-	AgentService_ReportNetworkChange_FullMethodName = "/awecloud.signaling.AgentService/ReportNetworkChange"
-	AgentService_SVCProxy_FullMethodName            = "/awecloud.signaling.AgentService/SVCProxy"
-	AgentService_GetUserDeviceInfo_FullMethodName   = "/awecloud.signaling.AgentService/GetUserDeviceInfo"
+	AgentService_Register_FullMethodName              = "/awecloud.signaling.AgentService/Register"
+	AgentService_Authenticate_FullMethodName          = "/awecloud.signaling.AgentService/Authenticate"
+	AgentService_Heartbeat_FullMethodName             = "/awecloud.signaling.AgentService/Heartbeat"
+	AgentService_ReportSupplyInventory_FullMethodName = "/awecloud.signaling.AgentService/ReportSupplyInventory"
+	AgentService_GetRealtimeStatus_FullMethodName     = "/awecloud.signaling.AgentService/GetRealtimeStatus"
+	AgentService_ReportProxyStatus_FullMethodName     = "/awecloud.signaling.AgentService/ReportProxyStatus"
+	AgentService_ReportVisitorStatus_FullMethodName   = "/awecloud.signaling.AgentService/ReportVisitorStatus"
+	AgentService_ReportNetworkChange_FullMethodName   = "/awecloud.signaling.AgentService/ReportNetworkChange"
+	AgentService_SVCProxy_FullMethodName              = "/awecloud.signaling.AgentService/SVCProxy"
+	AgentService_GetUserDeviceInfo_FullMethodName     = "/awecloud.signaling.AgentService/GetUserDeviceInfo"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -42,6 +43,8 @@ type AgentServiceClient interface {
 	Authenticate(ctx context.Context, in *AgentAuthenticateRequest, opts ...grpc.CallOption) (*AgentAuthenticateResponse, error)
 	// 心跳 - 双向流，保持连接并同步状态
 	Heartbeat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[AgentHeartbeatRequest, AgentHeartbeatResponse], error)
+	// 上报完整供给清单；Agent 身份由既有 Deploy Token 验证。
+	ReportSupplyInventory(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SupplyInventoryEnvelope, SupplyInventoryAck], error)
 	// 获取实时状态 - Server 主动调用（用于 Web 详情页刷新）
 	GetRealtimeStatus(ctx context.Context, in *GetRealtimeStatusRequest, opts ...grpc.CallOption) (*GetRealtimeStatusResponse, error)
 	// 上报本地服务状态
@@ -97,6 +100,19 @@ func (c *agentServiceClient) Heartbeat(ctx context.Context, opts ...grpc.CallOpt
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_HeartbeatClient = grpc.BidiStreamingClient[AgentHeartbeatRequest, AgentHeartbeatResponse]
 
+func (c *agentServiceClient) ReportSupplyInventory(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SupplyInventoryEnvelope, SupplyInventoryAck], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[1], AgentService_ReportSupplyInventory_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SupplyInventoryEnvelope, SupplyInventoryAck]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_ReportSupplyInventoryClient = grpc.BidiStreamingClient[SupplyInventoryEnvelope, SupplyInventoryAck]
+
 func (c *agentServiceClient) GetRealtimeStatus(ctx context.Context, in *GetRealtimeStatusRequest, opts ...grpc.CallOption) (*GetRealtimeStatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetRealtimeStatusResponse)
@@ -139,7 +155,7 @@ func (c *agentServiceClient) ReportNetworkChange(ctx context.Context, in *Report
 
 func (c *agentServiceClient) SVCProxy(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SVCProxyData, SVCProxyData], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[1], AgentService_SVCProxy_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[2], AgentService_SVCProxy_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +188,8 @@ type AgentServiceServer interface {
 	Authenticate(context.Context, *AgentAuthenticateRequest) (*AgentAuthenticateResponse, error)
 	// 心跳 - 双向流，保持连接并同步状态
 	Heartbeat(grpc.BidiStreamingServer[AgentHeartbeatRequest, AgentHeartbeatResponse]) error
+	// 上报完整供给清单；Agent 身份由既有 Deploy Token 验证。
+	ReportSupplyInventory(grpc.BidiStreamingServer[SupplyInventoryEnvelope, SupplyInventoryAck]) error
 	// 获取实时状态 - Server 主动调用（用于 Web 详情页刷新）
 	GetRealtimeStatus(context.Context, *GetRealtimeStatusRequest) (*GetRealtimeStatusResponse, error)
 	// 上报本地服务状态
@@ -202,6 +220,9 @@ func (UnimplementedAgentServiceServer) Authenticate(context.Context, *AgentAuthe
 }
 func (UnimplementedAgentServiceServer) Heartbeat(grpc.BidiStreamingServer[AgentHeartbeatRequest, AgentHeartbeatResponse]) error {
 	return status.Error(codes.Unimplemented, "method Heartbeat not implemented")
+}
+func (UnimplementedAgentServiceServer) ReportSupplyInventory(grpc.BidiStreamingServer[SupplyInventoryEnvelope, SupplyInventoryAck]) error {
+	return status.Error(codes.Unimplemented, "method ReportSupplyInventory not implemented")
 }
 func (UnimplementedAgentServiceServer) GetRealtimeStatus(context.Context, *GetRealtimeStatusRequest) (*GetRealtimeStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetRealtimeStatus not implemented")
@@ -284,6 +305,13 @@ func _AgentService_Heartbeat_Handler(srv interface{}, stream grpc.ServerStream) 
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_HeartbeatServer = grpc.BidiStreamingServer[AgentHeartbeatRequest, AgentHeartbeatResponse]
+
+func _AgentService_ReportSupplyInventory_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AgentServiceServer).ReportSupplyInventory(&grpc.GenericServerStream[SupplyInventoryEnvelope, SupplyInventoryAck]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_ReportSupplyInventoryServer = grpc.BidiStreamingServer[SupplyInventoryEnvelope, SupplyInventoryAck]
 
 func _AgentService_GetRealtimeStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetRealtimeStatusRequest)
@@ -422,6 +450,12 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Heartbeat",
 			Handler:       _AgentService_Heartbeat_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "ReportSupplyInventory",
+			Handler:       _AgentService_ReportSupplyInventory_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

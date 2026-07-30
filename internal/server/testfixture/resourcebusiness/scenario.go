@@ -22,21 +22,42 @@ const (
 var FixedTime = time.Date(2026, 1, 15, 8, 0, 0, 0, time.UTC)
 
 type Scenario struct {
-	Name       string
-	Providers  []Provider
-	Tenants    []Tenant
-	Identities []Identity
-	Scopes     []Scope
-	Workloads  []Workload
-	Services   []Service
-	Grants     []Grant
-	Sessions   []Session
-	Issues     []string
+	Name               string
+	Providers          []Provider
+	TechnicalResources []TechnicalResource
+	SupplyInventories  []SupplyInventory
+	Tenants            []Tenant
+	Identities         []Identity
+	Scopes             []Scope
+	Workloads          []Workload
+	Services           []Service
+	Grants             []Grant
+	Sessions           []Session
+	Issues             []string
 }
 
 type Provider struct {
 	ID             string
 	StableIdentity string
+}
+
+type TechnicalResource struct {
+	ID         string
+	ProviderID string
+	Type       string
+	StableKey  string
+	SourceType string
+	SourceID   string
+}
+
+type SupplyInventory struct {
+	ID                  string
+	TechnicalResourceID string
+	SourceEpoch         string
+	Sequence            int64
+	SnapshotID          string
+	ClusterUID          string
+	NamespaceUIDs       []string
 }
 
 type Tenant struct {
@@ -149,6 +170,12 @@ func Validate(scenario Scenario) error {
 	if err := uniqueIDs("tenant", tenantIDs(scenario.Tenants)); err != nil {
 		return err
 	}
+	if err := uniqueIDs("technical resource", technicalResourceIDs(scenario.TechnicalResources)); err != nil {
+		return err
+	}
+	if err := uniqueIDs("supply inventory", supplyInventoryIDs(scenario.SupplyInventories)); err != nil {
+		return err
+	}
 	if err := uniqueIDs("scope", scopeIDs(scenario.Scopes)); err != nil {
 		return err
 	}
@@ -156,6 +183,7 @@ func Validate(scenario Scenario) error {
 		return err
 	}
 	providers, tenants := stringSet(providerIDs(scenario.Providers)), stringSet(tenantIDs(scenario.Tenants))
+	technicalResources := stringSet(technicalResourceIDs(scenario.TechnicalResources))
 	scopes := stringSet(scopeIDs(scenario.Scopes))
 	identities := uintSet(scenario.Identities)
 	for _, provider := range scenario.Providers {
@@ -166,6 +194,32 @@ func Validate(scenario Scenario) error {
 	for _, tenant := range scenario.Tenants {
 		if tenant.Key == "" {
 			return fmt.Errorf("tenant %s is missing a key", tenant.ID)
+		}
+	}
+	boundSources := map[string]bool{}
+	for _, resource := range scenario.TechnicalResources {
+		if !providers[resource.ProviderID] || (resource.Type != "agent" && resource.Type != "endpoint") || resource.StableKey == "" {
+			return fmt.Errorf("technical resource %s has incomplete provider or stable identity", resource.ID)
+		}
+		if resource.SourceType != "legacy_node" && resource.SourceType != "legacy_endpoint" {
+			return fmt.Errorf("technical resource %s has invalid source type %q", resource.ID, resource.SourceType)
+		}
+		sourceKey := resource.SourceType + ":" + resource.SourceID
+		if resource.SourceID == "" || boundSources[sourceKey] {
+			return fmt.Errorf("technical resource %s has an empty or duplicated source", resource.ID)
+		}
+		boundSources[sourceKey] = true
+	}
+	for _, inventory := range scenario.SupplyInventories {
+		if !technicalResources[inventory.TechnicalResourceID] || inventory.SourceEpoch == "" || inventory.Sequence <= 0 || inventory.SnapshotID == "" || inventory.ClusterUID == "" {
+			return fmt.Errorf("supply inventory %s has incomplete source or cluster identity", inventory.ID)
+		}
+		seenNamespaceUIDs := map[string]bool{}
+		for _, namespaceUID := range inventory.NamespaceUIDs {
+			if namespaceUID == "" || seenNamespaceUIDs[namespaceUID] {
+				return fmt.Errorf("supply inventory %s has an empty or duplicated namespace UID", inventory.ID)
+			}
+			seenNamespaceUIDs[namespaceUID] = true
 		}
 	}
 	for _, scope := range scenario.Scopes {
@@ -267,6 +321,22 @@ func providerIDs(values []Provider) []string {
 }
 
 func tenantIDs(values []Tenant) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, value.ID)
+	}
+	return result
+}
+
+func technicalResourceIDs(values []TechnicalResource) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, value.ID)
+	}
+	return result
+}
+
+func supplyInventoryIDs(values []SupplyInventory) []string {
 	result := make([]string, 0, len(values))
 	for _, value := range values {
 		result = append(result, value.ID)

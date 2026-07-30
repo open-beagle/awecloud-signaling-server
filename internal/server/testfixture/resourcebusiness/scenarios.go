@@ -23,7 +23,15 @@ func singleProviderTenantScenario() Scenario {
 	return Scenario{
 		Name:      ScenarioSingleProviderTenant,
 		Providers: []Provider{{ID: "provider-a", StableIdentity: "provider-key-a"}},
-		Tenants:   []Tenant{{ID: "tenant-a", Key: "tenant-key-a"}},
+		TechnicalResources: []TechnicalResource{{
+			ID: "technical-agent-a", ProviderID: "provider-a", Type: "agent", StableKey: "agent-stable-a",
+			SourceType: "legacy_node", SourceID: "fixture-node-a",
+		}},
+		SupplyInventories: []SupplyInventory{{
+			ID: "inventory-a", TechnicalResourceID: "technical-agent-a", SourceEpoch: "epoch-a", Sequence: 1,
+			SnapshotID: "snapshot-a", ClusterUID: "cluster-uid-a", NamespaceUIDs: []string{"namespace-uid-a"},
+		}},
+		Tenants: []Tenant{{ID: "tenant-a", Key: "tenant-key-a"}},
 		Identities: []Identity{
 			{ID: 1001, Kind: "agent", NameToken: "agent-a", ProofToken: "agent-proof-a"},
 			{ID: 2001, Kind: "user", NameToken: "member-a", ProofToken: "user-proof-a", TenantID: "tenant-a", Role: "member"},
@@ -40,7 +48,15 @@ func providerIdentityConflictScenario() Scenario {
 	scenario := singleProviderTenantScenario()
 	scenario.Name = ScenarioProviderIdentityConflict
 	scenario.Providers = append(scenario.Providers, Provider{ID: "provider-b", StableIdentity: "provider-key-a"})
-	scenario.Issues = []string{"PROVIDER_STABLE_IDENTITY_CONFLICT"}
+	scenario.TechnicalResources = append(scenario.TechnicalResources, TechnicalResource{
+		ID: "technical-agent-b", ProviderID: "provider-b", Type: "agent", StableKey: "agent-stable-b",
+		SourceType: "legacy_node", SourceID: "fixture-node-b",
+	})
+	scenario.SupplyInventories = append(scenario.SupplyInventories, SupplyInventory{
+		ID: "inventory-b", TechnicalResourceID: "technical-agent-b", SourceEpoch: "epoch-b", Sequence: 1,
+		SnapshotID: "snapshot-b", ClusterUID: "cluster-uid-a", NamespaceUIDs: []string{"namespace-uid-b"},
+	})
+	scenario.Issues = []string{"PROVIDER_STABLE_IDENTITY_CONFLICT", "CROSS_PROVIDER_SUPPLY_IDENTITY_CONFLICT"}
 	return scenario
 }
 

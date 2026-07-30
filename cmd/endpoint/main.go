@@ -17,6 +17,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/banner"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -292,6 +293,7 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *upda
 	// 建立 gRPC 连接（内网明文）
 	conn, err := grpc.NewClient(cfg.Agent.Address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStreamInterceptor(endpointAuthStreamInterceptor(cfg.Agent.Token, cfg.Agent.Name)),
 	)
 	if err != nil {
 		return fmt.Errorf("创建 gRPC 连接失败: %w", err)
@@ -610,6 +612,13 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *upda
 				return fmt.Errorf("发送心跳失败: %w", err)
 			}
 		}
+	}
+}
+
+func endpointAuthStreamInterceptor(token, name string) grpc.StreamClientInterceptor {
+	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token, "x-endpoint-name", name)
+		return streamer(ctx, desc, cc, method, opts...)
 	}
 }
 

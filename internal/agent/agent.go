@@ -486,6 +486,7 @@ func (a *Agent) connectToServer() error {
 
 	// 添加认证拦截器（自动注入 Device Token）
 	opts = append(opts, grpc.WithUnaryInterceptor(a.authInterceptor()))
+	opts = append(opts, grpc.WithStreamInterceptor(a.authStreamInterceptor()))
 
 	// 创建gRPC连接
 	conn, err := grpc.NewClient(grpcAddr, opts...)
@@ -516,6 +517,13 @@ func (a *Agent) authInterceptor() grpc.UnaryClientInterceptor {
 
 		// 调用原始方法
 		return invoker(ctx, method, req, reply, cc, opts...)
+	}
+}
+
+func (a *Agent) authStreamInterceptor() grpc.StreamClientInterceptor {
+	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+a.config.Agent.AgentToken)
+		return streamer(ctx, desc, cc, method, opts...)
 	}
 }
 
@@ -982,6 +990,7 @@ func (a *Agent) syncEndpointServerConfigs(resp *pb.AgentHeartbeatResponse) {
 			K8SAPIApiServer:  cfg.K8SapiApiServer,
 			K8SSvcEnabled:    cfg.K8SserviceEnabled,
 			K8SSvcEnabledSet: true,
+			SupplyInventory:  cfg.SupplyInventoryConfig,
 		}
 
 		// 预分配端口（即使 Endpoint 尚未连接）
@@ -1572,6 +1581,7 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 			// 首次启动
 			logger.Infof("远程配置: Endpoint 功能启用，端口=%d", listenPort)
 			a.endpointServer = NewEndpointServer(listenPort, token, a.ctx)
+			a.endpointServer.SetSupplyInventoryClient(a.grpcClient)
 			if err := a.endpointServer.Start(); err != nil {
 				logger.Warnf("启动 Endpoint gRPC Server 失败: %v", err)
 				a.endpointServer = nil

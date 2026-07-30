@@ -5,6 +5,7 @@ package awecloud.signaling;
 option go_package = "github.com/open-beagle/awecloud-signaling-server/pkg/proto";
 
 import "pkg/proto/update.proto";
+import "google/protobuf/timestamp.proto";
 
 // ============================================
 // EndpointService（Agent 内网 gRPC Server，Endpoint 作为 Client 连接）
@@ -17,6 +18,9 @@ service EndpointService {
 
   // 心跳 - Endpoint 定期上报状态，Agent 下发配置
   rpc Heartbeat(stream EndpointHeartbeatRequest) returns (stream EndpointHeartbeatResponse);
+
+  // 上报完整供给清单；Endpoint 身份由既有 Endpoint Token 验证。
+  rpc ReportSupplyInventory(stream SupplyInventoryEnvelope) returns (stream SupplyInventoryAck);
 
   // OpenShell - Agent 指令 Endpoint 开启 shell 会话（gRPC 双向流）
   rpc OpenShell(stream ShellData) returns (stream ShellData);
@@ -102,6 +106,59 @@ message EndpointHeartbeatResponse {
   bool k8sservice_enabled = 15; // K8S Service 能力是否启用
   bool k8sservice_enabled_set = 16; // k8sservice_enabled 是否有效
   repeated UpdateDirective update_directives = 17; // Endpoint 更新任务
+  SupplyInventoryConfig supply_inventory_config = 18; // Server 授权的库存上报配置；空表示不支持或未启用
+}
+
+// SupplyInventoryConfig 是 Server 下发的可信上报映射，不由采集载荷声明。
+message SupplyInventoryConfig {
+  bool enabled = 1;
+  string protocol_version = 2;
+  string technical_resource_id = 3;
+  int64 credential_revision = 4;
+}
+
+// SupplyInventoryEnvelope 承载单个完整快照批次。Provider、Tenant 和 Allocation
+// 权限字段禁止出现在该协议及其标签中。
+message SupplyInventoryEnvelope {
+  uint32 schema_version = 1;
+  string source_epoch = 2;
+  uint64 sequence = 3;
+  string snapshot_id = 4;
+  uint32 batch_index = 5;
+  uint32 batch_count = 6;
+  google.protobuf.Timestamp observed_at = 7;
+  google.protobuf.Timestamp sent_at = 8;
+  string payload_hash = 9; // 规范 JSON payload 的小写 SHA-256
+  string source_technical_resource_id = 10; // 仅由 Agent 在 Endpoint 转发时填充
+  int64 credential_revision = 11;
+  repeated KubernetesClusterInventory kubernetes_clusters = 12;
+}
+
+message KubernetesClusterInventory {
+  string cluster_uid = 1;
+  string kube_system_namespace_uid = 2;
+  string ca_sha256 = 3;
+  string display_name = 4;
+  string kubernetes_version = 5;
+  repeated string capabilities = 6;
+  repeated KubernetesNamespaceInventory namespaces = 7;
+}
+
+message KubernetesNamespaceInventory {
+  string uid = 1;
+  string name = 2;
+  map<string, string> labels = 3;
+  string status = 4;
+}
+
+message SupplyInventoryAck {
+  uint64 accepted_sequence = 1;
+  string snapshot_id = 2;
+  string result_code = 3;
+  bool retryable = 4;
+  uint32 retry_after_seconds = 5;
+  bool replay = 6;
+  bool snapshot_committed = 7;
 }
 
 // ============================================

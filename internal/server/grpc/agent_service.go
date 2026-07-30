@@ -70,6 +70,7 @@ type AgentServiceServer struct {
 	domainService            *service.DomainService
 	updateService            *service.UpdateService
 	resourceReconciler       *service.ResourceReconciliationService
+	providerSupply           *service.ProviderSupplyService
 	containerSessionAckMutex sync.Mutex
 	containerSessionAcks     map[uint64][]string
 }
@@ -83,6 +84,7 @@ func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
 		domainService:        service.NewDomainService(db.DB),
 		updateService:        service.NewUpdateService(db.DB),
 		resourceReconciler:   service.NewResourceReconciliationService(db.DB),
+		providerSupply:       service.NewProviderSupplyService(db.DB),
 		containerSessionAcks: make(map[uint64][]string),
 	}
 
@@ -791,6 +793,10 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		DomainSuffix:           domainSuffix,
 		RequestImmediateReport: s.consumeImmediateReport(),
 	}
+	supplyInventoryAuthorized := s.authorizeSupplyInventoryNegotiation(ctx, nodeID)
+	if supplyInventoryAuthorized {
+		resp.SupplyInventoryConfig = s.supplyInventoryConfigForBinding(ctx, model.TechnicalResourceBindingLegacyNode, fmt.Sprintf("%d", nodeID))
+	}
 
 	// 构建 Agent 能力配置
 	// SSH：仅 Agent 角色从 User 表读取（User 级别共享）；Client/CloudIDE 保持本地配置
@@ -968,7 +974,7 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		for _, ep := range allEndpoints {
 			logger.Infof("Endpoint 配置: name=%s, ssh_enabled=%v, ssh_port=%d, k8sapi_enabled=%v, k8sapi_port=%d, k8sapi_api_server=%s, k8sservice_enabled=%v",
 				ep.Name, ep.SSHEnabled, ep.SSHPort, ep.K8SAPIEnabled, ep.K8SAPIPort, ep.K8SAPIApiServer, ep.K8SServiceEnabled)
-			resp.EndpointCapabilityConfigs = append(resp.EndpointCapabilityConfigs, &pb.EndpointCapabilityConfig{
+			endpointConfig := &pb.EndpointCapabilityConfig{
 				EndpointName:      ep.Name,
 				SshEnabled:        ep.SSHEnabled,
 				SshPort:           uint32(ep.SSHPort), // 新增：从 Endpoint 表读取端口
@@ -976,7 +982,11 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 				K8SapiPort:        uint32(ep.K8SAPIPort), // 新增：从 Endpoint 表读取端口
 				K8SapiApiServer:   ep.K8SAPIApiServer,
 				K8SserviceEnabled: ep.K8SServiceEnabled,
-			})
+			}
+			if supplyInventoryAuthorized {
+				endpointConfig.SupplyInventoryConfig = s.supplyInventoryConfigForBinding(ctx, model.TechnicalResourceBindingLegacyEndpoint, ep.ID)
+			}
+			resp.EndpointCapabilityConfigs = append(resp.EndpointCapabilityConfigs, endpointConfig)
 		}
 		logger.Infof("准备发送心跳响应: EndpointCapabilityConfigs 数量=%d", len(resp.EndpointCapabilityConfigs))
 	} else {

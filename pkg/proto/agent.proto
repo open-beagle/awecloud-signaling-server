@@ -18,6 +18,9 @@ service AgentService {
   // 心跳 - 双向流，保持连接并同步状态
   rpc Heartbeat(stream AgentHeartbeatRequest) returns (stream AgentHeartbeatResponse);
 
+  // 上报完整供给清单；Agent 身份由既有 Deploy Token 验证。
+  rpc ReportSupplyInventory(stream SupplyInventoryEnvelope) returns (stream SupplyInventoryAck);
+
   // 获取实时状态 - Server 主动调用（用于 Web 详情页刷新）
   rpc GetRealtimeStatus(GetRealtimeStatusRequest) returns (GetRealtimeStatusResponse);
 
@@ -228,6 +231,7 @@ message AgentHeartbeatResponse {
   string container_ssh_protocol = 16; // Server 确认的 ContainerSSH 协议版本；空表示不得启用入口
   repeated string container_ssh_disconnect_session_ids = 17; // 待强制断开的活动 Session ID
   repeated string container_ssh_session_ack_event_ids = 18; // Server 已持久化的 Session Event ID
+  SupplyInventoryConfig supply_inventory_config = 19; // 当前 Agent 的库存上报配置
 }
 
 // EndpointCapabilityConfig Server 下发给 Agent 的 Endpoint 能力开关配置
@@ -241,6 +245,7 @@ message EndpointCapabilityConfig {
   // 新增：Server 预分配的端口
   uint32 ssh_port = 6; // SSH 代理端口（0 表示未分配）
   uint32 k8sapi_port = 7; // K8SAPI 代理端口（0 表示未分配）
+  SupplyInventoryConfig supply_inventory_config = 8; // Endpoint 的可信转发映射
 }
 
 // AgentCapabilityConfig Agent 能力配置（Server 远程控制）

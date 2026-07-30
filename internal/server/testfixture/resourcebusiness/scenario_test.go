@@ -42,13 +42,18 @@ func TestScenarioFactsCoverM0DMatrix(t *testing.T) {
 
 	normal := MustLoad(ScenarioSingleProviderTenant)
 	require.Len(t, normal.Providers, 1)
+	require.Len(t, normal.TechnicalResources, 1)
+	require.Len(t, normal.SupplyInventories, 1)
+	require.Equal(t, normal.TechnicalResources[0].ID, normal.SupplyInventories[0].TechnicalResourceID)
 	require.Len(t, normal.Tenants, 1)
 	require.True(t, normal.Sessions[0].ExpectedPermitted)
 
 	providerConflict := MustLoad(ScenarioProviderIdentityConflict)
 	require.Len(t, providerConflict.Providers, 2)
 	require.Equal(t, providerConflict.Providers[0].StableIdentity, providerConflict.Providers[1].StableIdentity)
+	require.Equal(t, providerConflict.SupplyInventories[0].ClusterUID, providerConflict.SupplyInventories[1].ClusterUID)
 	require.True(t, HasIssue(providerConflict, "PROVIDER_STABLE_IDENTITY_CONFLICT"))
+	require.True(t, HasIssue(providerConflict, "CROSS_PROVIDER_SUPPLY_IDENTITY_CONFLICT"))
 
 	dualTenant := MustLoad(ScenarioDualTenantScopes)
 	require.Len(t, dualTenant.Tenants, 2)
@@ -83,8 +88,10 @@ func TestLoadReturnsIndependentScenarioCopies(t *testing.T) {
 	first := MustLoad(ScenarioRuntimeEvolution)
 	second := MustLoad(ScenarioRuntimeEvolution)
 	first.Services[0].Ports[0] = 1
+	first.SupplyInventories[0].NamespaceUIDs[0] = "changed"
 	first.Issues[0] = "changed"
 	require.Equal(t, 443, second.Services[0].Ports[0])
+	require.Equal(t, "namespace-uid-a", second.SupplyInventories[0].NamespaceUIDs[0])
 	require.NotEqual(t, first.Issues[0], second.Issues[0])
 }
 

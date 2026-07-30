@@ -119,6 +119,16 @@ func autoMigrate() error {
 		&model.UserTenantManagementMembership{},
 		&model.UserSimulationSession{},
 
+		// Provider 供给对象（S2，新增 Schema，业务入口仍由 Feature Flag 关闭）
+		&model.TechnicalResource{},
+		&model.TechnicalResourceBinding{},
+		&model.SupplyInventoryReceipt{},
+		&model.SupplyCandidate{},
+		&model.PlatformResource{},
+		&model.PlatformResourceSource{},
+		&model.NamespaceObservation{},
+		&model.ResourceScope{},
+
 		// 分组模型
 		&model.Group{},
 		&model.GroupMember{},
@@ -192,12 +202,12 @@ func autoMigrate() error {
 		// 忽略"索引已存在"的错误（SQLite 在某些情况下会报这个错误）
 		if strings.Contains(err.Error(), "already exists") {
 			logger.Warnf("数据库迁移警告（已忽略）: %v", err)
-			return nil
+		} else {
+			return err
 		}
-		return err
 	}
 
-	return nil
+	return ensureProviderSupplyConstraints(DB)
 }
 
 // CreateDefaultAdmin 创建默认管理员

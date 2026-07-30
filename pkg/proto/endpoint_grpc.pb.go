@@ -19,12 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	EndpointService_Register_FullMethodName        = "/awecloud.signaling.EndpointService/Register"
-	EndpointService_Heartbeat_FullMethodName       = "/awecloud.signaling.EndpointService/Heartbeat"
-	EndpointService_OpenShell_FullMethodName       = "/awecloud.signaling.EndpointService/OpenShell"
-	EndpointService_OpenK8SAPIProxy_FullMethodName = "/awecloud.signaling.EndpointService/OpenK8SAPIProxy"
-	EndpointService_OpenSVCProxy_FullMethodName    = "/awecloud.signaling.EndpointService/OpenSVCProxy"
-	EndpointService_OpenRawStream_FullMethodName   = "/awecloud.signaling.EndpointService/OpenRawStream"
+	EndpointService_Register_FullMethodName              = "/awecloud.signaling.EndpointService/Register"
+	EndpointService_Heartbeat_FullMethodName             = "/awecloud.signaling.EndpointService/Heartbeat"
+	EndpointService_ReportSupplyInventory_FullMethodName = "/awecloud.signaling.EndpointService/ReportSupplyInventory"
+	EndpointService_OpenShell_FullMethodName             = "/awecloud.signaling.EndpointService/OpenShell"
+	EndpointService_OpenK8SAPIProxy_FullMethodName       = "/awecloud.signaling.EndpointService/OpenK8SAPIProxy"
+	EndpointService_OpenSVCProxy_FullMethodName          = "/awecloud.signaling.EndpointService/OpenSVCProxy"
+	EndpointService_OpenRawStream_FullMethodName         = "/awecloud.signaling.EndpointService/OpenRawStream"
 )
 
 // EndpointServiceClient is the client API for EndpointService service.
@@ -37,6 +38,8 @@ type EndpointServiceClient interface {
 	Register(ctx context.Context, in *EndpointRegisterRequest, opts ...grpc.CallOption) (*EndpointRegisterResponse, error)
 	// 心跳 - Endpoint 定期上报状态，Agent 下发配置
 	Heartbeat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[EndpointHeartbeatRequest, EndpointHeartbeatResponse], error)
+	// 上报完整供给清单；Endpoint 身份由既有 Endpoint Token 验证。
+	ReportSupplyInventory(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SupplyInventoryEnvelope, SupplyInventoryAck], error)
 	// OpenShell - Agent 指令 Endpoint 开启 shell 会话（gRPC 双向流）
 	OpenShell(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ShellData, ShellData], error)
 	// OpenK8SAPIProxy - Agent 指令 Endpoint 开启 K8S API 代理（gRPC 双向流）
@@ -78,9 +81,22 @@ func (c *endpointServiceClient) Heartbeat(ctx context.Context, opts ...grpc.Call
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type EndpointService_HeartbeatClient = grpc.BidiStreamingClient[EndpointHeartbeatRequest, EndpointHeartbeatResponse]
 
+func (c *endpointServiceClient) ReportSupplyInventory(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SupplyInventoryEnvelope, SupplyInventoryAck], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &EndpointService_ServiceDesc.Streams[1], EndpointService_ReportSupplyInventory_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SupplyInventoryEnvelope, SupplyInventoryAck]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EndpointService_ReportSupplyInventoryClient = grpc.BidiStreamingClient[SupplyInventoryEnvelope, SupplyInventoryAck]
+
 func (c *endpointServiceClient) OpenShell(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ShellData, ShellData], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &EndpointService_ServiceDesc.Streams[1], EndpointService_OpenShell_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &EndpointService_ServiceDesc.Streams[2], EndpointService_OpenShell_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +109,7 @@ type EndpointService_OpenShellClient = grpc.BidiStreamingClient[ShellData, Shell
 
 func (c *endpointServiceClient) OpenK8SAPIProxy(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[K8SAPIProxyData, K8SAPIProxyData], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &EndpointService_ServiceDesc.Streams[2], EndpointService_OpenK8SAPIProxy_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &EndpointService_ServiceDesc.Streams[3], EndpointService_OpenK8SAPIProxy_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +122,7 @@ type EndpointService_OpenK8SAPIProxyClient = grpc.BidiStreamingClient[K8SAPIProx
 
 func (c *endpointServiceClient) OpenSVCProxy(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[EndpointSVCProxyData, EndpointSVCProxyData], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &EndpointService_ServiceDesc.Streams[3], EndpointService_OpenSVCProxy_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &EndpointService_ServiceDesc.Streams[4], EndpointService_OpenSVCProxy_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +135,7 @@ type EndpointService_OpenSVCProxyClient = grpc.BidiStreamingClient[EndpointSVCPr
 
 func (c *endpointServiceClient) OpenRawStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[RawStreamData, RawStreamData], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &EndpointService_ServiceDesc.Streams[4], EndpointService_OpenRawStream_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &EndpointService_ServiceDesc.Streams[5], EndpointService_OpenRawStream_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -140,6 +156,8 @@ type EndpointServiceServer interface {
 	Register(context.Context, *EndpointRegisterRequest) (*EndpointRegisterResponse, error)
 	// 心跳 - Endpoint 定期上报状态，Agent 下发配置
 	Heartbeat(grpc.BidiStreamingServer[EndpointHeartbeatRequest, EndpointHeartbeatResponse]) error
+	// 上报完整供给清单；Endpoint 身份由既有 Endpoint Token 验证。
+	ReportSupplyInventory(grpc.BidiStreamingServer[SupplyInventoryEnvelope, SupplyInventoryAck]) error
 	// OpenShell - Agent 指令 Endpoint 开启 shell 会话（gRPC 双向流）
 	OpenShell(grpc.BidiStreamingServer[ShellData, ShellData]) error
 	// OpenK8SAPIProxy - Agent 指令 Endpoint 开启 K8S API 代理（gRPC 双向流）
@@ -163,6 +181,9 @@ func (UnimplementedEndpointServiceServer) Register(context.Context, *EndpointReg
 }
 func (UnimplementedEndpointServiceServer) Heartbeat(grpc.BidiStreamingServer[EndpointHeartbeatRequest, EndpointHeartbeatResponse]) error {
 	return status.Error(codes.Unimplemented, "method Heartbeat not implemented")
+}
+func (UnimplementedEndpointServiceServer) ReportSupplyInventory(grpc.BidiStreamingServer[SupplyInventoryEnvelope, SupplyInventoryAck]) error {
+	return status.Error(codes.Unimplemented, "method ReportSupplyInventory not implemented")
 }
 func (UnimplementedEndpointServiceServer) OpenShell(grpc.BidiStreamingServer[ShellData, ShellData]) error {
 	return status.Error(codes.Unimplemented, "method OpenShell not implemented")
@@ -222,6 +243,13 @@ func _EndpointService_Heartbeat_Handler(srv interface{}, stream grpc.ServerStrea
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type EndpointService_HeartbeatServer = grpc.BidiStreamingServer[EndpointHeartbeatRequest, EndpointHeartbeatResponse]
 
+func _EndpointService_ReportSupplyInventory_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(EndpointServiceServer).ReportSupplyInventory(&grpc.GenericServerStream[SupplyInventoryEnvelope, SupplyInventoryAck]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type EndpointService_ReportSupplyInventoryServer = grpc.BidiStreamingServer[SupplyInventoryEnvelope, SupplyInventoryAck]
+
 func _EndpointService_OpenShell_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(EndpointServiceServer).OpenShell(&grpc.GenericServerStream[ShellData, ShellData]{ServerStream: stream})
 }
@@ -266,6 +294,12 @@ var EndpointService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Heartbeat",
 			Handler:       _EndpointService_Heartbeat_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "ReportSupplyInventory",
+			Handler:       _EndpointService_ReportSupplyInventory_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},
