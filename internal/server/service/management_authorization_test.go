@@ -139,6 +139,16 @@ func TestManagementMembershipTimeComparisonNormalizesOffsets(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.Equal(t, fixture.provider.ID, context.ScopeID)
+	contexts, err := ListManagementContexts(fixture.database, fixture.actor.ID, fixture.now.UTC())
+	require.NoError(t, err)
+	require.Condition(t, func() bool {
+		for _, listed := range contexts {
+			if listed.ScopeType == model.ManagementScopeProvider && listed.ScopeID == fixture.provider.ID {
+				return true
+			}
+		}
+		return false
+	})
 
 	expiredAt := fixture.now.Add(-time.Second).In(shanghai)
 	require.NoError(t, fixture.database.Model(&model.AdminProviderMembership{}).

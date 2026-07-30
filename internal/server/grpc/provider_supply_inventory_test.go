@@ -105,6 +105,7 @@ func newSupplyInventoryGRPCDatabase(t *testing.T) *gorm.DB {
 	require.NoError(t, database.AutoMigrate(
 		&model.User{}, &model.ResourceProvider{}, &model.Node{}, &model.DeployToken{},
 		&model.TechnicalResource{}, &model.TechnicalResourceBinding{}, &model.SupplyInventoryReceipt{}, &model.SupplyCandidate{},
+		&model.PlatformResource{}, &model.PlatformResourceSource{}, &model.NamespaceObservation{}, &model.ResourceScope{},
 	))
 	return database
 }

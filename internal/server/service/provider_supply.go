@@ -324,7 +324,7 @@ func (s *ProviderSupplyService) ExpireTechnicalResourceLeases(ctx context.Contex
 		return 0, ErrProviderSupplyInvalidInput
 	}
 	result := s.db.WithContext(ctx).Model(&model.TechnicalResource{}).
-		Where("lifecycle_state <> ? AND lease_expires_at IS NOT NULL AND lease_expires_at <= ? AND health_state <> ?",
+		Where("lifecycle_state <> ? AND lease_expires_at IS NOT NULL AND julianday(lease_expires_at) <= julianday(?) AND health_state <> ?",
 			model.TechnicalResourceRetired, at.UTC(), model.ResourceHealthOffline).
 		Updates(map[string]any{
 			"health_state":      model.ResourceHealthOffline,

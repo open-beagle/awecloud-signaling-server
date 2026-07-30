@@ -43,13 +43,14 @@ type Server struct {
 	loginService   *service.DesktopLoginService
 	desktopAuthAPI *api.DesktopAuthAPI
 
-	headscaleClient       *headscale.Client
-	aclSyncService        *headscale.ACLSyncService
-	aclSyncCtx            context.Context
-	aclSyncCancel         context.CancelFunc
-	reconciliationService *service.ResourceReconciliationService
-	reconciliationCtx     context.Context
-	reconciliationCancel  context.CancelFunc
+	headscaleClient               *headscale.Client
+	aclSyncService                *headscale.ACLSyncService
+	aclSyncCtx                    context.Context
+	aclSyncCancel                 context.CancelFunc
+	reconciliationService         *service.ResourceReconciliationService
+	providerReconciliationService *service.ProviderSupplyReconciliationService
+	reconciliationCtx             context.Context
+	reconciliationCancel          context.CancelFunc
 }
 
 // GetAgentService 获取 AgentService（供 API 使用）
@@ -111,14 +112,15 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 	}
 
 	return &Server{
-		config:                cfg,
-		headscaleClient:       headscaleClient,
-		aclSyncService:        aclSyncService,
-		aclSyncCtx:            aclSyncCtx,
-		aclSyncCancel:         aclSyncCancel,
-		reconciliationService: service.NewResourceReconciliationService(db.DB),
-		reconciliationCtx:     reconciliationCtx,
-		reconciliationCancel:  reconciliationCancel,
+		config:                        cfg,
+		headscaleClient:               headscaleClient,
+		aclSyncService:                aclSyncService,
+		aclSyncCtx:                    aclSyncCtx,
+		aclSyncCancel:                 aclSyncCancel,
+		reconciliationService:         service.NewResourceReconciliationService(db.DB),
+		providerReconciliationService: service.NewProviderSupplyReconciliationService(db.DB),
+		reconciliationCtx:             reconciliationCtx,
+		reconciliationCancel:          reconciliationCancel,
 	}, nil
 }
 
@@ -248,6 +250,11 @@ func (s *Server) Run() error {
 	}
 	if s.reconciliationService != nil {
 		go s.reconciliationService.StartPeriodicMaintenance(s.reconciliationCtx)
+	}
+	if s.providerReconciliationService != nil && s.config.FeatureFlags.ResourceModelWrite && s.config.FeatureFlags.ResourceReconciliation {
+		go s.providerReconciliationService.StartPeriodicMaintenance(s.reconciliationCtx)
+	} else {
+		logger.Info("Provider Supply 租约对账已禁用")
 	}
 
 	quit := make(chan os.Signal, 1)
@@ -430,6 +437,12 @@ func (s *Server) setupRouter() *gin.Engine {
 				managementGroup.GET("/user-simulations", api.RequireManagementPermission(service.PermissionPlatformUserSimulationsRead), userSimulationAPI.List)
 				managementGroup.POST("/user-simulations", api.ForbidUserSimulation(), api.RequireManagementPermission(service.PermissionPlatformUserSimulationsWrite), api.RequireIdempotencyKey(), userSimulationAPI.Create)
 				managementGroup.POST("/user-simulations/:id/revoke", api.RequireManagementPermission(service.PermissionPlatformUserSimulationsWrite), api.RequireIfMatch(), userSimulationAPI.Revoke)
+
+				platformSupplyAPI := api.NewPlatformSupplyAPI()
+				platformGroup := managementGroup.Group("/platform")
+				{
+					platformGroup.GET("/supply-conflicts", api.RequireManagementPermission(service.PermissionPlatformResourcesRead), platformSupplyAPI.ListConflicts)
+				}
 
 				providerSupplyAPI := api.NewProviderSupplyAPI()
 				providerGroup := managementGroup.Group("/provider")

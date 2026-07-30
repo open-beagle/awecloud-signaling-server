@@ -272,7 +272,7 @@ func ListManagementContexts(database *gorm.DB, userID uint64, at time.Time) ([]M
 	}
 
 	var providerMemberships []model.AdminProviderMembership
-	if err := database.Where("user_id = ? AND enabled = ? AND valid_from <= ? AND (expires_at IS NULL OR expires_at > ?)", userID, true, at, at).
+	if err := database.Where("user_id = ? AND enabled = ? AND julianday(valid_from) <= julianday(?) AND (expires_at IS NULL OR julianday(expires_at) > julianday(?))", userID, true, at, at).
 		Order("provider_id ASC").Find(&providerMemberships).Error; err != nil {
 		return nil, err
 	}
@@ -286,7 +286,7 @@ func ListManagementContexts(database *gorm.DB, userID uint64, at time.Time) ([]M
 	}
 
 	var tenantMemberships []model.UserTenantManagementMembership
-	if err := database.Where("user_id = ? AND enabled = ? AND valid_from <= ? AND (expires_at IS NULL OR expires_at > ?)", userID, true, at, at).
+	if err := database.Where("user_id = ? AND enabled = ? AND julianday(valid_from) <= julianday(?) AND (expires_at IS NULL OR julianday(expires_at) > julianday(?))", userID, true, at, at).
 		Order("tenant_id ASC").Find(&tenantMemberships).Error; err != nil {
 		return nil, err
 	}

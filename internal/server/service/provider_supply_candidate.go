@@ -112,8 +112,11 @@ func projectSupplyCandidatesFromSnapshot(tx *gorm.DB, source *model.TechnicalRes
 		if err := reconcileCrossProviderSupplyConflict(tx, model.SupplyResourceKubernetes, stableKey, now.UTC()); err != nil {
 			return err
 		}
+		if err := reconcileLinkedPlatformResourcesForStableKey(tx, model.SupplyResourceKubernetes, stableKey, now.UTC()); err != nil {
+			return err
+		}
 	}
-	return nil
+	return reconcileLinkedPlatformResourcesForSource(tx, source, now.UTC())
 }
 
 func normalizeSupplyCandidateProjection(sourceID string, evidence supplyClusterEvidence) (*supplyCandidateProjection, error) {
@@ -342,7 +345,7 @@ func upsertSupplyCandidate(tx *gorm.DB, source *model.TechnicalResource, project
 
 func reconcileCrossProviderSupplyConflict(tx *gorm.DB, resourceType model.SupplyResourceType, stableKey string, now time.Time) error {
 	var candidates []model.SupplyCandidate
-	if err := tx.Where("resource_type = ? AND stable_key = ? AND lease_expires_at > ? AND identity_quality <> ?",
+	if err := tx.Where("resource_type = ? AND stable_key = ? AND julianday(lease_expires_at) > julianday(?) AND identity_quality <> ?",
 		resourceType, stableKey, now, model.SupplyIdentityInsufficient).Find(&candidates).Error; err != nil {
 		return err
 	}
@@ -352,7 +355,7 @@ func reconcileCrossProviderSupplyConflict(tx *gorm.DB, resourceType model.Supply
 	}
 	if len(providers) <= 1 {
 		return tx.Model(&model.SupplyCandidate{}).
-			Where("resource_type = ? AND stable_key = ? AND lease_expires_at > ? AND conflict_code = ?", resourceType, stableKey, now, supplyConflictCrossProvider).
+			Where("resource_type = ? AND stable_key = ? AND julianday(lease_expires_at) > julianday(?) AND conflict_code = ?", resourceType, stableKey, now, supplyConflictCrossProvider).
 			Updates(map[string]any{
 				"identity_quality":   model.SupplyIdentityStrong,
 				"conflict_code":      "",
@@ -363,13 +366,14 @@ func reconcileCrossProviderSupplyConflict(tx *gorm.DB, resourceType model.Supply
 	}
 	opaqueID := supplyStableDigest("cross-provider-supply-conflict-v1", string(resourceType)+"\x00"+stableKey)
 	return tx.Model(&model.SupplyCandidate{}).
-		Where("resource_type = ? AND stable_key = ? AND lease_expires_at > ?", resourceType, stableKey, now).
+		Where("resource_type = ? AND stable_key = ? AND julianday(lease_expires_at) > julianday(?)", resourceType, stableKey, now).
 		Updates(map[string]any{
 			"identity_quality":   model.SupplyIdentityCollision,
 			"conflict_code":      supplyConflictCrossProvider,
 			"opaque_conflict_id": opaqueID,
-			"review_state":       gorm.Expr("CASE WHEN review_state = ? THEN review_state ELSE ? END", model.SupplyCandidateRejected, model.SupplyCandidateConflict),
-			"row_version":        gorm.Expr("row_version + 1"),
+			"review_state": gorm.Expr("CASE WHEN review_state IN ? THEN review_state ELSE ? END",
+				[]model.SupplyCandidateReviewState{model.SupplyCandidateRejected, model.SupplyCandidateAccepted, model.SupplyCandidateLinked}, model.SupplyCandidateConflict),
+			"row_version": gorm.Expr("row_version + 1"),
 		}).Error
 }
 
@@ -655,13 +659,18 @@ func upsertNamespaceObservation(tx *gorm.DB, resource *model.PlatformResource, n
 		return nil, err
 	}
 	revision := observation.Revision
-	if observation.Name != namespace.Name || observation.LabelSnapshot != string(labels) {
+	if observation.Name != namespace.Name || observation.LabelSnapshot != string(labels) || observation.State != model.NamespaceObservationObserved {
 		revision++
+	}
+	leaseExpiresAt := now.Add(supplyCandidateLeaseDuration)
+	if observation.Name == namespace.Name && observation.LabelSnapshot == string(labels) &&
+		observation.State == model.NamespaceObservationObserved && observation.ObservedAt.Equal(now) && observation.LeaseExpiresAt.Equal(leaseExpiresAt) {
+		return &observation, nil
 	}
 	if err := tx.Model(&model.NamespaceObservation{}).Where("provider_id = ? AND id = ?", resource.ProviderID, observation.ID).
 		Updates(map[string]any{
 			"name": namespace.Name, "label_snapshot": string(labels), "revision": revision,
-			"observed_at": now, "lease_expires_at": now.Add(supplyCandidateLeaseDuration), "state": model.NamespaceObservationObserved,
+			"observed_at": now, "lease_expires_at": leaseExpiresAt, "state": model.NamespaceObservationObserved,
 		}).Error; err != nil {
 		return nil, err
 	}

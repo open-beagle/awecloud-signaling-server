@@ -146,6 +146,9 @@ func (s *ProviderSupplyService) SetResourceScopeLifecycle(ctx context.Context, a
 			if resource.LifecycleState != model.PlatformResourceActive || !scopeParentAvailable(tx, &scope) {
 				return ErrResourceScopeStateTransition
 			}
+			if err := validateScopeActivationEvidence(tx, &scope, now); err != nil {
+				return err
+			}
 		}
 		if scope.Type == model.ResourceScopeCluster {
 			switch input.TargetState {
@@ -303,6 +306,24 @@ func validResourceScopeTransition(current, target model.ResourceScopeLifecycleSt
 	}
 }
 
+func validateScopeActivationEvidence(tx *gorm.DB, scope *model.ResourceScope, now time.Time) error {
+	if scope.Type == model.ResourceScopeCluster {
+		return nil
+	}
+	if scope.Type != model.ResourceScopeNamespace || scope.NamespaceObservationID == nil {
+		return ErrResourceScopeStateTransition
+	}
+	var observation model.NamespaceObservation
+	if err := tx.Where("provider_id = ? AND cluster_resource_id = ? AND id = ? AND state = ? AND julianday(lease_expires_at) > julianday(?)",
+		scope.ProviderID, scope.PlatformResourceID, *scope.NamespaceObservationID, model.NamespaceObservationObserved, now).First(&observation).Error; err != nil {
+		return ErrResourceScopeStateTransition
+	}
+	if scope.EvidenceRevision != observation.Revision {
+		return ErrResourceScopeStateTransition
+	}
+	return nil
+}
+
 func cascadeResourceScopes(tx *gorm.DB, providerID, resourceID string, target model.ResourceScopeLifecycleState) error {
 	query := tx.Model(&model.ResourceScope{}).Where("provider_id = ? AND platform_resource_id = ?", providerID, resourceID)
 	switch target {
@@ -357,7 +378,7 @@ func validateAllocatableResourceSource(tx *gorm.DB, resource *model.PlatformReso
 		Joins("JOIN technical_resource AS technical ON technical.id = candidate.technical_resource_id AND technical.provider_id = candidate.provider_id").
 		Where("source.provider_id = ? AND source.platform_resource_id = ?", resource.ProviderID, resource.ID).
 		Where("candidate.resource_type = ? AND candidate.stable_key = ?", resource.Type, resource.StableKey).
-		Where("candidate.review_state = ? AND candidate.identity_quality = ? AND candidate.conflict_code = '' AND candidate.lease_expires_at > ?",
+		Where("candidate.review_state = ? AND candidate.identity_quality = ? AND candidate.conflict_code = '' AND julianday(candidate.lease_expires_at) > julianday(?)",
 			model.SupplyCandidateLinked, model.SupplyIdentityStrong, now).
 		Where("technical.lifecycle_state = ?", model.TechnicalResourceRegistered).
 		Where(`EXISTS (
@@ -395,7 +416,7 @@ func validateAllocatableScopeEvidence(tx *gorm.DB, resource *model.PlatformResou
 			return ErrResourceScopeNotAllocatable
 		}
 		var observation model.NamespaceObservation
-		if err := tx.Where("provider_id = ? AND cluster_resource_id = ? AND id = ? AND state = ? AND lease_expires_at > ?",
+		if err := tx.Where("provider_id = ? AND cluster_resource_id = ? AND id = ? AND state = ? AND julianday(lease_expires_at) > julianday(?)",
 			resource.ProviderID, resource.ID, *scope.NamespaceObservationID, model.NamespaceObservationObserved, now).First(&observation).Error; err != nil {
 			return ErrResourceScopeNotAllocatable
 		}

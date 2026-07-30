@@ -36,6 +36,7 @@ func newProviderSupplyFixture(t *testing.T) providerSupplyFixture {
 		&model.Node{}, &model.Endpoint{}, &model.TechnicalResource{}, &model.TechnicalResourceBinding{},
 		&model.SupplyInventoryReceipt{}, &model.SupplyCandidate{}, &model.PlatformResource{},
 		&model.PlatformResourceSource{}, &model.NamespaceObservation{}, &model.ResourceScope{},
+		&model.OutboxEvent{}, &model.AuditLog{},
 	))
 	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
 	actor := model.User{Name: "provider-actor", Role: model.UserRoleClient, SecretHash: "fixture", Enabled: true}
