@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -81,4 +82,21 @@ func TestContainerSSHPermissionsEmptySnapshotRevokesAccess(t *testing.T) {
 	cache.UpdateContainerSSHPermissions(nil)
 	_, allowed := cache.CheckContainerSSHAccess("alice", "resource-a")
 	require.False(t, allowed)
+}
+
+func TestContainerExecBrokerV2RechecksSnapshotImmediatelyBeforeExec(t *testing.T) {
+	now := time.Now().UTC()
+	authorizations := NewSessionAuthorizationCache()
+	permission := sessionPermission(now, "session-server", "resource-a", "alice", 7001, 50200)
+	require.NoError(t, authorizations.Apply(signedSessionSnapshot(t, 1, now, permission), now))
+	executor := &recordingContainerExecutor{}
+	broker := NewContainerExecBroker(fake.NewSimpleClientset(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "ide-0", Namespace: "dev", UID: types.UID("pod-a")},
+		Status:     corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "workspace", Ready: true}}},
+	}), NewPermissionCache(), executor)
+
+	require.NoError(t, authorizations.Apply(signedSessionSnapshot(t, 2, now), now))
+	err := broker.OpenAuthorizedShell(context.Background(), authorizations, permission, ContainerExecStream{})
+	require.ErrorContains(t, err, "access denied")
+	require.False(t, executor.called)
 }

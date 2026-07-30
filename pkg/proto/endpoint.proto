@@ -81,6 +81,11 @@ message EndpointHeartbeatRequest {
   string arch = 11; // Endpoint CPU 架构
   string updater_protocol = 12; // 支持的 updater 协议版本
   repeated UpdateStatus update_statuses = 13; // Endpoint 更新状态
+  string session_authorization_protocol = 14; // 明确协商 resource_session_v2；空表示不支持
+  int64 authorization_snapshot_ack_revision = 15;
+  string authorization_snapshot_ack_hash = 16;
+  repeated ResourceSessionTerminationAckV2 session_termination_acks = 17;
+  repeated ResourceSessionEventV2 resource_session_events = 18;
 }
 
 // EndpointCapabilityInfo Endpoint 单项能力信息
@@ -111,6 +116,98 @@ message EndpointHeartbeatResponse {
   repeated UpdateDirective update_directives = 17; // Endpoint 更新任务
   SupplyInventoryConfig supply_inventory_config = 18; // Server 授权的库存上报配置；空表示不支持或未启用
   WorkloadInventoryConfig workload_inventory_config = 19; // Server 授权的工作负载上报配置
+  ResourceSessionAuthorizationSnapshotV2 authorization_snapshot_v2 = 20;
+  repeated ResourceSessionEventAckV2 resource_session_event_acks = 21;
+}
+
+// ResourceSessionAuthorizationSnapshotV2 是一个 TechnicalResource 的完整替换快照。
+// payload_hash 覆盖除自身以外的规范快照内容，Agent/Endpoint 必须原子校验后再 ACK。
+message ResourceSessionAuthorizationSnapshotV2 {
+  int64 revision = 1;
+  google.protobuf.Timestamp issued_at = 2;
+  google.protobuf.Timestamp valid_until = 3;
+  bool replace_all = 4;
+  string payload_hash = 5;
+  repeated ResourceSessionPermissionV2 permissions = 6;
+  repeated ResourceSessionTerminationCommandV2 termination_commands = 7;
+  bool enforce_v2 = 8; // Feature Flag 与依赖门禁均开启时为 true
+}
+
+message ResourceSessionPermissionV2 {
+  string session_id = 1;
+  string tenant_id = 2;
+  string resource_id = 3;
+  string source_id = 4;
+  string target_revision_id = 5;
+  uint64 user_id = 6;
+  string user_name = 7;
+  uint64 device_id = 8;
+  uint64 device_headscale_node_id = 9;
+  string resource_type = 10;
+  string action = 11;
+  string allocation_id = 12;
+  string grant_id = 13;
+  int64 grant_revision = 14;
+  int64 authorization_revision = 15;
+  google.protobuf.Timestamp valid_until = 16;
+  ResourceSessionTargetV2 target = 17;
+  uint32 listen_port = 18; // Server 生成的 Agent/Endpoint 本地入口；客户端不能提交
+}
+
+message ResourceSessionTargetV2 {
+  string namespace_uid = 1;
+  string namespace_name = 2;
+  string service_uid = 3;
+  string service_name = 4;
+  string port_name = 5;
+  int32 port_number = 6;
+  string protocol = 7;
+  string workload_uid = 8;
+  string pod_name = 9;
+  string pod_uid = 10;
+  string container_name = 11;
+}
+
+message ResourceSessionTerminationCommandV2 {
+  string session_id = 1;
+  int64 command_revision = 2;
+  string reason_code = 3;
+  string reason = 4;
+}
+
+message ResourceSessionTerminationAckV2 {
+  string session_id = 1;
+  int64 command_revision = 2;
+}
+
+message ResourceSessionEventV2 {
+  string event_id = 1;
+  string session_id = 2;
+  int64 source_sequence = 3;
+  string event_type = 4; // accepted / connected / ended / terminated / failed
+  google.protobuf.Timestamp occurred_at = 5;
+  string result_code = 6;
+}
+
+message ResourceSessionEventAckV2 {
+  string event_id = 1;
+  string result_code = 2;
+  bool replay = 3;
+}
+
+message EndpointSessionAuthorizationReportV2 {
+  string endpoint_name = 1;
+  string protocol_version = 2;
+  int64 authorization_snapshot_ack_revision = 3;
+  string authorization_snapshot_ack_hash = 4;
+  repeated ResourceSessionTerminationAckV2 termination_acks = 5;
+  repeated ResourceSessionEventV2 events = 6;
+}
+
+message EndpointSessionAuthorizationSnapshotV2 {
+  string endpoint_name = 1;
+  ResourceSessionAuthorizationSnapshotV2 snapshot = 2;
+  repeated ResourceSessionEventAckV2 event_acks = 3;
 }
 
 // SupplyInventoryConfig 是 Server 下发的可信上报映射，不由采集载荷声明。
@@ -241,6 +338,8 @@ message DiscoveredK8SService {
   string cluster_ip = 3; // ClusterIP
   repeated ServicePort ports = 4; // 端口列表
   map<string, string> labels = 5; // 标签
+  string service_uid = 6;
+  string namespace_uid = 7;
 }
 
 // ServicePort K8S Service 端口
@@ -328,6 +427,13 @@ message SVCProxyRequest {
   string service_name = 3; // 目标 Service 名称
   int32 port = 4; // 目标端口
   string cluster_ip = 5; // ClusterIP（物理节点部署时直连，避免依赖 cluster.local DNS）
+  string resource_id = 6;
+  string source_id = 7;
+  string target_revision_id = 8;
+  string service_uid = 9;
+  string port_name = 10;
+  string protocol = 11;
+  int64 authorization_revision = 12;
 }
 
 // EndpointSVCProxyData Endpoint K8S Service 代理数据帧

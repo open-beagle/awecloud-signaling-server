@@ -73,6 +73,25 @@ func (d *K8SServiceDiscovery) GetDiscoveredServices() []*pb.DiscoveredK8SService
 	return result
 }
 
+func (d *K8SServiceDiscovery) ResolveService(namespace, name, uid, portName string, port int32, protocol string) (string, bool) {
+	if d == nil {
+		return "", false
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	for _, svc := range d.discoveredSvcs {
+		if svc.Namespace != namespace || svc.ServiceName != name || svc.ServiceUid != uid || svc.ClusterIp == "" {
+			continue
+		}
+		for _, candidate := range svc.Ports {
+			if candidate.Name == portName && candidate.Port == port && candidate.Protocol == protocol {
+				return svc.ClusterIp, true
+			}
+		}
+	}
+	return "", false
+}
+
 // initK8SConnection 初始化 K8S API 连接信息
 func (d *K8SServiceDiscovery) initK8SConnection() error {
 	// 使用配置文件中的 API Server 地址
@@ -213,6 +232,7 @@ func (d *K8SServiceDiscovery) listServices() ([]*pb.DiscoveredK8SService, error)
 			ServiceName: svc.Name,
 			ClusterIp:   svc.Spec.ClusterIP,
 			Ports:       ports,
+			ServiceUid:  string(svc.UID),
 		})
 	}
 

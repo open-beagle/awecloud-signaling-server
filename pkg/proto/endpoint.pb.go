@@ -158,13 +158,18 @@ type EndpointHeartbeatRequest struct {
 	// K8S API 能力配置
 	K8SapiApiServer string `protobuf:"bytes,8,opt,name=k8sapi_api_server,json=k8sapiApiServer,proto3" json:"k8sapi_api_server,omitempty"` // K8S API Server 地址
 	// K8S Service 能力配置
-	K8SserviceLabelSelector string          `protobuf:"bytes,9,opt,name=k8sservice_label_selector,json=k8sserviceLabelSelector,proto3" json:"k8sservice_label_selector,omitempty"` // 标签选择器
-	K8SserviceNamespaces    []string        `protobuf:"bytes,10,rep,name=k8sservice_namespaces,json=k8sserviceNamespaces,proto3" json:"k8sservice_namespaces,omitempty"`           // 命名空间列表
-	Arch                    string          `protobuf:"bytes,11,opt,name=arch,proto3" json:"arch,omitempty"`                                                                       // Endpoint CPU 架构
-	UpdaterProtocol         string          `protobuf:"bytes,12,opt,name=updater_protocol,json=updaterProtocol,proto3" json:"updater_protocol,omitempty"`                          // 支持的 updater 协议版本
-	UpdateStatuses          []*UpdateStatus `protobuf:"bytes,13,rep,name=update_statuses,json=updateStatuses,proto3" json:"update_statuses,omitempty"`                             // Endpoint 更新状态
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	K8SserviceLabelSelector          string                             `protobuf:"bytes,9,opt,name=k8sservice_label_selector,json=k8sserviceLabelSelector,proto3" json:"k8sservice_label_selector,omitempty"`                 // 标签选择器
+	K8SserviceNamespaces             []string                           `protobuf:"bytes,10,rep,name=k8sservice_namespaces,json=k8sserviceNamespaces,proto3" json:"k8sservice_namespaces,omitempty"`                           // 命名空间列表
+	Arch                             string                             `protobuf:"bytes,11,opt,name=arch,proto3" json:"arch,omitempty"`                                                                                       // Endpoint CPU 架构
+	UpdaterProtocol                  string                             `protobuf:"bytes,12,opt,name=updater_protocol,json=updaterProtocol,proto3" json:"updater_protocol,omitempty"`                                          // 支持的 updater 协议版本
+	UpdateStatuses                   []*UpdateStatus                    `protobuf:"bytes,13,rep,name=update_statuses,json=updateStatuses,proto3" json:"update_statuses,omitempty"`                                             // Endpoint 更新状态
+	SessionAuthorizationProtocol     string                             `protobuf:"bytes,14,opt,name=session_authorization_protocol,json=sessionAuthorizationProtocol,proto3" json:"session_authorization_protocol,omitempty"` // 明确协商 resource_session_v2；空表示不支持
+	AuthorizationSnapshotAckRevision int64                              `protobuf:"varint,15,opt,name=authorization_snapshot_ack_revision,json=authorizationSnapshotAckRevision,proto3" json:"authorization_snapshot_ack_revision,omitempty"`
+	AuthorizationSnapshotAckHash     string                             `protobuf:"bytes,16,opt,name=authorization_snapshot_ack_hash,json=authorizationSnapshotAckHash,proto3" json:"authorization_snapshot_ack_hash,omitempty"`
+	SessionTerminationAcks           []*ResourceSessionTerminationAckV2 `protobuf:"bytes,17,rep,name=session_termination_acks,json=sessionTerminationAcks,proto3" json:"session_termination_acks,omitempty"`
+	ResourceSessionEvents            []*ResourceSessionEventV2          `protobuf:"bytes,18,rep,name=resource_session_events,json=resourceSessionEvents,proto3" json:"resource_session_events,omitempty"`
+	unknownFields                    protoimpl.UnknownFields
+	sizeCache                        protoimpl.SizeCache
 }
 
 func (x *EndpointHeartbeatRequest) Reset() {
@@ -288,6 +293,41 @@ func (x *EndpointHeartbeatRequest) GetUpdateStatuses() []*UpdateStatus {
 	return nil
 }
 
+func (x *EndpointHeartbeatRequest) GetSessionAuthorizationProtocol() string {
+	if x != nil {
+		return x.SessionAuthorizationProtocol
+	}
+	return ""
+}
+
+func (x *EndpointHeartbeatRequest) GetAuthorizationSnapshotAckRevision() int64 {
+	if x != nil {
+		return x.AuthorizationSnapshotAckRevision
+	}
+	return 0
+}
+
+func (x *EndpointHeartbeatRequest) GetAuthorizationSnapshotAckHash() string {
+	if x != nil {
+		return x.AuthorizationSnapshotAckHash
+	}
+	return ""
+}
+
+func (x *EndpointHeartbeatRequest) GetSessionTerminationAcks() []*ResourceSessionTerminationAckV2 {
+	if x != nil {
+		return x.SessionTerminationAcks
+	}
+	return nil
+}
+
+func (x *EndpointHeartbeatRequest) GetResourceSessionEvents() []*ResourceSessionEventV2 {
+	if x != nil {
+		return x.ResourceSessionEvents
+	}
+	return nil
+}
+
 // EndpointCapabilityInfo Endpoint 单项能力信息
 type EndpointCapabilityInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -367,18 +407,20 @@ type EndpointHeartbeatResponse struct {
 	SvcProxyRequests    []*SVCProxyRequest     `protobuf:"bytes,5,rep,name=svc_proxy_requests,json=svcProxyRequests,proto3" json:"svc_proxy_requests,omitempty"`          // K8S Service 代理请求通知
 	RawStreamRequests   []*RawStreamRequest    `protobuf:"bytes,6,rep,name=raw_stream_requests,json=rawStreamRequests,proto3" json:"raw_stream_requests,omitempty"`       // 原始字节流请求通知（用于协议升级）
 	// Server 下发的能力配置（由 Web 界面管理，Endpoint 应以此为准）
-	SshEnabled              bool                     `protobuf:"varint,10,opt,name=ssh_enabled,json=sshEnabled,proto3" json:"ssh_enabled,omitempty"`                                         // SSH 能力是否启用
-	SshEnabledSet           bool                     `protobuf:"varint,11,opt,name=ssh_enabled_set,json=sshEnabledSet,proto3" json:"ssh_enabled_set,omitempty"`                              // ssh_enabled 是否有效（false 表示未下发）
-	K8SapiEnabled           bool                     `protobuf:"varint,12,opt,name=k8sapi_enabled,json=k8sapiEnabled,proto3" json:"k8sapi_enabled,omitempty"`                                // K8S API 能力是否启用
-	K8SapiEnabledSet        bool                     `protobuf:"varint,13,opt,name=k8sapi_enabled_set,json=k8sapiEnabledSet,proto3" json:"k8sapi_enabled_set,omitempty"`                     // k8sapi_enabled 是否有效
-	K8SapiApiServer         string                   `protobuf:"bytes,14,opt,name=k8sapi_api_server,json=k8sapiApiServer,proto3" json:"k8sapi_api_server,omitempty"`                         // K8S API Server 地址（Server 存储的值）
-	K8SserviceEnabled       bool                     `protobuf:"varint,15,opt,name=k8sservice_enabled,json=k8sserviceEnabled,proto3" json:"k8sservice_enabled,omitempty"`                    // K8S Service 能力是否启用
-	K8SserviceEnabledSet    bool                     `protobuf:"varint,16,opt,name=k8sservice_enabled_set,json=k8sserviceEnabledSet,proto3" json:"k8sservice_enabled_set,omitempty"`         // k8sservice_enabled 是否有效
-	UpdateDirectives        []*UpdateDirective       `protobuf:"bytes,17,rep,name=update_directives,json=updateDirectives,proto3" json:"update_directives,omitempty"`                        // Endpoint 更新任务
-	SupplyInventoryConfig   *SupplyInventoryConfig   `protobuf:"bytes,18,opt,name=supply_inventory_config,json=supplyInventoryConfig,proto3" json:"supply_inventory_config,omitempty"`       // Server 授权的库存上报配置；空表示不支持或未启用
-	WorkloadInventoryConfig *WorkloadInventoryConfig `protobuf:"bytes,19,opt,name=workload_inventory_config,json=workloadInventoryConfig,proto3" json:"workload_inventory_config,omitempty"` // Server 授权的工作负载上报配置
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	SshEnabled               bool                                    `protobuf:"varint,10,opt,name=ssh_enabled,json=sshEnabled,proto3" json:"ssh_enabled,omitempty"`                                         // SSH 能力是否启用
+	SshEnabledSet            bool                                    `protobuf:"varint,11,opt,name=ssh_enabled_set,json=sshEnabledSet,proto3" json:"ssh_enabled_set,omitempty"`                              // ssh_enabled 是否有效（false 表示未下发）
+	K8SapiEnabled            bool                                    `protobuf:"varint,12,opt,name=k8sapi_enabled,json=k8sapiEnabled,proto3" json:"k8sapi_enabled,omitempty"`                                // K8S API 能力是否启用
+	K8SapiEnabledSet         bool                                    `protobuf:"varint,13,opt,name=k8sapi_enabled_set,json=k8sapiEnabledSet,proto3" json:"k8sapi_enabled_set,omitempty"`                     // k8sapi_enabled 是否有效
+	K8SapiApiServer          string                                  `protobuf:"bytes,14,opt,name=k8sapi_api_server,json=k8sapiApiServer,proto3" json:"k8sapi_api_server,omitempty"`                         // K8S API Server 地址（Server 存储的值）
+	K8SserviceEnabled        bool                                    `protobuf:"varint,15,opt,name=k8sservice_enabled,json=k8sserviceEnabled,proto3" json:"k8sservice_enabled,omitempty"`                    // K8S Service 能力是否启用
+	K8SserviceEnabledSet     bool                                    `protobuf:"varint,16,opt,name=k8sservice_enabled_set,json=k8sserviceEnabledSet,proto3" json:"k8sservice_enabled_set,omitempty"`         // k8sservice_enabled 是否有效
+	UpdateDirectives         []*UpdateDirective                      `protobuf:"bytes,17,rep,name=update_directives,json=updateDirectives,proto3" json:"update_directives,omitempty"`                        // Endpoint 更新任务
+	SupplyInventoryConfig    *SupplyInventoryConfig                  `protobuf:"bytes,18,opt,name=supply_inventory_config,json=supplyInventoryConfig,proto3" json:"supply_inventory_config,omitempty"`       // Server 授权的库存上报配置；空表示不支持或未启用
+	WorkloadInventoryConfig  *WorkloadInventoryConfig                `protobuf:"bytes,19,opt,name=workload_inventory_config,json=workloadInventoryConfig,proto3" json:"workload_inventory_config,omitempty"` // Server 授权的工作负载上报配置
+	AuthorizationSnapshotV2  *ResourceSessionAuthorizationSnapshotV2 `protobuf:"bytes,20,opt,name=authorization_snapshot_v2,json=authorizationSnapshotV2,proto3" json:"authorization_snapshot_v2,omitempty"`
+	ResourceSessionEventAcks []*ResourceSessionEventAckV2            `protobuf:"bytes,21,rep,name=resource_session_event_acks,json=resourceSessionEventAcks,proto3" json:"resource_session_event_acks,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *EndpointHeartbeatResponse) Reset() {
@@ -523,6 +565,834 @@ func (x *EndpointHeartbeatResponse) GetWorkloadInventoryConfig() *WorkloadInvent
 	return nil
 }
 
+func (x *EndpointHeartbeatResponse) GetAuthorizationSnapshotV2() *ResourceSessionAuthorizationSnapshotV2 {
+	if x != nil {
+		return x.AuthorizationSnapshotV2
+	}
+	return nil
+}
+
+func (x *EndpointHeartbeatResponse) GetResourceSessionEventAcks() []*ResourceSessionEventAckV2 {
+	if x != nil {
+		return x.ResourceSessionEventAcks
+	}
+	return nil
+}
+
+// ResourceSessionAuthorizationSnapshotV2 是一个 TechnicalResource 的完整替换快照。
+// payload_hash 覆盖除自身以外的规范快照内容，Agent/Endpoint 必须原子校验后再 ACK。
+type ResourceSessionAuthorizationSnapshotV2 struct {
+	state               protoimpl.MessageState                 `protogen:"open.v1"`
+	Revision            int64                                  `protobuf:"varint,1,opt,name=revision,proto3" json:"revision,omitempty"`
+	IssuedAt            *timestamppb.Timestamp                 `protobuf:"bytes,2,opt,name=issued_at,json=issuedAt,proto3" json:"issued_at,omitempty"`
+	ValidUntil          *timestamppb.Timestamp                 `protobuf:"bytes,3,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
+	ReplaceAll          bool                                   `protobuf:"varint,4,opt,name=replace_all,json=replaceAll,proto3" json:"replace_all,omitempty"`
+	PayloadHash         string                                 `protobuf:"bytes,5,opt,name=payload_hash,json=payloadHash,proto3" json:"payload_hash,omitempty"`
+	Permissions         []*ResourceSessionPermissionV2         `protobuf:"bytes,6,rep,name=permissions,proto3" json:"permissions,omitempty"`
+	TerminationCommands []*ResourceSessionTerminationCommandV2 `protobuf:"bytes,7,rep,name=termination_commands,json=terminationCommands,proto3" json:"termination_commands,omitempty"`
+	EnforceV2           bool                                   `protobuf:"varint,8,opt,name=enforce_v2,json=enforceV2,proto3" json:"enforce_v2,omitempty"` // Feature Flag 与依赖门禁均开启时为 true
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *ResourceSessionAuthorizationSnapshotV2) Reset() {
+	*x = ResourceSessionAuthorizationSnapshotV2{}
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResourceSessionAuthorizationSnapshotV2) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResourceSessionAuthorizationSnapshotV2) ProtoMessage() {}
+
+func (x *ResourceSessionAuthorizationSnapshotV2) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResourceSessionAuthorizationSnapshotV2.ProtoReflect.Descriptor instead.
+func (*ResourceSessionAuthorizationSnapshotV2) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ResourceSessionAuthorizationSnapshotV2) GetRevision() int64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *ResourceSessionAuthorizationSnapshotV2) GetIssuedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.IssuedAt
+	}
+	return nil
+}
+
+func (x *ResourceSessionAuthorizationSnapshotV2) GetValidUntil() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ValidUntil
+	}
+	return nil
+}
+
+func (x *ResourceSessionAuthorizationSnapshotV2) GetReplaceAll() bool {
+	if x != nil {
+		return x.ReplaceAll
+	}
+	return false
+}
+
+func (x *ResourceSessionAuthorizationSnapshotV2) GetPayloadHash() string {
+	if x != nil {
+		return x.PayloadHash
+	}
+	return ""
+}
+
+func (x *ResourceSessionAuthorizationSnapshotV2) GetPermissions() []*ResourceSessionPermissionV2 {
+	if x != nil {
+		return x.Permissions
+	}
+	return nil
+}
+
+func (x *ResourceSessionAuthorizationSnapshotV2) GetTerminationCommands() []*ResourceSessionTerminationCommandV2 {
+	if x != nil {
+		return x.TerminationCommands
+	}
+	return nil
+}
+
+func (x *ResourceSessionAuthorizationSnapshotV2) GetEnforceV2() bool {
+	if x != nil {
+		return x.EnforceV2
+	}
+	return false
+}
+
+type ResourceSessionPermissionV2 struct {
+	state                 protoimpl.MessageState   `protogen:"open.v1"`
+	SessionId             string                   `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	TenantId              string                   `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	ResourceId            string                   `protobuf:"bytes,3,opt,name=resource_id,json=resourceId,proto3" json:"resource_id,omitempty"`
+	SourceId              string                   `protobuf:"bytes,4,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	TargetRevisionId      string                   `protobuf:"bytes,5,opt,name=target_revision_id,json=targetRevisionId,proto3" json:"target_revision_id,omitempty"`
+	UserId                uint64                   `protobuf:"varint,6,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	UserName              string                   `protobuf:"bytes,7,opt,name=user_name,json=userName,proto3" json:"user_name,omitempty"`
+	DeviceId              uint64                   `protobuf:"varint,8,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	DeviceHeadscaleNodeId uint64                   `protobuf:"varint,9,opt,name=device_headscale_node_id,json=deviceHeadscaleNodeId,proto3" json:"device_headscale_node_id,omitempty"`
+	ResourceType          string                   `protobuf:"bytes,10,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"`
+	Action                string                   `protobuf:"bytes,11,opt,name=action,proto3" json:"action,omitempty"`
+	AllocationId          string                   `protobuf:"bytes,12,opt,name=allocation_id,json=allocationId,proto3" json:"allocation_id,omitempty"`
+	GrantId               string                   `protobuf:"bytes,13,opt,name=grant_id,json=grantId,proto3" json:"grant_id,omitempty"`
+	GrantRevision         int64                    `protobuf:"varint,14,opt,name=grant_revision,json=grantRevision,proto3" json:"grant_revision,omitempty"`
+	AuthorizationRevision int64                    `protobuf:"varint,15,opt,name=authorization_revision,json=authorizationRevision,proto3" json:"authorization_revision,omitempty"`
+	ValidUntil            *timestamppb.Timestamp   `protobuf:"bytes,16,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
+	Target                *ResourceSessionTargetV2 `protobuf:"bytes,17,opt,name=target,proto3" json:"target,omitempty"`
+	ListenPort            uint32                   `protobuf:"varint,18,opt,name=listen_port,json=listenPort,proto3" json:"listen_port,omitempty"` // Server 生成的 Agent/Endpoint 本地入口；客户端不能提交
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *ResourceSessionPermissionV2) Reset() {
+	*x = ResourceSessionPermissionV2{}
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResourceSessionPermissionV2) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResourceSessionPermissionV2) ProtoMessage() {}
+
+func (x *ResourceSessionPermissionV2) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResourceSessionPermissionV2.ProtoReflect.Descriptor instead.
+func (*ResourceSessionPermissionV2) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ResourceSessionPermissionV2) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ResourceSessionPermissionV2) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *ResourceSessionPermissionV2) GetResourceId() string {
+	if x != nil {
+		return x.ResourceId
+	}
+	return ""
+}
+
+func (x *ResourceSessionPermissionV2) GetSourceId() string {
+	if x != nil {
+		return x.SourceId
+	}
+	return ""
+}
+
+func (x *ResourceSessionPermissionV2) GetTargetRevisionId() string {
+	if x != nil {
+		return x.TargetRevisionId
+	}
+	return ""
+}
+
+func (x *ResourceSessionPermissionV2) GetUserId() uint64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *ResourceSessionPermissionV2) GetUserName() string {
+	if x != nil {
+		return x.UserName
+	}
+	return ""
+}
+
+func (x *ResourceSessionPermissionV2) GetDeviceId() uint64 {
+	if x != nil {
+		return x.DeviceId
+	}
+	return 0
+}
+
+func (x *ResourceSessionPermissionV2) GetDeviceHeadscaleNodeId() uint64 {
+	if x != nil {
+		return x.DeviceHeadscaleNodeId
+	}
+	return 0
+}
+
+func (x *ResourceSessionPermissionV2) GetResourceType() string {
+	if x != nil {
+		return x.ResourceType
+	}
+	return ""
+}
+
+func (x *ResourceSessionPermissionV2) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *ResourceSessionPermissionV2) GetAllocationId() string {
+	if x != nil {
+		return x.AllocationId
+	}
+	return ""
+}
+
+func (x *ResourceSessionPermissionV2) GetGrantId() string {
+	if x != nil {
+		return x.GrantId
+	}
+	return ""
+}
+
+func (x *ResourceSessionPermissionV2) GetGrantRevision() int64 {
+	if x != nil {
+		return x.GrantRevision
+	}
+	return 0
+}
+
+func (x *ResourceSessionPermissionV2) GetAuthorizationRevision() int64 {
+	if x != nil {
+		return x.AuthorizationRevision
+	}
+	return 0
+}
+
+func (x *ResourceSessionPermissionV2) GetValidUntil() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ValidUntil
+	}
+	return nil
+}
+
+func (x *ResourceSessionPermissionV2) GetTarget() *ResourceSessionTargetV2 {
+	if x != nil {
+		return x.Target
+	}
+	return nil
+}
+
+func (x *ResourceSessionPermissionV2) GetListenPort() uint32 {
+	if x != nil {
+		return x.ListenPort
+	}
+	return 0
+}
+
+type ResourceSessionTargetV2 struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NamespaceUid  string                 `protobuf:"bytes,1,opt,name=namespace_uid,json=namespaceUid,proto3" json:"namespace_uid,omitempty"`
+	NamespaceName string                 `protobuf:"bytes,2,opt,name=namespace_name,json=namespaceName,proto3" json:"namespace_name,omitempty"`
+	ServiceUid    string                 `protobuf:"bytes,3,opt,name=service_uid,json=serviceUid,proto3" json:"service_uid,omitempty"`
+	ServiceName   string                 `protobuf:"bytes,4,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
+	PortName      string                 `protobuf:"bytes,5,opt,name=port_name,json=portName,proto3" json:"port_name,omitempty"`
+	PortNumber    int32                  `protobuf:"varint,6,opt,name=port_number,json=portNumber,proto3" json:"port_number,omitempty"`
+	Protocol      string                 `protobuf:"bytes,7,opt,name=protocol,proto3" json:"protocol,omitempty"`
+	WorkloadUid   string                 `protobuf:"bytes,8,opt,name=workload_uid,json=workloadUid,proto3" json:"workload_uid,omitempty"`
+	PodName       string                 `protobuf:"bytes,9,opt,name=pod_name,json=podName,proto3" json:"pod_name,omitempty"`
+	PodUid        string                 `protobuf:"bytes,10,opt,name=pod_uid,json=podUid,proto3" json:"pod_uid,omitempty"`
+	ContainerName string                 `protobuf:"bytes,11,opt,name=container_name,json=containerName,proto3" json:"container_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResourceSessionTargetV2) Reset() {
+	*x = ResourceSessionTargetV2{}
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResourceSessionTargetV2) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResourceSessionTargetV2) ProtoMessage() {}
+
+func (x *ResourceSessionTargetV2) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResourceSessionTargetV2.ProtoReflect.Descriptor instead.
+func (*ResourceSessionTargetV2) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ResourceSessionTargetV2) GetNamespaceUid() string {
+	if x != nil {
+		return x.NamespaceUid
+	}
+	return ""
+}
+
+func (x *ResourceSessionTargetV2) GetNamespaceName() string {
+	if x != nil {
+		return x.NamespaceName
+	}
+	return ""
+}
+
+func (x *ResourceSessionTargetV2) GetServiceUid() string {
+	if x != nil {
+		return x.ServiceUid
+	}
+	return ""
+}
+
+func (x *ResourceSessionTargetV2) GetServiceName() string {
+	if x != nil {
+		return x.ServiceName
+	}
+	return ""
+}
+
+func (x *ResourceSessionTargetV2) GetPortName() string {
+	if x != nil {
+		return x.PortName
+	}
+	return ""
+}
+
+func (x *ResourceSessionTargetV2) GetPortNumber() int32 {
+	if x != nil {
+		return x.PortNumber
+	}
+	return 0
+}
+
+func (x *ResourceSessionTargetV2) GetProtocol() string {
+	if x != nil {
+		return x.Protocol
+	}
+	return ""
+}
+
+func (x *ResourceSessionTargetV2) GetWorkloadUid() string {
+	if x != nil {
+		return x.WorkloadUid
+	}
+	return ""
+}
+
+func (x *ResourceSessionTargetV2) GetPodName() string {
+	if x != nil {
+		return x.PodName
+	}
+	return ""
+}
+
+func (x *ResourceSessionTargetV2) GetPodUid() string {
+	if x != nil {
+		return x.PodUid
+	}
+	return ""
+}
+
+func (x *ResourceSessionTargetV2) GetContainerName() string {
+	if x != nil {
+		return x.ContainerName
+	}
+	return ""
+}
+
+type ResourceSessionTerminationCommandV2 struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	SessionId       string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	CommandRevision int64                  `protobuf:"varint,2,opt,name=command_revision,json=commandRevision,proto3" json:"command_revision,omitempty"`
+	ReasonCode      string                 `protobuf:"bytes,3,opt,name=reason_code,json=reasonCode,proto3" json:"reason_code,omitempty"`
+	Reason          string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ResourceSessionTerminationCommandV2) Reset() {
+	*x = ResourceSessionTerminationCommandV2{}
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResourceSessionTerminationCommandV2) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResourceSessionTerminationCommandV2) ProtoMessage() {}
+
+func (x *ResourceSessionTerminationCommandV2) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResourceSessionTerminationCommandV2.ProtoReflect.Descriptor instead.
+func (*ResourceSessionTerminationCommandV2) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ResourceSessionTerminationCommandV2) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ResourceSessionTerminationCommandV2) GetCommandRevision() int64 {
+	if x != nil {
+		return x.CommandRevision
+	}
+	return 0
+}
+
+func (x *ResourceSessionTerminationCommandV2) GetReasonCode() string {
+	if x != nil {
+		return x.ReasonCode
+	}
+	return ""
+}
+
+func (x *ResourceSessionTerminationCommandV2) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type ResourceSessionTerminationAckV2 struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	SessionId       string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	CommandRevision int64                  `protobuf:"varint,2,opt,name=command_revision,json=commandRevision,proto3" json:"command_revision,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ResourceSessionTerminationAckV2) Reset() {
+	*x = ResourceSessionTerminationAckV2{}
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResourceSessionTerminationAckV2) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResourceSessionTerminationAckV2) ProtoMessage() {}
+
+func (x *ResourceSessionTerminationAckV2) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResourceSessionTerminationAckV2.ProtoReflect.Descriptor instead.
+func (*ResourceSessionTerminationAckV2) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ResourceSessionTerminationAckV2) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ResourceSessionTerminationAckV2) GetCommandRevision() int64 {
+	if x != nil {
+		return x.CommandRevision
+	}
+	return 0
+}
+
+type ResourceSessionEventV2 struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	EventId        string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
+	SessionId      string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	SourceSequence int64                  `protobuf:"varint,3,opt,name=source_sequence,json=sourceSequence,proto3" json:"source_sequence,omitempty"`
+	EventType      string                 `protobuf:"bytes,4,opt,name=event_type,json=eventType,proto3" json:"event_type,omitempty"` // accepted / connected / ended / terminated / failed
+	OccurredAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=occurred_at,json=occurredAt,proto3" json:"occurred_at,omitempty"`
+	ResultCode     string                 `protobuf:"bytes,6,opt,name=result_code,json=resultCode,proto3" json:"result_code,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ResourceSessionEventV2) Reset() {
+	*x = ResourceSessionEventV2{}
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResourceSessionEventV2) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResourceSessionEventV2) ProtoMessage() {}
+
+func (x *ResourceSessionEventV2) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResourceSessionEventV2.ProtoReflect.Descriptor instead.
+func (*ResourceSessionEventV2) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ResourceSessionEventV2) GetEventId() string {
+	if x != nil {
+		return x.EventId
+	}
+	return ""
+}
+
+func (x *ResourceSessionEventV2) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ResourceSessionEventV2) GetSourceSequence() int64 {
+	if x != nil {
+		return x.SourceSequence
+	}
+	return 0
+}
+
+func (x *ResourceSessionEventV2) GetEventType() string {
+	if x != nil {
+		return x.EventType
+	}
+	return ""
+}
+
+func (x *ResourceSessionEventV2) GetOccurredAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.OccurredAt
+	}
+	return nil
+}
+
+func (x *ResourceSessionEventV2) GetResultCode() string {
+	if x != nil {
+		return x.ResultCode
+	}
+	return ""
+}
+
+type ResourceSessionEventAckV2 struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EventId       string                 `protobuf:"bytes,1,opt,name=event_id,json=eventId,proto3" json:"event_id,omitempty"`
+	ResultCode    string                 `protobuf:"bytes,2,opt,name=result_code,json=resultCode,proto3" json:"result_code,omitempty"`
+	Replay        bool                   `protobuf:"varint,3,opt,name=replay,proto3" json:"replay,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResourceSessionEventAckV2) Reset() {
+	*x = ResourceSessionEventAckV2{}
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResourceSessionEventAckV2) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResourceSessionEventAckV2) ProtoMessage() {}
+
+func (x *ResourceSessionEventAckV2) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResourceSessionEventAckV2.ProtoReflect.Descriptor instead.
+func (*ResourceSessionEventAckV2) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ResourceSessionEventAckV2) GetEventId() string {
+	if x != nil {
+		return x.EventId
+	}
+	return ""
+}
+
+func (x *ResourceSessionEventAckV2) GetResultCode() string {
+	if x != nil {
+		return x.ResultCode
+	}
+	return ""
+}
+
+func (x *ResourceSessionEventAckV2) GetReplay() bool {
+	if x != nil {
+		return x.Replay
+	}
+	return false
+}
+
+type EndpointSessionAuthorizationReportV2 struct {
+	state                            protoimpl.MessageState             `protogen:"open.v1"`
+	EndpointName                     string                             `protobuf:"bytes,1,opt,name=endpoint_name,json=endpointName,proto3" json:"endpoint_name,omitempty"`
+	ProtocolVersion                  string                             `protobuf:"bytes,2,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
+	AuthorizationSnapshotAckRevision int64                              `protobuf:"varint,3,opt,name=authorization_snapshot_ack_revision,json=authorizationSnapshotAckRevision,proto3" json:"authorization_snapshot_ack_revision,omitempty"`
+	AuthorizationSnapshotAckHash     string                             `protobuf:"bytes,4,opt,name=authorization_snapshot_ack_hash,json=authorizationSnapshotAckHash,proto3" json:"authorization_snapshot_ack_hash,omitempty"`
+	TerminationAcks                  []*ResourceSessionTerminationAckV2 `protobuf:"bytes,5,rep,name=termination_acks,json=terminationAcks,proto3" json:"termination_acks,omitempty"`
+	Events                           []*ResourceSessionEventV2          `protobuf:"bytes,6,rep,name=events,proto3" json:"events,omitempty"`
+	unknownFields                    protoimpl.UnknownFields
+	sizeCache                        protoimpl.SizeCache
+}
+
+func (x *EndpointSessionAuthorizationReportV2) Reset() {
+	*x = EndpointSessionAuthorizationReportV2{}
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EndpointSessionAuthorizationReportV2) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EndpointSessionAuthorizationReportV2) ProtoMessage() {}
+
+func (x *EndpointSessionAuthorizationReportV2) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EndpointSessionAuthorizationReportV2.ProtoReflect.Descriptor instead.
+func (*EndpointSessionAuthorizationReportV2) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *EndpointSessionAuthorizationReportV2) GetEndpointName() string {
+	if x != nil {
+		return x.EndpointName
+	}
+	return ""
+}
+
+func (x *EndpointSessionAuthorizationReportV2) GetProtocolVersion() string {
+	if x != nil {
+		return x.ProtocolVersion
+	}
+	return ""
+}
+
+func (x *EndpointSessionAuthorizationReportV2) GetAuthorizationSnapshotAckRevision() int64 {
+	if x != nil {
+		return x.AuthorizationSnapshotAckRevision
+	}
+	return 0
+}
+
+func (x *EndpointSessionAuthorizationReportV2) GetAuthorizationSnapshotAckHash() string {
+	if x != nil {
+		return x.AuthorizationSnapshotAckHash
+	}
+	return ""
+}
+
+func (x *EndpointSessionAuthorizationReportV2) GetTerminationAcks() []*ResourceSessionTerminationAckV2 {
+	if x != nil {
+		return x.TerminationAcks
+	}
+	return nil
+}
+
+func (x *EndpointSessionAuthorizationReportV2) GetEvents() []*ResourceSessionEventV2 {
+	if x != nil {
+		return x.Events
+	}
+	return nil
+}
+
+type EndpointSessionAuthorizationSnapshotV2 struct {
+	state         protoimpl.MessageState                  `protogen:"open.v1"`
+	EndpointName  string                                  `protobuf:"bytes,1,opt,name=endpoint_name,json=endpointName,proto3" json:"endpoint_name,omitempty"`
+	Snapshot      *ResourceSessionAuthorizationSnapshotV2 `protobuf:"bytes,2,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	EventAcks     []*ResourceSessionEventAckV2            `protobuf:"bytes,3,rep,name=event_acks,json=eventAcks,proto3" json:"event_acks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EndpointSessionAuthorizationSnapshotV2) Reset() {
+	*x = EndpointSessionAuthorizationSnapshotV2{}
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EndpointSessionAuthorizationSnapshotV2) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EndpointSessionAuthorizationSnapshotV2) ProtoMessage() {}
+
+func (x *EndpointSessionAuthorizationSnapshotV2) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EndpointSessionAuthorizationSnapshotV2.ProtoReflect.Descriptor instead.
+func (*EndpointSessionAuthorizationSnapshotV2) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *EndpointSessionAuthorizationSnapshotV2) GetEndpointName() string {
+	if x != nil {
+		return x.EndpointName
+	}
+	return ""
+}
+
+func (x *EndpointSessionAuthorizationSnapshotV2) GetSnapshot() *ResourceSessionAuthorizationSnapshotV2 {
+	if x != nil {
+		return x.Snapshot
+	}
+	return nil
+}
+
+func (x *EndpointSessionAuthorizationSnapshotV2) GetEventAcks() []*ResourceSessionEventAckV2 {
+	if x != nil {
+		return x.EventAcks
+	}
+	return nil
+}
+
 // SupplyInventoryConfig 是 Server 下发的可信上报映射，不由采集载荷声明。
 type SupplyInventoryConfig struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
@@ -536,7 +1406,7 @@ type SupplyInventoryConfig struct {
 
 func (x *SupplyInventoryConfig) Reset() {
 	*x = SupplyInventoryConfig{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[5]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -548,7 +1418,7 @@ func (x *SupplyInventoryConfig) String() string {
 func (*SupplyInventoryConfig) ProtoMessage() {}
 
 func (x *SupplyInventoryConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[5]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -561,7 +1431,7 @@ func (x *SupplyInventoryConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SupplyInventoryConfig.ProtoReflect.Descriptor instead.
 func (*SupplyInventoryConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{5}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SupplyInventoryConfig) GetEnabled() bool {
@@ -614,7 +1484,7 @@ type SupplyInventoryEnvelope struct {
 
 func (x *SupplyInventoryEnvelope) Reset() {
 	*x = SupplyInventoryEnvelope{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[6]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -626,7 +1496,7 @@ func (x *SupplyInventoryEnvelope) String() string {
 func (*SupplyInventoryEnvelope) ProtoMessage() {}
 
 func (x *SupplyInventoryEnvelope) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[6]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -639,7 +1509,7 @@ func (x *SupplyInventoryEnvelope) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SupplyInventoryEnvelope.ProtoReflect.Descriptor instead.
 func (*SupplyInventoryEnvelope) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{6}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SupplyInventoryEnvelope) GetSchemaVersion() uint32 {
@@ -741,7 +1611,7 @@ type KubernetesClusterInventory struct {
 
 func (x *KubernetesClusterInventory) Reset() {
 	*x = KubernetesClusterInventory{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[7]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -753,7 +1623,7 @@ func (x *KubernetesClusterInventory) String() string {
 func (*KubernetesClusterInventory) ProtoMessage() {}
 
 func (x *KubernetesClusterInventory) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[7]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -766,7 +1636,7 @@ func (x *KubernetesClusterInventory) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KubernetesClusterInventory.ProtoReflect.Descriptor instead.
 func (*KubernetesClusterInventory) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{7}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *KubernetesClusterInventory) GetClusterUid() string {
@@ -830,7 +1700,7 @@ type KubernetesNamespaceInventory struct {
 
 func (x *KubernetesNamespaceInventory) Reset() {
 	*x = KubernetesNamespaceInventory{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[8]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -842,7 +1712,7 @@ func (x *KubernetesNamespaceInventory) String() string {
 func (*KubernetesNamespaceInventory) ProtoMessage() {}
 
 func (x *KubernetesNamespaceInventory) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[8]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -855,7 +1725,7 @@ func (x *KubernetesNamespaceInventory) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KubernetesNamespaceInventory.ProtoReflect.Descriptor instead.
 func (*KubernetesNamespaceInventory) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{8}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *KubernetesNamespaceInventory) GetUid() string {
@@ -901,7 +1771,7 @@ type SupplyInventoryAck struct {
 
 func (x *SupplyInventoryAck) Reset() {
 	*x = SupplyInventoryAck{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[9]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -913,7 +1783,7 @@ func (x *SupplyInventoryAck) String() string {
 func (*SupplyInventoryAck) ProtoMessage() {}
 
 func (x *SupplyInventoryAck) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[9]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -926,7 +1796,7 @@ func (x *SupplyInventoryAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SupplyInventoryAck.ProtoReflect.Descriptor instead.
 func (*SupplyInventoryAck) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{9}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *SupplyInventoryAck) GetAcceptedSequence() uint64 {
@@ -992,7 +1862,7 @@ type WorkloadInventoryConfig struct {
 
 func (x *WorkloadInventoryConfig) Reset() {
 	*x = WorkloadInventoryConfig{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[10]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1004,7 +1874,7 @@ func (x *WorkloadInventoryConfig) String() string {
 func (*WorkloadInventoryConfig) ProtoMessage() {}
 
 func (x *WorkloadInventoryConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[10]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1017,7 +1887,7 @@ func (x *WorkloadInventoryConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkloadInventoryConfig.ProtoReflect.Descriptor instead.
 func (*WorkloadInventoryConfig) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{10}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *WorkloadInventoryConfig) GetEnabled() bool {
@@ -1082,7 +1952,7 @@ type WorkloadInventoryEnvelope struct {
 
 func (x *WorkloadInventoryEnvelope) Reset() {
 	*x = WorkloadInventoryEnvelope{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[11]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1094,7 +1964,7 @@ func (x *WorkloadInventoryEnvelope) String() string {
 func (*WorkloadInventoryEnvelope) ProtoMessage() {}
 
 func (x *WorkloadInventoryEnvelope) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[11]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1107,7 +1977,7 @@ func (x *WorkloadInventoryEnvelope) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkloadInventoryEnvelope.ProtoReflect.Descriptor instead.
 func (*WorkloadInventoryEnvelope) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{11}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *WorkloadInventoryEnvelope) GetSchemaVersion() uint32 {
@@ -1245,7 +2115,7 @@ type WorkloadServicePort struct {
 
 func (x *WorkloadServicePort) Reset() {
 	*x = WorkloadServicePort{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[12]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1257,7 +2127,7 @@ func (x *WorkloadServicePort) String() string {
 func (*WorkloadServicePort) ProtoMessage() {}
 
 func (x *WorkloadServicePort) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[12]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1270,7 +2140,7 @@ func (x *WorkloadServicePort) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkloadServicePort.ProtoReflect.Descriptor instead.
 func (*WorkloadServicePort) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{12}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *WorkloadServicePort) GetServiceUid() string {
@@ -1345,7 +2215,7 @@ type WorkloadContainer struct {
 
 func (x *WorkloadContainer) Reset() {
 	*x = WorkloadContainer{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[13]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1357,7 +2227,7 @@ func (x *WorkloadContainer) String() string {
 func (*WorkloadContainer) ProtoMessage() {}
 
 func (x *WorkloadContainer) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[13]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1370,7 +2240,7 @@ func (x *WorkloadContainer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkloadContainer.ProtoReflect.Descriptor instead.
 func (*WorkloadContainer) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{13}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *WorkloadContainer) GetWorkloadUid() string {
@@ -1446,7 +2316,7 @@ type WorkloadInventoryAck struct {
 
 func (x *WorkloadInventoryAck) Reset() {
 	*x = WorkloadInventoryAck{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[14]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1458,7 +2328,7 @@ func (x *WorkloadInventoryAck) String() string {
 func (*WorkloadInventoryAck) ProtoMessage() {}
 
 func (x *WorkloadInventoryAck) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[14]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1471,7 +2341,7 @@ func (x *WorkloadInventoryAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkloadInventoryAck.ProtoReflect.Descriptor instead.
 func (*WorkloadInventoryAck) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{14}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *WorkloadInventoryAck) GetAcceptedSequence() uint64 {
@@ -1545,13 +2415,15 @@ type DiscoveredK8SService struct {
 	ClusterIp     string                 `protobuf:"bytes,3,opt,name=cluster_ip,json=clusterIp,proto3" json:"cluster_ip,omitempty"`                                                    // ClusterIP
 	Ports         []*ServicePort         `protobuf:"bytes,4,rep,name=ports,proto3" json:"ports,omitempty"`                                                                             // 端口列表
 	Labels        map[string]string      `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // 标签
+	ServiceUid    string                 `protobuf:"bytes,6,opt,name=service_uid,json=serviceUid,proto3" json:"service_uid,omitempty"`
+	NamespaceUid  string                 `protobuf:"bytes,7,opt,name=namespace_uid,json=namespaceUid,proto3" json:"namespace_uid,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DiscoveredK8SService) Reset() {
 	*x = DiscoveredK8SService{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[15]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1563,7 +2435,7 @@ func (x *DiscoveredK8SService) String() string {
 func (*DiscoveredK8SService) ProtoMessage() {}
 
 func (x *DiscoveredK8SService) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[15]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1576,7 +2448,7 @@ func (x *DiscoveredK8SService) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiscoveredK8SService.ProtoReflect.Descriptor instead.
 func (*DiscoveredK8SService) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{15}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *DiscoveredK8SService) GetNamespace() string {
@@ -1614,6 +2486,20 @@ func (x *DiscoveredK8SService) GetLabels() map[string]string {
 	return nil
 }
 
+func (x *DiscoveredK8SService) GetServiceUid() string {
+	if x != nil {
+		return x.ServiceUid
+	}
+	return ""
+}
+
+func (x *DiscoveredK8SService) GetNamespaceUid() string {
+	if x != nil {
+		return x.NamespaceUid
+	}
+	return ""
+}
+
 // ServicePort K8S Service 端口
 type ServicePort struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1626,7 +2512,7 @@ type ServicePort struct {
 
 func (x *ServicePort) Reset() {
 	*x = ServicePort{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[16]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1638,7 +2524,7 @@ func (x *ServicePort) String() string {
 func (*ServicePort) ProtoMessage() {}
 
 func (x *ServicePort) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[16]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1651,7 +2537,7 @@ func (x *ServicePort) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServicePort.ProtoReflect.Descriptor instead.
 func (*ServicePort) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{16}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ServicePort) GetName() string {
@@ -1689,7 +2575,7 @@ type ShellRequest struct {
 
 func (x *ShellRequest) Reset() {
 	*x = ShellRequest{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[17]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1701,7 +2587,7 @@ func (x *ShellRequest) String() string {
 func (*ShellRequest) ProtoMessage() {}
 
 func (x *ShellRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[17]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1714,7 +2600,7 @@ func (x *ShellRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellRequest.ProtoReflect.Descriptor instead.
 func (*ShellRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{17}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ShellRequest) GetSessionId() string {
@@ -1771,7 +2657,7 @@ type ShellData struct {
 
 func (x *ShellData) Reset() {
 	*x = ShellData{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[18]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1783,7 +2669,7 @@ func (x *ShellData) String() string {
 func (*ShellData) ProtoMessage() {}
 
 func (x *ShellData) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[18]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1796,7 +2682,7 @@ func (x *ShellData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellData.ProtoReflect.Descriptor instead.
 func (*ShellData) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{18}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ShellData) GetIsOpen() bool {
@@ -1879,7 +2765,7 @@ type K8SAPIProxyRequest struct {
 
 func (x *K8SAPIProxyRequest) Reset() {
 	*x = K8SAPIProxyRequest{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[19]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1891,7 +2777,7 @@ func (x *K8SAPIProxyRequest) String() string {
 func (*K8SAPIProxyRequest) ProtoMessage() {}
 
 func (x *K8SAPIProxyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[19]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1904,7 +2790,7 @@ func (x *K8SAPIProxyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use K8SAPIProxyRequest.ProtoReflect.Descriptor instead.
 func (*K8SAPIProxyRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{19}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *K8SAPIProxyRequest) GetSessionId() string {
@@ -1934,7 +2820,7 @@ type K8SAPIProxyData struct {
 
 func (x *K8SAPIProxyData) Reset() {
 	*x = K8SAPIProxyData{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[20]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1946,7 +2832,7 @@ func (x *K8SAPIProxyData) String() string {
 func (*K8SAPIProxyData) ProtoMessage() {}
 
 func (x *K8SAPIProxyData) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[20]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1959,7 +2845,7 @@ func (x *K8SAPIProxyData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use K8SAPIProxyData.ProtoReflect.Descriptor instead.
 func (*K8SAPIProxyData) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{20}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *K8SAPIProxyData) GetIsOpen() bool {
@@ -2045,7 +2931,7 @@ type K8SAPIHTTPRequest struct {
 
 func (x *K8SAPIHTTPRequest) Reset() {
 	*x = K8SAPIHTTPRequest{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[21]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2057,7 +2943,7 @@ func (x *K8SAPIHTTPRequest) String() string {
 func (*K8SAPIHTTPRequest) ProtoMessage() {}
 
 func (x *K8SAPIHTTPRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[21]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2070,7 +2956,7 @@ func (x *K8SAPIHTTPRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use K8SAPIHTTPRequest.ProtoReflect.Descriptor instead.
 func (*K8SAPIHTTPRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{21}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *K8SAPIHTTPRequest) GetMethod() string {
@@ -2113,7 +2999,7 @@ type K8SAPIHTTPResponse struct {
 
 func (x *K8SAPIHTTPResponse) Reset() {
 	*x = K8SAPIHTTPResponse{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[22]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2125,7 +3011,7 @@ func (x *K8SAPIHTTPResponse) String() string {
 func (*K8SAPIHTTPResponse) ProtoMessage() {}
 
 func (x *K8SAPIHTTPResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[22]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2138,7 +3024,7 @@ func (x *K8SAPIHTTPResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use K8SAPIHTTPResponse.ProtoReflect.Descriptor instead.
 func (*K8SAPIHTTPResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{22}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *K8SAPIHTTPResponse) GetStatusCode() int32 {
@@ -2164,19 +3050,26 @@ func (x *K8SAPIHTTPResponse) GetBody() []byte {
 
 // SVCProxyRequest Agent 通知 Endpoint 的 K8S Service 代理请求
 type SVCProxyRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`       // 会话 ID
-	Namespace     string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`                        // 目标命名空间
-	ServiceName   string                 `protobuf:"bytes,3,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"` // 目标 Service 名称
-	Port          int32                  `protobuf:"varint,4,opt,name=port,proto3" json:"port,omitempty"`                                 // 目标端口
-	ClusterIp     string                 `protobuf:"bytes,5,opt,name=cluster_ip,json=clusterIp,proto3" json:"cluster_ip,omitempty"`       // ClusterIP（物理节点部署时直连，避免依赖 cluster.local DNS）
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	SessionId             string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`       // 会话 ID
+	Namespace             string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`                        // 目标命名空间
+	ServiceName           string                 `protobuf:"bytes,3,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"` // 目标 Service 名称
+	Port                  int32                  `protobuf:"varint,4,opt,name=port,proto3" json:"port,omitempty"`                                 // 目标端口
+	ClusterIp             string                 `protobuf:"bytes,5,opt,name=cluster_ip,json=clusterIp,proto3" json:"cluster_ip,omitempty"`       // ClusterIP（物理节点部署时直连，避免依赖 cluster.local DNS）
+	ResourceId            string                 `protobuf:"bytes,6,opt,name=resource_id,json=resourceId,proto3" json:"resource_id,omitempty"`
+	SourceId              string                 `protobuf:"bytes,7,opt,name=source_id,json=sourceId,proto3" json:"source_id,omitempty"`
+	TargetRevisionId      string                 `protobuf:"bytes,8,opt,name=target_revision_id,json=targetRevisionId,proto3" json:"target_revision_id,omitempty"`
+	ServiceUid            string                 `protobuf:"bytes,9,opt,name=service_uid,json=serviceUid,proto3" json:"service_uid,omitempty"`
+	PortName              string                 `protobuf:"bytes,10,opt,name=port_name,json=portName,proto3" json:"port_name,omitempty"`
+	Protocol              string                 `protobuf:"bytes,11,opt,name=protocol,proto3" json:"protocol,omitempty"`
+	AuthorizationRevision int64                  `protobuf:"varint,12,opt,name=authorization_revision,json=authorizationRevision,proto3" json:"authorization_revision,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *SVCProxyRequest) Reset() {
 	*x = SVCProxyRequest{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[23]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2188,7 +3081,7 @@ func (x *SVCProxyRequest) String() string {
 func (*SVCProxyRequest) ProtoMessage() {}
 
 func (x *SVCProxyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[23]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2201,7 +3094,7 @@ func (x *SVCProxyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SVCProxyRequest.ProtoReflect.Descriptor instead.
 func (*SVCProxyRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{23}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *SVCProxyRequest) GetSessionId() string {
@@ -2239,6 +3132,55 @@ func (x *SVCProxyRequest) GetClusterIp() string {
 	return ""
 }
 
+func (x *SVCProxyRequest) GetResourceId() string {
+	if x != nil {
+		return x.ResourceId
+	}
+	return ""
+}
+
+func (x *SVCProxyRequest) GetSourceId() string {
+	if x != nil {
+		return x.SourceId
+	}
+	return ""
+}
+
+func (x *SVCProxyRequest) GetTargetRevisionId() string {
+	if x != nil {
+		return x.TargetRevisionId
+	}
+	return ""
+}
+
+func (x *SVCProxyRequest) GetServiceUid() string {
+	if x != nil {
+		return x.ServiceUid
+	}
+	return ""
+}
+
+func (x *SVCProxyRequest) GetPortName() string {
+	if x != nil {
+		return x.PortName
+	}
+	return ""
+}
+
+func (x *SVCProxyRequest) GetProtocol() string {
+	if x != nil {
+		return x.Protocol
+	}
+	return ""
+}
+
+func (x *SVCProxyRequest) GetAuthorizationRevision() int64 {
+	if x != nil {
+		return x.AuthorizationRevision
+	}
+	return 0
+}
+
 // EndpointSVCProxyData Endpoint K8S Service 代理数据帧
 type EndpointSVCProxyData struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -2254,7 +3196,7 @@ type EndpointSVCProxyData struct {
 
 func (x *EndpointSVCProxyData) Reset() {
 	*x = EndpointSVCProxyData{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[24]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2266,7 +3208,7 @@ func (x *EndpointSVCProxyData) String() string {
 func (*EndpointSVCProxyData) ProtoMessage() {}
 
 func (x *EndpointSVCProxyData) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[24]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2279,7 +3221,7 @@ func (x *EndpointSVCProxyData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EndpointSVCProxyData.ProtoReflect.Descriptor instead.
 func (*EndpointSVCProxyData) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{24}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *EndpointSVCProxyData) GetIsOpen() bool {
@@ -2336,7 +3278,7 @@ type RawStreamRequest struct {
 
 func (x *RawStreamRequest) Reset() {
 	*x = RawStreamRequest{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[25]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2348,7 +3290,7 @@ func (x *RawStreamRequest) String() string {
 func (*RawStreamRequest) ProtoMessage() {}
 
 func (x *RawStreamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[25]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2361,7 +3303,7 @@ func (x *RawStreamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RawStreamRequest.ProtoReflect.Descriptor instead.
 func (*RawStreamRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{25}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *RawStreamRequest) GetSessionId() string {
@@ -2402,7 +3344,7 @@ type RawStreamData struct {
 
 func (x *RawStreamData) Reset() {
 	*x = RawStreamData{}
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[26]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2414,7 +3356,7 @@ func (x *RawStreamData) String() string {
 func (*RawStreamData) ProtoMessage() {}
 
 func (x *RawStreamData) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_endpoint_proto_msgTypes[26]
+	mi := &file_pkg_proto_endpoint_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2427,7 +3369,7 @@ func (x *RawStreamData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RawStreamData.ProtoReflect.Descriptor instead.
 func (*RawStreamData) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{26}
+	return file_pkg_proto_endpoint_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *RawStreamData) GetIsOpen() bool {
@@ -2499,7 +3441,7 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1f\n" +
 	"\vendpoint_id\x18\x03 \x01(\tR\n" +
-	"endpointId\"\xdd\x04\n" +
+	"endpointId\"\x8c\b\n" +
 	"\x18EndpointHeartbeatRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12N\n" +
@@ -2514,13 +3456,18 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	" \x03(\tR\x14k8sserviceNamespaces\x12\x12\n" +
 	"\x04arch\x18\v \x01(\tR\x04arch\x12)\n" +
 	"\x10updater_protocol\x18\f \x01(\tR\x0fupdaterProtocol\x12I\n" +
-	"\x0fupdate_statuses\x18\r \x03(\v2 .awecloud.signaling.UpdateStatusR\x0eupdateStatuses\"s\n" +
+	"\x0fupdate_statuses\x18\r \x03(\v2 .awecloud.signaling.UpdateStatusR\x0eupdateStatuses\x12D\n" +
+	"\x1esession_authorization_protocol\x18\x0e \x01(\tR\x1csessionAuthorizationProtocol\x12M\n" +
+	"#authorization_snapshot_ack_revision\x18\x0f \x01(\x03R authorizationSnapshotAckRevision\x12E\n" +
+	"\x1fauthorization_snapshot_ack_hash\x18\x10 \x01(\tR\x1cauthorizationSnapshotAckHash\x12m\n" +
+	"\x18session_termination_acks\x18\x11 \x03(\v23.awecloud.signaling.ResourceSessionTerminationAckV2R\x16sessionTerminationAcks\x12b\n" +
+	"\x17resource_session_events\x18\x12 \x03(\v2*.awecloud.signaling.ResourceSessionEventV2R\x15resourceSessionEvents\"s\n" +
 	"\x16EndpointCapabilityInfo\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x12\n" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x03 \x01(\x05R\x04port\x12\x1d\n" +
 	"\n" +
-	"api_server\x18\x04 \x01(\tR\tapiServer\"\xea\a\n" +
+	"api_server\x18\x04 \x01(\tR\tapiServer\"\xd0\t\n" +
 	"\x19EndpointHeartbeatResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12G\n" +
@@ -2539,7 +3486,99 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	"\x16k8sservice_enabled_set\x18\x10 \x01(\bR\x14k8sserviceEnabledSet\x12P\n" +
 	"\x11update_directives\x18\x11 \x03(\v2#.awecloud.signaling.UpdateDirectiveR\x10updateDirectives\x12a\n" +
 	"\x17supply_inventory_config\x18\x12 \x01(\v2).awecloud.signaling.SupplyInventoryConfigR\x15supplyInventoryConfig\x12g\n" +
-	"\x19workload_inventory_config\x18\x13 \x01(\v2+.awecloud.signaling.WorkloadInventoryConfigR\x17workloadInventoryConfig\"\xc1\x01\n" +
+	"\x19workload_inventory_config\x18\x13 \x01(\v2+.awecloud.signaling.WorkloadInventoryConfigR\x17workloadInventoryConfig\x12v\n" +
+	"\x19authorization_snapshot_v2\x18\x14 \x01(\v2:.awecloud.signaling.ResourceSessionAuthorizationSnapshotV2R\x17authorizationSnapshotV2\x12l\n" +
+	"\x1bresource_session_event_acks\x18\x15 \x03(\v2-.awecloud.signaling.ResourceSessionEventAckV2R\x18resourceSessionEventAcks\"\xdc\x03\n" +
+	"&ResourceSessionAuthorizationSnapshotV2\x12\x1a\n" +
+	"\brevision\x18\x01 \x01(\x03R\brevision\x127\n" +
+	"\tissued_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\bissuedAt\x12;\n" +
+	"\vvalid_until\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"validUntil\x12\x1f\n" +
+	"\vreplace_all\x18\x04 \x01(\bR\n" +
+	"replaceAll\x12!\n" +
+	"\fpayload_hash\x18\x05 \x01(\tR\vpayloadHash\x12Q\n" +
+	"\vpermissions\x18\x06 \x03(\v2/.awecloud.signaling.ResourceSessionPermissionV2R\vpermissions\x12j\n" +
+	"\x14termination_commands\x18\a \x03(\v27.awecloud.signaling.ResourceSessionTerminationCommandV2R\x13terminationCommands\x12\x1d\n" +
+	"\n" +
+	"enforce_v2\x18\b \x01(\bR\tenforceV2\"\xcf\x05\n" +
+	"\x1bResourceSessionPermissionV2\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
+	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x1f\n" +
+	"\vresource_id\x18\x03 \x01(\tR\n" +
+	"resourceId\x12\x1b\n" +
+	"\tsource_id\x18\x04 \x01(\tR\bsourceId\x12,\n" +
+	"\x12target_revision_id\x18\x05 \x01(\tR\x10targetRevisionId\x12\x17\n" +
+	"\auser_id\x18\x06 \x01(\x04R\x06userId\x12\x1b\n" +
+	"\tuser_name\x18\a \x01(\tR\buserName\x12\x1b\n" +
+	"\tdevice_id\x18\b \x01(\x04R\bdeviceId\x127\n" +
+	"\x18device_headscale_node_id\x18\t \x01(\x04R\x15deviceHeadscaleNodeId\x12#\n" +
+	"\rresource_type\x18\n" +
+	" \x01(\tR\fresourceType\x12\x16\n" +
+	"\x06action\x18\v \x01(\tR\x06action\x12#\n" +
+	"\rallocation_id\x18\f \x01(\tR\fallocationId\x12\x19\n" +
+	"\bgrant_id\x18\r \x01(\tR\agrantId\x12%\n" +
+	"\x0egrant_revision\x18\x0e \x01(\x03R\rgrantRevision\x125\n" +
+	"\x16authorization_revision\x18\x0f \x01(\x03R\x15authorizationRevision\x12;\n" +
+	"\vvalid_until\x18\x10 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"validUntil\x12C\n" +
+	"\x06target\x18\x11 \x01(\v2+.awecloud.signaling.ResourceSessionTargetV2R\x06target\x12\x1f\n" +
+	"\vlisten_port\x18\x12 \x01(\rR\n" +
+	"listenPort\"\x81\x03\n" +
+	"\x17ResourceSessionTargetV2\x12#\n" +
+	"\rnamespace_uid\x18\x01 \x01(\tR\fnamespaceUid\x12%\n" +
+	"\x0enamespace_name\x18\x02 \x01(\tR\rnamespaceName\x12\x1f\n" +
+	"\vservice_uid\x18\x03 \x01(\tR\n" +
+	"serviceUid\x12!\n" +
+	"\fservice_name\x18\x04 \x01(\tR\vserviceName\x12\x1b\n" +
+	"\tport_name\x18\x05 \x01(\tR\bportName\x12\x1f\n" +
+	"\vport_number\x18\x06 \x01(\x05R\n" +
+	"portNumber\x12\x1a\n" +
+	"\bprotocol\x18\a \x01(\tR\bprotocol\x12!\n" +
+	"\fworkload_uid\x18\b \x01(\tR\vworkloadUid\x12\x19\n" +
+	"\bpod_name\x18\t \x01(\tR\apodName\x12\x17\n" +
+	"\apod_uid\x18\n" +
+	" \x01(\tR\x06podUid\x12%\n" +
+	"\x0econtainer_name\x18\v \x01(\tR\rcontainerName\"\xa8\x01\n" +
+	"#ResourceSessionTerminationCommandV2\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12)\n" +
+	"\x10command_revision\x18\x02 \x01(\x03R\x0fcommandRevision\x12\x1f\n" +
+	"\vreason_code\x18\x03 \x01(\tR\n" +
+	"reasonCode\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\"k\n" +
+	"\x1fResourceSessionTerminationAckV2\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12)\n" +
+	"\x10command_revision\x18\x02 \x01(\x03R\x0fcommandRevision\"\xf8\x01\n" +
+	"\x16ResourceSessionEventV2\x12\x19\n" +
+	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x12'\n" +
+	"\x0fsource_sequence\x18\x03 \x01(\x03R\x0esourceSequence\x12\x1d\n" +
+	"\n" +
+	"event_type\x18\x04 \x01(\tR\teventType\x12;\n" +
+	"\voccurred_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"occurredAt\x12\x1f\n" +
+	"\vresult_code\x18\x06 \x01(\tR\n" +
+	"resultCode\"o\n" +
+	"\x19ResourceSessionEventAckV2\x12\x19\n" +
+	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x1f\n" +
+	"\vresult_code\x18\x02 \x01(\tR\n" +
+	"resultCode\x12\x16\n" +
+	"\x06replay\x18\x03 \x01(\bR\x06replay\"\xb0\x03\n" +
+	"$EndpointSessionAuthorizationReportV2\x12#\n" +
+	"\rendpoint_name\x18\x01 \x01(\tR\fendpointName\x12)\n" +
+	"\x10protocol_version\x18\x02 \x01(\tR\x0fprotocolVersion\x12M\n" +
+	"#authorization_snapshot_ack_revision\x18\x03 \x01(\x03R authorizationSnapshotAckRevision\x12E\n" +
+	"\x1fauthorization_snapshot_ack_hash\x18\x04 \x01(\tR\x1cauthorizationSnapshotAckHash\x12^\n" +
+	"\x10termination_acks\x18\x05 \x03(\v23.awecloud.signaling.ResourceSessionTerminationAckV2R\x0fterminationAcks\x12B\n" +
+	"\x06events\x18\x06 \x03(\v2*.awecloud.signaling.ResourceSessionEventV2R\x06events\"\xf3\x01\n" +
+	"&EndpointSessionAuthorizationSnapshotV2\x12#\n" +
+	"\rendpoint_name\x18\x01 \x01(\tR\fendpointName\x12V\n" +
+	"\bsnapshot\x18\x02 \x01(\v2:.awecloud.signaling.ResourceSessionAuthorizationSnapshotV2R\bsnapshot\x12L\n" +
+	"\n" +
+	"event_acks\x18\x03 \x03(\v2-.awecloud.signaling.ResourceSessionEventAckV2R\teventAcks\"\xc1\x01\n" +
 	"\x15SupplyInventoryConfig\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\tR\x0fprotocolVersion\x122\n" +
@@ -2664,14 +3703,17 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	"\tcommitted\x18\x06 \x01(\bR\tcommitted\x12\x1c\n" +
 	"\tretryable\x18\a \x01(\bR\tretryable\x12$\n" +
 	"\x0eretry_after_ms\x18\b \x01(\rR\fretryAfterMs\x12H\n" +
-	"\x12server_received_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\x10serverReceivedAt\"\xb6\x02\n" +
+	"\x12server_received_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\x10serverReceivedAt\"\xfc\x02\n" +
 	"\x14DiscoveredK8SService\x12\x1c\n" +
 	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12!\n" +
 	"\fservice_name\x18\x02 \x01(\tR\vserviceName\x12\x1d\n" +
 	"\n" +
 	"cluster_ip\x18\x03 \x01(\tR\tclusterIp\x125\n" +
 	"\x05ports\x18\x04 \x03(\v2\x1f.awecloud.signaling.ServicePortR\x05ports\x12L\n" +
-	"\x06labels\x18\x05 \x03(\v24.awecloud.signaling.DiscoveredK8SService.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\x05 \x03(\v24.awecloud.signaling.DiscoveredK8SService.LabelsEntryR\x06labels\x12\x1f\n" +
+	"\vservice_uid\x18\x06 \x01(\tR\n" +
+	"serviceUid\x12#\n" +
+	"\rnamespace_uid\x18\a \x01(\tR\fnamespaceUid\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"Q\n" +
@@ -2731,7 +3773,7 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	"\x04body\x18\x03 \x01(\fR\x04body\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa4\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa1\x03\n" +
 	"\x0fSVCProxyRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1c\n" +
@@ -2739,7 +3781,17 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	"\fservice_name\x18\x03 \x01(\tR\vserviceName\x12\x12\n" +
 	"\x04port\x18\x04 \x01(\x05R\x04port\x12\x1d\n" +
 	"\n" +
-	"cluster_ip\x18\x05 \x01(\tR\tclusterIp\"\xa9\x01\n" +
+	"cluster_ip\x18\x05 \x01(\tR\tclusterIp\x12\x1f\n" +
+	"\vresource_id\x18\x06 \x01(\tR\n" +
+	"resourceId\x12\x1b\n" +
+	"\tsource_id\x18\a \x01(\tR\bsourceId\x12,\n" +
+	"\x12target_revision_id\x18\b \x01(\tR\x10targetRevisionId\x12\x1f\n" +
+	"\vservice_uid\x18\t \x01(\tR\n" +
+	"serviceUid\x12\x1b\n" +
+	"\tport_name\x18\n" +
+	" \x01(\tR\bportName\x12\x1a\n" +
+	"\bprotocol\x18\v \x01(\tR\bprotocol\x125\n" +
+	"\x16authorization_revision\x18\f \x01(\x03R\x15authorizationRevision\"\xa9\x01\n" +
 	"\x14EndpointSVCProxyData\x12\x17\n" +
 	"\ais_open\x18\x01 \x01(\bR\x06isOpen\x12\x1d\n" +
 	"\n" +
@@ -2787,95 +3839,119 @@ func file_pkg_proto_endpoint_proto_rawDescGZIP() []byte {
 	return file_pkg_proto_endpoint_proto_rawDescData
 }
 
-var file_pkg_proto_endpoint_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
+var file_pkg_proto_endpoint_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
 var file_pkg_proto_endpoint_proto_goTypes = []any{
-	(*EndpointRegisterRequest)(nil),      // 0: awecloud.signaling.EndpointRegisterRequest
-	(*EndpointRegisterResponse)(nil),     // 1: awecloud.signaling.EndpointRegisterResponse
-	(*EndpointHeartbeatRequest)(nil),     // 2: awecloud.signaling.EndpointHeartbeatRequest
-	(*EndpointCapabilityInfo)(nil),       // 3: awecloud.signaling.EndpointCapabilityInfo
-	(*EndpointHeartbeatResponse)(nil),    // 4: awecloud.signaling.EndpointHeartbeatResponse
-	(*SupplyInventoryConfig)(nil),        // 5: awecloud.signaling.SupplyInventoryConfig
-	(*SupplyInventoryEnvelope)(nil),      // 6: awecloud.signaling.SupplyInventoryEnvelope
-	(*KubernetesClusterInventory)(nil),   // 7: awecloud.signaling.KubernetesClusterInventory
-	(*KubernetesNamespaceInventory)(nil), // 8: awecloud.signaling.KubernetesNamespaceInventory
-	(*SupplyInventoryAck)(nil),           // 9: awecloud.signaling.SupplyInventoryAck
-	(*WorkloadInventoryConfig)(nil),      // 10: awecloud.signaling.WorkloadInventoryConfig
-	(*WorkloadInventoryEnvelope)(nil),    // 11: awecloud.signaling.WorkloadInventoryEnvelope
-	(*WorkloadServicePort)(nil),          // 12: awecloud.signaling.WorkloadServicePort
-	(*WorkloadContainer)(nil),            // 13: awecloud.signaling.WorkloadContainer
-	(*WorkloadInventoryAck)(nil),         // 14: awecloud.signaling.WorkloadInventoryAck
-	(*DiscoveredK8SService)(nil),         // 15: awecloud.signaling.DiscoveredK8SService
-	(*ServicePort)(nil),                  // 16: awecloud.signaling.ServicePort
-	(*ShellRequest)(nil),                 // 17: awecloud.signaling.ShellRequest
-	(*ShellData)(nil),                    // 18: awecloud.signaling.ShellData
-	(*K8SAPIProxyRequest)(nil),           // 19: awecloud.signaling.K8SAPIProxyRequest
-	(*K8SAPIProxyData)(nil),              // 20: awecloud.signaling.K8SAPIProxyData
-	(*K8SAPIHTTPRequest)(nil),            // 21: awecloud.signaling.K8SAPIHTTPRequest
-	(*K8SAPIHTTPResponse)(nil),           // 22: awecloud.signaling.K8SAPIHTTPResponse
-	(*SVCProxyRequest)(nil),              // 23: awecloud.signaling.SVCProxyRequest
-	(*EndpointSVCProxyData)(nil),         // 24: awecloud.signaling.EndpointSVCProxyData
-	(*RawStreamRequest)(nil),             // 25: awecloud.signaling.RawStreamRequest
-	(*RawStreamData)(nil),                // 26: awecloud.signaling.RawStreamData
-	nil,                                  // 27: awecloud.signaling.KubernetesNamespaceInventory.LabelsEntry
-	nil,                                  // 28: awecloud.signaling.WorkloadServicePort.LabelsAllowlistEntry
-	nil,                                  // 29: awecloud.signaling.WorkloadContainer.LabelsAllowlistEntry
-	nil,                                  // 30: awecloud.signaling.DiscoveredK8SService.LabelsEntry
-	nil,                                  // 31: awecloud.signaling.K8SAPIHTTPRequest.HeadersEntry
-	nil,                                  // 32: awecloud.signaling.K8SAPIHTTPResponse.HeadersEntry
-	(*UpdateStatus)(nil),                 // 33: awecloud.signaling.UpdateStatus
-	(*UpdateDirective)(nil),              // 34: awecloud.signaling.UpdateDirective
-	(*timestamppb.Timestamp)(nil),        // 35: google.protobuf.Timestamp
+	(*EndpointRegisterRequest)(nil),                // 0: awecloud.signaling.EndpointRegisterRequest
+	(*EndpointRegisterResponse)(nil),               // 1: awecloud.signaling.EndpointRegisterResponse
+	(*EndpointHeartbeatRequest)(nil),               // 2: awecloud.signaling.EndpointHeartbeatRequest
+	(*EndpointCapabilityInfo)(nil),                 // 3: awecloud.signaling.EndpointCapabilityInfo
+	(*EndpointHeartbeatResponse)(nil),              // 4: awecloud.signaling.EndpointHeartbeatResponse
+	(*ResourceSessionAuthorizationSnapshotV2)(nil), // 5: awecloud.signaling.ResourceSessionAuthorizationSnapshotV2
+	(*ResourceSessionPermissionV2)(nil),            // 6: awecloud.signaling.ResourceSessionPermissionV2
+	(*ResourceSessionTargetV2)(nil),                // 7: awecloud.signaling.ResourceSessionTargetV2
+	(*ResourceSessionTerminationCommandV2)(nil),    // 8: awecloud.signaling.ResourceSessionTerminationCommandV2
+	(*ResourceSessionTerminationAckV2)(nil),        // 9: awecloud.signaling.ResourceSessionTerminationAckV2
+	(*ResourceSessionEventV2)(nil),                 // 10: awecloud.signaling.ResourceSessionEventV2
+	(*ResourceSessionEventAckV2)(nil),              // 11: awecloud.signaling.ResourceSessionEventAckV2
+	(*EndpointSessionAuthorizationReportV2)(nil),   // 12: awecloud.signaling.EndpointSessionAuthorizationReportV2
+	(*EndpointSessionAuthorizationSnapshotV2)(nil), // 13: awecloud.signaling.EndpointSessionAuthorizationSnapshotV2
+	(*SupplyInventoryConfig)(nil),                  // 14: awecloud.signaling.SupplyInventoryConfig
+	(*SupplyInventoryEnvelope)(nil),                // 15: awecloud.signaling.SupplyInventoryEnvelope
+	(*KubernetesClusterInventory)(nil),             // 16: awecloud.signaling.KubernetesClusterInventory
+	(*KubernetesNamespaceInventory)(nil),           // 17: awecloud.signaling.KubernetesNamespaceInventory
+	(*SupplyInventoryAck)(nil),                     // 18: awecloud.signaling.SupplyInventoryAck
+	(*WorkloadInventoryConfig)(nil),                // 19: awecloud.signaling.WorkloadInventoryConfig
+	(*WorkloadInventoryEnvelope)(nil),              // 20: awecloud.signaling.WorkloadInventoryEnvelope
+	(*WorkloadServicePort)(nil),                    // 21: awecloud.signaling.WorkloadServicePort
+	(*WorkloadContainer)(nil),                      // 22: awecloud.signaling.WorkloadContainer
+	(*WorkloadInventoryAck)(nil),                   // 23: awecloud.signaling.WorkloadInventoryAck
+	(*DiscoveredK8SService)(nil),                   // 24: awecloud.signaling.DiscoveredK8SService
+	(*ServicePort)(nil),                            // 25: awecloud.signaling.ServicePort
+	(*ShellRequest)(nil),                           // 26: awecloud.signaling.ShellRequest
+	(*ShellData)(nil),                              // 27: awecloud.signaling.ShellData
+	(*K8SAPIProxyRequest)(nil),                     // 28: awecloud.signaling.K8SAPIProxyRequest
+	(*K8SAPIProxyData)(nil),                        // 29: awecloud.signaling.K8SAPIProxyData
+	(*K8SAPIHTTPRequest)(nil),                      // 30: awecloud.signaling.K8SAPIHTTPRequest
+	(*K8SAPIHTTPResponse)(nil),                     // 31: awecloud.signaling.K8SAPIHTTPResponse
+	(*SVCProxyRequest)(nil),                        // 32: awecloud.signaling.SVCProxyRequest
+	(*EndpointSVCProxyData)(nil),                   // 33: awecloud.signaling.EndpointSVCProxyData
+	(*RawStreamRequest)(nil),                       // 34: awecloud.signaling.RawStreamRequest
+	(*RawStreamData)(nil),                          // 35: awecloud.signaling.RawStreamData
+	nil,                                            // 36: awecloud.signaling.KubernetesNamespaceInventory.LabelsEntry
+	nil,                                            // 37: awecloud.signaling.WorkloadServicePort.LabelsAllowlistEntry
+	nil,                                            // 38: awecloud.signaling.WorkloadContainer.LabelsAllowlistEntry
+	nil,                                            // 39: awecloud.signaling.DiscoveredK8SService.LabelsEntry
+	nil,                                            // 40: awecloud.signaling.K8SAPIHTTPRequest.HeadersEntry
+	nil,                                            // 41: awecloud.signaling.K8SAPIHTTPResponse.HeadersEntry
+	(*UpdateStatus)(nil),                           // 42: awecloud.signaling.UpdateStatus
+	(*UpdateDirective)(nil),                        // 43: awecloud.signaling.UpdateDirective
+	(*timestamppb.Timestamp)(nil),                  // 44: google.protobuf.Timestamp
 }
 var file_pkg_proto_endpoint_proto_depIdxs = []int32{
 	3,  // 0: awecloud.signaling.EndpointHeartbeatRequest.capabilities:type_name -> awecloud.signaling.EndpointCapabilityInfo
-	15, // 1: awecloud.signaling.EndpointHeartbeatRequest.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
-	33, // 2: awecloud.signaling.EndpointHeartbeatRequest.update_statuses:type_name -> awecloud.signaling.UpdateStatus
-	17, // 3: awecloud.signaling.EndpointHeartbeatResponse.shell_requests:type_name -> awecloud.signaling.ShellRequest
-	19, // 4: awecloud.signaling.EndpointHeartbeatResponse.k8sapi_proxy_requests:type_name -> awecloud.signaling.K8SAPIProxyRequest
-	23, // 5: awecloud.signaling.EndpointHeartbeatResponse.svc_proxy_requests:type_name -> awecloud.signaling.SVCProxyRequest
-	25, // 6: awecloud.signaling.EndpointHeartbeatResponse.raw_stream_requests:type_name -> awecloud.signaling.RawStreamRequest
-	34, // 7: awecloud.signaling.EndpointHeartbeatResponse.update_directives:type_name -> awecloud.signaling.UpdateDirective
-	5,  // 8: awecloud.signaling.EndpointHeartbeatResponse.supply_inventory_config:type_name -> awecloud.signaling.SupplyInventoryConfig
-	10, // 9: awecloud.signaling.EndpointHeartbeatResponse.workload_inventory_config:type_name -> awecloud.signaling.WorkloadInventoryConfig
-	35, // 10: awecloud.signaling.SupplyInventoryEnvelope.observed_at:type_name -> google.protobuf.Timestamp
-	35, // 11: awecloud.signaling.SupplyInventoryEnvelope.sent_at:type_name -> google.protobuf.Timestamp
-	7,  // 12: awecloud.signaling.SupplyInventoryEnvelope.kubernetes_clusters:type_name -> awecloud.signaling.KubernetesClusterInventory
-	8,  // 13: awecloud.signaling.KubernetesClusterInventory.namespaces:type_name -> awecloud.signaling.KubernetesNamespaceInventory
-	27, // 14: awecloud.signaling.KubernetesNamespaceInventory.labels:type_name -> awecloud.signaling.KubernetesNamespaceInventory.LabelsEntry
-	35, // 15: awecloud.signaling.WorkloadInventoryEnvelope.observed_at:type_name -> google.protobuf.Timestamp
-	35, // 16: awecloud.signaling.WorkloadInventoryEnvelope.sent_at:type_name -> google.protobuf.Timestamp
-	12, // 17: awecloud.signaling.WorkloadInventoryEnvelope.service_ports:type_name -> awecloud.signaling.WorkloadServicePort
-	13, // 18: awecloud.signaling.WorkloadInventoryEnvelope.containers:type_name -> awecloud.signaling.WorkloadContainer
-	28, // 19: awecloud.signaling.WorkloadServicePort.labels_allowlist:type_name -> awecloud.signaling.WorkloadServicePort.LabelsAllowlistEntry
-	29, // 20: awecloud.signaling.WorkloadContainer.labels_allowlist:type_name -> awecloud.signaling.WorkloadContainer.LabelsAllowlistEntry
-	35, // 21: awecloud.signaling.WorkloadInventoryAck.server_received_at:type_name -> google.protobuf.Timestamp
-	16, // 22: awecloud.signaling.DiscoveredK8SService.ports:type_name -> awecloud.signaling.ServicePort
-	30, // 23: awecloud.signaling.DiscoveredK8SService.labels:type_name -> awecloud.signaling.DiscoveredK8SService.LabelsEntry
-	21, // 24: awecloud.signaling.K8SAPIProxyData.http_request:type_name -> awecloud.signaling.K8SAPIHTTPRequest
-	22, // 25: awecloud.signaling.K8SAPIProxyData.http_response:type_name -> awecloud.signaling.K8SAPIHTTPResponse
-	31, // 26: awecloud.signaling.K8SAPIHTTPRequest.headers:type_name -> awecloud.signaling.K8SAPIHTTPRequest.HeadersEntry
-	32, // 27: awecloud.signaling.K8SAPIHTTPResponse.headers:type_name -> awecloud.signaling.K8SAPIHTTPResponse.HeadersEntry
-	0,  // 28: awecloud.signaling.EndpointService.Register:input_type -> awecloud.signaling.EndpointRegisterRequest
-	2,  // 29: awecloud.signaling.EndpointService.Heartbeat:input_type -> awecloud.signaling.EndpointHeartbeatRequest
-	6,  // 30: awecloud.signaling.EndpointService.ReportSupplyInventory:input_type -> awecloud.signaling.SupplyInventoryEnvelope
-	11, // 31: awecloud.signaling.EndpointService.ReportWorkloadInventory:input_type -> awecloud.signaling.WorkloadInventoryEnvelope
-	18, // 32: awecloud.signaling.EndpointService.OpenShell:input_type -> awecloud.signaling.ShellData
-	20, // 33: awecloud.signaling.EndpointService.OpenK8SAPIProxy:input_type -> awecloud.signaling.K8SAPIProxyData
-	24, // 34: awecloud.signaling.EndpointService.OpenSVCProxy:input_type -> awecloud.signaling.EndpointSVCProxyData
-	26, // 35: awecloud.signaling.EndpointService.OpenRawStream:input_type -> awecloud.signaling.RawStreamData
-	1,  // 36: awecloud.signaling.EndpointService.Register:output_type -> awecloud.signaling.EndpointRegisterResponse
-	4,  // 37: awecloud.signaling.EndpointService.Heartbeat:output_type -> awecloud.signaling.EndpointHeartbeatResponse
-	9,  // 38: awecloud.signaling.EndpointService.ReportSupplyInventory:output_type -> awecloud.signaling.SupplyInventoryAck
-	14, // 39: awecloud.signaling.EndpointService.ReportWorkloadInventory:output_type -> awecloud.signaling.WorkloadInventoryAck
-	18, // 40: awecloud.signaling.EndpointService.OpenShell:output_type -> awecloud.signaling.ShellData
-	20, // 41: awecloud.signaling.EndpointService.OpenK8SAPIProxy:output_type -> awecloud.signaling.K8SAPIProxyData
-	24, // 42: awecloud.signaling.EndpointService.OpenSVCProxy:output_type -> awecloud.signaling.EndpointSVCProxyData
-	26, // 43: awecloud.signaling.EndpointService.OpenRawStream:output_type -> awecloud.signaling.RawStreamData
-	36, // [36:44] is the sub-list for method output_type
-	28, // [28:36] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	24, // 1: awecloud.signaling.EndpointHeartbeatRequest.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
+	42, // 2: awecloud.signaling.EndpointHeartbeatRequest.update_statuses:type_name -> awecloud.signaling.UpdateStatus
+	9,  // 3: awecloud.signaling.EndpointHeartbeatRequest.session_termination_acks:type_name -> awecloud.signaling.ResourceSessionTerminationAckV2
+	10, // 4: awecloud.signaling.EndpointHeartbeatRequest.resource_session_events:type_name -> awecloud.signaling.ResourceSessionEventV2
+	26, // 5: awecloud.signaling.EndpointHeartbeatResponse.shell_requests:type_name -> awecloud.signaling.ShellRequest
+	28, // 6: awecloud.signaling.EndpointHeartbeatResponse.k8sapi_proxy_requests:type_name -> awecloud.signaling.K8SAPIProxyRequest
+	32, // 7: awecloud.signaling.EndpointHeartbeatResponse.svc_proxy_requests:type_name -> awecloud.signaling.SVCProxyRequest
+	34, // 8: awecloud.signaling.EndpointHeartbeatResponse.raw_stream_requests:type_name -> awecloud.signaling.RawStreamRequest
+	43, // 9: awecloud.signaling.EndpointHeartbeatResponse.update_directives:type_name -> awecloud.signaling.UpdateDirective
+	14, // 10: awecloud.signaling.EndpointHeartbeatResponse.supply_inventory_config:type_name -> awecloud.signaling.SupplyInventoryConfig
+	19, // 11: awecloud.signaling.EndpointHeartbeatResponse.workload_inventory_config:type_name -> awecloud.signaling.WorkloadInventoryConfig
+	5,  // 12: awecloud.signaling.EndpointHeartbeatResponse.authorization_snapshot_v2:type_name -> awecloud.signaling.ResourceSessionAuthorizationSnapshotV2
+	11, // 13: awecloud.signaling.EndpointHeartbeatResponse.resource_session_event_acks:type_name -> awecloud.signaling.ResourceSessionEventAckV2
+	44, // 14: awecloud.signaling.ResourceSessionAuthorizationSnapshotV2.issued_at:type_name -> google.protobuf.Timestamp
+	44, // 15: awecloud.signaling.ResourceSessionAuthorizationSnapshotV2.valid_until:type_name -> google.protobuf.Timestamp
+	6,  // 16: awecloud.signaling.ResourceSessionAuthorizationSnapshotV2.permissions:type_name -> awecloud.signaling.ResourceSessionPermissionV2
+	8,  // 17: awecloud.signaling.ResourceSessionAuthorizationSnapshotV2.termination_commands:type_name -> awecloud.signaling.ResourceSessionTerminationCommandV2
+	44, // 18: awecloud.signaling.ResourceSessionPermissionV2.valid_until:type_name -> google.protobuf.Timestamp
+	7,  // 19: awecloud.signaling.ResourceSessionPermissionV2.target:type_name -> awecloud.signaling.ResourceSessionTargetV2
+	44, // 20: awecloud.signaling.ResourceSessionEventV2.occurred_at:type_name -> google.protobuf.Timestamp
+	9,  // 21: awecloud.signaling.EndpointSessionAuthorizationReportV2.termination_acks:type_name -> awecloud.signaling.ResourceSessionTerminationAckV2
+	10, // 22: awecloud.signaling.EndpointSessionAuthorizationReportV2.events:type_name -> awecloud.signaling.ResourceSessionEventV2
+	5,  // 23: awecloud.signaling.EndpointSessionAuthorizationSnapshotV2.snapshot:type_name -> awecloud.signaling.ResourceSessionAuthorizationSnapshotV2
+	11, // 24: awecloud.signaling.EndpointSessionAuthorizationSnapshotV2.event_acks:type_name -> awecloud.signaling.ResourceSessionEventAckV2
+	44, // 25: awecloud.signaling.SupplyInventoryEnvelope.observed_at:type_name -> google.protobuf.Timestamp
+	44, // 26: awecloud.signaling.SupplyInventoryEnvelope.sent_at:type_name -> google.protobuf.Timestamp
+	16, // 27: awecloud.signaling.SupplyInventoryEnvelope.kubernetes_clusters:type_name -> awecloud.signaling.KubernetesClusterInventory
+	17, // 28: awecloud.signaling.KubernetesClusterInventory.namespaces:type_name -> awecloud.signaling.KubernetesNamespaceInventory
+	36, // 29: awecloud.signaling.KubernetesNamespaceInventory.labels:type_name -> awecloud.signaling.KubernetesNamespaceInventory.LabelsEntry
+	44, // 30: awecloud.signaling.WorkloadInventoryEnvelope.observed_at:type_name -> google.protobuf.Timestamp
+	44, // 31: awecloud.signaling.WorkloadInventoryEnvelope.sent_at:type_name -> google.protobuf.Timestamp
+	21, // 32: awecloud.signaling.WorkloadInventoryEnvelope.service_ports:type_name -> awecloud.signaling.WorkloadServicePort
+	22, // 33: awecloud.signaling.WorkloadInventoryEnvelope.containers:type_name -> awecloud.signaling.WorkloadContainer
+	37, // 34: awecloud.signaling.WorkloadServicePort.labels_allowlist:type_name -> awecloud.signaling.WorkloadServicePort.LabelsAllowlistEntry
+	38, // 35: awecloud.signaling.WorkloadContainer.labels_allowlist:type_name -> awecloud.signaling.WorkloadContainer.LabelsAllowlistEntry
+	44, // 36: awecloud.signaling.WorkloadInventoryAck.server_received_at:type_name -> google.protobuf.Timestamp
+	25, // 37: awecloud.signaling.DiscoveredK8SService.ports:type_name -> awecloud.signaling.ServicePort
+	39, // 38: awecloud.signaling.DiscoveredK8SService.labels:type_name -> awecloud.signaling.DiscoveredK8SService.LabelsEntry
+	30, // 39: awecloud.signaling.K8SAPIProxyData.http_request:type_name -> awecloud.signaling.K8SAPIHTTPRequest
+	31, // 40: awecloud.signaling.K8SAPIProxyData.http_response:type_name -> awecloud.signaling.K8SAPIHTTPResponse
+	40, // 41: awecloud.signaling.K8SAPIHTTPRequest.headers:type_name -> awecloud.signaling.K8SAPIHTTPRequest.HeadersEntry
+	41, // 42: awecloud.signaling.K8SAPIHTTPResponse.headers:type_name -> awecloud.signaling.K8SAPIHTTPResponse.HeadersEntry
+	0,  // 43: awecloud.signaling.EndpointService.Register:input_type -> awecloud.signaling.EndpointRegisterRequest
+	2,  // 44: awecloud.signaling.EndpointService.Heartbeat:input_type -> awecloud.signaling.EndpointHeartbeatRequest
+	15, // 45: awecloud.signaling.EndpointService.ReportSupplyInventory:input_type -> awecloud.signaling.SupplyInventoryEnvelope
+	20, // 46: awecloud.signaling.EndpointService.ReportWorkloadInventory:input_type -> awecloud.signaling.WorkloadInventoryEnvelope
+	27, // 47: awecloud.signaling.EndpointService.OpenShell:input_type -> awecloud.signaling.ShellData
+	29, // 48: awecloud.signaling.EndpointService.OpenK8SAPIProxy:input_type -> awecloud.signaling.K8SAPIProxyData
+	33, // 49: awecloud.signaling.EndpointService.OpenSVCProxy:input_type -> awecloud.signaling.EndpointSVCProxyData
+	35, // 50: awecloud.signaling.EndpointService.OpenRawStream:input_type -> awecloud.signaling.RawStreamData
+	1,  // 51: awecloud.signaling.EndpointService.Register:output_type -> awecloud.signaling.EndpointRegisterResponse
+	4,  // 52: awecloud.signaling.EndpointService.Heartbeat:output_type -> awecloud.signaling.EndpointHeartbeatResponse
+	18, // 53: awecloud.signaling.EndpointService.ReportSupplyInventory:output_type -> awecloud.signaling.SupplyInventoryAck
+	23, // 54: awecloud.signaling.EndpointService.ReportWorkloadInventory:output_type -> awecloud.signaling.WorkloadInventoryAck
+	27, // 55: awecloud.signaling.EndpointService.OpenShell:output_type -> awecloud.signaling.ShellData
+	29, // 56: awecloud.signaling.EndpointService.OpenK8SAPIProxy:output_type -> awecloud.signaling.K8SAPIProxyData
+	33, // 57: awecloud.signaling.EndpointService.OpenSVCProxy:output_type -> awecloud.signaling.EndpointSVCProxyData
+	35, // 58: awecloud.signaling.EndpointService.OpenRawStream:output_type -> awecloud.signaling.RawStreamData
+	51, // [51:59] is the sub-list for method output_type
+	43, // [43:51] is the sub-list for method input_type
+	43, // [43:43] is the sub-list for extension type_name
+	43, // [43:43] is the sub-list for extension extendee
+	0,  // [0:43] is the sub-list for field type_name
 }
 
 func init() { file_pkg_proto_endpoint_proto_init() }
@@ -2890,7 +3966,7 @@ func file_pkg_proto_endpoint_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_endpoint_proto_rawDesc), len(file_pkg_proto_endpoint_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   33,
+			NumMessages:   42,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

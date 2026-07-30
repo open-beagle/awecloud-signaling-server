@@ -383,7 +383,7 @@ const resourceSessionUpdateTriggerBody = `
 		OR NEW.session_type IS NOT OLD.session_type OR NEW.action IS NOT OLD.action
 		OR NEW.access_technical_resource_id IS NOT OLD.access_technical_resource_id
 		OR NEW.authorization_revision IS NOT OLD.authorization_revision
-		OR NEW.valid_until IS NOT OLD.valid_until OR NEW.request_id IS NOT OLD.request_id
+		OR NEW.request_id IS NOT OLD.request_id
 		OR NEW.started_at IS NOT OLD.started_at
 		THEN RAISE(ABORT, 'S4_RESOURCE_SESSION_IDENTITY_IMMUTABLE') END;
 	SELECT CASE WHEN NEW.row_version <> OLD.row_version + 1

@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
@@ -157,6 +159,10 @@ type EndpointServer struct {
 	supplyInventoryMutex     sync.Mutex
 	workloadInventoryStreams map[string]bool
 	workloadInventoryMutex   sync.Mutex
+	authorizationSnapshots   map[string]*pb.EndpointSessionAuthorizationSnapshotV2
+	authorizationCaches      map[string]*SessionAuthorizationCache
+	authorizationReports     map[string]*pb.EndpointSessionAuthorizationReportV2
+	authorizationMutex       sync.RWMutex
 
 	// Endpoint 代理对象（用于端口分配）
 	sshProxy    *EndpointSSHProxy
@@ -186,9 +192,151 @@ func NewEndpointServer(listenPort int, token string, parentCtx context.Context) 
 		updateDirectives:         make(map[string][]*pb.UpdateDirective),
 		supplyInventoryStreams:   make(map[string]bool),
 		workloadInventoryStreams: make(map[string]bool),
+		authorizationSnapshots:   make(map[string]*pb.EndpointSessionAuthorizationSnapshotV2),
+		authorizationCaches:      make(map[string]*SessionAuthorizationCache),
+		authorizationReports:     make(map[string]*pb.EndpointSessionAuthorizationReportV2),
 		ctx:                      ctx,
 		cancel:                   cancel,
 	}
+}
+
+func (s *EndpointServer) SetSessionAuthorizationSnapshots(wrappers []*pb.EndpointSessionAuthorizationSnapshotV2) {
+	if s == nil {
+		return
+	}
+	now := time.Now().UTC()
+	nextSnapshots := make(map[string]*pb.EndpointSessionAuthorizationSnapshotV2)
+	nextCaches := make(map[string]*SessionAuthorizationCache)
+	s.authorizationMutex.Lock()
+	defer s.authorizationMutex.Unlock()
+	for _, wrapper := range wrappers {
+		if wrapper == nil || wrapper.EndpointName == "" {
+			continue
+		}
+		copy := proto.Clone(wrapper).(*pb.EndpointSessionAuthorizationSnapshotV2)
+		previousSnapshot := s.authorizationSnapshots[copy.EndpointName]
+		cache := s.authorizationCaches[copy.EndpointName]
+		if copy.Snapshot != nil {
+			if cache == nil {
+				cache = NewSessionAuthorizationCache()
+			}
+			if err := cache.Apply(copy.Snapshot, now); err != nil {
+				logger.Warnf("拒绝 Endpoint Session 授权快照: endpoint=%s revision=%d err=%v", copy.EndpointName, copy.Snapshot.Revision, err)
+				if previousSnapshot != nil && previousSnapshot.Snapshot != nil {
+					copy.Snapshot = proto.Clone(previousSnapshot.Snapshot).(*pb.ResourceSessionAuthorizationSnapshotV2)
+				} else {
+					copy.Snapshot = nil
+				}
+			}
+		} else if previousSnapshot != nil && previousSnapshot.Snapshot != nil {
+			copy.Snapshot = proto.Clone(previousSnapshot.Snapshot).(*pb.ResourceSessionAuthorizationSnapshotV2)
+		}
+		if cache != nil {
+			nextCaches[copy.EndpointName] = cache
+		}
+		nextSnapshots[copy.EndpointName] = copy
+	}
+	s.authorizationSnapshots = nextSnapshots
+	s.authorizationCaches = nextCaches
+}
+
+func (s *EndpointServer) SessionAuthorizationReports() []*pb.EndpointSessionAuthorizationReportV2 {
+	if s == nil {
+		return nil
+	}
+	s.authorizationMutex.RLock()
+	defer s.authorizationMutex.RUnlock()
+	result := make([]*pb.EndpointSessionAuthorizationReportV2, 0, len(s.authorizationReports))
+	for _, report := range s.authorizationReports {
+		result = append(result, proto.Clone(report).(*pb.EndpointSessionAuthorizationReportV2))
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].EndpointName < result[j].EndpointName })
+	return result
+}
+
+func (s *EndpointServer) ResolveSessionAuthorization(sessionID string, now time.Time) (string, *pb.ResourceSessionPermissionV2, bool) {
+	if s == nil || sessionID == "" {
+		return "", nil, false
+	}
+	s.authorizationMutex.RLock()
+	defer s.authorizationMutex.RUnlock()
+	for endpointName, cache := range s.authorizationCaches {
+		if !cache.Enabled(now) {
+			continue
+		}
+		if permission, ok := cache.Permission(sessionID, now); ok {
+			return endpointName, permission, true
+		}
+	}
+	return "", nil, false
+}
+
+func (s *EndpointServer) SessionAuthorizationEnforced() bool {
+	if s == nil {
+		return false
+	}
+	s.authorizationMutex.RLock()
+	defer s.authorizationMutex.RUnlock()
+	for _, cache := range s.authorizationCaches {
+		if cache.EnforceV2() {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *EndpointServer) recordSessionAuthorizationReport(name string, req *pb.EndpointHeartbeatRequest) {
+	if s == nil || name == "" || req == nil {
+		return
+	}
+	report := &pb.EndpointSessionAuthorizationReportV2{
+		EndpointName: name, ProtocolVersion: req.SessionAuthorizationProtocol,
+		AuthorizationSnapshotAckRevision: req.AuthorizationSnapshotAckRevision,
+		AuthorizationSnapshotAckHash:     req.AuthorizationSnapshotAckHash,
+		TerminationAcks:                  cloneTerminationAcks(req.SessionTerminationAcks),
+		Events:                           cloneResourceSessionEvents(req.ResourceSessionEvents),
+	}
+	s.authorizationMutex.Lock()
+	s.authorizationReports[name] = report
+	s.authorizationMutex.Unlock()
+}
+
+func (s *EndpointServer) appendSessionAuthorizationResponse(name string, resp *pb.EndpointHeartbeatResponse) {
+	if s == nil || resp == nil {
+		return
+	}
+	s.authorizationMutex.RLock()
+	wrapper := s.authorizationSnapshots[name]
+	s.authorizationMutex.RUnlock()
+	if wrapper == nil {
+		return
+	}
+	if wrapper.Snapshot != nil {
+		resp.AuthorizationSnapshotV2 = proto.Clone(wrapper.Snapshot).(*pb.ResourceSessionAuthorizationSnapshotV2)
+	}
+	for _, ack := range wrapper.EventAcks {
+		resp.ResourceSessionEventAcks = append(resp.ResourceSessionEventAcks, proto.Clone(ack).(*pb.ResourceSessionEventAckV2))
+	}
+}
+
+func cloneTerminationAcks(values []*pb.ResourceSessionTerminationAckV2) []*pb.ResourceSessionTerminationAckV2 {
+	result := make([]*pb.ResourceSessionTerminationAckV2, 0, len(values))
+	for _, value := range values {
+		if value != nil {
+			result = append(result, proto.Clone(value).(*pb.ResourceSessionTerminationAckV2))
+		}
+	}
+	return result
+}
+
+func cloneResourceSessionEvents(values []*pb.ResourceSessionEventV2) []*pb.ResourceSessionEventV2 {
+	result := make([]*pb.ResourceSessionEventV2, 0, len(values))
+	for _, value := range values {
+		if value != nil {
+			result = append(result, proto.Clone(value).(*pb.ResourceSessionEventV2))
+		}
+	}
+	return result
 }
 
 func (s *EndpointServer) SetSupplyInventoryClient(client pb.AgentServiceClient) {
@@ -400,6 +548,7 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 
 	name := firstReq.Name
 	logger.Debugf("Endpoint 心跳流建立: name=%s", name)
+	s.recordSessionAuthorizationReport(name, firstReq)
 
 	// 注册连接（解析能力信息和配置）
 	conn := &EndpointConnection{
@@ -463,6 +612,11 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 		s.connMutex.Lock()
 		delete(s.connections, name)
 		s.connMutex.Unlock()
+		s.authorizationMutex.Lock()
+		delete(s.authorizationReports, name)
+		delete(s.authorizationCaches, name)
+		delete(s.authorizationSnapshots, name)
+		s.authorizationMutex.Unlock()
 		logger.Debugf("Endpoint 心跳流断开: name=%s", name)
 	}()
 
@@ -483,6 +637,7 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 		firstResp.SupplyInventoryConfig = cfg.SupplyInventory
 		firstResp.WorkloadInventoryConfig = cfg.WorkloadInventory
 	}
+	s.appendSessionAuthorizationResponse(name, firstResp)
 	if err := stream.Send(firstResp); err != nil {
 		return err
 	}
@@ -520,6 +675,7 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 			// 更新 K8S Service 配置
 			conn.K8SServiceLabelSelector = req.K8SserviceLabelSelector
 			conn.K8SServiceNamespaces = req.K8SserviceNamespaces
+			s.recordSessionAuthorizationReport(name, req)
 
 			// 取出待下发的请求
 			s.pendingMutex.Lock()
@@ -550,6 +706,7 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 				resp.SupplyInventoryConfig = cfg.SupplyInventory
 				resp.WorkloadInventoryConfig = cfg.WorkloadInventory
 			}
+			s.appendSessionAuthorizationResponse(name, resp)
 			if err := stream.Send(resp); err != nil {
 				return err
 			}
@@ -870,6 +1027,27 @@ func (s *EndpointServer) OpenSVCProxy(stream pb.EndpointService_OpenSVCProxyServ
 // RequestSVCProxy 请求 Endpoint 开启 K8S Service 代理会话
 // 创建 session → 通知 Endpoint → 等待回调 → 返回 gRPC 流
 func (s *EndpointServer) RequestSVCProxy(ctx context.Context, endpointName, namespace, serviceName, clusterIP string, port int32) (pb.EndpointService_OpenSVCProxyServer, error) {
+	return s.requestSVCProxy(ctx, endpointName, &pb.SVCProxyRequest{
+		SessionId: uuid.New().String(), Namespace: namespace, ServiceName: serviceName, Port: port, ClusterIp: clusterIP,
+	})
+}
+
+func (s *EndpointServer) RequestSVCProxyV2(ctx context.Context, endpointName string, permission *pb.ResourceSessionPermissionV2) (pb.EndpointService_OpenSVCProxyServer, error) {
+	if permission == nil || permission.Target == nil || permission.SessionId == "" || permission.ResourceType != "container_service" {
+		return nil, fmt.Errorf("invalid Endpoint resource_session_v2 permission")
+	}
+	target := permission.Target
+	return s.requestSVCProxy(ctx, endpointName, &pb.SVCProxyRequest{
+		SessionId: permission.SessionId, Namespace: target.NamespaceName, ServiceName: target.ServiceName, Port: target.PortNumber,
+		ResourceId: permission.ResourceId, SourceId: permission.SourceId, TargetRevisionId: permission.TargetRevisionId,
+		ServiceUid: target.ServiceUid, PortName: target.PortName, Protocol: target.Protocol, AuthorizationRevision: permission.AuthorizationRevision,
+	})
+}
+
+func (s *EndpointServer) requestSVCProxy(ctx context.Context, endpointName string, req *pb.SVCProxyRequest) (pb.EndpointService_OpenSVCProxyServer, error) {
+	if req == nil || req.SessionId == "" {
+		return nil, fmt.Errorf("invalid SVCProxy request")
+	}
 	// 检查 Endpoint 是否在线
 	s.connMutex.RLock()
 	_, connected := s.connections[endpointName]
@@ -879,12 +1057,12 @@ func (s *EndpointServer) RequestSVCProxy(ctx context.Context, endpointName, name
 	}
 
 	// 创建 session
-	sessionID := uuid.New().String()
+	sessionID := req.SessionId
 	session := &svcProxySession{
 		sessionID:   sessionID,
-		namespace:   namespace,
-		serviceName: serviceName,
-		port:        port,
+		namespace:   req.Namespace,
+		serviceName: req.ServiceName,
+		port:        req.Port,
 		streamCh:    make(chan pb.EndpointService_OpenSVCProxyServer, 1),
 		createdAt:   time.Now(),
 	}
@@ -899,19 +1077,11 @@ func (s *EndpointServer) RequestSVCProxy(ctx context.Context, endpointName, name
 		s.svcProxyMutex.Unlock()
 	}()
 
-	// 将请求加入待下发队列（携带 ClusterIP，供物理节点 Endpoint 直连）
-	req := &pb.SVCProxyRequest{
-		SessionId:   sessionID,
-		Namespace:   namespace,
-		ServiceName: serviceName,
-		Port:        port,
-		ClusterIp:   clusterIP,
-	}
 	s.pendingMutex.Lock()
 	s.pendingSVCReqs[endpointName] = append(s.pendingSVCReqs[endpointName], req)
 	s.pendingMutex.Unlock()
 
-	logger.Infof("SVC 代理请求已排队: session_id=%s, endpoint=%s, %s/%s:%d (clusterIP=%s)", sessionID, endpointName, namespace, serviceName, port, clusterIP)
+	logger.Infof("SVC 代理请求已排队: session_id=%s, endpoint=%s, %s/%s:%d", sessionID, endpointName, req.Namespace, req.ServiceName, req.Port)
 
 	// 等待 Endpoint 回调（超时 30 秒）
 	select {

@@ -332,6 +332,12 @@ func TestTenantResourceConstraintsPreserveTrustedResourceAndSessionChain(t *test
 		require.NoError(t, DB.Create(&session).Error)
 		groupSession := fixture.session("session-group", fixture.groupGrant)
 		require.NoError(t, DB.Create(&groupSession).Error)
+		require.NoError(t, DB.Model(&model.ResourceSession{}).Where("id = ?", groupSession.ID).Updates(map[string]any{
+			"valid_until": fixture.now.Add(time.Minute), "row_version": int64(2),
+		}).Error)
+		requireS4ConstraintError(t, DB.Model(&model.ResourceSession{}).Where("id = ?", groupSession.ID).Updates(map[string]any{
+			"authorization_revision": int64(2), "row_version": int64(3),
+		}).Error, "S4_RESOURCE_SESSION_IDENTITY_IMMUTABLE")
 
 		wrongDevice := fixture.session("session-wrong-device", fixture.grant)
 		wrongDevice.DeviceID = fixture.otherDesktop.ID

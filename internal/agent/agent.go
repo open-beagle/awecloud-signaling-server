@@ -53,14 +53,15 @@ type Agent struct {
 	tailscaleIP    string
 
 	// K8S 能力（P1 新增）
-	permCache           *PermissionCache       // 权限缓存
-	k8sAPIProxy         *K8SAPIProxy           // K8S API 反向代理
-	svcInformer         *K8SServiceInformer    // K8S Service Informer
-	svcProxy            *K8SSVCProxy           // K8S Service gRPC 代理
-	containerDiscovery  *K8SContainerDiscovery // ContainerSSH Pod 候选发现
-	containerExecBroker *ContainerExecBroker   // ContainerSSH Kubernetes Exec 数据面
-	containerSSHProxy   *ContainerSSHProxy     // ContainerSSH tsnet SSH 入口
-	containerSessions   *ContainerSessionManager
+	permCache             *PermissionCache       // 权限缓存
+	k8sAPIProxy           *K8SAPIProxy           // K8S API 反向代理
+	svcInformer           *K8SServiceInformer    // K8S Service Informer
+	svcProxy              *K8SSVCProxy           // K8S Service gRPC 代理
+	containerDiscovery    *K8SContainerDiscovery // ContainerSSH Pod 候选发现
+	containerExecBroker   *ContainerExecBroker   // ContainerSSH Kubernetes Exec 数据面
+	containerSSHProxy     *ContainerSSHProxy     // ContainerSSH tsnet SSH 入口
+	containerSessions     *ContainerSessionManager
+	sessionAuthorizations *SessionAuthorizationCache
 
 	// Endpoint 能力（P2 新增）
 	endpointServer      *EndpointServer      // Endpoint 内网 gRPC Server
@@ -142,6 +143,13 @@ func (a *Agent) Run() error {
 
 	// 初始化权限缓存（K8S 模块共用）
 	a.permCache = NewPermissionCache()
+	sessions, sessionErr := NewPersistentContainerSessionManager(a.config.Tunnel.StateDir)
+	if sessionErr != nil {
+		logger.Errorf("初始化 ResourceSession v2 持久队列失败，v2 授权保持关闭: %v", sessionErr)
+	} else {
+		a.containerSessions = sessions
+		a.sessionAuthorizations = NewSessionAuthorizationCache()
+	}
 
 	// 启动 K8S API 代理（如果配置启用）
 	if a.config.K8S.Enabled {
@@ -787,6 +795,15 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 		req.ContainerSshProtocol = "v1"
 		req.ContainerSshSessionEvents = a.containerSessions.EventsForHeartbeat()
 	}
+	if a.sessionAuthorizations != nil && a.containerSessions != nil {
+		req.SessionAuthorizationProtocol = sessionAuthorizationProtocolV2
+		req.AuthorizationSnapshotAckRevision, req.AuthorizationSnapshotAckHash = a.sessionAuthorizations.Ack()
+		req.SessionTerminationAcks = a.containerSessions.TerminationAcksForHeartbeat()
+		req.ResourceSessionEventsV2 = a.containerSessions.ResourceEventsForHeartbeat()
+	}
+	if a.endpointServer != nil {
+		req.EndpointSessionAuthorizationReportsV2 = a.endpointServer.SessionAuthorizationReports()
+	}
 
 	// 添加设备名称（Node.Name，即 DeployToken.Name）
 	if a.deviceName != "" {
@@ -912,6 +929,28 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 
 // handleHeartbeatResponse 处理心跳响应（配置同步）
 func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
+	if a.endpointServer != nil {
+		a.endpointServer.SetSessionAuthorizationSnapshots(resp.EndpointAuthorizationSnapshotsV2)
+	}
+	if a.sessionAuthorizations != nil && a.containerSessions != nil {
+		if err := a.containerSessions.AckResourceEvents(resp.ResourceSessionEventAcksV2); err != nil {
+			logger.Errorf("持久化 ResourceSession Event ACK 失败: %v", err)
+		}
+		if resp.AuthorizationSnapshotV2 != nil {
+			now := time.Now().UTC()
+			if err := a.sessionAuthorizations.Apply(resp.AuthorizationSnapshotV2, now); err != nil {
+				logger.Warnf("拒绝 ResourceSession v2 授权快照: revision=%d err=%v", resp.AuthorizationSnapshotV2.Revision, err)
+			} else if err := a.containerSessions.ApplyTerminationCommands(a.sessionAuthorizations.Commands()); err != nil {
+				logger.Errorf("应用 ResourceSession 终止命令失败，快照不 ACK: revision=%d err=%v", resp.AuthorizationSnapshotV2.Revision, err)
+			} else {
+				a.containerSessions.ReconcileV2(a.sessionAuthorizations, now)
+				revision, payloadHash := a.sessionAuthorizations.Current()
+				if err := a.sessionAuthorizations.CommitAck(revision, payloadHash); err != nil {
+					logger.Errorf("提交 ResourceSession 快照 ACK 失败: revision=%d err=%v", revision, err)
+				}
+			}
+		}
+	}
 	// 更新域名后缀
 	if resp.DomainSuffix != "" {
 		a.domainSuffix = resp.DomainSuffix
@@ -1313,6 +1352,7 @@ func (a *Agent) startK8SServiceModules() error {
 	if err != nil {
 		return fmt.Errorf("创建 K8S SVCProxy 失败: %w", err)
 	}
+	svcProxy.SetSessionAuthorizations(a.sessionAuthorizations, a.containerSessions)
 
 	if err := svcProxy.Start(); err != nil {
 		return fmt.Errorf("启动 K8S SVCProxy 失败: %w", err)
@@ -1344,7 +1384,10 @@ func (a *Agent) startK8SContainerDiscovery() error {
 		a.containerExecBroker = nil
 		return fmt.Errorf("启动 ContainerSSH 入口需要已连接的 Tailscale")
 	}
-	sessions := NewContainerSessionManager()
+	sessions := a.containerSessions
+	if sessions == nil {
+		sessions = NewContainerSessionManager()
+	}
 	proxy, err := NewContainerSSHProxy(a.tsManager, a.permCache, broker, sessions, a.config.Tunnel.StateDir, a.ctx)
 	if err != nil {
 		discovery.Stop()
@@ -1352,6 +1395,7 @@ func (a *Agent) startK8SContainerDiscovery() error {
 		a.containerExecBroker = nil
 		return fmt.Errorf("创建 ContainerSSH 入口失败: %w", err)
 	}
+	proxy.SetSessionAuthorizations(a.sessionAuthorizations)
 	if err := proxy.Start(); err != nil {
 		discovery.Stop()
 		a.containerDiscovery = nil

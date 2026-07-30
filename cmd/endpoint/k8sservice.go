@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
@@ -13,8 +15,18 @@ import (
 
 // handleSVCProxyRequest 处理来自 Agent 的 K8S Service 代理请求
 // 通过 gRPC OpenSVCProxy 双向流，桥接 Agent 和本地 K8S Service ClusterIP
-func handleSVCProxyRequest(ctx context.Context, client pb.EndpointServiceClient, cfg *EndpointConfig, req *pb.SVCProxyRequest) {
+func handleSVCProxyRequest(ctx context.Context, client pb.EndpointServiceClient, cfg *EndpointConfig, req *pb.SVCProxyRequest, authorization *endpointSessionAuthorization, discovery *K8SServiceDiscovery) {
 	logger.Infof("收到 SVC 代理请求: session_id=%s, %s/%s:%d", req.SessionId, req.Namespace, req.ServiceName, req.Port)
+	now := time.Now().UTC()
+	requireV2 := endpointRequestHasV2Fields(req) || (authorization != nil && authorization.enforceV2())
+	if requireV2 {
+		if authorization == nil || !authorization.enabled(now) {
+			logger.Warnf("Endpoint SVCProxy v2 权限缓存不可用，拒绝请求: session_id=%s", req.SessionId)
+			return
+		}
+		handleSVCProxyRequestV2(ctx, client, cfg, req, authorization, discovery)
+		return
+	}
 
 	// 建立 OpenSVCProxy gRPC 流
 	stream, err := client.OpenSVCProxy(ctx)
@@ -118,4 +130,114 @@ func handleSVCProxyRequest(ctx context.Context, client pb.EndpointServiceClient,
 
 	wg.Wait()
 	logger.Infof("SVC 代理已关闭: session_id=%s", req.SessionId)
+}
+
+func endpointRequestHasV2Fields(req *pb.SVCProxyRequest) bool {
+	return req != nil && (req.ResourceId != "" || req.SourceId != "" || req.TargetRevisionId != "" ||
+		req.ServiceUid != "" || req.PortName != "" || req.Protocol != "" || req.AuthorizationRevision != 0)
+}
+
+func handleSVCProxyRequestV2(ctx context.Context, client pb.EndpointServiceClient, cfg *EndpointConfig, req *pb.SVCProxyRequest, authorization *endpointSessionAuthorization, discovery *K8SServiceDiscovery) {
+	now := time.Now().UTC()
+	permission, allowed := authorization.cache.Permission(req.SessionId, now)
+	if !allowed || !endpointSVCRequestMatchesPermission(req, permission) {
+		logger.Warnf("Endpoint SVCProxy v2 权限拒绝: session_id=%s", req.SessionId)
+		return
+	}
+	if discovery == nil {
+		_ = authorization.sessions.FailV2(req.SessionId, "SERVICE_TARGET_UNAVAILABLE")
+		logger.Warnf("Endpoint SVCProxy v2 本地 Service 发现不可用: session_id=%s", req.SessionId)
+		return
+	}
+	clusterIP, matched := discovery.ResolveService(req.Namespace, req.ServiceName, req.ServiceUid, req.PortName, req.Port, req.Protocol)
+	if !matched {
+		_ = authorization.sessions.FailV2(req.SessionId, "SERVICE_TARGET_CHANGED")
+		logger.Warnf("Endpoint SVCProxy v2 本地 Service UID/Port/Protocol 不匹配: session_id=%s", req.SessionId)
+		return
+	}
+	targetAddr := net.JoinHostPort(clusterIP, strconv.Itoa(int(req.Port)))
+	targetConn, err := net.Dial("tcp", targetAddr)
+	if err != nil {
+		_ = authorization.sessions.FailV2(req.SessionId, "SERVICE_CONNECT_FAILED")
+		logger.Warnf("Endpoint SVCProxy v2 连接失败: session_id=%s target=%s err=%v", req.SessionId, targetAddr, err)
+		return
+	}
+	defer targetConn.Close()
+	sessionCtx, err := authorization.sessions.BeginV2(ctx, permission)
+	if err != nil {
+		logger.Warnf("Endpoint SVCProxy v2 会话注册失败: session_id=%s err=%v", req.SessionId, err)
+		return
+	}
+	stream, err := client.OpenSVCProxy(sessionCtx)
+	if err != nil {
+		_ = authorization.sessions.EndV2(req.SessionId, "failed", "ENDPOINT_STREAM_FAILED")
+		return
+	}
+	if err := stream.Send(&pb.EndpointSVCProxyData{IsOpen: true, SessionId: req.SessionId, Token: cfg.Agent.Token}); err != nil {
+		_ = authorization.sessions.EndV2(req.SessionId, "failed", "ENDPOINT_STREAM_FAILED")
+		return
+	}
+
+	done := make(chan error, 2)
+	go func() {
+		for {
+			msg, recvErr := stream.Recv()
+			if recvErr != nil {
+				done <- recvErr
+				return
+			}
+			if msg.IsClose {
+				done <- nil
+				return
+			}
+			if len(msg.Data) > 0 {
+				if _, writeErr := targetConn.Write(msg.Data); writeErr != nil {
+					done <- writeErr
+					return
+				}
+			}
+		}
+	}()
+	go func() {
+		buf := make([]byte, 32*1024)
+		for {
+			n, readErr := targetConn.Read(buf)
+			if n > 0 {
+				if sendErr := stream.Send(&pb.EndpointSVCProxyData{Data: buf[:n]}); sendErr != nil {
+					done <- sendErr
+					return
+				}
+			}
+			if readErr != nil {
+				done <- readErr
+				return
+			}
+		}
+	}()
+
+	result, reason := "success", "stream_closed"
+	select {
+	case bridgeErr := <-done:
+		if bridgeErr != nil && bridgeErr != io.EOF {
+			result, reason = "failed", "SERVICE_STREAM_FAILED"
+		}
+	case <-sessionCtx.Done():
+		result, reason = "ended", "context_canceled"
+		_ = stream.Send(&pb.EndpointSVCProxyData{IsClose: true})
+	}
+	_ = targetConn.Close()
+	_ = stream.CloseSend()
+	if err := authorization.sessions.EndV2(req.SessionId, result, reason); err != nil {
+		logger.Errorf("Endpoint SVCProxy v2 会话事件持久化失败: session_id=%s err=%v", req.SessionId, err)
+	}
+	logger.Infof("Endpoint SVCProxy v2 已关闭: session_id=%s", req.SessionId)
+}
+
+func endpointSVCRequestMatchesPermission(req *pb.SVCProxyRequest, permission *pb.ResourceSessionPermissionV2) bool {
+	return req != nil && permission != nil && permission.ResourceType == "container_service" && permission.Target != nil &&
+		req.SessionId == permission.SessionId && req.ResourceId == permission.ResourceId && req.SourceId == permission.SourceId &&
+		req.TargetRevisionId == permission.TargetRevisionId && req.AuthorizationRevision == permission.AuthorizationRevision &&
+		req.Namespace == permission.Target.NamespaceName && req.ServiceName == permission.Target.ServiceName &&
+		req.ServiceUid == permission.Target.ServiceUid && req.PortName == permission.Target.PortName &&
+		req.Port == permission.Target.PortNumber && req.Protocol == permission.Target.Protocol && req.Protocol == "TCP" && req.ClusterIp == ""
 }

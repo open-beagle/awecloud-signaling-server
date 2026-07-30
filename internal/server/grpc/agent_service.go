@@ -41,14 +41,16 @@ func parseJSONStringArray(jsonStr string) []string {
 // AgentConnection Agent 连接信息
 // 以 NodeID 为 key 存储，同一 AgentID（UserID）下可以有多个 Node 同时在线
 type AgentConnection struct {
-	AgentID        uint64
-	NodeID         uint64 // 当前心跳流对应的 Node ID（connections map 的 key）
-	Stream         pb.AgentService_HeartbeatServer
-	TunnelIP       string
-	Connected      bool
-	LastSeen       time.Time
-	Cancel         context.CancelFunc
-	HeartbeatCount int // 心跳计数器，用于定期检查用户状态
+	AgentID                               uint64
+	NodeID                                uint64 // 当前心跳流对应的 Node ID（connections map 的 key）
+	Stream                                pb.AgentService_HeartbeatServer
+	TunnelIP                              string
+	Connected                             bool
+	LastSeen                              time.Time
+	Cancel                                context.CancelFunc
+	HeartbeatCount                        int // 心跳计数器，用于定期检查用户状态
+	SessionAuthorizationProtocol          string
+	EndpointSessionAuthorizationProtocols map[string]string
 }
 
 // AgentServiceServer Agent 服务实现
@@ -65,29 +67,34 @@ type AgentServiceServer struct {
 	requestImmediateReport bool
 	immediateReportMutex   sync.Mutex
 
-	headscaleClient          *headscale.Client
-	config                   *config.ServerConfig
-	domainService            *service.DomainService
-	updateService            *service.UpdateService
-	resourceReconciler       *service.ResourceReconciliationService
-	providerSupply           *service.ProviderSupplyService
-	workloadInventory        *service.WorkloadInventoryService
-	containerSessionAckMutex sync.Mutex
-	containerSessionAcks     map[uint64][]string
+	headscaleClient             *headscale.Client
+	config                      *config.ServerConfig
+	domainService               *service.DomainService
+	updateService               *service.UpdateService
+	resourceReconciler          *service.ResourceReconciliationService
+	providerSupply              *service.ProviderSupplyService
+	workloadInventory           *service.WorkloadInventoryService
+	sessionAuthorization        *service.SessionAuthorizationService
+	containerSessionAckMutex    sync.Mutex
+	containerSessionAcks        map[uint64][]string
+	authorizationSnapshotMutex  sync.Mutex
+	authorizationSnapshotStates map[string]*authorizationSnapshotState
 }
 
 // NewAgentServiceServer 创建 Agent 服务
 func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
 	s := &AgentServiceServer{
-		connections:          make(map[uint64]*AgentConnection),
-		configVersion:        time.Now().Unix(),
-		config:               cfg,
-		domainService:        service.NewDomainService(db.DB),
-		updateService:        service.NewUpdateService(db.DB),
-		resourceReconciler:   service.NewResourceReconciliationService(db.DB),
-		providerSupply:       service.NewProviderSupplyService(db.DB),
-		workloadInventory:    service.NewWorkloadInventoryService(db.DB),
-		containerSessionAcks: make(map[uint64][]string),
+		connections:                 make(map[uint64]*AgentConnection),
+		configVersion:               time.Now().Unix(),
+		config:                      cfg,
+		domainService:               service.NewDomainService(db.DB),
+		updateService:               service.NewUpdateService(db.DB),
+		resourceReconciler:          service.NewResourceReconciliationService(db.DB),
+		providerSupply:              service.NewProviderSupplyService(db.DB),
+		workloadInventory:           service.NewWorkloadInventoryService(db.DB),
+		sessionAuthorization:        service.NewSessionAuthorizationService(db.DB),
+		containerSessionAcks:        make(map[uint64][]string),
+		authorizationSnapshotStates: make(map[string]*authorizationSnapshotState),
 	}
 
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
@@ -399,13 +406,14 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 
 	// 以 NodeID 为 key 注册连接，同一 AgentID 下多个 Node 独立共存
 	conn = &AgentConnection{
-		AgentID:   agentID,
-		NodeID:    nodeID,
-		Stream:    stream,
-		TunnelIP:  firstReq.TunnelIp,
-		Connected: firstReq.TunnelConnected,
-		LastSeen:  time.Now(),
-		Cancel:    cancel,
+		AgentID:                               agentID,
+		NodeID:                                nodeID,
+		Stream:                                stream,
+		TunnelIP:                              firstReq.TunnelIp,
+		Connected:                             firstReq.TunnelConnected,
+		LastSeen:                              time.Now(),
+		Cancel:                                cancel,
+		EndpointSessionAuthorizationProtocols: make(map[string]string),
 	}
 
 	s.connMutex.Lock()
@@ -466,23 +474,44 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 		logger.Infof("Node 断连: agent_id=%d, node_id=%d, 同 Agent 其他在线=%v", agentID, nodeID, hasOtherOnline)
 	}()
 
+	firstAcks := s.processSessionAuthorizationHeartbeat(context.Background(), conn, firstReq)
 	// 发送首次响应
-	if err := s.sendHeartbeatResponse(context.Background(), stream, agentID, nodeID); err != nil {
+	if err := s.sendHeartbeatResponse(context.Background(), stream, conn, firstAcks); err != nil {
 		logger.Errorf("发送首次心跳响应失败: %v", err)
 		return err
 	}
 
-	// 持续接收心跳
+	recvRequests := make(chan *pb.AgentHeartbeatRequest)
+	recvErrors := make(chan error, 1)
+	go func() {
+		defer close(recvRequests)
+		for {
+			req, recvErr := stream.Recv()
+			if recvErr != nil {
+				recvErrors <- recvErr
+				return
+			}
+			select {
+			case recvRequests <- req:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	pushTicker := time.NewTicker(sessionAuthorizationPushPeriod)
+	defer pushTicker.Stop()
+
+	// 持续接收心跳；v2 协商后允许 Server 在两次请求之间主动刷新授权。
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		default:
-			req, err := stream.Recv()
-			if err != nil {
-				return err
+		case err := <-recvErrors:
+			return err
+		case req, ok := <-recvRequests:
+			if !ok {
+				return nil
 			}
-
 			// 更新连接信息
 			conn.TunnelIP = req.TunnelIp
 			conn.Connected = req.TunnelConnected
@@ -508,9 +537,18 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 				conn.NodeID = newNodeID
 			}
 
+			acks := s.processSessionAuthorizationHeartbeat(context.Background(), conn, req)
 			// 发送响应
-			if err := s.sendHeartbeatResponse(context.Background(), stream, agentID, conn.NodeID); err != nil {
+			if err := s.sendHeartbeatResponse(context.Background(), stream, conn, acks); err != nil {
 				logger.Errorf("发送心跳响应失败: %v", err)
+				return err
+			}
+		case <-pushTicker.C:
+			if conn.SessionAuthorizationProtocol != sessionAuthorizationProtocolV2 && len(conn.EndpointSessionAuthorizationProtocols) == 0 {
+				continue
+			}
+			if err := s.sendHeartbeatResponse(context.Background(), stream, conn, nil); err != nil {
+				logger.Errorf("主动推送 Session 授权响应失败: %v", err)
 				return err
 			}
 		}
@@ -776,7 +814,11 @@ func (s *AgentServiceServer) handleContainerCandidates(ctx context.Context, node
 }
 
 // sendHeartbeatResponse 发送心跳响应
-func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream pb.AgentService_HeartbeatServer, agentID uint64, nodeID uint64) error {
+func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream pb.AgentService_HeartbeatServer, conn *AgentConnection, sessionAcks *sessionAuthorizationHeartbeatAcks) error {
+	if conn == nil {
+		return fmt.Errorf("Agent connection is required")
+	}
+	agentID, nodeID := conn.AgentID, conn.NodeID
 	s.versionMutex.RLock()
 	configVersion := s.configVersion
 	s.versionMutex.RUnlock()
@@ -1016,6 +1058,7 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 			}
 		}
 	}
+	s.appendSessionAuthorizationResponse(ctx, conn, resp, sessionAcks)
 
 	return stream.Send(resp)
 }

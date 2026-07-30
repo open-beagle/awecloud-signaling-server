@@ -211,16 +211,10 @@ func (s *ResourceSessionService) Create(ctx context.Context, authorization *Mana
 		if err != nil {
 			return err
 		}
-		validUntil := now.Add(resourceSessionSnapshotTTL)
-		for _, candidate := range []*time.Time{membership.ExpiresAt, chain.Allocation.ExpiresAt, &chain.Observation.LeaseExpiresAt, &chain.Evidence.LeaseExpiresAt, grant.ExpiresAt} {
-			if candidate != nil && candidate.Before(validUntil) {
-				validUntil = candidate.UTC()
-			}
-		}
-		maxSessionUntil := now.Add(time.Duration(grant.MaxSessionSeconds) * time.Second)
-		if maxSessionUntil.Before(validUntil) {
-			validUntil = maxSessionUntil
-		}
+		deviceValidUntil := device.LastHeartbeat.UTC().Add(resourceSessionDeviceHeartbeatTTL)
+		validUntil := calculateResourceSessionValidUntil(now, now, grant.MaxSessionSeconds,
+			membership.ExpiresAt, chain.Allocation.ExpiresAt, &chain.Observation.LeaseExpiresAt,
+			&chain.Evidence.LeaseExpiresAt, grant.ExpiresAt, &deviceValidUntil, namespaceLeaseDeadline(chain))
 		if !validUntil.After(now) {
 			return ErrResourceSessionAuthorizationDenied
 		}
@@ -251,6 +245,27 @@ func (s *ResourceSessionService) Create(ctx context.Context, authorization *Mana
 		return nil
 	})
 	return &session, err
+}
+
+func calculateResourceSessionValidUntil(now, startedAt time.Time, maxSessionSeconds int, deadlines ...*time.Time) time.Time {
+	validUntil := now.UTC().Add(resourceSessionSnapshotTTL)
+	for _, deadline := range deadlines {
+		if deadline != nil && !deadline.IsZero() && deadline.UTC().Before(validUntil) {
+			validUntil = deadline.UTC()
+		}
+	}
+	maxSessionUntil := startedAt.UTC().Add(time.Duration(maxSessionSeconds) * time.Second)
+	if maxSessionUntil.Before(validUntil) {
+		validUntil = maxSessionUntil
+	}
+	return validUntil
+}
+
+func namespaceLeaseDeadline(chain *tenantResourceChain) *time.Time {
+	if chain == nil || chain.Namespace.LeaseExpiresAt.IsZero() {
+		return nil
+	}
+	return &chain.Namespace.LeaseExpiresAt
 }
 
 type TerminateResourceSessionInput struct {

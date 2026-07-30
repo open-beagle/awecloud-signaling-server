@@ -154,6 +154,12 @@ message AgentHeartbeatRequest {
   repeated ContainerDiscoveryCandidate container_candidates = 18; // ContainerSSH 运行时候选（仅运行态证据）
   string container_ssh_protocol = 19; // 支持的 ContainerSSH 协议版本；空表示不支持
   repeated ContainerSSHSessionEvent container_ssh_session_events = 20; // 幂等会话生命周期事件
+  string session_authorization_protocol = 21; // 明确协商 resource_session_v2；空表示不支持
+  int64 authorization_snapshot_ack_revision = 22;
+  string authorization_snapshot_ack_hash = 23;
+  repeated ResourceSessionTerminationAckV2 session_termination_acks = 24;
+  repeated ResourceSessionEventV2 resource_session_events_v2 = 25;
+  repeated EndpointSessionAuthorizationReportV2 endpoint_session_authorization_reports_v2 = 26;
 }
 
 // ConnectedEndpoint Agent 上报的已连接 Endpoint 信息
@@ -236,6 +242,9 @@ message AgentHeartbeatResponse {
   repeated string container_ssh_session_ack_event_ids = 18; // Server 已持久化的 Session Event ID
   SupplyInventoryConfig supply_inventory_config = 19; // 当前 Agent 的库存上报配置
   WorkloadInventoryConfig workload_inventory_config = 20; // 当前 Agent 的工作负载清单配置
+  ResourceSessionAuthorizationSnapshotV2 authorization_snapshot_v2 = 21;
+  repeated ResourceSessionEventAckV2 resource_session_event_acks_v2 = 22;
+  repeated EndpointSessionAuthorizationSnapshotV2 endpoint_authorization_snapshots_v2 = 23;
 }
 
 // EndpointCapabilityConfig Server 下发给 Agent 的 Endpoint 能力开关配置
@@ -473,6 +482,14 @@ message SVCProxyData {
   bool is_close = 6; // 是否为关闭通知
   string error = 7; // 错误信息（如有）
   // 删除 endpoint_name 字段（P10 重构：Agent 自动选择实现路径）
+  string session_id = 8; // resource_session_v2 首包必填
+  string resource_id = 9;
+  string source_id = 10;
+  string target_revision_id = 11;
+  string service_uid = 12;
+  string port_name = 13;
+  string protocol = 14;
+  int64 authorization_revision = 15;
 }
 
 // ============================================
