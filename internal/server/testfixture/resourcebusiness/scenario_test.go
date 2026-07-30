@@ -77,20 +77,35 @@ func TestScenarioFactsCoverM0DMatrix(t *testing.T) {
 	runtime := MustLoad(ScenarioRuntimeEvolution)
 	require.Equal(t, runtime.Workloads[0].StableKey, normal.Workloads[0].StableKey)
 	require.NotEqual(t, runtime.Workloads[0].PreviousPodUID, runtime.Workloads[0].PodUID)
-	require.Equal(t, []int{443, 8443, 9443}, runtime.Services[0].Ports)
+	require.Equal(t, []int{443, 8443, 9443}, []int{
+		runtime.Services[0].Ports[0].Number,
+		runtime.Services[0].Ports[1].Number,
+		runtime.Services[0].Ports[2].Number,
+	})
+	require.NotEqual(t, runtime.Services[0].Ports[0].ResourceID, runtime.Services[0].Ports[1].ResourceID)
+	require.NotEqual(t, runtime.Services[0].Ports[1].StableKey, runtime.Services[0].Ports[2].StableKey)
+	require.Equal(t, "allocation-root-a", runtime.Allocations[1].RenewedFromID)
+	require.Empty(t, runtime.Allocations[2].RenewedFromID)
+	require.Equal(t, "allocation-root-a", runtime.ResourceSources[0].EntitlementLineageID)
+	require.Equal(t, "allocation-renewal-a", runtime.ResourceSources[0].AllocationID)
+	require.Equal(t, runtime.TargetRevisions[0].WorkloadStableKey, runtime.TargetRevisions[1].WorkloadStableKey)
+	require.NotEqual(t, runtime.TargetRevisions[0].PodUID, runtime.TargetRevisions[1].PodUID)
 	for _, session := range runtime.Sessions {
 		require.False(t, session.ExpectedPermitted)
 		require.NotEmpty(t, session.BlockReason)
+		require.Equal(t, runtime.ResourceSources[0].ID, session.ResourceSourceID)
+		require.Equal(t, runtime.TargetRevisions[1].ID, session.TargetRevisionID)
+		require.Equal(t, runtime.Grants[0].ID, session.GrantID)
 	}
 }
 
 func TestLoadReturnsIndependentScenarioCopies(t *testing.T) {
 	first := MustLoad(ScenarioRuntimeEvolution)
 	second := MustLoad(ScenarioRuntimeEvolution)
-	first.Services[0].Ports[0] = 1
+	first.Services[0].Ports[0].Number = 1
 	first.SupplyInventories[0].NamespaceUIDs[0] = "changed"
 	first.Issues[0] = "changed"
-	require.Equal(t, 443, second.Services[0].Ports[0])
+	require.Equal(t, 443, second.Services[0].Ports[0].Number)
 	require.Equal(t, "namespace-uid-a", second.SupplyInventories[0].NamespaceUIDs[0])
 	require.NotEqual(t, first.Issues[0], second.Issues[0])
 }

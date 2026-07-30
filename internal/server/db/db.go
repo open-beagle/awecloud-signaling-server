@@ -137,6 +137,21 @@ func autoMigrate() error {
 		&model.Group{},
 		&model.GroupMember{},
 
+		// Tenant 资源与会话（S4，新增 Schema，业务入口仍由 Feature Flag 关闭）
+		&model.WorkloadInventoryReceipt{},
+		&model.WorkloadInventoryBatch{},
+		&model.WorkloadObservation{},
+		&model.WorkloadObservationSource{},
+		&model.TenantResource{},
+		&model.TenantResourceSource{},
+		&model.TenantResourceReviewDecision{},
+		&model.TenantResourceTargetRevision{},
+		&model.TenantAccessGrant{},
+		&model.TenantAccessGrantEvent{},
+		&model.ResourceSession{},
+		&model.ResourceSessionEvent{},
+		&model.ResourceSessionTermination{},
+
 		// 服务模型
 		&model.ProxyService{},
 		&model.PortForward{},
@@ -214,7 +229,10 @@ func autoMigrate() error {
 	if err := ensureProviderSupplyConstraints(DB); err != nil {
 		return err
 	}
-	return ensurePlatformAllocationConstraints(DB)
+	if err := ensurePlatformAllocationConstraints(DB); err != nil {
+		return err
+	}
+	return ensureTenantResourceConstraints(DB)
 }
 
 // CreateDefaultAdmin 创建默认管理员

@@ -29,8 +29,11 @@ type Scenario struct {
 	Tenants            []Tenant
 	Identities         []Identity
 	Scopes             []Scope
+	Allocations        []Allocation
 	Workloads          []Workload
 	Services           []Service
+	ResourceSources    []ResourceSource
+	TargetRevisions    []TargetRevision
 	Grants             []Grant
 	Sessions           []Session
 	Issues             []string
@@ -97,12 +100,46 @@ type Workload struct {
 	ContainerName  string
 }
 
+type Allocation struct {
+	ID            string
+	TenantID      string
+	ScopeID       string
+	RenewedFromID string
+}
+
 type Service struct {
 	ID        string
 	TenantID  string
 	Namespace string
 	Name      string
-	Ports     []int
+	Ports     []ServicePort
+}
+
+type ServicePort struct {
+	Name       string
+	Number     int
+	Protocol   string
+	ResourceID string
+	StableKey  string
+}
+
+type ResourceSource struct {
+	ID                   string
+	TenantID             string
+	ResourceID           string
+	EntitlementLineageID string
+	AllocationID         string
+	ScopeID              string
+	WorkloadID           string
+}
+
+type TargetRevision struct {
+	ID                string
+	ResourceSourceID  string
+	Revision          int64
+	WorkloadStableKey string
+	PodUID            string
+	ContainerName     string
 }
 
 type Grant struct {
@@ -120,6 +157,10 @@ type Session struct {
 	ID                string
 	TenantID          string
 	ResourceID        string
+	ResourceSourceID  string
+	TargetRevisionID  string
+	AllocationID      string
+	GrantID           string
 	GrantActive       bool
 	SourceActive      bool
 	TargetReady       bool
@@ -179,12 +220,26 @@ func Validate(scenario Scenario) error {
 	if err := uniqueIDs("scope", scopeIDs(scenario.Scopes)); err != nil {
 		return err
 	}
+	if err := uniqueIDs("allocation", allocationIDs(scenario.Allocations)); err != nil {
+		return err
+	}
+	if err := uniqueIDs("resource source", resourceSourceIDs(scenario.ResourceSources)); err != nil {
+		return err
+	}
+	if err := uniqueIDs("target revision", targetRevisionIDs(scenario.TargetRevisions)); err != nil {
+		return err
+	}
 	if err := uniqueIdentityIDs(scenario.Identities); err != nil {
 		return err
 	}
 	providers, tenants := stringSet(providerIDs(scenario.Providers)), stringSet(tenantIDs(scenario.Tenants))
 	technicalResources := stringSet(technicalResourceIDs(scenario.TechnicalResources))
 	scopes := stringSet(scopeIDs(scenario.Scopes))
+	allocations := allocationMap(scenario.Allocations)
+	workloads := workloadMap(scenario.Workloads)
+	resourceSources := resourceSourceMap(scenario.ResourceSources)
+	targetRevisions := targetRevisionMap(scenario.TargetRevisions)
+	grants := grantMap(scenario.Grants)
 	identities := uintSet(scenario.Identities)
 	for _, provider := range scenario.Providers {
 		if provider.StableIdentity == "" {
@@ -249,16 +304,54 @@ func Validate(scenario Scenario) error {
 			return fmt.Errorf("workload %s has incomplete provider or runtime identity", workload.ID)
 		}
 	}
+	for _, allocation := range scenario.Allocations {
+		if !tenants[allocation.TenantID] || !scopes[allocation.ScopeID] {
+			return fmt.Errorf("allocation %s has an unknown tenant or scope", allocation.ID)
+		}
+		if allocation.RenewedFromID != "" {
+			parent, ok := allocations[allocation.RenewedFromID]
+			if !ok || parent.TenantID != allocation.TenantID {
+				return fmt.Errorf("allocation %s has an invalid renewal parent", allocation.ID)
+			}
+		}
+		if _, err := allocationRoot(allocation.ID, allocations); err != nil {
+			return err
+		}
+	}
 	for _, service := range scenario.Services {
 		if !tenants[service.TenantID] || service.ID == "" || service.Namespace == "" || service.Name == "" {
 			return fmt.Errorf("service %s has incomplete tenant or service identity", service.ID)
 		}
-		seen := map[int]bool{}
+		seenNumbers := map[int]bool{}
+		seenResources := map[string]bool{}
+		seenStableKeys := map[string]bool{}
 		for _, port := range service.Ports {
-			if port < 1 || port > 65535 || seen[port] {
+			if port.Number < 1 || port.Number > 65535 || seenNumbers[port.Number] ||
+				port.Protocol == "" || port.ResourceID == "" || port.StableKey == "" ||
+				seenResources[port.ResourceID] || seenStableKeys[port.StableKey] {
 				return fmt.Errorf("service %s has an invalid or duplicate port", service.ID)
 			}
-			seen[port] = true
+			seenNumbers[port.Number] = true
+			seenResources[port.ResourceID] = true
+			seenStableKeys[port.StableKey] = true
+		}
+	}
+	for _, source := range scenario.ResourceSources {
+		allocation, allocationExists := allocations[source.AllocationID]
+		workload, workloadExists := workloads[source.WorkloadID]
+		root, rootErr := allocationRoot(source.AllocationID, allocations)
+		if !allocationExists || !workloadExists || rootErr != nil || source.ResourceID == "" ||
+			source.TenantID != allocation.TenantID || source.ScopeID != allocation.ScopeID ||
+			source.EntitlementLineageID != root || workload.ID == "" {
+			return fmt.Errorf("resource source %s has a broken allocation lineage", source.ID)
+		}
+	}
+	for _, target := range scenario.TargetRevisions {
+		source, sourceExists := resourceSources[target.ResourceSourceID]
+		workload, workloadExists := workloads[source.WorkloadID]
+		if !sourceExists || !workloadExists || target.Revision <= 0 ||
+			target.WorkloadStableKey != workload.StableKey || target.PodUID == "" || target.ContainerName == "" {
+			return fmt.Errorf("target revision %s has a broken source or runtime identity", target.ID)
 		}
 	}
 	for _, grant := range scenario.Grants {
@@ -267,6 +360,15 @@ func Validate(scenario Scenario) error {
 		}
 	}
 	for _, session := range scenario.Sessions {
+		source, sourceExists := resourceSources[session.ResourceSourceID]
+		target, targetExists := targetRevisions[session.TargetRevisionID]
+		grant, grantExists := grants[session.GrantID]
+		if !sourceExists || !targetExists || !grantExists || session.AllocationID != source.AllocationID ||
+			target.ResourceSourceID != source.ID || session.TenantID != source.TenantID ||
+			session.ResourceID != source.ResourceID || grant.TenantID != session.TenantID ||
+			grant.ResourceID != session.ResourceID {
+			return fmt.Errorf("session %s has a broken grant/source/target chain", session.ID)
+		}
 		permitted := session.GrantActive && session.SourceActive && session.TargetReady
 		if permitted != session.ExpectedPermitted {
 			return fmt.Errorf("session %s permission expectation does not match upstream state", session.ID)
@@ -276,6 +378,25 @@ func Validate(scenario Scenario) error {
 		}
 	}
 	return nil
+}
+
+func allocationRoot(id string, allocations map[string]Allocation) (string, error) {
+	seen := map[string]bool{}
+	for id != "" {
+		if seen[id] {
+			return "", fmt.Errorf("allocation %s has a renewal cycle", id)
+		}
+		seen[id] = true
+		allocation, ok := allocations[id]
+		if !ok {
+			return "", fmt.Errorf("allocation %s is not registered", id)
+		}
+		if allocation.RenewedFromID == "" {
+			return allocation.ID, nil
+		}
+		id = allocation.RenewedFromID
+	}
+	return "", errors.New("allocation root is required")
 }
 
 func cloneScenario(source Scenario) (Scenario, error) {
@@ -348,6 +469,70 @@ func scopeIDs(values []Scope) []string {
 	result := make([]string, 0, len(values))
 	for _, value := range values {
 		result = append(result, value.ID)
+	}
+	return result
+}
+
+func allocationIDs(values []Allocation) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, value.ID)
+	}
+	return result
+}
+
+func resourceSourceIDs(values []ResourceSource) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, value.ID)
+	}
+	return result
+}
+
+func targetRevisionIDs(values []TargetRevision) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, value.ID)
+	}
+	return result
+}
+
+func allocationMap(values []Allocation) map[string]Allocation {
+	result := make(map[string]Allocation, len(values))
+	for _, value := range values {
+		result[value.ID] = value
+	}
+	return result
+}
+
+func workloadMap(values []Workload) map[string]Workload {
+	result := make(map[string]Workload, len(values))
+	for _, value := range values {
+		result[value.ID] = value
+	}
+	return result
+}
+
+func resourceSourceMap(values []ResourceSource) map[string]ResourceSource {
+	result := make(map[string]ResourceSource, len(values))
+	for _, value := range values {
+		result[value.ID] = value
+	}
+	return result
+}
+
+func targetRevisionMap(values []TargetRevision) map[string]TargetRevision {
+	result := make(map[string]TargetRevision, len(values))
+	for _, value := range values {
+		result[value.ID] = value
+	}
+	return result
+}
+
+func grantMap(values []Grant) map[string]Grant {
+	result := make(map[string]Grant, len(values))
+	for _, value := range values {
+		result[value.ID] = value
 	}
 	return result
 }

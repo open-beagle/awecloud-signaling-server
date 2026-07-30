@@ -48,9 +48,25 @@ func TestInitDBRegistersResourceDeliveryTables(t *testing.T) {
 		&model.ResourceScope{},
 		&model.ResourceAllocation{},
 		&model.ResourceAllocationItem{},
+		&model.WorkloadInventoryReceipt{},
+		&model.WorkloadInventoryBatch{},
+		&model.WorkloadObservation{},
+		&model.WorkloadObservationSource{},
+		&model.TenantResource{},
+		&model.TenantResourceSource{},
+		&model.TenantResourceReviewDecision{},
+		&model.TenantResourceTargetRevision{},
+		&model.TenantAccessGrant{},
+		&model.TenantAccessGrantEvent{},
+		&model.ResourceSession{},
+		&model.ResourceSessionEvent{},
+		&model.ResourceSessionTermination{},
 	} {
 		require.True(t, DB.Migrator().HasTable(table))
 	}
+	var triggerCount int64
+	require.NoError(t, DB.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'trg_s4_%'").Scan(&triggerCount).Error)
+	require.Equal(t, int64(len(tenantResourceTriggers)), triggerCount)
 }
 
 func TestInitDBAddsM1ATablesWithoutChangingLegacyRows(t *testing.T) {
@@ -90,6 +106,10 @@ func TestInitDBAddsM1ATablesWithoutChangingLegacyRows(t *testing.T) {
 		&model.TechnicalResource{}, &model.TechnicalResourceBinding{}, &model.SupplyInventoryReceipt{}, &model.SupplyCandidate{},
 		&model.PlatformResource{}, &model.PlatformResourceSource{}, &model.NamespaceObservation{}, &model.ResourceScope{},
 		&model.ResourceAllocation{}, &model.ResourceAllocationItem{},
+		&model.WorkloadInventoryReceipt{}, &model.WorkloadInventoryBatch{}, &model.WorkloadObservation{}, &model.WorkloadObservationSource{},
+		&model.TenantResource{}, &model.TenantResourceSource{}, &model.TenantResourceReviewDecision{}, &model.TenantResourceTargetRevision{},
+		&model.TenantAccessGrant{}, &model.TenantAccessGrantEvent{}, &model.ResourceSession{}, &model.ResourceSessionEvent{},
+		&model.ResourceSessionTermination{},
 	} {
 		require.True(t, DB.Migrator().HasTable(table))
 	}
@@ -104,6 +124,16 @@ func TestInitDBAddsM1ATablesWithoutChangingLegacyRows(t *testing.T) {
 	require.NoError(t, DB.Model(&model.ResourceAllocationItem{}).Count(&allocationItemCount).Error)
 	require.Zero(t, allocationCount)
 	require.Zero(t, allocationItemCount)
+	for _, table := range []any{
+		&model.WorkloadInventoryReceipt{}, &model.WorkloadInventoryBatch{}, &model.WorkloadObservation{}, &model.WorkloadObservationSource{},
+		&model.TenantResource{}, &model.TenantResourceSource{}, &model.TenantResourceReviewDecision{}, &model.TenantResourceTargetRevision{},
+		&model.TenantAccessGrant{}, &model.TenantAccessGrantEvent{}, &model.ResourceSession{}, &model.ResourceSessionEvent{},
+		&model.ResourceSessionTermination{},
+	} {
+		var count int64
+		require.NoError(t, DB.Model(table).Count(&count).Error)
+		require.Zero(t, count)
+	}
 }
 
 func TestInitDBEnforcesS2RelationshipsWithoutGlobalForeignKeys(t *testing.T) {
