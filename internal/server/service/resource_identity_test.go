@@ -122,6 +122,77 @@ func TestUserSimulationSessionSupportsProviderAndTenantMemberScopes(t *testing.T
 	}))
 }
 
+func TestUserSimulationMembershipTimeComparisonNormalizesOffsets(t *testing.T) {
+	database := newResourceIdentityServiceDB(t)
+	now := time.Date(2026, 1, 15, 8, 0, 0, 500_000_000, time.UTC)
+	shanghai := time.FixedZone("UTC+8", 8*60*60)
+	losAngeles := time.FixedZone("UTC-8", -8*60*60)
+	activeFrom := now.Add(-time.Minute).In(shanghai)
+	activeUntil := now.Add(time.Minute).In(shanghai)
+
+	require.NoError(t, CreatePlatformRoleMembership(database, &model.PlatformRoleMembership{
+		ID: "platform-role-offset", UserID: 1, Role: model.PlatformRoleAdmin, Enabled: true,
+		ValidFrom: activeFrom, ExpiresAt: &activeUntil, PermissionRevision: 1,
+		CreatedByUserID: 1, Reason: "offset fixture bootstrap", RowVersion: 1,
+	}))
+	provider := model.ResourceProvider{
+		ID: "provider-offset", Key: "provider-offset", DisplayName: "Provider Offset",
+		Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1,
+	}
+	require.NoError(t, CreateResourceProvider(database, &provider))
+	require.NoError(t, CreateAdminProviderMembership(database, &model.AdminProviderMembership{
+		ID: "provider-membership-offset", UserID: 2, ProviderID: provider.ID,
+		Role: model.ProviderManagementRoleOperator, Enabled: true, ValidFrom: activeFrom, ExpiresAt: &activeUntil,
+		PermissionRevision: 2, CreatedByUserID: 1, Reason: "offset provider membership", RowVersion: 1,
+	}))
+	require.NoError(t, CreateUserSimulationSession(database, &model.UserSimulationSession{
+		ID: "simulation-provider-offset", ActorUserID: 1, EffectiveUserID: 2, ScopeType: model.UserSimulationScopeProvider,
+		ScopeID: provider.ID, Reason: "verify provider offset", Status: model.UserSimulationSessionActive,
+		StartedAt: now.UTC(), ExpiresAt: now.Add(time.Hour).UTC(), CreatedRequestID: "request-provider-offset",
+		PermissionRevision: 2, RowVersion: 1,
+	}))
+
+	legacyActiveUntil := now.Add(time.Minute).In(losAngeles)
+	require.NoError(t, database.Create(&model.TenantMembership{
+		TenantID: "tenant-1", UserID: 2, Role: "member", Enabled: true, ExpiresAt: &legacyActiveUntil,
+	}).Error)
+	require.NoError(t, CreateUserSimulationSession(database, &model.UserSimulationSession{
+		ID: "simulation-tenant-legacy-offset", ActorUserID: 1, EffectiveUserID: 2, ScopeType: model.UserSimulationScopeTenant,
+		ScopeID: "tenant-1", Reason: "verify legacy tenant offset", Status: model.UserSimulationSessionActive,
+		StartedAt: now.UTC(), ExpiresAt: now.Add(time.Hour).UTC(), CreatedRequestID: "request-tenant-legacy-offset",
+		PermissionRevision: 1, RowVersion: 1,
+	}))
+	_, legacyContext, err := ResolveUserSimulationSession(database, "simulation-tenant-legacy-offset", 1, now.UTC())
+	require.NoError(t, err)
+	require.Equal(t, "member", legacyContext.Role)
+
+	require.NoError(t, database.Delete(&model.TenantMembership{}, "tenant_id = ? AND user_id = ?", "tenant-1", 2).Error)
+	require.NoError(t, CreateUserTenantManagementMembership(database, &model.UserTenantManagementMembership{
+		ID: "tenant-management-offset", UserID: 2, TenantID: "tenant-1", Role: model.TenantManagementRoleViewer,
+		Enabled: true, ValidFrom: activeFrom, ExpiresAt: &activeUntil, PermissionRevision: 3,
+		CreatedByUserID: 1, Reason: "offset tenant management membership", RowVersion: 1,
+	}))
+	require.NoError(t, CreateUserSimulationSession(database, &model.UserSimulationSession{
+		ID: "simulation-tenant-management-offset", ActorUserID: 1, EffectiveUserID: 2, ScopeType: model.UserSimulationScopeTenant,
+		ScopeID: "tenant-1", Reason: "verify management tenant offset", Status: model.UserSimulationSessionActive,
+		StartedAt: now.UTC(), ExpiresAt: now.Add(time.Hour).UTC(), CreatedRequestID: "request-tenant-management-offset",
+		PermissionRevision: 3, RowVersion: 1,
+	}))
+
+	expiredAt := now.Add(-500 * time.Millisecond).In(shanghai)
+	require.NoError(t, database.Create(&model.UserSimulationSession{
+		ID: "simulation-expired-offset", ActorUserID: 1, EffectiveUserID: 2, ScopeType: model.UserSimulationScopeTenant,
+		ScopeID: "tenant-1", Reason: "verify session expiry offset", Status: model.UserSimulationSessionActive,
+		StartedAt: now.Add(-time.Hour), ExpiresAt: expiredAt, CreatedRequestID: "request-expired-offset",
+		PermissionRevision: 3, RowVersion: 1,
+	}).Error)
+	_, err = ListUserSimulationSessions(database, now.UTC())
+	require.NoError(t, err)
+	var expired model.UserSimulationSession
+	require.NoError(t, database.First(&expired, "id = ?", "simulation-expired-offset").Error)
+	require.Equal(t, model.UserSimulationSessionExpired, expired.Status)
+}
+
 func TestUserSimulationSessionRecomputesEffectiveContextAndTerminatesOnInvalidation(t *testing.T) {
 	database := newResourceIdentityServiceDB(t)
 	now := time.Date(2026, 1, 15, 8, 0, 0, 0, time.UTC)

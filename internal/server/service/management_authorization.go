@@ -414,7 +414,7 @@ func resolveTenantContext(database *gorm.DB, userID uint64, tenantID string, at 
 		return nil, err
 	}
 	var member model.TenantMembership
-	err = database.Where("user_id = ? AND tenant_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)",
+	err = database.Where("user_id = ? AND tenant_id = ? AND enabled = ? AND (expires_at IS NULL OR julianday(expires_at) > julianday(?))",
 		userID, tenantID, true, at).First(&member).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -438,7 +438,7 @@ func activeMembership(database *gorm.DB, value any, identityQuery string, args .
 		return fmt.Errorf("active membership check requires time")
 	}
 	identityArgs := args[:len(args)-1]
-	query := identityQuery + " AND enabled = ? AND valid_from <= ? AND (expires_at IS NULL OR expires_at > ?)"
+	query := identityQuery + " AND enabled = ? AND julianday(valid_from) <= julianday(?) AND (expires_at IS NULL OR julianday(expires_at) > julianday(?))"
 	identityArgs = append(identityArgs, true, at, at)
 	err := database.Where(query, identityArgs...).First(value).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

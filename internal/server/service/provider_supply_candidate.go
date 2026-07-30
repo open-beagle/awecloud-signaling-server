@@ -437,11 +437,11 @@ type AcceptSupplyCandidateInput struct {
 }
 
 type AcceptSupplyCandidateResult struct {
-	Candidate       *model.SupplyCandidate
-	Resource        *model.PlatformResource
-	Source          *model.PlatformResourceSource
-	ClusterScope    *model.ResourceScope
-	NamespaceScopes []model.ResourceScope
+	Candidate       *model.SupplyCandidate        `json:"candidate"`
+	Resource        *model.PlatformResource       `json:"resource"`
+	Source          *model.PlatformResourceSource `json:"source"`
+	ClusterScope    *model.ResourceScope          `json:"cluster_scope"`
+	NamespaceScopes []model.ResourceScope         `json:"namespace_scopes"`
 }
 
 func (s *ProviderSupplyService) AcceptSupplyCandidate(ctx context.Context, authorization *ManagementAuthorizationContext, input AcceptSupplyCandidateInput) (*AcceptSupplyCandidateResult, error) {

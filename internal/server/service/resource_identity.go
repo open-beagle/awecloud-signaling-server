@@ -214,7 +214,7 @@ func ListUserSimulationSessions(database *gorm.DB, at time.Time) ([]model.UserSi
 	var sessions []model.UserSimulationSession
 	err := database.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.UserSimulationSession{}).
-			Where("status = ? AND expires_at <= ?", model.UserSimulationSessionActive, at).
+			Where("status = ? AND julianday(expires_at) <= julianday(?)", model.UserSimulationSessionActive, at).
 			Updates(map[string]any{
 				"status":      model.UserSimulationSessionExpired,
 				"ended_at":    at,
@@ -320,7 +320,7 @@ func requireEnabledSimulationUser(database *gorm.DB, userID uint64) error {
 func requireActivePlatformAdmin(database *gorm.DB, userID uint64, at time.Time) error {
 	var count int64
 	err := database.Model(&model.PlatformRoleMembership{}).
-		Where("user_id = ? AND role = ? AND enabled = ? AND valid_from <= ? AND (expires_at IS NULL OR expires_at > ?)",
+		Where("user_id = ? AND role = ? AND enabled = ? AND julianday(valid_from) <= julianday(?) AND (expires_at IS NULL OR julianday(expires_at) > julianday(?))",
 			userID, model.PlatformRoleAdmin, true, at, at).
 		Count(&count).Error
 	if err != nil {
@@ -346,7 +346,7 @@ func requireActiveSimulationScope(database *gorm.DB, value any, query string, ar
 func requireActiveProviderSimulationMembership(database *gorm.DB, userID uint64, providerID string, at time.Time) error {
 	var count int64
 	err := database.Model(&model.AdminProviderMembership{}).
-		Where("user_id = ? AND provider_id = ? AND enabled = ? AND valid_from <= ? AND (expires_at IS NULL OR expires_at > ?)",
+		Where("user_id = ? AND provider_id = ? AND enabled = ? AND julianday(valid_from) <= julianday(?) AND (expires_at IS NULL OR julianday(expires_at) > julianday(?))",
 			userID, providerID, true, at, at).
 		Count(&count).Error
 	if err != nil {
@@ -361,7 +361,7 @@ func requireActiveProviderSimulationMembership(database *gorm.DB, userID uint64,
 func requireActiveTenantSimulationMembership(database *gorm.DB, userID uint64, tenantID string, at time.Time) error {
 	var managementCount int64
 	err := database.Model(&model.UserTenantManagementMembership{}).
-		Where("user_id = ? AND tenant_id = ? AND enabled = ? AND valid_from <= ? AND (expires_at IS NULL OR expires_at > ?)",
+		Where("user_id = ? AND tenant_id = ? AND enabled = ? AND julianday(valid_from) <= julianday(?) AND (expires_at IS NULL OR julianday(expires_at) > julianday(?))",
 			userID, tenantID, true, at, at).
 		Count(&managementCount).Error
 	if err != nil {
@@ -369,7 +369,7 @@ func requireActiveTenantSimulationMembership(database *gorm.DB, userID uint64, t
 	}
 	var memberCount int64
 	err = database.Model(&model.TenantMembership{}).
-		Where("user_id = ? AND tenant_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)",
+		Where("user_id = ? AND tenant_id = ? AND enabled = ? AND (expires_at IS NULL OR julianday(expires_at) > julianday(?))",
 			userID, tenantID, true, at).
 		Count(&memberCount).Error
 	if err != nil {

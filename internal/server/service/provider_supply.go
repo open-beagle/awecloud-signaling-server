@@ -106,8 +106,8 @@ type BindTechnicalResourceInput struct {
 }
 
 type BindTechnicalResourceResult struct {
-	TechnicalResource *model.TechnicalResource
-	Binding           *model.TechnicalResourceBinding
+	TechnicalResource *model.TechnicalResource        `json:"technical_resource"`
+	Binding           *model.TechnicalResourceBinding `json:"binding"`
 }
 
 func (s *ProviderSupplyService) BindTechnicalResource(ctx context.Context, authorization *ManagementAuthorizationContext, input BindTechnicalResourceInput) (*BindTechnicalResourceResult, error) {

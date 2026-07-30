@@ -125,6 +125,31 @@ func TestManagementContextsUseIndependentMemberships(t *testing.T) {
 	require.ErrorIs(t, AuthorizeManagementPermission(tenantContext, PermissionTenantResourcesWrite), ErrManagementPermissionDenied)
 }
 
+func TestManagementMembershipTimeComparisonNormalizesOffsets(t *testing.T) {
+	fixture := newManagementAuthorizationFixture(t)
+	shanghai := time.FixedZone("UTC+8", 8*60*60)
+	validFrom := fixture.now.Add(-time.Minute).In(shanghai)
+	expiresAt := fixture.now.Add(500 * time.Millisecond).In(shanghai)
+	require.NoError(t, fixture.database.Model(&model.AdminProviderMembership{}).
+		Where("user_id = ? AND provider_id = ?", fixture.actor.ID, fixture.provider.ID).
+		Updates(map[string]any{"valid_from": validFrom, "expires_at": expiresAt}).Error)
+
+	context, err := ResolveManagementContext(
+		fixture.database, fixture.actor.ID, model.ManagementScopeProvider, fixture.provider.ID, fixture.now.UTC(), false,
+	)
+	require.NoError(t, err)
+	require.Equal(t, fixture.provider.ID, context.ScopeID)
+
+	expiredAt := fixture.now.Add(-time.Second).In(shanghai)
+	require.NoError(t, fixture.database.Model(&model.AdminProviderMembership{}).
+		Where("user_id = ? AND provider_id = ?", fixture.actor.ID, fixture.provider.ID).
+		Update("expires_at", expiredAt).Error)
+	_, err = ResolveManagementContext(
+		fixture.database, fixture.actor.ID, model.ManagementScopeProvider, fixture.provider.ID, fixture.now.UTC(), false,
+	)
+	require.ErrorIs(t, err, ErrManagementMembershipMissing)
+}
+
 func TestProviderContextRejectsLegacyIntegrationProviderID(t *testing.T) {
 	fixture := newManagementAuthorizationFixture(t)
 	legacyProviderID := fixture.provider.Key

@@ -190,8 +190,8 @@ type MarkResourceScopeAllocatableInput struct {
 }
 
 type MarkResourceScopeAllocatableResult struct {
-	Scope    *model.ResourceScope
-	Resource *model.PlatformResource
+	Scope    *model.ResourceScope    `json:"scope"`
+	Resource *model.PlatformResource `json:"resource"`
 }
 
 func (s *ProviderSupplyService) MarkResourceScopeAllocatable(ctx context.Context, authorization *ManagementAuthorizationContext, input MarkResourceScopeAllocatableInput) (*MarkResourceScopeAllocatableResult, error) {

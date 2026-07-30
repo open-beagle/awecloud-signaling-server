@@ -430,6 +430,38 @@ func (s *Server) setupRouter() *gin.Engine {
 				managementGroup.GET("/user-simulations", api.RequireManagementPermission(service.PermissionPlatformUserSimulationsRead), userSimulationAPI.List)
 				managementGroup.POST("/user-simulations", api.ForbidUserSimulation(), api.RequireManagementPermission(service.PermissionPlatformUserSimulationsWrite), api.RequireIdempotencyKey(), userSimulationAPI.Create)
 				managementGroup.POST("/user-simulations/:id/revoke", api.RequireManagementPermission(service.PermissionPlatformUserSimulationsWrite), api.RequireIfMatch(), userSimulationAPI.Revoke)
+
+				providerSupplyAPI := api.NewProviderSupplyAPI()
+				providerGroup := managementGroup.Group("/provider")
+				{
+					providerGroup.GET("/technical-resources", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.ListTechnicalResources)
+					providerGroup.GET("/technical-resources/:id", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.GetTechnicalResource)
+					providerGroup.POST("/technical-resources", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIdempotencyKey(), providerSupplyAPI.CreateTechnicalResource)
+					providerGroup.POST("/technical-resources/:id/bind", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), providerSupplyAPI.BindTechnicalResource)
+					providerGroup.POST("/technical-resources/:id/disable", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetTechnicalResourceLifecycle(model.TechnicalResourceDisabled, "disable_technical_resource"))
+					providerGroup.POST("/technical-resources/:id/resume", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetTechnicalResourceLifecycle(model.TechnicalResourceRegistered, "resume_technical_resource"))
+					providerGroup.POST("/technical-resources/:id/retire", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetTechnicalResourceLifecycle(model.TechnicalResourceRetired, "retire_technical_resource"))
+
+					providerGroup.GET("/supply-candidates", api.RequireManagementPermission(service.PermissionProviderResourcesRead), providerSupplyAPI.ListSupplyCandidates)
+					providerGroup.GET("/supply-candidates/:id", api.RequireManagementPermission(service.PermissionProviderResourcesRead), providerSupplyAPI.GetSupplyCandidate)
+					providerGroup.POST("/supply-candidates/:id/accept", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), providerSupplyAPI.AcceptSupplyCandidate)
+					providerGroup.POST("/supply-candidates/:id/reject", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.RejectSupplyCandidate)
+
+					providerGroup.GET("/resources", api.RequireManagementPermission(service.PermissionProviderResourcesRead), providerSupplyAPI.ListPlatformResources)
+					providerGroup.GET("/resources/:id", api.RequireManagementPermission(service.PermissionProviderResourcesRead), providerSupplyAPI.GetPlatformResource)
+					providerGroup.GET("/resources/:id/scopes", api.RequireManagementPermission(service.PermissionProviderResourcesRead), providerSupplyAPI.ListResourceScopes)
+					providerGroup.POST("/resources/:id/activate", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetPlatformResourceLifecycle(model.PlatformResourceActive, "activate_platform_resource"))
+					providerGroup.POST("/resources/:id/suspend", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetPlatformResourceLifecycle(model.PlatformResourceSuspended, "suspend_platform_resource"))
+					providerGroup.POST("/resources/:id/resume", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetPlatformResourceLifecycle(model.PlatformResourceActive, "resume_platform_resource"))
+					providerGroup.POST("/resources/:id/retire", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetPlatformResourceLifecycle(model.PlatformResourceRetired, "retire_platform_resource"))
+
+					providerGroup.GET("/scopes/:id", api.RequireManagementPermission(service.PermissionProviderResourcesRead), api.RequireManagementPermission(service.PermissionProviderIsolationEvidenceRead), providerSupplyAPI.GetResourceScope)
+					providerGroup.POST("/scopes/:id/activate", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetResourceScopeLifecycle(model.ResourceScopeActive, "activate_resource_scope"))
+					providerGroup.POST("/scopes/:id/mark-allocatable", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.MarkResourceScopeAllocatable)
+					providerGroup.POST("/scopes/:id/suspend", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetResourceScopeLifecycle(model.ResourceScopeSuspended, "suspend_resource_scope"))
+					providerGroup.POST("/scopes/:id/resume", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetResourceScopeLifecycle(model.ResourceScopeActive, "resume_resource_scope"))
+					providerGroup.POST("/scopes/:id/retire", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetResourceScopeLifecycle(model.ResourceScopeRetired, "retire_resource_scope"))
+				}
 			}
 
 			// 管理员 API
