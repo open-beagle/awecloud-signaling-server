@@ -20,11 +20,15 @@ import (
 
 type tenantResourceAPIFixture struct {
 	managementContextAPIFixture
-	login       LoginResponse
-	resource    model.TenantResource
-	otherTenant model.Tenant
-	other       model.TenantResource
-	desktop     model.Node
+	login        LoginResponse
+	resource     model.TenantResource
+	otherTenant  model.Tenant
+	other        model.TenantResource
+	grant        model.TenantAccessGrant
+	otherGrant   model.TenantAccessGrant
+	session      model.ResourceSession
+	otherSession model.ResourceSession
+	desktop      model.Node
 }
 
 func prepareTenantResourceAPIFixture(t *testing.T) tenantResourceAPIFixture {
@@ -157,7 +161,6 @@ func prepareTenantResourceAPIFixture(t *testing.T) tenantResourceAPIFixture {
 	other.StableKey = strings.Repeat("e", 64)
 	other.EntitlementLineageID = otherAllocation.ID
 	require.NoError(t, fixture.database.Create(&other).Error)
-
 	flags := config.FeatureFlagsSection{ManagementContextV2: true, TenantResourceReadV2: true, ResourceModelWrite: true, SessionAuthorizationV2: true}
 	management := fixture.router.Group("/api/v1/management")
 	management.Use(AuthMiddleware(fixture.config.Security.JWTSecret, false))
@@ -172,12 +175,17 @@ func prepareTenantResourceAPIFixture(t *testing.T) tenantResourceAPIFixture {
 	tenant.GET("/resource-candidates/:resource_id", RequireManagementPermission(service.PermissionTenantResourcesRead), resourceAPI.GetCandidate)
 	tenant.POST("/resource-candidates/:resource_id/publish", RequireManagementPermission(service.PermissionTenantResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), RequireIdempotencyKey(), resourceAPI.PublishCandidate)
 	tenant.POST("/resource-candidates/:resource_id/reject", RequireManagementPermission(service.PermissionTenantResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), resourceAPI.RejectCandidate)
+	tenant.GET("/resources", RequireManagementPermission(service.PermissionTenantResourcesRead), resourceAPI.ListResources)
 	tenant.GET("/resources/:id", RequireManagementPermission(service.PermissionTenantResourcesRead), resourceAPI.GetResource)
+	tenant.GET("/grants", RequireManagementPermission(service.PermissionTenantGrantsRead), grantAPI.List)
+	tenant.GET("/grants/:id", RequireManagementPermission(service.PermissionTenantGrantsRead), grantAPI.Get)
 	tenant.POST("/grants", RequireManagementPermission(service.PermissionTenantGrantsWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIdempotencyKey(), grantAPI.Create)
 	tenant.PATCH("/grants/:id", RequireManagementPermission(service.PermissionTenantGrantsWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), grantAPI.Update)
 	tenant.POST("/grants/:id/suspend", RequireManagementPermission(service.PermissionTenantGrantsWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), RequireIdempotencyKey(), grantAPI.Suspend)
 	tenant.POST("/grants/:id/resume", RequireManagementPermission(service.PermissionTenantGrantsWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), RequireIdempotencyKey(), grantAPI.Resume)
 	tenant.POST("/grants/:id/revoke", RequireManagementPermission(service.PermissionTenantGrantsWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), RequireIdempotencyKey(), grantAPI.Revoke)
+	tenant.GET("/sessions", RequireManagementPermission(service.PermissionTenantSessionsRead), sessionAPI.List)
+	tenant.GET("/sessions/:id", RequireManagementPermission(service.PermissionTenantSessionsRead), sessionAPI.Get)
 	tenant.POST("/sessions", RequireManagementPermission(service.PermissionTenantSessionsRead), RequireFeatureFlag(flags, config.FeatureSessionAuthorizationV2, true), RequireIdempotencyKey(), sessionAPI.Create)
 	tenant.POST("/sessions/:id/terminate", RequireManagementPermission(service.PermissionTenantSessionsTerminate), RequireFeatureFlag(flags, config.FeatureSessionAuthorizationV2, true), RequireIfMatch(), RequireIdempotencyKey(), sessionAPI.Terminate)
 
@@ -185,6 +193,50 @@ func prepareTenantResourceAPIFixture(t *testing.T) tenantResourceAPIFixture {
 		managementContextAPIFixture: fixture, login: fixture.login(t, fixture.admin.Username),
 		resource: resource, otherTenant: otherTenant, other: other, desktop: desktop,
 	}
+}
+
+func seedTenantResourceIsolationRecords(t *testing.T, fixture *tenantResourceAPIFixture) {
+	t.Helper()
+	now := time.Now().UTC()
+	expiresAt := now.Add(time.Hour)
+	var source model.TenantResourceSource
+	require.NoError(t, fixture.database.Where("tenant_resource_id = ?", fixture.resource.ID).First(&source).Error)
+	var target model.TenantResourceTargetRevision
+	require.NoError(t, fixture.database.Where("tenant_resource_source_id = ?", source.ID).First(&target).Error)
+	var allocation model.ResourceAllocation
+	require.NoError(t, fixture.database.First(&allocation, "id = ?", fixture.resource.EntitlementLineageID).Error)
+	var otherAllocation model.ResourceAllocation
+	require.NoError(t, fixture.database.First(&otherAllocation, "id = ?", fixture.other.EntitlementLineageID).Error)
+	var item model.ResourceAllocationItem
+	require.NoError(t, fixture.database.First(&item, "id = ?", source.AllocationItemID).Error)
+	fixture.grant = model.TenantAccessGrant{
+		ID: uuid.NewString(), TenantID: fixture.tenant.ID, TenantResourceID: fixture.resource.ID,
+		SubjectType: model.TenantAccessGrantSubjectUser, SubjectKey: fmt.Sprint(fixture.user.ID), SubjectUserID: &fixture.user.ID,
+		Actions: `["connect"]`, ValidFrom: now.Add(-time.Minute), ExpiresAt: &expiresAt, MaxSessionSeconds: 3600,
+		Status: model.TenantAccessGrantEnabled, Revision: 1, RowVersion: 1, CreatedByUserID: fixture.user.ID,
+	}
+	fixture.otherGrant = fixture.grant
+	fixture.otherGrant.ID = uuid.NewString()
+	fixture.otherGrant.TenantID = fixture.otherTenant.ID
+	fixture.otherGrant.TenantResourceID = fixture.other.ID
+	require.NoError(t, fixture.database.Create(&[]model.TenantAccessGrant{fixture.grant, fixture.otherGrant}).Error)
+	fixture.session = model.ResourceSession{
+		ID: uuid.NewString(), TenantID: fixture.tenant.ID, TenantResourceID: fixture.resource.ID,
+		TenantResourceSourceID: source.ID, TargetRevisionID: target.ID, AllocationID: allocation.ID,
+		AllocationItemID: item.ID, GrantID: fixture.grant.ID, GrantRevision: 1, UserID: fixture.user.ID,
+		TenantMembershipID: 9001, DeviceID: fixture.desktop.ID, ActorUserID: fixture.user.ID, EffectiveUserID: fixture.user.ID,
+		SessionType: model.ResourceSessionContainerService, Action: "connect", AccessTechnicalResourceID: target.AccessTechnicalResourceID,
+		AuthorizationRevision: 1, ValidUntil: now.Add(30 * time.Second), Status: model.ResourceSessionAuthorizing,
+		RequestID: "tenant-a-session-request", StartedAt: now, RowVersion: 1,
+	}
+	fixture.otherSession = fixture.session
+	fixture.otherSession.ID = uuid.NewString()
+	fixture.otherSession.TenantID = fixture.otherTenant.ID
+	fixture.otherSession.TenantResourceID = fixture.other.ID
+	fixture.otherSession.AllocationID = otherAllocation.ID
+	fixture.otherSession.GrantID = fixture.otherGrant.ID
+	fixture.otherSession.RequestID = "tenant-b-private-request"
+	require.NoError(t, fixture.database.Create(&[]model.ResourceSession{fixture.session, fixture.otherSession}).Error)
 }
 
 func tenantTestDigest(domain, value string) string {
@@ -207,6 +259,7 @@ func tenantAPIRequest(fixture tenantResourceAPIFixture, method, path, body strin
 
 func TestTenantResourceAPIIsScopeFirstAndRedactsTrustedTargets(t *testing.T) {
 	fixture := prepareTenantResourceAPIFixture(t)
+	seedTenantResourceIsolationRecords(t, &fixture)
 	list := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/resource-candidates", "", nil)
 	require.Equal(t, http.StatusOK, list.Code, list.Body.String())
 	require.Contains(t, list.Body.String(), fixture.resource.ID)
@@ -222,6 +275,43 @@ func TestTenantResourceAPIIsScopeFirstAndRedactsTrustedTargets(t *testing.T) {
 	pathMismatch := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.otherTenant.ID+"/resource-candidates/"+fixture.other.ID, "", nil)
 	require.Equal(t, http.StatusNotFound, pathMismatch.Code, pathMismatch.Body.String())
 	assertResponseErrorCode(t, pathMismatch, ErrorCodeManagementObjectMissing)
+
+	require.NoError(t, fixture.database.Model(&model.TenantResource{}).
+		Where("id IN ?", []string{fixture.resource.ID, fixture.other.ID}).
+		Update("visibility_state", model.TenantResourceVisible).Error)
+	resources := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/resources?limit=1&query=api", "", nil)
+	require.Equal(t, http.StatusOK, resources.Code, resources.Body.String())
+	require.Contains(t, resources.Body.String(), fixture.resource.ID)
+	require.NotContains(t, resources.Body.String(), fixture.other.ID)
+	foreignResource := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/resources/"+fixture.other.ID, "", nil)
+	require.Equal(t, http.StatusNotFound, foreignResource.Code, foreignResource.Body.String())
+	assertResponseErrorCode(t, foreignResource, "TENANT_RESOURCE_NOT_FOUND")
+
+	grants := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/grants?page=1&size=1", "", nil)
+	require.Equal(t, http.StatusOK, grants.Code, grants.Body.String())
+	require.Contains(t, grants.Body.String(), fixture.grant.ID)
+	require.NotContains(t, grants.Body.String(), fixture.otherGrant.ID)
+	foreignGrantFilter := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/grants?resource_id="+fixture.other.ID, "", nil)
+	require.Equal(t, http.StatusOK, foreignGrantFilter.Code, foreignGrantFilter.Body.String())
+	require.NotContains(t, foreignGrantFilter.Body.String(), fixture.otherGrant.ID)
+	foreignGrant := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/grants/"+fixture.otherGrant.ID, "", nil)
+	require.Equal(t, http.StatusNotFound, foreignGrant.Code, foreignGrant.Body.String())
+
+	sessions := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/sessions?page=1&size=1", "", nil)
+	require.Equal(t, http.StatusOK, sessions.Code, sessions.Body.String())
+	require.Contains(t, sessions.Body.String(), fixture.session.ID)
+	require.NotContains(t, sessions.Body.String(), fixture.otherSession.ID)
+	require.NotContains(t, sessions.Body.String(), fixture.otherSession.RequestID)
+	foreignSessionFilter := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/sessions?resource_id="+fixture.other.ID, "", nil)
+	require.Equal(t, http.StatusOK, foreignSessionFilter.Code, foreignSessionFilter.Body.String())
+	require.NotContains(t, foreignSessionFilter.Body.String(), fixture.otherSession.ID)
+	foreignSession := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/sessions/"+fixture.otherSession.ID, "", nil)
+	require.Equal(t, http.StatusNotFound, foreignSession.Code, foreignSession.Body.String())
+
+	foreignGrantUpdate := tenantAPIRequest(fixture, http.MethodPatch, "/api/v1/management/tenants/"+fixture.tenant.ID+"/grants/"+fixture.otherGrant.ID, `{"max_session_seconds":1800}`, map[string]string{HeaderIfMatch: `"1"`})
+	require.Equal(t, http.StatusNotFound, foreignGrantUpdate.Code, foreignGrantUpdate.Body.String())
+	foreignSessionTermination := tenantAPIRequest(fixture, http.MethodPost, "/api/v1/management/tenants/"+fixture.tenant.ID+"/sessions/"+fixture.otherSession.ID+"/terminate", `{"reason":"cross tenant"}`, map[string]string{HeaderIfMatch: `"1"`, HeaderIdempotencyKey: "cross-tenant-termination"})
+	require.Equal(t, http.StatusNotFound, foreignSessionTermination.Code, foreignSessionTermination.Body.String())
 }
 
 func TestTenantResourcePublishGrantSessionAndTerminationAreIdempotent(t *testing.T) {
