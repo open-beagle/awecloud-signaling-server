@@ -48,7 +48,7 @@ const canMutate = (row: AccessGrant) => authStore.canWrite && selectedTenant.val
 const handleRevoke = async (row: AccessGrant) => { if (!canMutate(row)) return; try { await ElMessageBox.confirm(`确认撤销 ${row.subject_name || subjectFallback(row)} 对 ${row.resource_name || row.resource_id} 的访问？`, '撤销访问策略', { type: 'warning' }); const res = await revokeResourceGrant(row.id); if (res.success) { ElMessage.success('访问策略已撤销'); await fetchPolicies() } } catch (error) { if (error !== 'cancel' && error !== 'close') throw error } }
 const parseActions = (value: string) => { try { return JSON.parse(value) as string[] } catch { return value ? [value] : [] } }
 const subjectFallback = (row: AccessGrant) => row.subject_type === 'user' ? `User ${row.subject_user_id}` : `Group ${row.subject_group_id}`
-const typeLabel = (type?: ResourceType) => ({ container_ssh: 'ContainerSSH', host_ssh: 'HostSSH', kubernetes_api: 'KubernetesAPI', database_service: 'DatabaseService', tcp_service: 'TCPService' }[type || ''] || type || '-')
+const typeLabel = (type?: ResourceType) => ({ container_ssh: 'ContainerSSH', host_ssh: '主机', kubernetes_api: 'KubernetesAPI', database_service: 'DatabaseService', tcp_service: 'TCPService' }[type || ''] || type || '-')
 const formatTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
 watch(() => tenantStore.tenantId, () => { pagination.page = 1; fetchPolicies() })
 onMounted(fetchPolicies)

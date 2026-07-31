@@ -35,8 +35,6 @@ func TestLegacyResourceClaimIsExplicitAndDoesNotGrantAccess(t *testing.T) {
 	tenantB := model.Tenant{ID: uuid.NewString(), Key: "legacy-b", Name: "Legacy B", Status: model.TenantStatusActive}
 	require.NoError(t, database.Create(&tenantA).Error)
 	require.NoError(t, database.Create(&tenantB).Error)
-	require.NoError(t, database.Create(&model.AdminTenantMembership{AdminID: admin.ID, TenantID: tenantA.ID, Role: string(model.TenantManagementRoleAdmin), Enabled: true}).Error)
-	require.NoError(t, database.Create(&model.AdminTenantMembership{AdminID: admin.ID, TenantID: tenantB.ID, Role: string(model.TenantManagementRoleAdmin), Enabled: true}).Error)
 	agentUser := model.User{Name: "legacy-agent", Role: model.UserRoleAgent, SecretHash: "test", Enabled: true}
 	require.NoError(t, database.Create(&agentUser).Error)
 	now := time.Now()
@@ -51,18 +49,17 @@ func TestLegacyResourceClaimIsExplicitAndDoesNotGrantAccess(t *testing.T) {
 	router.GET("/claims", api.List)
 	router.POST("/claims", api.Claim)
 	router.POST("/claims/:id/revoke", api.Revoke)
-	post := func(path, tenantID string, payload interface{}) *httptest.ResponseRecorder {
+	post := func(path string, payload interface{}) *httptest.ResponseRecorder {
 		body, marshalErr := json.Marshal(payload)
 		require.NoError(t, marshalErr)
 		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Tenant-ID", tenantID)
 		resp := httptest.NewRecorder()
 		router.ServeHTTP(resp, req)
 		return resp
 	}
 	payload := map[string]interface{}{"source_type": model.LegacySourceAgentNode, "source_id": strconv.FormatUint(node.ID, 10), "tenant_id": tenantA.ID, "reason": "管理员确认资产归属"}
-	created := post("/claims", tenantA.ID, payload)
+	created := post("/claims", payload)
 	require.Equal(t, http.StatusCreated, created.Code)
 	var createdBody struct {
 		Data model.LegacyResourceClaim `json:"data"`
@@ -70,14 +67,14 @@ func TestLegacyResourceClaimIsExplicitAndDoesNotGrantAccess(t *testing.T) {
 	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &createdBody))
 	require.Equal(t, tenantA.ID, createdBody.Data.TenantID)
 
-	require.Equal(t, http.StatusOK, post("/claims", tenantA.ID, payload).Code)
+	require.Equal(t, http.StatusOK, post("/claims", payload).Code)
 	payload["tenant_id"] = tenantB.ID
-	require.Equal(t, http.StatusConflict, post("/claims", tenantB.ID, payload).Code)
-	require.Equal(t, http.StatusOK, post("/claims/"+createdBody.Data.ID+"/revoke", tenantA.ID, map[string]interface{}{}).Code)
-	require.Equal(t, http.StatusOK, post("/claims", tenantB.ID, payload).Code)
+	require.Equal(t, http.StatusConflict, post("/claims", payload).Code)
+	require.Equal(t, http.StatusOK, post("/claims/"+createdBody.Data.ID+"/revoke", map[string]interface{}{}).Code)
+	require.Equal(t, http.StatusOK, post("/claims", payload).Code)
 
 	endpointPayload := map[string]interface{}{"source_type": model.LegacySourceEndpoint, "source_id": endpoint.ID, "tenant_id": tenantA.ID, "reason": "管理员确认 Endpoint 归属"}
-	require.Equal(t, http.StatusCreated, post("/claims", tenantA.ID, endpointPayload).Code)
+	require.Equal(t, http.StatusCreated, post("/claims", endpointPayload).Code)
 
 	listReq := httptest.NewRequest(http.MethodGet, "/claims?status=active", nil)
 	listResp := httptest.NewRecorder()
@@ -94,6 +91,9 @@ func TestLegacyResourceClaimIsExplicitAndDoesNotGrantAccess(t *testing.T) {
 	require.NoError(t, database.Model(&model.AccessGrant{}).Count(&grants).Error)
 	require.Zero(t, resources)
 	require.Zero(t, grants)
+	var adminMemberships int64
+	require.NoError(t, database.Model(&model.AdminTenantMembership{}).Where("admin_id = ?", admin.ID).Count(&adminMemberships).Error)
+	require.Zero(t, adminMemberships)
 	var auditCount int64
 	require.NoError(t, database.Model(&model.AuditLog{}).Where("target_type = ?", "legacy_resource_claim").Count(&auditCount).Error)
 	require.Equal(t, int64(4), auditCount)

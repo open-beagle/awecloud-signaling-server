@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
@@ -79,7 +80,10 @@ func (a *TenantBusinessAPI) ListMemberDevices(c *gin.Context) {
 	}
 	var rows []row
 	if err := base.Select("n.id AS node_id, u.id AS user_id, u.name AS user_name, u.alias AS user_alias, n.name AS device_name, n.hostname, n.ip, n.version, n.last_heartbeat").
-		Order("u.name ASC, n.name ASC").Offset((page - 1) * size).Limit(size).Scan(&rows).Error; err != nil {
+		Order(gorm.Expr("CASE WHEN n.last_heartbeat > ? THEN 0 ELSE 1 END ASC", now.Add(-2*time.Minute))).
+		Order("n.last_heartbeat DESC").
+		Order("n.id ASC").
+		Offset((page - 1) * size).Limit(size).Scan(&rows).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询成员设备失败"))
 		return
 	}

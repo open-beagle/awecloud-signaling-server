@@ -33,7 +33,7 @@ const loading = ref(false)
 const data = ref<TenantOverview>()
 const metrics = computed<OverviewMetric[]>(() => [
   { label: '有效成员', value: data.value?.member_count || 0, note: 'TenantMembership' },
-  { label: '用户组', value: data.value?.group_count || 0, note: '当前租户' },
+  { label: '成员分组', value: data.value?.group_count || 0, note: '当前租户' },
   { label: '资源', value: data.value?.resource_count || 0, note: '当前租户' },
   { label: '活动会话', value: data.value?.active_sessions || 0, note: '实时连接' },
   { label: '风险事项', value: data.value?.risk_count || 0, note: '当前租户', tone: data.value?.risk_count ? 'danger' : 'success' }

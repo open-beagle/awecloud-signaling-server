@@ -37,13 +37,17 @@ func TestTenantGroupOnlyAcceptsCurrentEffectiveMembers(t *testing.T) {
 	require.NoError(t, database.Create(&model.AdminTenantMembership{AdminID: admin.ID, TenantID: tenant.ID, Role: "tenant_admin", Enabled: true}).Error)
 	valid := model.User{Name: "group-valid", Role: model.UserRoleClient, SecretHash: "test", Enabled: true}
 	expired := model.User{Name: "group-expired", Role: model.UserRoleClient, SecretHash: "test", Enabled: true}
+	disabled := model.User{Name: "group-disabled", Role: model.UserRoleClient, SecretHash: "test", Enabled: false}
 	outsider := model.User{Name: "group-outsider", Role: model.UserRoleClient, SecretHash: "test", Enabled: true}
 	require.NoError(t, database.Create(&valid).Error)
 	require.NoError(t, database.Create(&expired).Error)
+	require.NoError(t, database.Create(&disabled).Error)
+	require.NoError(t, database.Model(&disabled).Update("enabled", false).Error)
 	require.NoError(t, database.Create(&outsider).Error)
 	expiredAt := time.Now().Add(-time.Minute)
 	require.NoError(t, database.Create(&model.TenantMembership{TenantID: tenant.ID, UserID: valid.ID, Role: "member", Enabled: true}).Error)
 	require.NoError(t, database.Create(&model.TenantMembership{TenantID: tenant.ID, UserID: expired.ID, Role: "member", Enabled: true, ExpiresAt: &expiredAt}).Error)
+	require.NoError(t, database.Create(&model.TenantMembership{TenantID: tenant.ID, UserID: disabled.ID, Role: "member", Enabled: true}).Error)
 	group := model.Group{TenantID: tenant.ID, Name: "developers"}
 	require.NoError(t, database.Create(&group).Error)
 	require.NoError(t, database.Create(&model.GroupMember{GroupID: group.ID, UserID: expired.ID}).Error)
@@ -62,6 +66,15 @@ func TestTenantGroupOnlyAcceptsCurrentEffectiveMembers(t *testing.T) {
 	addResponse := httptest.NewRecorder()
 	router.ServeHTTP(addResponse, addRequest)
 	require.Equal(t, http.StatusForbidden, addResponse.Code)
+
+	disabledBody, err := json.Marshal(map[string]interface{}{"user_ids": []uint64{disabled.ID}})
+	require.NoError(t, err)
+	disabledRequest := httptest.NewRequest(http.MethodPost, "/groups/"+strconv.FormatInt(group.ID, 10)+"/members", bytes.NewReader(disabledBody))
+	disabledRequest.Header.Set("Content-Type", "application/json")
+	disabledRequest.Header.Set("X-Tenant-ID", tenant.ID)
+	disabledResponse := httptest.NewRecorder()
+	router.ServeHTTP(disabledResponse, disabledRequest)
+	require.Equal(t, http.StatusForbidden, disabledResponse.Code)
 
 	validBody, err := json.Marshal(map[string]interface{}{"user_ids": []uint64{valid.ID}})
 	require.NoError(t, err)

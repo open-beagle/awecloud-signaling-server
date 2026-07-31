@@ -122,7 +122,7 @@ const showLegacyInventory = computed(() => authStore.role !== 'tenant_admin' && 
 const tabs = computed(() => [
   { label: '全部', value: '' as ResourceType | '', count: summary.total },
   { label: '容器', value: 'container_ssh' as ResourceType, count: summary.by_type.container_ssh || 0 },
-  { label: 'SSH 主机', value: 'host_ssh' as ResourceType, count: summary.by_type.host_ssh || 0 },
+  { label: '主机', value: 'host_ssh' as ResourceType, count: summary.by_type.host_ssh || 0 },
   { label: 'Kubernetes', value: 'kubernetes_api' as ResourceType, count: summary.by_type.kubernetes_api || 0 },
   { label: '数据库', value: 'database_service' as ResourceType, count: summary.by_type.database_service || 0 },
   { label: 'TCP', value: 'tcp_service' as ResourceType, count: summary.by_type.tcp_service || 0 }
@@ -194,7 +194,7 @@ const createResource = async () => {
 }
 
 const showActionMessage = () => ElMessage.info('低频资源操作将在资源详情中处理')
-const typeLabel = (type: ResourceType) => ({ container_ssh: 'ContainerSSH', host_ssh: 'HostSSH', kubernetes_api: 'KubernetesAPI', database_service: 'DatabaseService', tcp_service: 'TCPService' }[type] || type)
+const typeLabel = (type: ResourceType) => ({ container_ssh: 'ContainerSSH', host_ssh: '主机', kubernetes_api: 'KubernetesAPI', database_service: 'DatabaseService', tcp_service: 'TCPService' }[type] || type)
 const stateLabel = (state: string) => ({ pending: '待发布', available: '可用', degraded: '异常', draining: '排空中', stopped: '已停止', revoked: '已撤销' }[state] || state)
 const stateTag = (state: string) => ({ available: 'success', degraded: 'danger', draining: 'warning', stopped: 'info', revoked: 'info', pending: 'warning' }[state] || 'info') as any
 const resourceIcon = (type: ResourceType) => ({ container_ssh: TakeawayBox, host_ssh: Monitor, kubernetes_api: Ship, database_service: Coin, tcp_service: Connection }[type] || TakeawayBox)

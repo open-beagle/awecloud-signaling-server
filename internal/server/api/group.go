@@ -411,7 +411,8 @@ func (a *GroupAPINew) AddMembers(c *gin.Context) {
 			return
 		}
 		if !user.Enabled {
-			continue
+			c.JSON(http.StatusForbidden, NewErrorResponse("用户已停用"))
+			return
 		}
 		if group.TenantID != "" {
 			var membership model.TenantMembership

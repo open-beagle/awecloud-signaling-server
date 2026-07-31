@@ -177,7 +177,7 @@ func resourceTypeLabel(resourceType model.ResourceType) string {
 	case model.ResourceTypeContainerSSH:
 		return "ContainerSSH"
 	case model.ResourceTypeHostSSH:
-		return "SSH 主机"
+		return "主机"
 	case model.ResourceTypeKubernetesAPI:
 		return "Kubernetes API"
 	case model.ResourceTypeDatabaseService:

@@ -2,7 +2,7 @@
   <div class="page-container">
     <div class="page-header">
       <div>
-        <h1>租户成员</h1>
+        <h1>成员</h1>
         <p>这里展示当前租户与实名用户之间的成员关系，不是平台用户目录。</p>
       </div>
       <el-button :loading="loading" @click="fetchMembers">刷新</el-button>
