@@ -93,9 +93,14 @@ func (b *ContainerExecBroker) OpenAuthorizedShell(ctx context.Context, authoriza
 		return fmt.Errorf("ContainerSSH broker is not configured")
 	}
 	current, allowed := authorizations.Permission(permission.SessionId, time.Now().UTC())
-	if !allowed || !proto.Equal(current, permission) {
+	if !allowed || !sameResourceSessionIdentity(current, permission) {
 		return fmt.Errorf("ContainerSSH access denied")
 	}
+	// The Server can extend valid_until and advance authorization_revision on
+	// its short refresh loop between route selection and exec startup. Use the
+	// latest authoritative cache entry after verifying that the immutable
+	// Session identity is unchanged.
+	permission = current
 	target := &ContainerSSHUserPermission{
 		UserID: permission.UserId, ResourceID: permission.ResourceId,
 		Namespace: permission.Target.NamespaceName, PodName: permission.Target.PodName,
@@ -103,6 +108,19 @@ func (b *ContainerExecBroker) OpenAuthorizedShell(ctx context.Context, authoriza
 		GrantRevision: permission.GrantRevision, ListenPort: uint16(permission.ListenPort),
 	}
 	return b.openAuthorizedTarget(ctx, target, stream)
+}
+
+func sameResourceSessionIdentity(current, selected *pb.ResourceSessionPermissionV2) bool {
+	return current != nil && selected != nil &&
+		current.SessionId == selected.SessionId && current.TenantId == selected.TenantId &&
+		current.ResourceId == selected.ResourceId && current.SourceId == selected.SourceId &&
+		current.TargetRevisionId == selected.TargetRevisionId && current.UserId == selected.UserId &&
+		current.UserName == selected.UserName && current.DeviceId == selected.DeviceId &&
+		current.DeviceHeadscaleNodeId == selected.DeviceHeadscaleNodeId &&
+		current.ResourceType == selected.ResourceType && current.Action == selected.Action &&
+		current.AllocationId == selected.AllocationId && current.GrantId == selected.GrantId &&
+		current.GrantRevision == selected.GrantRevision && current.ListenPort == selected.ListenPort &&
+		proto.Equal(current.Target, selected.Target)
 }
 
 func (b *ContainerExecBroker) openAuthorizedTarget(ctx context.Context, permission *ContainerSSHUserPermission, stream ContainerExecStream) error {

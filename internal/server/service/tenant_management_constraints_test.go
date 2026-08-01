@@ -278,6 +278,37 @@ func TestTenantManagementServicesRespectS4Triggers(t *testing.T) {
 	require.Equal(t, int64(1), outboxCount)
 }
 
+func TestResourceSessionEnsureForDesktopUsesMemberGrantAndReusesLiveSession(t *testing.T) {
+	fixture := newTenantManagementConstraintFixture(t)
+	require.NoError(t, serverdb.DB.Model(&model.Node{}).Where("id = ?", fixture.desktop.ID).Update("headscale_node_id", uint64(8201)).Error)
+	sessions := NewResourceSessionService(serverdb.DB)
+	input := CreateResourceSessionInput{
+		TenantID: fixture.tenant.ID, ResourceID: fixture.resource.ID, Action: "connect", DeviceID: fixture.desktop.ID,
+		ClientCapability: "resource_session_v2", RequestID: "desktop-member-session-a",
+	}
+	first, err := sessions.EnsureForDesktop(context.Background(), fixture.member.ID, input)
+	require.NoError(t, err)
+	require.Equal(t, fixture.grant.ID, first.GrantID)
+	require.Equal(t, fixture.membership.ID, first.TenantMembershipID)
+	require.Equal(t, fixture.desktop.ID, first.DeviceID)
+
+	input.RequestID = "desktop-member-session-b"
+	second, err := sessions.EnsureForDesktop(context.Background(), fixture.member.ID, input)
+	require.NoError(t, err)
+	require.Equal(t, first.ID, second.ID)
+	var count int64
+	require.NoError(t, serverdb.DB.Model(&model.ResourceSession{}).Where("tenant_resource_id = ? AND user_id = ? AND device_id = ?", fixture.resource.ID, fixture.member.ID, fixture.desktop.ID).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+
+	memberAuthorization := &ManagementAuthorizationContext{
+		ActorUserID: fixture.member.ID, EffectiveUserID: fixture.member.ID,
+		ScopeType: model.ManagementScopeTenant, ScopeID: fixture.tenant.ID,
+		Role: "member", PermissionRevision: 1,
+	}
+	_, err = sessions.List(context.Background(), memberAuthorization, fixture.tenant.ID, ResourceSessionListInput{})
+	require.ErrorIs(t, err, ErrManagementPermissionDenied)
+}
+
 func TestTenantGrantMutationRollsBackWhenTerminationOutboxFails(t *testing.T) {
 	fixture := newTenantManagementConstraintFixture(t)
 	database := serverdb.DB

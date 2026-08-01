@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -369,15 +370,17 @@ func (p *K8SSVCProxy) handleDirectConnectionV2(stream pb.AgentService_SVCProxySe
 		}
 	}()
 
-	var bridgeErr error
+	result, reason := "success", "stream_closed"
 	select {
-	case bridgeErr = <-done:
+	case bridgeErr := <-done:
+		if bridgeErr != nil && !errors.Is(bridgeErr, io.EOF) {
+			result, reason = "failed", "SERVICE_STREAM_FAILED"
+		}
 	case <-sessionCtx.Done():
-		bridgeErr = sessionCtx.Err()
+		result, reason = "ended", "context_canceled"
 		_ = stream.Send(&pb.SVCProxyData{IsClose: true})
 	}
 	_ = targetConn.Close()
-	result, reason := containerSessionOutcome(bridgeErr)
 	if endErr := p.sessions.EndV2(permission.SessionId, result, reason); endErr != nil {
 		logger.Errorf("SVCProxy v2 会话事件持久化失败: session_id=%s err=%v", permission.SessionId, endErr)
 	}
@@ -385,10 +388,7 @@ func (p *K8SSVCProxy) handleDirectConnectionV2(stream pb.AgentService_SVCProxySe
 		auditTarget := fmt.Sprintf("%s.%s:%d", target.ServiceName, target.NamespaceName, target.PortNumber)
 		p.auditCollector.Record(peerIdentity.UserName, "", "k8s_service_connect", auditTarget, "", startedAt, time.Now())
 	}
-	if bridgeErr == io.EOF {
-		return nil
-	}
-	return bridgeErr
+	return nil
 }
 
 func serviceMatchesV2Permission(svc *DiscoveredService, target *pb.ResourceSessionTargetV2) bool {

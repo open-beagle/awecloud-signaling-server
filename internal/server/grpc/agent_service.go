@@ -476,7 +476,7 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 
 	firstAcks := s.processSessionAuthorizationHeartbeat(context.Background(), conn, firstReq)
 	// 发送首次响应
-	if err := s.sendHeartbeatResponse(context.Background(), stream, conn, firstAcks); err != nil {
+	if err := s.sendHeartbeatResponse(heartbeatResponseContext(ctx), stream, conn, firstAcks); err != nil {
 		logger.Errorf("发送首次心跳响应失败: %v", err)
 		return err
 	}
@@ -539,7 +539,7 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 
 			acks := s.processSessionAuthorizationHeartbeat(context.Background(), conn, req)
 			// 发送响应
-			if err := s.sendHeartbeatResponse(context.Background(), stream, conn, acks); err != nil {
+			if err := s.sendHeartbeatResponse(heartbeatResponseContext(ctx), stream, conn, acks); err != nil {
 				logger.Errorf("发送心跳响应失败: %v", err)
 				return err
 			}
@@ -547,7 +547,7 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 			if conn.SessionAuthorizationProtocol != sessionAuthorizationProtocolV2 && len(conn.EndpointSessionAuthorizationProtocols) == 0 {
 				continue
 			}
-			if err := s.sendHeartbeatResponse(context.Background(), stream, conn, nil); err != nil {
+			if err := s.sendHeartbeatResponse(heartbeatResponseContext(ctx), stream, conn, nil); err != nil {
 				logger.Errorf("主动推送 Session 授权响应失败: %v", err)
 				return err
 			}
@@ -679,24 +679,41 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	})
 	logger.Debugf("更新 Node 内存缓存: node_id=%d, tunnel_ip=%s", node.ID, req.TunnelIp)
 
-	// 如果 Headscale 客户端可用，查询并更新 HeadscaleNodeID
-	if s.headscaleClient != nil && node.HeadscaleNodeID == 0 {
+	// Resolve the current Headscale node by the authenticated Agent's reported
+	// tunnel IP. State loss can register a new node with an automatic name
+	// suffix, so a stale database HeadscaleNodeID or exact GivenName is not a
+	// trustworthy selector.
+	if s.headscaleClient != nil {
 		hsUserName := fmt.Sprintf("%s-%s", hsPrefix, user.Name)
-		// 按用户名 + 节点名精确匹配（一个 Headscale 用户下可能有多个节点）
-		hsNode, err := s.headscaleClient.GetNodeByUserAndName(ctx, hsUserName, node.Name)
-		if err != nil {
-			logger.Warnf("通过 User+Name 查询 Headscale 节点失败: %v", err)
-		} else if hsNode != nil {
-			updates["headscale_node_id"] = hsNode.Id
-			logger.Infof("用户 %d 关联 Headscale 节点: id=%d, name=%s, ip=%v, user=%s", agentID, hsNode.Id, hsNode.GivenName, hsNode.IpAddresses, hsUserName)
-		} else {
-			// 精确匹配失败，回退到第一个节点（兼容单节点场景）
-			hsNodeFallback, err := s.headscaleClient.GetNodeByUser(ctx, hsUserName)
+		tunnelIP := strings.TrimSpace(req.TunnelIp)
+		if tunnelIP != "" {
+			hsNode, err := s.headscaleClient.GetNodeByIP(ctx, tunnelIP)
 			if err != nil {
-				logger.Warnf("通过 User 查询 Headscale 节点失败: %v", err)
-			} else if hsNodeFallback != nil {
-				updates["headscale_node_id"] = hsNodeFallback.Id
-				logger.Infof("用户 %d 关联 Headscale 节点(回退): id=%d, name=%s, ip=%v, user=%s", agentID, hsNodeFallback.Id, hsNodeFallback.GivenName, hsNodeFallback.IpAddresses, hsUserName)
+				logger.Warnf("通过隧道 IP 查询 Agent Headscale 节点失败: ip=%s err=%v", tunnelIP, err)
+			} else if validDesktopHeadscaleNode(hsNode, hsUserName, tunnelIP) {
+				updates["headscale_node_id"] = hsNode.Id
+				if node.HeadscaleNodeID != hsNode.Id {
+					logger.Infof("Agent Node %d 更新 Headscale 节点: %d -> %d, ip=%s, user=%s", node.ID, node.HeadscaleNodeID, hsNode.Id, tunnelIP, hsUserName)
+				}
+			} else if hsNode != nil {
+				logger.Warnf("拒绝绑定不匹配的 Agent Headscale 节点: node=%d headscale_node=%d ip=%s expected_user=%s", node.ID, hsNode.Id, tunnelIP, hsUserName)
+			}
+		} else if node.HeadscaleNodeID == 0 {
+			hsNode, err := s.headscaleClient.GetNodeByUserAndName(ctx, hsUserName, node.Name)
+			if err != nil {
+				logger.Warnf("通过 User+Name 查询 Headscale 节点失败: %v", err)
+			} else if hsNode != nil {
+				updates["headscale_node_id"] = hsNode.Id
+				logger.Infof("用户 %d 关联 Headscale 节点: id=%d, name=%s, ip=%v, user=%s", agentID, hsNode.Id, hsNode.GivenName, hsNode.IpAddresses, hsUserName)
+			} else {
+				// 精确匹配失败，回退到第一个节点（兼容单节点场景）
+				hsNodeFallback, err := s.headscaleClient.GetNodeByUser(ctx, hsUserName)
+				if err != nil {
+					logger.Warnf("通过 User 查询 Headscale 节点失败: %v", err)
+				} else if hsNodeFallback != nil {
+					updates["headscale_node_id"] = hsNodeFallback.Id
+					logger.Infof("用户 %d 关联 Headscale 节点(回退): id=%d, name=%s, ip=%v, user=%s", agentID, hsNodeFallback.Id, hsNodeFallback.GivenName, hsNodeFallback.IpAddresses, hsUserName)
+				}
 			}
 		}
 	}
@@ -811,6 +828,16 @@ func (s *AgentServiceServer) handleContainerCandidates(ctx context.Context, node
 			logger.Warnf("ContainerSSH Candidate 自动匹配失败: candidate_id=%s err=%v", candidate.ID, reconcileErr)
 		}
 	}
+}
+
+// heartbeatResponseContext lets response-side database work finish without
+// discarding incoming gRPC metadata. Inventory capability negotiation uses the
+// existing Agent bearer from that metadata to resolve its trusted binding.
+func heartbeatResponseContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(ctx)
 }
 
 // sendHeartbeatResponse 发送心跳响应

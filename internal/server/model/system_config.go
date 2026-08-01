@@ -17,13 +17,14 @@ func (SystemConfig) TableName() string {
 
 // 系统配置键常量
 const (
-	ConfigClientDownloadURL  = "client_download_url"   // 客户端/Agent 下载地址（共用）
-	ConfigDesktopMinVersion  = "desktop_min_version"   // 客户端最低版本
-	ConfigHeadscalePublicURL = "headscale_public_url"  // 隧道公网地址
-	ConfigStunPort           = "stun_port"             // STUN 端口
-	ConfigIPPrefix           = "ip_prefix"             // IP 地址段
-	ConfigAuthKeyExpiryHours = "auth_key_expiry_hours" // 预认证密钥有效期（小时）
-	ConfigDomainSuffix       = "domain_suffix"         // 域名后缀（默认 .beagle）
+	ConfigClientDownloadURL    = "client_download_url"       // 客户端/Agent 下载地址（共用）
+	ConfigDesktopMinVersion    = "desktop_min_version"       // 客户端最低版本
+	ConfigHeadscalePublicURL   = "headscale_public_url"      // 隧道公网地址
+	ConfigStunPort             = "stun_port"                 // STUN 端口
+	ConfigIPPrefix             = "ip_prefix"                 // IP 地址段
+	ConfigAuthKeyExpiryHours   = "auth_key_expiry_hours"     // 预认证密钥有效期（小时）
+	ConfigDomainSuffix         = "domain_suffix"             // 域名后缀（默认 .beagle）
+	ConfigHeadscaleACLBaseline = "headscale_acl_baseline_v1" // 并行升级期间冻结的旧 Headscale Policy 基线
 )
 
 // DefaultDomainSuffix 默认域名后缀

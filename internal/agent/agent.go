@@ -62,6 +62,7 @@ type Agent struct {
 	containerSSHProxy     *ContainerSSHProxy     // ContainerSSH tsnet SSH 入口
 	containerSessions     *ContainerSessionManager
 	sessionAuthorizations *SessionAuthorizationCache
+	inventoryReporter     *KubernetesInventoryReporter
 
 	// Endpoint 能力（P2 新增）
 	endpointServer      *EndpointServer      // Endpoint 内网 gRPC Server
@@ -993,6 +994,7 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 	if resp.CapabilityConfig != nil {
 		a.applyCapabilityConfig(resp.CapabilityConfig)
 	}
+	a.syncInventoryReporter(resp)
 
 	// 检查配置版本
 	if resp.ConfigVersion <= a.configVersion {
@@ -1010,6 +1012,28 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 	// 同步端口访问服务
 	if len(resp.Forwards) > 0 {
 		a.syncForwards(resp.Forwards)
+	}
+}
+
+func (a *Agent) syncInventoryReporter(resp *pb.AgentHeartbeatResponse) {
+	if a == nil || resp == nil || a.isClientMode {
+		return
+	}
+	if a.inventoryReporter == nil && (resp.SupplyInventoryConfig != nil || resp.WorkloadInventoryConfig != nil) {
+		reporter, err := NewKubernetesInventoryReporter(a.grpcClient, a.config, a.ctx)
+		if err != nil {
+			logger.Warnf("初始化 Kubernetes Inventory 上报器失败: %v", err)
+			return
+		}
+		a.inventoryReporter = reporter
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			reporter.Run()
+		}()
+	}
+	if a.inventoryReporter != nil {
+		a.inventoryReporter.Update(resp.SupplyInventoryConfig, resp.WorkloadInventoryConfig, inventoryOptionsFromAgentConfig(a.config))
 	}
 }
 

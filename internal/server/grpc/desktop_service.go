@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	v1 "github.com/juanfont/headscale/gen/go/headscale/v1"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/codes"
@@ -804,10 +806,13 @@ func (s *DesktopServiceServer) GetMyDevices(ctx context.Context, req *pb.GetMyDe
 
 // OfflineDevice 设备下线
 func (s *DesktopServiceServer) OfflineDevice(ctx context.Context, req *pb.OfflineDeviceRequest) (*pb.OfflineDeviceResponse, error) {
-	// 验证当前 Desktop 是否存在
+	// 设备管理是安全敏感写操作，不能只信任调用方提交的 Desktop ID。
 	var currentNode model.Node
 	if err := db.DB.WithContext(ctx).First(&currentNode, req.DesktopId).Error; err != nil {
-		return &pb.OfflineDeviceResponse{Success: false, Message: "当前设备不存在"}, nil
+		return &pb.OfflineDeviceResponse{Success: false, Message: "当前设备认证失败"}, nil
+	}
+	if currentNode.Type != model.NodeTypeDesktop || bcrypt.CompareHashAndPassword([]byte(currentNode.SecretHash), []byte(req.Secret)) != nil {
+		return &pb.OfflineDeviceResponse{Success: false, Message: "当前设备认证失败"}, nil
 	}
 
 	// 解析目标设备 ID
@@ -847,10 +852,13 @@ func (s *DesktopServiceServer) OfflineDevice(ctx context.Context, req *pb.Offlin
 
 // DeleteDevice 删除设备
 func (s *DesktopServiceServer) DeleteDevice(ctx context.Context, req *pb.DeleteDeviceRequest) (*pb.DeleteDeviceResponse, error) {
-	// 验证当前 Desktop 是否存在
+	// 设备管理是安全敏感写操作，不能只信任调用方提交的 Desktop ID。
 	var currentNode model.Node
 	if err := db.DB.WithContext(ctx).First(&currentNode, req.DesktopId).Error; err != nil {
-		return &pb.DeleteDeviceResponse{Success: false, Message: "当前设备不存在"}, nil
+		return &pb.DeleteDeviceResponse{Success: false, Message: "当前设备认证失败"}, nil
+	}
+	if currentNode.Type != model.NodeTypeDesktop || bcrypt.CompareHashAndPassword([]byte(currentNode.SecretHash), []byte(req.Secret)) != nil {
+		return &pb.DeleteDeviceResponse{Success: false, Message: "当前设备认证失败"}, nil
 	}
 
 	// 解析目标设备 ID
@@ -1630,6 +1638,14 @@ func (s *DesktopServiceServer) GetResources(ctx context.Context, req *pb.GetReso
 	}
 
 	clientID := node.UserID
+	if req.TenantId != "" {
+		if req.ResourceProtocol != sessionAuthorizationProtocolV2 {
+			return nil, status.Error(codes.InvalidArgument, "Tenant 作用域需要 resource_session_v2")
+		}
+		if !desktopHasActiveTenantMembership(ctx, clientID, req.TenantId) {
+			return nil, status.Error(codes.PermissionDenied, "当前设备无权访问该 Tenant")
+		}
+	}
 
 	// 查询用户所属分组
 	var groupIDs []int64
@@ -1642,23 +1658,257 @@ func (s *DesktopServiceServer) GetResources(ctx context.Context, req *pb.GetReso
 
 	resp := &pb.GetResourcesResponse{}
 
-	// 1. 查询 SSH 资源
-	resp.Ssh = s.querySSHResourcesGRPC(ctx, clientID, groupIDs)
+	// 旧资源没有 Tenant 强身份，只能在未选择 Tenant 的兼容请求中返回。
+	// 显式 Tenant 请求必须失败关闭，避免把旧 Agent 级 ACL 混入当前作用域。
+	if req.TenantId == "" {
+		resp.Ssh = s.querySSHResourcesGRPC(ctx, clientID, groupIDs)
+		resp.K8SApi = s.queryK8SAPIResourcesGRPC(ctx, clientID, groupIDs)
+		resp.K8SService = s.queryK8SServiceResourcesGRPC(ctx, clientID, groupIDs)
+		resp.ContainerSsh = s.queryContainerSSHResourcesGRPC(ctx, clientID, groupIDs)
+	}
+	if req.ResourceProtocol == sessionAuthorizationProtocolV2 && s.config != nil &&
+		s.config.FeatureFlags.Enabled(config.FeatureResourceModelWrite) && s.config.FeatureFlags.Enabled(config.FeatureSessionAuthorizationV2) {
+		containerSSH, containerServices := s.queryTenantContainerResourcesGRPC(ctx, &node, groupIDs, req.TenantId)
+		resp.ContainerSsh = append(resp.ContainerSsh, containerSSH...)
+		resp.ContainerService = containerServices
+	}
 
-	// 2. 查询 K8S API 资源
-	resp.K8SApi = s.queryK8SAPIResourcesGRPC(ctx, clientID, groupIDs)
-
-	// 3. 查询 K8S Service 资源
-	resp.K8SService = s.queryK8SServiceResourcesGRPC(ctx, clientID, groupIDs)
-
-	// 4. 查询统一 ContainerSSH 资源。该投影只基于当前用户有效的
-	// Tenant Membership + AccessGrant，不复用平台管理员资源目录。
-	resp.ContainerSsh = s.queryContainerSSHResourcesGRPC(ctx, clientID, groupIDs)
-
-	logger.Infof("Desktop %d 资源发现: SSH=%d, K8SAPI=%d, K8SService=%d, ContainerSSH=%d",
-		req.DesktopId, len(resp.Ssh), len(resp.K8SApi), len(resp.K8SService), len(resp.ContainerSsh))
+	logger.Infof("Desktop %d 资源发现: SSH=%d, K8SAPI=%d, K8SService=%d, ContainerSSH=%d, ContainerService=%d",
+		req.DesktopId, len(resp.Ssh), len(resp.K8SApi), len(resp.K8SService), len(resp.ContainerSsh), len(resp.ContainerService))
 
 	return resp, nil
+}
+
+type desktopTenantResourceProjection struct {
+	resource model.TenantResource
+	tenant   model.Tenant
+	session  *model.ResourceSession
+	target   model.TenantResourceTargetRevision
+	agent    model.Node
+	targetV2 service.SessionAuthorizationTarget
+}
+
+func desktopHasActiveTenantMembership(ctx context.Context, userID uint64, tenantID string) bool {
+	if userID == 0 || tenantID == "" {
+		return false
+	}
+	now := time.Now().UTC()
+	var count int64
+	err := db.DB.WithContext(ctx).Table("tenant_membership AS membership").
+		Joins("JOIN tenant AS tenant ON tenant.id = membership.tenant_id").
+		Where("membership.user_id = ? AND membership.tenant_id = ? AND membership.enabled = ? AND (membership.expires_at IS NULL OR membership.expires_at > ?) AND tenant.status = ?",
+			userID, tenantID, true, now, model.TenantStatusActive).
+		Count(&count).Error
+	return err == nil && count == 1
+}
+
+func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Context, desktop *model.Node, groupIDs []int64, tenantID string) ([]*pb.ContainerSSHResource, []*pb.ContainerServiceResource) {
+	if desktop == nil || desktop.ID == 0 || desktop.UserID == 0 {
+		return nil, nil
+	}
+	now := time.Now().UTC()
+	var memberships []model.TenantMembership
+	membershipQuery := db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", desktop.UserID, true, now)
+	if tenantID != "" {
+		membershipQuery = membershipQuery.Where("tenant_id = ?", tenantID)
+	}
+	if err := membershipQuery.Find(&memberships).Error; err != nil {
+		return nil, nil
+	}
+	tenantIDs := make([]string, 0, len(memberships))
+	for _, membership := range memberships {
+		tenantIDs = append(tenantIDs, membership.TenantID)
+	}
+	if len(tenantIDs) == 0 {
+		return nil, nil
+	}
+	var tenants []model.Tenant
+	if err := db.DB.WithContext(ctx).Where("id IN ? AND status = ?", tenantIDs, model.TenantStatusActive).Find(&tenants).Error; err != nil {
+		return nil, nil
+	}
+	tenantByID := make(map[string]model.Tenant, len(tenants))
+	activeTenantIDs := make([]string, 0, len(tenants))
+	for _, tenant := range tenants {
+		tenantByID[tenant.ID] = tenant
+		activeTenantIDs = append(activeTenantIDs, tenant.ID)
+	}
+	if len(activeTenantIDs) == 0 {
+		return nil, nil
+	}
+	grantQuery := db.DB.WithContext(ctx).Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND (expires_at IS NULL OR expires_at > ?)", activeTenantIDs, model.TenantAccessGrantEnabled, now, now).
+		Where("subject_type = ? AND subject_user_id = ?", model.TenantAccessGrantSubjectUser, desktop.UserID)
+	if len(groupIDs) > 0 {
+		grantQuery = db.DB.WithContext(ctx).Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND (expires_at IS NULL OR expires_at > ?)", activeTenantIDs, model.TenantAccessGrantEnabled, now, now).
+			Where("(subject_type = ? AND subject_user_id = ?) OR (subject_type = ? AND subject_group_id IN ?)",
+				model.TenantAccessGrantSubjectUser, desktop.UserID, model.TenantAccessGrantSubjectGroup, groupIDs)
+	}
+	var grants []model.TenantAccessGrant
+	if err := grantQuery.Order("tenant_resource_id ASC, revision DESC").Find(&grants).Error; err != nil {
+		return nil, nil
+	}
+	actionByResource := make(map[string]string)
+	for _, grant := range grants {
+		if grant.SubjectType == model.TenantAccessGrantSubjectGroup && !grpcTenantGroupGrantMatches(ctx, grant) {
+			continue
+		}
+		actions := parseJSONStringArray(grant.Actions)
+		if containsAction(actions, "shell") {
+			actionByResource[grant.TenantResourceID] = "shell"
+		} else if containsAction(actions, "connect") {
+			actionByResource[grant.TenantResourceID] = "connect"
+		}
+	}
+	resourceIDs := make([]string, 0, len(actionByResource))
+	for resourceID := range actionByResource {
+		resourceIDs = append(resourceIDs, resourceID)
+	}
+	if len(resourceIDs) == 0 {
+		return nil, nil
+	}
+	var resources []model.TenantResource
+	if err := db.DB.WithContext(ctx).Where("id IN ? AND tenant_id IN ? AND visibility_state = ? AND availability_state IN ?", resourceIDs, activeTenantIDs,
+		model.TenantResourceVisible, []model.TenantResourceAvailabilityState{model.TenantResourceAvailable, model.TenantResourceDegraded}).
+		Order("display_name ASC, id ASC").Find(&resources).Error; err != nil {
+		return nil, nil
+	}
+
+	sessionService := service.NewResourceSessionService(db.DB)
+	projections := make([]desktopTenantResourceProjection, 0, len(resources))
+	for _, resource := range resources {
+		action := actionByResource[resource.ID]
+		if (resource.Type == model.TenantResourceContainerSSH && action != "shell") ||
+			(resource.Type == model.TenantResourceContainerService && action != "connect") {
+			continue
+		}
+		session, err := sessionService.EnsureForDesktop(ctx, desktop.UserID, service.CreateResourceSessionInput{
+			TenantID: resource.TenantID, ResourceID: resource.ID, Action: action, DeviceID: desktop.ID,
+			ClientCapability: "resource_session_v2", RequestID: "desktop-resource:" + uuid.NewString(),
+		})
+		if err != nil {
+			logger.Warnf("Desktop ResourceSession 授权失败: desktop_id=%d resource_id=%s err=%v", desktop.ID, resource.ID, err)
+			continue
+		}
+		var target model.TenantResourceTargetRevision
+		if err := db.DB.WithContext(ctx).Where("id = ? AND tenant_resource_source_id = ? AND superseded_at IS NULL", session.TargetRevisionID, session.TenantResourceSourceID).First(&target).Error; err != nil {
+			continue
+		}
+		var targetV2 service.SessionAuthorizationTarget
+		if json.Unmarshal([]byte(target.TargetSnapshot), &targetV2) != nil {
+			continue
+		}
+		agentNode, err := desktopAccessAgentNode(ctx, target.AccessTechnicalResourceID)
+		if err != nil {
+			continue
+		}
+		projections = append(projections, desktopTenantResourceProjection{
+			resource: resource, tenant: tenantByID[resource.TenantID], session: session, target: target, agent: agentNode, targetV2: targetV2,
+		})
+	}
+
+	permissions := make(map[string]service.SessionAuthorizationPermission)
+	listenPorts := make(map[string]map[string]uint16)
+	technicalIDs := make(map[string]struct{})
+	for _, projection := range projections {
+		technicalIDs[projection.session.AccessTechnicalResourceID] = struct{}{}
+	}
+	for technicalID := range technicalIDs {
+		snapshot, err := service.NewSessionAuthorizationService(db.DB).BuildSnapshot(ctx, technicalID, true)
+		if err != nil {
+			continue
+		}
+		for _, permission := range snapshot.Permissions {
+			permissions[permission.SessionID] = permission
+		}
+		listenPorts[technicalID] = allocateSessionAuthorizationListenPorts(snapshot.Permissions)
+	}
+
+	domainSuffix := desktopResourceDomainSuffix(ctx)
+	sshResources := make([]*pb.ContainerSSHResource, 0)
+	serviceResources := make([]*pb.ContainerServiceResource, 0)
+	for _, projection := range projections {
+		permission, allowed := permissions[projection.session.ID]
+		if !allowed {
+			continue
+		}
+		state := string(projection.resource.AvailabilityState)
+		if projection.resource.Type == model.TenantResourceContainerSSH {
+			listenPort := listenPorts[projection.session.AccessTechnicalResourceID][projection.resource.ID]
+			if listenPort == 0 {
+				continue
+			}
+			sshResources = append(sshResources, &pb.ContainerSSHResource{
+				ResourceId: projection.resource.ID, TenantId: projection.resource.TenantID, TenantName: projection.tenant.Name,
+				DisplayName: projection.resource.DisplayName, State: state, TargetRevision: projection.target.Revision,
+				AgentNodeId: projection.agent.ID, Capability: string(model.TenantResourceContainerSSH), ListenPort: uint32(listenPort),
+				Domain: projection.resource.ID + ".container" + domainSuffix, AgentIp: projection.agent.IP, SshUser: "container",
+				SessionId: projection.session.ID, SourceId: projection.session.TenantResourceSourceID,
+				TargetRevisionId: projection.session.TargetRevisionID, AuthorizationRevision: permission.AuthorizationRevision,
+			})
+			continue
+		}
+		serviceResources = append(serviceResources, &pb.ContainerServiceResource{
+			ResourceId: projection.resource.ID, TenantId: projection.resource.TenantID, TenantName: projection.tenant.Name,
+			DisplayName: projection.resource.DisplayName, State: state, TargetRevision: projection.target.Revision,
+			AgentNodeId: projection.agent.ID, AgentIp: projection.agent.IP, SvcProxyPort: 50051,
+			Domain: projection.resource.ID + ".service" + domainSuffix, Namespace: projection.targetV2.NamespaceName,
+			ServiceUid: projection.targetV2.ServiceUID, ServiceName: projection.targetV2.ServiceName,
+			PortName: projection.targetV2.PortName, PortNumber: projection.targetV2.PortNumber, Protocol: projection.targetV2.Protocol,
+			SessionId: projection.session.ID, SourceId: projection.session.TenantResourceSourceID,
+			TargetRevisionId: projection.session.TargetRevisionID, AuthorizationRevision: permission.AuthorizationRevision,
+		})
+	}
+	return sshResources, serviceResources
+}
+
+func grpcTenantGroupGrantMatches(ctx context.Context, grant model.TenantAccessGrant) bool {
+	if grant.SubjectGroupID == nil || grant.TenantID == "" {
+		return false
+	}
+	var count int64
+	return db.DB.WithContext(ctx).Model(&model.Group{}).Where("id = ? AND tenant_id = ?", *grant.SubjectGroupID, grant.TenantID).Count(&count).Error == nil && count == 1
+}
+
+func desktopAccessAgentNode(ctx context.Context, technicalResourceID string) (model.Node, error) {
+	var technical model.TechnicalResource
+	if err := db.DB.WithContext(ctx).Where("id = ? AND lifecycle_state = ?", technicalResourceID, model.TechnicalResourceRegistered).First(&technical).Error; err != nil {
+		return model.Node{}, err
+	}
+	if technical.Type == model.TechnicalResourceEndpoint {
+		if technical.ParentID == nil || *technical.ParentID == "" {
+			return model.Node{}, fmt.Errorf("Endpoint parent Agent is missing")
+		}
+		if err := db.DB.WithContext(ctx).Where("id = ? AND type = ? AND lifecycle_state = ?", *technical.ParentID, model.TechnicalResourceAgent, model.TechnicalResourceRegistered).First(&technical).Error; err != nil {
+			return model.Node{}, err
+		}
+	}
+	if technical.Type != model.TechnicalResourceAgent {
+		return model.Node{}, fmt.Errorf("unsupported access TechnicalResource type %s", technical.Type)
+	}
+	var binding model.TechnicalResourceBinding
+	if err := db.DB.WithContext(ctx).Where("technical_resource_id = ? AND source_type = ? AND enabled = ?", technical.ID, model.TechnicalResourceBindingLegacyNode, true).First(&binding).Error; err != nil {
+		return model.Node{}, err
+	}
+	nodeID, err := strconv.ParseUint(binding.SourceID, 10, 64)
+	if err != nil {
+		return model.Node{}, err
+	}
+	var node model.Node
+	if err := db.DB.WithContext(ctx).Where("id = ? AND type = ? AND ip <> ?", nodeID, model.NodeTypeAgent, "").First(&node).Error; err != nil {
+		return model.Node{}, err
+	}
+	return node, nil
+}
+
+func desktopResourceDomainSuffix(ctx context.Context) string {
+	domainSuffix := model.DefaultDomainSuffix
+	var domainConfig model.SystemConfig
+	if err := db.DB.WithContext(ctx).Where("key = ?", model.ConfigDomainSuffix).First(&domainConfig).Error; err == nil && domainConfig.Value != "" {
+		domainSuffix = domainConfig.Value
+	}
+	if !strings.HasPrefix(domainSuffix, ".") {
+		domainSuffix = "." + domainSuffix
+	}
+	return domainSuffix
 }
 
 func (s *DesktopServiceServer) queryContainerSSHResourcesGRPC(ctx context.Context, clientID uint64, groupIDs []int64) []*pb.ContainerSSHResource {

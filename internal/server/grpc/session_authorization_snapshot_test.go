@@ -9,6 +9,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/agent"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
+	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
 func TestSessionAuthorizationSnapshotInteroperatesWithAgentAtomicCache(t *testing.T) {
@@ -37,6 +38,31 @@ func TestSessionAuthorizationSnapshotInteroperatesWithAgentAtomicCache(t *testin
 	require.True(t, server.acknowledgeAuthorizationSnapshot("technical-a", ackRevision, ackHash))
 	require.Equal(t, ackRevision, server.authorizationSnapshotStates["technical-a"].ackRevision)
 	require.False(t, server.acknowledgeAuthorizationSnapshot("technical-a", ackRevision, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+}
+
+func TestTerminationCommandsRequestImmediateAgentReport(t *testing.T) {
+	tests := []struct {
+		name string
+		resp *pb.AgentHeartbeatResponse
+		want bool
+	}{
+		{name: "empty", resp: &pb.AgentHeartbeatResponse{}},
+		{name: "direct permission only", resp: &pb.AgentHeartbeatResponse{AuthorizationSnapshotV2: &pb.ResourceSessionAuthorizationSnapshotV2{}}},
+		{name: "direct termination", resp: &pb.AgentHeartbeatResponse{AuthorizationSnapshotV2: &pb.ResourceSessionAuthorizationSnapshotV2{
+			TerminationCommands: []*pb.ResourceSessionTerminationCommandV2{{SessionId: "session-a", CommandRevision: 1}},
+		}}, want: true},
+		{name: "endpoint termination", resp: &pb.AgentHeartbeatResponse{EndpointAuthorizationSnapshotsV2: []*pb.EndpointSessionAuthorizationSnapshotV2{{
+			EndpointName: "endpoint-a", Snapshot: &pb.ResourceSessionAuthorizationSnapshotV2{
+				TerminationCommands: []*pb.ResourceSessionTerminationCommandV2{{SessionId: "session-b", CommandRevision: 2}},
+			},
+		}}}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requestImmediateTerminationReport(tt.resp)
+			require.Equal(t, tt.want, tt.resp.RequestImmediateReport)
+		})
+	}
 }
 
 func testSessionAuthorizationPermission(now time.Time, sessionID, resourceID, userName string, nodeID uint64) service.SessionAuthorizationPermission {

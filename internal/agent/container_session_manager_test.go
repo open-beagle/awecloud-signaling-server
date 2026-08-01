@@ -270,6 +270,7 @@ func TestContainerSessionManagerBatchesReliableReports(t *testing.T) {
 func TestPersistentContainerSessionManagerExpandsHomeDirectory(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	manager, err := NewPersistentContainerSessionManager("~/signal-state")
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(home, "signal-state", "resource_session_events_v2.json"), manager.statePath)

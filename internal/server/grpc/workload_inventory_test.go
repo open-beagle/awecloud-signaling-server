@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -82,7 +84,8 @@ func TestReportWorkloadInventoryFailsClosedForFeatureAndUntrustedScope(t *testin
 	disabledClient, disabledCleanup := startSupplyInventoryAgentServer(t, disabled)
 	disabledStream, err := disabledClient.ReportWorkloadInventory(ctx)
 	require.NoError(t, err)
-	require.NoError(t, disabledStream.Send(testWorkloadInventoryEnvelope(t, clusterDigest, namespaceUID, 1, "snapshot-disabled")))
+	sendErr := disabledStream.Send(testWorkloadInventoryEnvelope(t, clusterDigest, namespaceUID, 1, "snapshot-disabled"))
+	require.True(t, sendErr == nil || errors.Is(sendErr, io.EOF), "unexpected send error: %v", sendErr)
 	_, err = disabledStream.Recv()
 	require.Equal(t, codes.Unavailable, status.Code(err))
 	disabledCleanup()

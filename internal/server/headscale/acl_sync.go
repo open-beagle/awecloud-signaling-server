@@ -4,9 +4,14 @@ package headscale
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
+	"sort"
 	"sync"
 	"time"
+
+	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
@@ -64,6 +69,10 @@ func (s *ACLSyncService) SyncACL(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("生成 ACL 策略失败: %w", err)
 	}
+	policy, err = s.mergeStoredACLPolicyBaseline(ctx, policy)
+	if err != nil {
+		return fmt.Errorf("合并旧 ACL 基线失败: %w", err)
+	}
 
 	policyJSON, err := json.MarshalIndent(policy, "", "  ")
 	if err != nil {
@@ -88,6 +97,90 @@ func (s *ACLSyncService) SyncACL(ctx context.Context) error {
 
 	logger.Errorf("ACL 同步最终失败: %v", lastErr)
 	return fmt.Errorf("设置 ACL 策略失败（已重试 3 次）: %w", lastErr)
+}
+
+func (s *ACLSyncService) mergeStoredACLPolicyBaseline(ctx context.Context, generated *ACLPolicy) (*ACLPolicy, error) {
+	var config model.SystemConfig
+	err := db.DB.WithContext(ctx).Where("key = ?", model.ConfigHeadscaleACLBaseline).First(&config).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return generated, nil
+		}
+		return nil, err
+	}
+	var baseline ACLPolicy
+	if err := json.Unmarshal([]byte(config.Value), &baseline); err != nil {
+		return nil, fmt.Errorf("baseline JSON 无效: %w", err)
+	}
+	return mergeACLPolicies(&baseline, generated)
+}
+
+func mergeACLPolicies(baseline, generated *ACLPolicy) (*ACLPolicy, error) {
+	if baseline == nil || generated == nil {
+		return nil, fmt.Errorf("baseline 和 generated policy 均不能为空")
+	}
+	result := &ACLPolicy{Groups: map[string][]string{}, TagOwners: map[string][]string{}}
+	for name, members := range baseline.Groups {
+		result.Groups[name] = append([]string(nil), members...)
+	}
+	for name, members := range generated.Groups {
+		if existing, ok := result.Groups[name]; ok && !stringSetsEqual(existing, members) {
+			return nil, fmt.Errorf("Group %s 在 baseline 与 ZTNA 中定义冲突", name)
+		}
+		result.Groups[name] = append([]string(nil), members...)
+	}
+	for tag, owners := range baseline.TagOwners {
+		result.TagOwners[tag] = append([]string(nil), owners...)
+	}
+	for tag, owners := range generated.TagOwners {
+		result.TagOwners[tag] = unionStrings(result.TagOwners[tag], owners)
+	}
+	result.ACLs = appendUniqueJSON(result.ACLs, baseline.ACLs)
+	result.ACLs = appendUniqueJSON(result.ACLs, generated.ACLs)
+	result.SSH = appendUniqueJSON(result.SSH, baseline.SSH)
+	result.SSH = appendUniqueJSON(result.SSH, generated.SSH)
+	return result, nil
+}
+
+func appendUniqueJSON[T any](dst, values []T) []T {
+	seen := make(map[string]struct{}, len(dst)+len(values))
+	for _, value := range dst {
+		encoded, _ := json.Marshal(value)
+		seen[string(encoded)] = struct{}{}
+	}
+	for _, value := range values {
+		encoded, _ := json.Marshal(value)
+		key := string(encoded)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		dst = append(dst, value)
+	}
+	return dst
+}
+
+func unionStrings(left, right []string) []string {
+	seen := make(map[string]struct{}, len(left)+len(right))
+	result := make([]string, 0, len(left)+len(right))
+	for _, values := range [][]string{left, right} {
+		for _, value := range values {
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			result = append(result, value)
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
+func stringSetsEqual(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	return slices.Equal(unionStrings(nil, left), unionStrings(nil, right))
 }
 
 // FullSync 完整同步：先同步 Node Tag，再同步 ACL 规则
@@ -379,6 +472,7 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 		GivenName       string
 		IP              string
 		Tags            []string
+		Online          bool
 	}
 	userNodesMap := make(map[string][]hsNodeInfo)
 	for _, node := range nodes {
@@ -392,6 +486,7 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 				GivenName:       node.GivenName,
 				IP:              ip,
 				Tags:            node.ForcedTags,
+				Online:          node.Online,
 			})
 		}
 	}
@@ -431,9 +526,22 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 		// 在同一 User 的多个 Headscale Node 中，按 GivenName 精确匹配
 		var nodeInfo *hsNodeInfo
 		for i := range hsNodes {
-			if hsNodes[i].GivenName == dbNode.Name {
+			if dbNode.IP != "" && hsNodes[i].IP == dbNode.IP {
 				nodeInfo = &hsNodes[i]
 				break
+			}
+		}
+		for i := range hsNodes {
+			if nodeInfo != nil {
+				break
+			}
+			candidate := &hsNodes[i]
+			if candidate.GivenName != dbNode.Name {
+				continue
+			}
+			if nodeInfo == nil || (candidate.Online && !nodeInfo.Online) ||
+				(candidate.Online == nodeInfo.Online && candidate.HeadscaleNodeID > nodeInfo.HeadscaleNodeID) {
+				nodeInfo = candidate
 			}
 		}
 

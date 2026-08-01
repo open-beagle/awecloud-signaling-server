@@ -174,6 +174,26 @@ func (s *AgentServiceServer) appendSessionAuthorizationResponse(ctx context.Cont
 		}
 		resp.EndpointAuthorizationSnapshotsV2 = append(resp.EndpointAuthorizationSnapshotsV2, wrapper)
 	}
+	requestImmediateTerminationReport(resp)
+}
+
+// requestImmediateTerminationReport asks the Agent to return termination ACKs
+// and terminal events without waiting for its regular 30-second heartbeat. The
+// command is still retried by the Server until that report is committed.
+func requestImmediateTerminationReport(resp *pb.AgentHeartbeatResponse) {
+	if resp == nil {
+		return
+	}
+	if resp.AuthorizationSnapshotV2 != nil && len(resp.AuthorizationSnapshotV2.TerminationCommands) > 0 {
+		resp.RequestImmediateReport = true
+		return
+	}
+	for _, endpoint := range resp.EndpointAuthorizationSnapshotsV2 {
+		if endpoint != nil && endpoint.Snapshot != nil && len(endpoint.Snapshot.TerminationCommands) > 0 {
+			resp.RequestImmediateReport = true
+			return
+		}
+	}
 }
 
 func (s *AgentServiceServer) sessionAuthorizationPermissionsEnabled() bool {

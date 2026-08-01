@@ -564,20 +564,11 @@ func (m *ContainerSessionManager) persistLocked() error {
 		_ = os.Remove(tempPath)
 		return err
 	}
-	if err := os.Rename(tempPath, m.statePath); err != nil {
+	if err := replaceResourceSessionStateFile(tempPath, m.statePath); err != nil {
 		_ = os.Remove(tempPath)
 		return err
 	}
-	directory, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	err = directory.Sync()
-	closeErr := directory.Close()
-	if err != nil {
-		return err
-	}
-	return closeErr
+	return syncResourceSessionStateDirectory(dir)
 }
 
 func terminationAckKey(sessionID string, revision int64) string {

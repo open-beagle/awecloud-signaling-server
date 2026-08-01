@@ -155,6 +155,10 @@ type CreateResourceSessionInput struct {
 }
 
 func (s *ResourceSessionService) Create(ctx context.Context, authorization *ManagementAuthorizationContext, input CreateResourceSessionInput) (*model.ResourceSession, error) {
+	return s.create(ctx, authorization, input, false)
+}
+
+func (s *ResourceSessionService) create(ctx context.Context, authorization *ManagementAuthorizationContext, input CreateResourceSessionInput, desktopMember bool) (*model.ResourceSession, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrResourceSessionInvalidInput
 	}
@@ -168,8 +172,14 @@ func (s *ResourceSessionService) Create(ctx context.Context, authorization *Mana
 	now := s.now().UTC()
 	var session model.ResourceSession
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := reauthorizeTenantPermission(tx, authorization, input.TenantID, PermissionTenantSessionsRead, now); err != nil {
-			return err
+		if desktopMember {
+			if err := reauthorizeDesktopSessionMember(tx, authorization, input.TenantID, now); err != nil {
+				return err
+			}
+		} else {
+			if err := reauthorizeTenantPermission(tx, authorization, input.TenantID, PermissionTenantSessionsRead, now); err != nil {
+				return err
+			}
 		}
 		var activeTenant int64
 		if err := tx.Model(&model.Tenant{}).Where("id = ? AND status = ?", input.TenantID, model.TenantStatusActive).Count(&activeTenant).Error; err != nil {
@@ -245,6 +255,86 @@ func (s *ResourceSessionService) Create(ctx context.Context, authorization *Mana
 		return nil
 	})
 	return &session, err
+}
+
+// EnsureForDesktop is the member-device entrypoint approved for S6. It reuses
+// a still-valid session for the same Resource and Device, and otherwise goes
+// through the same complete authorization chain as the management API. A
+// Tenant member gains no management permission from this path.
+func (s *ResourceSessionService) EnsureForDesktop(ctx context.Context, userID uint64, input CreateResourceSessionInput) (*model.ResourceSession, error) {
+	if s == nil || s.db == nil || userID == 0 {
+		return nil, ErrResourceSessionInvalidInput
+	}
+	now := s.now().UTC()
+	tenantID := strings.TrimSpace(input.TenantID)
+	var tenant model.Tenant
+	var membership model.TenantMembership
+	if err := s.db.WithContext(ctx).Where("id = ? AND status = ?", tenantID, model.TenantStatusActive).First(&tenant).Error; err != nil {
+		return nil, ErrResourceSessionAuthorizationDenied
+	}
+	if err := s.db.WithContext(ctx).Where("tenant_id = ? AND user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)",
+		tenantID, userID, true, now).First(&membership).Error; err != nil {
+		return nil, ErrResourceSessionAuthorizationDenied
+	}
+	authorization := &ManagementAuthorizationContext{
+		ActorUserID: userID, EffectiveUserID: userID, ScopeType: model.ManagementScopeTenant,
+		ScopeID: tenant.ID, ScopeKey: tenant.Key, ScopeName: tenant.Name, ScopeStatus: string(tenant.Status),
+		Role: "member", PermissionRevision: 1, ExpiresAt: membership.ExpiresAt,
+	}
+	if authorization.ActorUserID != userID || authorization.EffectiveUserID != userID {
+		return nil, ErrResourceSessionAuthorizationDenied
+	}
+	var existing model.ResourceSession
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var candidates []model.ResourceSession
+		if err := tx.Where("tenant_id = ? AND tenant_resource_id = ? AND user_id = ? AND device_id = ? AND action = ? AND status IN ?",
+			strings.TrimSpace(input.TenantID), strings.TrimSpace(input.ResourceID), userID, input.DeviceID, strings.TrimSpace(input.Action),
+			[]model.ResourceSessionStatus{model.ResourceSessionAuthorizing, model.ResourceSessionActive}).
+			Order("started_at DESC, id ASC").Find(&candidates).Error; err != nil {
+			return err
+		}
+		authorizer := NewSessionAuthorizationService(tx)
+		authorizer.now = func() time.Time { return now }
+		for i := range candidates {
+			permission, _, err := authorizer.revalidateSession(tx, &candidates[i], now, true)
+			if err != nil {
+				return err
+			}
+			if permission != nil {
+				existing = candidates[i]
+				return nil
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if existing.ID != "" {
+		return &existing, nil
+	}
+	return s.create(ctx, authorization, input, true)
+}
+
+func reauthorizeDesktopSessionMember(tx *gorm.DB, authorization *ManagementAuthorizationContext, tenantID string, at time.Time) error {
+	if tx == nil || authorization == nil || strings.TrimSpace(tenantID) == "" || at.IsZero() ||
+		authorization.Role != "member" || authorization.ScopeType != model.ManagementScopeTenant || authorization.ScopeID != tenantID ||
+		authorization.SimulationSessionID != "" || authorization.ActorUserID == 0 ||
+		authorization.ActorUserID != authorization.EffectiveUserID || authorization.PermissionRevision != 1 {
+		return ErrManagementPermissionDenied
+	}
+	var membershipCount, userCount int64
+	if err := tx.Model(&model.TenantMembership{}).Where("tenant_id = ? AND user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)",
+		tenantID, authorization.EffectiveUserID, true, at).Count(&membershipCount).Error; err != nil {
+		return err
+	}
+	if err := tx.Model(&model.User{}).Where("id = ? AND enabled = ?", authorization.EffectiveUserID, true).Count(&userCount).Error; err != nil {
+		return err
+	}
+	if membershipCount != 1 || userCount != 1 {
+		return ErrManagementPermissionDenied
+	}
+	return nil
 }
 
 func calculateResourceSessionValidUntil(now, startedAt time.Time, maxSessionSeconds int, deadlines ...*time.Time) time.Time {
