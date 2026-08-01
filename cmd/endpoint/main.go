@@ -17,6 +17,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/banner"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -42,9 +43,10 @@ type EndpointConfig struct {
 
 // AgentConnect Agent 连接配置
 type AgentConnect struct {
-	Address string `toml:"address"` // Agent 内网 gRPC 地址，如 192.168.1.1:50052
-	Token   string `toml:"token"`   // 注册令牌（Server 生成，ep_ 前缀）
-	Name    string `toml:"name"`    // Endpoint 名称（可选，默认 hostname）
+	Address  string `toml:"address"`   // Agent 内网 gRPC 地址，如 192.168.1.1:50052
+	Token    string `toml:"token"`     // 注册令牌（Server 生成，ep_ 前缀）
+	Name     string `toml:"name"`      // Endpoint 名称（可选，默认 hostname）
+	StateDir string `toml:"state_dir"` // ResourceSession 事件持久化目录
 }
 
 // SSHConfig SSH 能力配置
@@ -258,6 +260,10 @@ func buildConnectedEndpoint(cfg *EndpointConfig, discovery *K8SServiceDiscovery)
 
 // connectLoop 连接 Agent 的主循环（自动重连）
 func connectLoop(ctx context.Context, cfg *EndpointConfig, updateManager *updater.Manager) {
+	authorization, err := newEndpointSessionAuthorization(cfg.Agent.StateDir)
+	if err != nil {
+		logger.Errorf("初始化 Endpoint ResourceSession v2 失败，v2 授权保持关闭: %v", err)
+	}
 	retryDelay := 5 * time.Second
 	maxRetryDelay := 60 * time.Second
 
@@ -270,7 +276,7 @@ func connectLoop(ctx context.Context, cfg *EndpointConfig, updateManager *update
 
 		logger.Infof("连接 Agent: %s", cfg.Agent.Address)
 
-		err := connectAndRun(ctx, cfg, updateManager)
+		err := connectAndRun(ctx, cfg, updateManager, authorization)
 		if err != nil {
 			logger.Warnf("连接断开: %v", err)
 		}
@@ -288,10 +294,11 @@ func connectLoop(ctx context.Context, cfg *EndpointConfig, updateManager *update
 }
 
 // connectAndRun 连接 Agent 并运行注册 + 心跳
-func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *updater.Manager) error {
+func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *updater.Manager, authorization *endpointSessionAuthorization) error {
 	// 建立 gRPC 连接（内网明文）
 	conn, err := grpc.NewClient(cfg.Agent.Address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStreamInterceptor(endpointAuthStreamInterceptor(cfg.Agent.Token, cfg.Agent.Name)),
 	)
 	if err != nil {
 		return fmt.Errorf("创建 gRPC 连接失败: %w", err)
@@ -363,6 +370,9 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *upda
 		UpdaterProtocol: "v1",
 		UpdateStatuses:  toProtoUpdateStatuses(updateManager.Statuses()),
 	}
+	if authorization != nil {
+		authorization.appendReport(heartbeatReq)
+	}
 	// 添加 K8S API 配置（始终上报，无论是否启用）
 	if cfg.K8S.APIServer != "" {
 		heartbeatReq.K8SapiApiServer = cfg.K8S.APIServer
@@ -409,6 +419,9 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *upda
 
 	// 处理首次响应中 Server 下发的能力配置（如果没有超时）
 	if resp != nil {
+		if authorization != nil {
+			authorization.applyResponse(resp)
+		}
 		for _, directive := range resp.UpdateDirectives {
 			updateManager.Handle(updateDirectiveFromProto(directive))
 		}
@@ -498,6 +511,9 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *upda
 			for _, directive := range resp.UpdateDirectives {
 				updateManager.Handle(updateDirectiveFromProto(directive))
 			}
+			if authorization != nil {
+				authorization.applyResponse(resp)
+			}
 
 			// 处理 Server 下发的能力配置（更新运行时配置）
 			if resp.SshEnabledSet {
@@ -562,7 +578,10 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *upda
 
 			// 处理 K8S Service 代理请求通知
 			for _, svcReq := range resp.SvcProxyRequests {
-				go handleSVCProxyRequest(ctx, client, cfg, svcReq)
+				discoveryMu.Lock()
+				currentDiscovery := discovery
+				discoveryMu.Unlock()
+				go handleSVCProxyRequest(ctx, client, cfg, svcReq, authorization, currentDiscovery)
 			}
 
 			// 处理原始字节流请求通知（协议升级）
@@ -590,6 +609,9 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *upda
 				UpdaterProtocol: "v1",
 				UpdateStatuses:  toProtoUpdateStatuses(updateManager.Statuses()),
 			}
+			if authorization != nil {
+				authorization.appendReport(heartbeatReq)
+			}
 			// 添加 K8S API 配置（始终上报，无论是否启用）
 			if cfg.K8S.APIServer != "" {
 				heartbeatReq.K8SapiApiServer = cfg.K8S.APIServer
@@ -610,6 +632,13 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *upda
 				return fmt.Errorf("发送心跳失败: %w", err)
 			}
 		}
+	}
+}
+
+func endpointAuthStreamInterceptor(token, name string) grpc.StreamClientInterceptor {
+	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token, "x-endpoint-name", name)
+		return streamer(ctx, desc, cc, method, opts...)
 	}
 }
 
@@ -639,6 +668,9 @@ func loadConfig(path string) (*EndpointConfig, error) {
 	if v := os.Getenv("SIGNAL_ENDPOINT_NAME"); v != "" {
 		cfg.Agent.Name = v
 	}
+	if v := os.Getenv("SIGNAL_ENDPOINT_STATE_DIR"); v != "" {
+		cfg.Agent.StateDir = v
+	}
 	if v := os.Getenv("SIGNAL_ENDPOINT_SSH_ENABLED"); v == "true" {
 		cfg.SSH.Enabled = true
 	}
@@ -667,6 +699,9 @@ func loadConfig(path string) (*EndpointConfig, error) {
 	if cfg.Agent.Name == "" {
 		hostname, _ := os.Hostname()
 		cfg.Agent.Name = hostname
+	}
+	if cfg.Agent.StateDir == "" {
+		cfg.Agent.StateDir = "./"
 	}
 
 	// SSH 默认值

@@ -3,8 +3,12 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/trace"
+	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
@@ -77,12 +81,23 @@ func NewPagedResponse(data interface{}, total int64, page, size int) PagedRespon
 
 // recordAuditLog 记录审计日志
 func recordAuditLog(ctx context.Context, c *gin.Context, actionType, targetType, targetID, targetName string, detail interface{}) {
+	_ = recordAuditLogStrict(ctx, c, actionType, targetType, targetID, targetName, detail)
+}
+
+func recordAuditLogStrict(ctx context.Context, c *gin.Context, actionType, targetType, targetID, targetName string, detail interface{}) error {
+	return recordAuditLogStrictWithDB(ctx, db.DB, c, actionType, targetType, targetID, targetName, detail)
+}
+
+func recordAuditLogStrictWithDB(ctx context.Context, database *gorm.DB, c *gin.Context, actionType, targetType, targetID, targetName string, detail interface{}) error {
+	if database == nil {
+		return fmt.Errorf("audit database is not initialized")
+	}
 	userID := getAdminIDFromContext(c)
 	actorUsername := ""
 	platformRole := ""
 	if userID > 0 {
 		var admin model.Admin
-		if err := db.DB.WithContext(ctx).Select("username", "role").First(&admin, userID).Error; err == nil {
+		if err := database.WithContext(ctx).Select("username", "role").First(&admin, userID).Error; err == nil {
 			actorUsername = admin.Username
 			platformRole = string(model.NormalizePlatformRole(admin.Role))
 		}
@@ -91,35 +106,71 @@ func recordAuditLog(ctx context.Context, c *gin.Context, actionType, targetType,
 	tenantRole, _ := c.Get("audit_tenant_role")
 	requiredPermission, _ := c.Get("audit_required_permission")
 	permissionRevision, _ := c.Get("audit_permission_revision")
+	actorUserID, _ := c.Get(contextAuditActorUserID)
+	effectiveUserID, _ := c.Get(contextAuditEffectiveUserID)
+	simulationSessionID, _ := c.Get(contextAuditSimulationSessionID)
+	scopeType, _ := c.Get(contextAuditScopeType)
+	scopeID, _ := c.Get(contextAuditScopeID)
 
 	var detailStr string
 	if detail != nil {
-		if data, err := json.Marshal(detail); err == nil {
-			detailStr = string(data)
+		data, err := json.Marshal(detail)
+		if err != nil {
+			return fmt.Errorf("marshal audit detail: %w", err)
 		}
+		detailStr = string(data)
 	}
 
 	log := &model.AuditLog{
-		UserID:             userID,
-		UserType:           "admin",
-		ActorAdminID:       userID,
-		ActorUsername:      actorUsername,
-		PlatformRole:       platformRole,
-		TenantID:           stringContextValue(tenantID),
-		TenantRole:         stringContextValue(tenantRole),
-		RequiredPermission: stringContextValue(requiredPermission),
-		PermissionRevision: int64ContextValue(permissionRevision),
-		RequestID:          requestID(c),
-		SourceIP:           c.ClientIP(),
-		UserAgent:          c.Request.UserAgent(),
-		ActionType:         actionType,
-		TargetType:         targetType,
-		TargetID:           targetID,
-		TargetName:         targetName,
-		Detail:             detailStr,
+		UserID:              userID,
+		UserType:            "admin",
+		ActorAdminID:        userID,
+		ActorUsername:       actorUsername,
+		ActorUserID:         uint64ContextNumber(actorUserID),
+		EffectiveUserID:     uint64ContextNumber(effectiveUserID),
+		SimulationSessionID: stringContextValue(simulationSessionID),
+		ScopeType:           stringContextValue(scopeType),
+		ScopeID:             stringContextValue(scopeID),
+		PlatformRole:        platformRole,
+		TenantID:            stringContextValue(tenantID),
+		TenantRole:          stringContextValue(tenantRole),
+		RequiredPermission:  stringContextValue(requiredPermission),
+		PermissionRevision:  int64ContextValue(permissionRevision),
+		RequestID:           requestID(c),
+		TraceID:             auditTraceID(ctx),
+		SourceIP:            c.ClientIP(),
+		UserAgent:           c.Request.UserAgent(),
+		ActionType:          actionType,
+		TargetType:          targetType,
+		TargetID:            targetID,
+		TargetName:          targetName,
+		Detail:              detailStr,
 	}
 
-	db.DB.WithContext(ctx).Create(log)
+	return database.WithContext(ctx).Create(log).Error
+}
+
+func auditTraceID(ctx context.Context) string {
+	spanContext := trace.SpanContextFromContext(ctx)
+	if !spanContext.IsValid() {
+		return ""
+	}
+	return spanContext.TraceID().String()
+}
+
+func requestID(c *gin.Context) string {
+	if value, exists := c.Get(contextRequestID); exists {
+		if result, ok := value.(string); ok && result != "" {
+			return result
+		}
+	}
+	value := singleSafeHeader(c, HeaderRequestID, 64)
+	if value == "" {
+		value = uuid.NewString()
+	}
+	c.Set(contextRequestID, value)
+	c.Header(HeaderRequestID, value)
+	return value
 }
 
 func stringContextValue(value interface{}) string {
@@ -136,4 +187,24 @@ func int64ContextValue(value interface{}) int64 {
 	default:
 		return 0
 	}
+}
+
+func uint64ContextNumber(value interface{}) uint64 {
+	switch result := value.(type) {
+	case uint64:
+		return result
+	case int64:
+		if result > 0 {
+			return uint64(result)
+		}
+	case int:
+		if result > 0 {
+			return uint64(result)
+		}
+	case float64:
+		if result > 0 {
+			return uint64(result)
+		}
+	}
+	return 0
 }

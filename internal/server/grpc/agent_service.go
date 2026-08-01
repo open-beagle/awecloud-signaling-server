@@ -41,14 +41,16 @@ func parseJSONStringArray(jsonStr string) []string {
 // AgentConnection Agent 连接信息
 // 以 NodeID 为 key 存储，同一 AgentID（UserID）下可以有多个 Node 同时在线
 type AgentConnection struct {
-	AgentID        uint64
-	NodeID         uint64 // 当前心跳流对应的 Node ID（connections map 的 key）
-	Stream         pb.AgentService_HeartbeatServer
-	TunnelIP       string
-	Connected      bool
-	LastSeen       time.Time
-	Cancel         context.CancelFunc
-	HeartbeatCount int // 心跳计数器，用于定期检查用户状态
+	AgentID                               uint64
+	NodeID                                uint64 // 当前心跳流对应的 Node ID（connections map 的 key）
+	Stream                                pb.AgentService_HeartbeatServer
+	TunnelIP                              string
+	Connected                             bool
+	LastSeen                              time.Time
+	Cancel                                context.CancelFunc
+	HeartbeatCount                        int // 心跳计数器，用于定期检查用户状态
+	SessionAuthorizationProtocol          string
+	EndpointSessionAuthorizationProtocols map[string]string
 }
 
 // AgentServiceServer Agent 服务实现
@@ -65,25 +67,34 @@ type AgentServiceServer struct {
 	requestImmediateReport bool
 	immediateReportMutex   sync.Mutex
 
-	headscaleClient          *headscale.Client
-	config                   *config.ServerConfig
-	domainService            *service.DomainService
-	updateService            *service.UpdateService
-	resourceReconciler       *service.ResourceReconciliationService
-	containerSessionAckMutex sync.Mutex
-	containerSessionAcks     map[uint64][]string
+	headscaleClient             *headscale.Client
+	config                      *config.ServerConfig
+	domainService               *service.DomainService
+	updateService               *service.UpdateService
+	resourceReconciler          *service.ResourceReconciliationService
+	providerSupply              *service.ProviderSupplyService
+	workloadInventory           *service.WorkloadInventoryService
+	sessionAuthorization        *service.SessionAuthorizationService
+	containerSessionAckMutex    sync.Mutex
+	containerSessionAcks        map[uint64][]string
+	authorizationSnapshotMutex  sync.Mutex
+	authorizationSnapshotStates map[string]*authorizationSnapshotState
 }
 
 // NewAgentServiceServer 创建 Agent 服务
 func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
 	s := &AgentServiceServer{
-		connections:          make(map[uint64]*AgentConnection),
-		configVersion:        time.Now().Unix(),
-		config:               cfg,
-		domainService:        service.NewDomainService(db.DB),
-		updateService:        service.NewUpdateService(db.DB),
-		resourceReconciler:   service.NewResourceReconciliationService(db.DB),
-		containerSessionAcks: make(map[uint64][]string),
+		connections:                 make(map[uint64]*AgentConnection),
+		configVersion:               time.Now().Unix(),
+		config:                      cfg,
+		domainService:               service.NewDomainService(db.DB),
+		updateService:               service.NewUpdateService(db.DB),
+		resourceReconciler:          service.NewResourceReconciliationService(db.DB),
+		providerSupply:              service.NewProviderSupplyService(db.DB),
+		workloadInventory:           service.NewWorkloadInventoryService(db.DB),
+		sessionAuthorization:        service.NewSessionAuthorizationService(db.DB),
+		containerSessionAcks:        make(map[uint64][]string),
+		authorizationSnapshotStates: make(map[string]*authorizationSnapshotState),
 	}
 
 	if cfg.Tailscale.HeadscaleURL != "" && cfg.Tailscale.HeadscaleAPIKey != "" {
@@ -395,13 +406,14 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 
 	// 以 NodeID 为 key 注册连接，同一 AgentID 下多个 Node 独立共存
 	conn = &AgentConnection{
-		AgentID:   agentID,
-		NodeID:    nodeID,
-		Stream:    stream,
-		TunnelIP:  firstReq.TunnelIp,
-		Connected: firstReq.TunnelConnected,
-		LastSeen:  time.Now(),
-		Cancel:    cancel,
+		AgentID:                               agentID,
+		NodeID:                                nodeID,
+		Stream:                                stream,
+		TunnelIP:                              firstReq.TunnelIp,
+		Connected:                             firstReq.TunnelConnected,
+		LastSeen:                              time.Now(),
+		Cancel:                                cancel,
+		EndpointSessionAuthorizationProtocols: make(map[string]string),
 	}
 
 	s.connMutex.Lock()
@@ -462,23 +474,44 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 		logger.Infof("Node 断连: agent_id=%d, node_id=%d, 同 Agent 其他在线=%v", agentID, nodeID, hasOtherOnline)
 	}()
 
+	firstAcks := s.processSessionAuthorizationHeartbeat(context.Background(), conn, firstReq)
 	// 发送首次响应
-	if err := s.sendHeartbeatResponse(context.Background(), stream, agentID, nodeID); err != nil {
+	if err := s.sendHeartbeatResponse(heartbeatResponseContext(ctx), stream, conn, firstAcks); err != nil {
 		logger.Errorf("发送首次心跳响应失败: %v", err)
 		return err
 	}
 
-	// 持续接收心跳
+	recvRequests := make(chan *pb.AgentHeartbeatRequest)
+	recvErrors := make(chan error, 1)
+	go func() {
+		defer close(recvRequests)
+		for {
+			req, recvErr := stream.Recv()
+			if recvErr != nil {
+				recvErrors <- recvErr
+				return
+			}
+			select {
+			case recvRequests <- req:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	pushTicker := time.NewTicker(sessionAuthorizationPushPeriod)
+	defer pushTicker.Stop()
+
+	// 持续接收心跳；v2 协商后允许 Server 在两次请求之间主动刷新授权。
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		default:
-			req, err := stream.Recv()
-			if err != nil {
-				return err
+		case err := <-recvErrors:
+			return err
+		case req, ok := <-recvRequests:
+			if !ok {
+				return nil
 			}
-
 			// 更新连接信息
 			conn.TunnelIP = req.TunnelIp
 			conn.Connected = req.TunnelConnected
@@ -504,9 +537,18 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 				conn.NodeID = newNodeID
 			}
 
+			acks := s.processSessionAuthorizationHeartbeat(context.Background(), conn, req)
 			// 发送响应
-			if err := s.sendHeartbeatResponse(context.Background(), stream, agentID, conn.NodeID); err != nil {
+			if err := s.sendHeartbeatResponse(heartbeatResponseContext(ctx), stream, conn, acks); err != nil {
 				logger.Errorf("发送心跳响应失败: %v", err)
+				return err
+			}
+		case <-pushTicker.C:
+			if conn.SessionAuthorizationProtocol != sessionAuthorizationProtocolV2 && len(conn.EndpointSessionAuthorizationProtocols) == 0 {
+				continue
+			}
+			if err := s.sendHeartbeatResponse(heartbeatResponseContext(ctx), stream, conn, nil); err != nil {
+				logger.Errorf("主动推送 Session 授权响应失败: %v", err)
 				return err
 			}
 		}
@@ -637,24 +679,41 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	})
 	logger.Debugf("更新 Node 内存缓存: node_id=%d, tunnel_ip=%s", node.ID, req.TunnelIp)
 
-	// 如果 Headscale 客户端可用，查询并更新 HeadscaleNodeID
-	if s.headscaleClient != nil && node.HeadscaleNodeID == 0 {
+	// Resolve the current Headscale node by the authenticated Agent's reported
+	// tunnel IP. State loss can register a new node with an automatic name
+	// suffix, so a stale database HeadscaleNodeID or exact GivenName is not a
+	// trustworthy selector.
+	if s.headscaleClient != nil {
 		hsUserName := fmt.Sprintf("%s-%s", hsPrefix, user.Name)
-		// 按用户名 + 节点名精确匹配（一个 Headscale 用户下可能有多个节点）
-		hsNode, err := s.headscaleClient.GetNodeByUserAndName(ctx, hsUserName, node.Name)
-		if err != nil {
-			logger.Warnf("通过 User+Name 查询 Headscale 节点失败: %v", err)
-		} else if hsNode != nil {
-			updates["headscale_node_id"] = hsNode.Id
-			logger.Infof("用户 %d 关联 Headscale 节点: id=%d, name=%s, ip=%v, user=%s", agentID, hsNode.Id, hsNode.GivenName, hsNode.IpAddresses, hsUserName)
-		} else {
-			// 精确匹配失败，回退到第一个节点（兼容单节点场景）
-			hsNodeFallback, err := s.headscaleClient.GetNodeByUser(ctx, hsUserName)
+		tunnelIP := strings.TrimSpace(req.TunnelIp)
+		if tunnelIP != "" {
+			hsNode, err := s.headscaleClient.GetNodeByIP(ctx, tunnelIP)
 			if err != nil {
-				logger.Warnf("通过 User 查询 Headscale 节点失败: %v", err)
-			} else if hsNodeFallback != nil {
-				updates["headscale_node_id"] = hsNodeFallback.Id
-				logger.Infof("用户 %d 关联 Headscale 节点(回退): id=%d, name=%s, ip=%v, user=%s", agentID, hsNodeFallback.Id, hsNodeFallback.GivenName, hsNodeFallback.IpAddresses, hsUserName)
+				logger.Warnf("通过隧道 IP 查询 Agent Headscale 节点失败: ip=%s err=%v", tunnelIP, err)
+			} else if validDesktopHeadscaleNode(hsNode, hsUserName, tunnelIP) {
+				updates["headscale_node_id"] = hsNode.Id
+				if node.HeadscaleNodeID != hsNode.Id {
+					logger.Infof("Agent Node %d 更新 Headscale 节点: %d -> %d, ip=%s, user=%s", node.ID, node.HeadscaleNodeID, hsNode.Id, tunnelIP, hsUserName)
+				}
+			} else if hsNode != nil {
+				logger.Warnf("拒绝绑定不匹配的 Agent Headscale 节点: node=%d headscale_node=%d ip=%s expected_user=%s", node.ID, hsNode.Id, tunnelIP, hsUserName)
+			}
+		} else if node.HeadscaleNodeID == 0 {
+			hsNode, err := s.headscaleClient.GetNodeByUserAndName(ctx, hsUserName, node.Name)
+			if err != nil {
+				logger.Warnf("通过 User+Name 查询 Headscale 节点失败: %v", err)
+			} else if hsNode != nil {
+				updates["headscale_node_id"] = hsNode.Id
+				logger.Infof("用户 %d 关联 Headscale 节点: id=%d, name=%s, ip=%v, user=%s", agentID, hsNode.Id, hsNode.GivenName, hsNode.IpAddresses, hsUserName)
+			} else {
+				// 精确匹配失败，回退到第一个节点（兼容单节点场景）
+				hsNodeFallback, err := s.headscaleClient.GetNodeByUser(ctx, hsUserName)
+				if err != nil {
+					logger.Warnf("通过 User 查询 Headscale 节点失败: %v", err)
+				} else if hsNodeFallback != nil {
+					updates["headscale_node_id"] = hsNodeFallback.Id
+					logger.Infof("用户 %d 关联 Headscale 节点(回退): id=%d, name=%s, ip=%v, user=%s", agentID, hsNodeFallback.Id, hsNodeFallback.GivenName, hsNodeFallback.IpAddresses, hsUserName)
+				}
 			}
 		}
 	}
@@ -771,8 +830,22 @@ func (s *AgentServiceServer) handleContainerCandidates(ctx context.Context, node
 	}
 }
 
+// heartbeatResponseContext lets response-side database work finish without
+// discarding incoming gRPC metadata. Inventory capability negotiation uses the
+// existing Agent bearer from that metadata to resolve its trusted binding.
+func heartbeatResponseContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(ctx)
+}
+
 // sendHeartbeatResponse 发送心跳响应
-func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream pb.AgentService_HeartbeatServer, agentID uint64, nodeID uint64) error {
+func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream pb.AgentService_HeartbeatServer, conn *AgentConnection, sessionAcks *sessionAuthorizationHeartbeatAcks) error {
+	if conn == nil {
+		return fmt.Errorf("Agent connection is required")
+	}
+	agentID, nodeID := conn.AgentID, conn.NodeID
 	s.versionMutex.RLock()
 	configVersion := s.configVersion
 	s.versionMutex.RUnlock()
@@ -790,6 +863,11 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		ConfigVersion:          configVersion,
 		DomainSuffix:           domainSuffix,
 		RequestImmediateReport: s.consumeImmediateReport(),
+	}
+	supplyInventoryAuthorized := s.authorizeSupplyInventoryNegotiation(ctx, nodeID)
+	if supplyInventoryAuthorized {
+		resp.SupplyInventoryConfig = s.supplyInventoryConfigForBinding(ctx, model.TechnicalResourceBindingLegacyNode, fmt.Sprintf("%d", nodeID))
+		resp.WorkloadInventoryConfig = s.workloadInventoryConfigForBinding(ctx, model.TechnicalResourceBindingLegacyNode, nodeSourceID(nodeID))
 	}
 
 	// 构建 Agent 能力配置
@@ -968,7 +1046,7 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		for _, ep := range allEndpoints {
 			logger.Infof("Endpoint 配置: name=%s, ssh_enabled=%v, ssh_port=%d, k8sapi_enabled=%v, k8sapi_port=%d, k8sapi_api_server=%s, k8sservice_enabled=%v",
 				ep.Name, ep.SSHEnabled, ep.SSHPort, ep.K8SAPIEnabled, ep.K8SAPIPort, ep.K8SAPIApiServer, ep.K8SServiceEnabled)
-			resp.EndpointCapabilityConfigs = append(resp.EndpointCapabilityConfigs, &pb.EndpointCapabilityConfig{
+			endpointConfig := &pb.EndpointCapabilityConfig{
 				EndpointName:      ep.Name,
 				SshEnabled:        ep.SSHEnabled,
 				SshPort:           uint32(ep.SSHPort), // 新增：从 Endpoint 表读取端口
@@ -976,7 +1054,12 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 				K8SapiPort:        uint32(ep.K8SAPIPort), // 新增：从 Endpoint 表读取端口
 				K8SapiApiServer:   ep.K8SAPIApiServer,
 				K8SserviceEnabled: ep.K8SServiceEnabled,
-			})
+			}
+			if supplyInventoryAuthorized {
+				endpointConfig.SupplyInventoryConfig = s.supplyInventoryConfigForBinding(ctx, model.TechnicalResourceBindingLegacyEndpoint, ep.ID)
+				endpointConfig.WorkloadInventoryConfig = s.workloadInventoryConfigForBinding(ctx, model.TechnicalResourceBindingLegacyEndpoint, ep.ID)
+			}
+			resp.EndpointCapabilityConfigs = append(resp.EndpointCapabilityConfigs, endpointConfig)
 		}
 		logger.Infof("准备发送心跳响应: EndpointCapabilityConfigs 数量=%d", len(resp.EndpointCapabilityConfigs))
 	} else {
@@ -1002,6 +1085,7 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 			}
 		}
 	}
+	s.appendSessionAuthorizationResponse(ctx, conn, resp, sessionAcks)
 
 	return stream.Send(resp)
 }

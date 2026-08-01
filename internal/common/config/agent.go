@@ -316,9 +316,10 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	if cfg.Container.LabelSelector == "" {
 		cfg.Container.LabelSelector = "signal.beagle.io/container-ssh=true"
 	}
-	if cfg.Container.Kubeconfig == "" {
-		cfg.Container.Kubeconfig = "~/.kube/config"
-	}
+	// Keep an omitted kubeconfig empty. The shared Kubernetes loader first
+	// tries the Pod service account and only falls back to ~/.kube/config when
+	// in-cluster configuration is unavailable. Expanding the fallback here
+	// bypasses that order and breaks ContainerSSH discovery inside Kubernetes.
 	if cfg.Container.ProviderLabel == "" {
 		cfg.Container.ProviderLabel = "beagle.io/provider"
 	}

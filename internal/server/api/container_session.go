@@ -74,11 +74,13 @@ func (a *ContainerSessionAPI) List(c *gin.Context) {
 	for _, session := range sessions {
 		item := containerSessionListItem{ContainerSession: session}
 		var resource model.Resource
-		if err := db.DB.WithContext(ctx).First(&resource, "id = ?", session.ResourceID).Error; err == nil {
+		if err := db.DB.WithContext(ctx).First(&resource, "id = ? AND tenant_id = ?", session.ResourceID, session.TenantID).Error; err == nil {
 			item.ResourceName = resource.DisplayName
 		}
 		var user model.User
-		if err := db.DB.WithContext(ctx).First(&user, "id = ?", session.UserID).Error; err == nil {
+		if err := db.DB.WithContext(ctx).
+			Joins("JOIN tenant_membership ON tenant_membership.user_id = user.id AND tenant_membership.tenant_id = ?", session.TenantID).
+			First(&user, "user.id = ?", session.UserID).Error; err == nil {
 			item.UserName = user.Alias
 			if item.UserName == "" {
 				item.UserName = user.Name
@@ -91,21 +93,26 @@ func (a *ContainerSessionAPI) List(c *gin.Context) {
 
 func (a *ContainerSessionAPI) Get(c *gin.Context) {
 	ctx := c.Request.Context()
+	tenantID, unrestricted, ok := tenantObjectScope(c, PermissionTenantSessionsRead)
+	if !ok {
+		return
+	}
 	var session model.ContainerSession
-	if err := db.DB.WithContext(ctx).First(&session, "id = ?", c.Param("id")).Error; err != nil {
+	query := db.DB.WithContext(ctx).Where("id = ?", c.Param("id"))
+	if !unrestricted {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+	if err := query.First(&session).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, NewErrorResponse("ContainerSSH 会话不存在"))
+			codedError(c, http.StatusNotFound, ErrorCodeTenantObjectNotFound, "当前租户范围内对象不存在")
 			return
 		}
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询 ContainerSSH 会话失败"))
 		return
 	}
-	if !requireTenantPermission(c, session.TenantID, PermissionTenantSessionsRead) {
-		return
-	}
 	detail := containerSessionDetail{Session: session}
 	var resource model.Resource
-	if err := db.DB.WithContext(ctx).First(&resource, "id = ?", session.ResourceID).Error; err == nil {
+	if err := db.DB.WithContext(ctx).First(&resource, "id = ? AND tenant_id = ?", session.ResourceID, session.TenantID).Error; err == nil {
 		detail.Resource = &resource
 	}
 	var tenant model.Tenant
@@ -125,16 +132,21 @@ func (a *ContainerSessionAPI) ForceDisconnect(c *gin.Context) {
 
 func (a *ContainerSessionAPI) close(c *gin.Context, action, defaultReason string) {
 	ctx := c.Request.Context()
+	tenantID, unrestricted, ok := tenantObjectScope(c, PermissionTenantSessionsDisconnect)
+	if !ok {
+		return
+	}
 	var session model.ContainerSession
-	if err := db.DB.WithContext(ctx).First(&session, "id = ?", c.Param("id")).Error; err != nil {
+	query := db.DB.WithContext(ctx).Where("id = ?", c.Param("id"))
+	if !unrestricted {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+	if err := query.First(&session).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, NewErrorResponse("ContainerSSH 会话不存在"))
+			codedError(c, http.StatusNotFound, ErrorCodeTenantObjectNotFound, "当前租户范围内对象不存在")
 			return
 		}
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询 ContainerSSH 会话失败"))
-		return
-	}
-	if !requireTenantPermission(c, session.TenantID, PermissionTenantSessionsDisconnect) {
 		return
 	}
 	if session.Status != model.ContainerSessionActive {

@@ -9,7 +9,7 @@
       </el-aside>
       <button v-if="appStore.mobileSidebarOpen" class="mobile-backdrop" aria-label="关闭导航" @click="appStore.closeMobileSidebar" />
       <el-main class="layout-main">
-        <Breadcrumb v-if="showLegacyBreadcrumb" />
+        <Breadcrumb />
         <router-view />
       </el-main>
     </el-container>
@@ -18,20 +18,16 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import Header from './Header.vue'
 import Sidebar from './Sidebar.vue'
 import Breadcrumb from '@/components/Common/Breadcrumb.vue'
 
 const appStore = useAppStore()
-const route = useRoute()
 
 const sidebarWidth = computed(() => {
   return appStore.sidebarCollapsed ? '64px' : '200px'
 })
-const modernPaths = ['/resources', '/resource-candidates', '/legacy-inventory', '/access-policies', '/sessions', '/tenants', '/infrastructure/integrations']
-const showLegacyBreadcrumb = computed(() => !modernPaths.some(path => route.path === path || route.path.startsWith(`${path}/`)))
 </script>
 
 <style scoped>
@@ -75,10 +71,10 @@ const showLegacyBreadcrumb = computed(() => !modernPaths.some(path => route.path
 
 /* 响应式适配 */
 @media (max-width: 768px) {
-  .layout-header { height: 56px; padding: 0 12px; }
-  .layout-aside { position: fixed; top: 56px; bottom: 0; left: 0; z-index: 30; width: 240px !important; transform: translateX(-100%); transition: transform 0.2s ease; }
+  .layout-header { height: 104px; padding: 0 12px; }
+  .layout-aside { position: fixed; top: 104px; bottom: 0; left: 0; z-index: 30; width: 240px !important; transform: translateX(-100%); transition: transform 0.2s ease; }
   .layout-aside.mobile-open { transform: translateX(0); }
-  .mobile-backdrop { position: fixed; inset: 56px 0 0; z-index: 20; border: 0; background: rgba(24, 30, 42, 0.32); }
+  .mobile-backdrop { position: fixed; inset: 104px 0 0; z-index: 20; border: 0; background: rgba(24, 30, 42, 0.32); }
   .layout-main {
     padding: 16px 12px 24px;
   }

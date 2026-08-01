@@ -7,10 +7,12 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
+	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
 const (
@@ -25,15 +27,16 @@ type peerIdentityExtractor interface {
 // ContainerSSHProxy exposes raw SSH on Agent-scoped ports. The port resolves
 // a Resource only through the last authoritative Server snapshot.
 type ContainerSSHProxy struct {
-	tsManager   *TailscaleManager
-	permissions *PermissionCache
-	broker      *ContainerExecBroker
-	sessions    *ContainerSessionManager
-	identity    peerIdentityExtractor
-	sshConfig   *ssh.ServerConfig
-	deregister  func()
-	ctx         context.Context
-	cancel      context.CancelFunc
+	tsManager      *TailscaleManager
+	permissions    *PermissionCache
+	authorizations *SessionAuthorizationCache
+	broker         *ContainerExecBroker
+	sessions       *ContainerSessionManager
+	identity       peerIdentityExtractor
+	sshConfig      *ssh.ServerConfig
+	deregister     func()
+	ctx            context.Context
+	cancel         context.CancelFunc
 }
 
 func NewContainerSSHProxy(tsManager *TailscaleManager, permissions *PermissionCache, broker *ContainerExecBroker, sessions *ContainerSessionManager, stateDir string, parentCtx context.Context) (*ContainerSSHProxy, error) {
@@ -61,6 +64,10 @@ func NewContainerSSHProxy(tsManager *TailscaleManager, permissions *PermissionCa
 	}, nil
 }
 
+func (p *ContainerSSHProxy) SetSessionAuthorizations(authorizations *SessionAuthorizationCache) {
+	p.authorizations = authorizations
+}
+
 func (p *ContainerSSHProxy) Start() error {
 	if p == nil || p.tsManager == nil {
 		return fmt.Errorf("ContainerSSH proxy is not configured")
@@ -70,12 +77,16 @@ func (p *ContainerSSHProxy) Start() error {
 		if port < ContainerSSHPortBase || port > ContainerSSHPortEnd {
 			return nil, false
 		}
-		resourceID, ok := p.permissions.ResolveContainerSSHRoute(port)
-		if !ok {
+		resourceID, legacyRoute := p.permissions.ResolveContainerSSHRoute(port)
+		v2Route := p.authorizations != nil && p.authorizations.HasContainerSSHRoute(port, time.Now().UTC())
+		if p.authorizations != nil && p.authorizations.EnforceV2() {
+			legacyRoute = false
+		}
+		if !legacyRoute && !v2Route {
 			return nil, false
 		}
 		return func(conn net.Conn) {
-			go p.HandleConn(p.ctx, conn, resourceID)
+			go p.handleConn(p.ctx, conn, port, resourceID)
 		}, true
 	})
 	logger.Infof("[ContainerSSH] 入口已启动: 端口范围 %d-%d", ContainerSSHPortBase, ContainerSSHPortEnd)
@@ -93,16 +104,36 @@ func (p *ContainerSSHProxy) Stop() {
 }
 
 func (p *ContainerSSHProxy) HandleConn(ctx context.Context, conn net.Conn, resourceID string) {
+	p.handleConn(ctx, conn, 0, resourceID)
+}
+
+func (p *ContainerSSHProxy) handleConn(ctx context.Context, conn net.Conn, listenPort uint16, legacyResourceID string) {
 	defer conn.Close()
 	identity, err := p.identity.ExtractFromConn(ctx, conn.RemoteAddr())
 	if err != nil || identity == nil || identity.Role != "client" || identity.UserName == "" {
 		logger.Warnf("[ContainerSSH] 无法确认 Desktop 身份，拒绝连接: err=%v", err)
 		return
 	}
-	permission, allowed := p.permissions.CheckContainerSSHAccess(identity.UserName, resourceID)
-	if !allowed {
-		logger.Warnf("[ContainerSSH] 用户无权访问资源: user=%s resource=%s", identity.UserName, resourceID)
-		return
+	var v2Permission *pb.ResourceSessionPermissionV2
+	if listenPort != 0 && p.authorizations != nil {
+		v2Permission, _ = p.authorizations.ResolveContainerSSH(listenPort, identity.UserName, identity.NodeID, time.Now().UTC())
+	}
+	var legacyPermission *ContainerSSHUserPermission
+	if v2Permission == nil {
+		if p.authorizations != nil && p.authorizations.EnforceV2() {
+			logger.Warnf("[ContainerSSH] v2 权限不可用，禁止回落旧授权: user=%s node_id=%d port=%d", identity.UserName, identity.NodeID, listenPort)
+			return
+		}
+		var allowed bool
+		legacyPermission, allowed = p.permissions.CheckContainerSSHAccess(identity.UserName, legacyResourceID)
+		if !allowed {
+			logger.Warnf("[ContainerSSH] 用户或设备无权访问入口: user=%s node_id=%d port=%d", identity.UserName, identity.NodeID, listenPort)
+			return
+		}
+	}
+	resourceID := legacyResourceID
+	if v2Permission != nil {
+		resourceID = v2Permission.ResourceId
 	}
 
 	sshConn, channels, requests, err := ssh.NewServerConn(conn, p.sshConfig)
@@ -122,15 +153,43 @@ func (p *ContainerSSHProxy) HandleConn(ctx context.Context, conn net.Conn, resou
 		if err != nil {
 			return
 		}
-		sessionID, sessionCtx := p.sessions.Begin(ctx, identity, permission)
-		err = ServeContainerSSHSession(sessionCtx, channel, channelRequests, p.broker, identity.UserName, resourceID)
-		result, reason := containerSessionOutcome(err)
-		p.sessions.End(sessionID, result, reason)
+		if v2Permission != nil {
+			sessionCtx, beginErr := p.sessions.BeginV2(ctx, v2Permission)
+			if beginErr != nil {
+				_ = channel.Close()
+				logger.Warnf("[ContainerSSH] v2 会话注册失败: session_id=%s err=%v", v2Permission.SessionId, beginErr)
+				return
+			}
+			opener := &authorizedContainerShellOpener{broker: p.broker, authorizations: p.authorizations, permission: v2Permission}
+			err = ServeContainerSSHSession(sessionCtx, channel, channelRequests, opener, identity.UserName, resourceID)
+			result, reason := containerSessionOutcome(err)
+			if endErr := p.sessions.EndV2(v2Permission.SessionId, result, reason); endErr != nil {
+				logger.Errorf("[ContainerSSH] v2 会话事件持久化失败: session_id=%s err=%v", v2Permission.SessionId, endErr)
+			}
+		} else {
+			sessionID, sessionCtx := p.sessions.Begin(ctx, identity, legacyPermission)
+			err = ServeContainerSSHSession(sessionCtx, channel, channelRequests, p.broker, identity.UserName, resourceID)
+			result, reason := containerSessionOutcome(err)
+			p.sessions.End(sessionID, result, reason)
+		}
 		if err != nil {
 			logger.Warnf("[ContainerSSH] 会话结束: user=%s resource=%s err=%v", identity.UserName, resourceID, err)
 		}
 		return
 	}
+}
+
+type authorizedContainerShellOpener struct {
+	broker         *ContainerExecBroker
+	authorizations *SessionAuthorizationCache
+	permission     *pb.ResourceSessionPermissionV2
+}
+
+func (o *authorizedContainerShellOpener) OpenShell(ctx context.Context, userName, resourceID string, stream ContainerExecStream) error {
+	if o == nil || o.permission == nil || o.permission.UserName != userName || o.permission.ResourceId != resourceID {
+		return fmt.Errorf("ContainerSSH access denied")
+	}
+	return o.broker.OpenAuthorizedShell(ctx, o.authorizations, o.permission, stream)
 }
 
 func containerSessionOutcome(err error) (string, string) {

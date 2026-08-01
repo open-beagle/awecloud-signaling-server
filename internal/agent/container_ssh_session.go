@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"golang.org/x/crypto/ssh"
@@ -35,6 +36,7 @@ func ServeContainerSSHSession(ctx context.Context, channel ssh.Channel, requests
 		case <-ctx.Done():
 			return ctx.Err()
 		case err := <-result:
+			sendContainerSSHExitStatus(channel, err)
 			return err
 		case request, ok := <-requests:
 			if !ok {
@@ -95,6 +97,25 @@ func ServeContainerSSHSession(ctx context.Context, channel ssh.Channel, requests
 			}
 		}
 	}
+}
+
+type containerSSHExitError interface {
+	ExitStatus() int
+}
+
+func sendContainerSSHExitStatus(channel ssh.Channel, err error) {
+	status := uint32(0)
+	if err != nil {
+		status = 255
+		var exitErr containerSSHExitError
+		if errors.As(err, &exitErr) {
+			code := exitErr.ExitStatus()
+			if code >= 0 {
+				status = uint32(code)
+			}
+		}
+	}
+	_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{Status: status}))
 }
 
 func offerTerminalSize(queue chan ContainerTerminalSize, size ContainerTerminalSize) {

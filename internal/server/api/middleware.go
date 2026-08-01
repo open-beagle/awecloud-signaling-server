@@ -68,7 +68,7 @@ func AuthMiddleware(jwtSecret string, allowLocalhostDebug bool) gin.HandlerFunc 
 		// 验证Token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			return []byte(jwtSecret), nil
-		})
+		}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 
 		if err != nil || !token.Valid {
 			c.JSON(http.StatusUnauthorized, gin.H{
@@ -79,11 +79,30 @@ func AuthMiddleware(jwtSecret string, allowLocalhostDebug bool) gin.HandlerFunc 
 			return
 		}
 
-		// 提取claims
-		if claims, ok := token.Claims.(jwt.MapClaims); ok {
-			c.Set("admin_id", claims["admin_id"])
-			c.Set("username", claims["username"])
+		claims, ok := token.Claims.(jwt.MapClaims)
+		adminID := int64(0)
+		if ok {
+			switch value := claims["admin_id"].(type) {
+			case float64:
+				adminID = int64(value)
+			case int64:
+				adminID = value
+			case int:
+				adminID = int64(value)
+			}
 		}
+		if !ok || adminID <= 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "Token缺少有效管理员身份"})
+			c.Abort()
+			return
+		}
+		c.Set("admin_id", adminID)
+		c.Set("username", claims["username"])
+		c.Set("user_id", claims["user_id"])
+		c.Set("auth_revision", claims["auth_revision"])
+		c.Set("credential_revision", claims["credential_revision"])
+		c.Set(contextAuditActorUserID, claims["user_id"])
+		c.Set(contextAuditEffectiveUserID, claims["user_id"])
 
 		c.Next()
 	}

@@ -23,7 +23,9 @@ func setupTenantManagementTest(t *testing.T) (*model.Admin, *model.Admin, *model
 	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, database.AutoMigrate(
-		&model.Admin{}, &model.AdminTenantMembership{}, &model.Tenant{}, &model.TenantMembership{}, &model.AuditLog{},
+		&model.Admin{}, &model.AdminTenantMembership{}, &model.User{}, &model.Tenant{}, &model.TenantMembership{},
+		&model.UserIdentityProfile{}, &model.UserAuthenticationLink{}, &model.PlatformRoleMembership{},
+		&model.UserTenantManagementMembership{}, &model.AuditLog{},
 	))
 	serverdb.DB = database
 	platform := &model.Admin{Username: "platform-owner", PasswordHash: "test", Role: "admin", Enabled: true}
@@ -122,6 +124,13 @@ func TestTenantAdminMembershipLifecycleDoesNotCreateBusinessMember(t *testing.T)
 	require.NoError(t, serverdb.DB.Where("admin_id = ? AND tenant_id = ?", newAdmin.ID, tenant.ID).First(&membership).Error)
 	require.Equal(t, string(model.TenantManagementRoleSecurityAuditor), membership.Role)
 	require.Equal(t, int64(1), membership.PermissionRevision)
+	var link model.UserAuthenticationLink
+	require.NoError(t, serverdb.DB.Where("provider_type = ? AND provider_subject = ?",
+		model.AuthenticationProviderLegacyAdmin, jsonNumber(newAdmin.ID)).First(&link).Error)
+	var unifiedMembership model.UserTenantManagementMembership
+	require.NoError(t, serverdb.DB.First(&unifiedMembership, "user_id = ? AND tenant_id = ?", link.UserID, tenant.ID).Error)
+	require.Equal(t, model.TenantManagementRoleSecurityAuditor, unifiedMembership.Role)
+	require.True(t, unifiedMembership.Enabled)
 	var businessMemberCount int64
 	require.NoError(t, serverdb.DB.Model(&model.TenantMembership{}).Count(&businessMemberCount).Error)
 	require.Zero(t, businessMemberCount)
@@ -137,6 +146,10 @@ func TestTenantAdminMembershipLifecycleDoesNotCreateBusinessMember(t *testing.T)
 	require.Equal(t, string(model.TenantManagementRoleViewer), membership.Role)
 	require.False(t, membership.Enabled)
 	require.Equal(t, int64(2), membership.PermissionRevision)
+	require.NoError(t, serverdb.DB.First(&unifiedMembership, "user_id = ? AND tenant_id = ?", link.UserID, tenant.ID).Error)
+	require.Equal(t, model.TenantManagementRoleViewer, unifiedMembership.Role)
+	require.False(t, unifiedMembership.Enabled)
+	require.Greater(t, unifiedMembership.PermissionRevision, int64(1))
 
 	listResponse := httptest.NewRecorder()
 	router.ServeHTTP(listResponse, httptest.NewRequest(http.MethodGet, "/tenant-admin-memberships?search=scoped-auditor", nil))

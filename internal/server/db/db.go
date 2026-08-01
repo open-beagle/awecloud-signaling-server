@@ -103,9 +103,54 @@ func autoMigrate() error {
 		&model.ContainerSession{},
 		&model.LegacyResourceClaim{},
 
+		// 新资源业务迁移、幂等与事务 Outbox 基础
+		&model.MigrationBatch{},
+		&model.MigrationSourceMapping{},
+		&model.APIIdempotencyRecord{},
+		&model.OutboxEvent{},
+		&model.ConsumerRevision{},
+
+		// 新资源业务目标身份与管理关系（M1-A，仅新增 Schema）
+		&model.UserIdentityProfile{},
+		&model.UserAuthenticationLink{},
+		&model.PlatformRoleMembership{},
+		&model.ResourceProvider{},
+		&model.AdminProviderMembership{},
+		&model.UserTenantManagementMembership{},
+		&model.UserSimulationSession{},
+
+		// Provider 供给对象（S2，新增 Schema，业务入口仍由 Feature Flag 关闭）
+		&model.TechnicalResource{},
+		&model.TechnicalResourceBinding{},
+		&model.SupplyInventoryReceipt{},
+		&model.SupplyCandidate{},
+		&model.PlatformResource{},
+		&model.PlatformResourceSource{},
+		&model.NamespaceObservation{},
+		&model.ResourceScope{},
+
+		// Platform 资源分配（S3，新增 Schema，业务入口仍由 Feature Flag 关闭）
+		&model.ResourceAllocation{},
+		&model.ResourceAllocationItem{},
+
 		// 分组模型
 		&model.Group{},
 		&model.GroupMember{},
+
+		// Tenant 资源与会话（S4，新增 Schema，业务入口仍由 Feature Flag 关闭）
+		&model.WorkloadInventoryReceipt{},
+		&model.WorkloadInventoryBatch{},
+		&model.WorkloadObservation{},
+		&model.WorkloadObservationSource{},
+		&model.TenantResource{},
+		&model.TenantResourceSource{},
+		&model.TenantResourceReviewDecision{},
+		&model.TenantResourceTargetRevision{},
+		&model.TenantAccessGrant{},
+		&model.TenantAccessGrantEvent{},
+		&model.ResourceSession{},
+		&model.ResourceSessionEvent{},
+		&model.ResourceSessionTermination{},
 
 		// 服务模型
 		&model.ProxyService{},
@@ -176,12 +221,18 @@ func autoMigrate() error {
 		// 忽略"索引已存在"的错误（SQLite 在某些情况下会报这个错误）
 		if strings.Contains(err.Error(), "already exists") {
 			logger.Warnf("数据库迁移警告（已忽略）: %v", err)
-			return nil
+		} else {
+			return err
 		}
-		return err
 	}
 
-	return nil
+	if err := ensureProviderSupplyConstraints(DB); err != nil {
+		return err
+	}
+	if err := ensurePlatformAllocationConstraints(DB); err != nil {
+		return err
+	}
+	return ensureTenantResourceConstraints(DB)
 }
 
 // CreateDefaultAdmin 创建默认管理员
@@ -280,6 +331,10 @@ func EnsureBeagleWorkspace(adminUsername string) error {
 			Select("scoped_user.*").
 			Joins("LEFT JOIN tenant_membership AS membership ON membership.user_id = scoped_user.id").
 			Where("scoped_user.role = ? AND membership.id IS NULL", model.UserRoleClient).
+			Where(`NOT EXISTS (
+				SELECT 1 FROM user_authentication_link AS authentication_link
+				WHERE authentication_link.user_id = scoped_user.id AND authentication_link.provider_type = ?
+			)`, model.AuthenticationProviderLegacyAdmin).
 			Find(&users).Error; err != nil {
 			return fmt.Errorf("查询未归属 Desktop 用户失败: %w", err)
 		}

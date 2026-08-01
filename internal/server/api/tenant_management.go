@@ -209,22 +209,27 @@ func (a *TenantAdminMembershipAPI) Create(c *gin.Context) {
 		enabled = *req.Enabled
 	}
 	membership := model.AdminTenantMembership{AdminID: req.AdminID, TenantID: req.TenantID, Role: string(role), Enabled: enabled, ExpiresAt: req.ExpiresAt, PermissionRevision: 1}
-	if err := db.DB.WithContext(c.Request.Context()).Create(&membership).Error; err != nil {
+	err := db.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&membership).Error; err != nil {
+			return err
+		}
+		// GORM applies the model's default:true tag to a false bool during Create.
+		if !enabled {
+			if err := tx.Model(&membership).Update("enabled", false).Error; err != nil {
+				return err
+			}
+			membership.Enabled = false
+		}
+		_, err := db.SyncLegacyAdminIdentity(tx, membership.AdminID, "tenant management membership created")
+		return err
+	})
+	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			c.JSON(http.StatusConflict, NewErrorResponse("该管理员已存在此租户的管理授权"))
 			return
 		}
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("创建租户管理员授权失败"))
 		return
-	}
-	// GORM applies the model's default:true tag to a false bool during Create.
-	// Persist an explicitly disabled initial grant without changing the model's
-	// compatibility default for existing callers.
-	if !enabled {
-		if err := db.DB.WithContext(c.Request.Context()).Model(&membership).Update("enabled", false).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, NewErrorResponse("创建租户管理员授权失败"))
-			return
-		}
 	}
 	c.Set("audit_tenant_id", req.TenantID)
 	recordAuditLog(c.Request.Context(), c, "create_tenant_admin_membership", "admin_tenant_membership", strconv.FormatInt(membership.ID, 10), "租户管理员授权", membership)
@@ -268,7 +273,13 @@ func (a *TenantAdminMembershipAPI) Update(c *gin.Context) {
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
 	}
-	if err := db.DB.WithContext(c.Request.Context()).Model(&membership).Updates(updates).Error; err != nil {
+	if err := db.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&membership).Updates(updates).Error; err != nil {
+			return err
+		}
+		_, err := db.SyncLegacyAdminIdentity(tx, membership.AdminID, "tenant management membership updated")
+		return err
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新租户管理员授权失败"))
 		return
 	}

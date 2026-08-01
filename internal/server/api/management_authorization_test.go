@@ -129,6 +129,18 @@ func TestManagementAuthorizationWithSignedJWT(t *testing.T) {
 	}
 	require.Equal(t, http.StatusNoContent, request(platform))
 	require.Equal(t, http.StatusForbidden, request(tenantAdmin))
+
+	missingAdminID := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"username": "missing-admin-id", "exp": time.Now().Add(time.Hour).Unix(),
+	})
+	signedMissingAdminID, err := missingAdminID.SignedString([]byte(secret))
+	require.NoError(t, err)
+	missingReq := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users", nil)
+	missingReq.RemoteAddr = "192.0.2.10:12345"
+	missingReq.Header.Set("Authorization", "Bearer "+signedMissingAdminID)
+	missingResp := httptest.NewRecorder()
+	router.ServeHTTP(missingResp, missingReq)
+	require.Equal(t, http.StatusUnauthorized, missingResp.Code)
 }
 
 func TestLocalhostAdminDebugRequiresExplicitEnablement(t *testing.T) {

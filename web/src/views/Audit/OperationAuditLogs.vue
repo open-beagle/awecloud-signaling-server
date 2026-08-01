@@ -1,7 +1,9 @@
 <template>
   <div class="operation-audit-page">
+    <PageHeader title="连接操作审计" description="查询连接期间执行的操作、访问目标和耗时记录。" />
+
     <!-- 搜索筛选区域 -->
-    <SearchCard :title="$t('operationAudit.title')">
+    <SearchCard title="筛选条件">
       <el-form :inline="true" :model="queryParams" class="search-form">
         <el-row :gutter="20">
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
@@ -89,6 +91,7 @@ import { useI18n } from 'vue-i18n'
 import SearchCard from '@/components/Common/SearchCard.vue'
 import TableToolbar from '@/components/Common/TableToolbar.vue'
 import EmptyState from '@/components/Common/EmptyState.vue'
+import PageHeader from '@/components/Common/PageHeader.vue'
 
 const { t } = useI18n()
 const loading = ref(false)

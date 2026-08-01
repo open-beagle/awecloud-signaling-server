@@ -1,5 +1,7 @@
 <template>
   <div class="node-list">
+    <PageHeader :title="pageTitle" :description="pageDescription" />
+
     <!-- 搜索和筛选 -->
     <el-card class="search-card" shadow="never">
       <el-form :inline="true" :model="searchForm" class="search-form">
@@ -81,18 +83,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref, reactive, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { getNodes, deleteNode, type Node, type NodeType } from '@/api/node'
 import { formatTime } from '@/utils/time'
+import PageHeader from '@/components/Common/PageHeader.vue'
 
 const props = defineProps<{
   fixedType?: NodeType
 }>()
 
 const { t } = useI18n()
+const route = useRoute()
 const router = useRouter()
 
 const loading = ref(false)
@@ -107,6 +111,17 @@ const pagination = reactive({
   page: 1,
   size: 20,
   total: 0
+})
+
+const pageTitle = computed(() => {
+  if (route.name === 'DiagnosticDesktopNodes') return 'Desktop 节点'
+  if (route.name === 'DiagnosticNodes') return '全部节点'
+  return '代理设备'
+})
+const pageDescription = computed(() => {
+  if (route.name === 'DiagnosticDesktopNodes') return '查看用于发起连接的 Desktop 节点及其在线状态。'
+  if (route.name === 'DiagnosticNodes') return '集中查看平台登记的全部 Agent 与 Desktop 节点。'
+  return '查看平台登记的 Agent 节点及其运行状态。'
 })
 
 // 判断是否在线（60秒内有心跳）
@@ -161,7 +176,8 @@ const handleReset = () => {
 
 // 跳转到详情页
 const goDetail = (row: Node) => {
-  router.push({ path: `/nodes/${row.id}`, query: { name: row.name, type: row.type } })
+  const source = route.name === 'DiagnosticDesktopNodes' ? 'desktop' : route.name === 'DiagnosticNodes' ? 'all' : 'agents'
+  router.push({ path: `/nodes/${row.id}`, query: { name: row.name, type: row.type, source } })
 }
 
 // 删除

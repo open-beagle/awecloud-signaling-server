@@ -6,10 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/creack/pty"
 
@@ -37,10 +35,6 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 	// 获取用户的 login shell
 	loginShell := u.HomeDir
 	shell := getLoginShell(u)
-
-	// 解析 UID/GID
-	uid, _ := strconv.Atoi(u.Uid)
-	gid, _ := strconv.Atoi(u.Gid)
 
 	// 建立 OpenShell gRPC 流
 	stream, err := client.OpenShell(ctx)
@@ -71,12 +65,10 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 
 	cmd.Dir = loginShell
 	cmd.Env = buildShellEnv(u, shell)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{
-			Uid: uint32(uid),
-			Gid: uint32(gid),
-		},
-		Setsid: true,
+	if err := configureShellProcess(cmd, u); err != nil {
+		logger.Warnf("配置 Shell 进程失败: %v", err)
+		stream.Send(&pb.ShellData{IsClose: true, Error: fmt.Sprintf("配置 shell 进程失败: %v", err)})
+		return
 	}
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
@@ -134,12 +126,12 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 			msg, err := stream.Recv()
 			if err != nil {
 				// 流关闭，终止 shell
-				cmd.Process.Signal(syscall.SIGHUP)
+				_ = signalShellProcess(cmd)
 				return
 			}
 
 			if msg.IsClose {
-				cmd.Process.Signal(syscall.SIGHUP)
+				_ = signalShellProcess(cmd)
 				return
 			}
 

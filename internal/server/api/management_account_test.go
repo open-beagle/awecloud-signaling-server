@@ -36,7 +36,11 @@ func newManagementAccountTestEnv(t *testing.T) managementAccountTestEnv {
 	database, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	db.DB = database
-	require.NoError(t, database.AutoMigrate(&model.Admin{}, &model.AdminTenantMembership{}, &model.Tenant{}, &model.AuditLog{}))
+	require.NoError(t, database.AutoMigrate(
+		&model.Admin{}, &model.AdminTenantMembership{}, &model.User{}, &model.Tenant{},
+		&model.UserIdentityProfile{}, &model.UserAuthenticationLink{}, &model.PlatformRoleMembership{},
+		&model.UserTenantManagementMembership{}, &model.AuditLog{},
+	))
 
 	platform := model.Admin{Username: "platform-admin", PasswordHash: "test", Role: managementRoleAdmin, Enabled: true}
 	tenantA := model.Tenant{ID: uuid.NewString(), Key: "acceptance-a", Name: "Acceptance A", Status: model.TenantStatusActive}
@@ -109,6 +113,13 @@ func TestManagementAccountCreateIsScopedAndDoesNotLeakPassword(t *testing.T) {
 	require.NoError(t, env.database.First(&membership, "admin_id = ? AND tenant_id = ?", created.ID, env.tenantA.ID).Error)
 	require.True(t, membership.Enabled)
 	require.Equal(t, managementRoleTenantAdmin, membership.Role)
+	var link model.UserAuthenticationLink
+	require.NoError(t, env.database.Where("provider_type = ? AND provider_subject = ?",
+		model.AuthenticationProviderLegacyAdmin, strconv.FormatInt(created.ID, 10)).First(&link).Error)
+	var unifiedMembership model.UserTenantManagementMembership
+	require.NoError(t, env.database.First(&unifiedMembership, "user_id = ? AND tenant_id = ?", link.UserID, env.tenantA.ID).Error)
+	require.True(t, unifiedMembership.Enabled)
+	require.Equal(t, model.TenantManagementRoleAdmin, unifiedMembership.Role)
 
 	var audit model.AuditLog
 	require.NoError(t, env.database.First(&audit, "action_type = ?", "create_management_account").Error)
@@ -150,6 +161,13 @@ func TestManagementAccountTenantBindingDisableAndRestore(t *testing.T) {
 	var membership model.AdminTenantMembership
 	require.NoError(t, env.database.First(&membership, "admin_id = ? AND tenant_id = ?", account.ID, env.tenantB.ID).Error)
 	require.False(t, membership.Enabled)
+	var link model.UserAuthenticationLink
+	require.NoError(t, env.database.Where("provider_type = ? AND provider_subject = ?",
+		model.AuthenticationProviderLegacyAdmin, strconv.FormatInt(account.ID, 10)).First(&link).Error)
+	var unifiedMembership model.UserTenantManagementMembership
+	require.NoError(t, env.database.First(&unifiedMembership, "user_id = ? AND tenant_id = ?", link.UserID, env.tenantB.ID).Error)
+	require.False(t, unifiedMembership.Enabled)
+	disabledRevision := unifiedMembership.PermissionRevision
 
 	restore := managementRequest(t, env.router, env.platform.ID, http.MethodPost,
 		"/management-accounts/"+strconv.FormatInt(account.ID, 10)+"/tenant-memberships",
@@ -158,6 +176,10 @@ func TestManagementAccountTenantBindingDisableAndRestore(t *testing.T) {
 	require.NoError(t, env.database.First(&membership, "admin_id = ? AND tenant_id = ?", account.ID, env.tenantB.ID).Error)
 	require.True(t, membership.Enabled)
 	require.Equal(t, managementRoleTenantAdmin, membership.Role)
+	require.NoError(t, env.database.First(&unifiedMembership, "user_id = ? AND tenant_id = ?", link.UserID, env.tenantB.ID).Error)
+	require.True(t, unifiedMembership.Enabled)
+	require.Equal(t, model.TenantManagementRoleAdmin, unifiedMembership.Role)
+	require.Greater(t, unifiedMembership.PermissionRevision, disabledRevision)
 	var count int64
 	require.NoError(t, env.database.Model(&model.AdminTenantMembership{}).Where("admin_id = ? AND tenant_id = ?", account.ID, env.tenantB.ID).Count(&count).Error)
 	require.Equal(t, int64(1), count)

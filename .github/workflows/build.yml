@@ -1,60 +1,86 @@
-name: Build Images
+name: Build ZTNA Server
 
 on:
   workflow_dispatch:
   push:
     branches:
+      - dev
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ztna-server-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_REPOSITORY: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server
+
 jobs:
-  build:
-    name: Build Images
+  test:
+    name: Test Server
     runs-on: ubuntu-latest
-    outputs:
-      build_version: ${{ steps.version.outputs.BUILD_VERSION }}
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-        with:
-          fetch-depth: 0 # 获取完整的 git 历史，确保 BUILD_NUMBER 正确
-
-      - name: Read version from file
-        id: version
-        run: echo "BUILD_VERSION=$(cat version)" >> $GITHUB_OUTPUT
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          cache: "npm"
-          cache-dependency-path: web/package-lock.json
-
-      - name: Build Frontend
-        run: BUILD_VERSION=${{ steps.version.outputs.BUILD_VERSION }} bash ./scripts/build_frontend.sh
 
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
           go-version: "1.26"
+          cache: true
 
-      - name: Show toolchain versions
+      - name: Run tests
+        run: go test ./...
+
+  publish:
+    name: Build and Publish ZTNA Server
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      build_version: ${{ steps.version.outputs.build_version }}
+      image_digest: ${{ steps.image.outputs.digest }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set image version
+        id: version
+        shell: bash
         run: |
-          go version
-          node --version
-          npm --version
+          echo "build_version=v1.0.0" >> "$GITHUB_OUTPUT"
 
-      - name: Cross Build Server, Agent and Endpoint
-        run: |
-          BUILD_VERSION=${{ steps.version.outputs.BUILD_VERSION }} \
-          GOOS=linux \
-          GOARCHS=amd64,arm64 \
-          BUILD_TARGETS=server,agent,endpoint \
-          bash scripts/build.sh
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
         with:
-          platforms: arm64
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build frontend
+        working-directory: web
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.build_version }}
+        run: |
+          npm ci --legacy-peer-deps
+          npm run build
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Build Linux AMD64 server
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.build_version }}
+          GOOS: linux
+          GOARCHS: amd64
+          BUILD_TARGETS: server
+        run: bash scripts/build.sh
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -66,188 +92,28 @@ jobs:
           username: ${{ secrets.REGISTRY_USER_ALIYUN }}
           password: ${{ secrets.REGISTRY_PASSWORD_ALIYUN }}
 
-      # Server Images
-      - name: Build Server AMD64 image
+      - name: Build and push server image
+        id: image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./.beagle/server.dockerfile
           platforms: linux/amd64
           push: true
-          tags: |
-            registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:${{ steps.version.outputs.BUILD_VERSION }}-amd64
+          tags: ${{ env.IMAGE_REPOSITORY }}:${{ steps.version.outputs.build_version }}
           build-args: |
             BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-amd64
             AUTHOR=${{ github.repository_owner }}
-            VERSION=${{ steps.version.outputs.BUILD_VERSION }}
+            VERSION=${{ steps.version.outputs.build_version }}
 
-      - name: Build Server ARM64 image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./.beagle/server.dockerfile
-          platforms: linux/arm64
-          push: true
-          tags: |
-            registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:${{ steps.version.outputs.BUILD_VERSION }}-arm64
-          build-args: |
-            BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-arm64
-            AUTHOR=${{ github.repository_owner }}
-            VERSION=${{ steps.version.outputs.BUILD_VERSION }}
-
-      - name: Create Server multi-arch manifest
+      - name: Publish build summary
+        env:
+          BUILD_VERSION: ${{ steps.version.outputs.build_version }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         run: |
-          docker buildx imagetools create -t registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:${{ steps.version.outputs.BUILD_VERSION }} \
-            registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:${{ steps.version.outputs.BUILD_VERSION }}-amd64 \
-            registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:${{ steps.version.outputs.BUILD_VERSION }}-arm64
-
-      # Agent Images
-      - name: Build Agent AMD64 image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./.beagle/agent.dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: |
-            registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:${{ steps.version.outputs.BUILD_VERSION }}-amd64
-          build-args: |
-            BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-amd64
-            AUTHOR=${{ github.repository_owner }}
-            VERSION=${{ steps.version.outputs.BUILD_VERSION }}
-
-      - name: Build Agent ARM64 image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./.beagle/agent.dockerfile
-          platforms: linux/arm64
-          push: true
-          tags: |
-            registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:${{ steps.version.outputs.BUILD_VERSION }}-arm64
-          build-args: |
-            BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-arm64
-            AUTHOR=${{ github.repository_owner }}
-            VERSION=${{ steps.version.outputs.BUILD_VERSION }}
-
-      - name: Create Agent multi-arch manifest
-        run: |
-          docker buildx imagetools create -t registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:${{ steps.version.outputs.BUILD_VERSION }} \
-            registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:${{ steps.version.outputs.BUILD_VERSION }}-amd64 \
-            registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:${{ steps.version.outputs.BUILD_VERSION }}-arm64
-
-      # Upload Agent binaries to S3
-      - name: Setup MinIO Client
-        run: |
-          wget -q https://dl.min.io/client/mc/release/linux-amd64/mc
-          chmod +x mc
-          sudo mv mc /usr/local/bin/
-
-      - name: Upload Agent to S3
-        run: |
-          mc alias set aliyun --api=S3v4 ${{ secrets.S3_ENDPOINT_ALIYUN }} \
-            ${{ secrets.S3_ACCESS_KEY_ALIYUN }} ${{ secrets.S3_SECRET_KEY_ALIYUN }}
-
-          VERSION="${{ steps.version.outputs.BUILD_VERSION }}"
-          S3_BUCKET="aliyun/vscode/awecloud-signaling"
-
-          # 上传 Agent 安装脚本
-          echo "Uploading install_agent.sh..."
-          mc cp scripts/install_agent.sh "${S3_BUCKET}/install_agent.sh"
-
-          # 上传 Agent 二进制
-          echo "Uploading signal_agent-${VERSION}-linux-amd64..."
-          mc cp bin/signal_agent-linux-amd64 "${S3_BUCKET}/signal_agent-${VERSION}-linux-amd64"
-
-          echo "Uploading signal_agent-${VERSION}-linux-arm64..."
-          mc cp bin/signal_agent-linux-arm64 "${S3_BUCKET}/signal_agent-${VERSION}-linux-arm64"
-
-          # 创建 Agent 版本信息文件
-          cat > signal_agent-version.json << EOF
           {
-            "version": "${VERSION}",
-            "build_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "files": {
-              "linux-amd64": "signal_agent-${VERSION}-linux-amd64",
-              "linux-arm64": "signal_agent-${VERSION}-linux-arm64"
-            }
-          }
-          EOF
-          mc cp signal_agent-version.json "${S3_BUCKET}/signal_agent-version.json"
-
-          echo "Agent ${VERSION} uploaded successfully!"
-        env:
-          S3_ACCESS_KEY_ALIYUN: ${{ secrets.S3_ACCESS_KEY_ALIYUN }}
-          S3_SECRET_KEY_ALIYUN: ${{ secrets.S3_SECRET_KEY_ALIYUN }}
-
-      - name: Upload Endpoint to S3
-        run: |
-          VERSION="${{ steps.version.outputs.BUILD_VERSION }}"
-          S3_BUCKET="aliyun/vscode/awecloud-signaling"
-
-          # 上传 Endpoint 安装脚本
-          echo "Uploading install_endpoint.sh..."
-          mc cp scripts/install_endpoint.sh "${S3_BUCKET}/install_endpoint.sh"
-
-          # 上传 Endpoint 二进制
-          echo "Uploading signal_endpoint-${VERSION}-linux-amd64..."
-          mc cp bin/signal_endpoint-linux-amd64 "${S3_BUCKET}/signal_endpoint-${VERSION}-linux-amd64"
-
-          echo "Uploading signal_endpoint-${VERSION}-linux-arm64..."
-          mc cp bin/signal_endpoint-linux-arm64 "${S3_BUCKET}/signal_endpoint-${VERSION}-linux-arm64"
-
-          # 创建 Endpoint 版本信息文件
-          cat > signal_endpoint-version.json << EOF
-          {
-            "version": "${VERSION}",
-            "build_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "files": {
-              "linux-amd64": "signal_endpoint-${VERSION}-linux-amd64",
-              "linux-arm64": "signal_endpoint-${VERSION}-linux-arm64"
-            }
-          }
-          EOF
-          mc cp signal_endpoint-version.json "${S3_BUCKET}/signal_endpoint-version.json"
-
-          echo "Endpoint ${VERSION} uploaded successfully!"
-        env:
-          S3_ACCESS_KEY_ALIYUN: ${{ secrets.S3_ACCESS_KEY_ALIYUN }}
-          S3_SECRET_KEY_ALIYUN: ${{ secrets.S3_SECRET_KEY_ALIYUN }}
-
-  deploy:
-    name: Deploy Server to Kubernetes
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Configure Kubernetes access
-        env:
-          KUBERNETES_SERVER: ${{ secrets.KUBERNETES_ALIYUN_SERVER }}
-          KUBERNETES_TOKEN: ${{ secrets.KUBERNETES_ALIYUN_TOKEN }}
-        run: |
-          set -eu
-          test -n "$KUBERNETES_SERVER"
-          test -n "$KUBERNETES_TOKEN"
-
-          kubectl config set-cluster beagle-signal \
-            --server="$KUBERNETES_SERVER" \
-            --insecure-skip-tls-verify=true
-
-          kubectl config set-credentials github-actions --token="$KUBERNETES_TOKEN"
-          kubectl config set-context beagle-signal \
-            --cluster=beagle-signal \
-            --user=github-actions \
-            --namespace=beagle-access
-          kubectl config use-context beagle-signal
-
-      - name: Update Server deployment
-        run: |
-          image="registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:${{ needs.build.outputs.build_version }}"
-          kubectl set image deployment/signal-server server="$image"
-          kubectl rollout restart deployment/signal-server
-          kubectl rollout status deployment/signal-server --timeout=5m
-          kubectl get deployment/signal-server -o jsonpath='{.spec.template.spec.containers[?(@.name=="server")].image}{"\n"}'
+            echo "### ZTNA Server image"
+            echo
+            echo "- Version: \`${BUILD_VERSION}\`"
+            echo "- Digest: \`${IMAGE_DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

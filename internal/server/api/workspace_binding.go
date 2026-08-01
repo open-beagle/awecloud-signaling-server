@@ -208,12 +208,17 @@ func (a *WorkspaceBindingAPI) CreateWorkspaceBinding(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("Workspace 生命周期状态无效"))
 		return
 	}
-	var tenantBinding model.ProviderTenantBinding
-	if err := db.DB.WithContext(ctx).Where("provider_id = ? AND external_tenant_id = ? AND status = ?", req.ProviderID, req.ExternalTenantID, model.ProviderBindingActive).First(&tenantBinding).Error; err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("Provider 外部客户尚未绑定可信 Tenant"))
+	tenantID, unrestricted, ok := tenantObjectScope(c, PermissionTenantResourcesWrite)
+	if !ok {
 		return
 	}
-	if !requireTenantPermission(c, tenantBinding.TenantID, PermissionTenantResourcesWrite) {
+	var tenantBinding model.ProviderTenantBinding
+	bindingQuery := db.DB.WithContext(ctx).Where("provider_id = ? AND external_tenant_id = ? AND status = ?", req.ProviderID, req.ExternalTenantID, model.ProviderBindingActive)
+	if !unrestricted {
+		bindingQuery = bindingQuery.Where("tenant_id = ?", tenantID)
+	}
+	if err := bindingQuery.First(&tenantBinding).Error; err != nil {
+		codedError(c, http.StatusNotFound, ErrorCodeTenantObjectNotFound, "当前租户范围内对象不存在")
 		return
 	}
 	var tenant model.Tenant

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"testing"
@@ -13,13 +14,32 @@ import (
 
 type recordingRemoteExecutor struct {
 	options remotecommand.StreamOptions
+	err     error
 }
 
 func (e *recordingRemoteExecutor) Stream(remotecommand.StreamOptions) error { return nil }
 
 func (e *recordingRemoteExecutor) StreamWithContext(_ context.Context, options remotecommand.StreamOptions) error {
 	e.options = options
-	return nil
+	return e.err
+}
+
+func TestKubernetesContainerExecutorForwardsResizeAndStreamFailure(t *testing.T) {
+	executor, err := NewKubernetesContainerExecutor(&rest.Config{Host: "https://kubernetes.example"})
+	require.NoError(t, err)
+	streamFailure := fmt.Errorf("pod exec stream failed")
+	remote := &recordingRemoteExecutor{err: streamFailure}
+	executor.newExecutor = func(*rest.Config, string, *url.URL) (remotecommand.Executor, error) { return remote, nil }
+	resize := make(chan ContainerTerminalSize, 1)
+	resize <- ContainerTerminalSize{Rows: 55, Cols: 144}
+	close(resize)
+	err = executor.Execute(context.Background(), &ContainerSSHUserPermission{
+		Namespace: "team-a", PodName: "ide-0", ContainerName: "workspace",
+	}, ContainerExecStream{Rows: 40, Cols: 120, Resize: resize})
+	require.ErrorIs(t, err, streamFailure)
+	require.Equal(t, &remotecommand.TerminalSize{Width: 120, Height: 40}, remote.options.TerminalSizeQueue.Next())
+	require.Equal(t, &remotecommand.TerminalSize{Width: 144, Height: 55}, remote.options.TerminalSizeQueue.Next())
+	require.Nil(t, remote.options.TerminalSizeQueue.Next())
 }
 
 func TestKubernetesContainerExecutorUsesFixedShellAndTarget(t *testing.T) {

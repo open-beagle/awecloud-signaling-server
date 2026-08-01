@@ -43,13 +43,17 @@ type Server struct {
 	loginService   *service.DesktopLoginService
 	desktopAuthAPI *api.DesktopAuthAPI
 
-	headscaleClient       *headscale.Client
-	aclSyncService        *headscale.ACLSyncService
-	aclSyncCtx            context.Context
-	aclSyncCancel         context.CancelFunc
-	reconciliationService *service.ResourceReconciliationService
-	reconciliationCtx     context.Context
-	reconciliationCancel  context.CancelFunc
+	headscaleClient               *headscale.Client
+	aclSyncService                *headscale.ACLSyncService
+	aclSyncCtx                    context.Context
+	aclSyncCancel                 context.CancelFunc
+	reconciliationService         *service.ResourceReconciliationService
+	providerReconciliationService *service.ProviderSupplyReconciliationService
+	allocationExpiryService       *service.PlatformAllocationExpiryService
+	workloadReconciliationService *service.WorkloadReconciliationService
+	tenantAuthorizationService    *service.TenantAuthorizationMaintenanceService
+	reconciliationCtx             context.Context
+	reconciliationCancel          context.CancelFunc
 }
 
 // GetAgentService 获取 AgentService（供 API 使用）
@@ -83,6 +87,9 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 	if err := db.EnsureBeagleWorkspace(cfg.Web.DefaultAdminUsername); err != nil {
 		return nil, fmt.Errorf("初始化 Beagle 默认租户失败: %w", err)
 	}
+	if err := db.EnsureDefaultAdminIdentity(cfg.Web.DefaultAdminUsername); err != nil {
+		return nil, fmt.Errorf("初始化默认管理员统一身份失败: %w", err)
+	}
 
 	var headscaleClient *headscale.Client
 	var aclSyncService *headscale.ACLSyncService
@@ -108,18 +115,31 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 	}
 
 	return &Server{
-		config:                cfg,
-		headscaleClient:       headscaleClient,
-		aclSyncService:        aclSyncService,
-		aclSyncCtx:            aclSyncCtx,
-		aclSyncCancel:         aclSyncCancel,
-		reconciliationService: service.NewResourceReconciliationService(db.DB),
-		reconciliationCtx:     reconciliationCtx,
-		reconciliationCancel:  reconciliationCancel,
+		config:                        cfg,
+		headscaleClient:               headscaleClient,
+		aclSyncService:                aclSyncService,
+		aclSyncCtx:                    aclSyncCtx,
+		aclSyncCancel:                 aclSyncCancel,
+		reconciliationService:         service.NewResourceReconciliationService(db.DB),
+		providerReconciliationService: service.NewProviderSupplyReconciliationService(db.DB),
+		allocationExpiryService:       service.NewPlatformAllocationExpiryService(db.DB),
+		workloadReconciliationService: service.NewWorkloadReconciliationService(db.DB),
+		tenantAuthorizationService:    service.NewTenantAuthorizationMaintenanceService(db.DB),
+		reconciliationCtx:             reconciliationCtx,
+		reconciliationCancel:          reconciliationCancel,
 	}, nil
 }
 
 func (s *Server) Run() error {
+	if s.tenantAuthorizationService != nil && !s.config.FeatureFlags.SessionAuthorizationV2 {
+		count, err := s.tenantAuthorizationService.DrainSessionsWhenAuthorizationDisabled(context.Background())
+		if err != nil {
+			return fmt.Errorf("关闭存量 Tenant ResourceSession 失败: %w", err)
+		}
+		if count > 0 {
+			logger.Infof("session_authorization_v2 已关闭，存量 Tenant ResourceSession 已进入 ending: count=%d", count)
+		}
+	}
 	switch s.config.Log.Level {
 	case "debug":
 		gin.SetMode(gin.DebugMode)
@@ -237,10 +257,37 @@ func (s *Server) Run() error {
 	}()
 
 	if s.aclSyncService != nil {
-		go s.aclSyncService.StartPeriodicSync(s.aclSyncCtx)
+		if s.config.Tailscale.HeadscaleAutoSync {
+			go s.aclSyncService.StartPeriodicSync(s.aclSyncCtx)
+		} else {
+			logger.Info("Headscale ACL/Tag 自动同步已禁用，显式 Headscale API 仍可用")
+		}
 	}
 	if s.reconciliationService != nil {
 		go s.reconciliationService.StartPeriodicMaintenance(s.reconciliationCtx)
+	}
+	if s.providerReconciliationService != nil && s.config.FeatureFlags.ResourceModelWrite && s.config.FeatureFlags.ResourceReconciliation {
+		go s.providerReconciliationService.StartPeriodicMaintenance(s.reconciliationCtx)
+	} else {
+		logger.Info("Provider Supply 租约对账已禁用")
+	}
+	if s.allocationExpiryService != nil && s.config.FeatureFlags.ResourceModelWrite && s.config.FeatureFlags.ResourceAllocation {
+		go s.allocationExpiryService.StartPeriodicExpiration(s.reconciliationCtx)
+	} else {
+		logger.Info("Platform Allocation 到期任务已禁用")
+	}
+	if s.workloadReconciliationService != nil && s.config.FeatureFlags.ResourceModelWrite &&
+		s.config.FeatureFlags.ResourceReconciliation && s.config.FeatureFlags.ResourceAllocation {
+		go s.workloadReconciliationService.StartPeriodicMaintenance(s.reconciliationCtx)
+	} else {
+		logger.Info("Workload/Tenant Resource 对账已禁用")
+	}
+	if s.tenantAuthorizationService != nil && s.config.FeatureFlags.ManagementContextV2 &&
+		s.config.FeatureFlags.TenantResourceReadV2 && s.config.FeatureFlags.ResourceModelWrite &&
+		s.config.FeatureFlags.SessionAuthorizationV2 {
+		go s.tenantAuthorizationService.StartPeriodicGrantExpiration(s.reconciliationCtx)
+	} else {
+		logger.Info("Tenant AccessGrant 到期任务已禁用")
 	}
 
 	quit := make(chan os.Signal, 1)
@@ -290,14 +337,16 @@ func (s *Server) customLogger() gin.HandlerFunc {
 func (s *Server) setupRouter() *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(api.RequestMetadataMiddleware())
 	router.Use(s.customLogger())
 
 	// CORS 中间件 - 允许所有来源的请求
 	router.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, X-Tenant-ID, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, X-Tenant-ID, X-Management-Scope-Type, X-Management-Scope-ID, X-User-Simulation-ID, X-Request-ID, Idempotency-Key, If-Match, Authorization, accept, origin, Cache-Control, X-Requested-With")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
+		c.Writer.Header().Set("Access-Control-Expose-Headers", "X-Request-ID, ETag")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -408,6 +457,101 @@ func (s *Server) setupRouter() *gin.Engine {
 			// 兼容旧版 Agent 注册接口（deprecated）
 			v1Group.POST("/agent/register", deployPublicAPI.RegisterCompat)
 
+			// 新管理上下文 API。默认关闭，只接受显式映射后的统一 User。
+			managementGroup := v1Group.Group("/management")
+			managementGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret, s.config.Security.AllowLocalhostAdminDebug))
+			managementGroup.Use(api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureManagementContextV2, false))
+			managementGroup.Use(api.UnifiedManagementIdentityMiddleware())
+			{
+				managementContextAPI := api.NewManagementContextAPI()
+				managementGroup.GET("/contexts", managementContextAPI.List)
+				managementGroup.GET("/contexts/current", managementContextAPI.Current)
+				userSimulationAPI := api.NewUserSimulationAPI(s.config.Security.UserSimulationMaxHours)
+				managementGroup.GET("/user-simulations", api.RequireManagementPermission(service.PermissionPlatformUserSimulationsRead), userSimulationAPI.List)
+				managementGroup.POST("/user-simulations", api.ForbidUserSimulation(), api.RequireManagementPermission(service.PermissionPlatformUserSimulationsWrite), api.RequireIdempotencyKey(), userSimulationAPI.Create)
+				managementGroup.POST("/user-simulations/:id/revoke", api.RequireManagementPermission(service.PermissionPlatformUserSimulationsWrite), api.RequireIfMatch(), userSimulationAPI.Revoke)
+
+				platformSupplyAPI := api.NewPlatformSupplyAPI()
+				platformAllocationAPI := api.NewPlatformAllocationAPI()
+				platformGroup := managementGroup.Group("/platform")
+				{
+					platformGroup.GET("/supply-conflicts", api.RequireManagementPermission(service.PermissionPlatformResourcesRead), platformSupplyAPI.ListConflicts)
+					platformGroup.GET("/allocations", api.RequireManagementPermission(service.PermissionPlatformAllocationsRead), platformAllocationAPI.List)
+					platformGroup.GET("/allocations/:id", api.RequireManagementPermission(service.PermissionPlatformAllocationsRead), platformAllocationAPI.Get)
+					platformGroup.POST("/allocations", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIdempotencyKey(), platformAllocationAPI.Create)
+					platformGroup.PATCH("/allocations/:id", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), platformAllocationAPI.Update)
+					platformGroup.POST("/allocations/:id/schedule", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), platformAllocationAPI.Schedule)
+					platformGroup.POST("/allocations/:id/activate", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), platformAllocationAPI.Activate)
+					platformGroup.POST("/allocations/:id/suspend", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), platformAllocationAPI.Suspend)
+					platformGroup.POST("/allocations/:id/resume", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), platformAllocationAPI.Resume)
+					platformGroup.POST("/allocations/:id/revoke", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), platformAllocationAPI.Revoke)
+					platformGroup.POST("/allocations/:id/renew", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), platformAllocationAPI.Renew)
+				}
+
+				providerSupplyAPI := api.NewProviderSupplyAPI()
+				providerGroup := managementGroup.Group("/provider")
+				{
+					providerGroup.GET("/technical-resources", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.ListTechnicalResources)
+					providerGroup.GET("/technical-resources/:id", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.GetTechnicalResource)
+					providerGroup.POST("/technical-resources", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIdempotencyKey(), providerSupplyAPI.CreateTechnicalResource)
+					providerGroup.POST("/technical-resources/:id/bind", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), providerSupplyAPI.BindTechnicalResource)
+					providerGroup.POST("/technical-resources/:id/disable", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetTechnicalResourceLifecycle(model.TechnicalResourceDisabled, "disable_technical_resource"))
+					providerGroup.POST("/technical-resources/:id/resume", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetTechnicalResourceLifecycle(model.TechnicalResourceRegistered, "resume_technical_resource"))
+					providerGroup.POST("/technical-resources/:id/retire", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetTechnicalResourceLifecycle(model.TechnicalResourceRetired, "retire_technical_resource"))
+
+					providerGroup.GET("/supply-candidates", api.RequireManagementPermission(service.PermissionProviderResourcesRead), providerSupplyAPI.ListSupplyCandidates)
+					providerGroup.GET("/supply-candidates/:id", api.RequireManagementPermission(service.PermissionProviderResourcesRead), providerSupplyAPI.GetSupplyCandidate)
+					providerGroup.POST("/supply-candidates/:id/accept", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), providerSupplyAPI.AcceptSupplyCandidate)
+					providerGroup.POST("/supply-candidates/:id/reject", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.RejectSupplyCandidate)
+
+					providerGroup.GET("/resources", api.RequireManagementPermission(service.PermissionProviderResourcesRead), providerSupplyAPI.ListPlatformResources)
+					providerGroup.GET("/resources/:id", api.RequireManagementPermission(service.PermissionProviderResourcesRead), providerSupplyAPI.GetPlatformResource)
+					providerGroup.GET("/resources/:id/scopes", api.RequireManagementPermission(service.PermissionProviderResourcesRead), providerSupplyAPI.ListResourceScopes)
+					providerGroup.POST("/resources/:id/activate", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetPlatformResourceLifecycle(model.PlatformResourceActive, "activate_platform_resource"))
+					providerGroup.POST("/resources/:id/suspend", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetPlatformResourceLifecycle(model.PlatformResourceSuspended, "suspend_platform_resource"))
+					providerGroup.POST("/resources/:id/resume", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetPlatformResourceLifecycle(model.PlatformResourceActive, "resume_platform_resource"))
+					providerGroup.POST("/resources/:id/retire", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetPlatformResourceLifecycle(model.PlatformResourceRetired, "retire_platform_resource"))
+
+					providerGroup.GET("/scopes/:id", api.RequireManagementPermission(service.PermissionProviderResourcesRead), api.RequireManagementPermission(service.PermissionProviderIsolationEvidenceRead), providerSupplyAPI.GetResourceScope)
+					providerGroup.POST("/scopes/:id/activate", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetResourceScopeLifecycle(model.ResourceScopeActive, "activate_resource_scope"))
+					providerGroup.POST("/scopes/:id/mark-allocatable", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.MarkResourceScopeAllocatable)
+					providerGroup.POST("/scopes/:id/suspend", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetResourceScopeLifecycle(model.ResourceScopeSuspended, "suspend_resource_scope"))
+					providerGroup.POST("/scopes/:id/resume", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetResourceScopeLifecycle(model.ResourceScopeActive, "resume_resource_scope"))
+					providerGroup.POST("/scopes/:id/retire", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetResourceScopeLifecycle(model.ResourceScopeRetired, "retire_resource_scope"))
+				}
+
+				tenantResourceAPI := api.NewTenantResourceManagementAPI()
+				tenantGrantAPI := api.NewTenantAccessGrantAPI()
+				resourceSessionAPI := api.NewResourceSessionManagementAPI()
+				tenantGroup := managementGroup.Group("/tenants/:tenant_id")
+				tenantGroup.Use(api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureTenantResourceReadV2, false))
+				{
+					tenantGroup.GET("/resource-candidates", api.RequireManagementPermission(service.PermissionTenantResourcesRead), tenantResourceAPI.ListCandidates)
+					tenantGroup.GET("/resource-candidates/:resource_id", api.RequireManagementPermission(service.PermissionTenantResourcesRead), tenantResourceAPI.GetCandidate)
+					tenantGroup.POST("/resource-candidates/:resource_id/publish", api.RequireManagementPermission(service.PermissionTenantResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), tenantResourceAPI.PublishCandidate)
+					tenantGroup.POST("/resource-candidates/:resource_id/reject", api.RequireManagementPermission(service.PermissionTenantResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), tenantResourceAPI.RejectCandidate)
+
+					tenantGroup.GET("/resources", api.RequireManagementPermission(service.PermissionTenantResourcesRead), tenantResourceAPI.ListResources)
+					tenantGroup.GET("/resources/:id", api.RequireManagementPermission(service.PermissionTenantResourcesRead), tenantResourceAPI.GetResource)
+					tenantGroup.PATCH("/resources/:id", api.RequireManagementPermission(service.PermissionTenantResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), tenantResourceAPI.UpdateResource)
+					tenantGroup.POST("/resources/:id/hide", api.RequireManagementPermission(service.PermissionTenantResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), tenantResourceAPI.HideResource)
+					tenantGroup.POST("/resources/:id/show", api.RequireManagementPermission(service.PermissionTenantResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), tenantResourceAPI.ShowResource)
+
+					tenantGroup.GET("/grants", api.RequireManagementPermission(service.PermissionTenantGrantsRead), tenantGrantAPI.List)
+					tenantGroup.POST("/grants", api.RequireManagementPermission(service.PermissionTenantGrantsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIdempotencyKey(), tenantGrantAPI.Create)
+					tenantGroup.GET("/grants/:id", api.RequireManagementPermission(service.PermissionTenantGrantsRead), tenantGrantAPI.Get)
+					tenantGroup.PATCH("/grants/:id", api.RequireManagementPermission(service.PermissionTenantGrantsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), tenantGrantAPI.Update)
+					tenantGroup.POST("/grants/:id/suspend", api.RequireManagementPermission(service.PermissionTenantGrantsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), tenantGrantAPI.Suspend)
+					tenantGroup.POST("/grants/:id/resume", api.RequireManagementPermission(service.PermissionTenantGrantsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), tenantGrantAPI.Resume)
+					tenantGroup.POST("/grants/:id/revoke", api.RequireManagementPermission(service.PermissionTenantGrantsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), tenantGrantAPI.Revoke)
+
+					tenantGroup.GET("/sessions", api.RequireManagementPermission(service.PermissionTenantSessionsRead), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureSessionAuthorizationV2, false), resourceSessionAPI.List)
+					tenantGroup.GET("/sessions/:id", api.RequireManagementPermission(service.PermissionTenantSessionsRead), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureSessionAuthorizationV2, false), resourceSessionAPI.Get)
+					tenantGroup.POST("/sessions", api.RequireManagementPermission(service.PermissionTenantSessionsRead), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureSessionAuthorizationV2, true), api.RequireIdempotencyKey(), resourceSessionAPI.Create)
+					tenantGroup.POST("/sessions/:id/terminate", api.RequireManagementPermission(service.PermissionTenantSessionsTerminate), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureSessionAuthorizationV2, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), resourceSessionAPI.Terminate)
+				}
+			}
+
 			// 管理员 API
 			adminGroup := v1Group.Group("/admin")
 			{
@@ -417,6 +561,7 @@ func (s *Server) setupRouter() *gin.Engine {
 
 				adminAuthGroup := adminGroup.Group("")
 				adminAuthGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret, s.config.Security.AllowLocalhostAdminDebug))
+				adminAuthGroup.Use(api.ForbidUserSimulation())
 				adminAuthGroup.Use(api.ManagementAuthorizationMiddleware())
 				{
 					adminAuthGroup.GET("/auth/me", adminAPI.GetMe)

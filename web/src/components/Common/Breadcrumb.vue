@@ -10,6 +10,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import type { RouteLocationNormalizedLoaded } from 'vue-router'
 
 interface BreadcrumbItem {
   path?: string
@@ -18,7 +19,10 @@ interface BreadcrumbItem {
 
 const route = useRoute()
 const items = computed<BreadcrumbItem[]>(() => {
-  const value = route.meta.breadcrumb
+  const metadata = route.meta.breadcrumb
+  const value = typeof metadata === 'function'
+    ? metadata(route as RouteLocationNormalizedLoaded)
+    : metadata
   if (!Array.isArray(value)) return []
   return value.filter((item): item is BreadcrumbItem => {
     return Boolean(item && typeof item === 'object' && typeof item.title === 'string')

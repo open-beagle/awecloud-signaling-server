@@ -1,5 +1,11 @@
 <template>
   <div class="domain-list">
+    <PageHeader title="域名管理" description="查看并维护当前平台的连接入口、目标地址和在线状态。">
+      <template #actions>
+        <el-button :loading="refreshing" @click="handleRefresh">{{ $t('domain.refresh') }}</el-button>
+      </template>
+    </PageHeader>
+
     <!-- 搜索和筛选 -->
     <el-card class="search-card" shadow="never">
       <el-form :inline="true" :model="searchForm" class="search-form">
@@ -20,7 +26,6 @@
         <el-form-item>
           <el-button type="primary" @click="handleSearch">{{ $t('common.search') }}</el-button>
           <el-button @click="handleReset">{{ $t('common.reset') }}</el-button>
-          <el-button type="warning" :loading="refreshing" @click="handleRefresh">{{ $t('domain.refresh') }}</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -107,6 +112,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getDomains, deleteDomain, refreshDomains, type DomainItem, type DomainType } from '@/api/domain'
 import { ElMessage } from 'element-plus'
+import PageHeader from '@/components/Common/PageHeader.vue'
 
 const { t } = useI18n()
 

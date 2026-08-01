@@ -24,6 +24,7 @@ import (
 
 // DiscoveredService Agent 发现的 K8S Service
 type DiscoveredService struct {
+	UID       string
 	Namespace string
 	Name      string
 	ClusterIP string
@@ -209,6 +210,7 @@ func (i *K8SServiceInformer) convertService(svc *corev1.Service) *DiscoveredServ
 	alias := svc.Labels["signal.beagle.io/alias"]
 
 	return &DiscoveredService{
+		UID:       string(svc.UID),
 		Namespace: svc.Namespace,
 		Name:      svc.Name,
 		ClusterIP: svc.Spec.ClusterIP,

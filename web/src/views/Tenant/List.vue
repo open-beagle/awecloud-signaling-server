@@ -1,16 +1,11 @@
 <template>
   <div class="tenant-page">
-    <div class="page-header">
-      <div>
-        <div class="eyebrow">租户安全边界</div>
-        <h1>租户管理</h1>
-        <p>建立和查看租户安全边界。业务成员统一在进入租户后管理，管理台授权由“租户管理员授权”维护。</p>
-      </div>
-      <div class="header-actions">
+    <PageHeader title="组织管理" eyebrow="租户安全边界" description="建立和查看租户安全边界。业务成员统一在进入租户后管理，管理台授权由“租户管理员授权”维护。">
+      <template #actions>
         <el-button :icon="Refresh" :loading="loading" @click="fetchTenants">刷新</el-button>
         <el-button type="primary" :icon="Plus" :disabled="!authStore.isPlatformAdmin" @click="showCreate = true">创建租户</el-button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <div class="tenant-surface">
       <div class="toolbar">
@@ -52,6 +47,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
+import PageHeader from '@/components/Common/PageHeader.vue'
 import { createTenant, getTenants, type Tenant } from '@/api/resource'
 import { useAuthStore } from '@/stores/auth'
 import { useTenantStore } from '@/stores/tenant'
@@ -101,17 +97,13 @@ onMounted(async () => { await Promise.all([fetchTenants(), tenantStore.loadConte
 
 <style scoped>
 .tenant-page { width: 100%; }
-.page-header, .header-actions, .toolbar { display: flex; align-items: center; }
-.page-header { justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 18px; }
-.header-actions { gap: 8px; }
-.eyebrow, .secondary, .toolbar span, .form-hint { color: var(--text-secondary); font-size: 12px; }
-h1 { margin: 0; color: var(--text-primary); font-size: 24px; line-height: 32px; }
-.page-header p { margin: 5px 0 0; color: var(--text-regular); font-size: 13px; }
+.toolbar { display: flex; align-items: center; }
+.secondary, .toolbar span, .form-hint { color: var(--text-secondary); font-size: 12px; }
 .tenant-surface { overflow: hidden; background: #fff; border: 1px solid var(--border-light); border-radius: 6px; }
 .toolbar { justify-content: space-between; gap: 16px; padding: 14px 16px; border-bottom: 1px solid var(--border-light); }
 .toolbar .el-input { width: 340px; }
 .secondary { display: block; margin-top: 3px; }
 .pagination { display: flex; justify-content: flex-end; padding: 16px; }
 .form-hint { margin-top: 6px; line-height: 18px; }
-@media (max-width: 700px) { .page-header { flex-direction: column; } .toolbar .el-input { width: 100%; } }
+@media (max-width: 700px) { .toolbar .el-input { width: 100%; } }
 </style>

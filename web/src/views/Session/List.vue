@@ -1,6 +1,8 @@
 <template>
   <div class="session-page">
-    <div class="page-header"><div><div class="eyebrow">访问运行态</div><h1>活动会话</h1><p>查看 ContainerSSH 会话、目标 revision 和关闭原因。强制断开要求 Agent 支持协议 v1。</p></div><el-button :icon="Refresh" :loading="loading" @click="fetchSessions">刷新</el-button></div>
+    <PageHeader title="访问会话" eyebrow="访问运行态" description="查看 ContainerSSH 会话、目标 revision 和关闭原因。强制断开要求 Agent 支持协议 v1。">
+      <template #actions><el-button :icon="Refresh" :loading="loading" @click="fetchSessions">刷新</el-button></template>
+    </PageHeader>
     <div class="status-strip"><button v-for="item in statusOptions" :key="item.value" :class="{ active: filters.status === item.value }" @click="selectStatus(item.value)">{{ item.label }}</button></div>
     <div class="surface">
       <div class="toolbar"><span>{{ pagination.total }} 条会话</span></div>
@@ -23,6 +25,7 @@ import { onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
+import PageHeader from '@/components/Common/PageHeader.vue'
 import { forceDisconnectSession, getSessions, type ContainerSession, type ContainerSessionStatus } from '@/api/resource'
 import { useAuthStore } from '@/stores/auth'
 import { useTenantStore } from '@/stores/tenant'
@@ -44,5 +47,5 @@ onMounted(fetchSessions)
 </script>
 
 <style scoped>
-.session-page{width:100%}.page-header{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;margin-bottom:18px}.eyebrow,.secondary,.toolbar{color:var(--text-secondary);font-size:12px}.eyebrow{margin-bottom:5px}h1{margin:0;font-size:24px;line-height:32px}.page-header p{margin:5px 0 0;color:var(--text-regular);font-size:13px}.status-strip{display:flex;gap:4px;margin-bottom:12px}.status-strip button{height:34px;padding:0 13px;border:1px solid var(--border-light);border-radius:4px;background:#fff;color:var(--text-regular);cursor:pointer}.status-strip button.active{border-color:var(--primary-color);color:var(--primary-color);background:#eef6ff}.surface{overflow:hidden;background:#fff;border:1px solid var(--border-light);border-radius:6px}.toolbar{padding:13px 16px;border-bottom:1px solid var(--border-light)}.secondary{display:block;margin-top:3px}.reason{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pagination{display:flex;justify-content:flex-end;padding:16px}@media(max-width:700px){.page-header{flex-direction:column}.status-strip{overflow-x:auto}}
+    .session-page{width:100%}.secondary,.toolbar{color:var(--text-secondary);font-size:12px}.status-strip{display:flex;gap:4px;margin-bottom:12px}.status-strip button{height:34px;padding:0 13px;border:1px solid var(--border-light);border-radius:4px;background:#fff;color:var(--text-regular);cursor:pointer}.status-strip button.active{border-color:var(--primary-color);color:var(--primary-color);background:#eef6ff}.surface{overflow:hidden;background:#fff;border:1px solid var(--border-light);border-radius:6px}.toolbar{padding:13px 16px;border-bottom:1px solid var(--border-light)}.secondary{display:block;margin-top:3px}.reason{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pagination{display:flex;justify-content:flex-end;padding:16px}@media(max-width:700px){.status-strip{overflow-x:auto}}
 </style>

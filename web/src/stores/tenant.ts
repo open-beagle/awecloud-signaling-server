@@ -10,6 +10,7 @@ export const useTenantStore = defineStore('tenant', () => {
 	const invalid = ref(false)
 	const error = ref('')
 	const contextRevision = ref(0)
+	let loadPromise: Promise<void> | null = null
 
 	const current = computed(() => contexts.value.find(item => item.tenant_id === tenantId.value))
 	const tenantRole = computed(() => current.value?.management_role || '')
@@ -27,6 +28,15 @@ export const useTenantStore = defineStore('tenant', () => {
 		contextRevision.value++
 	}
 
+	const syncTenantContext = (value: string) => {
+		const previous = tenantId.value
+		if (value === previous) return
+		persistTenant(value)
+		invalid.value = false
+		contextRevision.value++
+		window.dispatchEvent(new CustomEvent('tenant-context-changed', { detail: { previous, current: value } }))
+	}
+
 	const reset = () => {
 		persistTenant('')
 		contexts.value = []
@@ -36,25 +46,30 @@ export const useTenantStore = defineStore('tenant', () => {
 		contextRevision.value++
 	}
 
-	const loadContexts = async (force = false) => {
-		if (loading.value || (loaded.value && !force)) return
+	const loadContexts = (force = false): Promise<void> => {
+		if (loading.value && loadPromise) return loadPromise
+		if (loaded.value && !force) return Promise.resolve()
 		loading.value = true
 		error.value = ''
-		try {
-			const response = await getTenantContexts()
-			contexts.value = response.success && response.data ? response.data : []
-			loaded.value = true
-			invalid.value = false
-			if (tenantId.value && !contexts.value.some(item => item.tenant_id === tenantId.value)) {
-				persistTenant('')
+		loadPromise = (async () => {
+			try {
+				const response = await getTenantContexts()
+				contexts.value = response.success && response.data ? response.data : []
+				loaded.value = true
+				invalid.value = false
+				if (tenantId.value && !contexts.value.some(item => item.tenant_id === tenantId.value)) {
+					persistTenant('')
+				}
+				if (!tenantId.value && contexts.value.length > 0) persistTenant(contexts.value[0].tenant_id)
+			} catch (cause) {
+				error.value = cause instanceof Error ? cause.message : '租户上下文加载失败'
+				throw cause
+			} finally {
+				loading.value = false
+				loadPromise = null
 			}
-			if (!tenantId.value && contexts.value.length > 0) persistTenant(contexts.value[0].tenant_id)
-		} catch (cause) {
-			error.value = cause instanceof Error ? cause.message : '租户上下文加载失败'
-			throw cause
-		} finally {
-			loading.value = false
-		}
+		})()
+		return loadPromise
 	}
 
 	const selectTenant = async (value: string) => {
@@ -92,6 +107,7 @@ export const useTenantStore = defineStore('tenant', () => {
 		contextRevision,
 		loadContexts,
 		selectTenant,
+		syncTenantContext,
 		clearTenantState,
 		reset,
 		canTenant

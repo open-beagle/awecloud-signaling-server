@@ -1,7 +1,14 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import type { RouteRecordRaw } from 'vue-router'
+import type { RouteLocationNormalizedLoaded, RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useTenantStore } from '@/stores/tenant'
+import { useWorkspaceStore, workspaceHome } from '@/stores/workspace'
+import type { ManagementWorkspace } from '@/api/managementContext'
+
+const storedWorkspace = (): ManagementWorkspace => {
+	const value = localStorage.getItem('management_workspace')
+	return value === 'tenant' || value === 'provider' || value === 'platform' ? value : 'platform'
+}
 
 const routes: RouteRecordRaw[] = [
   {
@@ -19,16 +26,32 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/components/Layout/Layout.vue'),
-    redirect: () => ['admin', 'viewer', 'platform_admin', 'platform_viewer'].includes(localStorage.getItem('admin_role') || '')
-      ? '/platform-overview'
-      : '/tenant-overview',
+    redirect: '/workspace-entry',
     meta: { requiresAuth: true },
     children: [
+		{
+			path: 'workspace-entry',
+			name: 'WorkspaceEntry',
+			component: () => import('@/views/Workspace/Unavailable.vue'),
+			meta: { requiresAuth: true, scope: 'any', workspace: 'any', menuDomain: 'any' }
+		},
+		{
+			path: 'workspace-unavailable',
+			name: 'WorkspaceUnavailable',
+			component: () => import('@/views/Workspace/Unavailable.vue'),
+			meta: { requiresAuth: true, scope: 'any', workspace: 'any', menuDomain: 'any' }
+		},
 		{
 			path: 'platform-overview',
 			name: 'PlatformOverview',
 			component: () => import('@/views/Platform/Overview.vue'),
 			meta: { requiresAuth: true, scope: 'platform', menuDomain: 'platform' }
+		},
+		{
+			path: 'provider-overview',
+			name: 'ProviderOverview',
+			component: () => import('@/views/Provider/Overview.vue'),
+			meta: { requiresAuth: true, scope: 'provider', workspace: 'provider', permission: 'provider.overview.read', menuDomain: 'provider' }
 		},
 		{
 			path: 'tenant-overview',
@@ -367,16 +390,23 @@ const routes: RouteRecordRaw[] = [
 ]
 
 type BreadcrumbMetaItem = { title: string; path?: string }
+type BreadcrumbMeta = BreadcrumbMetaItem[] | ((route: RouteLocationNormalizedLoaded) => BreadcrumbMetaItem[])
 
-const breadcrumbByRouteName: Record<string, BreadcrumbMetaItem[]> = {
+const breadcrumbByRouteName: Record<string, BreadcrumbMeta> = {
+	WorkspaceUnavailable: route => {
+		const workspace = route.query.workspace
+		const label = workspace === 'tenant' ? '租户' : workspace === 'provider' ? '资源' : workspace === 'platform' ? '平台' : '工作空间'
+		return [{ title: '工作空间' }, { title: `${label}业务不可用` }]
+	},
 	PlatformOverview: [{ title: '管理员' }, { title: '平台概览' }],
+	ProviderOverview: [{ title: '资源业务' }, { title: '资源概览' }],
 	TenantOverview: [{ title: '租户业务' }, { title: '租户概览' }],
 	TenantSwitch: [{ title: '管理员' }, { title: '租户切换' }],
 	TenantMembers: [{ title: '租户业务' }, { title: '成员' }],
 	TenantMemberDevices: [{ title: '租户业务' }, { title: '成员设备' }],
 	TenantAudit: [{ title: '租户业务' }, { title: '租户审计' }],
 	TenantSettings: [{ title: '租户业务' }, { title: '租户设置' }],
-	Tenants: [{ title: '租户治理' }, { title: '租户管理' }],
+	Tenants: [{ title: '组织治理' }, { title: '组织管理' }],
 	TenantAdminMemberships: [{ title: '租户治理' }, { title: '租户管理员授权' }],
 	PlatformAdmins: [{ title: '平台治理' }, { title: '平台管理账号' }],
 	PlatformIdentities: [{ title: '平台治理' }, { title: '访问主体目录', path: '/platform-identities' }],
@@ -384,27 +414,31 @@ const breadcrumbByRouteName: Record<string, BreadcrumbMetaItem[]> = {
 	AgentNodes: [{ title: '设备管理' }, { title: '代理设备', path: '/nodes/agents' }],
 	DiagnosticDesktopNodes: [{ title: '高级诊断' }, { title: 'Desktop 节点', path: '/diagnostics/desktop-nodes' }],
 	DiagnosticNodes: [{ title: '高级诊断' }, { title: '全部节点', path: '/diagnostics/nodes' }],
-	NodeDetail: [{ title: '设备管理' }, { title: '设备详情' }],
+	NodeDetail: route => {
+		if (route.query.source === 'desktop') return [{ title: '高级诊断' }, { title: 'Desktop 节点', path: '/diagnostics/desktop-nodes' }, { title: '节点详情' }]
+		if (route.query.source === 'all') return [{ title: '高级诊断' }, { title: '全部节点', path: '/diagnostics/nodes' }, { title: '节点详情' }]
+		return [{ title: '设备管理' }, { title: '代理设备', path: '/nodes/agents' }, { title: '节点详情' }]
+	},
 	Endpoints: [{ title: '终端管理', path: '/endpoints' }],
 	EndpointDetail: [{ title: '终端管理', path: '/endpoints' }, { title: '终端详情' }],
 	Integrations: [{ title: '基础设施' }, { title: '集成' }],
 	Groups: [{ title: '租户业务' }, { title: '成员分组', path: '/groups' }],
-	GroupMembers: [{ title: '成员分组', path: '/groups' }, { title: '成员管理' }],
+	GroupMembers: [{ title: '租户业务' }, { title: '成员分组', path: '/groups' }, { title: '成员管理' }],
 	Resources: [{ title: '租户业务' }, { title: '资源目录' }],
-	ResourceDetail: [{ title: '资源目录', path: '/resources' }, { title: '资源详情' }],
+	ResourceDetail: [{ title: '租户业务' }, { title: '资源目录', path: '/resources' }, { title: '资源详情' }],
 	ResourceCandidates: [{ title: '资源治理' }, { title: '发现候选' }],
 	PlatformResources: [{ title: '资源治理' }, { title: '全局资源目录' }],
 	LegacyInventory: [{ title: '资源治理' }, { title: '存量认领' }],
-	AccessPolicies: [{ title: '租户业务' }, { title: '访问策略' }],
-	Sessions: [{ title: '租户业务' }, { title: '活动会话' }],
-	Domains: [{ title: '域名管理', path: '/domains' }],
+	AccessPolicies: [{ title: '租户业务' }, { title: '访问授权' }],
+	Sessions: [{ title: '租户业务' }, { title: '访问会话' }],
+	Domains: [{ title: '高级诊断' }, { title: '域名管理', path: '/domains' }],
 	ACLServices: [{ title: '授权管理' }, { title: '服务授权', path: '/acl/services' }],
 	ACLServiceDetail: [{ title: '服务授权', path: '/acl/services' }, { title: '授权详情' }],
 	ACLUsers: [{ title: '授权管理' }, { title: '用户授权', path: '/acl/users' }],
 	ACLUserDetail: [{ title: '用户授权', path: '/acl/users' }, { title: '授权详情' }],
 	ACLGroups: [{ title: '授权管理' }, { title: '分组授权', path: '/acl/groups' }],
 	ACLGroupDetail: [{ title: '分组授权', path: '/acl/groups' }, { title: '授权详情' }],
-	ACLSSH: [{ title: '授权管理' }, { title: 'SSH 授权', path: '/acl/ssh' }],
+	ACLSSH: [{ title: '高级诊断' }, { title: 'SSH 授权', path: '/acl/ssh' }],
 	ACLSSHDetail: [{ title: 'SSH 授权', path: '/acl/ssh' }, { title: '授权详情' }],
 	ACLK8S: [{ title: '授权管理' }, { title: 'Kubernetes 授权', path: '/acl/k8s' }],
 	ACLK8SDetail: [{ title: 'Kubernetes 授权', path: '/acl/k8s' }, { title: '授权详情' }],
@@ -412,21 +446,23 @@ const breadcrumbByRouteName: Record<string, BreadcrumbMetaItem[]> = {
 	ACLK8SServiceDetail: [{ title: 'Kubernetes Service 授权', path: '/acl/k8s-service' }, { title: '授权详情' }],
 	TunnelUsers: [{ title: '隧道管理' }, { title: 'User 管理' }],
 	TunnelNodes: [{ title: '隧道管理' }, { title: 'Node 管理' }],
-	TunnelACL: [{ title: '隧道管理' }, { title: 'ACL 管理' }],
+	TunnelACL: [{ title: '高级诊断' }, { title: 'ACL 管理' }],
 	TunnelSSH: [{ title: '隧道管理' }, { title: 'SSH 策略' }],
 	PlatformAudit: [{ title: '平台治理' }, { title: '平台审计' }],
 	DiagnosticOperationAudit: [{ title: '高级诊断' }, { title: '连接操作审计' }],
-	SystemConfig: [{ title: '系统配置' }]
+	SystemConfig: [{ title: '平台治理' }, { title: '系统配置' }]
 }
 
 const normalizeProtectedRouteMetadata = (records: RouteRecordRaw[]) => {
 	for (const route of records) {
 		if (route.meta?.requiresAuth !== false) {
 			const routeName = typeof route.name === 'string' ? route.name : ''
+			const workspace = route.meta?.workspace || route.meta?.scope || 'platform'
 			route.meta = {
 				...route.meta,
-				scope: route.meta?.scope || 'platform',
-				menuDomain: route.meta?.menuDomain || (route.meta?.scope === 'tenant' ? 'tenant' : 'platform'),
+				scope: route.meta?.scope || workspace,
+				workspace,
+				menuDomain: route.meta?.menuDomain || workspace,
 				...(breadcrumbByRouteName[routeName] ? { breadcrumb: breadcrumbByRouteName[routeName] } : {})
 			}
 		}
@@ -445,6 +481,7 @@ const router = createRouter({
 router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
 	const tenantStore = useTenantStore()
+	const workspaceStore = useWorkspaceStore()
 
 	if (to.meta.requiresAuth === false) {
 		next()
@@ -454,60 +491,88 @@ router.beforeEach(async (to, _from, next) => {
     next({ name: 'Login', query: { redirect: to.fullPath } })
 	return
   }
-  if (!authStore.role) {
+	if (!authStore.role) {
     try { await authStore.loadProfile() } catch { return }
   }
-	const scope = to.meta.scope || 'platform'
-	if (scope === 'platform' && !authStore.hasPlatformScope) {
-		try { await tenantStore.loadContexts() } catch { next(false); return }
-		next(firstTenantDestination(tenantStore))
+	try { await workspaceStore.loadContexts() } catch { next(false); return }
+	if (to.name === 'WorkspaceEntry') {
+		const initialWorkspace = workspaceStore.currentWorkspace || storedWorkspace()
+		next(workspaceStore.hasContext(initialWorkspace)
+			? workspaceHome(initialWorkspace)
+			: { name: 'WorkspaceUnavailable', query: { workspace: initialWorkspace }, replace: true })
 		return
 	}
-	if (scope === 'tenant') {
+
+	if (to.name === 'WorkspaceUnavailable') {
+		const requested = typeof to.query.workspace === 'string' ? to.query.workspace : workspaceStore.currentWorkspace
+		if (requested === 'tenant' || requested === 'provider' || requested === 'platform') workspaceStore.activateWorkspace(requested)
+		next()
+		return
+	}
+
+	const workspace = (to.meta.workspace || to.meta.scope || 'platform') as ManagementWorkspace
+	workspaceStore.activateWorkspace(workspace)
+	if (!workspaceStore.hasContext(workspace)) {
+		next({ name: 'WorkspaceUnavailable', query: { workspace }, replace: true })
+		return
+	}
+
+	if (workspace === 'tenant') {
+		const selectedTenantId = workspaceStore.selectedContextId('tenant')
+		if (selectedTenantId && tenantStore.tenantId !== selectedTenantId) tenantStore.syncTenantContext(selectedTenantId)
 		try { await tenantStore.loadContexts() } catch { next(false); return }
 		if (!tenantStore.current) {
-			if (authStore.hasPlatformScope) next('/tenant-switch')
-			else next(false)
+			next({ name: 'WorkspaceUnavailable', query: { workspace: 'tenant' }, replace: true })
 			return
 		}
-		const permission = typeof to.meta.permission === 'string' ? to.meta.permission : ''
-		if (permission && !tenantStore.canTenant(permission)) {
-			next(firstTenantDestination(tenantStore))
-			return
+	}
+	const permission = typeof to.meta.permission === 'string' ? to.meta.permission : ''
+	if (permission && !workspaceStore.can(permission)) {
+		if (workspace === 'tenant') {
+			next(firstTenantDestination(tenantStore, workspaceStore))
+		} else {
+			next({ name: 'WorkspaceUnavailable', query: { workspace }, replace: true })
 		}
+		return
 	}
   next()
 })
 
-const firstTenantDestination = (tenantStore: ReturnType<typeof useTenantStore>) => {
-	if (tenantStore.canTenant('tenant.overview.read')) return '/tenant-overview'
-	if (tenantStore.canTenant('tenant.resources.read')) return '/resources'
-	if (tenantStore.canTenant('tenant.members.read')) return '/tenant-members'
-	if (tenantStore.canTenant('tenant.groups.read')) return '/groups'
-	if (tenantStore.canTenant('tenant.devices.read')) return '/tenant-member-devices'
-	if (tenantStore.canTenant('tenant.grants.read')) return '/access-policies'
-	if (tenantStore.canTenant('tenant.sessions.read')) return '/sessions'
-	if (tenantStore.canTenant('tenant.audit.read')) return '/tenant-audit'
-	if (tenantStore.canTenant('tenant.settings.read')) return '/tenant-settings'
-	return '/login'
+const firstTenantDestination = (
+	tenantStore: ReturnType<typeof useTenantStore>,
+	workspaceStore = useWorkspaceStore()
+) => {
+	const can = (permission: string) => workspaceStore.can(permission) && tenantStore.canTenant(permission)
+	if (can('tenant.overview.read')) return '/tenant-overview'
+	if (can('tenant.resources.read')) return '/resources'
+	if (can('tenant.members.read')) return '/tenant-members'
+	if (can('tenant.groups.read')) return '/groups'
+	if (can('tenant.devices.read')) return '/tenant-member-devices'
+	if (can('tenant.grants.read')) return '/access-policies'
+	if (can('tenant.sessions.read')) return '/sessions'
+	if (can('tenant.audit.read')) return '/tenant-audit'
+	if (can('tenant.settings.read')) return '/tenant-settings'
+	return { name: 'WorkspaceUnavailable', query: { workspace: 'tenant' } }
 }
 
 const recoverTenantRoute = async () => {
 	if (router.currentRoute.value.meta.scope !== 'tenant') return
-	const authStore = useAuthStore()
 	const tenantStore = useTenantStore()
+	const workspaceStore = useWorkspaceStore()
+	try { await workspaceStore.loadContexts(true) } catch { return }
 	try { await tenantStore.loadContexts(true) } catch { return }
 	if (!tenantStore.current) {
-		await router.replace(authStore.hasPlatformScope ? '/tenant-switch' : '/login')
+		await router.replace({ name: 'WorkspaceUnavailable', query: { workspace: 'tenant' } })
 		return
 	}
 	const permission = router.currentRoute.value.meta.permission
 	if (typeof permission === 'string' && !tenantStore.canTenant(permission)) {
-		await router.replace(firstTenantDestination(tenantStore))
+		await router.replace(firstTenantDestination(tenantStore, workspaceStore))
 	}
 }
 
 window.addEventListener('tenant-context-invalid', () => { recoverTenantRoute() })
 window.addEventListener('tenant-context-changed', () => { recoverTenantRoute() })
+window.addEventListener('management-context-changed', () => { recoverTenantRoute() })
 
 export default router

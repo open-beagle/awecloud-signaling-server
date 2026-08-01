@@ -1,17 +1,20 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 )
 
 // AdminAPI 管理员 API
@@ -39,11 +42,14 @@ type LoginResponse struct {
 
 // AdminInfo 管理员信息
 type AdminInfo struct {
-	ID        int64     `json:"id"`
-	Username  string    `json:"username"`
-	Role      string    `json:"role"`
-	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"created_at"`
+	ID                 int64     `json:"id"`
+	Username           string    `json:"username"`
+	Role               string    `json:"role"`
+	Enabled            bool      `json:"enabled"`
+	UnifiedUserID      uint64    `json:"unified_user_id,omitempty"`
+	AuthRevision       int64     `json:"auth_revision,omitempty"`
+	CredentialRevision int64     `json:"credential_revision,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 // Login 管理员登录
@@ -68,13 +74,30 @@ func (a *AdminAPI) Login(c *gin.Context) {
 		return
 	}
 
-	// 生成 JWT Token
-	expiresAt := time.Now().Add(time.Hour * time.Duration(a.config.Security.JWTExpireHours))
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+	claims := jwt.MapClaims{
 		"admin_id": admin.ID,
 		"username": admin.Username,
-		"exp":      expiresAt.Unix(),
-	})
+	}
+	adminInfo := &AdminInfo{
+		ID: admin.ID, Username: admin.Username, Role: admin.Role, Enabled: admin.Enabled, CreatedAt: admin.CreatedAt,
+	}
+	identity, identityErr := service.LoadLegacyAdminIdentity(db.DB.WithContext(ctx), admin.ID)
+	if identityErr == nil {
+		claims["user_id"] = identity.UserID
+		claims["auth_revision"] = identity.AuthRevision
+		claims["credential_revision"] = identity.CredentialRevision
+		adminInfo.UnifiedUserID = identity.UserID
+		adminInfo.AuthRevision = identity.AuthRevision
+		adminInfo.CredentialRevision = identity.CredentialRevision
+	} else if !errors.Is(identityErr, service.ErrManagementIdentityNotMapped) && !errors.Is(identityErr, service.ErrManagementUserDisabled) {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("读取统一身份映射失败"))
+		return
+	}
+
+	// 生成 JWT Token。Provider/Tenant 权限不进入 Token，逐请求从 Membership 计算。
+	expiresAt := time.Now().Add(time.Hour * time.Duration(a.config.Security.JWTExpireHours))
+	claims["exp"] = expiresAt.Unix()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
 	tokenString, err := token.SignedString([]byte(a.config.Security.JWTSecret))
 	if err != nil {
@@ -87,13 +110,7 @@ func (a *AdminAPI) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, NewSuccessResponse(LoginResponse{
 		Token:     tokenString,
 		ExpiresAt: expiresAt,
-		Admin: &AdminInfo{
-			ID:        admin.ID,
-			Username:  admin.Username,
-			Role:      admin.Role,
-			Enabled:   admin.Enabled,
-			CreatedAt: admin.CreatedAt,
-		},
+		Admin:     adminInfo,
 	}))
 }
 
@@ -167,8 +184,16 @@ func (a *AdminAPI) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	admin.PasswordHash = string(newHash)
-	if err := db.DB.WithContext(ctx).Save(&admin).Error; err != nil {
+	err = db.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&admin).Update("password_hash", string(newHash)).Error; err != nil {
+			return err
+		}
+		if _, err := db.SyncLegacyAdminIdentity(tx, admin.ID, "management account password changed"); err != nil {
+			return err
+		}
+		return service.BumpLegacyAdminCredentialRevision(tx, admin.ID)
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新失败"))
 		return
 	}

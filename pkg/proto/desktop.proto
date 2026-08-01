@@ -226,6 +226,7 @@ message GetMyDevicesResponse {
 message OfflineDeviceRequest {
   uint64 desktop_id = 1; // 当前 Desktop ID
   string device_token = 2; // 要下线的设备令牌
+  string secret = 3; // 当前 Desktop secret；旧客户端缺失时失败关闭
 }
 
 // OfflineDeviceResponse 设备下线响应
@@ -242,6 +243,7 @@ message OfflineDeviceResponse {
 message DeleteDeviceRequest {
   uint64 desktop_id = 1; // 当前 Desktop ID
   string device_token = 2; // 要删除的设备令牌
+  string secret = 3; // 当前 Desktop secret；旧客户端缺失时失败关闭
 }
 
 // DeleteDeviceResponse 删除设备响应
@@ -402,6 +404,8 @@ message ResolveDomainResponse {
 // GetResourcesRequest 资源发现请求
 message GetResourcesRequest {
   uint64 desktop_id = 1; // Desktop ID
+  string resource_protocol = 2; // 明确协商 resource_session_v2；空表示旧 Desktop
+  string tenant_id = 3; // 可选的当前 Tenant；新 Desktop 用于作用域切换，空值保持旧行为
 }
 
 // SSHResource SSH 资源
@@ -437,6 +441,7 @@ message GetResourcesResponse {
   repeated K8SAPIResource k8s_api = 2;
   repeated K8SServiceResource k8s_service = 3;
   repeated ContainerSSHResource container_ssh = 4;
+  repeated ContainerServiceResource container_service = 5;
 }
 
 // ============================================
@@ -514,4 +519,33 @@ message ContainerSSHResource {
   string domain = 13;
   string agent_ip = 14;
   string ssh_user = 15;
+  string session_id = 16;
+  string source_id = 17;
+  string target_revision_id = 18;
+  int64 authorization_revision = 19;
+}
+
+// ContainerServiceResource is an additive v2 projection. Legacy k8ssvc
+// fields remain unchanged for old Desktop clients.
+message ContainerServiceResource {
+  string resource_id = 1;
+  string tenant_id = 2;
+  string tenant_name = 3;
+  string display_name = 4;
+  string state = 5;
+  int64 target_revision = 6;
+  uint64 agent_node_id = 7;
+  string agent_ip = 8;
+  uint32 svc_proxy_port = 9;
+  string domain = 10;
+  string namespace = 11;
+  string service_uid = 12;
+  string service_name = 13;
+  string port_name = 14;
+  int32 port_number = 15;
+  string protocol = 16;
+  string session_id = 17;
+  string source_id = 18;
+  string target_revision_id = 19;
+  int64 authorization_revision = 20;
 }

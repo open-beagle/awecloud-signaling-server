@@ -144,6 +144,30 @@ func requireTenantPermission(c *gin.Context, tenantID, permission string) bool {
 	return true
 }
 
+// tenantObjectScope authorizes the selected Tenant before a detail or mutation
+// query is allowed to resolve an object ID. The unrestricted result exists only
+// for the explicit localhost debug path and unit handlers without auth.
+func tenantObjectScope(c *gin.Context, permission string) (tenantID string, unrestricted bool, ok bool) {
+	selected, selectedOK := selectedTenantID(c)
+	if !selectedOK {
+		return "", false, false
+	}
+	if getAdminIDFromContext(c) == 0 {
+		if selected == "" {
+			return "", true, true
+		}
+		return selected, false, requireTenantPermission(c, selected, permission)
+	}
+	if selected == "" {
+		codedError(c, http.StatusBadRequest, ErrorCodeTenantContextRequired, "租户级请求必须携带 X-Tenant-ID")
+		return "", false, false
+	}
+	if !requireTenantPermission(c, selected, permission) {
+		return "", false, false
+	}
+	return selected, false, true
+}
+
 func tenantReadScope(c *gin.Context, permission string) ([]string, bool, bool) {
 	selected, ok := selectedTenantID(c)
 	if !ok {

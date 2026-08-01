@@ -1,16 +1,12 @@
 <template>
   <div class="tunnel-acl">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <span class="card-title">ACL 管理</span>
-          <div class="header-actions">
-            <el-button :icon="Refresh" @click="loadACL">刷新</el-button>
-            <el-button type="primary" @click="handleSave" :disabled="!isEdited">保存</el-button>
-          </div>
-        </div>
+    <PageHeader title="ACL 管理" description="查看、编辑并同步平台网络访问控制策略。">
+      <template #actions>
+        <el-button :icon="Refresh" @click="loadACL">刷新</el-button>
+        <el-button type="primary" :disabled="!isEdited" @click="handleSave">保存</el-button>
       </template>
-
+    </PageHeader>
+    <el-card>
       <!-- 视图切换 -->
       <div class="view-switch">
         <el-radio-group v-model="viewMode">
@@ -99,6 +95,7 @@ import {
   type ACLRule,
   type TagOwner
 } from '@/api/tunnel'
+import PageHeader from '@/components/Common/PageHeader.vue'
 
 const viewMode = ref<'editor' | 'visual'>('editor')
 const policyContent = ref('')
@@ -211,22 +208,6 @@ onMounted(() => {
 <style scoped>
 .tunnel-acl {
   width: 100%;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.card-title {
-  font-size: 18px;
-  font-weight: 500;
-}
-
-.header-actions {
-  display: flex;
-  gap: 12px;
 }
 
 .view-switch {

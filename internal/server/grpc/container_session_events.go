@@ -81,7 +81,8 @@ func saveContainerSessionStarted(ctx context.Context, nodeID uint64, event *pb.C
 		startedAt = time.Unix(event.OccurredAt, 0)
 	}
 	session := model.ContainerSession{
-		ID: event.SessionId, TenantID: resource.TenantID, UserID: user.ID, DeviceID: device.ID,
+		ID: event.SessionId, TenantID: resource.TenantID, UserID: user.ID,
+		ActorUserID: user.ID, EffectiveUserID: user.ID, DeviceID: device.ID,
 		ResourceID: resource.ID, WorkspaceID: resource.ExternalWorkspaceID,
 		GrantRevision: event.GrantRevision, TargetRevision: event.TargetRevision,
 		PodUID: target.PodUID, ContainerName: target.ContainerName, AgentNodeID: nodeID,

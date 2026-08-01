@@ -321,11 +321,7 @@ func (c *Client) GetNodeByUser(ctx context.Context, userName string) (*v1.Node, 
 	if err != nil {
 		return nil, err
 	}
-	if len(nodes) == 0 {
-		return nil, nil
-	}
-	// 返回第一个节点（通常每个用户只有一个节点）
-	return nodes[0], nil
+	return selectPreferredNode(nodes), nil
 }
 
 // GetNodeByUserAndName 获取指定用户下匹配名称的节点
@@ -335,13 +331,36 @@ func (c *Client) GetNodeByUserAndName(ctx context.Context, userName string, node
 	if err != nil {
 		return nil, err
 	}
+	return selectPreferredNodeByGivenName(nodes, nodeName), nil
+}
+
+// selectPreferredNodeByGivenName handles stale duplicate registrations left by
+// emptyDir or local state loss. An online node always wins; within the same
+// online state the highest Headscale ID is the newest registration.
+func selectPreferredNodeByGivenName(nodes []*v1.Node, nodeName string) *v1.Node {
+	var selected *v1.Node
 	for _, node := range nodes {
-		if node.GivenName == nodeName {
-			return node, nil
+		if node == nil || node.GivenName != nodeName {
+			continue
+		}
+		if selected == nil || (node.Online && !selected.Online) || (node.Online == selected.Online && node.Id > selected.Id) {
+			selected = node
 		}
 	}
-	// 未找到精确匹配，返回 nil
-	return nil, nil
+	return selected
+}
+
+func selectPreferredNode(nodes []*v1.Node) *v1.Node {
+	var selected *v1.Node
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		if selected == nil || (node.Online && !selected.Online) || (node.Online == selected.Online && node.Id > selected.Id) {
+			selected = node
+		}
+	}
+	return selected
 }
 
 // DeleteNode 删除节点

@@ -1,7 +1,5 @@
 <template>
   <div class="resource-detail" v-loading="loading">
-    <el-breadcrumb separator="/" class="breadcrumb"><el-breadcrumb-item :to="{ path: '/resources' }">资源目录</el-breadcrumb-item><el-breadcrumb-item>{{ detail?.resource.display_name || '资源详情' }}</el-breadcrumb-item></el-breadcrumb>
-
     <el-card v-if="detail" class="hero-card" shadow="never">
       <div class="hero-top">
         <div class="hero-title"><span class="type-icon" :class="`type-${detail.resource.type}`"><el-icon><component :is="resourceIcon" /></el-icon></span><div><div class="title-line"><h1>{{ detail.resource.display_name }}</h1><el-tag size="small" :type="stateTag">{{ stateLabel }}</el-tag></div><div class="meta-line">{{ typeLabel }} · {{ detail.resource.id }} · {{ detail.resource.provider_id || '管理 API' }}</div></div></div>
@@ -147,7 +145,6 @@ onMounted(() => { fetchDetail(); fetchEvents() })
 
 <style scoped>
 .resource-detail { width: 100%; }
-.breadcrumb { margin-bottom: 14px; }
 .hero-card, .detail-card { margin-bottom: 16px; border-radius: 6px; }
 .hero-top, .hero-title, .title-line, .hero-actions, .tab-head, .section-head { display: flex; align-items: center; }
 .hero-top, .tab-head, .section-head { justify-content: space-between; gap: 16px; }

@@ -1,5 +1,11 @@
 <template>
   <div class="group-list">
+    <PageHeader title="成员分组" description="管理当前租户的成员分组及分组成员。">
+      <template #actions>
+        <el-button type="primary" :icon="Plus" :disabled="!canCreate" @click="showCreateDialog = true">{{ $t('group.create') }}</el-button>
+      </template>
+    </PageHeader>
+
     <!-- 搜索 -->
     <el-card class="search-card" shadow="never">
       <el-form :inline="true" :model="searchForm" class="search-form">
@@ -9,12 +15,6 @@
         <el-form-item>
           <el-button type="primary" @click="handleSearch">{{ $t('common.search') }}</el-button>
           <el-button @click="handleReset">{{ $t('common.reset') }}</el-button>
-        </el-form-item>
-        <el-form-item style="float: right">
-          <el-button type="primary" :disabled="!canCreate" @click="showCreateDialog = true">
-            <el-icon><Plus /></el-icon>
-            {{ $t('group.create') }}
-          </el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -93,6 +93,7 @@ import { formatTime } from '@/utils/time'
 import { useAuthStore } from '@/stores/auth'
 import { useTenantStore } from '@/stores/tenant'
 import { getTenants, type Tenant } from '@/api/resource'
+import PageHeader from '@/components/Common/PageHeader.vue'
 
 const { t } = useI18n()
 const router = useRouter()

@@ -53,14 +53,16 @@ type Agent struct {
 	tailscaleIP    string
 
 	// K8S 能力（P1 新增）
-	permCache           *PermissionCache       // 权限缓存
-	k8sAPIProxy         *K8SAPIProxy           // K8S API 反向代理
-	svcInformer         *K8SServiceInformer    // K8S Service Informer
-	svcProxy            *K8SSVCProxy           // K8S Service gRPC 代理
-	containerDiscovery  *K8SContainerDiscovery // ContainerSSH Pod 候选发现
-	containerExecBroker *ContainerExecBroker   // ContainerSSH Kubernetes Exec 数据面
-	containerSSHProxy   *ContainerSSHProxy     // ContainerSSH tsnet SSH 入口
-	containerSessions   *ContainerSessionManager
+	permCache             *PermissionCache       // 权限缓存
+	k8sAPIProxy           *K8SAPIProxy           // K8S API 反向代理
+	svcInformer           *K8SServiceInformer    // K8S Service Informer
+	svcProxy              *K8SSVCProxy           // K8S Service gRPC 代理
+	containerDiscovery    *K8SContainerDiscovery // ContainerSSH Pod 候选发现
+	containerExecBroker   *ContainerExecBroker   // ContainerSSH Kubernetes Exec 数据面
+	containerSSHProxy     *ContainerSSHProxy     // ContainerSSH tsnet SSH 入口
+	containerSessions     *ContainerSessionManager
+	sessionAuthorizations *SessionAuthorizationCache
+	inventoryReporter     *KubernetesInventoryReporter
 
 	// Endpoint 能力（P2 新增）
 	endpointServer      *EndpointServer      // Endpoint 内网 gRPC Server
@@ -142,6 +144,13 @@ func (a *Agent) Run() error {
 
 	// 初始化权限缓存（K8S 模块共用）
 	a.permCache = NewPermissionCache()
+	sessions, sessionErr := NewPersistentContainerSessionManager(a.config.Tunnel.StateDir)
+	if sessionErr != nil {
+		logger.Errorf("初始化 ResourceSession v2 持久队列失败，v2 授权保持关闭: %v", sessionErr)
+	} else {
+		a.containerSessions = sessions
+		a.sessionAuthorizations = NewSessionAuthorizationCache()
+	}
 
 	// 启动 K8S API 代理（如果配置启用）
 	if a.config.K8S.Enabled {
@@ -486,6 +495,7 @@ func (a *Agent) connectToServer() error {
 
 	// 添加认证拦截器（自动注入 Device Token）
 	opts = append(opts, grpc.WithUnaryInterceptor(a.authInterceptor()))
+	opts = append(opts, grpc.WithStreamInterceptor(a.authStreamInterceptor()))
 
 	// 创建gRPC连接
 	conn, err := grpc.NewClient(grpcAddr, opts...)
@@ -516,6 +526,13 @@ func (a *Agent) authInterceptor() grpc.UnaryClientInterceptor {
 
 		// 调用原始方法
 		return invoker(ctx, method, req, reply, cc, opts...)
+	}
+}
+
+func (a *Agent) authStreamInterceptor() grpc.StreamClientInterceptor {
+	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+a.config.Agent.AgentToken)
+		return streamer(ctx, desc, cc, method, opts...)
 	}
 }
 
@@ -779,6 +796,15 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 		req.ContainerSshProtocol = "v1"
 		req.ContainerSshSessionEvents = a.containerSessions.EventsForHeartbeat()
 	}
+	if a.sessionAuthorizations != nil && a.containerSessions != nil {
+		req.SessionAuthorizationProtocol = sessionAuthorizationProtocolV2
+		req.AuthorizationSnapshotAckRevision, req.AuthorizationSnapshotAckHash = a.sessionAuthorizations.Ack()
+		req.SessionTerminationAcks = a.containerSessions.TerminationAcksForHeartbeat()
+		req.ResourceSessionEventsV2 = a.containerSessions.ResourceEventsForHeartbeat()
+	}
+	if a.endpointServer != nil {
+		req.EndpointSessionAuthorizationReportsV2 = a.endpointServer.SessionAuthorizationReports()
+	}
 
 	// 添加设备名称（Node.Name，即 DeployToken.Name）
 	if a.deviceName != "" {
@@ -904,6 +930,28 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 
 // handleHeartbeatResponse 处理心跳响应（配置同步）
 func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
+	if a.endpointServer != nil {
+		a.endpointServer.SetSessionAuthorizationSnapshots(resp.EndpointAuthorizationSnapshotsV2)
+	}
+	if a.sessionAuthorizations != nil && a.containerSessions != nil {
+		if err := a.containerSessions.AckResourceEvents(resp.ResourceSessionEventAcksV2); err != nil {
+			logger.Errorf("持久化 ResourceSession Event ACK 失败: %v", err)
+		}
+		if resp.AuthorizationSnapshotV2 != nil {
+			now := time.Now().UTC()
+			if err := a.sessionAuthorizations.Apply(resp.AuthorizationSnapshotV2, now); err != nil {
+				logger.Warnf("拒绝 ResourceSession v2 授权快照: revision=%d err=%v", resp.AuthorizationSnapshotV2.Revision, err)
+			} else if err := a.containerSessions.ApplyTerminationCommands(a.sessionAuthorizations.Commands()); err != nil {
+				logger.Errorf("应用 ResourceSession 终止命令失败，快照不 ACK: revision=%d err=%v", resp.AuthorizationSnapshotV2.Revision, err)
+			} else {
+				a.containerSessions.ReconcileV2(a.sessionAuthorizations, now)
+				revision, payloadHash := a.sessionAuthorizations.Current()
+				if err := a.sessionAuthorizations.CommitAck(revision, payloadHash); err != nil {
+					logger.Errorf("提交 ResourceSession 快照 ACK 失败: revision=%d err=%v", revision, err)
+				}
+			}
+		}
+	}
 	// 更新域名后缀
 	if resp.DomainSuffix != "" {
 		a.domainSuffix = resp.DomainSuffix
@@ -946,6 +994,7 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 	if resp.CapabilityConfig != nil {
 		a.applyCapabilityConfig(resp.CapabilityConfig)
 	}
+	a.syncInventoryReporter(resp)
 
 	// 检查配置版本
 	if resp.ConfigVersion <= a.configVersion {
@@ -966,6 +1015,28 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 	}
 }
 
+func (a *Agent) syncInventoryReporter(resp *pb.AgentHeartbeatResponse) {
+	if a == nil || resp == nil || a.isClientMode {
+		return
+	}
+	if a.inventoryReporter == nil && (resp.SupplyInventoryConfig != nil || resp.WorkloadInventoryConfig != nil) {
+		reporter, err := NewKubernetesInventoryReporter(a.grpcClient, a.config, a.ctx)
+		if err != nil {
+			logger.Warnf("初始化 Kubernetes Inventory 上报器失败: %v", err)
+			return
+		}
+		a.inventoryReporter = reporter
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			reporter.Run()
+		}()
+	}
+	if a.inventoryReporter != nil {
+		a.inventoryReporter.Update(resp.SupplyInventoryConfig, resp.WorkloadInventoryConfig, inventoryOptionsFromAgentConfig(a.config))
+	}
+}
+
 // syncEndpointServerConfigs 将 Server 下发的 Endpoint 能力配置同步到 EndpointServer
 // 这样 EndpointServer 在心跳响应里就能把配置下发给 Endpoint 进程
 func (a *Agent) syncEndpointServerConfigs(resp *pb.AgentHeartbeatResponse) {
@@ -973,15 +1044,17 @@ func (a *Agent) syncEndpointServerConfigs(resp *pb.AgentHeartbeatResponse) {
 	logger.Infof("收到 Server 下发的 Endpoint 配置，共 %d 个", len(resp.EndpointCapabilityConfigs))
 	for _, cfg := range resp.EndpointCapabilityConfigs {
 		serverCfg := &EndpointServerConfig{
-			SSHEnabled:       cfg.SshEnabled,
-			SSHEnabledSet:    true,
-			SSHPort:          cfg.SshPort, // 新增：解析端口字段
-			K8SAPIEnabled:    cfg.K8SapiEnabled,
-			K8SAPIEnabledSet: true,
-			K8SAPIPort:       cfg.K8SapiPort, // 新增：解析端口字段
-			K8SAPIApiServer:  cfg.K8SapiApiServer,
-			K8SSvcEnabled:    cfg.K8SserviceEnabled,
-			K8SSvcEnabledSet: true,
+			SSHEnabled:        cfg.SshEnabled,
+			SSHEnabledSet:     true,
+			SSHPort:           cfg.SshPort, // 新增：解析端口字段
+			K8SAPIEnabled:     cfg.K8SapiEnabled,
+			K8SAPIEnabledSet:  true,
+			K8SAPIPort:        cfg.K8SapiPort, // 新增：解析端口字段
+			K8SAPIApiServer:   cfg.K8SapiApiServer,
+			K8SSvcEnabled:     cfg.K8SserviceEnabled,
+			K8SSvcEnabledSet:  true,
+			SupplyInventory:   cfg.SupplyInventoryConfig,
+			WorkloadInventory: cfg.WorkloadInventoryConfig,
 		}
 
 		// 预分配端口（即使 Endpoint 尚未连接）
@@ -1303,6 +1376,7 @@ func (a *Agent) startK8SServiceModules() error {
 	if err != nil {
 		return fmt.Errorf("创建 K8S SVCProxy 失败: %w", err)
 	}
+	svcProxy.SetSessionAuthorizations(a.sessionAuthorizations, a.containerSessions)
 
 	if err := svcProxy.Start(); err != nil {
 		return fmt.Errorf("启动 K8S SVCProxy 失败: %w", err)
@@ -1334,7 +1408,10 @@ func (a *Agent) startK8SContainerDiscovery() error {
 		a.containerExecBroker = nil
 		return fmt.Errorf("启动 ContainerSSH 入口需要已连接的 Tailscale")
 	}
-	sessions := NewContainerSessionManager()
+	sessions := a.containerSessions
+	if sessions == nil {
+		sessions = NewContainerSessionManager()
+	}
 	proxy, err := NewContainerSSHProxy(a.tsManager, a.permCache, broker, sessions, a.config.Tunnel.StateDir, a.ctx)
 	if err != nil {
 		discovery.Stop()
@@ -1342,6 +1419,7 @@ func (a *Agent) startK8SContainerDiscovery() error {
 		a.containerExecBroker = nil
 		return fmt.Errorf("创建 ContainerSSH 入口失败: %w", err)
 	}
+	proxy.SetSessionAuthorizations(a.sessionAuthorizations)
 	if err := proxy.Start(); err != nil {
 		discovery.Stop()
 		a.containerDiscovery = nil
@@ -1572,6 +1650,7 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 			// 首次启动
 			logger.Infof("远程配置: Endpoint 功能启用，端口=%d", listenPort)
 			a.endpointServer = NewEndpointServer(listenPort, token, a.ctx)
+			a.endpointServer.SetSupplyInventoryClient(a.grpcClient)
 			if err := a.endpointServer.Start(); err != nil {
 				logger.Warnf("启动 Endpoint gRPC Server 失败: %v", err)
 				a.endpointServer = nil
