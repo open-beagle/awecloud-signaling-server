@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -240,7 +241,20 @@ func (a *DesktopAuthAPI) findOrCreateUser(ctx interface{}, userInfo *auth.LogtoU
 		Source:  model.UserSourceLogto,
 	}
 
-	if err := db.DB.Create(&user).Error; err != nil {
+	// Enabled has a database default of true for manually-created users. GORM
+	// replaces the false zero value with that default during Create, which would
+	// allow the next Logto login attempt to bypass administrator approval. Force
+	// the disabled state before the insert transaction becomes visible.
+	if err := db.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&user).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&user).UpdateColumn("enabled", false).Error; err != nil {
+			return err
+		}
+		user.Enabled = false
+		return nil
+	}); err != nil {
 		return nil, false, err
 	}
 
