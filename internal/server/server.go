@@ -489,8 +489,11 @@ func (s *Server) setupRouter() *gin.Engine {
 				}
 
 				providerSupplyAPI := api.NewProviderSupplyAPI()
+				providerGovernanceAPI := api.NewProviderGovernanceAPI()
 				providerGroup := managementGroup.Group("/provider")
 				{
+					providerGroup.GET("/memberships", api.RequireManagementPermission(service.PermissionProviderMembershipsRead), providerGovernanceAPI.ListMemberships)
+					providerGroup.GET("/audit-logs", api.RequireManagementPermission(service.PermissionProviderAuditRead), providerGovernanceAPI.ListAuditLogs)
 					providerGroup.GET("/technical-resources", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.ListTechnicalResources)
 					providerGroup.GET("/technical-resources/:id", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.GetTechnicalResource)
 					providerGroup.POST("/technical-resources", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIdempotencyKey(), providerSupplyAPI.CreateTechnicalResource)
@@ -507,6 +510,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					providerGroup.GET("/resources", api.RequireManagementPermission(service.PermissionProviderResourcesRead), providerSupplyAPI.ListPlatformResources)
 					providerGroup.GET("/resources/:id", api.RequireManagementPermission(service.PermissionProviderResourcesRead), providerSupplyAPI.GetPlatformResource)
 					providerGroup.GET("/resources/:id/scopes", api.RequireManagementPermission(service.PermissionProviderResourcesRead), providerSupplyAPI.ListResourceScopes)
+					providerGroup.GET("/scopes", api.RequireManagementPermission(service.PermissionProviderResourcesRead), providerSupplyAPI.ListResourceScopes)
 					providerGroup.POST("/resources/:id/activate", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetPlatformResourceLifecycle(model.PlatformResourceActive, "activate_platform_resource"))
 					providerGroup.POST("/resources/:id/suspend", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetPlatformResourceLifecycle(model.PlatformResourceSuspended, "suspend_platform_resource"))
 					providerGroup.POST("/resources/:id/resume", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetPlatformResourceLifecycle(model.PlatformResourceActive, "resume_platform_resource"))
@@ -523,6 +527,9 @@ func (s *Server) setupRouter() *gin.Engine {
 				tenantResourceAPI := api.NewTenantResourceManagementAPI()
 				tenantGrantAPI := api.NewTenantAccessGrantAPI()
 				resourceSessionAPI := api.NewResourceSessionManagementAPI()
+				tenantGovernanceAPI := api.NewTenantGovernanceAPI()
+				tenantGovernanceGroup := managementGroup.Group("/tenants/:tenant_id")
+				tenantGovernanceGroup.GET("/management-memberships", api.RequireManagementPermission(service.PermissionTenantAdminsRead), tenantGovernanceAPI.ListManagementMemberships)
 				tenantGroup := managementGroup.Group("/tenants/:tenant_id")
 				tenantGroup.Use(api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureTenantResourceReadV2, false))
 				{

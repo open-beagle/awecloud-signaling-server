@@ -90,17 +90,13 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { getGroups, createGroup, updateGroup, deleteGroup, type Group } from '@/api/group'
 import { formatTime } from '@/utils/time'
-import { useAuthStore } from '@/stores/auth'
 import { useTenantStore } from '@/stores/tenant'
-import { getTenants, type Tenant } from '@/api/resource'
 import PageHeader from '@/components/Common/PageHeader.vue'
 
 const { t } = useI18n()
 const router = useRouter()
-const authStore = useAuthStore()
 const tenantStore = useTenantStore()
-const tenants = ref<Tenant[]>([])
-const canCreate = computed(() => authStore.canWrite && (authStore.isPlatformAdmin || !!tenantStore.tenantId))
+const canCreate = computed(() => !!tenantStore.tenantId && tenantStore.canTenant('tenant.groups.write'))
 
 const loading = ref(false)
 const groups = ref<Group[]>([])
@@ -169,6 +165,7 @@ const handleViewMembers = (row: Group) => {
 
 // 编辑
 const handleEdit = (row: Group) => {
+  if (!canManage(row)) return
   editingGroup.value = row
   form.name = row.name
   form.description = row.description || ''
@@ -177,6 +174,7 @@ const handleEdit = (row: Group) => {
 
 // 删除
 const handleDelete = async (row: Group) => {
+  if (!canManage(row)) return
   try {
     await ElMessageBox.confirm(
       t('group.deleteConfirm', { name: row.name }),
@@ -200,6 +198,7 @@ const handleDelete = async (row: Group) => {
 // 提交表单
 const handleSubmit = async () => {
   if (!formRef.value) return
+  if (editingGroup.value ? !canManage(editingGroup.value) : !canCreate.value) return
   
   await formRef.value.validate(async (valid) => {
     if (!valid) return
@@ -228,8 +227,8 @@ const handleSubmit = async () => {
   })
 }
 
-const canManage = (group: Group) => authStore.canWrite && (group.tenant_id ? tenantStore.tenantId === group.tenant_id : authStore.isPlatformAdmin)
-const tenantName = (tenantId?: string) => tenantId ? (tenants.value.find(tenant => tenant.id === tenantId)?.name || tenantId) : '平台全局（旧版）'
+const canManage = (group: Group) => tenantStore.canTenant('tenant.groups.write') && !!group.tenant_id && tenantStore.tenantId === group.tenant_id
+const tenantName = (tenantId?: string) => tenantId === tenantStore.tenantId ? (tenantStore.current?.tenant_name || tenantId) : '-'
 
 // 关闭弹窗
 const handleCloseDialog = () => {
@@ -240,10 +239,7 @@ const handleCloseDialog = () => {
   formRef.value?.resetFields()
 }
 
-onMounted(() => {
-  fetchGroups()
-  getTenants({ page: 1, size: 100 }).then(res => { if (res.success && res.data) tenants.value = res.data })
-})
+onMounted(fetchGroups)
 watch(() => tenantStore.tenantId, () => { pagination.page = 1; fetchGroups() })
 </script>
 

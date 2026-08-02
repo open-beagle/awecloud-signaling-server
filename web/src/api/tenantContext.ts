@@ -1,7 +1,7 @@
 import request from '@/utils/request'
 import type { ApiResponse } from '@/types/models'
 
-export type TenantManagementRole = 'tenant_admin' | 'security_auditor' | 'tenant_viewer'
+export type TenantManagementRole = 'tenant_admin' | 'security_auditor' | 'tenant_viewer' | 'member'
 
 export interface TenantContext {
   tenant_id: string

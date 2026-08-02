@@ -20,6 +20,10 @@
     </nav>
 
     <div class="header-right">
+      <div v-if="workspaceStore.isSimulationActive && workspaceStore.simulationSession" class="simulation-state" role="status">
+        <span class="simulation-copy"><strong>用户模拟</strong><span>真实 {{ authStore.username }} → 实际 {{ simulatedUserLabel }} · {{ simulatedScopeLabel }} · 至 {{ simulationExpiry }}</span></span>
+        <el-button class="simulation-exit" size="small" type="warning" plain :loading="exitingSimulation" @click="exitSimulation">退出模拟</el-button>
+      </div>
       <button class="header-action client-download" type="button" @click="handleDownloadClient">
         <el-icon><Download /></el-icon>
         <span>客户端</span>
@@ -47,10 +51,9 @@
         </button>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item v-if="authStore.isPlatformAdmin" disabled>
+            <el-dropdown-item v-if="canOpenSimulations && !workspaceStore.isSimulationActive" command="user-simulations">
               <el-icon><Switch /></el-icon>
-              切换用户
-              <el-tag class="pending-tag" size="small" type="info" effect="plain">待开放</el-tag>
+              用户模拟
             </el-dropdown-item>
             <el-dropdown-item command="logout">
               <el-icon><SwitchButton /></el-icon>
@@ -67,20 +70,24 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Menu } from '@element-plus/icons-vue'
 import type { ManagementWorkspace } from '@/api/managementContext'
 import Logo from '@/components/Common/Logo.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { useWorkspaceStore, workspaceHome } from '@/stores/workspace'
+import { useTenantStore } from '@/stores/tenant'
+import { revokeUserSimulation } from '@/api/userSimulation'
 
 const router = useRouter()
 const { t, locale } = useI18n()
 const authStore = useAuthStore()
 const appStore = useAppStore()
 const workspaceStore = useWorkspaceStore()
+const tenantStore = useTenantStore()
 const switching = ref(false)
+const exitingSimulation = ref(false)
 const workspaces: Array<{ value: ManagementWorkspace; label: string }> = [
   { value: 'tenant', label: '租户' },
   { value: 'provider', label: '资源' },
@@ -97,6 +104,17 @@ const roleLabel = computed(() => ({
   tenant_admin: '租户管理员',
   none: '无平台角色'
 }[authStore.role] || authStore.role))
+const canOpenSimulations = computed(() => workspaceStore.platformContext?.permissions.includes('platform.user_simulations.read') || false)
+const simulatedUserLabel = computed(() => workspaceStore.simulationSession?.effective_user_name || `User ${workspaceStore.simulationSession?.effective_user_id || '-'}`)
+const simulatedScopeLabel = computed(() => {
+  const session = workspaceStore.simulationSession
+  if (!session) return '-'
+  const context = workspaceStore.contexts.find(item => item.scope_type === session.scope_type && item.scope_id === session.scope_id)
+  return `${session.scope_type === 'tenant' ? '租户' : '资源'} ${context?.scope_name || context?.scope_key || session.scope_id}`
+})
+const simulationExpiry = computed(() => workspaceStore.simulationSession?.expires_at
+  ? new Date(workspaceStore.simulationSession.expires_at).toLocaleString('zh-CN', { hour12: false })
+  : '-')
 
 const switchWorkspace = async (workspace: ManagementWorkspace) => {
   if (workspace === workspaceStore.currentWorkspace || switching.value) return
@@ -119,9 +137,36 @@ const handleLanguageChange = (lang: string) => {
 }
 
 const handleCommand = async (command: string) => {
+  if (command === 'user-simulations') {
+    await router.push('/platform-user-simulations')
+    return
+  }
   if (command === 'logout') {
     await authStore.logout()
     router.push('/login')
+  }
+}
+
+const exitSimulation = async () => {
+  const session = workspaceStore.simulationSession
+  if (!session || exitingSimulation.value) return
+  try {
+    await ElMessageBox.confirm('退出后恢复真实身份与平台工作域。当前模拟会话将立即撤销。', '退出用户模拟', { type: 'warning', confirmButtonText: '确认退出', cancelButtonText: '继续模拟' })
+  } catch {
+    return
+  }
+  exitingSimulation.value = true
+  try {
+    await revokeUserSimulation(session.id, session.row_version, '管理员主动退出用户模拟')
+    ElMessage.success('已退出用户模拟')
+  } catch {
+    ElMessage.warning('模拟会话可能已结束，本地模拟状态已清除。')
+  } finally {
+    workspaceStore.clearSimulation()
+    await workspaceStore.loadContexts(true).catch(() => undefined)
+    await tenantStore.loadContexts(true).catch(() => undefined)
+    await router.push('/platform-overview')
+    exitingSimulation.value = false
   }
 }
 
@@ -152,7 +197,11 @@ const handleDownloadClient = () => window.open('/download', '_blank')
 .identity-copy strong { max-width: 130px; font-size: 13px; }
 .role-text { color: var(--text-secondary); font-size: 11px; white-space: nowrap; }
 .dropdown-caret { color: var(--text-secondary); font-size: 9px; }
-.pending-tag { margin-left: 10px; }
+.simulation-state { display: flex; max-width: 560px; align-items: center; gap: 10px; margin-right: 6px; padding: 6px 8px 6px 10px; border: 1px solid #e6a23c; border-radius: 5px; background: #fdf6ec; color: #8a5a12; }
+.simulation-copy { display: flex; min-width: 0; flex-direction: column; line-height: 16px; }
+.simulation-copy strong { font-size: 12px; }
+.simulation-copy span { overflow: hidden; max-width: 430px; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.simulation-exit { flex: 0 0 auto; }
 
 @media (max-width: 1040px) {
   .header { grid-template-columns: auto minmax(220px, 1fr) auto; }

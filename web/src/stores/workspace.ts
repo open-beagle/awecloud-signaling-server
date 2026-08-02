@@ -6,13 +6,28 @@ import {
   type ManagementContext,
   type ManagementWorkspace
 } from '@/api/managementContext'
+import type { UserSimulationSession } from '@/api/userSimulation'
 import { useTenantStore } from '@/stores/tenant'
 
 const WORKSPACE_KEY = 'management_workspace'
 const PROVIDER_CONTEXT_KEY = 'provider_context'
+const USER_SIMULATION_STORAGE_KEY = 'management_user_simulation'
 
 const isWorkspace = (value: string | null): value is ManagementWorkspace =>
   value === 'tenant' || value === 'provider' || value === 'platform'
+
+const storedSimulation = (): UserSimulationSession | undefined => {
+  const raw = localStorage.getItem(USER_SIMULATION_STORAGE_KEY)
+  if (!raw) return undefined
+  try {
+    const session = JSON.parse(raw) as UserSimulationSession
+    if (session.id && session.status === 'active' && new Date(session.expires_at).getTime() > Date.now()) return session
+  } catch {
+    // Invalid local state must never attach an unverified simulation header.
+  }
+  localStorage.removeItem(USER_SIMULATION_STORAGE_KEY)
+  return undefined
+}
 
 export const workspaceHome = (workspace: ManagementWorkspace) => ({
   tenant: '/tenant-overview',
@@ -35,6 +50,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const loaded = ref(false)
   const error = ref('')
   const contextRevision = ref(0)
+  const simulationSession = ref<UserSimulationSession | undefined>(storedSimulation())
 
   const tenantContexts = computed(() => contexts.value.filter(item => item.scope_type === 'tenant'))
   const providerContexts = computed(() => contexts.value.filter(item => item.scope_type === 'provider'))
@@ -45,7 +61,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const selectedId = currentWorkspace.value === 'tenant' ? tenantId.value : providerId.value
     return contexts.value.find(item => item.scope_type === currentWorkspace.value && item.scope_id === selectedId)
   })
-  const isSimulationActive = computed(() => false)
+  const isSimulationActive = computed(() => !!simulationSession.value && simulationSession.value.status === 'active' && new Date(simulationSession.value.expires_at).getTime() > Date.now())
 
   const persistWorkspace = (workspace: ManagementWorkspace) => {
     currentWorkspace.value = workspace
@@ -85,6 +101,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try {
       const response = await getManagementContexts()
       contexts.value = response.success && response.data ? response.data : []
+      if (isSimulationActive.value && simulationSession.value) {
+        const session = simulationSession.value
+        try {
+          const current = await getCurrentManagementContext(session.scope_type, session.scope_id)
+          if (!current.success || !current.data) throw new Error('用户模拟上下文不可用')
+          const index = contexts.value.findIndex(item => item.scope_type === session.scope_type && item.scope_id === session.scope_id)
+          if (index >= 0) contexts.value[index] = current.data
+          else contexts.value.push(current.data)
+          persistWorkspace(session.scope_type)
+          if (session.scope_type === 'tenant') useTenantStore().applyManagementContext(current.data)
+          else persistProvider(session.scope_id)
+        } catch {
+          simulationSession.value = undefined
+          localStorage.removeItem(USER_SIMULATION_STORAGE_KEY)
+        }
+      }
       const tenantStore = useTenantStore()
       const availableTenantIds = tenantContexts.value.map(item => item.scope_id || '').filter(Boolean)
       const nextTenantId = availableTenantIds.includes(tenantStore.tenantId) ? tenantStore.tenantId : availableTenantIds[0] || ''
@@ -105,10 +137,39 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   const activateWorkspace = (workspace: ManagementWorkspace) => {
-    if (isSimulationActive.value && workspace !== currentWorkspace.value) return false
+    if (isSimulationActive.value && workspace !== simulationSession.value?.scope_type) return false
     persistWorkspace(workspace)
     contextRevision.value++
     return true
+  }
+
+  const activateSimulation = async (session: UserSimulationSession, effectiveUserName = '') => {
+    const active = { ...session, effective_user_name: effectiveUserName || session.effective_user_name }
+    simulationSession.value = active
+    localStorage.setItem(USER_SIMULATION_STORAGE_KEY, JSON.stringify(active))
+    persistWorkspace(active.scope_type)
+    if (active.scope_type === 'tenant') useTenantStore().syncTenantContext(active.scope_id)
+    else persistProvider(active.scope_id)
+    try {
+      const response = await getCurrentManagementContext(active.scope_type, active.scope_id)
+      if (!response.success || !response.data) throw new Error('用户模拟上下文不可用')
+      const index = contexts.value.findIndex(item => item.scope_type === active.scope_type && item.scope_id === active.scope_id)
+      if (index >= 0) contexts.value[index] = response.data
+      else contexts.value.push(response.data)
+      if (active.scope_type === 'tenant') useTenantStore().applyManagementContext(response.data)
+      contextRevision.value++
+    } catch (cause) {
+      simulationSession.value = undefined
+      localStorage.removeItem(USER_SIMULATION_STORAGE_KEY)
+      throw cause
+    }
+  }
+
+  const clearSimulation = () => {
+    simulationSession.value = undefined
+    localStorage.removeItem(USER_SIMULATION_STORAGE_KEY)
+    persistWorkspace('platform')
+    contextRevision.value++
   }
 
   const selectContext = async (workspace: 'tenant' | 'provider', scopeId: string) => {
@@ -135,15 +196,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     currentWorkspace.value = 'platform'
     providerId.value = ''
     contexts.value = []
+    simulationSession.value = undefined
     loading.value = false
     loaded.value = false
     error.value = ''
     contextRevision.value++
     localStorage.removeItem(WORKSPACE_KEY)
-    localStorage.removeItem(PROVIDER_CONTEXT_KEY)
+		localStorage.removeItem(PROVIDER_CONTEXT_KEY)
+		localStorage.removeItem(USER_SIMULATION_STORAGE_KEY)
   }
 
   window.addEventListener('admin-session-cleared', reset)
+  window.addEventListener('user-simulation-invalid', () => {
+    clearSimulation()
+    loadContexts(true).catch(() => undefined)
+    useTenantStore().loadContexts(true).catch(() => undefined)
+  })
 
   return {
     currentWorkspace,
@@ -157,6 +225,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     loaded,
     error,
     contextRevision,
+    simulationSession,
     isSimulationActive,
     hasContext,
     selectedContextId,
@@ -164,6 +233,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     loadContexts,
     activateWorkspace,
     selectContext,
+    activateSimulation,
+    clearSimulation,
     reset
   }
 })

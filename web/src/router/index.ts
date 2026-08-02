@@ -54,6 +54,50 @@ const routes: RouteRecordRaw[] = [
 			meta: { requiresAuth: true, scope: 'provider', workspace: 'provider', permission: 'provider.overview.read', menuDomain: 'provider' }
 		},
 		{
+			path: 'provider-technical-resources',
+			name: 'ProviderTechnicalResources',
+			component: () => import('@/views/Provider/TechnicalResources.vue'),
+			meta: { requiresAuth: true, scope: 'provider', workspace: 'provider', permission: 'provider.technical_resources.read', menuDomain: 'provider' }
+		},
+		{
+			path: 'provider-supply-candidates',
+			name: 'ProviderSupplyCandidates',
+			component: () => import('@/views/Provider/SupplyCandidates.vue'),
+			meta: { requiresAuth: true, scope: 'provider', workspace: 'provider', permission: 'provider.resources.read', menuDomain: 'provider' }
+		},
+		{
+			path: 'provider-hosts',
+			name: 'ProviderHosts',
+			component: () => import('@/views/Provider/Resources.vue'),
+			props: { resourceType: 'host' },
+			meta: { requiresAuth: true, scope: 'provider', workspace: 'provider', permission: 'provider.resources.read', menuDomain: 'provider' }
+		},
+		{
+			path: 'provider-kubernetes',
+			name: 'ProviderKubernetes',
+			component: () => import('@/views/Provider/Resources.vue'),
+			props: { resourceType: 'kubernetes' },
+			meta: { requiresAuth: true, scope: 'provider', workspace: 'provider', permission: 'provider.resources.read', menuDomain: 'provider' }
+		},
+		{
+			path: 'provider-namespaces',
+			name: 'ProviderNamespaces',
+			component: () => import('@/views/Provider/Namespaces.vue'),
+			meta: { requiresAuth: true, scope: 'provider', workspace: 'provider', permission: 'provider.resources.read', menuDomain: 'provider' }
+		},
+		{
+			path: 'provider-memberships',
+			name: 'ProviderMemberships',
+			component: () => import('@/views/Provider/Memberships.vue'),
+			meta: { requiresAuth: true, scope: 'provider', workspace: 'provider', permission: 'provider.memberships.read', menuDomain: 'provider' }
+		},
+		{
+			path: 'provider-audit',
+			name: 'ProviderAudit',
+			component: () => import('@/views/Provider/Audit.vue'),
+			meta: { requiresAuth: true, scope: 'provider', workspace: 'provider', permission: 'provider.audit.read', menuDomain: 'provider' }
+		},
+		{
 			path: 'tenant-overview',
 			name: 'TenantOverview',
 			component: () => import('@/views/Tenant/Overview.vue'),
@@ -76,6 +120,12 @@ const routes: RouteRecordRaw[] = [
 			name: 'TenantMemberDevices',
 			component: () => import('@/views/Tenant/MemberDevices.vue'),
 			meta: { requiresAuth: true, scope: 'tenant', permission: 'tenant.devices.read', menuDomain: 'tenant' }
+		},
+		{
+			path: 'tenant-management-memberships',
+			name: 'TenantManagementMemberships',
+			component: () => import('@/views/Tenant/ManagementMemberships.vue'),
+			meta: { requiresAuth: true, scope: 'tenant', workspace: 'tenant', permission: 'tenant.admins.read', menuDomain: 'tenant' }
 		},
 		{
 			path: 'tenant-audit',
@@ -107,6 +157,12 @@ const routes: RouteRecordRaw[] = [
 			name: 'PlatformAdmins',
 			component: () => import('@/views/Platform/AdminAccounts.vue'),
 			meta: { requiresAuth: true, scope: 'platform', menuDomain: 'platform' }
+		},
+		{
+			path: 'platform-user-simulations',
+			name: 'PlatformUserSimulations',
+			component: () => import('@/views/Platform/UserSimulations.vue'),
+			meta: { requiresAuth: true, scope: 'platform', workspace: 'platform', permission: 'platform.user_simulations.read', menuDomain: 'platform' }
 		},
       {
         path: 'platform-identities',
@@ -196,26 +252,26 @@ const routes: RouteRecordRaw[] = [
         path: 'groups',
         name: 'Groups',
         component: () => import('@/views/Group/List.vue'),
-		meta: { requiresAuth: true, scope: 'tenant', permission: 'tenant.groups.read' }
+		meta: { requiresAuth: true, scope: 'tenant', workspace: 'tenant', permission: 'tenant.groups.read', menuDomain: 'tenant' }
       },
       {
         path: 'groups/:id/members',
         name: 'GroupMembers',
         component: () => import('@/views/Group/Members.vue'),
-		meta: { requiresAuth: true, scope: 'tenant', permission: 'tenant.groups.read' }
+		meta: { requiresAuth: true, scope: 'tenant', workspace: 'tenant', permission: 'tenant.groups.read', menuDomain: 'tenant' }
       },
       // 资源发现
       {
         path: 'resources',
         name: 'Resources',
-        component: () => import('@/views/Resource/List.vue'),
+        component: () => import('@/views/Tenant/ResourcesV2.vue'),
 		meta: { requiresAuth: true, scope: 'tenant', permission: 'tenant.resources.read' }
       },
       {
         path: 'resources/:id',
         name: 'ResourceDetail',
-        component: () => import('@/views/Resource/Detail.vue'),
-		meta: { requiresAuth: true, scope: 'tenant', permission: 'tenant.resources.read' }
+        component: () => import('@/views/Tenant/ResourceDetailV2.vue'),
+		meta: { requiresAuth: true, scope: 'tenant', workspace: 'tenant', permission: 'tenant.resources.read', menuDomain: 'tenant' }
       },
 		{
 			path: 'resource-candidates',
@@ -229,6 +285,18 @@ const routes: RouteRecordRaw[] = [
 			component: () => import('@/views/Platform/Resources.vue'),
 			meta: { requiresAuth: true, scope: 'platform', menuDomain: 'platform' }
 		},
+		{
+			path: 'platform-allocations',
+			name: 'PlatformAllocations',
+			component: () => import('@/views/Platform/Allocations.vue'),
+			meta: { requiresAuth: true, scope: 'platform', workspace: 'platform', permission: 'platform.allocations.read', menuDomain: 'platform' }
+		},
+		{
+			path: 'platform-allocations/:id',
+			name: 'PlatformAllocationDetail',
+			component: () => import('@/views/Platform/AllocationDetail.vue'),
+			meta: { requiresAuth: true, scope: 'platform', workspace: 'platform', permission: 'platform.allocations.read', menuDomain: 'platform' }
+		},
       {
         path: 'legacy-inventory',
         name: 'LegacyInventory',
@@ -238,13 +306,13 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'access-policies',
         name: 'AccessPolicies',
-        component: () => import('@/views/AccessPolicy/List.vue'),
+        component: () => import('@/views/Tenant/GrantsV2.vue'),
 		meta: { requiresAuth: true, scope: 'tenant', permission: 'tenant.grants.read' }
       },
       {
         path: 'sessions',
         name: 'Sessions',
-        component: () => import('@/views/Session/List.vue'),
+        component: () => import('@/views/Tenant/SessionsV2.vue'),
 		meta: { requiresAuth: true, scope: 'tenant', permission: 'tenant.sessions.read' }
       },
       // 域名管理
@@ -400,15 +468,24 @@ const breadcrumbByRouteName: Record<string, BreadcrumbMeta> = {
 	},
 	PlatformOverview: [{ title: '管理员' }, { title: '平台概览' }],
 	ProviderOverview: [{ title: '资源业务' }, { title: '资源概览' }],
+	ProviderTechnicalResources: [{ title: '资源业务' }, { title: '技术资源' }],
+	ProviderSupplyCandidates: [{ title: '资源业务' }, { title: '供给候选' }],
+	ProviderHosts: [{ title: '资源业务' }, { title: '主机资源' }],
+	ProviderKubernetes: [{ title: '资源业务' }, { title: 'Kubernetes 资源' }],
+	ProviderNamespaces: [{ title: '资源业务' }, { title: 'Namespace' }],
+	ProviderMemberships: [{ title: '资源治理' }, { title: '管理员' }],
+	ProviderAudit: [{ title: '资源治理' }, { title: '审计日志' }],
 	TenantOverview: [{ title: '租户业务' }, { title: '租户概览' }],
 	TenantSwitch: [{ title: '管理员' }, { title: '租户切换' }],
 	TenantMembers: [{ title: '租户业务' }, { title: '成员' }],
 	TenantMemberDevices: [{ title: '租户业务' }, { title: '成员设备' }],
+	TenantManagementMemberships: [{ title: '租户治理' }, { title: '管理员' }],
 	TenantAudit: [{ title: '租户业务' }, { title: '租户审计' }],
 	TenantSettings: [{ title: '租户业务' }, { title: '租户设置' }],
 	Tenants: [{ title: '组织治理' }, { title: '组织管理' }],
 	TenantAdminMemberships: [{ title: '租户治理' }, { title: '租户管理员授权' }],
 	PlatformAdmins: [{ title: '平台治理' }, { title: '平台管理账号' }],
+	PlatformUserSimulations: [{ title: '平台治理' }, { title: '用户模拟' }],
 	PlatformIdentities: [{ title: '平台治理' }, { title: '访问主体目录', path: '/platform-identities' }],
 	PlatformIdentityDetail: [{ title: '访问主体目录', path: '/platform-identities' }, { title: '主体详情' }],
 	AgentNodes: [{ title: '设备管理' }, { title: '代理设备', path: '/nodes/agents' }],
@@ -428,6 +505,8 @@ const breadcrumbByRouteName: Record<string, BreadcrumbMeta> = {
 	ResourceDetail: [{ title: '租户业务' }, { title: '资源目录', path: '/resources' }, { title: '资源详情' }],
 	ResourceCandidates: [{ title: '资源治理' }, { title: '发现候选' }],
 	PlatformResources: [{ title: '资源治理' }, { title: '全局资源目录' }],
+	PlatformAllocations: [{ title: '资源治理' }, { title: '资源分配', path: '/platform-allocations' }],
+	PlatformAllocationDetail: [{ title: '资源治理' }, { title: '资源分配', path: '/platform-allocations' }, { title: '分配详情' }],
 	LegacyInventory: [{ title: '资源治理' }, { title: '存量认领' }],
 	AccessPolicies: [{ title: '租户业务' }, { title: '访问授权' }],
 	Sessions: [{ title: '租户业务' }, { title: '访问会话' }],
@@ -548,6 +627,7 @@ const firstTenantDestination = (
 	if (can('tenant.members.read')) return '/tenant-members'
 	if (can('tenant.groups.read')) return '/groups'
 	if (can('tenant.devices.read')) return '/tenant-member-devices'
+	if (can('tenant.admins.read')) return '/tenant-management-memberships'
 	if (can('tenant.grants.read')) return '/access-policies'
 	if (can('tenant.sessions.read')) return '/sessions'
 	if (can('tenant.audit.read')) return '/tenant-audit'

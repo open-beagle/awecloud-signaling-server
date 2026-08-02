@@ -79,23 +79,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { getGroup, getGroupMembers, addGroupMember, removeGroupMember, type Group, type GroupMember } from '@/api/group'
-import { getUsers, type User } from '@/api/user'
 import { getTenantMembers, type TenantMember } from '@/api/resource'
 import { formatTime } from '@/utils/time'
-import { useAuthStore } from '@/stores/auth'
 import { useTenantStore } from '@/stores/tenant'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const authStore = useAuthStore()
 const tenantStore = useTenantStore()
 
 const groupId = Number(route.params.id)
@@ -104,7 +101,6 @@ const loadingUsers = ref(false)
 const submitting = ref(false)
 const group = ref<Group | null>(null)
 const members = ref<GroupMember[]>([])
-const users = ref<User[]>([])
 const tenantMembers = ref<TenantMember[]>([])
 const showAddDialog = ref(false)
 const formRef = ref<FormInstance>()
@@ -120,12 +116,9 @@ const rules: FormRules = {
 // 可选用户（排除已是成员的）
 const availableUsers = computed(() => {
   const memberUserIds = members.value.map(m => m.user_id)
-  if (group.value?.tenant_id) {
-    return tenantMembers.value.filter(member => member.enabled && !memberUserIds.includes(member.user_id)).map(member => ({ id: member.user_id, name: member.name, alias: member.alias }))
-  }
-  return users.value.filter(user => !memberUserIds.includes(user.id))
+  return tenantMembers.value.filter(member => member.enabled && !memberUserIds.includes(member.user_id)).map(member => ({ id: member.user_id, name: member.name, alias: member.alias }))
 })
-const canManage = computed(() => authStore.canWrite && !!group.value && (group.value.tenant_id ? tenantStore.tenantId === group.value.tenant_id : authStore.isPlatformAdmin))
+const canManage = computed(() => tenantStore.canTenant('tenant.groups.write') && !!group.value?.tenant_id && tenantStore.tenantId === group.value.tenant_id)
 
 // 获取分组信息
 const fetchGroup = async () => {
@@ -159,12 +152,9 @@ const fetchMembers = async () => {
 const fetchUsers = async () => {
   loadingUsers.value = true
   try {
-    if (group.value?.tenant_id) {
+    if (group.value?.tenant_id && group.value.tenant_id === tenantStore.tenantId) {
       const res = await getTenantMembers(group.value.tenant_id)
       if (res.success && res.data) tenantMembers.value = res.data
-    } else if (authStore.isPlatformAdmin) {
-      const res = await getUsers({ size: 1000 })
-      if (res.success && res.data) users.value = res.data
     }
   } catch (error) {
     console.error('获取用户列表失败:', error)
@@ -176,6 +166,7 @@ const fetchUsers = async () => {
 // 添加成员
 const handleAddMember = async () => {
   if (!formRef.value) return
+  if (!canManage.value) return
   
   await formRef.value.validate(async (valid) => {
     if (!valid || !form.userId) return
@@ -201,6 +192,7 @@ const handleAddMember = async () => {
 
 // 移除成员
 const handleRemove = async (row: GroupMember) => {
+  if (!canManage.value) return
   try {
     await ElMessageBox.confirm(
       t('group.removeMemberConfirm', { name: row.user?.name }),
@@ -233,6 +225,7 @@ onMounted(() => {
   fetchGroup()
   fetchMembers()
 })
+watch(() => tenantStore.contextRevision, () => router.replace('/groups'))
 </script>
 
 <style scoped>

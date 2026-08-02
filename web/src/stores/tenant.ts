@@ -94,6 +94,27 @@ export const useTenantStore = defineStore('tenant', () => {
 
 	const canTenant = (permission: string) => permissions.value.includes(permission)
 
+	const applyManagementContext = (context: { scope_id?: string; scope_key?: string; scope_name?: string; scope_status?: string; role: string; permissions: string[]; permission_revision: number; expires_at?: string }) => {
+		if (!context.scope_id) return
+		const item: TenantContext = {
+			tenant_id: context.scope_id,
+			tenant_key: context.scope_key || context.scope_id,
+			tenant_name: context.scope_name || context.scope_key || context.scope_id,
+			tenant_status: context.scope_status === 'suspended' ? 'suspended' : 'active',
+			management_role: context.role as TenantManagementRole,
+			permissions: [...context.permissions],
+			permission_revision: context.permission_revision,
+			expires_at: context.expires_at,
+		}
+		const index = contexts.value.findIndex(existing => existing.tenant_id === item.tenant_id)
+		if (index >= 0) contexts.value[index] = item
+		else contexts.value.push(item)
+		persistTenant(item.tenant_id)
+		loaded.value = true
+		invalid.value = false
+		contextRevision.value++
+	}
+
 	return {
 		tenantId,
 		contexts,
@@ -110,6 +131,7 @@ export const useTenantStore = defineStore('tenant', () => {
 		syncTenantContext,
 		clearTenantState,
 		reset,
-		canTenant
+		canTenant,
+		applyManagementContext
 	}
 })

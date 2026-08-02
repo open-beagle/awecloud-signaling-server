@@ -32,6 +32,36 @@ export interface TenantAuditLog {
   created_at: string
 }
 
+export type TenantManagementRole = 'tenant_admin' | 'security_auditor' | 'tenant_viewer'
+
+export interface TenantManagementMembership {
+  id: string
+  user_id: number
+  username: string
+  display_name: string
+  user_enabled: boolean
+  role: TenantManagementRole
+  enabled: boolean
+  valid_from: string
+  expires_at?: string
+  permission_revision: number
+  reason: string
+  row_version: number
+  created_at: string
+  updated_at: string
+}
+
+const tenantManagementHeaders = (tenantId: string) => ({
+  'X-Management-Scope-Type': 'tenant',
+  'X-Management-Scope-ID': tenantId,
+})
+
+export const getTenantManagementMemberships = (tenantId: string, params: { search?: string; role?: string; state?: string; page: number; size: number }) =>
+  request.get<any, PagedResponse<TenantManagementMembership[]>>(`/api/v1/management/tenants/${tenantId}/management-memberships`, {
+    params,
+    headers: tenantManagementHeaders(tenantId),
+  })
+
 export const getTenantMemberDevices = (tenantId: string, params: { search?: string; page: number; size: number }) =>
   request.get<any, PagedResponse<TenantMemberDevice[]>>(`/api/v1/admin/tenants/${tenantId}/member-devices`, {
     params,

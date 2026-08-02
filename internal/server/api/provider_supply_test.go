@@ -46,14 +46,61 @@ func prepareProviderSupplyAPIFixture(t *testing.T, flags config.FeatureFlagsSect
 	management.Use(UnifiedManagementIdentityMiddleware())
 	provider := management.Group("/provider")
 	providerAPI := NewProviderSupplyAPI()
+	providerGovernanceAPI := NewProviderGovernanceAPI()
+	provider.GET("/memberships", RequireManagementPermission(service.PermissionProviderMembershipsRead), providerGovernanceAPI.ListMemberships)
+	provider.GET("/audit-logs", RequireManagementPermission(service.PermissionProviderAuditRead), providerGovernanceAPI.ListAuditLogs)
 	provider.GET("/technical-resources/:id", RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerAPI.GetTechnicalResource)
 	provider.GET("/resources", RequireManagementPermission(service.PermissionProviderResourcesRead), providerAPI.ListPlatformResources)
 	provider.GET("/resources/:id", RequireManagementPermission(service.PermissionProviderResourcesRead), providerAPI.GetPlatformResource)
+	provider.GET("/scopes", RequireManagementPermission(service.PermissionProviderResourcesRead), providerAPI.ListResourceScopes)
 	provider.GET("/scopes/:id", RequireManagementPermission(service.PermissionProviderResourcesRead), RequireManagementPermission(service.PermissionProviderIsolationEvidenceRead), providerAPI.GetResourceScope)
 	provider.POST("/resources/:id/suspend", RequireManagementPermission(service.PermissionProviderResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), providerAPI.SetPlatformResourceLifecycle(model.PlatformResourceSuspended, "suspend_platform_resource"))
 	provider.POST("/technical-resources", RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIdempotencyKey(), providerAPI.CreateTechnicalResource)
 	provider.POST("/supply-candidates/:id/accept", RequireManagementPermission(service.PermissionProviderResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), RequireIdempotencyKey(), providerAPI.AcceptSupplyCandidate)
 	return fixture, fixture.login(t, fixture.admin.Username)
+}
+
+func TestProviderGovernanceAPIReadsOnlyCurrentProvider(t *testing.T) {
+	fixture, login := prepareProviderSupplyAPIFixture(t, config.FeatureFlagsSection{})
+	now := time.Now().UTC()
+	otherUser := model.User{Name: "other-provider-admin", Alias: "Other Provider Admin", Role: model.UserRoleClient, SecretHash: "fixture", Enabled: true}
+	require.NoError(t, fixture.database.Create(&otherUser).Error)
+	require.NoError(t, fixture.database.Create(&model.UserIdentityProfile{
+		UserID: otherUser.ID, Username: "other-provider-admin", DisplayName: "Other Provider Admin",
+		Enabled: true, AuthRevision: 1, RowVersion: 1,
+	}).Error)
+	require.NoError(t, fixture.database.Create(&model.AdminProviderMembership{
+		ID: uuid.NewString(), UserID: otherUser.ID, ProviderID: fixture.otherProvider.ID,
+		Role: model.ProviderManagementRoleViewer, Enabled: true, ValidFrom: now.Add(-time.Minute),
+		PermissionRevision: 1, CreatedByUserID: fixture.user.ID, Reason: "other provider only", RowVersion: 1,
+	}).Error)
+	require.NoError(t, fixture.database.Create(&model.AuditLog{
+		ScopeType: string(model.ManagementScopeProvider), ScopeID: fixture.provider.ID,
+		ActorUsername: "mapped-admin", ActorUserID: fixture.user.ID, EffectiveUserID: fixture.user.ID,
+		RequiredPermission: service.PermissionProviderResourcesWrite, PermissionRevision: 5,
+		ActionType: "provider_a_action", TargetType: "platform_resource", TargetID: "resource-a", TargetName: "Resource A",
+		RequestID: "provider-a-request",
+	}).Error)
+	require.NoError(t, fixture.database.Create(&model.AuditLog{
+		ScopeType: string(model.ManagementScopeProvider), ScopeID: fixture.otherProvider.ID,
+		ActorUsername: "other-provider-admin", ActorUserID: otherUser.ID, EffectiveUserID: otherUser.ID,
+		RequiredPermission: service.PermissionProviderResourcesWrite, PermissionRevision: 1,
+		ActionType: "provider_b_action", TargetType: "platform_resource", TargetID: "resource-b", TargetName: "Resource B",
+		RequestID: "provider-b-request",
+	}).Error)
+
+	memberships := providerAPIRequest(fixture, login, http.MethodGet, "/api/v1/management/provider/memberships?size=100", fixture.provider.ID, "", nil)
+	require.Equal(t, http.StatusOK, memberships.Code, memberships.Body.String())
+	require.Contains(t, memberships.Body.String(), fixture.user.Name)
+	require.NotContains(t, memberships.Body.String(), otherUser.Name)
+
+	audit := providerAPIRequest(fixture, login, http.MethodGet, "/api/v1/management/provider/audit-logs?size=100", fixture.provider.ID, "", nil)
+	require.Equal(t, http.StatusOK, audit.Code, audit.Body.String())
+	require.Contains(t, audit.Body.String(), "provider-a-request")
+	require.NotContains(t, audit.Body.String(), "provider-b-request")
+
+	invalidState := providerAPIRequest(fixture, login, http.MethodGet, "/api/v1/management/provider/memberships?state=unknown", fixture.provider.ID, "", nil)
+	require.Equal(t, http.StatusBadRequest, invalidState.Code, invalidState.Body.String())
 }
 
 func providerAPIRequest(fixture managementContextAPIFixture, login LoginResponse, method, path, providerID, body string, headers map[string]string) *httptest.ResponseRecorder {
@@ -85,6 +132,18 @@ func TestProviderSupplyAPIReadsOnlyCurrentProvider(t *testing.T) {
 	}
 	require.NoError(t, fixture.database.Create(&resourceA).Error)
 	require.NoError(t, fixture.database.Create(&resourceB).Error)
+	scopeA := model.ResourceScope{
+		ID: uuid.NewString(), ProviderID: fixture.provider.ID, PlatformResourceID: resourceA.ID,
+		Type: model.ResourceScopeCluster, StableKey: "cluster-scope-api-a", LifecycleState: model.ResourceScopeActive,
+		ConfigRevision: 1, EvidenceRevision: 1, RowVersion: 1,
+	}
+	scopeB := model.ResourceScope{
+		ID: uuid.NewString(), ProviderID: fixture.otherProvider.ID, PlatformResourceID: resourceB.ID,
+		Type: model.ResourceScopeCluster, StableKey: "cluster-scope-api-b", LifecycleState: model.ResourceScopeActive,
+		ConfigRevision: 1, EvidenceRevision: 1, RowVersion: 1,
+	}
+	require.NoError(t, fixture.database.Create(&scopeA).Error)
+	require.NoError(t, fixture.database.Create(&scopeB).Error)
 
 	list := providerAPIRequest(fixture, login, http.MethodGet, "/api/v1/management/provider/resources?size=100", fixture.provider.ID, "", nil)
 	require.Equal(t, http.StatusOK, list.Code, list.Body.String())
@@ -92,6 +151,10 @@ func TestProviderSupplyAPIReadsOnlyCurrentProvider(t *testing.T) {
 	require.NoError(t, json.Unmarshal(list.Body.Bytes(), &listBody))
 	require.Equal(t, int64(1), listBody.Total)
 	require.NotContains(t, list.Body.String(), resourceB.ID)
+	scopeList := providerAPIRequest(fixture, login, http.MethodGet, "/api/v1/management/provider/scopes?size=100", fixture.provider.ID, "", nil)
+	require.Equal(t, http.StatusOK, scopeList.Code, scopeList.Body.String())
+	require.Contains(t, scopeList.Body.String(), scopeA.ID)
+	require.NotContains(t, scopeList.Body.String(), scopeB.ID)
 	detail := providerAPIRequest(fixture, login, http.MethodGet, "/api/v1/management/provider/resources/"+resourceA.ID, fixture.provider.ID, "", nil)
 	require.Equal(t, http.StatusOK, detail.Code, detail.Body.String())
 	var detailBody map[string]any

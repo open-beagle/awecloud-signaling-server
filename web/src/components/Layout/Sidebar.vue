@@ -8,6 +8,7 @@
           :model-value="workspaceStore.selectedContextId(workspaceStore.currentWorkspace)"
           class="scope-select"
           size="small"
+          :disabled="workspaceStore.isSimulationActive"
           :aria-label="workspaceStore.currentWorkspace === 'tenant' ? '当前租户' : '当前资源方'"
           @change="selectScope"
         >
@@ -32,7 +33,7 @@
         <el-menu-item v-if="workspaceStore.can('tenant.members.read')" index="/tenant-members"><el-icon><UserFilled /></el-icon><template #title>成员</template></el-menu-item>
         <el-menu-item v-if="workspaceStore.can('tenant.groups.read')" index="/groups"><el-icon><Collection /></el-icon><template #title>成员分组</template></el-menu-item>
         <el-menu-item v-if="workspaceStore.can('tenant.devices.read')" index="/tenant-member-devices"><el-icon><Monitor /></el-icon><template #title>成员设备</template></el-menu-item>
-        <el-menu-item v-if="workspaceStore.can('tenant.admins.read')" disabled><el-icon><Avatar /></el-icon><template #title>管理员</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('tenant.admins.read')" index="/tenant-management-memberships"><el-icon><Avatar /></el-icon><template #title>管理员</template></el-menu-item>
         <div v-if="!appStore.sidebarCollapsed && hasTenantResourceMenu" class="nav-section">资源与访问</div>
         <el-menu-item v-if="workspaceStore.can('tenant.resources.read')" index="/resources"><el-icon><Box /></el-icon><template #title>资源目录</template></el-menu-item>
         <el-menu-item v-if="workspaceStore.can('tenant.grants.read')" index="/access-policies"><el-icon><Key /></el-icon><template #title>访问授权</template></el-menu-item>
@@ -45,14 +46,14 @@
       <template v-else-if="workspaceStore.currentWorkspace === 'provider' && workspaceStore.currentContext">
         <el-menu-item v-if="workspaceStore.can('provider.overview.read')" index="/provider-overview"><el-icon><DataAnalysis /></el-icon><template #title>概览</template></el-menu-item>
         <div v-if="!appStore.sidebarCollapsed" class="nav-section">资源供给</div>
-        <el-menu-item disabled><el-icon><Cpu /></el-icon><template #title>技术资源</template></el-menu-item>
-        <el-menu-item disabled><el-icon><Search /></el-icon><template #title>供给候选</template></el-menu-item>
-        <el-menu-item disabled><el-icon><Monitor /></el-icon><template #title>主机</template></el-menu-item>
-        <el-menu-item disabled><el-icon><Connection /></el-icon><template #title>Kubernetes</template></el-menu-item>
-        <el-menu-item disabled><el-icon><Grid /></el-icon><template #title>Namespace</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('provider.technical_resources.read')" index="/provider-technical-resources"><el-icon><Cpu /></el-icon><template #title>技术资源</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('provider.resources.read')" index="/provider-supply-candidates"><el-icon><Search /></el-icon><template #title>供给候选</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('provider.resources.read')" index="/provider-hosts"><el-icon><Monitor /></el-icon><template #title>主机</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('provider.resources.read')" index="/provider-kubernetes"><el-icon><Connection /></el-icon><template #title>Kubernetes</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('provider.resources.read')" index="/provider-namespaces"><el-icon><Grid /></el-icon><template #title>Namespace</template></el-menu-item>
         <div v-if="!appStore.sidebarCollapsed" class="nav-section">资源治理</div>
-        <el-menu-item disabled><el-icon><Avatar /></el-icon><template #title>管理员</template></el-menu-item>
-        <el-menu-item disabled><el-icon><DocumentChecked /></el-icon><template #title>审计日志</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('provider.memberships.read')" index="/provider-memberships"><el-icon><Avatar /></el-icon><template #title>管理员</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('provider.audit.read')" index="/provider-audit"><el-icon><DocumentChecked /></el-icon><template #title>审计日志</template></el-menu-item>
       </template>
 
       <template v-else-if="workspaceStore.currentWorkspace === 'platform' && workspaceStore.currentContext">
@@ -62,11 +63,11 @@
         <el-menu-item v-if="workspaceStore.can('platform.memberships.read')" index="/tenant-admin-memberships"><el-icon><Avatar /></el-icon><template #title>管理授权</template></el-menu-item>
         <div v-if="!appStore.sidebarCollapsed" class="nav-section">资源治理</div>
         <el-menu-item v-if="workspaceStore.can('platform.resources.read')" index="/platform-resources"><el-icon><Box /></el-icon><template #title>资源目录</template></el-menu-item>
-        <el-menu-item v-if="workspaceStore.can('platform.allocations.read')" disabled><el-icon><Connection /></el-icon><template #title>资源分配</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('platform.allocations.read')" index="/platform-allocations"><el-icon><Connection /></el-icon><template #title>资源分配</template></el-menu-item>
         <div v-if="!appStore.sidebarCollapsed" class="nav-section">平台治理</div>
         <el-menu-item v-if="workspaceStore.can('platform.identities.read')" index="/platform-identities"><el-icon><User /></el-icon><template #title>主体目录</template></el-menu-item>
         <el-menu-item v-if="workspaceStore.can('platform.memberships.read')" index="/platform-admins"><el-icon><UserFilled /></el-icon><template #title>平台管理账号</template></el-menu-item>
-        <el-menu-item v-if="workspaceStore.can('platform.user_simulations.read')" disabled><el-icon><Switch /></el-icon><template #title>用户模拟</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('platform.user_simulations.read')" index="/platform-user-simulations"><el-icon><Switch /></el-icon><template #title>用户模拟</template></el-menu-item>
         <el-menu-item v-if="workspaceStore.can('platform.audit.read')" index="/platform-audit"><el-icon><Document /></el-icon><template #title>审计日志</template></el-menu-item>
         <el-menu-item v-if="workspaceStore.can('platform.settings.read')" index="/system/config"><el-icon><Setting /></el-icon><template #title>系统配置</template></el-menu-item>
         <el-sub-menu index="diagnostics">
@@ -104,27 +105,39 @@ const appStore = useAppStore()
 const tenantStore = useTenantStore()
 const workspaceStore = useWorkspaceStore()
 
-const selectableContexts = computed(() => workspaceStore.currentWorkspace === 'tenant'
-  ? workspaceStore.tenantContexts
-  : workspaceStore.providerContexts)
+const selectableContexts = computed(() => {
+  const contexts = workspaceStore.currentWorkspace === 'tenant' ? workspaceStore.tenantContexts : workspaceStore.providerContexts
+  if (!workspaceStore.isSimulationActive || !workspaceStore.simulationSession) return contexts
+  return contexts.filter(item => item.scope_type === workspaceStore.simulationSession?.scope_type && item.scope_id === workspaceStore.simulationSession.scope_id)
+})
 const hasTenantOrganizationMenu = computed(() => ['tenant.members.read', 'tenant.groups.read', 'tenant.devices.read', 'tenant.admins.read'].some(workspaceStore.can))
 const hasTenantResourceMenu = computed(() => ['tenant.resources.read', 'tenant.grants.read', 'tenant.sessions.read'].some(workspaceStore.can))
 const hasTenantGovernanceMenu = computed(() => ['tenant.audit.read', 'tenant.settings.read'].some(workspaceStore.can))
 const activeMenu = computed(() => {
   if (route.path.startsWith('/tenant-overview')) return '/tenant-overview'
   if (route.path.startsWith('/provider-overview')) return '/provider-overview'
+  if (route.path.startsWith('/provider-technical-resources')) return '/provider-technical-resources'
+  if (route.path.startsWith('/provider-supply-candidates')) return '/provider-supply-candidates'
+  if (route.path.startsWith('/provider-hosts')) return '/provider-hosts'
+  if (route.path.startsWith('/provider-kubernetes')) return '/provider-kubernetes'
+  if (route.path.startsWith('/provider-namespaces')) return '/provider-namespaces'
+  if (route.path.startsWith('/provider-memberships')) return '/provider-memberships'
+  if (route.path.startsWith('/provider-audit')) return '/provider-audit'
   if (route.path.startsWith('/platform-overview')) return '/platform-overview'
   if (route.path.startsWith('/platform-admins')) return '/platform-admins'
   if (route.path.startsWith('/platform-identities')) return '/platform-identities'
+  if (route.path.startsWith('/platform-user-simulations')) return '/platform-user-simulations'
   if (route.path.startsWith('/diagnostics/desktop-nodes')) return '/diagnostics/desktop-nodes'
   if (route.path.startsWith('/diagnostics/nodes')) return '/diagnostics/nodes'
   if (route.path.startsWith('/diagnostics/operation-audit')) return '/diagnostics/operation-audit'
   if (route.path.startsWith('/platform-audit')) return '/platform-audit'
   if (route.path.startsWith('/platform-resources')) return '/platform-resources'
+  if (route.path.startsWith('/platform-allocations')) return '/platform-allocations'
   if (route.path.startsWith('/resources')) return '/resources'
   if (route.path.startsWith('/groups')) return '/groups'
   if (route.path.startsWith('/tenant-members')) return '/tenant-members'
   if (route.path.startsWith('/tenant-member-devices')) return '/tenant-member-devices'
+  if (route.path.startsWith('/tenant-management-memberships')) return '/tenant-management-memberships'
   if (route.path.startsWith('/tenant-audit')) return '/tenant-audit'
   if (route.path.startsWith('/tenant-settings')) return '/tenant-settings'
   if (route.path.startsWith('/nodes/')) {
