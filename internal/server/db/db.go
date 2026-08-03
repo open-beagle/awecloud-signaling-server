@@ -42,7 +42,8 @@ func InitDB(cfg config.DatabaseSection) error {
 
 	// 连接数据库（使用自定义 logger，统一日志格式）
 	DB, err = gorm.Open(sqlite.Open(cfg.Path), &gorm.Config{
-		Logger: NewGormLogger(gormlogger.Warn),
+		Logger:                           NewGormLogger(gormlogger.Warn),
+		IgnoreRelationshipsWhenMigrating: true,
 	})
 	if err != nil {
 		return fmt.Errorf("连接数据库失败: %w", err)
@@ -84,6 +85,9 @@ func EnableTracing() error {
 
 // autoMigrate 自动迁移数据库表
 func autoMigrate() error {
+	if err := ensureTenantGovernanceSchema(DB); err != nil {
+		return err
+	}
 	err := DB.AutoMigrate(
 		// 基础模型
 		&model.Admin{},
@@ -92,7 +96,6 @@ func autoMigrate() error {
 		&model.Node{},
 
 		// 统一资源模型
-		&model.Tenant{},
 		&model.TenantMembership{},
 		&model.ProviderTenantBinding{},
 		&model.WorkspaceBinding{},
@@ -233,6 +236,30 @@ func autoMigrate() error {
 		return err
 	}
 	return ensureTenantResourceConstraints(DB)
+}
+
+// ensureTenantGovernanceSchema owns Tenant schema migration. Existing SQLite
+// installations can have triggers in other tables that reference tenant; asking
+// GORM to rebuild that table makes SQLite reject the migration while those
+// triggers temporarily point at a missing table. New installations still use
+// AutoMigrate, while existing installations receive additive columns only.
+func ensureTenantGovernanceSchema(database *gorm.DB) error {
+	migrator := database.Migrator()
+	if !migrator.HasTable(&model.Tenant{}) {
+		if err := database.AutoMigrate(&model.Tenant{}); err != nil {
+			return fmt.Errorf("create tenant governance schema: %w", err)
+		}
+		return nil
+	}
+	for _, column := range []string{"revision", "row_version"} {
+		if migrator.HasColumn(&model.Tenant{}, column) {
+			continue
+		}
+		if err := database.Exec("ALTER TABLE tenant ADD COLUMN " + column + " INTEGER NOT NULL DEFAULT 1").Error; err != nil {
+			return fmt.Errorf("add tenant governance column %s: %w", column, err)
+		}
+	}
+	return nil
 }
 
 // CreateDefaultAdmin 创建默认管理员

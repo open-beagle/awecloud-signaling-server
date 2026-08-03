@@ -36,7 +36,7 @@
           <el-button type="primary" @click="handleSearch">{{ $t('common.search') }}</el-button>
           <el-button @click="handleReset">{{ $t('common.reset') }}</el-button>
         </el-form-item>
-        <el-form-item style="float: right">
+        <el-form-item v-if="canWrite" style="float: right">
           <el-button type="primary" @click="showCreateDialog = true">
             <el-icon><Plus /></el-icon>
             {{ $t('user.create') }}
@@ -96,7 +96,7 @@
             {{ formatTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="260" fixed="right">
+        <el-table-column v-if="canWrite" :label="$t('common.actions')" width="260" fixed="right">
           <template #default="{ row }">
             <el-button v-if="!row.enabled" type="success" link size="small" @click="handleEnable(row)">{{ $t('user.enabledTrue') }}</el-button>
             <el-button v-else type="warning" link size="small" @click="handleDisable(row)">{{ $t('user.enabledFalse') }}</el-button>
@@ -130,7 +130,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Upload } from '@element-plus/icons-vue'
@@ -140,9 +140,12 @@ import { getUsers, deleteUser, enableUser, disableUser, type User, type UserRole
 import { formatTime } from '@/utils/time'
 import CreateDialog from './components/CreateDialog.vue'
 import DeployDialog from './components/DeployDialog.vue'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 const { t } = useI18n()
 const router = useRouter()
+const workspaceStore = useWorkspaceStore()
+const canWrite = computed(() => workspaceStore.can('platform.identities.write'))
 
 const loading = ref(false)
 const users = ref<User[]>([])
@@ -209,11 +212,13 @@ const handleView = (row: User) => {
 
 // 编辑
 const handleEdit = (row: User) => {
+  if (!canWrite.value) return
   router.push(`/platform-identities/${row.name}?edit=true`)
 }
 
 // 删除
 const handleDelete = async (row: User) => {
+  if (!canWrite.value) return
   try {
     await ElMessageBox.confirm(
       t('user.deleteConfirm', { name: row.name }),
@@ -236,12 +241,14 @@ const handleDelete = async (row: User) => {
 
 // 部署（Agent 和 Client 通用）
 const handleDeploy = (row: User) => {
+  if (!canWrite.value) return
   selectedUser.value = row
   showDeployDialog.value = true
 }
 
 // 启用用户
 const handleEnable = async (row: User) => {
+  if (!canWrite.value) return
   try {
     await ElMessageBox.confirm(
       t('user.enableConfirm', { name: row.name }),
@@ -264,6 +271,7 @@ const handleEnable = async (row: User) => {
 
 // 禁用用户
 const handleDisable = async (row: User) => {
+  if (!canWrite.value) return
   try {
     await ElMessageBox.confirm(
       t('user.disableConfirm', { name: row.name }),

@@ -7,7 +7,7 @@
       </div>
       <div class="header-actions">
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :icon="Plus" :disabled="!authStore.isPlatformAdmin" @click="openCreate">新增授权</el-button>
+        <el-button v-if="canWrite" type="primary" :icon="Plus" @click="openCreate">新增授权</el-button>
       </div>
     </div>
 
@@ -33,7 +33,7 @@
         </el-table-column>
         <el-table-column label="权限版本" width="100" align="center"><template #default="{ row }">r{{ row.permission_revision }}</template></el-table-column>
         <el-table-column label="操作" width="90" fixed="right" align="right">
-          <template #default="{ row }"><el-button link type="primary" :disabled="!authStore.isPlatformAdmin" @click="openEdit(row)">编辑</el-button></template>
+          <template #default="{ row }"><el-button v-if="canWrite" link type="primary" @click="openEdit(row)">编辑</el-button><span v-else class="secondary">只读</span></template>
         </el-table-column>
       </el-table>
       <el-empty v-if="!loading && !items.length" description="暂无租户管理员授权" />
@@ -76,9 +76,10 @@ import {
   createTenantAdminMembership, getTenantAdminMemberships, getTenantAdminOptions, updateTenantAdminMembership,
   type TenantAdminMembership, type TenantAdminMembershipInput, type TenantAdminOption
 } from '@/api/tenantManagement'
-import { useAuthStore } from '@/stores/auth'
+import { useWorkspaceStore } from '@/stores/workspace'
 
-const authStore = useAuthStore()
+const workspaceStore = useWorkspaceStore()
+const canWrite = computed(() => workspaceStore.can('platform.memberships.write'))
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
@@ -111,14 +112,16 @@ const loadOptions = async () => {
 }
 const search = () => { pagination.page = 1; load() }
 const resetForm = () => Object.assign(form, { admin_id: undefined, tenant_id: '', role: 'tenant_viewer', enabled: true, expires_at: null })
-const openCreate = async () => { editing.value = undefined; resetForm(); await loadOptions(); dialogVisible.value = true }
+const openCreate = async () => { if (!canWrite.value) return; editing.value = undefined; resetForm(); await loadOptions(); dialogVisible.value = true }
 const openEdit = async (row: TenantAdminMembership) => {
+  if (!canWrite.value) return
   editing.value = row
   await loadOptions()
   Object.assign(form, { admin_id: row.admin_id, tenant_id: row.tenant_id, role: row.role, enabled: row.enabled, expires_at: row.expires_at || null })
   dialogVisible.value = true
 }
 const save = async () => {
+  if (!canWrite.value) return
   if (!form.admin_id || !form.tenant_id) return ElMessage.warning('请选择平台管理账号和租户')
   saving.value = true
   try {

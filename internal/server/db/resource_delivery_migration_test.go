@@ -84,12 +84,13 @@ func TestInitDBAddsM1ATablesWithoutChangingLegacyRows(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, sqlDB.Close())
 
-	require.NoError(t, InitDB(config.DatabaseSection{Type: "sqlite", Path: path}))
+	initErr := InitDB(config.DatabaseSection{Type: "sqlite", Path: path})
 	t.Cleanup(func() {
 		if current, dbErr := DB.DB(); dbErr == nil {
 			_ = current.Close()
 		}
 	})
+	require.NoError(t, initErr)
 
 	var admin model.Admin
 	require.NoError(t, DB.First(&admin, 11).Error)
@@ -134,6 +135,42 @@ func TestInitDBAddsM1ATablesWithoutChangingLegacyRows(t *testing.T) {
 		require.NoError(t, DB.Model(table).Count(&count).Error)
 		require.Zero(t, count)
 	}
+}
+
+func TestInitDBAddsTenantVersionsWithoutRebuildingReferencedTable(t *testing.T) {
+	original := DB
+	t.Cleanup(func() { DB = original })
+	path := filepath.Join(t.TempDir(), "legacy-trigger.db")
+	legacy, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	require.NoError(t, err)
+	for _, statement := range []string{
+		`CREATE TABLE tenant (id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at DATETIME, updated_at DATETIME)`,
+		`CREATE TABLE tenant_reference (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL)`,
+		`CREATE TRIGGER trg_fixture_tenant_reference BEFORE INSERT ON tenant_reference BEGIN SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM tenant WHERE id = NEW.tenant_id) THEN RAISE(ABORT, 'TENANT_NOT_FOUND') END; END`,
+		`INSERT INTO tenant (id, key, name, status) VALUES ('tenant-a', 'tenant-a', 'Tenant A', 'active')`,
+	} {
+		require.NoError(t, legacy.Exec(statement).Error)
+	}
+	legacySQL, err := legacy.DB()
+	require.NoError(t, err)
+	require.NoError(t, legacySQL.Close())
+
+	require.NoError(t, InitDB(config.DatabaseSection{Type: "sqlite", Path: path}))
+	t.Cleanup(func() {
+		if current, dbErr := DB.DB(); dbErr == nil {
+			_ = current.Close()
+		}
+	})
+	require.True(t, DB.Migrator().HasColumn(&model.Tenant{}, "Revision"))
+	require.True(t, DB.Migrator().HasColumn(&model.Tenant{}, "RowVersion"))
+	var tenant model.Tenant
+	require.NoError(t, DB.First(&tenant, "id = ?", "tenant-a").Error)
+	require.EqualValues(t, 1, tenant.Revision)
+	require.EqualValues(t, 1, tenant.RowVersion)
+	var triggerCount int64
+	require.NoError(t, DB.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_fixture_tenant_reference'").Scan(&triggerCount).Error)
+	require.EqualValues(t, 1, triggerCount)
+	require.NoError(t, DB.Exec("INSERT INTO tenant_reference (id, tenant_id) VALUES (?, ?)", "reference-a", "tenant-a").Error)
 }
 
 func TestInitDBEnforcesS2RelationshipsWithoutGlobalForeignKeys(t *testing.T) {

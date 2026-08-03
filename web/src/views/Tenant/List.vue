@@ -3,7 +3,7 @@
     <PageHeader title="组织管理" eyebrow="租户安全边界" description="建立和查看租户安全边界。业务成员统一在进入租户后管理，管理台授权由“租户管理员授权”维护。">
       <template #actions>
         <el-button :icon="Refresh" :loading="loading" @click="fetchTenants">刷新</el-button>
-        <el-button type="primary" :icon="Plus" :disabled="!authStore.isPlatformAdmin" @click="showCreate = true">创建租户</el-button>
+        <el-button v-if="canWrite" type="primary" :icon="Plus" @click="showCreate = true">创建租户</el-button>
       </template>
     </PageHeader>
 
@@ -23,7 +23,8 @@
         <el-table-column label="操作" width="180" fixed="right" align="right">
           <template #default="{ row }">
             <el-button v-if="canEnterTenant(row.id)" link type="primary" @click="enterTenant(row)">进入租户</el-button>
-            <el-button v-else link type="primary" @click="router.push('/tenant-admin-memberships')">配置管理授权</el-button>
+            <el-button v-else-if="canManageMemberships" link type="primary" @click="router.push('/tenant-admin-memberships')">配置管理授权</el-button>
+            <span v-else class="secondary">无租户管理授权</span>
           </template>
         </el-table-column>
       </el-table>
@@ -43,18 +44,20 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import PageHeader from '@/components/Common/PageHeader.vue'
 import { createTenant, getTenants, type Tenant } from '@/api/resource'
-import { useAuthStore } from '@/stores/auth'
 import { useTenantStore } from '@/stores/tenant'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 const router = useRouter()
-const authStore = useAuthStore()
 const tenantStore = useTenantStore()
+const workspaceStore = useWorkspaceStore()
+const canWrite = computed(() => workspaceStore.can('platform.organizations.write'))
+const canManageMemberships = computed(() => workspaceStore.can('platform.memberships.read'))
 const loading = ref(false)
 const creating = ref(false)
 const showCreate = ref(false)
@@ -72,6 +75,7 @@ const fetchTenants = async () => {
 }
 const handleSearch = () => { pagination.page = 1; fetchTenants() }
 const handleCreate = async () => {
+  if (!canWrite.value) return
   if (!createForm.name.trim() || !createForm.key.trim()) return ElMessage.warning('请输入租户名称和稳定标识')
   creating.value = true
   try {

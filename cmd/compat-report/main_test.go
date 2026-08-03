@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/migration"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/testfixture/resourcebusiness"
 )
 
@@ -86,6 +87,26 @@ func TestBuildReportClassifiesFullAnonymousFixture(t *testing.T) {
 	require.Equal(t, beforeHash, afterHash)
 	require.Equal(t, beforeSchemaVersion, sqliteInteger(t, path, "PRAGMA schema_version"))
 	require.Equal(t, beforeRows, sqliteInteger(t, path, "SELECT COUNT(*) FROM access_grant"))
+}
+
+func TestAnonymousCompatibilityReportBuildsDeterministicMappingDraft(t *testing.T) {
+	report, err := buildReport(createFullFixture(t))
+	require.NoError(t, err)
+	content, err := json.Marshal(report)
+	require.NoError(t, err)
+	var input migration.CompatReport
+	require.NoError(t, json.Unmarshal(content, &input))
+	draft, err := migration.BuildDraft(input)
+	require.NoError(t, err)
+	require.Equal(t, report.SourceFingerprint, draft.SourceFingerprint)
+	require.Equal(t, report.ContentHash, draft.SourceContentHash)
+	require.Equal(t, report.Totals.SourceCount, draft.Totals.SourceCount)
+	require.Greater(t, draft.Totals.PendingCount, int64(0))
+	require.Len(t, draft.ManifestHash, 64)
+
+	second, err := migration.BuildDraft(input)
+	require.NoError(t, err)
+	require.Equal(t, draft.ManifestHash, second.ManifestHash)
 }
 
 func TestContentHashIsIndependentOfPathAndGenerationTime(t *testing.T) {

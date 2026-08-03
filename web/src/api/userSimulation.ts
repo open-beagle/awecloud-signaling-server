@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import { createIdempotencyKey } from '@/utils/idempotency'
 import type { ApiResponse } from '@/types/models'
 
 export const USER_SIMULATION_STORAGE_KEY = 'management_user_simulation'
@@ -33,7 +34,7 @@ export const getUserSimulations = () =>
 
 export const createUserSimulation = (data: { effective_user_id: number; scope_type: UserSimulationScopeType; scope_id: string; reason: string; expires_at: string }) =>
   request.post<any, ApiResponse<UserSimulationSession>>('/api/v1/management/user-simulations', data, {
-    headers: { ...platformHeaders, 'Idempotency-Key': crypto.randomUUID() },
+    headers: { ...platformHeaders, 'Idempotency-Key': createIdempotencyKey() },
   })
 
 export const revokeUserSimulation = (sessionId: string, rowVersion: number, reason: string) =>

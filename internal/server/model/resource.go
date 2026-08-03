@@ -26,12 +26,14 @@ const (
 // Tenant is the authorization boundary for customer-owned resources.
 // A shared Agent or Kubernetes cluster may serve resources from many tenants.
 type Tenant struct {
-	ID        string       `gorm:"primaryKey;size:36" json:"id"`
-	Key       string       `gorm:"size:100;not null;uniqueIndex" json:"key"`
-	Name      string       `gorm:"size:200;not null" json:"name"`
-	Status    TenantStatus `gorm:"size:20;not null;default:'active';index" json:"status"`
-	CreatedAt time.Time    `json:"created_at"`
-	UpdatedAt time.Time    `json:"updated_at"`
+	ID         string       `gorm:"primaryKey;size:36" json:"id"`
+	Key        string       `gorm:"size:100;not null;uniqueIndex" json:"key"`
+	Name       string       `gorm:"size:200;not null" json:"name"`
+	Status     TenantStatus `gorm:"size:20;not null;default:'active';index" json:"status"`
+	Revision   int64        `gorm:"not null;default:1" json:"revision"`
+	RowVersion int64        `gorm:"not null;default:1" json:"row_version"`
+	CreatedAt  time.Time    `json:"created_at"`
+	UpdatedAt  time.Time    `json:"updated_at"`
 }
 
 func (Tenant) TableName() string { return "tenant" }

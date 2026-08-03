@@ -45,7 +45,7 @@ const routes: RouteRecordRaw[] = [
 			path: 'platform-overview',
 			name: 'PlatformOverview',
 			component: () => import('@/views/Platform/Overview.vue'),
-			meta: { requiresAuth: true, scope: 'platform', menuDomain: 'platform' }
+			meta: { requiresAuth: true, scope: 'platform', workspace: 'platform', permission: 'platform.overview.read', menuDomain: 'platform' }
 		},
 		{
 			path: 'provider-overview',
@@ -143,20 +143,20 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'tenants',
         name: 'Tenants',
-        component: () => import('@/views/Tenant/List.vue'),
-		meta: { requiresAuth: true, scope: 'platform' }
+        component: () => import('@/views/Platform/Organizations.vue'),
+		meta: { requiresAuth: true, scope: 'platform', workspace: 'platform', permission: 'platform.organizations.read', menuDomain: 'platform' }
       },
 		{
 			path: 'tenant-admin-memberships',
 			name: 'TenantAdminMemberships',
-			component: () => import('@/views/Tenant/AdminMemberships.vue'),
-			meta: { requiresAuth: true, scope: 'platform', menuDomain: 'platform' }
+			component: () => import('@/views/Platform/Memberships.vue'),
+			meta: { requiresAuth: true, scope: 'platform', workspace: 'platform', permission: 'platform.memberships.read', menuDomain: 'platform' }
 		},
 		{
 			path: 'platform-admins',
 			name: 'PlatformAdmins',
 			component: () => import('@/views/Platform/AdminAccounts.vue'),
-			meta: { requiresAuth: true, scope: 'platform', menuDomain: 'platform' }
+			meta: { requiresAuth: true, scope: 'platform', workspace: 'platform', permission: 'platform.memberships.read', menuDomain: 'platform' }
 		},
 		{
 			path: 'platform-user-simulations',
@@ -168,13 +168,13 @@ const routes: RouteRecordRaw[] = [
         path: 'platform-identities',
         name: 'PlatformIdentities',
         component: () => import('@/views/User/List.vue'),
-        meta: { requiresAuth: true, scope: 'platform', menuDomain: 'platform' }
+        meta: { requiresAuth: true, scope: 'platform', workspace: 'platform', permission: 'platform.identities.read', menuDomain: 'platform' }
       },
       {
         path: 'platform-identities/:username',
         name: 'PlatformIdentityDetail',
         component: () => import('@/views/User/Detail.vue'),
-        meta: { requiresAuth: true, scope: 'platform', menuDomain: 'platform' }
+        meta: { requiresAuth: true, scope: 'platform', workspace: 'platform', permission: 'platform.identities.read', menuDomain: 'platform' }
       },
       {
         path: 'users',
@@ -283,7 +283,7 @@ const routes: RouteRecordRaw[] = [
 			path: 'platform-resources',
 			name: 'PlatformResources',
 			component: () => import('@/views/Platform/Resources.vue'),
-			meta: { requiresAuth: true, scope: 'platform', menuDomain: 'platform' }
+			meta: { requiresAuth: true, scope: 'platform', workspace: 'platform', permission: 'platform.resources.read', menuDomain: 'platform' }
 		},
 		{
 			path: 'platform-allocations',
@@ -427,7 +427,7 @@ const routes: RouteRecordRaw[] = [
         path: 'platform-audit',
         name: 'PlatformAudit',
         component: () => import('@/views/Audit/AuditLogs.vue'),
-        meta: { requiresAuth: true, scope: 'platform', menuDomain: 'platform' }
+        meta: { requiresAuth: true, scope: 'platform', workspace: 'platform', permission: 'platform.audit.read', menuDomain: 'platform' }
       },
       // 操作审计
       {
@@ -451,7 +451,7 @@ const routes: RouteRecordRaw[] = [
         path: 'system/config',
         name: 'SystemConfig',
         component: () => import('@/views/System/Config.vue'),
-        meta: { requiresAuth: true }
+        meta: { requiresAuth: true, scope: 'platform', workspace: 'platform', permission: 'platform.settings.read', menuDomain: 'platform' }
       }
     ]
   }
@@ -483,7 +483,7 @@ const breadcrumbByRouteName: Record<string, BreadcrumbMeta> = {
 	TenantAudit: [{ title: '租户业务' }, { title: '租户审计' }],
 	TenantSettings: [{ title: '租户业务' }, { title: '租户设置' }],
 	Tenants: [{ title: '组织治理' }, { title: '组织管理' }],
-	TenantAdminMemberships: [{ title: '租户治理' }, { title: '租户管理员授权' }],
+	TenantAdminMemberships: [{ title: '平台治理' }, { title: '管理授权' }],
 	PlatformAdmins: [{ title: '平台治理' }, { title: '平台管理账号' }],
 	PlatformUserSimulations: [{ title: '平台治理' }, { title: '用户模拟' }],
 	PlatformIdentities: [{ title: '平台治理' }, { title: '访问主体目录', path: '/platform-identities' }],
@@ -609,6 +609,10 @@ router.beforeEach(async (to, _from, next) => {
 	if (permission && !workspaceStore.can(permission)) {
 		if (workspace === 'tenant') {
 			next(firstTenantDestination(tenantStore, workspaceStore))
+		} else if (workspace === 'provider') {
+			next(firstProviderDestination(workspaceStore))
+		} else if (workspace === 'platform') {
+			next(firstPlatformDestination(workspaceStore))
 		} else {
 			next({ name: 'WorkspaceUnavailable', query: { workspace }, replace: true })
 		}
@@ -616,6 +620,28 @@ router.beforeEach(async (to, _from, next) => {
 	}
   next()
 })
+
+const firstProviderDestination = (workspaceStore = useWorkspaceStore()) => {
+	if (workspaceStore.can('provider.overview.read')) return '/provider-overview'
+	if (workspaceStore.can('provider.technical_resources.read')) return '/provider-technical-resources'
+	if (workspaceStore.can('provider.resources.read')) return '/provider-supply-candidates'
+	if (workspaceStore.can('provider.memberships.read')) return '/provider-memberships'
+	if (workspaceStore.can('provider.audit.read')) return '/provider-audit'
+	return { name: 'WorkspaceUnavailable', query: { workspace: 'provider' } }
+}
+
+const firstPlatformDestination = (workspaceStore = useWorkspaceStore()) => {
+	if (workspaceStore.can('platform.overview.read')) return '/platform-overview'
+	if (workspaceStore.can('platform.organizations.read')) return '/tenants'
+	if (workspaceStore.can('platform.memberships.read')) return '/tenant-admin-memberships'
+	if (workspaceStore.can('platform.resources.read')) return '/platform-resources'
+	if (workspaceStore.can('platform.allocations.read')) return '/platform-allocations'
+	if (workspaceStore.can('platform.identities.read')) return '/platform-identities'
+	if (workspaceStore.can('platform.user_simulations.read')) return '/platform-user-simulations'
+	if (workspaceStore.can('platform.audit.read')) return '/platform-audit'
+	if (workspaceStore.can('platform.settings.read')) return '/system/config'
+	return { name: 'WorkspaceUnavailable', query: { workspace: 'platform' } }
+}
 
 const firstTenantDestination = (
 	tenantStore: ReturnType<typeof useTenantStore>,

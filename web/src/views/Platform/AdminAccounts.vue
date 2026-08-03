@@ -4,7 +4,7 @@
       <div><h1>平台管理账号</h1><p>管理登录 Web 控制面的真实 Admin 身份。租户管理范围需在“租户管理员授权”中单独配置。</p></div>
       <div class="header-actions">
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :icon="Plus" :disabled="!authStore.isPlatformAdmin" @click="openCreate">新增账号</el-button>
+        <el-button v-if="canWrite" type="primary" :icon="Plus" @click="openCreate">新增账号</el-button>
       </div>
     </div>
 
@@ -17,7 +17,7 @@
         <el-table-column label="状态" width="120"><template #default="{ row }"><el-tag size="small" :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '停用' }}</el-tag></template></el-table-column>
         <el-table-column label="创建时间" width="180"><template #default="{ row }">{{ formatTime(row.created_at) }}</template></el-table-column>
         <el-table-column label="更新时间" width="180"><template #default="{ row }">{{ formatTime(row.updated_at) }}</template></el-table-column>
-        <el-table-column label="操作" width="90" fixed="right" align="right"><template #default="{ row }"><el-button link type="primary" :disabled="!authStore.isPlatformAdmin" @click="openEdit(row)">编辑</el-button></template></el-table-column>
+        <el-table-column label="操作" width="90" fixed="right" align="right"><template #default="{ row }"><el-button v-if="canWrite" link type="primary" @click="openEdit(row)">编辑</el-button><span v-else class="secondary">只读</span></template></el-table-column>
       </el-table>
       <el-empty v-if="!loading && !items.length" description="暂无平台管理账号" />
       <div class="pagination"><el-pagination v-model:current-page="pagination.page" layout="total, prev, pager, next" :total="pagination.total" :page-size="pagination.size" @current-change="load" /></div>
@@ -39,13 +39,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { createPlatformAdmin, getPlatformAdmins, updatePlatformAdmin, type PlatformAdminAccount, type PlatformRole } from '@/api/platformAdmin'
-import { useAuthStore } from '@/stores/auth'
+import { useWorkspaceStore } from '@/stores/workspace'
 
-const authStore = useAuthStore()
+const workspaceStore = useWorkspaceStore()
+const canWrite = computed(() => workspaceStore.can('platform.memberships.write'))
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
@@ -65,9 +66,10 @@ const load = async () => {
   finally { loading.value = false }
 }
 const handleSearch = () => { pagination.page = 1; load() }
-const openCreate = () => { editing.value = undefined; Object.assign(form, { username: '', password: '', platform_role: 'none', enabled: true }); dialogVisible.value = true }
-const openEdit = (row: PlatformAdminAccount) => { editing.value = row; Object.assign(form, { username: row.username, password: '', platform_role: row.platform_role, enabled: row.enabled }); dialogVisible.value = true }
+const openCreate = () => { if (!canWrite.value) return; editing.value = undefined; Object.assign(form, { username: '', password: '', platform_role: 'none', enabled: true }); dialogVisible.value = true }
+const openEdit = (row: PlatformAdminAccount) => { if (!canWrite.value) return; editing.value = row; Object.assign(form, { username: row.username, password: '', platform_role: row.platform_role, enabled: row.enabled }); dialogVisible.value = true }
 const save = async () => {
+  if (!canWrite.value) return
   if (!form.username.trim()) return ElMessage.warning('请输入平台管理账号')
   if (!editing.value && form.password.length < 8) return ElMessage.warning('初始密码至少需要 8 个字符')
   saving.value = true

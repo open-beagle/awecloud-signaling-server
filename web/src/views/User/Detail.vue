@@ -5,7 +5,7 @@
       <template #header>
         <div class="card-header">
           <span>{{ $t('user.basicInfo') }}</span>
-          <el-button type="primary" size="small" @click="showEditDialog = true">
+          <el-button v-if="canWrite" type="primary" size="small" @click="showEditDialog = true">
             {{ $t('common.edit') }}
           </el-button>
         </div>
@@ -67,7 +67,7 @@
       <template #header>
         <div class="card-header">
           <span>{{ $t('user.deployHistory') }}</span>
-          <el-button type="primary" size="small" @click="showDeployDialog = true">
+          <el-button v-if="canWrite" type="primary" size="small" @click="showDeployDialog = true">
             {{ $t('user.deploy') }}
           </el-button>
         </div>
@@ -94,7 +94,7 @@
             {{ row.bound_at ? formatTime(row.bound_at) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="150" fixed="right">
+        <el-table-column v-if="canWrite" :label="$t('common.actions')" width="150" fixed="right">
           <template #default="{ row }">
             <el-button
               size="small"
@@ -134,7 +134,7 @@
             {{ row.bound_at ? formatTime(row.bound_at) : '-' }}
           </template>
         </el-table-column>
-        <el-table-column :label="$t('common.actions')" width="150" fixed="right">
+        <el-table-column v-if="canWrite" :label="$t('common.actions')" width="150" fixed="right">
           <template #default="{ row }">
             <el-button
               size="small"
@@ -211,7 +211,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
@@ -220,10 +220,13 @@ import { getUser, updateUser, deleteUser, regenerateUserSecret, type User, type 
 import { getDeployTokens, revokeDeployToken, getDeployCommand, type DeployToken } from '@/api/deployToken'
 import { formatTime } from '@/utils/time'
 import DeployDialog from './components/DeployDialog.vue'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const workspaceStore = useWorkspaceStore()
+const canWrite = computed(() => workspaceStore.can('platform.identities.write'))
 
 const loading = ref(false)
 const saving = ref(false)
@@ -301,6 +304,7 @@ const loadTokens = async () => {
 
 // 删除 Token
 const handleDeleteToken = async (token: DeployToken) => {
+  if (!canWrite.value) return
   try {
     await ElMessageBox.confirm(
       t('clientToken.deleteConfirm'),
@@ -358,6 +362,7 @@ const loadDeployHistory = async () => {
 
 // 撤销部署 Token
 const handleRevokeDeployToken = async (token: DeployToken) => {
+  if (!canWrite.value) return
   try {
     await ElMessageBox.confirm(
       t('agent.revokeConfirm'),
@@ -403,7 +408,7 @@ const getDeployStatusText = (status: string) => {
 
 // 保存编辑
 const handleSave = async () => {
-  if (!user.value) return
+  if (!canWrite.value || !user.value) return
 
   saving.value = true
   try {
@@ -425,7 +430,7 @@ const handleSave = async () => {
 
 // 重新生成密钥
 const handleRegenerateSecret = async () => {
-  if (!user.value) return
+  if (!canWrite.value || !user.value) return
 
   try {
     await ElMessageBox.confirm(
@@ -449,7 +454,7 @@ const handleRegenerateSecret = async () => {
 
 // 删除用户
 const handleDelete = async () => {
-  if (!user.value) return
+  if (!canWrite.value || !user.value) return
 
   try {
     await ElMessageBox.confirm(
@@ -483,6 +488,7 @@ const copySecret = async () => {
 
 // 查看部署命令
 const handleViewCommand = async (token: DeployToken) => {
+  if (!canWrite.value) return
   showCommandDialog.value = true
   deployCommand.value = ''
   

@@ -1,304 +1,101 @@
 <template>
-  <div class="audit-logs-page">
-    <PageHeader title="平台审计" description="查询平台管理操作及其执行主体、目标和审计详情。" />
+  <div class="audit-page">
+    <PageHeader title="平台审计" eyebrow="Platform Governance" description="统一查询平台、Provider 与 Tenant 管理操作，并保留真实操作者、实际身份、Scope 和权限 revision 证据。">
+      <template #actions><el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button></template>
+    </PageHeader>
 
-    <!-- 搜索筛选区域 -->
-    <SearchCard title="筛选条件">
-      <el-form :inline="true" :model="queryParams" class="search-form">
-        <el-row :gutter="20">
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item :label="t('audit.actionType')">
-              <el-select
-                v-model="queryParams.action_type"
-                :placeholder="t('audit.actionTypePlaceholder')"
-                clearable
-              >
-                <el-option
-                  v-for="item in actionTypes"
-                  :key="item.value"
-                  :label="item.label"
-                  :value="item.value"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item :label="t('audit.user')">
-              <el-select
-                v-model="queryParams.user_id"
-                :placeholder="t('audit.userPlaceholder')"
-                clearable
-              >
-                <el-option
-                  v-for="item in adminList"
-                  :key="item.id"
-                  :label="item.username"
-                  :value="item.id"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="24" :md="12" :lg="8">
-            <el-form-item :label="t('audit.dateRange')">
-              <el-date-picker
-                v-model="dateRange"
-                type="daterange"
-                :start-placeholder="t('audit.startDate')"
-                :end-placeholder="t('audit.endDate')"
-                value-format="YYYY-MM-DD"
-                style="width: 100%"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row>
-          <el-col :span="24" class="form-actions">
-            <el-button @click="handleReset">
-              {{ t('common.reset') }}
-            </el-button>
-            <el-button type="primary" @click="handleQuery">
-              {{ t('common.search') }}
-            </el-button>
-          </el-col>
-        </el-row>
-      </el-form>
-    </SearchCard>
+    <el-alert title="用户模拟记录同时展示真实操作者和实际 User；平台审计读取不会授予目标 Scope 的业务权限。" type="info" show-icon :closable="false" />
+    <el-alert v-if="errorMessage" class="state-alert" title="平台审计加载失败" :description="errorMessage" type="error" show-icon :closable="false" />
 
-    <!-- 数据表格区域 -->
-    <el-card shadow="never">
-      <TableToolbar 
-        :total="total"
-        :show-column-setting="false"
-        :show-export="false"
-        @refresh="handleQuery"
-      />
+    <section class="data-surface">
+      <div class="toolbar">
+        <el-input v-model="filters.search" clearable :prefix-icon="Search" placeholder="搜索身份、目标、Scope 或 Request ID" @keyup.enter="applyFilters" @clear="applyFilters" />
+        <el-select v-model="filters.scope_type" clearable placeholder="全部 Scope" @change="applyFilters">
+          <el-option label="Platform" value="platform" />
+          <el-option label="Provider" value="provider" />
+          <el-option label="Tenant" value="tenant" />
+        </el-select>
+        <el-select v-model="filters.simulation" clearable placeholder="全部身份模式" @change="applyFilters">
+          <el-option label="真实身份" value="false" />
+          <el-option label="用户模拟" value="true" />
+        </el-select>
+        <el-input v-model="filters.action_type" class="action-input" clearable placeholder="操作类型" @keyup.enter="applyFilters" @clear="applyFilters" />
+        <span>{{ pagination.total }} 条记录</span>
+      </div>
 
-      <el-table
-        v-loading="loading"
-        :data="auditLogs"
-        border
-        stripe
-        style="width: 100%"
-      >
-        <el-table-column prop="id" label="ID" width="80" align="center" />
-        <el-table-column
-          prop="action_type"
-          :label="t('audit.actionType')"
-          width="150"
-        >
+      <el-table v-loading="loading" :data="items" :empty-text="errorMessage ? ' ' : '当前筛选条件下没有审计记录'" stripe>
+        <el-table-column label="时间 / Request ID" width="205"><template #default="{ row }"><span>{{ formatTime(row.created_at) }}</span><span class="secondary">{{ row.request_id || '—' }}</span></template></el-table-column>
+        <el-table-column label="身份" min-width="210">
           <template #default="{ row }">
-            <el-tag size="small">{{ getActionLabel(row.action_type) }}</el-tag>
+            <strong>{{ actorLabel(row) }}</strong>
+            <span class="secondary" :class="{ simulated: row.simulation_session_id }">{{ identityEvidence(row) }}</span>
           </template>
         </el-table-column>
-        <el-table-column
-          prop="actor_name"
-          :label="t('audit.actor')"
-          width="120"
-        />
-        <el-table-column
-          prop="target_name"
-          :label="t('audit.target')"
-          min-width="150"
-        />
-        <el-table-column
-          prop="detail"
-          :label="t('audit.detail')"
-          min-width="250"
-        >
-          <template #default="{ row }">
-            <span v-if="row.detail">{{ row.detail }}</span>
-            <span v-else class="cell-sub">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column
-          prop="created_at"
-          :label="t('audit.createdAt')"
-          width="180"
-        >
-          <template #default="{ row }">
-            {{ formatTime(row.created_at) }}
-          </template>
-        </el-table-column>
+        <el-table-column label="Scope" min-width="155"><template #default="{ row }"><strong>{{ scopeLabel(row.scope_type) }}</strong><span class="secondary">{{ row.scope_id || '平台全局' }}</span></template></el-table-column>
+        <el-table-column prop="action_type" label="操作" min-width="180" show-overflow-tooltip />
+        <el-table-column label="目标" min-width="210"><template #default="{ row }"><span>{{ row.target_name || row.target_id }}</span><span class="secondary">{{ row.target_type }} · {{ row.target_id }}</span></template></el-table-column>
+        <el-table-column label="权限证据" min-width="220"><template #default="{ row }"><span>{{ row.required_permission || '兼容记录' }}</span><span class="secondary">revision {{ row.permission_revision || '—' }}</span></template></el-table-column>
       </el-table>
-
-      <!-- 空状态 -->
-      <EmptyState 
-        v-if="!loading && auditLogs.length === 0"
-        @action="handleQuery"
-      />
-
-      <!-- 分页 -->
-      <el-pagination
-        v-if="auditLogs.length > 0"
-        v-model:current-page="queryParams.page"
-        v-model:page-size="queryParams.size"
-        :total="total"
-        :page-sizes="[10, 20, 50, 100]"
-        layout="total, sizes, prev, pager, next, jumper"
-        @size-change="handleQuery"
-        @current-change="handleQuery"
-        class="pagination"
-      />
-    </el-card>
+      <div class="pagination"><el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.size" :total="pagination.total" :page-sizes="[20, 50, 100]" layout="total, sizes, prev, pager, next" @size-change="load" @current-change="load" /></div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { queryAuditLogs, getActionTypes, getAdminList, type QueryAuditLogsParams, type AuditLog, type ActionType, type AdminOption } from '@/api/audit'
-import { formatTime } from '@/utils/time'
-import { useI18n } from 'vue-i18n'
-import SearchCard from '@/components/Common/SearchCard.vue'
-import TableToolbar from '@/components/Common/TableToolbar.vue'
-import EmptyState from '@/components/Common/EmptyState.vue'
+import { onMounted, reactive, ref } from 'vue'
+import { Refresh, Search } from '@element-plus/icons-vue'
 import PageHeader from '@/components/Common/PageHeader.vue'
-
-const { t } = useI18n()
+import { getPlatformAuditLogs, type PlatformAuditLog, type PlatformAuditParams } from '@/api/platformGovernance'
 
 const loading = ref(false)
-const auditLogs = ref<AuditLog[]>([])
-const total = ref(0)
-const dateRange = ref<[string, string] | null>(null)
-const actionTypes = ref<ActionType[]>([])
-const adminList = ref<AdminOption[]>([])
+const errorMessage = ref('')
+const items = ref<PlatformAuditLog[]>([])
+const filters = reactive<{ search: string; scope_type: PlatformAuditParams['scope_type'] | ''; simulation: PlatformAuditParams['simulation'] | ''; action_type: string }>({ search: '', scope_type: '', simulation: '', action_type: '' })
+const pagination = reactive({ page: 1, size: 20, total: 0 })
 
-const queryParams = reactive<QueryAuditLogsParams>({
-  action_type: '',
-  user_id: undefined,
-  start_date: '',
-  end_date: '',
-  page: 1,
-  size: 50
-})
-
-// 获取操作类型标签
-const getActionLabel = (actionType: string) => {
-  const found = actionTypes.value.find(item => item.value === actionType)
-  return found ? found.label : actionType
-}
-
-// 加载操作类型列表
-const loadActionTypes = async () => {
-  try {
-    const response = await getActionTypes()
-    if (response.success) {
-      actionTypes.value = response.data || []
-    }
-  } catch (error) {
-    console.error('Load action types error:', error)
-  }
-}
-
-// 加载管理员列表
-const loadAdminList = async () => {
-  try {
-    const response = await getAdminList()
-    if (response.success) {
-      adminList.value = response.data || []
-    }
-  } catch (error) {
-    console.error('Load admin list error:', error)
-  }
-}
-
-// 查询审计日志
-const handleQuery = async () => {
+const load = async () => {
   loading.value = true
+  errorMessage.value = ''
   try {
-    // 设置日期范围
-    if (dateRange.value) {
-      queryParams.start_date = dateRange.value[0]
-      queryParams.end_date = dateRange.value[1]
-    } else {
-      queryParams.start_date = ''
-      queryParams.end_date = ''
-    }
-
-    const response = await queryAuditLogs(queryParams)
-    if (response.success) {
-      auditLogs.value = response.data || []
-      total.value = response.total || 0
-    } else {
-      ElMessage.error(response.message || t('audit.queryFailed'))
-    }
-  } catch (error) {
-    console.error('Query audit logs error:', error)
-    ElMessage.error(t('audit.queryFailed'))
+    const response = await getPlatformAuditLogs({
+      search: filters.search.trim() || undefined,
+      scope_type: filters.scope_type || undefined,
+      simulation: filters.simulation || undefined,
+      action_type: filters.action_type.trim() || undefined,
+      page: pagination.page,
+      size: pagination.size
+    })
+    items.value = response.success && response.data ? response.data : []
+    pagination.total = response.total || 0
+  } catch {
+    items.value = []
+    pagination.total = 0
+    errorMessage.value = '请确认平台审计读取权限和服务状态后重试。'
   } finally {
     loading.value = false
   }
 }
+const applyFilters = () => { pagination.page = 1; load() }
+const actorLabel = (row: PlatformAuditLog) => row.actor_user_name || row.actor_username || `User #${row.actor_user_id || row.actor_admin_id}`
+const identityEvidence = (row: PlatformAuditLog) => row.simulation_session_id
+  ? `用户模拟 · 实际身份 ${row.effective_user_name || `User #${row.effective_user_id}`}`
+  : `真实身份 · User #${row.actor_user_id || row.effective_user_id || '—'}`
+const scopeLabel = (scope: PlatformAuditLog['scope_type']) => scope === 'provider' ? 'Provider' : scope === 'tenant' ? 'Tenant' : 'Platform'
+const formatTime = (value: string) => new Date(value).toLocaleString('zh-CN', { hour12: false })
 
-// 重置查询条件
-const handleReset = () => {
-  queryParams.action_type = ''
-  queryParams.user_id = undefined
-  queryParams.start_date = ''
-  queryParams.end_date = ''
-  queryParams.page = 1
-  queryParams.size = 50
-  dateRange.value = null
-  handleQuery()
-}
-
-onMounted(() => {
-  loadActionTypes()
-  loadAdminList()
-  handleQuery()
-})
+onMounted(load)
 </script>
 
 <style scoped>
-.audit-logs-page {
-  padding: 0;
-}
-
-.search-form {
-  width: 100%;
-}
-
-.search-form :deep(.el-form-item) {
-  width: 100%;
-  margin-bottom: 16px;
-}
-
-.search-form :deep(.el-form-item__label) {
-  width: 100px;
-}
-
-.search-form :deep(.el-form-item__content) {
-  flex: 1;
-}
-
-.search-form :deep(.el-input),
-.search-form :deep(.el-select) {
-  width: 100%;
-}
-
-.form-actions {
-  text-align: right;
-  margin-top: 8px;
-}
-
-.cell-sub {
-  color: #909399;
-  font-size: 12px;
-}
-
-.pagination {
-  margin-top: 20px;
-  display: flex;
-  justify-content: flex-end;
-}
-
-@media (max-width: 768px) {
-  .search-form :deep(.el-form-item__label) {
-    width: 80px;
-  }
-  
-  .form-actions {
-    text-align: center;
-  }
-}
+.audit-page { width: 100%; }
+.state-alert { margin-top: 12px; }
+.data-surface { margin-top: 14px; overflow: hidden; border: 1px solid var(--border-light); border-radius: 6px; background: #fff; }
+.toolbar { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border-light); }
+.toolbar .el-input { width: 300px; }
+.toolbar .el-select { width: 150px; }
+.toolbar .action-input { width: 190px; }
+.toolbar > span { margin-left: auto; color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+.secondary { display: block; margin-top: 3px; color: var(--text-secondary); font-size: 12px; }
+.secondary.simulated { color: var(--el-color-warning-dark-2); }
+.pagination { display: flex; justify-content: flex-end; padding: 16px; }
 </style>
