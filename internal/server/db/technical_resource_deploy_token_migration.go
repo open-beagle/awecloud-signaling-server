@@ -25,31 +25,34 @@ func migrateAgentDeployTokensToTechnicalResources(database *gorm.DB) error {
 		if len(tokens) == 0 {
 			return nil
 		}
-		providerID, err := deploymentTokenMigrationProvider(tx)
-		if err != nil {
-			return err
-		}
+		var providerID string
 		for i := range tokens {
 			legacy := &tokens[i]
+			var existing model.TechnicalResourceDeployToken
+			err := tx.Where("token = ?", legacy.Token).First(&existing).Error
+			if err == nil {
+				if err := validateMigratedDeployToken(tx, legacy, &existing); err != nil {
+					return fmt.Errorf("validate already migrated Agent deploy token %d: %w", legacy.ID, err)
+				}
+				if err := tx.Delete(&model.DeployToken{}, legacy.ID).Error; err != nil {
+					return err
+				}
+				continue
+			}
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("find migrated Agent deploy token %d: %w", legacy.ID, err)
+			}
+			if providerID == "" {
+				providerID, err = deploymentTokenMigrationProvider(tx)
+				if err != nil {
+					return err
+				}
+			}
 			resource, err := deploymentTokenTechnicalResource(tx, providerID, legacy)
 			if err != nil {
 				return fmt.Errorf("map Agent deploy token %d: %w", legacy.ID, err)
 			}
-			status := model.TechnicalResourceDeployTokenPending
-			var consumedAt, revokedAt *time.Time
-			switch legacy.Status {
-			case model.DeployTokenStatusBound:
-				status = model.TechnicalResourceDeployTokenConsumed
-				consumedAt = legacy.BoundAt
-				if consumedAt == nil {
-					value := legacy.CreatedAt
-					consumedAt = &value
-				}
-			case model.DeployTokenStatusRevoked:
-				status = model.TechnicalResourceDeployTokenRevoked
-				value := legacy.CreatedAt
-				revokedAt = &value
-			}
+			status, consumedAt, revokedAt := migratedDeployTokenStatus(legacy)
 			migrated := model.TechnicalResourceDeployToken{
 				ID: uuid.NewString(), TechnicalResourceID: resource.ID, Token: legacy.Token, Name: legacy.Name, RuntimeUserID: legacy.UserID,
 				Status: status, DeviceFingerprint: legacy.DeviceFingerprint, ExpiresAt: legacy.ExpiresAt,
@@ -64,6 +67,49 @@ func migrateAgentDeployTokensToTechnicalResources(database *gorm.DB) error {
 		}
 		return nil
 	})
+}
+
+func validateMigratedDeployToken(tx *gorm.DB, legacy *model.DeployToken, existing *model.TechnicalResourceDeployToken) error {
+	if existing.RuntimeUserID != legacy.UserID {
+		return fmt.Errorf("runtime user differs: legacy=%d migrated=%d", legacy.UserID, existing.RuntimeUserID)
+	}
+	var resource model.TechnicalResource
+	if err := tx.Where("id = ?", existing.TechnicalResourceID).First(&resource).Error; err != nil {
+		return fmt.Errorf("load technical resource %s: %w", existing.TechnicalResourceID, err)
+	}
+	if resource.Type != model.TechnicalResourceAgent || resource.RuntimeUserID != legacy.UserID {
+		return fmt.Errorf("technical resource ownership differs: type=%s runtime_user_id=%d", resource.Type, resource.RuntimeUserID)
+	}
+	expectedStatus, _, _ := migratedDeployTokenStatus(legacy)
+	if existing.Name != legacy.Name || existing.Status != expectedStatus || existing.DeviceFingerprint != legacy.DeviceFingerprint || !sameOptionalTime(existing.ExpiresAt, legacy.ExpiresAt) {
+		return fmt.Errorf("credential attributes differ for migrated token %s", existing.ID)
+	}
+	if expectedStatus == model.TechnicalResourceDeployTokenConsumed && existing.ConsumedAt == nil {
+		return fmt.Errorf("consumed token %s has no consumed_at", existing.ID)
+	}
+	if expectedStatus == model.TechnicalResourceDeployTokenRevoked && existing.RevokedAt == nil {
+		return fmt.Errorf("revoked token %s has no revoked_at", existing.ID)
+	}
+	return nil
+}
+
+func migratedDeployTokenStatus(legacy *model.DeployToken) (model.TechnicalResourceDeployTokenStatus, *time.Time, *time.Time) {
+	status := model.TechnicalResourceDeployTokenPending
+	var consumedAt, revokedAt *time.Time
+	switch legacy.Status {
+	case model.DeployTokenStatusBound:
+		status = model.TechnicalResourceDeployTokenConsumed
+		consumedAt = legacy.BoundAt
+		if consumedAt == nil {
+			value := legacy.CreatedAt
+			consumedAt = &value
+		}
+	case model.DeployTokenStatusRevoked:
+		status = model.TechnicalResourceDeployTokenRevoked
+		value := legacy.CreatedAt
+		revokedAt = &value
+	}
+	return status, consumedAt, revokedAt
 }
 
 func deploymentTokenMigrationProvider(tx *gorm.DB) (string, error) {

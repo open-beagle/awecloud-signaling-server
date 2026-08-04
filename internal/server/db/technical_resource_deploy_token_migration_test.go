@@ -3,6 +3,7 @@ package db
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
@@ -49,4 +50,75 @@ func TestMigrateDeployTokensMovesAgentTokensAndPreservesDesktopTokens(t *testing
 	require.NoError(t, migrateAgentDeployTokensToTechnicalResources(database))
 	require.NoError(t, database.Find(&resourceTokens).Error)
 	require.Len(t, resourceTokens, 2)
+}
+
+func TestMigrateDeployTokensReconcilesAlreadyMigratedToken(t *testing.T) {
+	database := newDeployTokenMigrationTestDB(t)
+	agent := model.User{Name: "agent-user", Role: model.UserRoleAgent, SecretHash: "fixture", Enabled: true}
+	require.NoError(t, database.Create(&agent).Error)
+	provider := model.ResourceProvider{ID: uuid.NewString(), Key: "beagle", DisplayName: "Beagle", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	require.NoError(t, database.Create(&provider).Error)
+	resource := model.TechnicalResource{
+		ID: uuid.NewString(), ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "legacy-node:48",
+		LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline,
+		CredentialRevision: 1, RuntimeUserID: agent.ID, ConfigRevision: 1, RowVersion: 1,
+	}
+	require.NoError(t, database.Create(&resource).Error)
+	now := time.Now().UTC().Truncate(time.Second)
+	legacy := model.DeployToken{
+		Token: "already-migrated", UserID: agent.ID, Name: "beagle-242", Status: model.DeployTokenStatusBound,
+		DeviceFingerprint: "device-fingerprint", CreatedBy: 1, BoundAt: &now,
+	}
+	require.NoError(t, database.Create(&legacy).Error)
+	existing := model.TechnicalResourceDeployToken{
+		ID: uuid.NewString(), TechnicalResourceID: resource.ID, Token: legacy.Token, Name: legacy.Name,
+		RuntimeUserID: agent.ID, Status: model.TechnicalResourceDeployTokenConsumed,
+		DeviceFingerprint: legacy.DeviceFingerprint, ConsumedAt: &now, CreatedByUserID: agent.ID,
+	}
+	require.NoError(t, database.Create(&existing).Error)
+
+	require.NoError(t, migrateAgentDeployTokensToTechnicalResources(database))
+	require.NoError(t, migrateAgentDeployTokensToTechnicalResources(database))
+	var legacyCount, migratedCount, resourceCount int64
+	require.NoError(t, database.Model(&model.DeployToken{}).Where("token = ?", legacy.Token).Count(&legacyCount).Error)
+	require.NoError(t, database.Model(&model.TechnicalResourceDeployToken{}).Where("token = ?", legacy.Token).Count(&migratedCount).Error)
+	require.NoError(t, database.Model(&model.TechnicalResource{}).Count(&resourceCount).Error)
+	require.Zero(t, legacyCount)
+	require.Equal(t, int64(1), migratedCount)
+	require.Equal(t, int64(1), resourceCount)
+}
+
+func TestMigrateDeployTokensRejectsConflictingMigratedToken(t *testing.T) {
+	database := newDeployTokenMigrationTestDB(t)
+	agent := model.User{Name: "agent-user", Role: model.UserRoleAgent, SecretHash: "fixture", Enabled: true}
+	require.NoError(t, database.Create(&agent).Error)
+	provider := model.ResourceProvider{ID: uuid.NewString(), Key: "beagle", DisplayName: "Beagle", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	require.NoError(t, database.Create(&provider).Error)
+	resource := model.TechnicalResource{
+		ID: uuid.NewString(), ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "conflict",
+		LifecycleState: model.TechnicalResourcePending, HealthState: model.ResourceHealthUnknown,
+		CredentialRevision: 1, RuntimeUserID: agent.ID, ConfigRevision: 1, RowVersion: 1,
+	}
+	require.NoError(t, database.Create(&resource).Error)
+	legacy := model.DeployToken{Token: "conflicting-token", UserID: agent.ID, Name: "legacy-name", Status: model.DeployTokenStatusPending, CreatedBy: 1}
+	require.NoError(t, database.Create(&legacy).Error)
+	existing := model.TechnicalResourceDeployToken{
+		ID: uuid.NewString(), TechnicalResourceID: resource.ID, Token: legacy.Token, Name: "different-name",
+		RuntimeUserID: agent.ID, Status: model.TechnicalResourceDeployTokenPending, CreatedByUserID: agent.ID,
+	}
+	require.NoError(t, database.Create(&existing).Error)
+
+	err := migrateAgentDeployTokensToTechnicalResources(database)
+	require.ErrorContains(t, err, "credential attributes differ")
+	var legacyCount int64
+	require.NoError(t, database.Model(&model.DeployToken{}).Where("token = ?", legacy.Token).Count(&legacyCount).Error)
+	require.Equal(t, int64(1), legacyCount, "the transaction must retain the legacy row on conflict")
+}
+
+func newDeployTokenMigrationTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	database, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.NewString())), &gorm.Config{IgnoreRelationshipsWhenMigrating: true})
+	require.NoError(t, err)
+	require.NoError(t, database.AutoMigrate(&model.User{}, &model.Node{}, &model.ResourceProvider{}, &model.TechnicalResource{}, &model.TechnicalResourceBinding{}, &model.DeployToken{}, &model.TechnicalResourceDeployToken{}))
+	return database
 }
