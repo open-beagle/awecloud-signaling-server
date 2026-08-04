@@ -282,6 +282,19 @@ func (s *AgentServiceServer) Authenticate(ctx context.Context, req *pb.AgentAuth
 		}
 	}
 
+	// Resource deployment tokens remain the Agent credential after admission.
+	if !authenticated {
+		var resourceToken model.TechnicalResourceDeployToken
+		if err := db.DB.WithContext(ctx).Table("technical_resource_deploy_token AS token").
+			Select("token.*").
+			Joins("JOIN technical_resource AS resource ON resource.id = token.technical_resource_id").
+			Where("token.runtime_user_id = ? AND token.token = ? AND token.status = ?", user.ID, req.Secret, model.TechnicalResourceDeployTokenConsumed).
+			Where("resource.lifecycle_state = ? AND resource.deleted_at IS NULL", model.TechnicalResourceRegistered).
+			First(&resourceToken).Error; err == nil {
+			authenticated = true
+		}
+	}
+
 	if !authenticated {
 		logger.Warnf("Agent 密钥验证失败: %d", req.AgentId)
 		return &pb.AgentAuthenticateResponse{

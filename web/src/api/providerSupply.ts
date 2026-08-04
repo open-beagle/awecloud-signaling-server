@@ -97,12 +97,6 @@ export interface TechnicalResourceDeleteCheck {
   blockers: Array<{ code: string; message: string; count: number }>
 }
 
-export interface ProviderRuntimeIdentity {
-  user_id: number
-  name: string
-  hostname: string
-}
-
 export interface DeploymentCredentialResult {
   credential: { id: string; technical_resource_id: string; token: string; expires_at: string }
   install_command: string
@@ -226,12 +220,9 @@ export const getProviderTechnicalResources = (providerId: string, params: Provid
     headers: providerHeaders(providerId),
   })
 
-export const getProviderRuntimeIdentities = (providerId: string) =>
-  request.get<any, { success: boolean; data: ProviderRuntimeIdentity[] }>('/api/v1/management/provider/runtime-identities', { headers: providerHeaders(providerId) })
-
-export const createProviderAgent = (providerId: string, runtimeUserId: number, reason: string) =>
+export const createProviderAgent = (providerId: string, runtimeName: string, reason: string) =>
   request.post<any, { success: boolean; data: TechnicalResource }>('/api/v1/management/provider/technical-resources', {
-    type: 'agent', runtime_user_id: runtimeUserId, credential_revision: 1, reason,
+    type: 'agent', runtime_name: runtimeName, credential_revision: 1, reason,
   }, { headers: { ...providerHeaders(providerId), 'Idempotency-Key': crypto.randomUUID() } })
 
 export const createProviderDeploymentCredential = (providerId: string, resourceId: string, name: string, ttlMinutes: number) =>

@@ -44,7 +44,7 @@ func createOtherProviderAuthorization(t *testing.T, fixture providerSupplyFixtur
 func createBoundAgentForProvider(t *testing.T, fixture providerSupplyFixture, authorization *ManagementAuthorizationContext, stableKey string, nodeID uint64) *model.TechnicalResource {
 	t.Helper()
 	resource, err := fixture.service.CreateTechnicalResource(context.Background(), authorization, CreateTechnicalResourceInput{
-		Type: model.TechnicalResourceAgent, StableKey: stableKey, CredentialRevision: 1,
+		Type: model.TechnicalResourceAgent, StableKey: stableKey, CredentialRevision: 1, RuntimeName: stableKey,
 	})
 	require.NoError(t, err)
 	bound, err := fixture.service.BindTechnicalResource(context.Background(), authorization, BindTechnicalResourceInput{

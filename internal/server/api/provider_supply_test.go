@@ -188,14 +188,14 @@ func TestProviderSupplyAPIReadsOnlyCurrentProvider(t *testing.T) {
 
 func TestProviderSupplyAPICreateIsIdempotentAndTransactional(t *testing.T) {
 	fixture, login := prepareProviderSupplyAPIFixture(t, config.FeatureFlagsSection{ResourceModelWrite: true})
-	body := `{"type":"agent","stable_key":"agent-api-a","credential_revision":1,"reason":"register API agent"}`
+	body := `{"type":"agent","stable_key":"agent-api-a","runtime_name":"agent-api-a","credential_revision":1,"reason":"register API agent"}`
 	headers := map[string]string{HeaderIdempotencyKey: "provider-create-agent-a"}
 	created := providerAPIRequest(fixture, login, http.MethodPost, providerTechnicalResourceCreateRoute, fixture.provider.ID, body, headers)
 	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 	require.Equal(t, `"1"`, created.Header().Get("ETag"))
 
 	replayed := providerAPIRequest(fixture, login, http.MethodPost, providerTechnicalResourceCreateRoute, fixture.provider.ID,
-		`{"reason":"register API agent","credential_revision":1,"stable_key":"agent-api-a","type":"agent"}`, headers)
+		`{"reason":"register API agent","credential_revision":1,"runtime_name":"agent-api-a","stable_key":"agent-api-a","type":"agent"}`, headers)
 	require.Equal(t, http.StatusCreated, replayed.Code, replayed.Body.String())
 	require.JSONEq(t, created.Body.String(), replayed.Body.String())
 	require.Equal(t, `"1"`, replayed.Header().Get("ETag"))
@@ -211,7 +211,7 @@ func TestProviderSupplyAPICreateIsIdempotentAndTransactional(t *testing.T) {
 	require.Equal(t, int64(1), idempotencyCount)
 
 	reused := providerAPIRequest(fixture, login, http.MethodPost, providerTechnicalResourceCreateRoute, fixture.provider.ID,
-		`{"type":"agent","stable_key":"agent-api-other","credential_revision":1,"reason":"different request"}`, headers)
+		`{"type":"agent","stable_key":"agent-api-other","runtime_name":"agent-api-other","credential_revision":1,"reason":"different request"}`, headers)
 	require.Equal(t, http.StatusConflict, reused.Code, reused.Body.String())
 	assertResponseErrorCode(t, reused, ErrorCodeIdempotencyKeyReused)
 
@@ -231,7 +231,7 @@ func TestProviderSupplyAPIAuditFailureRollsBackMutationAndOutbox(t *testing.T) {
 	require.NoError(t, fixture.database.Migrator().DropTable(&model.AuditLog{}))
 
 	response := providerAPIRequest(fixture, login, http.MethodPost, providerTechnicalResourceCreateRoute, fixture.provider.ID,
-		`{"type":"agent","stable_key":"agent-audit-failure","credential_revision":1,"reason":"verify atomic rollback"}`,
+		`{"type":"agent","stable_key":"agent-audit-failure","runtime_name":"agent-audit-failure","credential_revision":1,"reason":"verify atomic rollback"}`,
 		map[string]string{HeaderIdempotencyKey: "provider-audit-failure"})
 	require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
 	assertResponseErrorCode(t, response, ErrorCodeProviderSupplyAuditFailed)
@@ -338,7 +338,7 @@ func TestProviderSupplyAPIWriteFlagAndCreateHeadersFailClosed(t *testing.T) {
 	t.Run("resource write flag disabled", func(t *testing.T) {
 		fixture, login := prepareProviderSupplyAPIFixture(t, config.FeatureFlagsSection{})
 		response := providerAPIRequest(fixture, login, http.MethodPost, providerTechnicalResourceCreateRoute, fixture.provider.ID,
-			`{"type":"agent","stable_key":"disabled-agent","credential_revision":1,"reason":"must stay disabled"}`, nil)
+			`{"type":"agent","stable_key":"disabled-agent","runtime_name":"disabled-agent","credential_revision":1,"reason":"must stay disabled"}`, nil)
 		require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
 		assertResponseErrorCode(t, response, ErrorCodeFeatureDisabled)
 		var resources int64

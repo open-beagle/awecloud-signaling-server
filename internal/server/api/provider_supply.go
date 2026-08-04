@@ -59,7 +59,7 @@ type providerTechnicalResourceCreateRequest struct {
 	StableKey          string                      `json:"stable_key"`
 	ParentID           string                      `json:"parent_id"`
 	CredentialRevision int64                       `json:"credential_revision"`
-	RuntimeUserID      uint64                      `json:"runtime_user_id"`
+	RuntimeName        string                      `json:"runtime_name"`
 	Reason             string                      `json:"reason"`
 }
 
@@ -133,27 +133,13 @@ func (a *ProviderSupplyAPI) CreateTechnicalResource(c *gin.Context) {
 	executeProviderIdempotentMutation(c, authorization, body, http.StatusCreated, "create_technical_resource", request.Reason,
 		func(supply *service.ProviderSupplyService) (any, string, string, int64, error) {
 			resource, err := supply.CreateTechnicalResource(c.Request.Context(), authorization, service.CreateTechnicalResourceInput{
-				Type: request.Type, StableKey: request.StableKey, ParentID: request.ParentID, CredentialRevision: request.CredentialRevision, RuntimeUserID: request.RuntimeUserID,
+				Type: request.Type, StableKey: request.StableKey, ParentID: request.ParentID, CredentialRevision: request.CredentialRevision, RuntimeName: request.RuntimeName,
 			})
 			if err != nil {
 				return nil, "", "", 0, err
 			}
 			return resource, "technical_resource", resource.ID, resource.RowVersion, nil
 		})
-}
-
-func (a *ProviderSupplyAPI) ListRuntimeIdentities(c *gin.Context) {
-	authorization, ok := currentManagementAuthorization(c)
-	if !ok {
-		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
-		return
-	}
-	result, err := service.NewProviderSupplyService(db.DB).ListProviderRuntimeIdentities(c.Request.Context(), authorization)
-	if err != nil {
-		writeProviderSupplyError(c, err, false)
-		return
-	}
-	c.JSON(http.StatusOK, NewSuccessResponse(result))
 }
 
 func (a *ProviderSupplyAPI) CreateDeploymentCredential(c *gin.Context) {

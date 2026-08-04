@@ -511,7 +511,6 @@ func (s *Server) setupRouter() *gin.Engine {
 					providerGroup.GET("/memberships", api.RequireManagementPermission(service.PermissionProviderMembershipsRead), providerGovernanceAPI.ListMemberships)
 					providerGroup.GET("/audit-logs", api.RequireManagementPermission(service.PermissionProviderAuditRead), providerGovernanceAPI.ListAuditLogs)
 					providerGroup.GET("/technical-resources", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.ListTechnicalResources)
-					providerGroup.GET("/runtime-identities", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.ListRuntimeIdentities)
 					providerGroup.GET("/technical-resources/:id", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.GetTechnicalResource)
 					providerGroup.GET("/technical-resources/:id/capabilities", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.GetTechnicalResourceCapabilities)
 					providerGroup.PATCH("/technical-resources/:id/config", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.UpdateTechnicalResourceCapabilities)

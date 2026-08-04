@@ -50,7 +50,19 @@
         <el-table-column label="版本" width="130"><template #default="{ row }"><strong>{{ row.version || '-' }}</strong><span class="secondary">{{ row.updater_protocol ? `Updater ${row.updater_protocol}` : '不支持远程更新' }}</span></template></el-table-column>
         <el-table-column label="库存进度" min-width="150"><template #default="{ row }"><strong>seq {{ row.last_sequence }}</strong><span class="secondary">观测 rev {{ row.observed_revision }}</span></template></el-table-column>
         <el-table-column label="最后上报" width="180"><template #default="{ row }">{{ formatTime(row.last_received_at) }}</template></el-table-column>
-        <el-table-column label="" width="62" fixed="right" align="center"><template #default="{ row }"><el-button text :icon="MoreFilled" aria-label="更多操作" @click="openDetail(row.id)" /></template></el-table-column>
+        <el-table-column label="" width="62" fixed="right" align="center">
+          <template #default="{ row }">
+            <el-dropdown trigger="click" @command="command => handleRowCommand(command, row)">
+              <el-button text :icon="MoreFilled" :loading="deletingResourceId === row.id" aria-label="更多操作" @click.stop />
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="detail">查看详情</el-dropdown-item>
+                  <el-dropdown-item v-if="canDelete(row)" command="delete" :disabled="!canWrite" divided>删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </template>
+        </el-table-column>
       </el-table>
 
       <el-empty v-if="!loading && !errorMessage && items.length === 0" description="当前资源方没有符合条件的技术资源" />
@@ -59,13 +71,11 @@
 
 	<el-dialog v-model="createDialog" title="创建 Agent" width="620px" destroy-on-close>
 		<el-form label-position="top">
-			<el-form-item label="运行身份" required><el-select v-model="createForm.runtimeUserId" style="width: 100%" placeholder="选择当前资源方已有 Agent 身份"><el-option v-for="identity in runtimeIdentities" :key="identity.user_id" :value="identity.user_id" :label="`${identity.hostname} · ${identity.name}`" /></el-select></el-form-item>
-			<el-form-item label="部署名称" required><el-input v-model="createForm.name" maxlength="100" placeholder="例如：北京生产区 Agent" /></el-form-item>
+			<el-form-item label="Agent 名称" required><el-input v-model="createForm.name" maxlength="100" placeholder="小写字母、数字和连字符，例如 szzy" /></el-form-item>
 			<el-form-item label="Token 有效期"><el-input-number v-model="createForm.ttlMinutes" :min="1" :max="1440" :step="10" /> <span class="form-suffix">分钟</span></el-form-item>
 			<el-form-item label="创建原因" required><el-input v-model="createForm.reason" type="textarea" :rows="3" maxlength="500" show-word-limit /></el-form-item>
 		</el-form>
-		<el-alert v-if="runtimeIdentities.length === 0" title="当前资源方没有可用的 Agent 运行身份" description="请先完成一个存量 Agent 的资源归属迁移。" type="warning" show-icon :closable="false" />
-		<template #footer><el-button @click="createDialog = false">取消</el-button><el-button type="primary" :loading="creating" :disabled="!createForm.runtimeUserId || !createForm.name.trim() || !createForm.reason.trim()" @click="createAgent">创建并生成命令</el-button></template>
+		<template #footer><el-button @click="createDialog = false">取消</el-button><el-button type="primary" :loading="creating" :disabled="!agentNameValid || !createForm.reason.trim()" @click="createAgent">创建并生成命令</el-button></template>
 	</el-dialog>
 
 	<el-dialog v-model="commandDialog" title="部署 Agent" width="760px" :close-on-click-modal="false">
@@ -78,11 +88,11 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { DocumentCopy, MoreFilled, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import PageHeader from '@/components/Common/PageHeader.vue'
-import { createProviderAgent, createProviderDeploymentCredential, getProviderRuntimeIdentities, getProviderTechnicalResources, type ProviderRuntimeIdentity, type TechnicalResource, type TechnicalResourceState } from '@/api/providerSupply'
+import { checkProviderTechnicalResourceDelete, createProviderAgent, createProviderDeploymentCredential, deleteProviderTechnicalResource, getProviderTechnicalResources, type TechnicalResource, type TechnicalResourceState } from '@/api/providerSupply'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspaceStore = useWorkspaceStore()
@@ -95,10 +105,11 @@ const pagination = reactive({ page: 1, size: 20, total: 0 })
 const createDialog = ref(false)
 const commandDialog = ref(false)
 const creating = ref(false)
+const deletingResourceId = ref('')
 const installCommand = ref('')
-const runtimeIdentities = ref<ProviderRuntimeIdentity[]>([])
-const createForm = reactive({ runtimeUserId: 0, name: '', ttlMinutes: 30, reason: '' })
+const createForm = reactive({ name: '', ttlMinutes: 30, reason: '' })
 const canWrite = computed(() => workspaceStore.can('provider.technical_resources.write'))
+const agentNameValid = computed(() => /^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$/.test(createForm.name.trim()))
 
 const load = async () => {
   const providerId = workspaceStore.providerId
@@ -131,9 +142,6 @@ const load = async () => {
 
 const openCreate = async () => {
 	if (!workspaceStore.providerId) return
-	const response = await getProviderRuntimeIdentities(workspaceStore.providerId)
-	runtimeIdentities.value = response.success ? response.data : []
-	createForm.runtimeUserId = runtimeIdentities.value.length === 1 ? runtimeIdentities.value[0].user_id : 0
 	createForm.name = ''
 	createForm.reason = ''
 	createForm.ttlMinutes = 30
@@ -141,10 +149,10 @@ const openCreate = async () => {
 }
 
 const createAgent = async () => {
-	if (!workspaceStore.providerId || !createForm.runtimeUserId) return
+	if (!workspaceStore.providerId || !agentNameValid.value) return
 	creating.value = true
 	try {
-		const created = await createProviderAgent(workspaceStore.providerId, createForm.runtimeUserId, createForm.reason.trim())
+		const created = await createProviderAgent(workspaceStore.providerId, createForm.name.trim(), createForm.reason.trim())
 		if (!created.success) return
 		const credential = await createProviderDeploymentCredential(workspaceStore.providerId, created.data.id, createForm.name.trim(), createForm.ttlMinutes)
 		if (!credential.success) return
@@ -162,6 +170,38 @@ const copyCommand = async () => {
 
 const applyFilters = () => { pagination.page = 1; load() }
 const openDetail = (resourceId: string) => router.push(`/provider-technical-resources/${resourceId}`)
+const canDelete = (resource: TechnicalResource) => resource.health_state === 'offline' && resource.lifecycle_state !== 'deleted'
+const handleRowCommand = async (command: string, resource: TechnicalResource) => {
+  if (command === 'detail') {
+    await openDetail(resource.id)
+    return
+  }
+  if (command !== 'delete' || !canWrite.value || !canDelete(resource) || !workspaceStore.providerId) return
+
+  deletingResourceId.value = resource.id
+  try {
+    const check = await checkProviderTechnicalResourceDelete(workspaceStore.providerId, resource.id)
+    if (!check.success || !check.data.allowed) {
+      const blockers = check.data?.blockers.map(item => `${item.message}${item.count > 1 ? `（${item.count} 项）` : ''}`).join('\n') || '当前资源不允许删除。'
+      await ElMessageBox.alert(blockers, '无法删除技术资源', { confirmButtonText: '知道了', type: 'warning' })
+      return
+    }
+    const result = await ElMessageBox.prompt(`删除 ${resource.hostname || '该资源'} 后不可恢复，请输入删除原因。`, '确认删除技术资源', {
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+      inputPattern: /\S+/,
+      inputErrorMessage: '请输入删除原因',
+      type: 'warning',
+    })
+    await deleteProviderTechnicalResource(workspaceStore.providerId, resource, result.value.trim())
+    ElMessage.success('技术资源已删除')
+    await load()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') throw error
+  } finally {
+    deletingResourceId.value = ''
+  }
+}
 const capabilityLabels = (row: TechnicalResource) => [
   row.ssh_enabled ? 'SSH' : '',
   row.container_ssh_enabled ? 'ContainerSSH' : '',

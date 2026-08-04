@@ -16,33 +16,11 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
-type ProviderRuntimeIdentity struct {
-	UserID   uint64 `json:"user_id"`
-	Name     string `json:"name"`
-	Hostname string `json:"hostname"`
-}
-
 type TechnicalResourceDeploymentCredential struct {
 	ID                  string    `json:"id"`
 	TechnicalResourceID string    `json:"technical_resource_id"`
 	Token               string    `json:"token"`
 	ExpiresAt           time.Time `json:"expires_at"`
-}
-
-func (s *ProviderSupplyService) ListProviderRuntimeIdentities(ctx context.Context, authorization *ManagementAuthorizationContext) ([]ProviderRuntimeIdentity, error) {
-	providerID, err := reauthorizeProviderPermission(s.db.WithContext(ctx), authorization, PermissionProviderTechnicalResourcesRead, s.now().UTC())
-	if err != nil {
-		return nil, err
-	}
-	var result []ProviderRuntimeIdentity
-	err = s.db.WithContext(ctx).Table("technical_resource").Distinct().
-		Select("node.user_id, user.name, COALESCE(NULLIF(node.hostname, ''), node.name) AS hostname").
-		Joins("JOIN technical_resource_binding ON technical_resource_binding.technical_resource_id = technical_resource.id AND technical_resource_binding.enabled = ?", true).
-		Joins("JOIN node ON technical_resource_binding.source_type = ? AND CAST(node.id AS TEXT) = technical_resource_binding.source_id", model.TechnicalResourceBindingLegacyNode).
-		Joins("JOIN user ON user.id = node.user_id").
-		Where("technical_resource.provider_id = ? AND technical_resource.type = ? AND user.role = ? AND user.enabled = ?", providerID, model.TechnicalResourceAgent, model.UserRoleAgent, true).
-		Order("hostname").Scan(&result).Error
-	return result, err
 }
 
 func (s *ProviderSupplyService) CreateTechnicalResourceDeploymentCredential(ctx context.Context, authorization *ManagementAuthorizationContext, resourceID, name string, ttl time.Duration) (*TechnicalResourceDeploymentCredential, error) {
@@ -76,7 +54,7 @@ func (s *ProviderSupplyService) CreateTechnicalResourceDeploymentCredential(ctx 
 			return ErrProviderSupplyConflict
 		}
 		if err := tx.Model(&model.TechnicalResourceDeployToken{}).
-			Where("technical_resource_id = ? AND status = ?", resource.ID, model.TechnicalResourceDeployTokenPending).
+			Where("technical_resource_id = ? AND status <> ?", resource.ID, model.TechnicalResourceDeployTokenRevoked).
 			Updates(map[string]any{"status": model.TechnicalResourceDeployTokenRevoked, "revoked_at": now}).Error; err != nil {
 			return err
 		}
@@ -168,7 +146,8 @@ func (s *ProviderSupplyService) DeleteTechnicalResource(ctx context.Context, aut
 			return err
 		}
 		updated := tx.Model(&model.TechnicalResource{}).
-			Where("provider_id = ? AND id = ? AND row_version = ? AND lifecycle_state = ?", providerID, resource.ID, resource.RowVersion, model.TechnicalResourceRetired).
+			Where("provider_id = ? AND id = ? AND row_version = ?", providerID, resource.ID, resource.RowVersion).
+			Where("lifecycle_state = ? OR health_state = ?", model.TechnicalResourceRetired, model.ResourceHealthOffline).
 			Updates(map[string]any{
 				"health_state": model.ResourceHealthOffline, "lease_expires_at": nil, "deleted_at": now,
 				"credential_revision": gorm.Expr("credential_revision + 1"),
@@ -454,8 +433,8 @@ func checkTechnicalResourceDelete(database *gorm.DB, providerID string, resource
 			result.Blockers = append(result.Blockers, TechnicalResourceDeleteBlocker{Code: code, Message: message, Count: count})
 		}
 	}
-	if resource.LifecycleState != model.TechnicalResourceRetired {
-		add("RESOURCE_NOT_RETIRED", "仅已退役资源可以删除", 1)
+	if resource.LifecycleState != model.TechnicalResourceRetired && resource.HealthState != model.ResourceHealthOffline {
+		add("RESOURCE_NOT_DELETABLE", "仅已退役或离线资源可以删除", 1)
 	}
 	if resource.DeletedAt != nil {
 		add("RESOURCE_ALREADY_DELETED", "资源已经删除", 1)

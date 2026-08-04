@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
@@ -39,8 +43,10 @@ type CreateTechnicalResourceInput struct {
 	StableKey          string
 	ParentID           string
 	CredentialRevision int64
-	RuntimeUserID      uint64
+	RuntimeName        string
 }
+
+var technicalResourceRuntimeNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$`)
 
 func (s *ProviderSupplyService) CreateTechnicalResource(ctx context.Context, authorization *ManagementAuthorizationContext, input CreateTechnicalResourceInput) (*model.TechnicalResource, error) {
 	if s == nil || s.db == nil {
@@ -48,6 +54,7 @@ func (s *ProviderSupplyService) CreateTechnicalResource(ctx context.Context, aut
 	}
 	input.StableKey = strings.TrimSpace(input.StableKey)
 	input.ParentID = strings.TrimSpace(input.ParentID)
+	input.RuntimeName = strings.ToLower(strings.TrimSpace(input.RuntimeName))
 	if len(input.StableKey) > 128 || input.CredentialRevision <= 0 {
 		return nil, ErrProviderSupplyInvalidInput
 	}
@@ -58,10 +65,14 @@ func (s *ProviderSupplyService) CreateTechnicalResource(ctx context.Context, aut
 		(input.Type == model.TechnicalResourceEndpoint && input.ParentID == "") {
 		return nil, ErrProviderSupplyInvalidInput
 	}
+	if (input.Type == model.TechnicalResourceAgent && !technicalResourceRuntimeNamePattern.MatchString(input.RuntimeName)) ||
+		(input.Type == model.TechnicalResourceEndpoint && input.RuntimeName != "") {
+		return nil, ErrProviderSupplyInvalidInput
+	}
 
 	now := s.now().UTC()
 	resource := &model.TechnicalResource{
-		ID: uuid.NewString(), Type: input.Type, StableKey: input.StableKey, RuntimeUserID: input.RuntimeUserID,
+		ID: uuid.NewString(), Type: input.Type, StableKey: input.StableKey,
 		LifecycleState: model.TechnicalResourcePending, HealthState: model.ResourceHealthUnknown,
 		CredentialRevision: input.CredentialRevision, ConfigRevision: 1, ObservedRevision: 0, RowVersion: 1,
 	}
@@ -86,22 +97,35 @@ func (s *ProviderSupplyService) CreateTechnicalResource(ctx context.Context, aut
 				}
 				return err
 			}
-			if resource.RuntimeUserID != 0 && resource.RuntimeUserID != parent.RuntimeUserID {
-				return ErrProviderSupplyConflict
-			}
 			resource.RuntimeUserID = parent.RuntimeUserID
-		} else if resource.RuntimeUserID != 0 {
-			var allowed int64
-			if err := tx.Table("technical_resource").
-				Joins("JOIN technical_resource_binding ON technical_resource_binding.technical_resource_id = technical_resource.id AND technical_resource_binding.enabled = ?", true).
-				Joins("JOIN node ON technical_resource_binding.source_type = ? AND CAST(node.id AS TEXT) = technical_resource_binding.source_id", model.TechnicalResourceBindingLegacyNode).
-				Where("technical_resource.provider_id = ? AND technical_resource.type = ? AND node.user_id = ?", providerID, model.TechnicalResourceAgent, resource.RuntimeUserID).
-				Count(&allowed).Error; err != nil {
+		} else {
+			var provider model.ResourceProvider
+			if err := tx.Select("key").First(&provider, "id = ?", providerID).Error; err != nil {
 				return err
 			}
-			if allowed == 0 {
-				return ErrProviderSupplyConflict
+			runtimeUserName := provider.Key + "-" + input.RuntimeName
+			if len(runtimeUserName) > 100 {
+				return ErrProviderSupplyInvalidInput
 			}
+			runtimeSecret := make([]byte, 32)
+			if _, err := rand.Read(runtimeSecret); err != nil {
+				return err
+			}
+			secretHash, err := bcrypt.GenerateFromPassword([]byte(hex.EncodeToString(runtimeSecret)), bcrypt.DefaultCost)
+			if err != nil {
+				return err
+			}
+			runtimeUser := model.User{
+				Name: runtimeUserName, Alias: input.RuntimeName, Role: model.UserRoleAgent,
+				SecretHash: string(secretHash), Enabled: true, Source: model.UserSourceManual,
+			}
+			if err := tx.Create(&runtimeUser).Error; err != nil {
+				if isDatabaseConstraintError(err) {
+					return ErrProviderSupplyConflict
+				}
+				return err
+			}
+			resource.RuntimeUserID = runtimeUser.ID
 		}
 		if err := tx.Create(resource).Error; err != nil {
 			if isDatabaseConstraintError(err) {

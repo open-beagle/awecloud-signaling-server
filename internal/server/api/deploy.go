@@ -594,13 +594,9 @@ func (a *DeployAPI) RegisterCompat(c *gin.Context) {
 func (a *DeployAPI) createAgentAuthKey(ctx context.Context, userName string) string {
 	hsUserName := fmt.Sprintf("agent-%s", userName)
 
-	user, err := a.hsClient.GetUserByName(ctx, hsUserName)
+	user, err := a.hsClient.GetOrCreateUser(ctx, hsUserName)
 	if err != nil {
-		logger.Warnf("获取 Headscale 用户失败: %v", err)
-		return ""
-	}
-	if user == nil {
-		logger.Warnf("Headscale 用户 %s 不存在", hsUserName)
+		logger.Warnf("获取或创建 Headscale 用户失败: %v", err)
 		return ""
 	}
 

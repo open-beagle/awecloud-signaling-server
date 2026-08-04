@@ -127,25 +127,23 @@ func TestProviderTechnicalResourceCapabilitiesAndUpdaterUseScopedBinding(t *test
 func TestProviderCreatesResourceOwnedOneTimeDeploymentCredential(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	ctx := context.Background()
-	fixture.createBoundAgent(t, "existing-runtime", 1001)
-	require.NoError(t, fixture.database.Model(&model.User{}).Where("id = ?", fixture.actor.ID).Update("role", model.UserRoleAgent).Error)
-
-	identities, err := fixture.service.ListProviderRuntimeIdentities(ctx, fixture.authorization)
-	require.NoError(t, err)
-	require.Len(t, identities, 1)
-	require.Equal(t, fixture.actor.ID, identities[0].UserID)
 	resource, err := fixture.service.CreateTechnicalResource(ctx, fixture.authorization, CreateTechnicalResourceInput{
-		Type: model.TechnicalResourceAgent, CredentialRevision: 1, RuntimeUserID: fixture.actor.ID,
+		Type: model.TechnicalResourceAgent, CredentialRevision: 1, RuntimeName: "new-agent",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "resource:"+resource.ID, resource.StableKey)
+	var runtimeUser model.User
+	require.NoError(t, fixture.database.First(&runtimeUser, resource.RuntimeUserID).Error)
+	require.Equal(t, "provider-a-new-agent", runtimeUser.Name)
+	require.Equal(t, "new-agent", runtimeUser.Alias)
+	require.Equal(t, model.UserRoleAgent, runtimeUser.Role)
 	credential, err := fixture.service.CreateTechnicalResourceDeploymentCredential(ctx, fixture.authorization, resource.ID, "new-agent", 30*time.Minute)
 	require.NoError(t, err)
 	require.NotEmpty(t, credential.Token)
 	var token model.TechnicalResourceDeployToken
 	require.NoError(t, fixture.database.First(&token, "id = ?", credential.ID).Error)
 	require.Equal(t, resource.ID, token.TechnicalResourceID)
-	require.Equal(t, fixture.actor.ID, token.RuntimeUserID)
+	require.Equal(t, runtimeUser.ID, token.RuntimeUserID)
 	require.Equal(t, model.TechnicalResourceDeployTokenPending, token.Status)
 }
 
@@ -181,10 +179,29 @@ func TestProviderDeletesRetiredTechnicalResourceAsTombstone(t *testing.T) {
 	require.False(t, check.Allowed)
 }
 
+func TestProviderDeletesOfflineTechnicalResourceWithoutRetiring(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	ctx := context.Background()
+	agent := fixture.createBoundAgent(t, "agent-offline-delete", 1002)
+	require.NoError(t, fixture.database.Model(&model.TechnicalResource{}).Where("id = ?", agent.ID).
+		Update("health_state", model.ResourceHealthOffline).Error)
+	require.NoError(t, fixture.database.First(agent, "id = ?", agent.ID).Error)
+	require.Equal(t, model.TechnicalResourceRegistered, agent.LifecycleState)
+
+	check, err := fixture.service.CheckTechnicalResourceDelete(ctx, fixture.authorization, agent.ID)
+	require.NoError(t, err)
+	require.True(t, check.Allowed)
+
+	deleted, err := fixture.service.DeleteTechnicalResource(ctx, fixture.authorization, agent.ID, agent.RowVersion, "remove stale offline resource")
+	require.NoError(t, err)
+	require.Equal(t, model.TechnicalResourceDeleted, deleted.LifecycleState)
+	require.NotNil(t, deleted.DeletedAt)
+}
+
 func (f providerSupplyFixture) createBoundAgent(t *testing.T, stableKey string, nodeID uint64) *model.TechnicalResource {
 	t.Helper()
 	resource, err := f.service.CreateTechnicalResource(context.Background(), f.authorization, CreateTechnicalResourceInput{
-		Type: model.TechnicalResourceAgent, StableKey: stableKey, CredentialRevision: 1,
+		Type: model.TechnicalResourceAgent, StableKey: stableKey, CredentialRevision: 1, RuntimeName: strings.ReplaceAll(stableKey, ":", "-"),
 	})
 	require.NoError(t, err)
 	bound, err := f.service.BindTechnicalResource(context.Background(), f.authorization, BindTechnicalResourceInput{
@@ -205,14 +222,14 @@ func TestProviderSupplyTechnicalResourceBindingAndScopeIsolation(t *testing.T) {
 	require.Equal(t, int64(2), agent.RowVersion)
 
 	_, err := fixture.service.CreateTechnicalResource(ctx, fixture.authorization, CreateTechnicalResourceInput{
-		Type: model.TechnicalResourceAgent, StableKey: "agent-stable-a", CredentialRevision: 1,
+		Type: model.TechnicalResourceAgent, StableKey: "agent-stable-a", CredentialRevision: 1, RuntimeName: "agent-stable-duplicate",
 	})
 	require.ErrorIs(t, err, ErrProviderSupplyConflict)
 
 	forgedAuthorization := *fixture.authorization
 	forgedAuthorization.ScopeID = fixture.otherProvider.ID
 	_, err = fixture.service.CreateTechnicalResource(ctx, &forgedAuthorization, CreateTechnicalResourceInput{
-		Type: model.TechnicalResourceAgent, StableKey: "forged-provider", CredentialRevision: 1,
+		Type: model.TechnicalResourceAgent, StableKey: "forged-provider", CredentialRevision: 1, RuntimeName: "forged-provider",
 	})
 	require.ErrorIs(t, err, ErrManagementPermissionDenied)
 
