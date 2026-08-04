@@ -1,8 +1,9 @@
 <template>
   <div class="provider-page">
-    <PageHeader title="技术资源" description="查看当前资源方注册的 Agent 与 Endpoint，以及库存租约和健康状态。">
+    <PageHeader title="技术资源" description="管理当前资源方的 Agent 与 Endpoint 部署位置、运行能力和健康状态。">
       <template #actions>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
+		<el-button type="primary" :icon="Plus" :disabled="!canWrite" @click="openCreate">创建 Agent</el-button>
       </template>
     </PageHeader>
 
@@ -20,7 +21,7 @@
 
     <section class="data-surface">
       <div class="toolbar">
-        <el-input v-model="filters.search" class="search-input" clearable :prefix-icon="Search" placeholder="搜索稳定标识" @keyup.enter="applyFilters" @clear="applyFilters" />
+        <el-input v-model="filters.search" class="search-input" clearable :prefix-icon="Search" placeholder="搜索主机名或稳定标识" @keyup.enter="applyFilters" @clear="applyFilters" />
         <el-select v-model="filters.type" class="filter-select" clearable placeholder="全部类型" @change="applyFilters">
           <el-option label="Agent" value="agent" />
           <el-option label="Endpoint" value="endpoint" />
@@ -28,8 +29,9 @@
         <el-select v-model="filters.state" class="filter-select" clearable placeholder="全部生命周期" @change="applyFilters">
           <el-option label="待注册" value="pending" />
           <el-option label="已注册" value="registered" />
-          <el-option label="已禁用" value="disabled" />
+          <el-option label="维护中" value="disabled" />
           <el-option label="已退役" value="retired" />
+          <el-option label="已删除" value="deleted" />
         </el-select>
         <span class="result-count">{{ pagination.total }} 项技术资源</span>
       </div>
@@ -37,37 +39,66 @@
       <el-table v-loading="loading" :data="items" stripe>
         <el-table-column label="技术资源" min-width="250">
           <template #default="{ row }">
-            <strong>{{ row.stable_key }}</strong>
-            <span class="secondary mono">{{ row.id }}</span>
+            <el-link class="resource-name" type="primary" :underline="false" @click="openDetail(row.id)">{{ row.hostname || '等待主机注册' }}</el-link>
+            <span class="secondary"><template v-if="row.parent_hostname">父 Agent：{{ row.parent_hostname }} · </template><span class="mono">{{ row.stable_key }}</span></span>
           </template>
         </el-table-column>
         <el-table-column label="类型" width="110"><template #default="{ row }">{{ typeLabel(row.type) }}</template></el-table-column>
         <el-table-column label="生命周期" width="120"><template #default="{ row }"><el-tag size="small" :type="lifecycleTag(row.lifecycle_state)">{{ lifecycleLabel(row.lifecycle_state) }}</el-tag></template></el-table-column>
         <el-table-column label="健康" width="110"><template #default="{ row }"><el-tag size="small" effect="plain" :type="healthTag(row.health_state)">{{ healthLabel(row.health_state) }}</el-tag></template></el-table-column>
+        <el-table-column label="开放能力" min-width="190"><template #default="{ row }"><div class="capabilities"><el-tag v-for="capability in capabilityLabels(row)" :key="capability" size="small" effect="plain" type="info">{{ capability }}</el-tag><span v-if="capabilityLabels(row).length === 0" class="secondary inline">未开放</span></div></template></el-table-column>
+        <el-table-column label="版本" width="130"><template #default="{ row }"><strong>{{ row.version || '-' }}</strong><span class="secondary">{{ row.updater_protocol ? `Updater ${row.updater_protocol}` : '不支持远程更新' }}</span></template></el-table-column>
         <el-table-column label="库存进度" min-width="150"><template #default="{ row }"><strong>seq {{ row.last_sequence }}</strong><span class="secondary">观测 rev {{ row.observed_revision }}</span></template></el-table-column>
-        <el-table-column label="租约到期" width="180"><template #default="{ row }">{{ formatTime(row.lease_expires_at) }}</template></el-table-column>
         <el-table-column label="最后上报" width="180"><template #default="{ row }">{{ formatTime(row.last_received_at) }}</template></el-table-column>
+        <el-table-column label="" width="62" fixed="right" align="center"><template #default="{ row }"><el-button text :icon="MoreFilled" aria-label="更多操作" @click="openDetail(row.id)" /></template></el-table-column>
       </el-table>
 
       <el-empty v-if="!loading && !errorMessage && items.length === 0" description="当前资源方没有符合条件的技术资源" />
       <div class="pagination"><el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.size" :total="pagination.total" :page-sizes="[20, 50, 100]" layout="total, sizes, prev, pager, next" @size-change="load" @current-change="load" /></div>
     </section>
+
+	<el-dialog v-model="createDialog" title="创建 Agent" width="620px" destroy-on-close>
+		<el-form label-position="top">
+			<el-form-item label="运行身份" required><el-select v-model="createForm.runtimeUserId" style="width: 100%" placeholder="选择当前资源方已有 Agent 身份"><el-option v-for="identity in runtimeIdentities" :key="identity.user_id" :value="identity.user_id" :label="`${identity.hostname} · ${identity.name}`" /></el-select></el-form-item>
+			<el-form-item label="部署名称" required><el-input v-model="createForm.name" maxlength="100" placeholder="例如：北京生产区 Agent" /></el-form-item>
+			<el-form-item label="Token 有效期"><el-input-number v-model="createForm.ttlMinutes" :min="1" :max="1440" :step="10" /> <span class="form-suffix">分钟</span></el-form-item>
+			<el-form-item label="创建原因" required><el-input v-model="createForm.reason" type="textarea" :rows="3" maxlength="500" show-word-limit /></el-form-item>
+		</el-form>
+		<el-alert v-if="runtimeIdentities.length === 0" title="当前资源方没有可用的 Agent 运行身份" description="请先完成一个存量 Agent 的资源归属迁移。" type="warning" show-icon :closable="false" />
+		<template #footer><el-button @click="createDialog = false">取消</el-button><el-button type="primary" :loading="creating" :disabled="!createForm.runtimeUserId || !createForm.name.trim() || !createForm.reason.trim()" @click="createAgent">创建并生成命令</el-button></template>
+	</el-dialog>
+
+	<el-dialog v-model="commandDialog" title="部署 Agent" width="760px" :close-on-click-modal="false">
+		<el-alert title="部署 Token 仅可成功注册一次，请妥善保管。" type="warning" show-icon :closable="false" />
+		<div class="command-box"><code>{{ installCommand }}</code><el-button :icon="DocumentCopy" circle title="复制安装命令" @click="copyCommand" /></div>
+		<template #footer><el-button type="primary" @click="commandDialog = false">完成</el-button></template>
+	</el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
-import { Refresh, Search } from '@element-plus/icons-vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import { DocumentCopy, MoreFilled, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
 import PageHeader from '@/components/Common/PageHeader.vue'
-import { getProviderTechnicalResources, type TechnicalResource, type TechnicalResourceState } from '@/api/providerSupply'
+import { createProviderAgent, createProviderDeploymentCredential, getProviderRuntimeIdentities, getProviderTechnicalResources, type ProviderRuntimeIdentity, type TechnicalResource, type TechnicalResourceState } from '@/api/providerSupply'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspaceStore = useWorkspaceStore()
+const router = useRouter()
 const loading = ref(false)
 const errorMessage = ref('')
 const items = ref<TechnicalResource[]>([])
 const filters = reactive({ search: '', type: '', state: '' })
 const pagination = reactive({ page: 1, size: 20, total: 0 })
+const createDialog = ref(false)
+const commandDialog = ref(false)
+const creating = ref(false)
+const installCommand = ref('')
+const runtimeIdentities = ref<ProviderRuntimeIdentity[]>([])
+const createForm = reactive({ runtimeUserId: 0, name: '', ttlMinutes: 30, reason: '' })
+const canWrite = computed(() => workspaceStore.can('provider.technical_resources.write'))
 
 const load = async () => {
   const providerId = workspaceStore.providerId
@@ -98,10 +129,49 @@ const load = async () => {
   }
 }
 
+const openCreate = async () => {
+	if (!workspaceStore.providerId) return
+	const response = await getProviderRuntimeIdentities(workspaceStore.providerId)
+	runtimeIdentities.value = response.success ? response.data : []
+	createForm.runtimeUserId = runtimeIdentities.value.length === 1 ? runtimeIdentities.value[0].user_id : 0
+	createForm.name = ''
+	createForm.reason = ''
+	createForm.ttlMinutes = 30
+	createDialog.value = true
+}
+
+const createAgent = async () => {
+	if (!workspaceStore.providerId || !createForm.runtimeUserId) return
+	creating.value = true
+	try {
+		const created = await createProviderAgent(workspaceStore.providerId, createForm.runtimeUserId, createForm.reason.trim())
+		if (!created.success) return
+		const credential = await createProviderDeploymentCredential(workspaceStore.providerId, created.data.id, createForm.name.trim(), createForm.ttlMinutes)
+		if (!credential.success) return
+		installCommand.value = credential.data.install_command
+		createDialog.value = false
+		commandDialog.value = true
+		await load()
+	} finally { creating.value = false }
+}
+
+const copyCommand = async () => {
+	await navigator.clipboard.writeText(installCommand.value)
+	ElMessage.success('安装命令已复制')
+}
+
 const applyFilters = () => { pagination.page = 1; load() }
+const openDetail = (resourceId: string) => router.push(`/provider-technical-resources/${resourceId}`)
+const capabilityLabels = (row: TechnicalResource) => [
+  row.ssh_enabled ? 'SSH' : '',
+  row.container_ssh_enabled ? 'ContainerSSH' : '',
+  row.k8s_enabled ? 'Kubernetes API' : '',
+  row.svc_enabled ? 'Kubernetes Service' : '',
+  row.endpoint_access_enabled ? 'Endpoint 接入' : '',
+].filter(Boolean)
 const typeLabel = (type: string) => type === 'agent' ? 'Agent' : type === 'endpoint' ? 'Endpoint' : type
-const lifecycleLabel = (state: TechnicalResourceState) => ({ pending: '待注册', registered: '已注册', disabled: '已禁用', retired: '已退役' }[state])
-const lifecycleTag = (state: TechnicalResourceState) => ({ pending: 'warning', registered: 'success', disabled: 'info', retired: 'info' }[state] as any)
+const lifecycleLabel = (state: TechnicalResourceState) => ({ pending: '待部署', registered: '已注册', disabled: '维护中', retired: '已退役', deleted: '已删除' }[state])
+const lifecycleTag = (state: TechnicalResourceState) => ({ pending: 'warning', registered: 'success', disabled: 'warning', retired: 'info', deleted: 'info' }[state] as any)
 const healthLabel = (state: string) => ({ unknown: '未知', online: '在线', degraded: '异常', offline: '离线' }[state] || state)
 const healthTag = (state: string) => ({ online: 'success', degraded: 'warning', offline: 'danger', unknown: 'info' }[state] || 'info') as any
 const formatTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
@@ -119,6 +189,12 @@ onMounted(load)
 .filter-select { width: 160px; }
 .result-count { margin-left: auto; color: var(--text-secondary); font-size: 12px; }
 .secondary { display: block; margin-top: 3px; color: var(--text-secondary); font-size: 12px; }
+.secondary.inline { display: inline; margin-top: 0; }
 .mono { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; }
+.resource-name { max-width: 100%; font-weight: 650; }
+.capabilities { display: flex; flex-wrap: wrap; gap: 4px; }
 .pagination { display: flex; justify-content: flex-end; padding: 16px; }
+.form-suffix { margin-left: 8px; color: var(--text-secondary); }
+.command-box { display: flex; align-items: flex-start; gap: 12px; margin-top: 14px; padding: 14px; border: 1px solid var(--border-light); border-radius: 5px; background: #f7f8fa; }
+.command-box code { flex: 1; overflow-wrap: anywhere; line-height: 1.7; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; }
 </style>

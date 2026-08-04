@@ -16,6 +16,7 @@ const (
 	TechnicalResourceRegistered TechnicalResourceLifecycleState = "registered"
 	TechnicalResourceDisabled   TechnicalResourceLifecycleState = "disabled"
 	TechnicalResourceRetired    TechnicalResourceLifecycleState = "retired"
+	TechnicalResourceDeleted    TechnicalResourceLifecycleState = "deleted"
 )
 
 type ResourceHealthState string
@@ -36,6 +37,7 @@ type TechnicalResource struct {
 	LifecycleState     TechnicalResourceLifecycleState `gorm:"size:20;not null;default:'pending';index;check:chk_technical_resource_lifecycle,lifecycle_state IN ('pending','registered','disabled','retired')" json:"lifecycle_state"`
 	HealthState        ResourceHealthState             `gorm:"size:20;not null;default:'unknown';index;check:chk_technical_resource_health,health_state IN ('unknown','online','degraded','offline')" json:"health_state"`
 	CredentialRevision int64                           `gorm:"not null;default:1;check:chk_technical_resource_credential_revision,credential_revision > 0" json:"credential_revision"`
+	RuntimeUserID      uint64                          `gorm:"not null;default:0;index" json:"-"`
 	SourceEpoch        string                          `gorm:"size:36" json:"source_epoch,omitempty"`
 	LastSequence       int64                           `gorm:"not null;default:0;check:chk_technical_resource_last_sequence,last_sequence >= 0" json:"last_sequence"`
 	LastPayloadHash    string                          `gorm:"size:64" json:"last_payload_hash,omitempty"`
@@ -46,6 +48,7 @@ type TechnicalResource struct {
 	RowVersion         int64                           `gorm:"not null;default:1;check:chk_technical_resource_row_version,row_version > 0" json:"row_version"`
 	CreatedAt          time.Time                       `json:"created_at"`
 	UpdatedAt          time.Time                       `json:"updated_at"`
+	DeletedAt          *time.Time                      `gorm:"index" json:"deleted_at,omitempty"`
 
 	Provider *ResourceProvider  `gorm:"foreignKey:ProviderID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT" json:"-"`
 	Parent   *TechnicalResource `gorm:"foreignKey:ProviderID,ParentID;references:ProviderID,ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT" json:"-"`

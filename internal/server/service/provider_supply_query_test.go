@@ -69,6 +69,59 @@ func TestProviderSupplyQueriesAreProviderScoped(t *testing.T) {
 	require.ErrorIs(t, err, ErrProviderSupplyObjectNotFound)
 }
 
+func TestTechnicalResourceQueriesProjectAndSearchRuntimeHostname(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	require.NoError(t, fixture.database.Model(&model.Node{}).Where("id = ?", 1001).Updates(map[string]any{
+		"hostname": "beagle-prod-01", "version": "v1.2.0", "updater_protocol": "v2",
+		"container_ssh_protocol": "v1", "k8s_enabled": true,
+	}).Error)
+	fixture.actor.SSHEnabled = true
+	require.NoError(t, fixture.database.Model(&model.User{}).Where("id = ?", fixture.actor.ID).Update("ssh_enabled", true).Error)
+	agent := fixture.createBoundAgent(t, "legacy-node:1001", 1001)
+
+	endpoint, err := fixture.service.CreateTechnicalResource(context.Background(), fixture.authorization, CreateTechnicalResourceInput{
+		Type: model.TechnicalResourceEndpoint, StableKey: "legacy-endpoint:a", ParentID: agent.ID, CredentialRevision: 1,
+	})
+	require.NoError(t, err)
+	_, err = fixture.service.BindTechnicalResource(context.Background(), fixture.authorization, BindTechnicalResourceInput{
+		TechnicalResourceID: endpoint.ID, SourceType: model.TechnicalResourceBindingLegacyEndpoint,
+		SourceID: "legacy-endpoint-a", ExpectedResourceVersion: endpoint.RowVersion, Reason: "hostname projection",
+	})
+	require.NoError(t, err)
+
+	result, err := fixture.service.ListTechnicalResources(context.Background(), fixture.authorization, ProviderSupplyListInput{
+		Search: "beagle-prod", Page: 1, PageSize: 20,
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.Total)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, agent.ID, result.Items[0].ID)
+	require.Equal(t, "beagle-prod-01", result.Items[0].Hostname)
+	require.Equal(t, "reported", result.Items[0].HostnameSource)
+	require.Equal(t, "v1.2.0", result.Items[0].Version)
+	require.True(t, result.Items[0].SSHEnabled)
+	require.True(t, result.Items[0].ContainerSSHEnabled)
+	require.True(t, result.Items[0].K8SEnabled)
+
+	detail, err := fixture.service.GetTechnicalResource(context.Background(), fixture.authorization, endpoint.ID)
+	require.NoError(t, err)
+	require.Equal(t, "endpoint-a", detail.Resource.Hostname)
+	require.Equal(t, "legacy_name", detail.Resource.HostnameSource)
+	require.Equal(t, "beagle-prod-01", detail.Resource.ParentHostname)
+
+	otherAuthorization := createOtherProviderAuthorization(t, fixture)
+	otherResource := createBoundAgentForProvider(t, fixture, otherAuthorization, "other-hostname", 1002)
+	require.NoError(t, fixture.database.Model(&model.Node{}).Where("id = ?", 1002).Update("hostname", "private-provider-b").Error)
+	result, err = fixture.service.ListTechnicalResources(context.Background(), fixture.authorization, ProviderSupplyListInput{
+		Search: "private-provider-b", Page: 1, PageSize: 20,
+	})
+	require.NoError(t, err)
+	require.Zero(t, result.Total)
+	require.Empty(t, result.Items)
+	_, err = fixture.service.GetTechnicalResource(context.Background(), fixture.authorization, otherResource.ID)
+	require.ErrorIs(t, err, ErrProviderSupplyObjectNotFound)
+}
+
 func TestProviderSupplyQueriesValidateFiltersAndReauthorize(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	createLifecycleSupplyResource(t, fixture)

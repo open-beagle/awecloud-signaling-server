@@ -21,13 +21,30 @@ type ProviderSupplyListInput struct {
 }
 
 type TechnicalResourceListResult struct {
-	Items []model.TechnicalResource `json:"items"`
-	Total int64                     `json:"total"`
+	Items []TechnicalResourceView `json:"items"`
+	Total int64                   `json:"total"`
 }
 
 type TechnicalResourceDetail struct {
-	Resource *model.TechnicalResource         `json:"resource"`
+	Resource *TechnicalResourceView           `json:"resource"`
 	Bindings []model.TechnicalResourceBinding `json:"bindings"`
+}
+
+// TechnicalResourceView projects the Provider-owned identity together with its
+// current legacy runtime binding. Runtime fields are read-only compatibility
+// data; Provider ownership continues to come exclusively from TechnicalResource.
+type TechnicalResourceView struct {
+	model.TechnicalResource
+	Hostname              string `gorm:"column:hostname" json:"hostname"`
+	HostnameSource        string `gorm:"column:hostname_source" json:"hostname_source,omitempty"`
+	ParentHostname        string `gorm:"column:parent_hostname" json:"parent_hostname,omitempty"`
+	Version               string `gorm:"column:version" json:"version,omitempty"`
+	UpdaterProtocol       string `gorm:"column:updater_protocol" json:"updater_protocol,omitempty"`
+	SSHEnabled            bool   `gorm:"column:ssh_enabled" json:"ssh_enabled"`
+	ContainerSSHEnabled   bool   `gorm:"column:container_ssh_enabled" json:"container_ssh_enabled"`
+	K8SEnabled            bool   `gorm:"column:k8s_enabled" json:"k8s_enabled"`
+	SVCEnabled            bool   `gorm:"column:svc_enabled" json:"svc_enabled"`
+	EndpointAccessEnabled bool   `gorm:"column:endpoint_access_enabled" json:"endpoint_access_enabled"`
 }
 
 type SupplyCandidateListResult struct {
@@ -71,26 +88,44 @@ func (s *ProviderSupplyService) ListTechnicalResources(ctx context.Context, auth
 		if typeValue != model.TechnicalResourceAgent && typeValue != model.TechnicalResourceEndpoint {
 			return nil, ErrProviderSupplyInvalidInput
 		}
-		query = query.Where("type = ?", typeValue)
+		query = query.Where("technical_resource.type = ?", typeValue)
 	}
 	if input.State != "" {
 		state := model.TechnicalResourceLifecycleState(input.State)
 		if state != model.TechnicalResourcePending && state != model.TechnicalResourceRegistered &&
-			state != model.TechnicalResourceDisabled && state != model.TechnicalResourceRetired {
+			state != model.TechnicalResourceDisabled && state != model.TechnicalResourceRetired && state != model.TechnicalResourceDeleted {
 			return nil, ErrProviderSupplyInvalidInput
 		}
-		query = query.Where("lifecycle_state = ?", state)
+		if state == model.TechnicalResourceDeleted {
+			query = query.Where("technical_resource.deleted_at IS NOT NULL")
+		} else if state == model.TechnicalResourceRetired {
+			query = query.Where("technical_resource.lifecycle_state = ? AND technical_resource.deleted_at IS NULL", state)
+		} else {
+			query = query.Where("technical_resource.lifecycle_state = ? AND technical_resource.deleted_at IS NULL", state)
+		}
 	}
+	query = technicalResourceProjectionQuery(query)
 	if input.Search != "" {
-		query = query.Where("stable_key LIKE ? ESCAPE '\\'", "%"+escapeProviderLike(input.Search)+"%")
+		pattern := "%" + escapeProviderLike(input.Search) + "%"
+		query = query.Where(`(technical_resource.stable_key LIKE ? ESCAPE '\'
+			OR agent_node.hostname LIKE ? ESCAPE '\'
+			OR agent_node.name LIKE ? ESCAPE '\'
+			OR bound_endpoint.name LIKE ? ESCAPE '\')`, pattern, pattern, pattern, pattern)
 	}
-	result := &TechnicalResourceListResult{Items: []model.TechnicalResource{}}
-	query = query.Model(&model.TechnicalResource{}).Where("provider_id = ?", providerID)
+	result := &TechnicalResourceListResult{Items: []TechnicalResourceView{}}
+	query = query.Where("technical_resource.provider_id = ?", providerID)
 	if err := query.Count(&result.Total).Error; err != nil {
 		return nil, err
 	}
-	if err := query.Order("created_at DESC, id ASC").Offset((input.Page - 1) * input.PageSize).Limit(input.PageSize).Find(&result.Items).Error; err != nil {
+	if err := query.Select(technicalResourceProjectionSelect()).
+		Order("technical_resource.created_at DESC, technical_resource.id ASC").
+		Offset((input.Page - 1) * input.PageSize).Limit(input.PageSize).Scan(&result.Items).Error; err != nil {
 		return nil, err
+	}
+	for i := range result.Items {
+		if result.Items[i].DeletedAt != nil {
+			result.Items[i].LifecycleState = model.TechnicalResourceDeleted
+		}
 	}
 	return result, nil
 }
@@ -105,15 +140,65 @@ func (s *ProviderSupplyService) GetTechnicalResource(ctx context.Context, author
 	if validateRequired("technical_resource_id", resourceID, 36) != nil {
 		return nil, ErrProviderSupplyInvalidInput
 	}
-	var resource model.TechnicalResource
-	if err := query.Where("provider_id = ? AND id = ?", providerID, resourceID).First(&resource).Error; err != nil {
+	var resource TechnicalResourceView
+	if err := technicalResourceProjectionQuery(query).
+		Select(technicalResourceProjectionSelect()).
+		Where("technical_resource.provider_id = ? AND technical_resource.id = ?", providerID, resourceID).
+		Take(&resource).Error; err != nil {
 		return nil, providerSupplyNotFound(err)
+	}
+	if resource.DeletedAt != nil {
+		resource.LifecycleState = model.TechnicalResourceDeleted
 	}
 	bindings := []model.TechnicalResourceBinding{}
 	if err := query.Where("technical_resource_id = ?", resource.ID).Order("created_at DESC, id ASC").Find(&bindings).Error; err != nil {
 		return nil, err
 	}
 	return &TechnicalResourceDetail{Resource: &resource, Bindings: bindings}, nil
+}
+
+func technicalResourceProjectionQuery(query *gorm.DB) *gorm.DB {
+	return query.Table("technical_resource").
+		Joins(`LEFT JOIN technical_resource_binding active_binding
+			ON active_binding.technical_resource_id = technical_resource.id AND active_binding.enabled = ?`, true).
+		Joins(`LEFT JOIN node agent_node
+			ON technical_resource.type = ? AND active_binding.source_type = ?
+			AND CAST(agent_node.id AS TEXT) = active_binding.source_id`, model.TechnicalResourceAgent, model.TechnicalResourceBindingLegacyNode).
+		Joins(`LEFT JOIN user agent_user ON agent_user.id = agent_node.user_id`).
+		Joins(`LEFT JOIN endpoint bound_endpoint
+			ON technical_resource.type = ? AND active_binding.source_type = ?
+			AND bound_endpoint.id = active_binding.source_id`, model.TechnicalResourceEndpoint, model.TechnicalResourceBindingLegacyEndpoint).
+		Joins(`LEFT JOIN technical_resource parent_resource ON parent_resource.id = technical_resource.parent_id`).
+		Joins(`LEFT JOIN technical_resource_binding parent_binding
+			ON parent_binding.technical_resource_id = parent_resource.id AND parent_binding.enabled = ?`, true).
+		Joins(`LEFT JOIN node parent_node
+			ON parent_binding.source_type = ? AND CAST(parent_node.id AS TEXT) = parent_binding.source_id`, model.TechnicalResourceBindingLegacyNode)
+}
+
+func technicalResourceProjectionSelect() string {
+	return `technical_resource.*,
+		CASE WHEN technical_resource.type = 'agent'
+			THEN COALESCE(NULLIF(agent_node.hostname, ''), agent_node.name, '')
+			ELSE COALESCE(bound_endpoint.name, '') END AS hostname,
+		CASE WHEN technical_resource.type = 'agent' AND COALESCE(agent_node.hostname, '') <> '' THEN 'reported'
+			WHEN technical_resource.type = 'agent' AND agent_node.id IS NOT NULL THEN 'legacy_name'
+			WHEN technical_resource.type = 'endpoint' AND bound_endpoint.id IS NOT NULL THEN 'legacy_name'
+			ELSE '' END AS hostname_source,
+		COALESCE(NULLIF(parent_node.hostname, ''), parent_node.name, '') AS parent_hostname,
+		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.version, '')
+			ELSE COALESCE(bound_endpoint.version, '') END AS version,
+		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.updater_protocol, '')
+			ELSE COALESCE(bound_endpoint.updater_protocol, '') END AS updater_protocol,
+		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_user.ssh_enabled, false)
+			ELSE COALESCE(bound_endpoint.ssh_enabled, false) END AS ssh_enabled,
+		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.container_ssh_protocol, '') <> ''
+			ELSE false END AS container_ssh_enabled,
+		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.k8s_enabled, false)
+			ELSE COALESCE(bound_endpoint.k8sapi_enabled, false) END AS k8s_enabled,
+		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.svc_enabled, false)
+			ELSE COALESCE(bound_endpoint.k8sservice_enabled, false) END AS svc_enabled,
+		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.endpoint_enabled, false)
+			ELSE false END AS endpoint_access_enabled`
 }
 
 func (s *ProviderSupplyService) ListSupplyCandidates(ctx context.Context, authorization *ManagementAuthorizationContext, input ProviderSupplyListInput) (*SupplyCandidateListResult, error) {

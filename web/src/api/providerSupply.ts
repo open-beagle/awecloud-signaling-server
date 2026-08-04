@@ -2,7 +2,7 @@ import request from '@/utils/request'
 import type { PagedResponse } from '@/types/models'
 
 export type TechnicalResourceType = 'agent' | 'endpoint'
-export type TechnicalResourceState = 'pending' | 'registered' | 'disabled' | 'retired'
+export type TechnicalResourceState = 'pending' | 'registered' | 'disabled' | 'retired' | 'deleted'
 export type ResourceHealthState = 'unknown' | 'online' | 'degraded' | 'offline'
 export type SupplyResourceType = 'host' | 'kubernetes'
 export type SupplyCandidateState = 'observed' | 'pending_review' | 'accepted' | 'linked' | 'conflict' | 'rejected'
@@ -17,6 +17,16 @@ export interface TechnicalResource {
   provider_id: string
   type: TechnicalResourceType
   stable_key: string
+  hostname: string
+  hostname_source?: 'reported' | 'legacy_name'
+  parent_hostname?: string
+  version?: string
+  updater_protocol?: string
+  ssh_enabled: boolean
+  container_ssh_enabled: boolean
+  k8s_enabled: boolean
+  svc_enabled: boolean
+  endpoint_access_enabled: boolean
   parent_id?: string
   lifecycle_state: TechnicalResourceState
   health_state: ResourceHealthState
@@ -30,6 +40,72 @@ export interface TechnicalResource {
   row_version: number
   created_at: string
   updated_at: string
+}
+
+export interface TechnicalResourceBinding {
+  id: string
+  technical_resource_id: string
+  source_type: 'legacy_node' | 'legacy_endpoint'
+  source_id: string
+  credential_revision: number
+  enabled: boolean
+  reason: string
+  row_version: number
+  created_at: string
+  updated_at: string
+}
+
+export interface TechnicalResourceDetail {
+  resource: TechnicalResource
+  bindings: TechnicalResourceBinding[]
+}
+
+export interface TechnicalResourceCapabilities {
+  ssh_enabled: boolean
+  ssh_users?: string[]
+  k8s_enabled: boolean
+  k8s_api_address?: string
+  svc_enabled: boolean
+  svc_label_selector?: string
+  svc_namespaces?: string[]
+  endpoint_access_enabled: boolean
+  k8s_listen_port?: number
+  svc_listen_port_base?: number
+  endpoint_listen_port?: number
+}
+
+export interface ProviderRelease {
+  id: string
+  component: 'agent' | 'endpoint'
+  version: string
+  channel: string
+  release_notes?: string
+  published_at?: string
+}
+
+export interface ProviderUpdateTask {
+  id: string
+  desired_version: string
+  status: string
+  last_error_message?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface TechnicalResourceDeleteCheck {
+  allowed: boolean
+  blockers: Array<{ code: string; message: string; count: number }>
+}
+
+export interface ProviderRuntimeIdentity {
+  user_id: number
+  name: string
+  hostname: string
+}
+
+export interface DeploymentCredentialResult {
+  credential: { id: string; technical_resource_id: string; token: string; expires_at: string }
+  install_command: string
 }
 
 export interface SupplyCandidate {
@@ -148,6 +224,65 @@ export const getProviderTechnicalResources = (providerId: string, params: Provid
   request.get<any, PagedResponse<TechnicalResource[]>>('/api/v1/management/provider/technical-resources', {
     params,
     headers: providerHeaders(providerId),
+  })
+
+export const getProviderRuntimeIdentities = (providerId: string) =>
+  request.get<any, { success: boolean; data: ProviderRuntimeIdentity[] }>('/api/v1/management/provider/runtime-identities', { headers: providerHeaders(providerId) })
+
+export const createProviderAgent = (providerId: string, runtimeUserId: number, reason: string) =>
+  request.post<any, { success: boolean; data: TechnicalResource }>('/api/v1/management/provider/technical-resources', {
+    type: 'agent', runtime_user_id: runtimeUserId, credential_revision: 1, reason,
+  }, { headers: { ...providerHeaders(providerId), 'Idempotency-Key': crypto.randomUUID() } })
+
+export const createProviderDeploymentCredential = (providerId: string, resourceId: string, name: string, ttlMinutes: number) =>
+  request.post<any, { success: boolean; data: DeploymentCredentialResult }>(`/api/v1/management/provider/technical-resources/${resourceId}/deployment-credentials`, {
+    name, ttl_minutes: ttlMinutes,
+  }, { headers: { ...providerHeaders(providerId), 'Idempotency-Key': crypto.randomUUID() } })
+
+export const getProviderTechnicalResource = (providerId: string, resourceId: string) =>
+  request.get<any, { success: boolean; data: TechnicalResourceDetail }>(`/api/v1/management/provider/technical-resources/${resourceId}`, {
+    headers: providerHeaders(providerId),
+  })
+
+export const getProviderTechnicalResourceCapabilities = (providerId: string, resourceId: string) =>
+  request.get<any, { success: boolean; data: TechnicalResourceCapabilities }>(`/api/v1/management/provider/technical-resources/${resourceId}/capabilities`, {
+    headers: providerHeaders(providerId),
+  })
+
+export const updateProviderTechnicalResourceCapabilities = (providerId: string, resource: TechnicalResource, data: TechnicalResourceCapabilities) =>
+  request.patch<any, { success: boolean; data: TechnicalResource }>(`/api/v1/management/provider/technical-resources/${resource.id}/config`, data, {
+    headers: { ...providerHeaders(providerId), 'If-Match': String(resource.row_version) },
+  })
+
+export const setProviderTechnicalResourceLifecycle = (providerId: string, resource: TechnicalResource, action: 'maintenance' | 'resume' | 'retire', reason: string) =>
+  request.post<any, { success: boolean; data: TechnicalResource }>(`/api/v1/management/provider/technical-resources/${resource.id}/${action}`, { reason }, {
+    headers: { ...providerHeaders(providerId), 'If-Match': String(resource.row_version) },
+  })
+
+export const getProviderTechnicalResourceReleases = (providerId: string, resourceId: string) =>
+  request.get<any, { success: boolean; data: ProviderRelease[] }>(`/api/v1/management/provider/technical-resources/${resourceId}/releases`, {
+    headers: providerHeaders(providerId),
+  })
+
+export const getProviderTechnicalResourceUpdateTasks = (providerId: string, resourceId: string) =>
+  request.get<any, { success: boolean; data: ProviderUpdateTask[] }>(`/api/v1/management/provider/technical-resources/${resourceId}/update-tasks`, {
+    headers: providerHeaders(providerId),
+  })
+
+export const createProviderTechnicalResourceUpdateTask = (providerId: string, resourceId: string, releaseId: string, force: boolean, reason: string) =>
+  request.post<any, { success: boolean; data: ProviderUpdateTask }>(`/api/v1/management/provider/technical-resources/${resourceId}/update-tasks`, {
+    release_id: releaseId, force, reason,
+  }, { headers: { ...providerHeaders(providerId), 'Idempotency-Key': crypto.randomUUID() } })
+
+export const checkProviderTechnicalResourceDelete = (providerId: string, resourceId: string) =>
+  request.get<any, { success: boolean; data: TechnicalResourceDeleteCheck }>(`/api/v1/management/provider/technical-resources/${resourceId}/delete-check`, {
+    headers: providerHeaders(providerId),
+  })
+
+export const deleteProviderTechnicalResource = (providerId: string, resource: TechnicalResource, reason: string) =>
+  request.delete<any, { success: boolean; data: { result: TechnicalResource; row_version: number } }>(`/api/v1/management/provider/technical-resources/${resource.id}`, {
+    data: { reason },
+    headers: { ...providerHeaders(providerId), 'If-Match': String(resource.row_version), 'Idempotency-Key': crypto.randomUUID() },
   })
 
 export const getProviderSupplyCandidates = (providerId: string, params: ProviderSupplyListParams) =>

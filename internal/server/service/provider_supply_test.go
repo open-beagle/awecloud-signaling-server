@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,9 +35,11 @@ func newProviderSupplyFixture(t *testing.T) providerSupplyFixture {
 	require.NoError(t, database.AutoMigrate(
 		&model.User{}, &model.UserIdentityProfile{}, &model.ResourceProvider{}, &model.AdminProviderMembership{},
 		&model.Node{}, &model.Endpoint{}, &model.TechnicalResource{}, &model.TechnicalResourceBinding{},
+		&model.TechnicalResourceDeployToken{},
 		&model.SupplyInventoryReceipt{}, &model.SupplyCandidate{}, &model.PlatformResource{},
 		&model.PlatformResourceSource{}, &model.NamespaceObservation{}, &model.ResourceScope{},
-		&model.OutboxEvent{}, &model.AuditLog{},
+		&model.ResourceSession{},
+		&model.OutboxEvent{}, &model.AuditLog{}, &model.DomainRegistry{}, &model.Release{}, &model.Artifact{}, &model.UpdateTask{}, &model.UpdateEvent{},
 	))
 	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
 	actor := model.User{Name: "provider-actor", Role: model.UserRoleClient, SecretHash: "fixture", Enabled: true}
@@ -69,6 +72,113 @@ func newProviderSupplyFixture(t *testing.T) providerSupplyFixture {
 		database: database, service: service, now: now, actor: actor, otherUser: otherUser,
 		provider: provider, otherProvider: otherProvider, authorization: authorization,
 	}
+}
+
+func TestProviderTechnicalResourceCapabilitiesAndUpdaterUseScopedBinding(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	ctx := context.Background()
+	agent := fixture.createBoundAgent(t, "agent-operations", 1001)
+
+	capabilities, err := fixture.service.GetTechnicalResourceCapabilities(ctx, fixture.authorization, agent.ID)
+	require.NoError(t, err)
+	require.False(t, capabilities.K8SEnabled)
+
+	capabilities.SVCEnabled = true
+	capabilities.SVCNamespaces = []string{"team-a"}
+	updated, err := fixture.service.UpdateTechnicalResourceCapabilities(ctx, fixture.authorization, UpdateTechnicalResourceCapabilitiesInput{
+		TechnicalResourceID: agent.ID, ExpectedRowVersion: agent.RowVersion, Capabilities: *capabilities,
+	})
+	require.NoError(t, err)
+	require.Equal(t, agent.ConfigRevision+1, updated.ConfigRevision)
+	require.Equal(t, agent.RowVersion+1, updated.RowVersion)
+	var node model.Node
+	require.NoError(t, fixture.database.First(&node, 1001).Error)
+	require.NotNil(t, node.SVCEnabled)
+	require.True(t, *node.SVCEnabled)
+	require.Equal(t, `["team-a"]`, node.SVCNamespaces)
+
+	foreign := model.TechnicalResource{
+		ID: uuid.NewString(), ProviderID: fixture.otherProvider.ID, Type: model.TechnicalResourceAgent, StableKey: "foreign-operations",
+		LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthUnknown, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1,
+	}
+	require.NoError(t, fixture.database.Create(&foreign).Error)
+	_, err = fixture.service.GetTechnicalResourceCapabilities(ctx, fixture.authorization, foreign.ID)
+	require.ErrorIs(t, err, ErrProviderSupplyObjectNotFound)
+
+	require.NoError(t, fixture.database.Model(&node).Updates(map[string]any{
+		"updater_protocol": "v1", "system_info": `{"os":"linux","arch":"amd64"}`,
+	}).Error)
+	now := fixture.now
+	release := model.Release{ID: uuid.NewString(), Component: model.ComponentAgent, Version: "2.0.0", Channel: "stable", Status: model.ReleaseStatusPublished, PublishedAt: &now}
+	require.NoError(t, fixture.database.Create(&release).Error)
+	require.NoError(t, fixture.database.Create(&model.Artifact{
+		ID: uuid.NewString(), ReleaseID: release.ID, OS: "linux", Arch: "amd64", Filename: "agent", DownloadURL: "https://example.invalid/agent",
+		SHA256: strings.Repeat("a", 64), Status: model.ArtifactStatusAvailable,
+	}).Error)
+	task, err := fixture.service.CreateTechnicalResourceUpdateTask(ctx, fixture.authorization, agent.ID, release.ID, false)
+	require.NoError(t, err)
+	require.Equal(t, model.UpdateTargetNode, task.TargetType)
+	require.Equal(t, "1001", task.TargetID)
+	tasks, err := fixture.service.ListTechnicalResourceUpdateTasks(ctx, fixture.authorization, agent.ID)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+}
+
+func TestProviderCreatesResourceOwnedOneTimeDeploymentCredential(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	ctx := context.Background()
+	fixture.createBoundAgent(t, "existing-runtime", 1001)
+	require.NoError(t, fixture.database.Model(&model.User{}).Where("id = ?", fixture.actor.ID).Update("role", model.UserRoleAgent).Error)
+
+	identities, err := fixture.service.ListProviderRuntimeIdentities(ctx, fixture.authorization)
+	require.NoError(t, err)
+	require.Len(t, identities, 1)
+	require.Equal(t, fixture.actor.ID, identities[0].UserID)
+	resource, err := fixture.service.CreateTechnicalResource(ctx, fixture.authorization, CreateTechnicalResourceInput{
+		Type: model.TechnicalResourceAgent, CredentialRevision: 1, RuntimeUserID: fixture.actor.ID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "resource:"+resource.ID, resource.StableKey)
+	credential, err := fixture.service.CreateTechnicalResourceDeploymentCredential(ctx, fixture.authorization, resource.ID, "new-agent", 30*time.Minute)
+	require.NoError(t, err)
+	require.NotEmpty(t, credential.Token)
+	var token model.TechnicalResourceDeployToken
+	require.NoError(t, fixture.database.First(&token, "id = ?", credential.ID).Error)
+	require.Equal(t, resource.ID, token.TechnicalResourceID)
+	require.Equal(t, fixture.actor.ID, token.RuntimeUserID)
+	require.Equal(t, model.TechnicalResourceDeployTokenPending, token.Status)
+}
+
+func TestProviderDeletesRetiredTechnicalResourceAsTombstone(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	ctx := context.Background()
+	agent := fixture.createBoundAgent(t, "agent-delete", 1001)
+	token := model.TechnicalResourceDeployToken{
+		ID: uuid.NewString(), TechnicalResourceID: agent.ID, Token: "delete-token", Name: "agent-delete",
+		RuntimeUserID: fixture.actor.ID, Status: model.TechnicalResourceDeployTokenPending, CreatedByUserID: fixture.actor.ID,
+	}
+	require.NoError(t, fixture.database.Create(&token).Error)
+	retired, err := fixture.service.SetTechnicalResourceLifecycle(ctx, fixture.authorization, SetTechnicalResourceLifecycleInput{
+		TechnicalResourceID: agent.ID, TargetState: model.TechnicalResourceRetired,
+		ExpectedRowVersion: agent.RowVersion, Reason: "retire before deletion",
+	})
+	require.NoError(t, err)
+
+	check, err := fixture.service.CheckTechnicalResourceDelete(ctx, fixture.authorization, agent.ID)
+	require.NoError(t, err)
+	require.True(t, check.Allowed)
+	_, err = fixture.service.DeleteTechnicalResource(ctx, fixture.authorization, agent.ID, retired.RowVersion-1, "stale deletion")
+	require.ErrorIs(t, err, ErrProviderSupplyVersionConflict)
+
+	deleted, err := fixture.service.DeleteTechnicalResource(ctx, fixture.authorization, agent.ID, retired.RowVersion, "dependency cleanup complete")
+	require.NoError(t, err)
+	require.Equal(t, model.TechnicalResourceDeleted, deleted.LifecycleState)
+	require.NotNil(t, deleted.DeletedAt)
+	require.NoError(t, fixture.database.First(&token, "id = ?", token.ID).Error)
+	require.Equal(t, model.TechnicalResourceDeployTokenRevoked, token.Status)
+	check, err = fixture.service.CheckTechnicalResourceDelete(ctx, fixture.authorization, agent.ID)
+	require.NoError(t, err)
+	require.False(t, check.Allowed)
 }
 
 func (f providerSupplyFixture) createBoundAgent(t *testing.T, stableKey string, nodeID uint64) *model.TechnicalResource {

@@ -511,10 +511,20 @@ func (s *Server) setupRouter() *gin.Engine {
 					providerGroup.GET("/memberships", api.RequireManagementPermission(service.PermissionProviderMembershipsRead), providerGovernanceAPI.ListMemberships)
 					providerGroup.GET("/audit-logs", api.RequireManagementPermission(service.PermissionProviderAuditRead), providerGovernanceAPI.ListAuditLogs)
 					providerGroup.GET("/technical-resources", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.ListTechnicalResources)
+					providerGroup.GET("/runtime-identities", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.ListRuntimeIdentities)
 					providerGroup.GET("/technical-resources/:id", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.GetTechnicalResource)
+					providerGroup.GET("/technical-resources/:id/capabilities", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.GetTechnicalResourceCapabilities)
+					providerGroup.PATCH("/technical-resources/:id/config", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.UpdateTechnicalResourceCapabilities)
+					providerGroup.GET("/technical-resources/:id/releases", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.ListTechnicalResourceReleases)
+					providerGroup.GET("/technical-resources/:id/update-tasks", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.ListTechnicalResourceUpdateTasks)
+					providerGroup.POST("/technical-resources/:id/update-tasks", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIdempotencyKey(), providerSupplyAPI.CreateTechnicalResourceUpdateTask)
+					providerGroup.GET("/technical-resources/:id/delete-check", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.CheckTechnicalResourceDelete)
+					providerGroup.DELETE("/technical-resources/:id", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), providerSupplyAPI.DeleteTechnicalResource)
 					providerGroup.POST("/technical-resources", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIdempotencyKey(), providerSupplyAPI.CreateTechnicalResource)
+					providerGroup.POST("/technical-resources/:id/deployment-credentials", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIdempotencyKey(), providerSupplyAPI.CreateDeploymentCredential)
 					providerGroup.POST("/technical-resources/:id/bind", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), providerSupplyAPI.BindTechnicalResource)
 					providerGroup.POST("/technical-resources/:id/disable", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetTechnicalResourceLifecycle(model.TechnicalResourceDisabled, "disable_technical_resource"))
+					providerGroup.POST("/technical-resources/:id/maintenance", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetTechnicalResourceLifecycle(model.TechnicalResourceDisabled, "maintain_technical_resource"))
 					providerGroup.POST("/technical-resources/:id/resume", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetTechnicalResourceLifecycle(model.TechnicalResourceRegistered, "resume_technical_resource"))
 					providerGroup.POST("/technical-resources/:id/retire", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetTechnicalResourceLifecycle(model.TechnicalResourceRetired, "retire_technical_resource"))
 
@@ -615,7 +625,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.DELETE("/users/:id", userAPI.Delete)
 					adminAuthGroup.POST("/users/:id/regenerate-secret", userAPI.RegenerateSecret)
 
-					// 部署 Token（统一管理 Agent 和 Client）
+					// Desktop Token 继续归属 User；Agent Token 由资源方技术资源管理。
 					deployAPI := api.NewDeployAPI(s.config)
 					adminAuthGroup.POST("/users/:id/deploy-token", deployAPI.CreateDeployToken)
 					adminAuthGroup.GET("/users/:id/deploy-tokens", deployAPI.ListDeployTokens)

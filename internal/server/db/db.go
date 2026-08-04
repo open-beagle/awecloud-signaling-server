@@ -94,6 +94,7 @@ func autoMigrate() error {
 		&model.AdminTenantMembership{},
 		&model.User{},
 		&model.Node{},
+		&model.DeployToken{},
 
 		// 统一资源模型
 		&model.TenantMembership{},
@@ -125,6 +126,7 @@ func autoMigrate() error {
 		// Provider 供给对象（S2，新增 Schema，业务入口仍由 Feature Flag 关闭）
 		&model.TechnicalResource{},
 		&model.TechnicalResourceBinding{},
+		&model.TechnicalResourceDeployToken{},
 		&model.SupplyInventoryReceipt{},
 		&model.SupplyCandidate{},
 		&model.PlatformResource{},
@@ -188,9 +190,6 @@ func autoMigrate() error {
 		// Visitor
 		&model.Visitor{},
 
-		// 部署 Token（统一）
-		&model.DeployToken{},
-
 		// Device Token
 		&model.DeviceToken{},
 
@@ -230,6 +229,9 @@ func autoMigrate() error {
 	}
 
 	if err := ensureProviderSupplyConstraints(DB); err != nil {
+		return err
+	}
+	if err := migrateAgentDeployTokensToTechnicalResources(DB); err != nil {
 		return err
 	}
 	if err := ensurePlatformAllocationConstraints(DB); err != nil {

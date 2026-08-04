@@ -39,6 +39,7 @@ type CreateTechnicalResourceInput struct {
 	StableKey          string
 	ParentID           string
 	CredentialRevision int64
+	RuntimeUserID      uint64
 }
 
 func (s *ProviderSupplyService) CreateTechnicalResource(ctx context.Context, authorization *ManagementAuthorizationContext, input CreateTechnicalResourceInput) (*model.TechnicalResource, error) {
@@ -47,7 +48,7 @@ func (s *ProviderSupplyService) CreateTechnicalResource(ctx context.Context, aut
 	}
 	input.StableKey = strings.TrimSpace(input.StableKey)
 	input.ParentID = strings.TrimSpace(input.ParentID)
-	if err := validateRequired("stable_key", input.StableKey, 128); err != nil || input.CredentialRevision <= 0 {
+	if len(input.StableKey) > 128 || input.CredentialRevision <= 0 {
 		return nil, ErrProviderSupplyInvalidInput
 	}
 	if input.Type != model.TechnicalResourceAgent && input.Type != model.TechnicalResourceEndpoint {
@@ -60,12 +61,15 @@ func (s *ProviderSupplyService) CreateTechnicalResource(ctx context.Context, aut
 
 	now := s.now().UTC()
 	resource := &model.TechnicalResource{
-		ID: uuid.NewString(), Type: input.Type, StableKey: input.StableKey,
+		ID: uuid.NewString(), Type: input.Type, StableKey: input.StableKey, RuntimeUserID: input.RuntimeUserID,
 		LifecycleState: model.TechnicalResourcePending, HealthState: model.ResourceHealthUnknown,
 		CredentialRevision: input.CredentialRevision, ConfigRevision: 1, ObservedRevision: 0, RowVersion: 1,
 	}
 	if input.ParentID != "" {
 		resource.ParentID = &input.ParentID
+	}
+	if resource.StableKey == "" {
+		resource.StableKey = "resource:" + resource.ID
 	}
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		providerID, err := reauthorizeProviderPermission(tx, authorization, PermissionProviderTechnicalResourcesWrite, now)
@@ -81,6 +85,22 @@ func (s *ProviderSupplyService) CreateTechnicalResource(ctx context.Context, aut
 					return ErrProviderSupplyObjectNotFound
 				}
 				return err
+			}
+			if resource.RuntimeUserID != 0 && resource.RuntimeUserID != parent.RuntimeUserID {
+				return ErrProviderSupplyConflict
+			}
+			resource.RuntimeUserID = parent.RuntimeUserID
+		} else if resource.RuntimeUserID != 0 {
+			var allowed int64
+			if err := tx.Table("technical_resource").
+				Joins("JOIN technical_resource_binding ON technical_resource_binding.technical_resource_id = technical_resource.id AND technical_resource_binding.enabled = ?", true).
+				Joins("JOIN node ON technical_resource_binding.source_type = ? AND CAST(node.id AS TEXT) = technical_resource_binding.source_id", model.TechnicalResourceBindingLegacyNode).
+				Where("technical_resource.provider_id = ? AND technical_resource.type = ? AND node.user_id = ?", providerID, model.TechnicalResourceAgent, resource.RuntimeUserID).
+				Count(&allowed).Error; err != nil {
+				return err
+			}
+			if allowed == 0 {
+				return ErrProviderSupplyConflict
 			}
 		}
 		if err := tx.Create(resource).Error; err != nil {

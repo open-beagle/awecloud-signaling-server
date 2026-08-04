@@ -100,7 +100,7 @@
           <template #default="{ row }">
             <el-button v-if="!row.enabled" type="success" link size="small" @click="handleEnable(row)">{{ $t('user.enabledTrue') }}</el-button>
             <el-button v-else type="warning" link size="small" @click="handleDisable(row)">{{ $t('user.enabledFalse') }}</el-button>
-            <el-button type="primary" link size="small" :icon="Upload" @click="handleDeploy(row)">{{ $t('user.deploy') }}</el-button>
+            <el-button v-if="row.role === 'client'" type="primary" link size="small" :icon="Upload" @click="handleDeploy(row)">{{ $t('user.deploy') }}</el-button>
             <el-button type="primary" link size="small" @click="handleEdit(row)">{{ $t('common.edit') }}</el-button>
             <el-button type="danger" link size="small" @click="handleDelete(row)">{{ $t('common.delete') }}</el-button>
           </template>
@@ -124,7 +124,7 @@
     <!-- 创建用户弹窗 -->
     <CreateDialog v-model="showCreateDialog" @success="handleCreateSuccess" />
 
-    <!-- 部署弹窗（Agent 和 Client 通用） -->
+    <!-- Desktop 部署弹窗 -->
     <DeployDialog v-model="showDeployDialog" :user="selectedUser" @success="fetchUsers" />
   </div>
 </template>
@@ -239,9 +239,9 @@ const handleDelete = async (row: User) => {
   }
 }
 
-// 部署（Agent 和 Client 通用）
+// Desktop 部署
 const handleDeploy = (row: User) => {
-  if (!canWrite.value) return
+  if (!canWrite.value || row.role !== 'client') return
   selectedUser.value = row
   showDeployDialog.value = true
 }

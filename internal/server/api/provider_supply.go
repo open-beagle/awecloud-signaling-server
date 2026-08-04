@@ -18,11 +18,14 @@ import (
 )
 
 const (
-	providerTechnicalResourceCreateRoute = "/api/v1/management/provider/technical-resources"
-	providerTechnicalResourceBindRoute   = "/api/v1/management/provider/technical-resources/:id/bind"
-	providerCandidateAcceptRoute         = "/api/v1/management/provider/supply-candidates/:id/accept"
-	providerSupplyOutboxEventType        = "provider_supply.changed"
-	providerSupplyOutboxConsumer         = "provider_supply_projection"
+	providerTechnicalResourceCreateRoute     = "/api/v1/management/provider/technical-resources"
+	providerTechnicalResourceBindRoute       = "/api/v1/management/provider/technical-resources/:id/bind"
+	providerTechnicalResourceUpdateRoute     = "/api/v1/management/provider/technical-resources/:id/update-tasks"
+	providerTechnicalResourceCredentialRoute = "/api/v1/management/provider/technical-resources/:id/deployment-credentials"
+	providerTechnicalResourceDeleteRoute     = "/api/v1/management/provider/technical-resources/:id"
+	providerCandidateAcceptRoute             = "/api/v1/management/provider/supply-candidates/:id/accept"
+	providerSupplyOutboxEventType            = "provider_supply.changed"
+	providerSupplyOutboxConsumer             = "provider_supply_projection"
 
 	ErrorCodeProviderSupplyConflict      = "PROVIDER_SUPPLY_CONFLICT"
 	ErrorCodeProviderSupplyVersion       = "PROVIDER_SUPPLY_VERSION_CONFLICT"
@@ -35,9 +38,12 @@ const (
 )
 
 var providerSupplyIdempotencyPolicies = map[string]service.JSONFieldPolicy{
-	http.MethodPost + " " + providerTechnicalResourceCreateRoute: service.NewJSONFieldPolicy("success", "data"),
-	http.MethodPost + " " + providerTechnicalResourceBindRoute:   service.NewJSONFieldPolicy("success", "data"),
-	http.MethodPost + " " + providerCandidateAcceptRoute:         service.NewJSONFieldPolicy("success", "data"),
+	http.MethodPost + " " + providerTechnicalResourceCreateRoute:     service.NewJSONFieldPolicy("success", "data"),
+	http.MethodPost + " " + providerTechnicalResourceBindRoute:       service.NewJSONFieldPolicy("success", "data"),
+	http.MethodPost + " " + providerTechnicalResourceUpdateRoute:     service.NewJSONFieldPolicy("success", "data"),
+	http.MethodPost + " " + providerTechnicalResourceCredentialRoute: service.NewJSONFieldPolicy("success", "data"),
+	http.MethodDelete + " " + providerTechnicalResourceDeleteRoute:   service.NewJSONFieldPolicy("success", "data"),
+	http.MethodPost + " " + providerCandidateAcceptRoute:             service.NewJSONFieldPolicy("success", "data"),
 }
 
 var providerSupplyOutboxPolicies = map[string]service.JSONFieldPolicy{
@@ -53,7 +59,13 @@ type providerTechnicalResourceCreateRequest struct {
 	StableKey          string                      `json:"stable_key"`
 	ParentID           string                      `json:"parent_id"`
 	CredentialRevision int64                       `json:"credential_revision"`
+	RuntimeUserID      uint64                      `json:"runtime_user_id"`
 	Reason             string                      `json:"reason"`
+}
+
+type providerDeploymentCredentialRequest struct {
+	Name       string `json:"name"`
+	TTLMinutes int    `json:"ttl_minutes"`
 }
 
 type providerTechnicalResourceBindRequest struct {
@@ -64,6 +76,12 @@ type providerTechnicalResourceBindRequest struct {
 
 type providerReasonRequest struct {
 	Reason string `json:"reason"`
+}
+
+type providerTechnicalResourceUpdateRequest struct {
+	ReleaseID string `json:"release_id"`
+	Force     bool   `json:"force"`
+	Reason    string `json:"reason"`
 }
 
 type providerCandidateAcceptRequest struct {
@@ -115,12 +133,65 @@ func (a *ProviderSupplyAPI) CreateTechnicalResource(c *gin.Context) {
 	executeProviderIdempotentMutation(c, authorization, body, http.StatusCreated, "create_technical_resource", request.Reason,
 		func(supply *service.ProviderSupplyService) (any, string, string, int64, error) {
 			resource, err := supply.CreateTechnicalResource(c.Request.Context(), authorization, service.CreateTechnicalResourceInput{
-				Type: request.Type, StableKey: request.StableKey, ParentID: request.ParentID, CredentialRevision: request.CredentialRevision,
+				Type: request.Type, StableKey: request.StableKey, ParentID: request.ParentID, CredentialRevision: request.CredentialRevision, RuntimeUserID: request.RuntimeUserID,
 			})
 			if err != nil {
 				return nil, "", "", 0, err
 			}
 			return resource, "technical_resource", resource.ID, resource.RowVersion, nil
+		})
+}
+
+func (a *ProviderSupplyAPI) ListRuntimeIdentities(c *gin.Context) {
+	authorization, ok := currentManagementAuthorization(c)
+	if !ok {
+		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
+		return
+	}
+	result, err := service.NewProviderSupplyService(db.DB).ListProviderRuntimeIdentities(c.Request.Context(), authorization)
+	if err != nil {
+		writeProviderSupplyError(c, err, false)
+		return
+	}
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+func (a *ProviderSupplyAPI) CreateDeploymentCredential(c *gin.Context) {
+	authorization, ok := currentManagementAuthorization(c)
+	if !ok {
+		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
+		return
+	}
+	var request providerDeploymentCredentialRequest
+	body, ok := decodeProviderSupplyRequest(c, &request)
+	if !ok {
+		return
+	}
+	request.Name = strings.TrimSpace(request.Name)
+	if request.TTLMinutes == 0 {
+		request.TTLMinutes = 30
+	}
+	if request.Name == "" || request.TTLMinutes < 1 || request.TTLMinutes > 1440 {
+		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "部署凭据参数无效")
+		return
+	}
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	serverAddr := scheme + "://" + c.Request.Host
+	executeProviderIdempotentMutation(c, authorization, body, http.StatusCreated, "create_technical_resource_deployment_credential", "generate deployment credential",
+		func(supply *service.ProviderSupplyService) (any, string, string, int64, error) {
+			credential, err := supply.CreateTechnicalResourceDeploymentCredential(c.Request.Context(), authorization, c.Param("id"), request.Name, time.Duration(request.TTLMinutes)*time.Minute)
+			if err != nil {
+				return nil, "", "", 0, err
+			}
+			detail, err := supply.GetTechnicalResource(c.Request.Context(), authorization, c.Param("id"))
+			if err != nil {
+				return nil, "", "", 0, err
+			}
+			data := gin.H{"credential": credential, "install_command": fmt.Sprintf("curl -fsSL %s/api/v1/download/install_agent.sh | sudo bash -s -- --deploy -t %s -s %s", serverAddr, credential.Token, serverAddr)}
+			return data, "technical_resource", c.Param("id"), detail.Resource.RowVersion, nil
 		})
 }
 
@@ -177,6 +248,149 @@ func (a *ProviderSupplyAPI) SetTechnicalResourceLifecycle(target model.Technical
 				return resource, "technical_resource", resource.ID, resource.RowVersion, nil
 			})
 	}
+}
+
+func (a *ProviderSupplyAPI) GetTechnicalResourceCapabilities(c *gin.Context) {
+	authorization, ok := currentManagementAuthorization(c)
+	if !ok {
+		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
+		return
+	}
+	result, err := service.NewProviderSupplyService(db.DB).GetTechnicalResourceCapabilities(c.Request.Context(), authorization, c.Param("id"))
+	if err != nil {
+		writeProviderSupplyError(c, err, false)
+		return
+	}
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+func (a *ProviderSupplyAPI) UpdateTechnicalResourceCapabilities(c *gin.Context) {
+	authorization, ok := currentManagementAuthorization(c)
+	if !ok {
+		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
+		return
+	}
+	rowVersion, ok := requiredRevision(c)
+	if !ok {
+		codedError(c, http.StatusPreconditionRequired, ErrorCodePreconditionRequired, "必须提供 If-Match revision")
+		return
+	}
+	var request service.TechnicalResourceCapabilities
+	if _, ok := decodeProviderSupplyRequest(c, &request); !ok {
+		return
+	}
+	resource, err := service.NewProviderSupplyService(db.DB).UpdateTechnicalResourceCapabilities(c.Request.Context(), authorization, service.UpdateTechnicalResourceCapabilitiesInput{
+		TechnicalResourceID: c.Param("id"), ExpectedRowVersion: rowVersion, Capabilities: request,
+	})
+	if err != nil {
+		writeProviderSupplyError(c, err, true)
+		return
+	}
+	SetRevisionETag(c, resource.RowVersion)
+	c.JSON(http.StatusOK, NewSuccessResponse(resource))
+}
+
+func (a *ProviderSupplyAPI) ListTechnicalResourceReleases(c *gin.Context) {
+	authorization, ok := currentManagementAuthorization(c)
+	if !ok {
+		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
+		return
+	}
+	result, err := service.NewProviderSupplyService(db.DB).ListTechnicalResourceReleases(c.Request.Context(), authorization, c.Param("id"))
+	if err != nil {
+		writeProviderSupplyError(c, err, false)
+		return
+	}
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+func (a *ProviderSupplyAPI) ListTechnicalResourceUpdateTasks(c *gin.Context) {
+	authorization, ok := currentManagementAuthorization(c)
+	if !ok {
+		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
+		return
+	}
+	result, err := service.NewProviderSupplyService(db.DB).ListTechnicalResourceUpdateTasks(c.Request.Context(), authorization, c.Param("id"))
+	if err != nil {
+		writeProviderSupplyError(c, err, false)
+		return
+	}
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+func (a *ProviderSupplyAPI) CreateTechnicalResourceUpdateTask(c *gin.Context) {
+	authorization, ok := currentManagementAuthorization(c)
+	if !ok {
+		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
+		return
+	}
+	var request providerTechnicalResourceUpdateRequest
+	body, ok := decodeProviderSupplyRequest(c, &request)
+	if !ok {
+		return
+	}
+	request.ReleaseID, request.Reason = strings.TrimSpace(request.ReleaseID), strings.TrimSpace(request.Reason)
+	if request.ReleaseID == "" || request.Reason == "" || len(request.ReleaseID) > 36 || len(request.Reason) > 500 {
+		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "更新任务参数无效")
+		return
+	}
+	executeProviderIdempotentMutation(c, authorization, body, http.StatusCreated, "create_technical_resource_update_task", request.Reason,
+		func(supply *service.ProviderSupplyService) (any, string, string, int64, error) {
+			task, err := supply.CreateTechnicalResourceUpdateTask(c.Request.Context(), authorization, c.Param("id"), request.ReleaseID, request.Force)
+			if err != nil {
+				return nil, "", "", 0, err
+			}
+			detail, err := supply.GetTechnicalResource(c.Request.Context(), authorization, c.Param("id"))
+			if err != nil {
+				return nil, "", "", 0, err
+			}
+			return task, "technical_resource", c.Param("id"), detail.Resource.RowVersion, nil
+		})
+}
+
+func (a *ProviderSupplyAPI) CheckTechnicalResourceDelete(c *gin.Context) {
+	authorization, ok := currentManagementAuthorization(c)
+	if !ok {
+		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
+		return
+	}
+	result, err := service.NewProviderSupplyService(db.DB).CheckTechnicalResourceDelete(c.Request.Context(), authorization, c.Param("id"))
+	if err != nil {
+		writeProviderSupplyError(c, err, false)
+		return
+	}
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+func (a *ProviderSupplyAPI) DeleteTechnicalResource(c *gin.Context) {
+	authorization, ok := currentManagementAuthorization(c)
+	if !ok {
+		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
+		return
+	}
+	rowVersion, ok := requiredRevision(c)
+	if !ok {
+		codedError(c, http.StatusPreconditionRequired, ErrorCodePreconditionRequired, "必须提供 If-Match revision")
+		return
+	}
+	var request providerReasonRequest
+	body, ok := decodeProviderSupplyRequest(c, &request)
+	if !ok {
+		return
+	}
+	request.Reason = strings.TrimSpace(request.Reason)
+	if request.Reason == "" || len(request.Reason) > 500 {
+		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "删除原因无效")
+		return
+	}
+	executeProviderIdempotentMutation(c, authorization, body, http.StatusOK, "delete_technical_resource", request.Reason,
+		func(supply *service.ProviderSupplyService) (any, string, string, int64, error) {
+			resource, err := supply.DeleteTechnicalResource(c.Request.Context(), authorization, c.Param("id"), rowVersion, request.Reason)
+			if err != nil {
+				return nil, "", "", 0, err
+			}
+			return resource, "technical_resource", resource.ID, resource.RowVersion, nil
+		})
 }
 
 func (a *ProviderSupplyAPI) ListSupplyCandidates(c *gin.Context) {
@@ -405,13 +619,16 @@ func providerSupplyCreateRequest(c *gin.Context) (*service.ManagementAuthorizati
 	request.StableKey = strings.TrimSpace(request.StableKey)
 	request.ParentID = strings.TrimSpace(request.ParentID)
 	request.Reason = strings.TrimSpace(request.Reason)
-	if request.StableKey == "" || request.Reason == "" || len(request.StableKey) > 128 || len(request.ParentID) > 36 ||
-		len(request.Reason) > 500 || request.CredentialRevision <= 0 ||
+	if request.Reason == "" || len(request.StableKey) > 128 || len(request.ParentID) > 36 ||
+		len(request.Reason) > 500 || request.CredentialRevision < 0 ||
 		(request.Type != model.TechnicalResourceAgent && request.Type != model.TechnicalResourceEndpoint) ||
 		(request.Type == model.TechnicalResourceAgent && request.ParentID != "") ||
 		(request.Type == model.TechnicalResourceEndpoint && request.ParentID == "") {
 		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "技术资源参数无效")
 		return nil, nil, request, false
+	}
+	if request.CredentialRevision == 0 {
+		request.CredentialRevision = 1
 	}
 	return authorization, body, request, true
 }
@@ -631,6 +848,11 @@ func writeProviderSupplyError(c *gin.Context, err error, write bool) {
 		codedError(c, http.StatusConflict, ErrorCodeProviderScopeNotAllocatable, "Scope 当前不满足可分配条件")
 	case errors.Is(err, service.ErrProviderSupplyConflict), errors.Is(err, service.ErrTechnicalResourceUnbound):
 		codedError(c, http.StatusConflict, ErrorCodeProviderSupplyConflict, "Provider 资源存在冲突或缺少前置条件")
+	case errors.Is(err, service.ErrActiveTaskExists), errors.Is(err, service.ErrReleaseNotPublished),
+		errors.Is(err, service.ErrArtifactNotFound), errors.Is(err, service.ErrUpdaterUnsupported):
+		codedError(c, http.StatusConflict, ErrorCodeProviderSupplyConflict, "当前资源不满足更新前置条件")
+	case errors.Is(err, service.ErrTechnicalResourceDeleteBlocked):
+		codedError(c, http.StatusConflict, ErrorCodeProviderSupplyConflict, "资源仍有业务依赖，请重新执行删除检查")
 	case errors.Is(err, service.ErrTechnicalResourceStateTransition), errors.Is(err, service.ErrPlatformResourceStateTransition),
 		errors.Is(err, service.ErrResourceScopeStateTransition):
 		codedError(c, http.StatusConflict, ErrorCodeProviderSupplyState, "对象状态转换无效")

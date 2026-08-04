@@ -60,6 +60,12 @@ const routes: RouteRecordRaw[] = [
 			meta: { requiresAuth: true, scope: 'provider', workspace: 'provider', permission: 'provider.technical_resources.read', menuDomain: 'provider' }
 		},
 		{
+			path: 'provider-technical-resources/:id',
+			name: 'ProviderTechnicalResourceDetail',
+			component: () => import('@/views/Provider/TechnicalResourceDetail.vue'),
+			meta: { requiresAuth: true, scope: 'provider', workspace: 'provider', permission: 'provider.technical_resources.read', menuDomain: 'provider' }
+		},
+		{
 			path: 'provider-supply-candidates',
 			name: 'ProviderSupplyCandidates',
 			component: () => import('@/views/Provider/SupplyCandidates.vue'),
