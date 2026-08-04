@@ -1,4 +1,4 @@
-name: Build ZTNA Server
+name: Build Signal Server
 
 on:
   workflow_dispatch:
@@ -6,12 +6,14 @@ on:
     branches:
       - dev
       - main
+    tags:
+      - "v*"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ztna-server-${{ github.ref }}
+  group: signal-server-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -36,7 +38,7 @@ jobs:
         run: go test ./...
 
   publish:
-    name: Build and Publish ZTNA Server
+    name: Build and Publish Signal Server
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -51,7 +53,12 @@ jobs:
         id: version
         shell: bash
         run: |
-          echo "build_version=v1.0.0" >> "$GITHUB_OUTPUT"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            build_version="${GITHUB_REF_NAME}"
+          else
+            build_version="sha-${GITHUB_SHA::12}"
+          fi
+          echo "build_version=${build_version}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -112,7 +119,7 @@ jobs:
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         run: |
           {
-            echo "### ZTNA Server image"
+            echo "### Signal Server image"
             echo
             echo "- Version: \`${BUILD_VERSION}\`"
             echo "- Digest: \`${IMAGE_DIGEST}\`"
