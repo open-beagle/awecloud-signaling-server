@@ -55,12 +55,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Resolve build version
         id: version
         shell: bash
         env:
           PUBLISH_RELEASE: ${{ inputs.publish_release || false }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           file_version="$(tr -d '[:space:]' < version)"
           if [[ ! "${file_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -80,6 +83,13 @@ jobs:
           elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${PUBLISH_RELEASE}" == "true" ]]; then
             is_release=true
             build_version="${file_version}"
+          elif [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" == "main" ]]; then
+            previous_version="$(git show "${BEFORE_SHA}:version" 2>/dev/null | tr -d '[:space:]' || true)"
+            if [[ "${previous_version}" != "${file_version}" ]]; then
+              echo "Version changed on main: ${previous_version:-<missing>} -> ${file_version}"
+              is_release=true
+              build_version="${file_version}"
+            fi
           fi
 
           echo "file_version=${file_version}" >> "$GITHUB_OUTPUT"
