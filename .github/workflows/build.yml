@@ -1,25 +1,17 @@
-name: Build Signal Server
+name: Release Signal Components
 
 on:
-  workflow_dispatch:
-    inputs:
-      publish_release:
-        description: Publish the version in server/version to registry and S3
-        required: true
-        type: boolean
-        default: false
   push:
     branches:
-      - dev
-      - main
+      - "release-v*"
     tags:
-      - "v*"
+      - "release-v*"
 
 permissions:
   contents: read
 
 concurrency:
-  group: signal-server-${{ github.ref }}
+  group: signal-release-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -27,74 +19,31 @@ env:
   AGENT_IMAGE_REPOSITORY: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent
 
 jobs:
-  test:
-    name: Test Server
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Setup Go
-        uses: actions/setup-go@v7
-        with:
-          go-version: "1.26"
-          cache: true
-
-      - name: Run tests
-        run: go test ./...
-
-  publish:
-    name: Build and Publish Signal Components
-    needs: test
+  release:
+    name: Test, Build and Publish Signal Components
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    outputs:
-      build_version: ${{ steps.version.outputs.build_version }}
-      is_release: ${{ steps.version.outputs.is_release }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
 
-      - name: Resolve build version
+      - name: Resolve release version
         id: version
         shell: bash
-        env:
-          PUBLISH_RELEASE: ${{ inputs.publish_release || false }}
-          BEFORE_SHA: ${{ github.event.before }}
         run: |
-          file_version="$(tr -d '[:space:]' < version)"
-          if [[ ! "${file_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid version file: ${file_version}" >&2
+          version="$(tr -d '[:space:]' < version)"
+          if [[ ! "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version file: ${version}" >&2
             exit 1
           fi
 
-          is_release=false
-          build_version="sha-${GITHUB_SHA::12}"
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            if [[ "${GITHUB_REF_NAME}" != "${file_version}" ]]; then
-              echo "Git tag ${GITHUB_REF_NAME} does not match version ${file_version}" >&2
-              exit 1
-            fi
-            is_release=true
-            build_version="${file_version}"
-          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${PUBLISH_RELEASE}" == "true" ]]; then
-            is_release=true
-            build_version="${file_version}"
-          elif [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" == "main" ]]; then
-            previous_version="$(git show "${BEFORE_SHA}:version" 2>/dev/null | tr -d '[:space:]' || true)"
-            if [[ "${previous_version}" != "${file_version}" ]]; then
-              echo "Version changed on main: ${previous_version:-<missing>} -> ${file_version}"
-              is_release=true
-              build_version="${file_version}"
-            fi
+          expected_ref="release-${version}"
+          if [[ "${GITHUB_REF_NAME}" != "${expected_ref}" ]]; then
+            echo "Release ref ${GITHUB_REF_NAME} does not match ${expected_ref}" >&2
+            exit 1
           fi
 
-          echo "file_version=${file_version}" >> "$GITHUB_OUTPUT"
-          echo "build_version=${build_version}" >> "$GITHUB_OUTPUT"
-          echo "is_release=${is_release}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -106,7 +55,7 @@ jobs:
       - name: Build frontend
         working-directory: web
         env:
-          BUILD_VERSION: ${{ steps.version.outputs.build_version }}
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
         run: |
           npm ci --legacy-peer-deps
           npm run build
@@ -117,20 +66,18 @@ jobs:
           go-version: "1.26"
           cache: true
 
+      - name: Test server
+        run: go test ./...
+
       - name: Build Linux binaries
         env:
-          BUILD_VERSION: ${{ steps.version.outputs.build_version }}
-          IS_RELEASE: ${{ steps.version.outputs.is_release }}
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
           GOOS: linux
-        run: |
-          if [[ "${IS_RELEASE}" == "true" ]]; then
-            GOARCHS=amd64,arm64 BUILD_TARGETS=server,agent,endpoint bash scripts/build.sh
-          else
-            GOARCHS=amd64 BUILD_TARGETS=server bash scripts/build.sh
-          fi
+          GOARCHS: amd64,arm64
+          BUILD_TARGETS: server,agent,endpoint
+        run: bash scripts/build.sh
 
       - name: Set up QEMU
-        if: steps.version.outputs.is_release == 'true'
         uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
@@ -145,91 +92,70 @@ jobs:
           username: ${{ secrets.REGISTRY_USER_ALIYUN }}
           password: ${{ secrets.REGISTRY_PASSWORD_ALIYUN }}
 
-      - name: Build and push branch Server image
-        if: steps.version.outputs.is_release != 'true'
-        id: branch_server_image
+      - name: Build and push Server AMD64 image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./.beagle/server.dockerfile
           platforms: linux/amd64
           push: true
-          tags: ${{ env.SERVER_IMAGE_REPOSITORY }}:${{ steps.version.outputs.build_version }}
+          tags: ${{ env.SERVER_IMAGE_REPOSITORY }}:${{ steps.version.outputs.version }}-amd64
           build-args: |
             BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-amd64
             AUTHOR=${{ github.repository_owner }}
-            VERSION=${{ steps.version.outputs.build_version }}
+            VERSION=${{ steps.version.outputs.version }}
 
-      - name: Build and push Release Server AMD64 image
-        if: steps.version.outputs.is_release == 'true'
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./.beagle/server.dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ env.SERVER_IMAGE_REPOSITORY }}:${{ steps.version.outputs.build_version }}-amd64
-          build-args: |
-            BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-amd64
-            AUTHOR=${{ github.repository_owner }}
-            VERSION=${{ steps.version.outputs.build_version }}
-
-      - name: Build and push Release Server ARM64 image
-        if: steps.version.outputs.is_release == 'true'
+      - name: Build and push Server ARM64 image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./.beagle/server.dockerfile
           platforms: linux/arm64
           push: true
-          tags: ${{ env.SERVER_IMAGE_REPOSITORY }}:${{ steps.version.outputs.build_version }}-arm64
+          tags: ${{ env.SERVER_IMAGE_REPOSITORY }}:${{ steps.version.outputs.version }}-arm64
           build-args: |
             BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-arm64
             AUTHOR=${{ github.repository_owner }}
-            VERSION=${{ steps.version.outputs.build_version }}
+            VERSION=${{ steps.version.outputs.version }}
 
-      - name: Create Release Server multi-arch manifest
-        if: steps.version.outputs.is_release == 'true'
+      - name: Create Server multi-arch manifest
         env:
-          VERSION: ${{ steps.version.outputs.build_version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           docker buildx imagetools create \
             -t "${SERVER_IMAGE_REPOSITORY}:${VERSION}" \
             "${SERVER_IMAGE_REPOSITORY}:${VERSION}-amd64" \
             "${SERVER_IMAGE_REPOSITORY}:${VERSION}-arm64"
 
-      - name: Build and push Release Agent AMD64 image
-        if: steps.version.outputs.is_release == 'true'
+      - name: Build and push Agent AMD64 image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./.beagle/agent.dockerfile
           platforms: linux/amd64
           push: true
-          tags: ${{ env.AGENT_IMAGE_REPOSITORY }}:${{ steps.version.outputs.build_version }}-amd64
+          tags: ${{ env.AGENT_IMAGE_REPOSITORY }}:${{ steps.version.outputs.version }}-amd64
           build-args: |
             BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-amd64
             AUTHOR=${{ github.repository_owner }}
-            VERSION=${{ steps.version.outputs.build_version }}
+            VERSION=${{ steps.version.outputs.version }}
 
-      - name: Build and push Release Agent ARM64 image
-        if: steps.version.outputs.is_release == 'true'
+      - name: Build and push Agent ARM64 image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./.beagle/agent.dockerfile
           platforms: linux/arm64
           push: true
-          tags: ${{ env.AGENT_IMAGE_REPOSITORY }}:${{ steps.version.outputs.build_version }}-arm64
+          tags: ${{ env.AGENT_IMAGE_REPOSITORY }}:${{ steps.version.outputs.version }}-arm64
           build-args: |
             BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-arm64
             AUTHOR=${{ github.repository_owner }}
-            VERSION=${{ steps.version.outputs.build_version }}
+            VERSION=${{ steps.version.outputs.version }}
 
-      - name: Create Release Agent multi-arch manifest
-        if: steps.version.outputs.is_release == 'true'
+      - name: Create Agent multi-arch manifest
         env:
-          VERSION: ${{ steps.version.outputs.build_version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           docker buildx imagetools create \
             -t "${AGENT_IMAGE_REPOSITORY}:${VERSION}" \
@@ -237,16 +163,14 @@ jobs:
             "${AGENT_IMAGE_REPOSITORY}:${VERSION}-arm64"
 
       - name: Setup MinIO Client
-        if: steps.version.outputs.is_release == 'true'
         run: |
           curl -fsSLo mc https://dl.min.io/client/mc/release/linux-amd64/mc
           chmod +x mc
           sudo mv mc /usr/local/bin/mc
 
-      - name: Publish Release Agent and Endpoint artifacts
-        if: steps.version.outputs.is_release == 'true'
+      - name: Publish Agent and Endpoint artifacts
         env:
-          VERSION: ${{ steps.version.outputs.build_version }}
+          VERSION: ${{ steps.version.outputs.version }}
           S3_ENDPOINT: ${{ secrets.S3_ENDPOINT_ALIYUN }}
           S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY_ALIYUN }}
           S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY_ALIYUN }}
@@ -286,7 +210,7 @@ jobs:
             '{version: $version, build_date: $build_date, files: {"linux-amd64": ("signal_endpoint-" + $version + "-linux-amd64"), "linux-arm64": ("signal_endpoint-" + $version + "-linux-arm64")}, sha256: {"linux-amd64": $amd64_sha, "linux-arm64": $arm64_sha}}' \
             > signal_endpoint-version.json
 
-          # Publish mutable version pointers only after all immutable artifacts exist.
+          # Update mutable pointers only after all immutable artifacts are available.
           mc cp signal_agent-version.json "${s3_bucket}/signal_agent-version.json"
           mc cp signal_endpoint-version.json "${s3_bucket}/signal_endpoint-version.json"
 
@@ -299,22 +223,16 @@ jobs:
           mc anonymous set download "${s3_bucket}/signal_endpoint-${VERSION}-linux-amd64"
           mc anonymous set download "${s3_bucket}/signal_endpoint-${VERSION}-linux-arm64"
 
-      - name: Publish build summary
+      - name: Publish release summary
         env:
-          VERSION: ${{ steps.version.outputs.build_version }}
-          IS_RELEASE: ${{ steps.version.outputs.is_release }}
-          BRANCH_IMAGE_DIGEST: ${{ steps.branch_server_image.outputs.digest }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           {
-            echo "### Signal build"
+            echo "### Signal release"
             echo
             echo "- Version: \`${VERSION}\`"
-            echo "- Release: \`${IS_RELEASE}\`"
-            if [[ "${IS_RELEASE}" == "true" ]]; then
-              echo "- Server image: \`${SERVER_IMAGE_REPOSITORY}:${VERSION}\`"
-              echo "- Agent image: \`${AGENT_IMAGE_REPOSITORY}:${VERSION}\`"
-              echo "- Agent/Endpoint artifacts: published to S3"
-            else
-              echo "- Server digest: \`${BRANCH_IMAGE_DIGEST}\`"
-            fi
+            echo "- Source: \`${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}\`"
+            echo "- Server image: \`${SERVER_IMAGE_REPOSITORY}:${VERSION}\`"
+            echo "- Agent image: \`${AGENT_IMAGE_REPOSITORY}:${VERSION}\`"
+            echo "- Agent/Endpoint artifacts: published to S3"
           } >> "$GITHUB_STEP_SUMMARY"
