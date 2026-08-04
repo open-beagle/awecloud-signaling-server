@@ -30,6 +30,9 @@ func NewDomainStatusService(headscaleClient *headscale.Client) *DomainStatusServ
 // GetDomainStatus 获取域名状态
 // 根据 node_id 或 endpoint_id 从内存缓存判断状态
 func (s *DomainStatusService) GetDomainStatus(ctx context.Context, domain *model.DomainRegistry) model.DomainStatus {
+	if domain.Status == model.DomainStatusOffline {
+		return model.DomainStatusOffline
+	}
 	// 场景 1：Node 域名（node_id > 0 且 endpoint_id 为空）
 	if domain.NodeID > 0 && domain.EndpointID == "" {
 		return s.getNodeDomainStatus(ctx, domain)

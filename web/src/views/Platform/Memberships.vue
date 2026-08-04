@@ -1,6 +1,6 @@
 <template>
   <div class="membership-page">
-    <PageHeader title="管理授权" eyebrow="Platform Governance" description="统一查看 User 对 Provider 与 Tenant 的正式管理关系；管理授权不会授予业务资源访问资格。">
+    <PageHeader title="授权管理" eyebrow="Platform Governance" description="统一查看用户对租户与资源供应商的正式管理关系；管理授权不会授予业务资源访问资格。">
       <template #actions>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
         <el-button v-if="canWrite" type="primary" :icon="Plus" @click="openCreate">新建管理授权</el-button>
@@ -8,7 +8,7 @@
     </PageHeader>
 
     <el-alert
-      :title="canWrite ? '可在此维护 Provider 与 Tenant 的正式管理授权；兼容期旧 Admin 关系不在此扩展。' : '当前页面只读。Provider 与 Tenant 授权均以统一 User 为主体，兼容期旧 Admin 关系不在此扩展。'"
+      :title="canWrite ? '可在此维护租户与资源供应商的正式管理授权；兼容期旧 Admin 关系不在此扩展。' : '当前页面只读。两类授权均以统一用户为主体，兼容期旧 Admin 关系不在此扩展。'"
       type="info"
       show-icon
       :closable="false"
@@ -18,9 +18,9 @@
     <section class="list-surface">
       <div class="scope-tabs" role="group" aria-label="管理授权对象类型">
         <el-radio-group v-model="filters.scope_type" @change="search">
-          <el-radio-button value="">全部</el-radio-button>
-          <el-radio-button value="provider">Provider</el-radio-button>
-          <el-radio-button value="tenant">Tenant</el-radio-button>
+          <el-radio-button value="">全部授权</el-radio-button>
+          <el-radio-button value="provider">资源授权</el-radio-button>
+          <el-radio-button value="tenant">租户授权</el-radio-button>
         </el-radio-group>
       </div>
       <div class="toolbar">
@@ -57,8 +57,8 @@
     <el-dialog v-model="dialog.visible" :title="dialog.mode === 'create' ? '新建管理授权' : '编辑管理授权'" width="620px" destroy-on-close>
       <el-alert title="授权只建立目标组织的管理关系；完成后仍需切换到对应工作域。自授权必须设置到期时间并完整记录原因。" type="warning" show-icon :closable="false" />
       <el-form class="membership-form" label-position="top">
-        <el-form-item label="目标类型" required>
-          <el-radio-group v-model="form.scopeType" :disabled="dialog.mode === 'edit'" @change="loadOrganizations"><el-radio-button value="provider">Provider</el-radio-button><el-radio-button value="tenant">Tenant</el-radio-button></el-radio-group>
+        <el-form-item label="授权类型" required>
+          <el-radio-group v-model="form.scopeType" :disabled="dialog.mode === 'edit'" @change="loadOrganizations"><el-radio-button value="provider">资源授权</el-radio-button><el-radio-button value="tenant">租户授权</el-radio-button></el-radio-group>
         </el-form-item>
         <el-form-item label="目标对象" required>
           <el-select v-model="form.scopeId" filterable :disabled="dialog.mode === 'edit'" placeholder="选择目标组织" style="width: 100%">
@@ -116,12 +116,12 @@ const organizationOptions = ref<PlatformOrganization[]>([])
 const dialog = reactive<{ visible: boolean; mode: 'create' | 'edit'; membership?: PlatformManagementMembership }>({ visible: false, mode: 'create' })
 const form = reactive<{ scopeType: PlatformMembershipScopeType; scopeId: string; userId?: number; role: string; enabled: boolean; validFrom: Date; expiresAt: Date | null; reason: string }>({ scopeType: 'provider', scopeId: '', userId: undefined, role: 'provider_viewer', enabled: true, validFrom: new Date(), expiresAt: null, reason: '' })
 const allRoles = [
-  { label: 'Provider 管理员', value: 'provider_admin', scope: 'provider' },
-  { label: 'Provider 运维员', value: 'provider_operator', scope: 'provider' },
-  { label: 'Provider 观察员', value: 'provider_viewer', scope: 'provider' },
-  { label: 'Tenant 管理员', value: 'tenant_admin', scope: 'tenant' },
+  { label: '资源管理员', value: 'provider_admin', scope: 'provider' },
+  { label: '资源运维员', value: 'provider_operator', scope: 'provider' },
+  { label: '资源观察员', value: 'provider_viewer', scope: 'provider' },
+  { label: '租户管理员', value: 'tenant_admin', scope: 'tenant' },
   { label: '安全审计员', value: 'security_auditor', scope: 'tenant' },
-  { label: 'Tenant 观察员', value: 'tenant_viewer', scope: 'tenant' }
+  { label: '租户观察员', value: 'tenant_viewer', scope: 'tenant' }
 ]
 const roleOptions = computed(() => filters.scope_type ? allRoles.filter(option => option.scope === filters.scope_type) : allRoles)
 const rolesForScope = (scope: PlatformMembershipScopeType) => allRoles.filter(option => option.scope === scope)
@@ -153,7 +153,7 @@ const search = () => { pagination.page = 1; load() }
 watch(() => filters.scope_type, () => {
   if (filters.role && !roleOptions.value.some(option => option.value === filters.role)) filters.role = ''
 })
-const scopeLabel = (scope: PlatformMembershipScopeType) => scope === 'provider' ? 'Provider' : 'Tenant'
+const scopeLabel = (scope: PlatformMembershipScopeType) => scope === 'provider' ? '资源供应商' : '租户'
 const roleLabel = (role: string) => allRoles.find(option => option.value === role)?.label || role
 const statusLabel = (row: PlatformManagementMembership) => !row.user_enabled ? '账号停用' : !row.enabled ? '授权停用' : new Date(row.valid_from).getTime() > Date.now() ? '未生效' : row.expires_at && new Date(row.expires_at).getTime() <= Date.now() ? '已过期' : row.scope_status !== 'active' ? '对象暂停' : '有效'
 const statusType = (row: PlatformManagementMembership) => statusLabel(row) === '有效' ? 'success' : statusLabel(row) === '对象暂停' ? 'warning' : 'info'

@@ -2460,6 +2460,9 @@ func (s *DesktopServiceServer) extractRegionFromDomain(domain string) string {
 
 // getDomainStatus 判断域名状态
 func (s *DesktopServiceServer) getDomainStatus(ctx context.Context, dr *model.DomainRegistry) string {
+	if dr.Status == model.DomainStatusOffline {
+		return string(model.DomainStatusOffline)
+	}
 	// 判断是 Node 域名还是 Endpoint 域名
 	if dr.EndpointID == "" {
 		// Node 域名：通过 NodeStatusCache 判断

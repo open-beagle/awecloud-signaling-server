@@ -234,10 +234,38 @@ func autoMigrate() error {
 	if err := migrateAgentDeployTokensToTechnicalResources(DB); err != nil {
 		return err
 	}
+	if err := ensureProviderDomainLabelSchema(DB); err != nil {
+		return err
+	}
 	if err := ensurePlatformAllocationConstraints(DB); err != nil {
 		return err
 	}
 	return ensureTenantResourceConstraints(DB)
+}
+
+func ensureProviderDomainLabelSchema(database *gorm.DB) error {
+	var providers []model.ResourceProvider
+	if err := database.Where("domain_label = '' OR domain_label IS NULL").Order("id").Find(&providers).Error; err != nil {
+		return fmt.Errorf("list providers missing domain label: %w", err)
+	}
+	for i := range providers {
+		label := strings.ToLower(strings.TrimSpace(providers[i].Key))
+		if len(label) > 63 {
+			compactID := strings.ReplaceAll(providers[i].ID, "-", "")
+			if len(compactID) > 8 {
+				compactID = compactID[:8]
+			}
+			label = strings.TrimRight(label[:54], "-") + "-" + compactID
+		}
+		if err := database.Model(&model.ResourceProvider{}).Where("id = ?", providers[i].ID).Update("domain_label", label).Error; err != nil {
+			return fmt.Errorf("backfill provider domain label %s: %w", providers[i].ID, err)
+		}
+	}
+	if err := database.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uk_resource_provider_domain_label
+		ON resource_provider(lower(domain_label)) WHERE domain_label <> ''`).Error; err != nil {
+		return fmt.Errorf("create provider domain label index: %w", err)
+	}
+	return nil
 }
 
 // ensureTenantGovernanceSchema owns Tenant schema migration. Existing SQLite

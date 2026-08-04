@@ -10,6 +10,7 @@ export interface PlatformOrganization {
   scope_type: PlatformMembershipScopeType
   key: string
   name: string
+  domain_label?: string
   status: PlatformOrganizationStatus
   management_membership_count: number
   business_member_count: number
@@ -33,6 +34,8 @@ export interface PlatformOrganizationParams {
 export interface PlatformOrganizationMutationRequest {
   key?: string
   name?: string
+  domain_label?: string
+  domain_change_confirmation?: string
   reason: string
 }
 

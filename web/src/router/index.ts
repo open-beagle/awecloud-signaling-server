@@ -145,18 +145,36 @@ const routes: RouteRecordRaw[] = [
 			component: () => import('@/views/Tenant/Settings.vue'),
 			meta: { requiresAuth: true, scope: 'tenant', permission: 'tenant.settings.read', menuDomain: 'tenant' }
 		},
-      // 用户管理
+      // 平台组织治理
       {
-        path: 'tenants',
-        name: 'Tenants',
+        path: 'platform-tenants',
+        name: 'PlatformTenants',
         component: () => import('@/views/Platform/Organizations.vue'),
+		props: { scopeType: 'tenant' },
 		meta: { requiresAuth: true, scope: 'platform', workspace: 'platform', permission: 'platform.organizations.read', menuDomain: 'platform' }
       },
 		{
-			path: 'tenant-admin-memberships',
-			name: 'TenantAdminMemberships',
+			path: 'platform-providers',
+			name: 'PlatformProviders',
+			component: () => import('@/views/Platform/Organizations.vue'),
+			props: { scopeType: 'provider' },
+			meta: { requiresAuth: true, scope: 'platform', workspace: 'platform', permission: 'platform.organizations.read', menuDomain: 'platform' }
+		},
+		{
+			path: 'platform-management-memberships',
+			name: 'PlatformManagementMemberships',
 			component: () => import('@/views/Platform/Memberships.vue'),
 			meta: { requiresAuth: true, scope: 'platform', workspace: 'platform', permission: 'platform.memberships.read', menuDomain: 'platform' }
+		},
+		{
+			path: 'tenants',
+			redirect: to => ({ name: to.query.scope_type === 'provider' ? 'PlatformProviders' : 'PlatformTenants', query: to.query }),
+			meta: { requiresAuth: true, scope: 'platform', workspace: 'platform' }
+		},
+		{
+			path: 'tenant-admin-memberships',
+			redirect: to => ({ name: 'PlatformManagementMemberships', query: to.query }),
+			meta: { requiresAuth: true, scope: 'platform', workspace: 'platform' }
 		},
 		{
 			path: 'platform-admins',
@@ -488,8 +506,9 @@ const breadcrumbByRouteName: Record<string, BreadcrumbMeta> = {
 	TenantManagementMemberships: [{ title: '租户治理' }, { title: '管理员' }],
 	TenantAudit: [{ title: '租户业务' }, { title: '租户审计' }],
 	TenantSettings: [{ title: '租户业务' }, { title: '租户设置' }],
-	Tenants: [{ title: '组织治理' }, { title: '组织管理' }],
-	TenantAdminMemberships: [{ title: '平台治理' }, { title: '管理授权' }],
+	PlatformTenants: [{ title: '组织治理' }, { title: '租户管理' }],
+	PlatformProviders: [{ title: '组织治理' }, { title: '资源管理' }],
+	PlatformManagementMemberships: [{ title: '组织治理' }, { title: '授权管理' }],
 	PlatformAdmins: [{ title: '平台治理' }, { title: '平台管理账号' }],
 	PlatformUserSimulations: [{ title: '平台治理' }, { title: '用户模拟' }],
 	PlatformIdentities: [{ title: '平台治理' }, { title: '访问主体目录', path: '/platform-identities' }],
@@ -638,8 +657,8 @@ const firstProviderDestination = (workspaceStore = useWorkspaceStore()) => {
 
 const firstPlatformDestination = (workspaceStore = useWorkspaceStore()) => {
 	if (workspaceStore.can('platform.overview.read')) return '/platform-overview'
-	if (workspaceStore.can('platform.organizations.read')) return '/tenants'
-	if (workspaceStore.can('platform.memberships.read')) return '/tenant-admin-memberships'
+	if (workspaceStore.can('platform.organizations.read')) return '/platform-tenants'
+	if (workspaceStore.can('platform.memberships.read')) return '/platform-management-memberships'
 	if (workspaceStore.can('platform.resources.read')) return '/platform-resources'
 	if (workspaceStore.can('platform.allocations.read')) return '/platform-allocations'
 	if (workspaceStore.can('platform.identities.read')) return '/platform-identities'

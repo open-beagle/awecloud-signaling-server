@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -23,11 +24,17 @@ func NewDomainService(db *gorm.DB) *DomainService {
 	}
 }
 
+func (s *DomainService) providerDomain(ctx context.Context, label string, segments ...string) string {
+	parts := append(append(make([]string, 0, len(segments)+1), segments...), label)
+	return strings.Join(parts, ".") + domainSuffix(ctx, s.db)
+}
+
 // CreateNodeSSHDomain 创建 Node SSH 域名
-// domain = "{node_name}.{region}.beagle"
+// domain = "{node_name}.{domain_label}.{domain_suffix}"
 func (s *DomainService) CreateNodeSSHDomain(ctx context.Context, node *model.Node, user *model.User) error {
 	// 生成域名
-	domain := fmt.Sprintf("%s.%s.beagle", node.Name, user.Name)
+	label := EffectiveProviderDomainLabel(ctx, s.db, user.ID, user.Name)
+	domain := s.providerDomain(ctx, label, node.Name)
 
 	// 检查是否已存在
 	var existing model.DomainRegistry
@@ -59,10 +66,11 @@ func (s *DomainService) CreateNodeSSHDomain(ctx context.Context, node *model.Nod
 }
 
 // CreateNodeK8SAPIDomain 创建 Node K8S API 域名
-// domain = "kubernetes.{region}.beagle"
+// domain = "kubernetes.{domain_label}.{domain_suffix}"
 func (s *DomainService) CreateNodeK8SAPIDomain(ctx context.Context, node *model.Node, user *model.User) error {
 	// 生成域名
-	domain := fmt.Sprintf("kubernetes.%s.beagle", user.Name)
+	label := EffectiveProviderDomainLabel(ctx, s.db, user.ID, user.Name)
+	domain := s.providerDomain(ctx, label, "kubernetes")
 
 	// 检查是否已存在
 	var existing model.DomainRegistry
@@ -101,7 +109,8 @@ func (s *DomainService) CreateNodeK8SAPIDomain(ctx context.Context, node *model.
 
 // DeleteNodeSSHDomain 删除 Node SSH 域名
 func (s *DomainService) DeleteNodeSSHDomain(ctx context.Context, node *model.Node, user *model.User) error {
-	domain := fmt.Sprintf("%s.%s.beagle", node.Name, user.Name)
+	label := EffectiveProviderDomainLabel(ctx, s.db, user.ID, user.Name)
+	domain := s.providerDomain(ctx, label, node.Name)
 
 	result := s.db.WithContext(ctx).Where("domain = ? AND user_id = ? AND type = ?", domain, user.ID, model.DomainTypeSSH).
 		Delete(&model.DomainRegistry{})
@@ -119,7 +128,8 @@ func (s *DomainService) DeleteNodeSSHDomain(ctx context.Context, node *model.Nod
 
 // DeleteNodeK8SAPIDomain 删除 Node K8S API 域名
 func (s *DomainService) DeleteNodeK8SAPIDomain(ctx context.Context, node *model.Node, user *model.User) error {
-	domain := fmt.Sprintf("kubernetes.%s.beagle", user.Name)
+	label := EffectiveProviderDomainLabel(ctx, s.db, user.ID, user.Name)
+	domain := s.providerDomain(ctx, label, "kubernetes")
 
 	result := s.db.WithContext(ctx).Where("domain = ? AND user_id = ? AND type = ?", domain, user.ID, model.DomainTypeK8SAPI).
 		Delete(&model.DomainRegistry{})
@@ -151,10 +161,11 @@ func (s *DomainService) DeleteNodeAllDomains(ctx context.Context, nodeID uint64)
 }
 
 // CreateEndpointSSHDomain 创建 Endpoint SSH 域名
-// domain = "{endpoint_name}.{region}.beagle"
+// domain = "{endpoint_name}.{domain_label}.{domain_suffix}"
 func (s *DomainService) CreateEndpointSSHDomain(ctx context.Context, endpoint *model.Endpoint, agentNode *model.Node, user *model.User) error {
 	// 生成域名
-	domain := fmt.Sprintf("%s.%s.beagle", endpoint.Name, user.Name)
+	label := EffectiveProviderDomainLabel(ctx, s.db, user.ID, user.Name)
+	domain := s.providerDomain(ctx, label, endpoint.Name)
 
 	// 检查是否已存在
 	var existing model.DomainRegistry
@@ -172,9 +183,9 @@ func (s *DomainService) CreateEndpointSSHDomain(ctx context.Context, endpoint *m
 		Domain:     domain,
 		Type:       model.DomainTypeSSH,
 		UserID:     user.ID,
-		NodeID:     agentNode.ID,       // Agent Node ID
-		EndpointID: endpoint.Name,      // Endpoint 名称
-		TargetIP:   agentNode.IP,       // Agent IP
+		NodeID:     agentNode.ID,          // Agent Node ID
+		EndpointID: endpoint.Name,         // Endpoint 名称
+		TargetIP:   agentNode.IP,          // Agent IP
 		TargetPort: int(endpoint.SSHPort), // 从 Endpoint 表读取端口
 	}
 
@@ -189,7 +200,8 @@ func (s *DomainService) CreateEndpointSSHDomain(ctx context.Context, endpoint *m
 
 // DeleteEndpointSSHDomain 删除 Endpoint SSH 域名
 func (s *DomainService) DeleteEndpointSSHDomain(ctx context.Context, endpointName string, user *model.User) error {
-	domain := fmt.Sprintf("%s.%s.beagle", endpointName, user.Name)
+	label := EffectiveProviderDomainLabel(ctx, s.db, user.ID, user.Name)
+	domain := s.providerDomain(ctx, label, endpointName)
 
 	result := s.db.WithContext(ctx).Where("domain = ? AND user_id = ? AND type = ?", domain, user.ID, model.DomainTypeSSH).
 		Delete(&model.DomainRegistry{})
@@ -221,11 +233,12 @@ func (s *DomainService) DeleteEndpointAllDomains(ctx context.Context, endpointNa
 }
 
 // CreateEndpointK8SAPIDomain 创建 Endpoint K8S API 域名
-// domain = "kubernetes.{region}.beagle"
+// domain = "kubernetes.{domain_label}.{domain_suffix}"
 // 注意：Endpoint K8S API 域名格式和 Node K8S API 一样，通过 endpoint_id 字段区分
 func (s *DomainService) CreateEndpointK8SAPIDomain(ctx context.Context, endpoint *model.Endpoint, agentNode *model.Node, user *model.User) error {
 	// 生成域名
-	domain := fmt.Sprintf("kubernetes.%s.beagle", user.Name)
+	label := EffectiveProviderDomainLabel(ctx, s.db, user.ID, user.Name)
+	domain := s.providerDomain(ctx, label, "kubernetes")
 
 	// 检查是否已存在（按 endpoint_id 区分）
 	var existing model.DomainRegistry
@@ -243,9 +256,9 @@ func (s *DomainService) CreateEndpointK8SAPIDomain(ctx context.Context, endpoint
 		Domain:     domain,
 		Type:       model.DomainTypeK8SAPI,
 		UserID:     user.ID,
-		NodeID:     agentNode.ID,          // Agent Node ID
-		EndpointID: endpoint.Name,         // Endpoint 名称
-		TargetIP:   agentNode.IP,          // Agent IP
+		NodeID:     agentNode.ID,             // Agent Node ID
+		EndpointID: endpoint.Name,            // Endpoint 名称
+		TargetIP:   agentNode.IP,             // Agent IP
 		TargetPort: int(endpoint.K8SAPIPort), // 从 Endpoint 表读取端口
 	}
 
@@ -260,7 +273,8 @@ func (s *DomainService) CreateEndpointK8SAPIDomain(ctx context.Context, endpoint
 
 // DeleteEndpointK8SAPIDomain 删除 Endpoint K8S API 域名
 func (s *DomainService) DeleteEndpointK8SAPIDomain(ctx context.Context, endpointName string, user *model.User) error {
-	domain := fmt.Sprintf("kubernetes.%s.beagle", user.Name)
+	label := EffectiveProviderDomainLabel(ctx, s.db, user.ID, user.Name)
+	domain := s.providerDomain(ctx, label, "kubernetes")
 
 	result := s.db.WithContext(ctx).Where("domain = ? AND user_id = ? AND endpoint_id = ?", domain, user.ID, endpointName).
 		Delete(&model.DomainRegistry{})
@@ -277,10 +291,11 @@ func (s *DomainService) DeleteEndpointK8SAPIDomain(ctx context.Context, endpoint
 }
 
 // CreateNodeK8SSVCDomain 创建 Node K8S Service 域名
-// domain = "{service_name}.{namespace}.{region}.beagle"
+// domain = "{service_name}.{namespace}.{domain_label}.{domain_suffix}"
 func (s *DomainService) CreateNodeK8SSVCDomain(ctx context.Context, node *model.Node, user *model.User, namespace, serviceName, clusterIP string, port int) error {
 	// 生成域名
-	domain := fmt.Sprintf("%s.%s.%s.beagle", serviceName, namespace, user.Name)
+	label := EffectiveProviderDomainLabel(ctx, s.db, user.ID, user.Name)
+	domain := s.providerDomain(ctx, label, serviceName, namespace)
 
 	// 检查是否已存在
 	var existing model.DomainRegistry
@@ -340,10 +355,11 @@ func (s *DomainService) DeleteNodeK8SSVCDomains(ctx context.Context, nodeID uint
 }
 
 // CreateEndpointK8SSVCDomain 创建 Endpoint K8S Service 域名
-// domain = "{service_name}.{namespace}.{region}.beagle"
+// domain = "{service_name}.{namespace}.{domain_label}.{domain_suffix}"
 func (s *DomainService) CreateEndpointK8SSVCDomain(ctx context.Context, endpoint *model.Endpoint, agentNode *model.Node, user *model.User, namespace, serviceName string, ports []int32) error {
 	// 生成域名
-	domain := fmt.Sprintf("%s.%s.%s.beagle", serviceName, namespace, user.Name)
+	label := EffectiveProviderDomainLabel(ctx, s.db, user.ID, user.Name)
+	domain := s.providerDomain(ctx, label, serviceName, namespace)
 
 	// 将端口数组序列化为 JSON
 	portsJSON := "[]"

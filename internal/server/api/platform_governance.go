@@ -24,6 +24,7 @@ type platformOrganizationItem struct {
 	ScopeType                 string    `json:"scope_type"`
 	Key                       string    `json:"key"`
 	Name                      string    `json:"name"`
+	DomainLabel               string    `json:"domain_label,omitempty"`
 	Status                    string    `json:"status"`
 	ManagementMembershipCount int64     `json:"management_membership_count"`
 	BusinessMemberCount       int64     `json:"business_member_count"`
@@ -66,7 +67,7 @@ func (a *PlatformGovernanceAPI) ListOrganizations(c *gin.Context) {
 		if count > 0 {
 			var providerItems []platformOrganizationItem
 			if err := query.Select(`organization.id, 'provider' AS scope_type, organization.key,
-				organization.display_name AS name, organization.status,
+				organization.display_name AS name, organization.domain_label, organization.status,
 				(SELECT COUNT(*) FROM admin_provider_membership AS membership JOIN user AS member_user ON member_user.id = membership.user_id
 					WHERE membership.provider_id = organization.id AND membership.enabled = ? AND member_user.enabled = ?
 					AND membership.valid_from <= ? AND (membership.expires_at IS NULL OR membership.expires_at > ?)) AS management_membership_count,
@@ -137,7 +138,7 @@ func platformProviderOrganizationQuery(c *gin.Context, search, status string) *g
 	query := db.DB.WithContext(c.Request.Context()).Table("resource_provider AS organization")
 	if search != "" {
 		pattern := "%" + search + "%"
-		query = query.Where("organization.key LIKE ? OR organization.display_name LIKE ?", pattern, pattern)
+		query = query.Where("organization.key LIKE ? OR organization.display_name LIKE ? OR organization.domain_label LIKE ?", pattern, pattern, pattern)
 	}
 	if status != "" {
 		query = query.Where("organization.status = ?", status)

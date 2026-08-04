@@ -25,14 +25,17 @@ var (
 )
 
 type createPlatformOrganizationRequest struct {
-	Key    string `json:"key"`
-	Name   string `json:"name"`
-	Reason string `json:"reason"`
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	DomainLabel string `json:"domain_label"`
+	Reason      string `json:"reason"`
 }
 
 type updatePlatformOrganizationRequest struct {
-	Name   string `json:"name"`
-	Reason string `json:"reason"`
+	Name                     string `json:"name"`
+	DomainLabel              string `json:"domain_label"`
+	DomainChangeConfirmation string `json:"domain_change_confirmation"`
+	Reason                   string `json:"reason"`
 }
 
 type transitionPlatformOrganizationRequest struct {
@@ -40,15 +43,16 @@ type transitionPlatformOrganizationRequest struct {
 }
 
 type platformOrganizationMutationResponse struct {
-	ID         string    `json:"id"`
-	ScopeType  string    `json:"scope_type"`
-	Key        string    `json:"key"`
-	Name       string    `json:"name"`
-	Status     string    `json:"status"`
-	Revision   int64     `json:"revision"`
-	RowVersion int64     `json:"row_version"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	ScopeType   string    `json:"scope_type"`
+	Key         string    `json:"key"`
+	Name        string    `json:"name"`
+	DomainLabel string    `json:"domain_label,omitempty"`
+	Status      string    `json:"status"`
+	Revision    int64     `json:"revision"`
+	RowVersion  int64     `json:"row_version"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func (a *PlatformGovernanceAPI) CreateProvider(c *gin.Context) {
@@ -91,6 +95,7 @@ func (a *PlatformGovernanceAPI) createOrganization(c *gin.Context, scopeType mod
 	}
 	request.Key = strings.ToLower(strings.TrimSpace(request.Key))
 	request.Name = strings.TrimSpace(request.Name)
+	request.DomainLabel = strings.TrimSpace(request.DomainLabel)
 	request.Reason = strings.TrimSpace(request.Reason)
 	if !validOrganizationMutationFields(request.Key, request.Name, request.Reason) {
 		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "组织标识、名称或创建原因无效")
@@ -100,7 +105,18 @@ func (a *PlatformGovernanceAPI) createOrganization(c *gin.Context, scopeType mod
 		id := uuid.NewString()
 		var response platformOrganizationMutationResponse
 		if scopeType == model.ManagementScopeProvider {
-			item := &model.ResourceProvider{ID: id, Key: request.Key, DisplayName: request.Name, Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+			domainLabel, err := service.NormalizeProviderDomainLabel(request.DomainLabel)
+			if err != nil {
+				return response, err
+			}
+			var domainCount int64
+			if err := tx.Model(&model.ResourceProvider{}).Where("lower(domain_label) = ?", domainLabel).Count(&domainCount).Error; err != nil {
+				return response, err
+			}
+			if domainCount > 0 {
+				return response, service.ErrProviderDomainLabelExists
+			}
+			item := &model.ResourceProvider{ID: id, Key: request.Key, DisplayName: request.Name, DomainLabel: domainLabel, Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
 			if err := tx.Create(item).Error; err != nil {
 				return response, err
 			}
@@ -112,7 +128,7 @@ func (a *PlatformGovernanceAPI) createOrganization(c *gin.Context, scopeType mod
 			}
 			response = tenantOrganizationMutationView(item)
 		}
-		err := recordAuditLogStrictWithDB(c.Request.Context(), tx, c, "create_"+string(scopeType), "organization", id, id, gin.H{"scope_type": scopeType, "key": request.Key, "name": request.Name, "reason": request.Reason})
+		err := recordAuditLogStrictWithDB(c.Request.Context(), tx, c, "create_"+string(scopeType), "organization", id, id, gin.H{"scope_type": scopeType, "key": request.Key, "name": request.Name, "domain_label": response.DomainLabel, "reason": request.Reason})
 		return response, err
 	})
 }
@@ -132,6 +148,8 @@ func (a *PlatformGovernanceAPI) updateOrganization(c *gin.Context, scopeType mod
 		return
 	}
 	request.Name, request.Reason = strings.TrimSpace(request.Name), strings.TrimSpace(request.Reason)
+	request.DomainLabel = strings.TrimSpace(request.DomainLabel)
+	request.DomainChangeConfirmation = strings.TrimSpace(request.DomainChangeConfirmation)
 	if request.Name == "" || len(request.Name) > 200 || request.Reason == "" || len(request.Reason) > 500 {
 		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "组织名称或变更原因无效")
 		return
@@ -140,7 +158,42 @@ func (a *PlatformGovernanceAPI) updateOrganization(c *gin.Context, scopeType mod
 	var response platformOrganizationMutationResponse
 	err := db.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		if scopeType == model.ManagementScopeProvider {
-			result := tx.Model(&model.ResourceProvider{}).Where("id = ? AND row_version = ?", id, rowVersion).Updates(map[string]any{"display_name": request.Name, "revision": gorm.Expr("revision + 1"), "row_version": gorm.Expr("row_version + 1")})
+			var current model.ResourceProvider
+			if err := tx.First(&current, "id = ?", id).Error; err != nil {
+				return err
+			}
+			if current.RowVersion != rowVersion {
+				return errPlatformOrganizationVersionConflict
+			}
+			updates := map[string]any{"display_name": request.Name, "revision": gorm.Expr("revision + 1"), "row_version": gorm.Expr("row_version + 1")}
+			domainChange := service.ProviderDomainChangeResult{}
+			newDomainLabel := current.DomainLabel
+			if request.DomainLabel != "" {
+				var err error
+				newDomainLabel, err = service.NormalizeProviderDomainLabel(request.DomainLabel)
+				if err != nil {
+					return err
+				}
+			}
+			if newDomainLabel != current.DomainLabel {
+				confirmation, err := service.NormalizeProviderDomainLabel(request.DomainChangeConfirmation)
+				if err != nil || confirmation != newDomainLabel {
+					return service.ErrProviderDomainConfirmation
+				}
+				var count int64
+				if err := tx.Model(&model.ResourceProvider{}).Where("lower(domain_label) = ? AND id <> ?", newDomainLabel, id).Count(&count).Error; err != nil {
+					return err
+				}
+				if count > 0 {
+					return service.ErrProviderDomainLabelExists
+				}
+				domainChange, err = service.ChangeProviderDomainLabel(c.Request.Context(), tx, id, current.DomainLabel, newDomainLabel)
+				if err != nil {
+					return err
+				}
+				updates["domain_label"] = newDomainLabel
+			}
+			result := tx.Model(&model.ResourceProvider{}).Where("id = ? AND row_version = ?", id, rowVersion).Updates(updates)
 			if result.Error != nil {
 				return result.Error
 			}
@@ -152,6 +205,7 @@ func (a *PlatformGovernanceAPI) updateOrganization(c *gin.Context, scopeType mod
 				return err
 			}
 			response = providerOrganizationMutationView(&item)
+			return recordAuditLogStrictWithDB(c.Request.Context(), tx, c, "update_"+string(scopeType), "organization", id, id, gin.H{"scope_type": scopeType, "name": request.Name, "old_domain_label": current.DomainLabel, "domain_label": newDomainLabel, "domain_count": domainChange.DomainCount, "domain_examples": domainChange.Examples, "reason": request.Reason, "revision": response.Revision, "row_version": response.RowVersion})
 		} else {
 			result := tx.Model(&model.Tenant{}).Where("id = ? AND row_version = ?", id, rowVersion).Updates(map[string]any{"name": request.Name, "revision": gorm.Expr("revision + 1"), "row_version": gorm.Expr("row_version + 1")})
 			if result.Error != nil {
@@ -317,7 +371,7 @@ func classifyOrganizationStateMiss(tx *gorm.DB, scopeType model.ManagementScopeT
 }
 
 func providerOrganizationMutationView(item *model.ResourceProvider) platformOrganizationMutationResponse {
-	return platformOrganizationMutationResponse{ID: item.ID, ScopeType: "provider", Key: item.Key, Name: item.DisplayName, Status: string(item.Status), Revision: item.Revision, RowVersion: item.RowVersion, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
+	return platformOrganizationMutationResponse{ID: item.ID, ScopeType: "provider", Key: item.Key, Name: item.DisplayName, DomainLabel: item.DomainLabel, Status: string(item.Status), Revision: item.Revision, RowVersion: item.RowVersion, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
 }
 func tenantOrganizationMutationView(item *model.Tenant) platformOrganizationMutationResponse {
 	return platformOrganizationMutationResponse{ID: item.ID, ScopeType: "tenant", Key: item.Key, Name: item.Name, Status: string(item.Status), Revision: item.Revision, RowVersion: item.RowVersion, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
@@ -331,8 +385,14 @@ func writePlatformOrganizationMutationError(c *gin.Context, err error) {
 		codedError(c, http.StatusConflict, "PLATFORM_ORGANIZATION_STATE_CONFLICT", "组织当前状态不允许该操作")
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		codedError(c, http.StatusNotFound, ErrorCodeManagementObjectMissing, "组织不存在")
+	case errors.Is(err, service.ErrProviderDomainLabelInvalid):
+		codedError(c, http.StatusBadRequest, "PROVIDER_DOMAIN_LABEL_INVALID", "域名标识格式无效或属于系统保留名称")
+	case errors.Is(err, service.ErrProviderDomainConfirmation):
+		codedError(c, http.StatusBadRequest, "PROVIDER_DOMAIN_CONFIRMATION_MISMATCH", "新域名标识二次确认不一致")
+	case errors.Is(err, service.ErrProviderDomainLabelExists):
+		codedError(c, http.StatusConflict, "PROVIDER_DOMAIN_LABEL_EXISTS", "域名标识已被使用")
 	case strings.Contains(strings.ToLower(err.Error()), "unique") || strings.Contains(strings.ToLower(err.Error()), "duplicate"):
-		codedError(c, http.StatusConflict, "PLATFORM_ORGANIZATION_KEY_EXISTS", "组织标识已存在")
+		codedError(c, http.StatusConflict, "PLATFORM_ORGANIZATION_KEY_OR_DOMAIN_EXISTS", "组织标识或域名标识已存在")
 	default:
 		codedError(c, http.StatusInternalServerError, "PLATFORM_ORGANIZATION_WRITE_FAILED", "组织写入失败")
 	}

@@ -106,6 +106,7 @@ type ResourceProvider struct {
 	ID          string         `gorm:"primaryKey;size:36" json:"id"`
 	Key         string         `gorm:"size:100;not null;uniqueIndex" json:"key"`
 	DisplayName string         `gorm:"size:200;not null" json:"display_name"`
+	DomainLabel string         `gorm:"size:63;not null;default:'';index" json:"domain_label"`
 	Status      ProviderStatus `gorm:"size:20;not null;default:'active';index;check:chk_resource_provider_status,status IN ('active','suspended','retired')" json:"status"`
 	Revision    int64          `gorm:"not null;default:1;check:chk_resource_provider_revision,revision > 0" json:"revision"`
 	RowVersion  int64          `gorm:"not null;default:1;check:chk_resource_provider_row_version,row_version > 0" json:"row_version"`

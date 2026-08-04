@@ -1634,6 +1634,7 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 	for _, reg := range registrations {
 		var existing model.DomainRegistry
 		var err error
+		domain := service.NormalizeReportedProviderDomain(ctx, db.DB, agentID, "", reg.Domain)
 
 		// 自动填充 node_id 和 endpoint_id：
 		// 1. 如果有 endpoint_id，说明是 Endpoint 域名，保持不变
@@ -1646,12 +1647,12 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 
 		// 按联合唯一条件查询：node_id 和 endpoint_id 互斥
 		if actualNodeID > 0 {
-			err = db.DB.WithContext(ctx).Where("domain = ? AND node_id = ?", reg.Domain, actualNodeID).First(&existing).Error
+			err = db.DB.WithContext(ctx).Where("domain = ? AND node_id = ?", domain, actualNodeID).First(&existing).Error
 		} else if actualEndpointID != "" {
-			err = db.DB.WithContext(ctx).Where("domain = ? AND endpoint_id = ?", reg.Domain, actualEndpointID).First(&existing).Error
+			err = db.DB.WithContext(ctx).Where("domain = ? AND endpoint_id = ?", domain, actualEndpointID).First(&existing).Error
 		} else {
 			// 兼容：无 node_id 也无 endpoint_id，按 domain + user_id 查询
-			err = db.DB.WithContext(ctx).Where("domain = ? AND user_id = ? AND node_id = 0 AND endpoint_id = ''", reg.Domain, agentID).First(&existing).Error
+			err = db.DB.WithContext(ctx).Where("domain = ? AND user_id = ? AND node_id = 0 AND endpoint_id = ''", domain, agentID).First(&existing).Error
 		}
 
 		// 当 TargetIp 为空时，使用 Agent 的隧道 IP 自动填充
@@ -1677,7 +1678,7 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 		}
 
 		record := model.DomainRegistry{
-			Domain:       reg.Domain,
+			Domain:       domain,
 			Type:         model.DomainType(reg.Type),
 			UserID:       agentID,
 			NodeID:       actualNodeID,
@@ -1694,7 +1695,7 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 		if err != nil {
 			// 不存在，创建
 			if err := db.DB.WithContext(ctx).Create(&record).Error; err != nil {
-				logger.Errorf("域名注册失败: domain=%s, err=%v", reg.Domain, err)
+				logger.Errorf("域名注册失败: domain=%s, err=%v", domain, err)
 				continue
 			}
 			registered++
@@ -1720,7 +1721,7 @@ func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agen
 				updates["endpoint_id"] = actualEndpointID
 			}
 			if err := db.DB.WithContext(ctx).Model(&existing).Updates(updates).Error; err != nil {
-				logger.Errorf("域名更新失败: domain=%s, err=%v", reg.Domain, err)
+				logger.Errorf("域名更新失败: domain=%s, err=%v", domain, err)
 				continue
 			}
 			updated++

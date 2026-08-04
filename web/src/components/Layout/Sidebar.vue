@@ -59,8 +59,9 @@
       <template v-else-if="workspaceStore.currentWorkspace === 'platform' && workspaceStore.currentContext">
         <el-menu-item v-if="workspaceStore.can('platform.overview.read')" index="/platform-overview"><el-icon><DataAnalysis /></el-icon><template #title>概览</template></el-menu-item>
         <div v-if="!appStore.sidebarCollapsed" class="nav-section">组织治理</div>
-        <el-menu-item v-if="workspaceStore.can('platform.organizations.read')" index="/tenants"><el-icon><OfficeBuilding /></el-icon><template #title>组织管理</template></el-menu-item>
-        <el-menu-item v-if="workspaceStore.can('platform.memberships.read')" index="/tenant-admin-memberships"><el-icon><Avatar /></el-icon><template #title>管理授权</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('platform.organizations.read')" index="/platform-tenants"><el-icon><OfficeBuilding /></el-icon><template #title>租户管理</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('platform.organizations.read')" index="/platform-providers"><el-icon><SetUp /></el-icon><template #title>资源管理</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('platform.memberships.read')" index="/platform-management-memberships"><el-icon><Avatar /></el-icon><template #title>授权管理</template></el-menu-item>
         <div v-if="!appStore.sidebarCollapsed" class="nav-section">资源治理</div>
         <el-menu-item v-if="workspaceStore.can('platform.resources.read')" index="/platform-resources"><el-icon><Box /></el-icon><template #title>资源目录</template></el-menu-item>
         <el-menu-item v-if="workspaceStore.can('platform.allocations.read')" index="/platform-allocations"><el-icon><Connection /></el-icon><template #title>资源分配</template></el-menu-item>
@@ -124,6 +125,9 @@ const activeMenu = computed(() => {
   if (route.path.startsWith('/provider-memberships')) return '/provider-memberships'
   if (route.path.startsWith('/provider-audit')) return '/provider-audit'
   if (route.path.startsWith('/platform-overview')) return '/platform-overview'
+  if (route.path.startsWith('/platform-tenants')) return '/platform-tenants'
+  if (route.path.startsWith('/platform-providers')) return '/platform-providers'
+  if (route.path.startsWith('/platform-management-memberships')) return '/platform-management-memberships'
   if (route.path.startsWith('/platform-admins')) return '/platform-admins'
   if (route.path.startsWith('/platform-identities')) return '/platform-identities'
   if (route.path.startsWith('/platform-user-simulations')) return '/platform-user-simulations'
