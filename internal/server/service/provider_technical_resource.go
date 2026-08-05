@@ -461,7 +461,13 @@ func checkTechnicalResourceDelete(database *gorm.DB, providerID string, resource
 	}
 	var count int64
 	if resource.Type == model.TechnicalResourceAgent {
-		if err := database.Model(&model.TechnicalResource{}).Where("provider_id = ? AND parent_id = ? AND lifecycle_state NOT IN ?", providerID, resource.ID, []model.TechnicalResourceLifecycleState{model.TechnicalResourceRetired, model.TechnicalResourceDeleted}).Count(&count).Error; err != nil {
+		if err := database.Model(&model.TechnicalResource{}).Where(
+			"provider_id = ? AND parent_id = ? AND type = ? AND deleted_at IS NULL AND lifecycle_state <> ?",
+			providerID,
+			resource.ID,
+			model.TechnicalResourceEndpoint,
+			model.TechnicalResourceRetired,
+		).Count(&count).Error; err != nil {
 			return nil, err
 		}
 		add("ACTIVE_CHILD_ENDPOINTS", "仍有未退役的子 Endpoint", count)

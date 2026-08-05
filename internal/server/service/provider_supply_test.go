@@ -242,6 +242,41 @@ func TestProviderDeletesOfflineTechnicalResourceWithoutRetiring(t *testing.T) {
 	require.NotNil(t, deleted.DeletedAt)
 }
 
+func TestProviderDeleteCheckIgnoresDeletedChildEndpoints(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	ctx := context.Background()
+	agent := fixture.createBoundAgent(t, "agent-with-deleted-children", 1001)
+	require.NoError(t, fixture.database.Model(&model.TechnicalResource{}).Where("id = ?", agent.ID).
+		Update("health_state", model.ResourceHealthOffline).Error)
+
+	for i := 0; i < 4; i++ {
+		endpoint, err := fixture.service.CreateTechnicalResource(ctx, fixture.authorization, CreateTechnicalResourceInput{
+			Type: model.TechnicalResourceEndpoint, StableKey: fmt.Sprintf("deleted-child-%d", i), ParentID: agent.ID, CredentialRevision: 1,
+		})
+		require.NoError(t, err)
+		require.NoError(t, fixture.database.Model(&model.TechnicalResource{}).Where("id = ?", endpoint.ID).
+			Update("deleted_at", fixture.now).Error)
+	}
+
+	check, err := fixture.service.CheckTechnicalResourceDelete(ctx, fixture.authorization, agent.ID)
+	require.NoError(t, err)
+	require.True(t, check.Allowed)
+	require.NotContains(t, check.Blockers, TechnicalResourceDeleteBlocker{
+		Code: "ACTIVE_CHILD_ENDPOINTS", Message: "仍有未退役的子 Endpoint", Count: 4,
+	})
+
+	_, err = fixture.service.CreateTechnicalResource(ctx, fixture.authorization, CreateTechnicalResourceInput{
+		Type: model.TechnicalResourceEndpoint, StableKey: "active-child", ParentID: agent.ID, CredentialRevision: 1,
+	})
+	require.NoError(t, err)
+	check, err = fixture.service.CheckTechnicalResourceDelete(ctx, fixture.authorization, agent.ID)
+	require.NoError(t, err)
+	require.False(t, check.Allowed)
+	require.Contains(t, check.Blockers, TechnicalResourceDeleteBlocker{
+		Code: "ACTIVE_CHILD_ENDPOINTS", Message: "仍有未退役的子 Endpoint", Count: 1,
+	})
+}
+
 func (f providerSupplyFixture) createBoundAgent(t *testing.T, stableKey string, nodeID uint64) *model.TechnicalResource {
 	t.Helper()
 	resource, err := f.service.CreateTechnicalResource(context.Background(), f.authorization, CreateTechnicalResourceInput{
