@@ -94,61 +94,23 @@ func main() {
 	var err error
 	var registerResult *config.RegisterResult
 
-	// 检查是否为部署模式
 	if *deployToken != "" {
-		// 部署模式：使用 Token 向 Server 注册（命令行参数，通常是 install_agent.sh 调用）
 		if *serverAddr == "" {
 			log.Fatalf("部署模式需要指定: -s <server_address>")
 		}
 
 		fmt.Printf("进入部署模式...\n")
 		fmt.Printf("Server Address: %s\n", *serverAddr)
-
-		// 向 Server 注册并获取配置
-		cfg, registerResult, err = registerWithToken(*serverAddr, *deployToken)
-		if err != nil {
-			log.Fatalf("部署注册失败: %v", err)
-		}
-
-		// 保存配置到文件
+	}
+	cfg, registerResult, err = resolveAgentStartupConfig(*configPath, *deployToken, *serverAddr, registerWithToken)
+	if err != nil {
+		log.Fatalf("加载 Agent 配置失败: %v", err)
+	}
+	if *deployToken != "" {
 		if err := saveAgentConfig(*configPath, cfg); err != nil {
 			fmt.Printf("警告: 保存配置文件失败: %v（将使用内存配置继续运行）\n", err)
 		} else {
 			fmt.Printf("配置已保存到: %s\n", *configPath)
-		}
-	} else {
-		// 正常模式：从配置文件加载
-		cfg, err = config.LoadAgentConfig(*configPath)
-		if err != nil {
-			log.Fatalf("加载配置失败: %v", err)
-		}
-
-		// 检查是否有 SIGNAL_TOKEN 环境变量（Token 自动注册模式，CloudIDE 等场景）
-		if cfg.Agent.AgentToken != "" {
-			// Token 注册模式
-			srvAddr := cfg.Agent.Server
-			if srvAddr == "" && BUILD_URL != "" {
-				srvAddr = BUILD_URL
-			}
-			if srvAddr == "" {
-				log.Fatalf("Token 注册模式需要 SIGNAL_SERVER 环境变量")
-			}
-
-			hostname, _ := os.Hostname()
-			fmt.Printf("进入 Token 注册模式...\n")
-			fmt.Printf("Server Address: %s\n", srvAddr)
-			fmt.Printf("Device: %s\n", hostname)
-
-			cfg, registerResult, err = registerWithToken(srvAddr, cfg.Agent.AgentToken)
-			if err != nil {
-				log.Fatalf("Token 注册失败: %v", err)
-			}
-
-			// 合并环境变量中的其他配置（SSH、SOCKS 等）
-			envCfg, _ := config.LoadAgentConfig(*configPath)
-			if envCfg != nil {
-				mergeLocalAgentConfig(cfg, envCfg)
-			}
 		}
 	}
 
@@ -224,6 +186,19 @@ func main() {
 			logger.Fatalf("Agent运行失败: %v", err)
 		}
 	}
+}
+
+type agentTokenRegistrar func(serverAddr, token string) (*config.AgentConfig, *config.RegisterResult, error)
+
+func resolveAgentStartupConfig(configPath, deployToken, serverAddr string, registrar agentTokenRegistrar) (*config.AgentConfig, *config.RegisterResult, error) {
+	if deployToken == "" {
+		cfg, err := config.LoadAgentConfig(configPath)
+		return cfg, nil, err
+	}
+	if serverAddr == "" {
+		return nil, nil, fmt.Errorf("部署模式需要指定 Server 地址")
+	}
+	return registrar(serverAddr, deployToken)
 }
 
 func mergeLocalAgentConfig(cfg, local *config.AgentConfig) {
