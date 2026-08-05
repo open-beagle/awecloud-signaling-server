@@ -46,7 +46,14 @@ func (s *DomainService) CreateNodeSSHDomain(ctx context.Context, node *model.Nod
 	var existing model.DomainRegistry
 	err = s.db.WithContext(ctx).Where("domain = ? AND resource_kind = ? AND resource_id = ?", domain, model.DomainResourceNode, fmt.Sprint(node.ID)).First(&existing).Error
 	if err == nil {
-		logger.Infof("Node SSH 域名已存在，跳过创建: domain=%s", domain)
+		updates := map[string]any{
+			"target_ip":   node.IP,
+			"target_port": 22,
+		}
+		if err := s.db.WithContext(ctx).Model(&existing).Updates(updates).Error; err != nil {
+			return fmt.Errorf("更新 Node SSH 域名失败: %w", err)
+		}
+		logger.Infof("Node SSH 域名已存在，已刷新目标地址: domain=%s, target_ip=%s", domain, node.IP)
 		return nil
 	}
 	if err != gorm.ErrRecordNotFound {

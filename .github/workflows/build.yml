@@ -176,6 +176,7 @@ jobs:
           endpoint_arm64_sha="$(sha256sum bin/signal_endpoint-linux-arm64 | awk '{print $1}')"
 
           mc cp scripts/install_agent.sh "${s3_bucket}/install_agent.sh"
+          mc cp scripts/install_signal.sh "${s3_bucket}/install_signal.sh"
           mc cp scripts/install_endpoint.sh "${s3_bucket}/install_endpoint.sh"
           mc cp bin/signal_agent-linux-amd64 "${s3_bucket}/signal_agent-${VERSION}-linux-amd64"
           mc cp bin/signal_agent-linux-arm64 "${s3_bucket}/signal_agent-${VERSION}-linux-arm64"
@@ -207,6 +208,7 @@ jobs:
           mc cp signal_endpoint-version.json "${s3_bucket}/signal_endpoint-version.json"
 
           mc anonymous set download "${s3_bucket}/install_agent.sh"
+          mc anonymous set download "${s3_bucket}/install_signal.sh"
           mc anonymous set download "${s3_bucket}/install_endpoint.sh"
           mc anonymous set download "${s3_bucket}/signal_agent-version.json"
           mc anonymous set download "${s3_bucket}/signal_endpoint-version.json"

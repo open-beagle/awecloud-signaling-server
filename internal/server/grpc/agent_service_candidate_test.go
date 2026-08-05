@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -89,6 +90,38 @@ func TestLegacyAgentHeartbeatWithoutContainerCandidatesRemainsCompatible(t *test
 	require.NoError(t, testDB.First(&node, nodeID).Error)
 	require.Equal(t, "v1", node.UpdaterProtocol)
 	require.Equal(t, "", node.ContainerSSHProtocol)
+}
+
+func TestAgentHeartbeatRefreshesNodeSSHDomainTargetIP(t *testing.T) {
+	oldDB := db.DB
+	t.Cleanup(func() { db.DB = oldDB })
+	testDB, err := gorm.Open(sqlite.Open("file:agent_ssh_domain_ip_refresh_test?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	db.DB = testDB
+	require.NoError(t, testDB.AutoMigrate(&model.User{}, &model.Node{}, &model.DomainRegistry{}))
+
+	client := model.User{Name: "duyingjun", Role: model.UserRoleClient, SecretHash: "test", Enabled: true}
+	require.NoError(t, testDB.Create(&client).Error)
+	node := model.Node{UserID: client.ID, Name: "ide-duyingjun", Type: model.NodeTypeDesktop, IP: "100.64.0.117"}
+	require.NoError(t, testDB.Create(&node).Error)
+	require.NoError(t, testDB.Create(&model.DomainRegistry{
+		Domain: "duyingjun.oxaf1y22qr36.beagle", Type: model.DomainTypeSSH,
+		UserID: client.ID, ResourceKind: model.DomainResourceNode, ResourceID: fmt.Sprint(node.ID),
+		NodeID: node.ID, TargetIP: "100.64.0.4", TargetPort: 22,
+	}).Error)
+
+	server := &AgentServiceServer{}
+	server.handleHeartbeat(context.Background(), client.ID, &pb.AgentHeartbeatRequest{
+		DeviceName: "ide-duyingjun", TunnelIp: "100.64.0.119", TunnelConnected: true,
+		SystemInfo: &pb.SystemInfo{Os: "linux", Arch: "amd64", Hostname: "ide-duyingjun"},
+	})
+
+	require.NoError(t, testDB.First(&node, node.ID).Error)
+	require.Equal(t, "100.64.0.119", node.IP)
+	var domain model.DomainRegistry
+	require.NoError(t, testDB.First(&domain, "node_id = ? AND type = ?", node.ID, model.DomainTypeSSH).Error)
+	require.Equal(t, "100.64.0.119", domain.TargetIP)
+	require.Equal(t, 22, domain.TargetPort)
 }
 
 func TestHandleContainerCandidatesAutomaticallyPublishesAndIsIdempotent(t *testing.T) {

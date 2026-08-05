@@ -767,6 +767,13 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		Updates(updates).Error; err != nil {
 		logger.Errorf("更新 Node 心跳失败: %v", err)
 	}
+	if req.TunnelIp != "" {
+		if err := db.DB.WithContext(ctx).Model(&model.DomainRegistry{}).
+			Where("node_id = ? AND resource_kind = ? AND type = ?", node.ID, model.DomainResourceNode, model.DomainTypeSSH).
+			Updates(map[string]any{"target_ip": req.TunnelIp, "target_port": 22}).Error; err != nil {
+			logger.Errorf("同步 Node SSH 域名目标地址失败: node_id=%d, ip=%s, err=%v", node.ID, req.TunnelIp, err)
+		}
+	}
 
 	// 处理已连接的 Endpoint 上报
 	if len(req.ConnectedEndpoints) > 0 {

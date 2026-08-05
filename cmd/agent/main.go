@@ -198,7 +198,16 @@ func resolveAgentStartupConfig(configPath, deployToken, serverAddr string, regis
 	if serverAddr == "" {
 		return nil, nil, fmt.Errorf("部署模式需要指定 Server 地址")
 	}
-	return registrar(serverAddr, deployToken)
+	cfg, result, err := registrar(serverAddr, deployToken)
+	if err != nil {
+		return nil, nil, err
+	}
+	if local, err := config.LoadAgentConfig(configPath); err == nil {
+		mergeLocalAgentConfig(cfg, local)
+	} else if !os.IsNotExist(err) {
+		return nil, nil, err
+	}
+	return cfg, result, nil
 }
 
 func mergeLocalAgentConfig(cfg, local *config.AgentConfig) {

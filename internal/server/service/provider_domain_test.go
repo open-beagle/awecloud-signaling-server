@@ -85,6 +85,23 @@ func TestDomainServiceBuildsRootAgentDomainsForMultipleNodes(t *testing.T) {
 	require.Zero(t, implicitSSH)
 }
 
+func TestCreateNodeSSHDomainRefreshesExistingTargetIP(t *testing.T) {
+	database := newProviderDomainTestDB(t)
+	ctx := context.Background()
+	provider := model.ResourceProvider{ID: "beagle", Key: "beagle", DisplayName: "北京比格", DomainScope: model.ProviderDomainRoot, Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	user, _, nodes := createDomainAgent(t, database, provider, "beijing", 241)
+	domains := NewDomainService(database)
+
+	require.NoError(t, domains.CreateNodeSSHDomain(ctx, &nodes[0], &user))
+	nodes[0].IP = "100.64.0.119"
+	require.NoError(t, domains.CreateNodeSSHDomain(ctx, &nodes[0], &user))
+
+	var record model.DomainRegistry
+	require.NoError(t, database.Where("domain = ? AND type = ?", "beagle-241.beijing.beagle", model.DomainTypeSSH).First(&record).Error)
+	require.Equal(t, "100.64.0.119", record.TargetIP)
+	require.Equal(t, 22, record.TargetPort)
+}
+
 func TestDomainServiceBuildsNamedProviderAndEndpointDomains(t *testing.T) {
 	database := newProviderDomainTestDB(t)
 	ctx := context.Background()
