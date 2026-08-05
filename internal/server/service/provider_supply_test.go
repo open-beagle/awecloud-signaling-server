@@ -191,6 +191,25 @@ func TestProviderCreatesResourceOwnedOneTimeDeploymentCredential(t *testing.T) {
 	require.Equal(t, resource.RowVersion+2, updatedResource.RowVersion)
 }
 
+func TestProviderCreateAgentUsesUniqueRuntimeUserNameWhenLegacyUserExists(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	ctx := context.Background()
+	require.NoError(t, fixture.database.Create(&model.User{
+		Name: "provider-a-new-agent", Alias: "legacy agent", Role: model.UserRoleAgent, SecretHash: "fixture", Enabled: true,
+	}).Error)
+
+	resource, err := fixture.service.CreateTechnicalResource(ctx, fixture.authorization, CreateTechnicalResourceInput{
+		Type: model.TechnicalResourceAgent, CredentialRevision: 1, RuntimeName: "new-agent", DomainLabel: "new-agent",
+	})
+	require.NoError(t, err)
+	var runtimeUser model.User
+	require.NoError(t, fixture.database.First(&runtimeUser, resource.RuntimeUserID).Error)
+	require.NotEqual(t, "provider-a-new-agent", runtimeUser.Name)
+	require.Contains(t, runtimeUser.Name, "provider-a-new-agent-")
+	require.Equal(t, "new-agent", runtimeUser.Alias)
+	require.Equal(t, model.UserRoleAgent, runtimeUser.Role)
+}
+
 func TestProviderDeletesRetiredTechnicalResourceAsTombstone(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	ctx := context.Background()
@@ -205,6 +224,7 @@ func TestProviderDeletesRetiredTechnicalResourceAsTombstone(t *testing.T) {
 		ExpectedRowVersion: agent.RowVersion, Reason: "retire before deletion",
 	})
 	require.NoError(t, err)
+	require.Equal(t, model.ResourceHealthUnknown, retired.HealthState)
 
 	check, err := fixture.service.CheckTechnicalResourceDelete(ctx, fixture.authorization, agent.ID)
 	require.NoError(t, err)
@@ -227,6 +247,11 @@ func TestProviderDeletesOfflineTechnicalResourceWithoutRetiring(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	ctx := context.Background()
 	agent := fixture.createBoundAgent(t, "agent-offline-delete", 1002)
+	require.NoError(t, fixture.database.Exec(
+		`INSERT INTO domain_registry (domain, type, user_id, provider_id, agent_resource_id, resource_kind, resource_id, node_id, endpoint_id, target_ip, target_port, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+		"agent-offline-delete.provider-a.beagle", model.DomainTypeSSH, agent.RuntimeUserID, agent.ProviderID, agent.ID,
+		model.DomainResourceNode, "1002", 1002, "100.64.0.12", 22, model.DomainStatusOnline, fixture.now, fixture.now,
+	).Error)
 	require.NoError(t, fixture.database.Model(&model.TechnicalResource{}).Where("id = ?", agent.ID).
 		Update("health_state", model.ResourceHealthOffline).Error)
 	require.NoError(t, fixture.database.First(agent, "id = ?", agent.ID).Error)
@@ -240,6 +265,48 @@ func TestProviderDeletesOfflineTechnicalResourceWithoutRetiring(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, model.TechnicalResourceDeleted, deleted.LifecycleState)
 	require.NotNil(t, deleted.DeletedAt)
+	var domainCount int64
+	require.NoError(t, fixture.database.Model(&model.DomainRegistry{}).Where("agent_resource_id = ?", agent.ID).Count(&domainCount).Error)
+	require.Zero(t, domainCount)
+}
+
+func TestProviderDeletesPendingUnboundTechnicalResource(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	ctx := context.Background()
+	resource, err := fixture.service.CreateTechnicalResource(ctx, fixture.authorization, CreateTechnicalResourceInput{
+		Type: model.TechnicalResourceAgent, CredentialRevision: 1, RuntimeName: "pending-agent", DomainLabel: "pending-agent",
+	})
+	require.NoError(t, err)
+	require.Equal(t, model.TechnicalResourcePending, resource.LifecycleState)
+	require.Equal(t, model.ResourceHealthUnknown, resource.HealthState)
+
+	check, err := fixture.service.CheckTechnicalResourceDelete(ctx, fixture.authorization, resource.ID)
+	require.NoError(t, err)
+	require.True(t, check.Allowed)
+
+	deleted, err := fixture.service.DeleteTechnicalResource(ctx, fixture.authorization, resource.ID, resource.RowVersion, "remove undeployed resource")
+	require.NoError(t, err)
+	require.Equal(t, model.TechnicalResourceDeleted, deleted.LifecycleState)
+	require.NotNil(t, deleted.DeletedAt)
+}
+
+func TestProviderDeletesPendingEndpointWithoutDisablingParentAgent(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	ctx := context.Background()
+	agent := fixture.createBoundAgent(t, "agent-with-pending-endpoint", 1001)
+	endpoint, err := fixture.service.CreateTechnicalResource(ctx, fixture.authorization, CreateTechnicalResourceInput{
+		Type: model.TechnicalResourceEndpoint, StableKey: "pending-endpoint", ParentID: agent.ID, CredentialRevision: 1,
+	})
+	require.NoError(t, err)
+	require.Equal(t, agent.RuntimeUserID, endpoint.RuntimeUserID)
+
+	deleted, err := fixture.service.DeleteTechnicalResource(ctx, fixture.authorization, endpoint.ID, endpoint.RowVersion, "remove undeployed endpoint")
+	require.NoError(t, err)
+	require.Equal(t, model.TechnicalResourceDeleted, deleted.LifecycleState)
+
+	var runtimeUser model.User
+	require.NoError(t, fixture.database.First(&runtimeUser, agent.RuntimeUserID).Error)
+	require.True(t, runtimeUser.Enabled)
 }
 
 func TestProviderDeleteCheckIgnoresDeletedChildEndpoints(t *testing.T) {

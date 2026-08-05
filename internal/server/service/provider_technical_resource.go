@@ -155,9 +155,35 @@ func (s *ProviderSupplyService) DeleteTechnicalResource(ctx context.Context, aut
 			Updates(map[string]any{"enabled": false, "row_version": gorm.Expr("row_version + 1")}).Error; err != nil {
 			return err
 		}
+		var bindings []model.TechnicalResourceBinding
+		if err := tx.Where("technical_resource_id = ?", resource.ID).Find(&bindings).Error; err != nil {
+			return err
+		}
+		domains := NewDomainService(tx)
+		for _, binding := range bindings {
+			switch binding.SourceType {
+			case model.TechnicalResourceBindingLegacyNode:
+				nodeID, parseErr := strconv.ParseUint(binding.SourceID, 10, 64)
+				if parseErr != nil {
+					return ErrProviderSupplyConflict
+				}
+				if err := domains.DeleteNodeAllDomains(ctx, nodeID); err != nil {
+					return err
+				}
+			case model.TechnicalResourceBindingLegacyEndpoint:
+				if err := domains.DeleteEndpointAllDomains(ctx, binding.SourceID); err != nil {
+					return err
+				}
+			}
+		}
+		if resource.Type == model.TechnicalResourceAgent {
+			if err := tx.Where("provider_id = ? AND agent_resource_id = ?", providerID, resource.ID).Delete(&model.DomainRegistry{}).Error; err != nil {
+				return err
+			}
+		}
 		updated := tx.Model(&model.TechnicalResource{}).
 			Where("provider_id = ? AND id = ? AND row_version = ?", providerID, resource.ID, resource.RowVersion).
-			Where("lifecycle_state = ? OR health_state = ?", model.TechnicalResourceRetired, model.ResourceHealthOffline).
+			Where("lifecycle_state IN ? OR health_state = ?", []model.TechnicalResourceLifecycleState{model.TechnicalResourcePending, model.TechnicalResourceRetired}, model.ResourceHealthOffline).
 			Updates(map[string]any{
 				"health_state": model.ResourceHealthOffline, "lease_expires_at": nil, "deleted_at": now,
 				"credential_revision": gorm.Expr("credential_revision + 1"),
@@ -453,8 +479,13 @@ func checkTechnicalResourceDelete(database *gorm.DB, providerID string, resource
 			result.Blockers = append(result.Blockers, TechnicalResourceDeleteBlocker{Code: code, Message: message, Count: count})
 		}
 	}
-	if resource.LifecycleState != model.TechnicalResourceRetired && resource.HealthState != model.ResourceHealthOffline {
-		add("RESOURCE_NOT_DELETABLE", "仅已退役或离线资源可以删除", 1)
+	var bindings []model.TechnicalResourceBinding
+	if err := database.Where("technical_resource_id = ?", resource.ID).Find(&bindings).Error; err != nil {
+		return nil, err
+	}
+	pendingUnbound := resource.LifecycleState == model.TechnicalResourcePending && len(bindings) == 0
+	if resource.LifecycleState != model.TechnicalResourceRetired && resource.HealthState != model.ResourceHealthOffline && !pendingUnbound {
+		add("RESOURCE_NOT_DELETABLE", "仅已退役、离线或未部署资源可以删除", 1)
 	}
 	if resource.DeletedAt != nil {
 		add("RESOURCE_ALREADY_DELETED", "资源已经删除", 1)
@@ -477,10 +508,6 @@ func checkTechnicalResourceDelete(database *gorm.DB, providerID string, resource
 		return nil, err
 	}
 	add("ACTIVE_SESSIONS", "仍有活动会话", count)
-	var bindings []model.TechnicalResourceBinding
-	if err := database.Where("technical_resource_id = ?", resource.ID).Find(&bindings).Error; err != nil {
-		return nil, err
-	}
 	for _, binding := range bindings {
 		count = 0
 		targetType := model.UpdateTargetNode

@@ -898,7 +898,7 @@ func setProviderReplayETag(c *gin.Context, responseBody string) {
 
 func writeProviderSupplyError(c *gin.Context, err error, write bool) {
 	switch {
-	case errors.Is(err, service.ErrProviderSupplyInvalidInput), errors.Is(err, service.ErrHostDomainLabelInvalid):
+	case errors.Is(err, service.ErrProviderSupplyInvalidInput), errors.Is(err, service.ErrAgentDomainLabelInvalid), errors.Is(err, service.ErrHostDomainLabelInvalid):
 		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "Provider 资源请求参数无效")
 	case errors.Is(err, service.ErrProviderSupplyObjectNotFound):
 		codedError(c, http.StatusNotFound, ErrorCodeManagementObjectMissing, "当前 Provider 内对象不存在或不可见")
@@ -908,7 +908,7 @@ func writeProviderSupplyError(c *gin.Context, err error, write bool) {
 		codedError(c, http.StatusConflict, ErrorCodeProviderSupplyVersion, "对象版本已变化")
 	case errors.Is(err, service.ErrResourceScopeNotAllocatable):
 		codedError(c, http.StatusConflict, ErrorCodeProviderScopeNotAllocatable, "Scope 当前不满足可分配条件")
-	case errors.Is(err, service.ErrProviderSupplyConflict), errors.Is(err, service.ErrTechnicalResourceUnbound), errors.Is(err, service.ErrHostDomainLabelExists):
+	case errors.Is(err, service.ErrProviderSupplyConflict), errors.Is(err, service.ErrTechnicalResourceUnbound), errors.Is(err, service.ErrAgentDomainLabelExists), errors.Is(err, service.ErrHostDomainLabelExists):
 		codedError(c, http.StatusConflict, ErrorCodeProviderSupplyConflict, "Provider 资源存在冲突或缺少前置条件")
 	case errors.Is(err, service.ErrActiveTaskExists), errors.Is(err, service.ErrReleaseNotPublished),
 		errors.Is(err, service.ErrArtifactNotFound), errors.Is(err, service.ErrUpdaterUnsupported):

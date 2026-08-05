@@ -240,6 +240,21 @@ func TestProviderSupplyAPICreateIsIdempotentAndTransactional(t *testing.T) {
 	}
 }
 
+func TestProviderSupplyAPICreateAgentDomainConflictReturnsConflict(t *testing.T) {
+	fixture, login := prepareProviderSupplyAPIFixture(t, config.FeatureFlagsSection{ResourceModelWrite: true})
+	first := providerAPIRequest(fixture, login, http.MethodPost, providerTechnicalResourceCreateRoute, fixture.provider.ID,
+		`{"type":"agent","runtime_name":"agent-a","domain_label":"shared-agent","credential_revision":1,"reason":"register first agent"}`,
+		map[string]string{HeaderIdempotencyKey: "provider-create-agent-domain-a"})
+	require.Equal(t, http.StatusCreated, first.Code, first.Body.String())
+
+	conflict := providerAPIRequest(fixture, login, http.MethodPost, providerTechnicalResourceCreateRoute, fixture.provider.ID,
+		`{"type":"agent","runtime_name":"agent-b","domain_label":"shared-agent","credential_revision":1,"reason":"register conflicting agent"}`,
+		map[string]string{HeaderIdempotencyKey: "provider-create-agent-domain-b"})
+	require.Equal(t, http.StatusConflict, conflict.Code, conflict.Body.String())
+	assertResponseErrorCode(t, conflict, ErrorCodeProviderSupplyConflict)
+	require.Contains(t, conflict.Body.String(), "Provider 资源存在冲突")
+}
+
 func TestProviderSupplyAPIAuditFailureRollsBackMutationAndOutbox(t *testing.T) {
 	fixture, login := prepareProviderSupplyAPIFixture(t, config.FeatureFlagsSection{ResourceModelWrite: true})
 	require.NoError(t, fixture.database.Migrator().DropTable(&model.AuditLog{}))

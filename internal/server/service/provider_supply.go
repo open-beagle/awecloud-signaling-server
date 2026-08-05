@@ -272,7 +272,7 @@ func (s *ProviderSupplyService) CreateTechnicalResource(ctx context.Context, aut
 			if err := tx.Select("key").First(&provider, "id = ?", providerID).Error; err != nil {
 				return err
 			}
-			runtimeUserName := provider.Key + "-" + input.RuntimeName
+			runtimeUserName := providerRuntimeUserName(provider.Key, input.RuntimeName, "")
 			if len(runtimeUserName) > 100 {
 				return ErrProviderSupplyInvalidInput
 			}
@@ -290,9 +290,19 @@ func (s *ProviderSupplyService) CreateTechnicalResource(ctx context.Context, aut
 			}
 			if err := tx.Create(&runtimeUser).Error; err != nil {
 				if isDatabaseConstraintError(err) {
-					return ErrProviderSupplyConflict
+					runtimeUser.Name = providerRuntimeUserName(provider.Key, input.RuntimeName, resource.ID)
+					if runtimeUser.Name == runtimeUserName {
+						return ErrProviderSupplyConflict
+					}
+					if retryErr := tx.Create(&runtimeUser).Error; retryErr != nil {
+						if isDatabaseConstraintError(retryErr) {
+							return ErrProviderSupplyConflict
+						}
+						return retryErr
+					}
+				} else {
+					return err
 				}
-				return err
 			}
 			resource.RuntimeUserID = runtimeUser.ID
 		}
@@ -308,6 +318,20 @@ func (s *ProviderSupplyService) CreateTechnicalResource(ctx context.Context, aut
 		return nil, err
 	}
 	return resource, nil
+}
+
+func providerRuntimeUserName(providerKey, runtimeName, resourceID string) string {
+	name := strings.TrimSpace(providerKey) + "-" + strings.TrimSpace(runtimeName)
+	resourceID = strings.TrimSpace(resourceID)
+	if resourceID == "" {
+		return name
+	}
+	suffix := "-" + strings.ReplaceAll(resourceID, "-", "")[:8]
+	maxBase := 100 - len(suffix)
+	if len(name) > maxBase {
+		name = name[:maxBase]
+	}
+	return name + suffix
 }
 
 type BindTechnicalResourceInput struct {

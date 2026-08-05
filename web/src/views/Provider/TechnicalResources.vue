@@ -189,7 +189,9 @@ const copyCommand = async () => {
 
 const applyFilters = () => { pagination.page = 1; load() }
 const openDetail = (resourceId: string, tab?: string) => router.push({ path: `/provider-technical-resources/${resourceId}`, query: tab ? { tab } : undefined })
-const canDelete = (resource: TechnicalResource) => resource.health_state === 'offline' && resource.lifecycle_state !== 'deleted'
+const canDelete = (resource: TechnicalResource) =>
+  (resource.lifecycle_state === 'retired' || resource.health_state === 'offline' || (resource.lifecycle_state === 'pending' && (resource.endpoint_count || 0) === 0)) &&
+  resource.lifecycle_state !== 'deleted'
 const handleRowCommand = async (command: string, resource: TechnicalResource) => {
   if (command === 'detail') {
     await openDetail(resource.id)
