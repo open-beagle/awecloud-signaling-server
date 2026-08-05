@@ -105,6 +105,40 @@ func TestInstallSignalScriptUsesChinesePromptAndAvoidsDuplicateLogRedirect(t *te
 	}
 }
 
+func TestInstallAgentScriptDeployRestartsServiceAndResetsTunnelState(t *testing.T) {
+	for _, scriptPath := range []string{
+		filepath.Join("..", "..", "scripts", "install_agent.sh"),
+		filepath.Join("..", "..", "..", "scripts", "install_agent.sh"),
+	} {
+		t.Run(scriptPath, func(t *testing.T) {
+			script, err := os.ReadFile(scriptPath)
+			require.NoError(t, err)
+			content := string(script)
+
+			require.Contains(t, content, "prepare_redeploy_agent()")
+			require.Contains(t, content, `systemctl cat "$SERVICE_NAME" >/dev/null 2>&1`)
+			require.Contains(t, content, `systemctl stop "$SERVICE_NAME" || error "停止旧服务失败"`)
+			require.Contains(t, content, `mv "$TUNNEL_STATE_DIR" "$backup_dir" || error "备份旧隧道状态失败"`)
+			require.Contains(t, content, "检测到旧隧道状态，已备份")
+			require.Contains(t, content, "prepare_redeploy_agent")
+			require.Contains(t, content, `systemctl restart "$SERVICE_NAME" || error "启动服务失败"`)
+
+			mainScript := content[strings.LastIndex(content, "main() {"):]
+			registerAt := strings.Index(mainScript, "deploy_with_token")
+			downloadAt := strings.Index(mainScript, "download_agent")
+			prepareAt := strings.Index(mainScript, "prepare_redeploy_agent")
+			configAt := strings.Index(mainScript, "generate_config")
+			require.NotEqual(t, -1, registerAt)
+			require.NotEqual(t, -1, downloadAt)
+			require.NotEqual(t, -1, prepareAt)
+			require.NotEqual(t, -1, configAt)
+			require.Less(t, registerAt, downloadAt, "注册应在下载前完成")
+			require.Less(t, downloadAt, prepareAt, "下载失败时不应停止旧服务")
+			require.Less(t, prepareAt, configAt, "旧状态应在写入新配置前备份")
+		})
+	}
+}
+
 func TestMergeLocalAgentConfigPreservesContainerSSHConfig(t *testing.T) {
 	registered := &config.AgentConfig{
 		Agent: config.AgentSection{AgentToken: "token", Server: "https://signal.example"},

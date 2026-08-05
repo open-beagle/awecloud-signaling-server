@@ -27,6 +27,7 @@ INSTALL_DIR="/opt/bin"
 BINARY_NAME="signal_agent"
 CONFIG_DIR="/etc/kubernetes/config"
 DATA_DIR="/etc/kubernetes/data/signaling"
+TUNNEL_STATE_DIR="${DATA_DIR}/tunnel"
 CONFIG_FILE="${CONFIG_DIR}/k8s-signaling.toml"
 SERVICE_NAME="k8s-signaling"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
@@ -257,7 +258,7 @@ server = "${SERVER_ADDRESS}"
 
 # Tunnel 配置
 [tunnel]
-state_dir = "${DATA_DIR}/tunnel"
+state_dir = "${TUNNEL_STATE_DIR}"
 state_sync_interval = 5
 enable_ssh = ${ENABLE_SSH}
 
@@ -318,11 +319,28 @@ SyslogIdentifier=${SERVICE_NAME}
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reload
-    systemctl enable "$SERVICE_NAME"
-    systemctl start "$SERVICE_NAME"
+    systemctl daemon-reload || error "重新加载 systemd 配置失败"
+    systemctl enable "$SERVICE_NAME" || error "启用服务失败"
+    systemctl restart "$SERVICE_NAME" || error "启动服务失败"
     
     info "服务已启动"
+}
+
+# 准备重新部署 Agent
+prepare_redeploy_agent() {
+    info "重新部署模式：停止旧服务并备份旧隧道状态..."
+
+    if systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
+        systemctl stop "$SERVICE_NAME" || error "停止旧服务失败"
+    fi
+
+    if [[ -d "$TUNNEL_STATE_DIR" ]]; then
+        local timestamp backup_dir
+        timestamp="$(date +%Y%m%d%H%M%S)-$$"
+        backup_dir="${TUNNEL_STATE_DIR}.bak.${timestamp}"
+        mv "$TUNNEL_STATE_DIR" "$backup_dir" || error "备份旧隧道状态失败"
+        info "检测到旧隧道状态，已备份: ${backup_dir}"
+    fi
 }
 
 # 升级 Agent
@@ -509,6 +527,11 @@ main() {
     # 全新安装
     download_agent
     create_directories
+
+    if [[ "$DEPLOY_MODE" == "true" ]]; then
+        prepare_redeploy_agent
+    fi
+
     generate_config
     install_service
     
