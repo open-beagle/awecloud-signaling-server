@@ -50,3 +50,53 @@ func TestAgentAuthenticateAcceptsConsumedTechnicalResourceToken(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, response.Success)
 }
+
+func TestAgentRegisterResumesWithConsumedTechnicalResourceToken(t *testing.T) {
+	oldDB := db.DB
+	t.Cleanup(func() { db.DB = oldDB })
+	testDB, err := gorm.Open(sqlite.Open("file:agent_resource_token_register_test?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	db.DB = testDB
+	require.NoError(t, testDB.AutoMigrate(
+		&model.User{}, &model.Node{}, &model.DeployToken{}, &model.ResourceProvider{},
+		&model.TechnicalResource{}, &model.TechnicalResourceDeployToken{},
+	))
+
+	user := model.User{Name: "beijing", Role: model.UserRoleAgent, SecretHash: "fixture", Enabled: true}
+	require.NoError(t, testDB.Create(&user).Error)
+	provider := model.ResourceProvider{ID: "provider-beagle", Key: "beagle", DisplayName: "Beagle", DomainScope: model.ProviderDomainRoot, Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	require.NoError(t, testDB.Create(&provider).Error)
+	resource := model.TechnicalResource{
+		ID: "resource-beijing", ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "resource-beijing", DomainLabel: "beijing",
+		LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline,
+		CredentialRevision: 1, RuntimeUserID: user.ID, ConfigRevision: 1, RowVersion: 1,
+	}
+	require.NoError(t, testDB.Create(&resource).Error)
+	node := model.Node{UserID: user.ID, Name: "beagle-242", Type: model.NodeTypeAgent}
+	require.NoError(t, testDB.Create(&node).Error)
+	token := model.TechnicalResourceDeployToken{
+		ID: "token-beijing", TechnicalResourceID: resource.ID, Token: "persisted-runtime-token", Name: node.Name,
+		RuntimeUserID: user.ID, Status: model.TechnicalResourceDeployTokenConsumed, CreatedByUserID: user.ID,
+	}
+	require.NoError(t, testDB.Create(&token).Error)
+
+	server := &AgentServiceServer{}
+	response, err := server.Register(context.Background(), &pb.AgentRegisterRequest{Secret: token.Token, Version: "v1.0.1"})
+	require.NoError(t, err)
+	require.True(t, response.Success)
+	require.Equal(t, user.ID, response.AgentId)
+	require.Equal(t, node.Name, response.DeviceName)
+
+	var persistedToken model.TechnicalResourceDeployToken
+	require.NoError(t, testDB.First(&persistedToken, "id = ?", token.ID).Error)
+	require.Equal(t, model.TechnicalResourceDeployTokenConsumed, persistedToken.Status)
+	var persistedNode model.Node
+	require.NoError(t, testDB.First(&persistedNode, node.ID).Error)
+	require.Equal(t, "v1.0.1", persistedNode.Version)
+
+	require.NoError(t, testDB.Delete(&persistedNode).Error)
+	response, err = server.Register(context.Background(), &pb.AgentRegisterRequest{Secret: token.Token, Version: "v1.0.1"})
+	require.NoError(t, err)
+	require.False(t, response.Success)
+	require.Equal(t, "Agent Node 不存在", response.Message)
+}

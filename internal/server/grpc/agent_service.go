@@ -119,24 +119,49 @@ func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
 func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegisterRequest) (*pb.AgentRegisterResponse, error) {
 	logger.Infof("Agent 注册请求: version=%s", req.Version)
 
-	// 先通过 DeployToken 查询用户
-	var deployToken model.DeployToken
-	if err := db.DB.WithContext(ctx).Where("token = ? AND status = ?", req.Secret, model.DeployTokenStatusBound).First(&deployToken).Error; err != nil {
-		logger.Warnf("DeployToken 不存在或未绑定: %s", req.Secret)
-		return &pb.AgentRegisterResponse{
-			Success: false,
-			Message: "无效的 Token",
-		}, nil
-	}
+	var userID uint64
+	var deviceName string
+	resumeExistingNode := false
 
-	// 更新 DeployToken 最后使用时间
-	deployToken.UpdateLastUsed()
-	db.DB.WithContext(ctx).Save(&deployToken)
+	// Legacy credentials remain valid for Agents that have not moved to the
+	// TechnicalResource admission flow.
+	var deployToken model.DeployToken
+	legacyErr := db.DB.WithContext(ctx).Where("token = ? AND status = ?", req.Secret, model.DeployTokenStatusBound).First(&deployToken).Error
+	if legacyErr == nil {
+		deployToken.UpdateLastUsed()
+		if err := db.DB.WithContext(ctx).Save(&deployToken).Error; err != nil {
+			return nil, err
+		}
+		userID = deployToken.UserID
+		deviceName = deployToken.Name
+	} else if !errors.Is(legacyErr, gorm.ErrRecordNotFound) {
+		return nil, legacyErr
+	} else {
+		// A consumed TechnicalResource token is the persisted runtime
+		// credential. Restarting or upgrading must not consume it again.
+		var resourceToken model.TechnicalResourceDeployToken
+		resourceErr := db.DB.WithContext(ctx).Table("technical_resource_deploy_token AS token").
+			Select("token.*").
+			Joins("JOIN technical_resource AS resource ON resource.id = token.technical_resource_id AND resource.runtime_user_id = token.runtime_user_id").
+			Where("token.token = ? AND token.status = ?", req.Secret, model.TechnicalResourceDeployTokenConsumed).
+			Where("resource.type = ? AND resource.lifecycle_state = ? AND resource.deleted_at IS NULL", model.TechnicalResourceAgent, model.TechnicalResourceRegistered).
+			First(&resourceToken).Error
+		if resourceErr != nil {
+			if !errors.Is(resourceErr, gorm.ErrRecordNotFound) {
+				return nil, resourceErr
+			}
+			logger.Warn("Agent 运行凭据无效")
+			return &pb.AgentRegisterResponse{Success: false, Message: "无效的凭据"}, nil
+		}
+		userID = resourceToken.RuntimeUserID
+		deviceName = resourceToken.Name
+		resumeExistingNode = true
+	}
 
 	// 查询用户
 	var user model.User
-	if err := db.DB.WithContext(ctx).First(&user, deployToken.UserID).Error; err != nil {
-		logger.Warnf("用户不存在: user_id=%d", deployToken.UserID)
+	if err := db.DB.WithContext(ctx).First(&user, userID).Error; err != nil {
+		logger.Warnf("用户不存在: user_id=%d", userID)
 		return &pb.AgentRegisterResponse{
 			Success: false,
 			Message: "用户不存在",
@@ -163,9 +188,11 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 
 	// 每个部署名称对应一个独立 Agent Node。
 	var node model.Node
-	// Agent 设备名：使用 DeployToken.Name（不使用系统 hostname）
-	deviceName := deployToken.Name
 	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ? AND name = ?", user.ID, model.NodeTypeAgent, deviceName).First(&node).Error; err != nil {
+		if resumeExistingNode {
+			logger.Warnf("Agent 运行凭据没有已绑定 Node: user_id=%d, device=%s", user.ID, deviceName)
+			return &pb.AgentRegisterResponse{Success: false, Message: "Agent Node 不存在"}, nil
+		}
 		// 创建新 Node
 		node = model.Node{
 			UserID:          user.ID,
