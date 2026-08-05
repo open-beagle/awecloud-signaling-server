@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/glebarez/sqlite" // 纯 Go SQLite 驱动
@@ -88,6 +89,12 @@ func autoMigrate() error {
 	if err := ensureTenantGovernanceSchema(DB); err != nil {
 		return err
 	}
+	if err := ensureProviderDomainSchema(DB); err != nil {
+		return err
+	}
+	if err := ensureDomainRegistrySchema(DB); err != nil {
+		return err
+	}
 	err := DB.AutoMigrate(
 		// 基础模型
 		&model.Admin{},
@@ -118,13 +125,11 @@ func autoMigrate() error {
 		&model.UserIdentityProfile{},
 		&model.UserAuthenticationLink{},
 		&model.PlatformRoleMembership{},
-		&model.ResourceProvider{},
 		&model.AdminProviderMembership{},
 		&model.UserTenantManagementMembership{},
 		&model.UserSimulationSession{},
 
 		// Provider 供给对象（S2，新增 Schema，业务入口仍由 Feature Flag 关闭）
-		&model.TechnicalResource{},
 		&model.TechnicalResourceBinding{},
 		&model.TechnicalResourceDeployToken{},
 		&model.SupplyInventoryReceipt{},
@@ -196,9 +201,6 @@ func autoMigrate() error {
 		// Desktop 登录会话
 		&model.DesktopLoginSession{},
 
-		// ZTNA 域名注册表
-		&model.DomainRegistry{},
-
 		// ACL K8S API 授权模型
 		&model.AclK8SUserPermission{},
 		&model.AclK8SGroupPermission{},
@@ -249,7 +251,11 @@ func ensureProviderDomainLabelSchema(database *gorm.DB) error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS uk_resource_provider_domain_label ON resource_provider(lower(domain_label)) WHERE domain_scope = 'named'`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS uk_agent_domain_label ON technical_resource(provider_id, lower(domain_label)) WHERE type = 'agent' AND deleted_at IS NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS uk_domain_registry_resource ON domain_registry(domain, resource_kind, resource_id)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS uk_domain_registry_ssh_domain ON domain_registry(lower(domain)) WHERE type = 'ssh'`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uk_domain_registry_ssh_domain ON domain_registry(lower(domain)) WHERE type = 'ssh' AND provider_id <> '' AND agent_resource_id <> ''`,
+		`CREATE INDEX IF NOT EXISTS idx_domain_registry_provider_id ON domain_registry(provider_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_domain_registry_agent_resource_id ON domain_registry(agent_resource_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_domain_registry_resource_kind ON domain_registry(resource_kind)`,
+		`CREATE INDEX IF NOT EXISTS idx_domain_registry_resource_id ON domain_registry(resource_id)`,
 	}
 	for _, statement := range statements {
 		if err := database.Exec(statement).Error; err != nil {
@@ -257,6 +263,215 @@ func ensureProviderDomainLabelSchema(database *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+func ensureDomainRegistrySchema(database *gorm.DB) error {
+	migrator := database.Migrator()
+	if !migrator.HasTable(&model.DomainRegistry{}) {
+		if err := database.AutoMigrate(&model.DomainRegistry{}); err != nil {
+			return fmt.Errorf("create domain registry schema: %w", err)
+		}
+		return nil
+	}
+
+	return database.Transaction(func(tx *gorm.DB) error {
+		for _, column := range []string{"provider_id", "agent_resource_id", "resource_kind", "resource_id"} {
+			hasColumn, err := hasSQLiteColumn(tx, "domain_registry", column)
+			if err != nil {
+				return err
+			}
+			if hasColumn {
+				continue
+			}
+			if err := tx.Exec("ALTER TABLE domain_registry ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''").Error; err != nil {
+				return fmt.Errorf("add domain registry ownership column %s: %w", column, err)
+			}
+		}
+
+		statements := []string{
+			`UPDATE domain_registry SET
+				provider_id = COALESCE((SELECT resource.provider_id FROM technical_resource_binding binding
+					JOIN technical_resource resource ON resource.id = binding.technical_resource_id AND resource.type = 'agent'
+					WHERE binding.source_type = 'legacy_node' AND binding.source_id = CAST(domain_registry.node_id AS TEXT) AND binding.enabled = 1 LIMIT 1), ''),
+				agent_resource_id = COALESCE((SELECT resource.id FROM technical_resource_binding binding
+					JOIN technical_resource resource ON resource.id = binding.technical_resource_id AND resource.type = 'agent'
+					WHERE binding.source_type = 'legacy_node' AND binding.source_id = CAST(domain_registry.node_id AS TEXT) AND binding.enabled = 1 LIMIT 1), '')
+			WHERE COALESCE(endpoint_id, '') = ''
+				AND (provider_id = '' OR agent_resource_id = '' OR resource_kind = '' OR resource_id = '')`,
+			`UPDATE domain_registry SET
+				provider_id = COALESCE((SELECT agent.provider_id FROM endpoint legacy_endpoint
+					JOIN technical_resource_binding endpoint_binding ON endpoint_binding.source_type = 'legacy_endpoint'
+						AND endpoint_binding.source_id = legacy_endpoint.id AND endpoint_binding.enabled = 1
+					JOIN technical_resource endpoint_resource ON endpoint_resource.id = endpoint_binding.technical_resource_id AND endpoint_resource.type = 'endpoint'
+					JOIN technical_resource agent ON agent.id = endpoint_resource.parent_id AND agent.type = 'agent'
+					WHERE legacy_endpoint.id = domain_registry.endpoint_id OR legacy_endpoint.name = domain_registry.endpoint_id LIMIT 1), ''),
+				agent_resource_id = COALESCE((SELECT agent.id FROM endpoint legacy_endpoint
+					JOIN technical_resource_binding endpoint_binding ON endpoint_binding.source_type = 'legacy_endpoint'
+						AND endpoint_binding.source_id = legacy_endpoint.id AND endpoint_binding.enabled = 1
+					JOIN technical_resource endpoint_resource ON endpoint_resource.id = endpoint_binding.technical_resource_id AND endpoint_resource.type = 'endpoint'
+					JOIN technical_resource agent ON agent.id = endpoint_resource.parent_id AND agent.type = 'agent'
+					WHERE legacy_endpoint.id = domain_registry.endpoint_id OR legacy_endpoint.name = domain_registry.endpoint_id LIMIT 1), ''),
+				resource_id = COALESCE((SELECT id FROM endpoint WHERE id = domain_registry.endpoint_id OR name = domain_registry.endpoint_id LIMIT 1), domain_registry.endpoint_id),
+				resource_kind = CASE
+					WHEN type = 'ssh' THEN 'endpoint'
+					WHEN type = 'k8sapi' THEN 'kubernetes'
+					ELSE 'service' END
+			WHERE COALESCE(endpoint_id, '') <> ''
+				AND (provider_id = '' OR agent_resource_id = '' OR resource_kind = '' OR resource_id = '')`,
+			`UPDATE domain_registry SET resource_kind = CASE
+				WHEN type = 'ssh' THEN 'node'
+				WHEN type = 'k8sapi' THEN 'kubernetes'
+				ELSE 'service' END,
+				resource_id = CAST(node_id AS TEXT)
+			WHERE COALESCE(endpoint_id, '') = ''
+				AND (resource_kind = '' OR resource_id = '')`,
+		}
+		for _, statement := range statements {
+			if err := tx.Exec(statement).Error; err != nil {
+				return fmt.Errorf("backfill domain registry ownership: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+func hasSQLiteColumn(database *gorm.DB, table, column string) (bool, error) {
+	var columns []struct {
+		Name string
+	}
+	if err := database.Raw("PRAGMA table_info(" + table + ")").Scan(&columns).Error; err != nil {
+		return false, fmt.Errorf("inspect SQLite table %s: %w", table, err)
+	}
+	for _, candidate := range columns {
+		if candidate.Name == column {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+type legacyAgentDomainRow struct {
+	ID            string
+	ProviderID    string
+	StableKey     string
+	DomainLabel   string
+	RuntimeName   string
+	BoundNodeName string
+}
+
+var invalidDomainLabelCharacters = regexp.MustCompile(`[^a-z0-9-]+`)
+
+// ensureProviderDomainSchema keeps upgrades additive. Rebuilding either table
+// breaks existing SQLite triggers while the referenced table is temporarily
+// absent.
+func ensureProviderDomainSchema(database *gorm.DB) error {
+	migrator := database.Migrator()
+	if !migrator.HasTable(&model.ResourceProvider{}) {
+		if err := database.AutoMigrate(&model.ResourceProvider{}, &model.TechnicalResource{}); err != nil {
+			return fmt.Errorf("create Provider domain schema: %w", err)
+		}
+		return nil
+	}
+
+	return database.Transaction(func(tx *gorm.DB) error {
+		txMigrator := tx.Migrator()
+		if !txMigrator.HasColumn(&model.ResourceProvider{}, "domain_label") {
+			if err := tx.Exec(`ALTER TABLE resource_provider ADD COLUMN domain_label TEXT NOT NULL DEFAULT ''`).Error; err != nil {
+				return fmt.Errorf("add Provider domain label: %w", err)
+			}
+		}
+		if !txMigrator.HasColumn(&model.ResourceProvider{}, "domain_scope") {
+			if err := tx.Exec(`ALTER TABLE resource_provider ADD COLUMN domain_scope TEXT NOT NULL DEFAULT 'named'`).Error; err != nil {
+				return fmt.Errorf("add Provider domain scope: %w", err)
+			}
+		}
+		if err := tx.Exec(`UPDATE resource_provider SET domain_scope = 'root', domain_label = '' WHERE lower(key) = 'beagle'`).Error; err != nil {
+			return fmt.Errorf("set root Provider domain scope: %w", err)
+		}
+		if err := tx.Exec(`UPDATE resource_provider SET domain_scope = 'named', domain_label = lower(key) WHERE lower(key) <> 'beagle' AND domain_label = ''`).Error; err != nil {
+			return fmt.Errorf("backfill named Provider domain scope: %w", err)
+		}
+
+		if !txMigrator.HasTable(&model.TechnicalResource{}) {
+			if err := tx.AutoMigrate(&model.TechnicalResource{}); err != nil {
+				return fmt.Errorf("create technical resource domain schema: %w", err)
+			}
+			return nil
+		}
+		if !txMigrator.HasColumn(&model.TechnicalResource{}, "domain_label") {
+			if err := tx.Exec(`ALTER TABLE technical_resource ADD COLUMN domain_label TEXT NOT NULL DEFAULT ''`).Error; err != nil {
+				return fmt.Errorf("add Agent domain label: %w", err)
+			}
+		}
+		return backfillAgentDomainLabels(tx)
+	})
+}
+
+func backfillAgentDomainLabels(database *gorm.DB) error {
+	var agents []legacyAgentDomainRow
+	err := database.Table("technical_resource AS resource").
+		Select(`resource.id, resource.provider_id, resource.stable_key, resource.domain_label,
+			COALESCE(runtime_user.name, '') AS runtime_name,
+			COALESCE(bound_node.name, '') AS bound_node_name`).
+		Joins("LEFT JOIN user AS runtime_user ON runtime_user.id = resource.runtime_user_id").
+		Joins(`LEFT JOIN technical_resource_binding AS binding
+			ON binding.technical_resource_id = resource.id AND binding.source_type = 'legacy_node' AND binding.enabled = 1`).
+		Joins("LEFT JOIN node AS bound_node ON CAST(bound_node.id AS TEXT) = binding.source_id").
+		Where("resource.type = ? AND resource.deleted_at IS NULL", model.TechnicalResourceAgent).
+		Order("resource.provider_id, resource.created_at, resource.id").
+		Scan(&agents).Error
+	if err != nil {
+		return fmt.Errorf("list historical Agent domain labels: %w", err)
+	}
+
+	used := make(map[string]struct{}, len(agents))
+	for _, agent := range agents {
+		label := normalizeLegacyDomainLabel(agent.DomainLabel)
+		if label == "" {
+			label = normalizeLegacyDomainLabel(agent.RuntimeName)
+		}
+		if label == "" {
+			label = normalizeLegacyDomainLabel(agent.BoundNodeName)
+		}
+		if label == "" {
+			label = normalizeLegacyDomainLabel(agent.StableKey)
+		}
+		if label == "" {
+			label = "agent"
+		}
+		label = uniqueLegacyDomainLabel(used, agent.ProviderID, label)
+		if label == agent.DomainLabel {
+			continue
+		}
+		if err := database.Model(&model.TechnicalResource{}).Where("id = ?", agent.ID).Update("domain_label", label).Error; err != nil {
+			return fmt.Errorf("backfill Agent domain label %s: %w", agent.ID, err)
+		}
+	}
+	return nil
+}
+
+func normalizeLegacyDomainLabel(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = invalidDomainLabelCharacters.ReplaceAllString(value, "-")
+	value = strings.Trim(value, "-")
+	if len(value) > 63 {
+		value = strings.TrimRight(value[:63], "-")
+	}
+	return value
+}
+
+func uniqueLegacyDomainLabel(used map[string]struct{}, providerID, label string) string {
+	base := label
+	for suffix := 1; ; suffix++ {
+		key := providerID + "\x00" + label
+		if _, exists := used[key]; !exists {
+			used[key] = struct{}{}
+			return label
+		}
+		tail := fmt.Sprintf("-%d", suffix)
+		prefixLength := 63 - len(tail)
+		label = strings.TrimRight(base[:min(len(base), prefixLength)], "-") + tail
+	}
 }
 
 // ensureTenantGovernanceSchema owns Tenant schema migration. Existing SQLite
