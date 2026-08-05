@@ -62,6 +62,11 @@ type DesktopServiceServer struct {
 	loginService    *service.DesktopLoginService
 }
 
+type headscaleDeviceIPIndex struct {
+	byID   map[uint64]string
+	byName map[string]*v1.Node
+}
+
 // NewDesktopServiceServer 创建 Desktop 服务
 func NewDesktopServiceServer(cfg *config.ServerConfig) *DesktopServiceServer {
 	s := &DesktopServiceServer{
@@ -81,6 +86,36 @@ func NewDesktopServiceServer(cfg *config.ServerConfig) *DesktopServiceServer {
 		}
 	}
 	return s
+}
+
+func buildHeadscaleDeviceIPIndex(nodes []*v1.Node) headscaleDeviceIPIndex {
+	index := headscaleDeviceIPIndex{
+		byID:   make(map[uint64]string),
+		byName: make(map[string]*v1.Node),
+	}
+	for _, node := range nodes {
+		if node == nil || len(node.IpAddresses) == 0 {
+			continue
+		}
+		index.byID[node.Id] = node.IpAddresses[0]
+		selected := index.byName[node.GivenName]
+		if selected == nil || (node.Online && !selected.Online) || (node.Online == selected.Online && node.Id > selected.Id) {
+			index.byName[node.GivenName] = node
+		}
+	}
+	return index
+}
+
+func resolveDeviceIP(node model.Node, index headscaleDeviceIPIndex) string {
+	if node.HeadscaleNodeID != 0 {
+		if ip := index.byID[node.HeadscaleNodeID]; ip != "" {
+			return ip
+		}
+	}
+	if hsNode := index.byName[node.Name]; hsNode != nil && len(hsNode.IpAddresses) > 0 {
+		return hsNode.IpAddresses[0]
+	}
+	return node.IP
 }
 
 // SetAgentService 设置 Agent 服务
@@ -731,18 +766,14 @@ func (s *DesktopServiceServer) GetMyDevices(ctx context.Context, req *pb.GetMyDe
 	}
 
 	// 从 Headscale 获取该用户的所有节点 IP（实时数据）
-	nodeIPMap := make(map[string]string) // hostname -> IP
+	nodeIPIndex := headscaleDeviceIPIndex{}
 	if s.headscaleClient != nil {
 		var user model.User
 		if err := db.DB.WithContext(ctx).First(&user, currentNode.UserID).Error; err == nil {
 			hsUserName := fmt.Sprintf("client-%s", user.Name)
 			hsNodes, err := s.headscaleClient.ListNodesByUser(ctx, hsUserName)
 			if err == nil {
-				for _, hsNode := range hsNodes {
-					if len(hsNode.IpAddresses) > 0 {
-						nodeIPMap[hsNode.GivenName] = hsNode.IpAddresses[0]
-					}
-				}
+				nodeIPIndex = buildHeadscaleDeviceIPIndex(hsNodes)
 			}
 		}
 	}
@@ -783,8 +814,7 @@ func (s *DesktopServiceServer) GetMyDevices(ctx context.Context, req *pb.GetMyDe
 		}
 		createdAt := node.CreatedAt.Format(time.RFC3339)
 
-		// 从 Headscale 获取实时 IP（优先匹配 node.Name）
-		ip := nodeIPMap[node.Name]
+		ip := resolveDeviceIP(node, nodeIPIndex)
 
 		resp.Devices = append(resp.Devices, &pb.DeviceInfo{
 			DeviceToken: fmt.Sprintf("%d:%s", node.ID, "***"), // 不返回真实 secret
@@ -1449,18 +1479,14 @@ func (s *DesktopServiceServer) buildDevicesData(ctx context.Context, userID, cur
 	}
 
 	// 从 Headscale 获取 IP
-	nodeIPMap := make(map[string]string)
+	nodeIPIndex := headscaleDeviceIPIndex{}
 	if s.headscaleClient != nil {
 		var user model.User
 		if err := db.DB.WithContext(ctx).First(&user, userID).Error; err == nil {
 			hsUserName := fmt.Sprintf("client-%s", user.Name)
 			hsNodes, err := s.headscaleClient.ListNodesByUser(ctx, hsUserName)
 			if err == nil {
-				for _, hsNode := range hsNodes {
-					if len(hsNode.IpAddresses) > 0 {
-						nodeIPMap[hsNode.GivenName] = hsNode.IpAddresses[0]
-					}
-				}
+				nodeIPIndex = buildHeadscaleDeviceIPIndex(hsNodes)
 			}
 		}
 	}
@@ -1494,7 +1520,7 @@ func (s *DesktopServiceServer) buildDevicesData(ctx context.Context, userID, cur
 			lastUsedAt = node.LastHeartbeat.Format(time.RFC3339)
 		}
 		createdAt := node.CreatedAt.Format(time.RFC3339)
-		ip := nodeIPMap[node.Name]
+		ip := resolveDeviceIP(node, nodeIPIndex)
 
 		devices = append(devices, &pb.DeviceInfo{
 			DeviceToken: fmt.Sprintf("%d:%s", node.ID, "***"),
