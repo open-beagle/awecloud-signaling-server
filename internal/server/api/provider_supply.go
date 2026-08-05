@@ -89,6 +89,10 @@ type providerAgentDomainLabelRequest struct {
 	Reason      string `json:"reason"`
 }
 
+type providerAgentHostDomainLabelRequest struct {
+	HostDomainLabel string `json:"host_domain_label"`
+}
+
 type providerCandidateAcceptRequest struct {
 	DisplayName string `json:"display_name"`
 	Reason      string `json:"reason"`
@@ -174,6 +178,32 @@ func (a *ProviderSupplyAPI) UpdateAgentDomainLabel(c *gin.Context) {
 		return
 	}
 	recordAuditLog(c.Request.Context(), c, model.ActionUpdateAgent, "technical_resource", resource.ID, resource.DomainLabel, gin.H{"domain_label": resource.DomainLabel, "reason": request.Reason})
+	SetRevisionETag(c, resource.RowVersion)
+	c.JSON(http.StatusOK, NewSuccessResponse(resource))
+}
+
+func (a *ProviderSupplyAPI) UpdateAgentHostDomainLabel(c *gin.Context) {
+	authorization, ok := currentManagementAuthorization(c)
+	if !ok {
+		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
+		return
+	}
+	rowVersion, ok := requiredRevision(c)
+	if !ok {
+		codedError(c, http.StatusPreconditionRequired, ErrorCodePreconditionRequired, "必须提供 If-Match revision")
+		return
+	}
+	var request providerAgentHostDomainLabelRequest
+	if _, ok := decodeProviderSupplyRequest(c, &request); !ok {
+		return
+	}
+	request.HostDomainLabel = strings.TrimSpace(request.HostDomainLabel)
+	resource, err := service.NewProviderSupplyService(db.DB).ChangeAgentHostDomainLabel(c.Request.Context(), authorization, c.Param("id"), request.HostDomainLabel, rowVersion)
+	if err != nil {
+		writeProviderSupplyError(c, err, true)
+		return
+	}
+	recordAuditLog(c.Request.Context(), c, model.ActionUpdateAgent, "technical_resource", resource.ID, request.HostDomainLabel, gin.H{"host_domain_label": request.HostDomainLabel})
 	SetRevisionETag(c, resource.RowVersion)
 	c.JSON(http.StatusOK, NewSuccessResponse(resource))
 }
@@ -868,7 +898,7 @@ func setProviderReplayETag(c *gin.Context, responseBody string) {
 
 func writeProviderSupplyError(c *gin.Context, err error, write bool) {
 	switch {
-	case errors.Is(err, service.ErrProviderSupplyInvalidInput):
+	case errors.Is(err, service.ErrProviderSupplyInvalidInput), errors.Is(err, service.ErrHostDomainLabelInvalid):
 		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "Provider 资源请求参数无效")
 	case errors.Is(err, service.ErrProviderSupplyObjectNotFound):
 		codedError(c, http.StatusNotFound, ErrorCodeManagementObjectMissing, "当前 Provider 内对象不存在或不可见")
@@ -878,7 +908,7 @@ func writeProviderSupplyError(c *gin.Context, err error, write bool) {
 		codedError(c, http.StatusConflict, ErrorCodeProviderSupplyVersion, "对象版本已变化")
 	case errors.Is(err, service.ErrResourceScopeNotAllocatable):
 		codedError(c, http.StatusConflict, ErrorCodeProviderScopeNotAllocatable, "Scope 当前不满足可分配条件")
-	case errors.Is(err, service.ErrProviderSupplyConflict), errors.Is(err, service.ErrTechnicalResourceUnbound):
+	case errors.Is(err, service.ErrProviderSupplyConflict), errors.Is(err, service.ErrTechnicalResourceUnbound), errors.Is(err, service.ErrHostDomainLabelExists):
 		codedError(c, http.StatusConflict, ErrorCodeProviderSupplyConflict, "Provider 资源存在冲突或缺少前置条件")
 	case errors.Is(err, service.ErrActiveTaskExists), errors.Is(err, service.ErrReleaseNotPublished),
 		errors.Is(err, service.ErrArtifactNotFound), errors.Is(err, service.ErrUpdaterUnsupported):

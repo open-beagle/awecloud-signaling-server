@@ -20,6 +20,7 @@ export interface TechnicalResource {
   domain_label: string
   domain_namespace: string
   hostname: string
+  host_domain_label: string
   hostname_source?: 'reported' | 'legacy_name'
   parent_hostname?: string
   version?: string
@@ -240,6 +241,11 @@ export const getProviderTechnicalResource = (providerId: string, resourceId: str
 export const updateProviderAgentDomainLabel = (providerId: string, resource: TechnicalResource, domainLabel: string, reason: string) =>
   request.patch<any, { success: boolean; data: TechnicalResource }>(`/api/v1/management/provider/technical-resources/${resource.id}/domain-label`, {
     domain_label: domainLabel, reason,
+  }, { headers: { ...providerHeaders(providerId), 'If-Match': String(resource.row_version) } })
+
+export const updateProviderAgentHostDomainLabel = (providerId: string, resource: TechnicalResource, hostDomainLabel: string) =>
+  request.patch<any, { success: boolean; data: TechnicalResource }>(`/api/v1/management/provider/technical-resources/${resource.id}/host-domain-label`, {
+    host_domain_label: hostDomainLabel,
   }, { headers: { ...providerHeaders(providerId), 'If-Match': String(resource.row_version) } })
 
 export const getProviderTechnicalResourceCapabilities = (providerId: string, resourceId: string) =>

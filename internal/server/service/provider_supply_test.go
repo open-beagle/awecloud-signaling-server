@@ -124,6 +124,34 @@ func TestProviderTechnicalResourceCapabilitiesAndUpdaterUseScopedBinding(t *test
 	require.Len(t, tasks, 1)
 }
 
+func TestProviderChangesBoundAgentHostDomainLabel(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	ctx := context.Background()
+	agent := fixture.createBoundAgent(t, "agent-hostname", 1001)
+	require.NoError(t, fixture.database.Model(&model.Node{}).Where("id = ?", 1001).Updates(map[string]any{
+		"hostname": "reported-hostname", "host_domain_label": "reported-hostname",
+	}).Error)
+	var node model.Node
+	require.NoError(t, fixture.database.First(&node, 1001).Error)
+
+	updated, err := fixture.service.ChangeAgentHostDomainLabel(ctx, fixture.authorization, agent.ID, "friendly-host", agent.RowVersion)
+	require.NoError(t, err)
+	require.Equal(t, agent.RowVersion+1, updated.RowVersion)
+	require.Equal(t, agent.ConfigRevision+1, updated.ConfigRevision)
+	require.NoError(t, fixture.database.First(&node, 1001).Error)
+	require.Equal(t, "friendly-host", node.HostDomainLabel)
+
+	detail, err := fixture.service.GetTechnicalResource(ctx, fixture.authorization, agent.ID)
+	require.NoError(t, err)
+	require.Equal(t, "friendly-host", detail.Resource.HostDomainLabel)
+	require.Equal(t, "reported-hostname", detail.Resource.Hostname)
+
+	_, err = fixture.service.ChangeAgentHostDomainLabel(ctx, fixture.authorization, agent.ID, "invalid.name", updated.RowVersion)
+	require.ErrorIs(t, err, ErrHostDomainLabelInvalid)
+	_, err = fixture.service.ChangeAgentHostDomainLabel(ctx, fixture.authorization, agent.ID, "another-host", agent.RowVersion)
+	require.ErrorIs(t, err, ErrProviderSupplyVersionConflict)
+}
+
 func TestProviderCreatesResourceOwnedOneTimeDeploymentCredential(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	ctx := context.Background()

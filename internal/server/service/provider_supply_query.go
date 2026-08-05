@@ -36,6 +36,7 @@ type TechnicalResourceDetail struct {
 type TechnicalResourceView struct {
 	model.TechnicalResource
 	Hostname              string `gorm:"column:hostname" json:"hostname"`
+	HostDomainLabel       string `gorm:"column:host_domain_label" json:"host_domain_label"`
 	DomainNamespace       string `gorm:"column:domain_namespace" json:"domain_namespace"`
 	HostnameSource        string `gorm:"column:hostname_source" json:"hostname_source,omitempty"`
 	ParentHostname        string `gorm:"column:parent_hostname" json:"parent_hostname,omitempty"`
@@ -106,7 +107,9 @@ func (s *ProviderSupplyService) ListTechnicalResources(ctx context.Context, auth
 		query = query.Where(`(technical_resource.stable_key LIKE ? ESCAPE '\'
 			OR agent_node.hostname LIKE ? ESCAPE '\'
 			OR agent_node.name LIKE ? ESCAPE '\'
-			OR bound_endpoint.name LIKE ? ESCAPE '\')`, pattern, pattern, pattern, pattern)
+			OR agent_node.host_domain_label LIKE ? ESCAPE '\'
+			OR bound_endpoint.name LIKE ? ESCAPE '\'
+			OR bound_endpoint.host_domain_label LIKE ? ESCAPE '\')`, pattern, pattern, pattern, pattern, pattern, pattern)
 	}
 	result := &TechnicalResourceListResult{Items: []TechnicalResourceView{}}
 	query = query.Where("technical_resource.provider_id = ?", providerID)
@@ -176,6 +179,8 @@ func technicalResourceProjectionSelect() string {
 		CASE WHEN technical_resource.type = 'agent'
 			THEN COALESCE(NULLIF(agent_node.hostname, ''), agent_node.name, '')
 			ELSE COALESCE(bound_endpoint.name, '') END AS hostname,
+		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.host_domain_label, '')
+			ELSE COALESCE(bound_endpoint.host_domain_label, '') END AS host_domain_label,
 		CASE WHEN technical_resource.type = 'agent' AND COALESCE(agent_node.hostname, '') <> '' THEN 'reported'
 			WHEN technical_resource.type = 'agent' AND agent_node.id IS NOT NULL THEN 'legacy_name'
 			WHEN technical_resource.type = 'endpoint' AND bound_endpoint.id IS NOT NULL THEN 'legacy_name'

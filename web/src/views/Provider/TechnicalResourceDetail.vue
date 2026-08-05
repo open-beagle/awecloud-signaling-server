@@ -1,6 +1,6 @@
 <template>
   <div class="provider-page">
-    <PageHeader :title="resource?.hostname || '等待主机注册'" :description="resourceDescription">
+    <PageHeader :title="displayHostname" :description="resourceDescription">
       <template #actions>
         <el-button :icon="ArrowLeft" @click="router.push('/provider-technical-resources')">返回列表</el-button>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
@@ -24,7 +24,7 @@
       <section class="summary-surface">
         <div class="summary-identity">
           <span class="resource-icon"><el-icon><Cpu v-if="resource.type === 'agent'" /><Connection v-else /></el-icon></span>
-          <div><h2>{{ resource.hostname || '等待主机注册' }}</h2><p>{{ typeLabel(resource.type) }}<template v-if="resource.parent_hostname"> · 父 Agent {{ resource.parent_hostname }}</template></p></div>
+          <div><h2>{{ displayHostname }}</h2><p>{{ typeLabel(resource.type) }}<template v-if="resource.parent_hostname"> · 父 Agent {{ resource.parent_hostname }}</template></p></div>
         </div>
         <div class="summary-item"><span>生命周期</span><el-tag size="small" :type="lifecycleTag(resource.lifecycle_state)">{{ lifecycleLabel(resource.lifecycle_state) }}</el-tag></div>
         <div class="summary-item"><span>健康</span><el-tag size="small" effect="plain" :type="healthTag(resource.health_state)">{{ healthLabel(resource.health_state) }}</el-tag></div>
@@ -36,8 +36,8 @@
           <section class="detail-surface">
             <h3>运行概况</h3>
             <el-descriptions :column="4" border>
-              <el-descriptions-item label="主机名">{{ resource.hostname || '等待首次注册' }}</el-descriptions-item>
-              <el-descriptions-item label="名称来源">{{ hostnameSourceLabel(resource.hostname_source) }}</el-descriptions-item>
+              <el-descriptions-item label="主机名"><span class="mono">{{ displayHostname }}</span><el-button v-if="resource.type === 'agent' && canWrite && hasBinding" link type="primary" @click="editAgentHostDomainLabel">编辑</el-button></el-descriptions-item>
+              <el-descriptions-item label="SSH 域名"><span class="mono">{{ sshHostname }}</span></el-descriptions-item>
               <el-descriptions-item label="类型">{{ typeLabel(resource.type) }}</el-descriptions-item>
               <el-descriptions-item label="父 Agent">{{ resource.parent_hostname || '-' }}</el-descriptions-item>
 			  <el-descriptions-item v-if="resource.type === 'agent'" label="域名命名空间"><span class="mono">*.{{ resource.domain_namespace }}.beagle</span><el-button v-if="canWrite" link type="primary" @click="editAgentDomainLabel">编辑</el-button></el-descriptions-item>
@@ -77,6 +77,8 @@
             <el-descriptions class="diagnostic-grid" :column="2" border>
               <el-descriptions-item label="TechnicalResource ID"><span class="mono">{{ resource.id }}</span></el-descriptions-item>
               <el-descriptions-item label="Stable key"><span class="mono">{{ resource.stable_key }}</span></el-descriptions-item>
+              <el-descriptions-item label="Agent 上报主机名"><span class="mono">{{ resource.hostname || '-' }}</span></el-descriptions-item>
+              <el-descriptions-item label="上报名称来源">{{ hostnameSourceLabel(resource.hostname_source) }}</el-descriptions-item>
               <el-descriptions-item label="Credential Revision">{{ resource.credential_revision }}</el-descriptions-item>
               <el-descriptions-item label="Updater 协议">{{ resource.updater_protocol || '-' }}</el-descriptions-item>
               <el-descriptions-item label="Config Revision">{{ resource.config_revision }}</el-descriptions-item>
@@ -130,7 +132,7 @@ import PageHeader from '@/components/Common/PageHeader.vue'
 import {
 	checkProviderTechnicalResourceDelete, createProviderTechnicalResourceUpdateTask, deleteProviderTechnicalResource,
 	getProviderTechnicalResource, getProviderTechnicalResourceCapabilities, getProviderTechnicalResourceReleases,
-	getProviderTechnicalResourceUpdateTasks, setProviderTechnicalResourceLifecycle, updateProviderAgentDomainLabel, updateProviderTechnicalResourceCapabilities,
+	getProviderTechnicalResourceUpdateTasks, setProviderTechnicalResourceLifecycle, updateProviderAgentDomainLabel, updateProviderAgentHostDomainLabel, updateProviderTechnicalResourceCapabilities,
 	type ProviderRelease, type ProviderUpdateTask, type TechnicalResource, type TechnicalResourceBinding, type TechnicalResourceCapabilities,
 	type TechnicalResourceDeleteCheck, type TechnicalResourceState,
 } from '@/api/providerSupply'
@@ -155,6 +157,12 @@ const deleteCheck = ref<TechnicalResourceDeleteCheck>()
 const updateForm = reactive({ releaseId: '', reason: '', force: false })
 const canWrite = computed(() => workspaceStore.can('provider.technical_resources.write'))
 const hasBinding = computed(() => !!resource.value && resource.value.lifecycle_state !== 'pending')
+const displayHostname = computed(() => resource.value?.host_domain_label || resource.value?.hostname || '等待主机注册')
+const sshHostname = computed(() => resource.value
+	? resource.value.type === 'agent' && resource.value.host_domain_label
+		? `${resource.value.host_domain_label}.${resource.value.domain_namespace}.beagle`
+		: '-'
+	: '-')
 const resourceDescription = computed(() => resource.value
   ? `${typeLabel(resource.value.type)} 部署位置、运行能力、库存租约和身份诊断。`
   : '查看技术资源运行详情。')
@@ -180,6 +188,23 @@ const editAgentDomainLabel = async () => {
 		})
 		await updateProviderAgentDomainLabel(workspaceStore.providerId, resource.value, label.value.trim().toLowerCase(), reason.value.trim())
 		ElMessage.success('Agent 域名标识已更新')
+		await load()
+	} catch (error) {
+		if (error !== 'cancel' && error !== 'close') throw error
+	}
+}
+
+const editAgentHostDomainLabel = async () => {
+	if (!resource.value || resource.value.type !== 'agent' || !workspaceStore.providerId || !hasBinding.value) return
+	try {
+		const result = await ElMessageBox.prompt(`修改后 SSH 域名为 <主机名>.${resource.value.domain_namespace}.beagle，旧主机域名立即失效。`, '编辑 Agent 主机名', {
+			inputValue: resource.value.host_domain_label || resource.value.hostname,
+			inputPattern: /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
+			inputErrorMessage: '请输入有效的 DNS 单标签',
+			confirmButtonText: '保存', cancelButtonText: '取消',
+		})
+		await updateProviderAgentHostDomainLabel(workspaceStore.providerId, resource.value, result.value.trim().toLowerCase())
+		ElMessage.success('Agent 主机名和 SSH 域名已更新')
 		await load()
 	} catch (error) {
 		if (error !== 'cancel' && error !== 'close') throw error

@@ -117,6 +117,59 @@ func (s *ProviderSupplyService) ChangeAgentDomainLabel(ctx context.Context, auth
 	return &resource, err
 }
 
+func (s *ProviderSupplyService) ChangeAgentHostDomainLabel(ctx context.Context, authorization *ManagementAuthorizationContext, resourceID, value string, expectedRowVersion int64) (*model.TechnicalResource, error) {
+	label, err := NormalizeHostDomainLabel(value)
+	if err != nil || expectedRowVersion <= 0 {
+		return nil, ErrHostDomainLabelInvalid
+	}
+	var resource model.TechnicalResource
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		providerID, err := reauthorizeProviderPermission(tx, authorization, PermissionProviderTechnicalResourcesWrite, s.now().UTC())
+		if err != nil {
+			return err
+		}
+		if err := tx.Where("id = ? AND provider_id = ? AND type = ? AND deleted_at IS NULL", resourceID, providerID, model.TechnicalResourceAgent).First(&resource).Error; err != nil {
+			return providerSupplyNotFound(err)
+		}
+		if resource.RowVersion != expectedRowVersion {
+			return ErrProviderSupplyVersionConflict
+		}
+		var binding model.TechnicalResourceBinding
+		if err := tx.Where("technical_resource_id = ? AND source_type = ? AND enabled = ?", resource.ID, model.TechnicalResourceBindingLegacyNode, true).
+			Order("created_at DESC, id ASC").First(&binding).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrTechnicalResourceUnbound
+			}
+			return err
+		}
+		nodeID, err := strconv.ParseUint(binding.SourceID, 10, 64)
+		if err != nil || nodeID == 0 {
+			return ErrTechnicalResourceUnbound
+		}
+		var node model.Node
+		if err := tx.Select("host_domain_label").First(&node, nodeID).Error; err != nil {
+			return providerSupplyNotFound(err)
+		}
+		if node.HostDomainLabel == label {
+			return nil
+		}
+		if err := updateNodeHostDomainLabel(ctx, tx, nodeID, label); err != nil {
+			return err
+		}
+		updated := tx.Model(&resource).Where("row_version = ?", expectedRowVersion).Updates(map[string]any{
+			"config_revision": gorm.Expr("config_revision + 1"), "row_version": gorm.Expr("row_version + 1"),
+		})
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected != 1 {
+			return ErrProviderSupplyVersionConflict
+		}
+		return tx.First(&resource, "id = ?", resource.ID).Error
+	})
+	return &resource, err
+}
+
 type CreateTechnicalResourceInput struct {
 	Type               model.TechnicalResourceType
 	StableKey          string

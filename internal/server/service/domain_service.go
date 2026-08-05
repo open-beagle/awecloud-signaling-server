@@ -493,44 +493,48 @@ func (s *DomainService) UpdateNodeHostDomainLabel(ctx context.Context, nodeID ui
 		return err
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		identity, err := ResolveAgentDomainForNode(ctx, tx, nodeID)
-		if err != nil {
-			return err
-		}
-		var agent model.TechnicalResource
-		if err := tx.Select("runtime_user_id").First(&agent, "id = ?", identity.AgentResourceID).Error; err != nil {
-			return err
-		}
-		var nodeCount, endpointCount int64
-		if err := tx.Model(&model.Node{}).Where("user_id = ? AND type = ? AND lower(host_domain_label) = ? AND id <> ?", agent.RuntimeUserID, model.NodeTypeAgent, label, nodeID).Count(&nodeCount).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&model.Endpoint{}).Where("user_id = ? AND revoked = ? AND lower(host_domain_label) = ?", agent.RuntimeUserID, false, label).Count(&endpointCount).Error; err != nil {
-			return err
-		}
-		if nodeCount+endpointCount > 0 {
-			return ErrHostDomainLabelExists
-		}
-		var node model.Node
-		if err := tx.First(&node, nodeID).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&node).Update("host_domain_label", label).Error; err != nil {
-			return err
-		}
-		if err := NewDomainService(tx).DeleteNodeSSHDomain(ctx, &node, &model.User{ID: node.UserID}); err != nil {
-			return err
-		}
-		var user model.User
-		if err := tx.First(&user, node.UserID).Error; err != nil {
-			return err
-		}
-		node.HostDomainLabel = label
-		if user.SSHEnabled {
-			return NewDomainService(tx).CreateNodeSSHDomain(ctx, &node, &user)
-		}
-		return nil
+		return updateNodeHostDomainLabel(ctx, tx, nodeID, label)
 	})
+}
+
+func updateNodeHostDomainLabel(ctx context.Context, tx *gorm.DB, nodeID uint64, label string) error {
+	identity, err := ResolveAgentDomainForNode(ctx, tx, nodeID)
+	if err != nil {
+		return err
+	}
+	var agent model.TechnicalResource
+	if err := tx.Select("runtime_user_id").First(&agent, "id = ?", identity.AgentResourceID).Error; err != nil {
+		return err
+	}
+	var nodeCount, endpointCount int64
+	if err := tx.Model(&model.Node{}).Where("user_id = ? AND type = ? AND lower(host_domain_label) = ? AND id <> ?", agent.RuntimeUserID, model.NodeTypeAgent, label, nodeID).Count(&nodeCount).Error; err != nil {
+		return err
+	}
+	if err := tx.Model(&model.Endpoint{}).Where("user_id = ? AND revoked = ? AND lower(host_domain_label) = ?", agent.RuntimeUserID, false, label).Count(&endpointCount).Error; err != nil {
+		return err
+	}
+	if nodeCount+endpointCount > 0 {
+		return ErrHostDomainLabelExists
+	}
+	var node model.Node
+	if err := tx.First(&node, nodeID).Error; err != nil {
+		return err
+	}
+	if err := tx.Model(&node).Update("host_domain_label", label).Error; err != nil {
+		return err
+	}
+	if err := NewDomainService(tx).DeleteNodeSSHDomain(ctx, &node, &model.User{ID: node.UserID}); err != nil {
+		return err
+	}
+	var user model.User
+	if err := tx.First(&user, node.UserID).Error; err != nil {
+		return err
+	}
+	node.HostDomainLabel = label
+	if user.SSHEnabled {
+		return NewDomainService(tx).CreateNodeSSHDomain(ctx, &node, &user)
+	}
+	return nil
 }
 
 func (s *DomainService) UpdateEndpointHostDomainLabel(ctx context.Context, endpointID, value string) error {

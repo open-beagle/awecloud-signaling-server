@@ -38,7 +38,7 @@
       <el-table v-loading="loading" :data="items" stripe>
         <el-table-column label="技术资源" min-width="250">
           <template #default="{ row }">
-            <el-link class="resource-name" type="primary" :underline="false" @click="openDetail(row.id)">{{ row.hostname || '等待主机注册' }}</el-link>
+              <el-link class="resource-name" type="primary" :underline="false" @click="openDetail(row.id)">{{ row.host_domain_label || row.hostname || '等待主机注册' }}</el-link>
             <span class="secondary"><template v-if="row.parent_hostname">父 Agent：{{ row.parent_hostname }} · </template><span class="mono">{{ row.stable_key }}</span></span>
           </template>
         </el-table-column>
