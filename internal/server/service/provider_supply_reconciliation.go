@@ -25,9 +25,10 @@ var providerSupplyReconciliationOutboxPolicies = map[string]JSONFieldPolicy{
 }
 
 type ProviderSupplyReconciliationResult struct {
-	StaleObservations int64
-	SuspendedScopes   int64
-	UpdatedResources  int64
+	ExpiredTechnicalResources int64
+	StaleObservations         int64
+	SuspendedScopes           int64
+	UpdatedResources          int64
 }
 
 type ProviderSupplyReconciliationService struct {
@@ -48,6 +49,11 @@ func (s *ProviderSupplyReconciliationService) ReconcileExpiredEvidence(ctx conte
 	}
 	at = at.UTC()
 	result := &ProviderSupplyReconciliationResult{}
+	expiredTechnicalResources, err := NewProviderSupplyService(s.db).ExpireTechnicalResourceLeases(ctx, at)
+	if err != nil {
+		return nil, fmt.Errorf("expire TechnicalResource leases: %w", err)
+	}
+	result.ExpiredTechnicalResources = expiredTechnicalResources
 
 	conflictKeys, err := s.expiredCrossProviderConflictKeys(ctx, at)
 	if err != nil {
@@ -202,9 +208,9 @@ func (s *ProviderSupplyReconciliationService) StartPeriodicMaintenance(ctx conte
 				logger.Warnf("Provider Supply 租约对账失败: %v", err)
 				continue
 			}
-			if result.StaleObservations > 0 || result.SuspendedScopes > 0 || result.UpdatedResources > 0 {
-				logger.Infof("Provider Supply 租约对账完成: stale_observations=%d suspended_scopes=%d updated_resources=%d",
-					result.StaleObservations, result.SuspendedScopes, result.UpdatedResources)
+			if result.ExpiredTechnicalResources > 0 || result.StaleObservations > 0 || result.SuspendedScopes > 0 || result.UpdatedResources > 0 {
+				logger.Infof("Provider Supply 租约对账完成: expired_technical_resources=%d stale_observations=%d suspended_scopes=%d updated_resources=%d",
+					result.ExpiredTechnicalResources, result.StaleObservations, result.SuspendedScopes, result.UpdatedResources)
 			}
 		}
 	}

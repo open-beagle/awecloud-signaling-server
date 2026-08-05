@@ -26,6 +26,8 @@ import (
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
+const technicalResourceHeartbeatLeaseDuration = 2 * time.Minute
+
 // parseJSONStringArray 解析 JSON 字符串数组
 func parseJSONStringArray(jsonStr string) []string {
 	if jsonStr == "" || jsonStr == "[]" {
@@ -766,6 +768,8 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		Where("user_id = ? AND type = ? AND name = ?", agentID, nodeType, nodeName).
 		Updates(updates).Error; err != nil {
 		logger.Errorf("更新 Node 心跳失败: %v", err)
+	} else {
+		s.recordNodeTechnicalResourceHeartbeat(ctx, node.ID)
 	}
 	if req.TunnelIp != "" {
 		if err := db.DB.WithContext(ctx).Model(&model.DomainRegistry{}).
@@ -826,6 +830,31 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	// 旧的 DiscoveredServices 字段已废弃，不再处理
 
 	return node.ID
+}
+
+func (s *AgentServiceServer) recordNodeTechnicalResourceHeartbeat(ctx context.Context, nodeID uint64) {
+	if s == nil || s.providerSupply == nil || nodeID == 0 {
+		return
+	}
+	var binding model.TechnicalResourceBinding
+	err := db.DB.WithContext(ctx).
+		Where("source_type = ? AND source_id = ? AND enabled = ?", model.TechnicalResourceBindingLegacyNode, fmt.Sprint(nodeID), true).
+		First(&binding).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return
+	}
+	if err != nil {
+		logger.Warnf("查询 Node 技术资源绑定失败: node_id=%d, err=%v", nodeID, err)
+		return
+	}
+	_, err = s.providerSupply.RecordTechnicalResourceHeartbeat(ctx, service.TechnicalResourceCredential{
+		SourceType:         binding.SourceType,
+		SourceID:           binding.SourceID,
+		CredentialRevision: binding.CredentialRevision,
+	}, technicalResourceHeartbeatLeaseDuration)
+	if err != nil {
+		logger.Warnf("同步 Node 技术资源健康状态失败: node_id=%d, technical_resource_id=%s, err=%v", nodeID, binding.TechnicalResourceID, err)
+	}
 }
 
 func (s *AgentServiceServer) handleContainerCandidates(ctx context.Context, nodeID uint64, reports []*pb.ContainerDiscoveryCandidate) {

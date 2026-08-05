@@ -92,6 +92,47 @@ func TestLegacyAgentHeartbeatWithoutContainerCandidatesRemainsCompatible(t *test
 	require.Equal(t, "", node.ContainerSSHProtocol)
 }
 
+func TestAgentHeartbeatRefreshesBoundTechnicalResourceHealth(t *testing.T) {
+	oldDB := db.DB
+	t.Cleanup(func() { db.DB = oldDB })
+	testDB, err := gorm.Open(sqlite.Open("file:agent_technical_resource_heartbeat_test?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	db.DB = testDB
+	require.NoError(t, testDB.AutoMigrate(
+		&model.User{}, &model.Node{}, &model.ResourceProvider{}, &model.TechnicalResource{}, &model.TechnicalResourceBinding{},
+	))
+
+	agent := model.User{Name: "managed-agent", Role: model.UserRoleAgent, SecretHash: "fixture", Enabled: true}
+	require.NoError(t, testDB.Create(&agent).Error)
+	node := model.Node{UserID: agent.ID, Name: "managed-agent", Type: model.NodeTypeAgent}
+	require.NoError(t, testDB.Create(&node).Error)
+	provider := model.ResourceProvider{ID: "provider-a", Key: "provider-a", DisplayName: "Provider A", DomainScope: model.ProviderDomainRoot, Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	require.NoError(t, testDB.Create(&provider).Error)
+	resource := model.TechnicalResource{
+		ID: "managed-agent-resource", ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "managed-agent",
+		DomainLabel: "managed-agent", LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthUnknown,
+		CredentialRevision: 1, RuntimeUserID: agent.ID, ConfigRevision: 1, RowVersion: 1,
+	}
+	require.NoError(t, testDB.Create(&resource).Error)
+	require.NoError(t, testDB.Create(&model.TechnicalResourceBinding{
+		ID: "managed-agent-binding", TechnicalResourceID: resource.ID, SourceType: model.TechnicalResourceBindingLegacyNode,
+		SourceID: fmt.Sprint(node.ID), CredentialRevision: 1, Enabled: true, BoundByUserID: agent.ID, Reason: "test", RowVersion: 1,
+	}).Error)
+
+	before := time.Now().UTC()
+	server := &AgentServiceServer{providerSupply: service.NewProviderSupplyService(testDB)}
+	nodeID := server.handleHeartbeat(context.Background(), agent.ID, &pb.AgentHeartbeatRequest{
+		AgentId: agent.ID, DeviceName: node.Name, Hostname: "managed-host", Version: "v1.0.1",
+	})
+	require.Equal(t, node.ID, nodeID)
+	require.NoError(t, testDB.First(&resource, "id = ?", resource.ID).Error)
+	require.Equal(t, model.ResourceHealthOnline, resource.HealthState)
+	require.NotNil(t, resource.LastReceivedAt)
+	require.NotNil(t, resource.LeaseExpiresAt)
+	require.False(t, resource.LastReceivedAt.Before(before))
+	require.WithinDuration(t, resource.LastReceivedAt.Add(technicalResourceHeartbeatLeaseDuration), *resource.LeaseExpiresAt, time.Second)
+}
+
 func TestAgentHeartbeatRefreshesNodeSSHDomainTargetIP(t *testing.T) {
 	oldDB := db.DB
 	t.Cleanup(func() { db.DB = oldDB })

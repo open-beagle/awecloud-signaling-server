@@ -11,6 +11,21 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
+func TestProviderSupplyReconciliationExpiresTechnicalResourceLease(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	agent := fixture.createBoundAgent(t, "expired-agent", 1001)
+	expiresAt := fixture.now.Add(-time.Minute)
+	require.NoError(t, fixture.database.Model(&model.TechnicalResource{}).Where("id = ?", agent.ID).Updates(map[string]any{
+		"health_state": model.ResourceHealthOnline, "lease_expires_at": expiresAt,
+	}).Error)
+
+	result, err := NewProviderSupplyReconciliationService(fixture.database).ReconcileExpiredEvidence(context.Background(), fixture.now)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.ExpiredTechnicalResources)
+	require.NoError(t, fixture.database.First(agent, "id = ?", agent.ID).Error)
+	require.Equal(t, model.ResourceHealthOffline, agent.HealthState)
+}
+
 func TestProviderSupplyCompleteSnapshotReconcilesNamespaceLeaseAndScope(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	fixture.createBoundAgent(t, "agent-reconciliation", 1001)
