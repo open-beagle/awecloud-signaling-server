@@ -1,6 +1,6 @@
 <template>
   <div class="provider-page">
-    <PageHeader title="技术资源" description="管理当前资源方的 Agent 与 Endpoint 部署位置、运行能力和健康状态。">
+    <PageHeader title="技术资源" description="管理当前资源方的 Agent 部署位置、运行能力和所属 Endpoint。">
       <template #actions>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
 		<el-button type="primary" :icon="Plus" :disabled="!canWrite" @click="openCreate">创建 Agent</el-button>
@@ -22,28 +22,24 @@
     <section class="data-surface">
       <div class="toolbar">
         <el-input v-model="filters.search" class="search-input" clearable :prefix-icon="Search" placeholder="搜索主机名或稳定标识" @keyup.enter="applyFilters" @clear="applyFilters" />
-        <el-select v-model="filters.type" class="filter-select" clearable placeholder="全部类型" @change="applyFilters">
-          <el-option label="Agent" value="agent" />
-          <el-option label="Endpoint" value="endpoint" />
-        </el-select>
         <el-select v-model="filters.state" class="filter-select" clearable placeholder="全部生命周期" @change="applyFilters">
           <el-option label="待注册" value="pending" />
           <el-option label="已注册" value="registered" />
           <el-option label="维护中" value="disabled" />
           <el-option label="已退役" value="retired" />
         </el-select>
-        <span class="result-count">{{ pagination.total }} 项技术资源</span>
+        <span class="result-count">{{ pagination.total }} 个 Agent</span>
       </div>
 
       <el-table v-loading="loading" :data="items" stripe>
-        <el-table-column label="技术资源" min-width="250">
+        <el-table-column label="Agent" min-width="250">
           <template #default="{ row }">
               <el-link class="resource-name" type="primary" :underline="false" @click="openDetail(row.id)">{{ row.host_domain_label || row.hostname || '等待主机注册' }}</el-link>
-            <span class="secondary"><template v-if="row.parent_hostname">父 Agent：{{ row.parent_hostname }} · </template><span class="mono">{{ row.stable_key }}</span></span>
+            <span class="secondary"><span class="mono">{{ row.stable_key }}</span></span>
           </template>
         </el-table-column>
-        <el-table-column label="类型" width="110"><template #default="{ row }">{{ typeLabel(row.type) }}</template></el-table-column>
-		<el-table-column label="域名命名空间" min-width="210"><template #default="{ row }"><span v-if="row.type === 'agent'" class="mono">*.{{ row.domain_namespace }}.beagle</span><span v-else class="secondary inline">继承父 Agent</span></template></el-table-column>
+		<el-table-column label="域名命名空间" min-width="210"><template #default="{ row }"><span class="mono">*.{{ row.domain_namespace }}.beagle</span></template></el-table-column>
+		<el-table-column label="Endpoints" width="120" align="center"><template #default="{ row }"><el-button link type="primary" @click="openDetail(row.id, 'endpoints')">{{ row.endpoint_count }}</el-button></template></el-table-column>
         <el-table-column label="生命周期" width="120"><template #default="{ row }"><el-tag size="small" :type="lifecycleTag(row.lifecycle_state)">{{ lifecycleLabel(row.lifecycle_state) }}</el-tag></template></el-table-column>
         <el-table-column label="健康" width="110"><template #default="{ row }"><el-tag size="small" effect="plain" :type="healthTag(row.health_state)">{{ healthLabel(row.health_state) }}</el-tag></template></el-table-column>
         <el-table-column label="开放能力" min-width="190"><template #default="{ row }"><div class="capabilities"><el-tag v-for="capability in capabilityLabels(row)" :key="capability" size="small" effect="plain" type="info">{{ capability }}</el-tag><span v-if="capabilityLabels(row).length === 0" class="secondary inline">未开放</span></div></template></el-table-column>
@@ -67,7 +63,7 @@
         </el-table-column>
       </el-table>
 
-      <el-empty v-if="!loading && !errorMessage && items.length === 0" description="当前资源方没有符合条件的技术资源" />
+      <el-empty v-if="!loading && !errorMessage && items.length === 0" description="当前资源方没有符合条件的 Agent" />
       <div class="pagination"><el-pagination v-model:current-page="pagination.page" v-model:page-size="pagination.size" :total="pagination.total" :page-sizes="[20, 50, 100]" layout="total, sizes, prev, pager, next" @size-change="load" @current-change="load" /></div>
     </section>
 
@@ -104,7 +100,7 @@ const router = useRouter()
 const loading = ref(false)
 const errorMessage = ref('')
 const items = ref<TechnicalResource[]>([])
-const filters = reactive({ search: '', type: '', state: '' })
+const filters = reactive({ search: '', state: '' })
 const pagination = reactive({ page: 1, size: 20, total: 0 })
 const createDialog = ref(false)
 const commandDialog = ref(false)
@@ -131,7 +127,6 @@ const load = async () => {
   try {
     const response = await getProviderTechnicalResources(providerId, {
       search: filters.search.trim() || undefined,
-      type: filters.type || undefined,
       state: filters.state || undefined,
       page: pagination.page,
       size: pagination.size,
@@ -178,7 +173,7 @@ const copyCommand = async () => {
 }
 
 const applyFilters = () => { pagination.page = 1; load() }
-const openDetail = (resourceId: string) => router.push(`/provider-technical-resources/${resourceId}`)
+const openDetail = (resourceId: string, tab?: string) => router.push({ path: `/provider-technical-resources/${resourceId}`, query: tab ? { tab } : undefined })
 const canDelete = (resource: TechnicalResource) => resource.health_state === 'offline' && resource.lifecycle_state !== 'deleted'
 const handleRowCommand = async (command: string, resource: TechnicalResource) => {
   if (command === 'detail') {
@@ -218,7 +213,6 @@ const capabilityLabels = (row: TechnicalResource) => [
   row.svc_enabled ? 'Kubernetes Service' : '',
   row.endpoint_access_enabled ? 'Endpoint 接入' : '',
 ].filter(Boolean)
-const typeLabel = (type: string) => type === 'agent' ? 'Agent' : type === 'endpoint' ? 'Endpoint' : type
 const lifecycleLabel = (state: TechnicalResourceState) => ({ pending: '待部署', registered: '已注册', disabled: '维护中', retired: '已退役', deleted: '已删除' }[state])
 const lifecycleTag = (state: TechnicalResourceState) => ({ pending: 'warning', registered: 'success', disabled: 'warning', retired: 'info', deleted: 'info' }[state] as any)
 const healthLabel = (state: string) => ({ unknown: '未知', online: '在线', degraded: '异常', offline: '离线' }[state] || state)

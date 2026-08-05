@@ -2,7 +2,7 @@
   <div class="provider-page">
     <PageHeader :title="displayHostname" :description="resourceDescription">
       <template #actions>
-        <el-button :icon="ArrowLeft" @click="router.push('/provider-technical-resources')">返回列表</el-button>
+        <el-button :icon="ArrowLeft" @click="returnFromDetail">{{ resource?.type === 'endpoint' ? '返回 Agent' : '返回列表' }}</el-button>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
 		<el-button v-if="resource && ['registered', 'disabled'].includes(resource.lifecycle_state)" :icon="Edit" :disabled="!canWrite || !hasBinding" @click="openCapabilities">编辑能力</el-button>
 		<el-button v-if="resource && ['registered', 'disabled'].includes(resource.lifecycle_state)" type="primary" :icon="Upload" :disabled="!canWrite || !hasBinding || resource.updater_protocol !== 'v1'" @click="openUpdate">更新</el-button>
@@ -58,6 +58,26 @@
 			</el-table>
 			<el-empty v-else description="暂无部署实例" />
 		  </section>
+        </el-tab-pane>
+        <el-tab-pane v-if="resource.type === 'agent'" :label="`Endpoints ${endpoints.length}`" name="endpoints">
+          <section class="detail-surface">
+            <h3>所属 Endpoints</h3>
+            <el-table v-if="endpoints.length" :data="endpoints" stripe>
+              <el-table-column label="Endpoint" min-width="210">
+                <template #default="{ row }">
+                  <el-link class="endpoint-name" type="primary" :underline="false" @click="openEndpoint(row.id)">{{ endpointName(row) }}</el-link>
+                  <span class="secondary mono">{{ row.stable_key }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="SSH 域名" min-width="260"><template #default="{ row }"><span class="mono">{{ endpointDomain(row) }}</span></template></el-table-column>
+              <el-table-column label="健康" width="110"><template #default="{ row }"><el-tag size="small" effect="plain" :type="healthTag(row.health_state)">{{ healthLabel(row.health_state) }}</el-tag></template></el-table-column>
+              <el-table-column label="开放能力" min-width="190"><template #default="{ row }"><div class="endpoint-capabilities"><el-tag v-for="capability in endpointCapabilityLabels(row)" :key="capability" size="small" effect="plain" type="info">{{ capability }}</el-tag><span v-if="endpointCapabilityLabels(row).length === 0" class="secondary inline">未开放</span></div></template></el-table-column>
+              <el-table-column label="版本" width="130"><template #default="{ row }"><strong>{{ row.version || '-' }}</strong><span class="secondary">{{ row.updater_protocol ? `Updater ${row.updater_protocol}` : '不支持远程更新' }}</span></template></el-table-column>
+              <el-table-column label="最后上报" width="180"><template #default="{ row }">{{ formatTime(row.last_received_at) }}</template></el-table-column>
+              <el-table-column label="" width="72" align="center"><template #default="{ row }"><el-button link type="primary" @click="openEndpoint(row.id)">查看</el-button></template></el-table-column>
+            </el-table>
+            <el-empty v-else description="当前 Agent 没有 Endpoint" />
+          </section>
         </el-tab-pane>
         <el-tab-pane label="能力" name="capabilities">
           <section class="detail-surface">
@@ -145,7 +165,8 @@ const loading = ref(false)
 const errorMessage = ref('')
 const resource = ref<TechnicalResource>()
 const bindings = ref<TechnicalResourceBinding[]>([])
-const activeTab = ref('overview')
+const endpoints = ref<TechnicalResource[]>([])
+const activeTab = ref(typeof route.query.tab === 'string' ? route.query.tab : 'overview')
 const submitting = ref(false)
 const capabilityDialog = ref(false)
 const updateDialog = ref(false)
@@ -173,6 +194,26 @@ const capabilityRows = computed(() => resource.value ? [
   { label: 'Kubernetes Service', description: '发现并代理集群服务', enabled: resource.value.svc_enabled },
   ...(resource.value.type === 'agent' ? [{ label: 'Endpoint 接入', description: '接受隔离网络 Endpoint 反向连接', enabled: resource.value.endpoint_access_enabled }] : []),
 ] : [])
+const endpointName = (endpoint: TechnicalResource) => endpoint.host_domain_label || endpoint.hostname || '等待主机注册'
+const endpointDomain = (endpoint: TechnicalResource) => endpoint.host_domain_label && endpoint.domain_namespace
+	? `${endpoint.host_domain_label}.${endpoint.domain_namespace}.beagle`
+	: '-'
+const endpointCapabilityLabels = (endpoint: TechnicalResource) => [
+	endpoint.ssh_enabled ? 'SSH' : '',
+	endpoint.k8s_enabled ? 'Kubernetes API' : '',
+	endpoint.svc_enabled ? 'Kubernetes Service' : '',
+].filter(Boolean)
+const openEndpoint = async (endpointId: string) => {
+	activeTab.value = 'overview'
+	await router.push(`/provider-technical-resources/${endpointId}`)
+}
+const returnFromDetail = async () => {
+	if (resource.value?.type === 'endpoint' && resource.value.parent_id) {
+		await router.push({ path: `/provider-technical-resources/${resource.value.parent_id}`, query: { tab: 'endpoints' } })
+		return
+	}
+	await router.push('/provider-technical-resources')
+}
 
 const editAgentDomainLabel = async () => {
 	if (!resource.value || resource.value.type !== 'agent' || !workspaceStore.providerId) return
@@ -220,6 +261,9 @@ const load = async () => {
     const response = await getProviderTechnicalResource(providerId, String(route.params.id))
 	resource.value = response.success ? response.data.resource : undefined
 	bindings.value = response.success ? response.data.bindings || [] : []
+	endpoints.value = response.success ? response.data.endpoints || [] : []
+	if (resource.value?.type === 'agent' && route.query.tab === 'endpoints') activeTab.value = 'endpoints'
+	else if (resource.value?.type !== 'agent' && activeTab.value === 'endpoints') activeTab.value = 'overview'
 	if (resource.value && response.data.bindings?.length) {
 		const tasks = await getProviderTechnicalResourceUpdateTasks(providerId, resource.value.id)
 		updateTasks.value = tasks.success ? tasks.data : []
@@ -227,6 +271,7 @@ const load = async () => {
   } catch {
     resource.value = undefined
 	bindings.value = []
+	endpoints.value = []
     errorMessage.value = '请确认技术资源仍属于当前资源方且当前账号具有查看权限。'
   } finally {
     loading.value = false
@@ -307,7 +352,7 @@ const deleteResource = async () => {
 		await deleteProviderTechnicalResource(workspaceStore.providerId, resource.value, result.value.trim())
 		ElMessage.success('技术资源已删除')
 		deleteCheckDialog.value = false
-		await router.push('/provider-technical-resources')
+		await returnFromDetail()
 	} catch (error) {
 		if (error !== 'cancel' && error !== 'close') throw error
 	} finally { submitting.value = false }
@@ -347,6 +392,10 @@ onMounted(load)
 .capability-row:last-child { border-bottom: 0; }
 .capability-row strong, .capability-row span { display: block; }
 .capability-row span { margin-top: 2px; color: var(--text-secondary); font-size: 12px; }
+.endpoint-name { max-width: 100%; font-weight: 650; }
+.endpoint-capabilities { display: flex; flex-wrap: wrap; gap: 4px; }
+.secondary { display: block; margin-top: 3px; color: var(--text-secondary); font-size: 12px; }
+.secondary.inline { display: inline; margin-top: 0; }
 .diagnostic-grid { margin-top: 14px; }
 .mono { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; }
 .switch-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; }

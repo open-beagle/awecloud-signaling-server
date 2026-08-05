@@ -26,8 +26,9 @@ type TechnicalResourceListResult struct {
 }
 
 type TechnicalResourceDetail struct {
-	Resource *TechnicalResourceView           `json:"resource"`
-	Bindings []model.TechnicalResourceBinding `json:"bindings"`
+	Resource  *TechnicalResourceView           `json:"resource"`
+	Bindings  []model.TechnicalResourceBinding `json:"bindings"`
+	Endpoints []TechnicalResourceView          `json:"endpoints"`
 }
 
 // TechnicalResourceView projects the Provider-owned identity together with its
@@ -47,6 +48,7 @@ type TechnicalResourceView struct {
 	K8SEnabled            bool   `gorm:"column:k8s_enabled" json:"k8s_enabled"`
 	SVCEnabled            bool   `gorm:"column:svc_enabled" json:"svc_enabled"`
 	EndpointAccessEnabled bool   `gorm:"column:endpoint_access_enabled" json:"endpoint_access_enabled"`
+	EndpointCount         int64  `gorm:"column:endpoint_count" json:"endpoint_count"`
 }
 
 type SupplyCandidateListResult struct {
@@ -85,14 +87,10 @@ func (s *ProviderSupplyService) ListTechnicalResources(ctx context.Context, auth
 	if err != nil {
 		return nil, err
 	}
-	query = query.Where("technical_resource.deleted_at IS NULL")
 	if input.Type != "" {
-		typeValue := model.TechnicalResourceType(input.Type)
-		if typeValue != model.TechnicalResourceAgent && typeValue != model.TechnicalResourceEndpoint {
-			return nil, ErrProviderSupplyInvalidInput
-		}
-		query = query.Where("technical_resource.type = ?", typeValue)
+		return nil, ErrProviderSupplyInvalidInput
 	}
+	query = query.Where("technical_resource.type = ? AND technical_resource.deleted_at IS NULL", model.TechnicalResourceAgent)
 	if input.State != "" {
 		state := model.TechnicalResourceLifecycleState(input.State)
 		if state != model.TechnicalResourcePending && state != model.TechnicalResourceRegistered &&
@@ -107,9 +105,7 @@ func (s *ProviderSupplyService) ListTechnicalResources(ctx context.Context, auth
 		query = query.Where(`(technical_resource.stable_key LIKE ? ESCAPE '\'
 			OR agent_node.hostname LIKE ? ESCAPE '\'
 			OR agent_node.name LIKE ? ESCAPE '\'
-			OR agent_node.host_domain_label LIKE ? ESCAPE '\'
-			OR bound_endpoint.name LIKE ? ESCAPE '\'
-			OR bound_endpoint.host_domain_label LIKE ? ESCAPE '\')`, pattern, pattern, pattern, pattern, pattern, pattern)
+			OR agent_node.host_domain_label LIKE ? ESCAPE '\')`, pattern, pattern, pattern, pattern)
 	}
 	result := &TechnicalResourceListResult{Items: []TechnicalResourceView{}}
 	query = query.Where("technical_resource.provider_id = ?", providerID)
@@ -145,7 +141,18 @@ func (s *ProviderSupplyService) GetTechnicalResource(ctx context.Context, author
 	if err := query.Where("technical_resource_id = ?", resource.ID).Order("created_at DESC, id ASC").Find(&bindings).Error; err != nil {
 		return nil, err
 	}
-	return &TechnicalResourceDetail{Resource: &resource, Bindings: bindings}, nil
+	endpoints := []TechnicalResourceView{}
+	if resource.Type == model.TechnicalResourceAgent {
+		if err := technicalResourceProjectionQuery(query).
+			Select(technicalResourceProjectionSelect()).
+			Where("technical_resource.provider_id = ? AND technical_resource.parent_id = ? AND technical_resource.type = ? AND technical_resource.deleted_at IS NULL",
+				providerID, resource.ID, model.TechnicalResourceEndpoint).
+			Order("technical_resource.created_at ASC, technical_resource.id ASC").
+			Scan(&endpoints).Error; err != nil {
+			return nil, err
+		}
+	}
+	return &TechnicalResourceDetail{Resource: &resource, Bindings: bindings, Endpoints: endpoints}, nil
 }
 
 func technicalResourceProjectionQuery(query *gorm.DB) *gorm.DB {
@@ -175,6 +182,8 @@ func technicalResourceProjectionSelect() string {
 	return `technical_resource.*,
 		CASE WHEN technical_resource.type = 'agent' AND projection_provider.domain_scope = 'root' THEN technical_resource.domain_label
 			WHEN technical_resource.type = 'agent' THEN technical_resource.domain_label || '.' || projection_provider.domain_label
+			WHEN technical_resource.type = 'endpoint' AND projection_provider.domain_scope = 'root' THEN parent_resource.domain_label
+			WHEN technical_resource.type = 'endpoint' THEN parent_resource.domain_label || '.' || projection_provider.domain_label
 			ELSE '' END AS domain_namespace,
 		CASE WHEN technical_resource.type = 'agent'
 			THEN COALESCE(NULLIF(agent_node.hostname, ''), agent_node.name, '')
@@ -199,7 +208,13 @@ func technicalResourceProjectionSelect() string {
 		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.svc_enabled, false)
 			ELSE COALESCE(bound_endpoint.k8sservice_enabled, false) END AS svc_enabled,
 		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.endpoint_enabled, false)
-			ELSE false END AS endpoint_access_enabled`
+			ELSE false END AS endpoint_access_enabled,
+		CASE WHEN technical_resource.type = 'agent' THEN (
+			SELECT COUNT(*) FROM technical_resource child_endpoint
+			WHERE child_endpoint.parent_id = technical_resource.id
+				AND child_endpoint.provider_id = technical_resource.provider_id
+				AND child_endpoint.type = 'endpoint' AND child_endpoint.deleted_at IS NULL
+		) ELSE 0 END AS endpoint_count`
 }
 
 func (s *ProviderSupplyService) ListSupplyCandidates(ctx context.Context, authorization *ManagementAuthorizationContext, input ProviderSupplyListInput) (*SupplyCandidateListResult, error) {

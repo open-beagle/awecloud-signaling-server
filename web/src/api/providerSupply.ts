@@ -30,6 +30,7 @@ export interface TechnicalResource {
   k8s_enabled: boolean
   svc_enabled: boolean
   endpoint_access_enabled: boolean
+  endpoint_count: number
   parent_id?: string
   lifecycle_state: TechnicalResourceState
   health_state: ResourceHealthState
@@ -61,6 +62,7 @@ export interface TechnicalResourceBinding {
 export interface TechnicalResourceDetail {
   resource: TechnicalResource
   bindings: TechnicalResourceBinding[]
+  endpoints: TechnicalResource[]
 }
 
 export interface TechnicalResourceCapabilities {

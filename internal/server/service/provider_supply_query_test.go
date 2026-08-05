@@ -78,6 +78,7 @@ func TestTechnicalResourceQueriesProjectAndSearchRuntimeHostname(t *testing.T) {
 	fixture.actor.SSHEnabled = true
 	require.NoError(t, fixture.database.Model(&model.User{}).Where("id = ?", fixture.actor.ID).Update("ssh_enabled", true).Error)
 	agent := fixture.createBoundAgent(t, "legacy-node:1001", 1001)
+	require.NoError(t, fixture.database.Model(&model.Endpoint{}).Where("id = ?", "legacy-endpoint-a").Update("host_domain_label", "endpoint-a").Error)
 
 	endpoint, err := fixture.service.CreateTechnicalResource(context.Background(), fixture.authorization, CreateTechnicalResourceInput{
 		Type: model.TechnicalResourceEndpoint, StableKey: "legacy-endpoint:a", ParentID: agent.ID, CredentialRevision: 1,
@@ -102,12 +103,22 @@ func TestTechnicalResourceQueriesProjectAndSearchRuntimeHostname(t *testing.T) {
 	require.True(t, result.Items[0].SSHEnabled)
 	require.True(t, result.Items[0].ContainerSSHEnabled)
 	require.True(t, result.Items[0].K8SEnabled)
+	require.Equal(t, int64(1), result.Items[0].EndpointCount)
+
+	agentDetail, err := fixture.service.GetTechnicalResource(context.Background(), fixture.authorization, agent.ID)
+	require.NoError(t, err)
+	require.Len(t, agentDetail.Endpoints, 1)
+	require.Equal(t, endpoint.ID, agentDetail.Endpoints[0].ID)
+	require.Equal(t, "endpoint-a", agentDetail.Endpoints[0].Hostname)
+	require.Equal(t, "endpoint-a", agentDetail.Endpoints[0].HostDomainLabel)
+	require.Equal(t, "legacy-node-1001.provider-a", agentDetail.Endpoints[0].DomainNamespace)
 
 	detail, err := fixture.service.GetTechnicalResource(context.Background(), fixture.authorization, endpoint.ID)
 	require.NoError(t, err)
 	require.Equal(t, "endpoint-a", detail.Resource.Hostname)
 	require.Equal(t, "legacy_name", detail.Resource.HostnameSource)
 	require.Equal(t, "beagle-prod-01", detail.Resource.ParentHostname)
+	require.Empty(t, detail.Endpoints)
 
 	otherAuthorization := createOtherProviderAuthorization(t, fixture)
 	otherResource := createBoundAgentForProvider(t, fixture, otherAuthorization, "other-hostname", 1002)
@@ -172,6 +183,30 @@ func TestTechnicalResourceQueriesHideDeletedResources(t *testing.T) {
 	require.ErrorIs(t, err, ErrProviderSupplyObjectNotFound)
 	_, err = fixture.service.ListTechnicalResources(context.Background(), fixture.authorization, ProviderSupplyListInput{
 		State: string(model.TechnicalResourceDeleted), Page: 1, PageSize: 20,
+	})
+	require.ErrorIs(t, err, ErrProviderSupplyInvalidInput)
+}
+
+func TestTechnicalResourceQueriesExcludeDeletedEndpointsFromAgent(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	agent := fixture.createBoundAgent(t, "agent-with-deleted-endpoint", 1001)
+	endpoint, err := fixture.service.CreateTechnicalResource(context.Background(), fixture.authorization, CreateTechnicalResourceInput{
+		Type: model.TechnicalResourceEndpoint, StableKey: "deleted-endpoint", ParentID: agent.ID, CredentialRevision: 1,
+	})
+	require.NoError(t, err)
+	require.NoError(t, fixture.database.Model(&model.TechnicalResource{}).Where("id = ?", endpoint.ID).
+		Update("deleted_at", fixture.service.now().UTC()).Error)
+
+	result, err := fixture.service.ListTechnicalResources(context.Background(), fixture.authorization, ProviderSupplyListInput{Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.Zero(t, result.Items[0].EndpointCount)
+	detail, err := fixture.service.GetTechnicalResource(context.Background(), fixture.authorization, agent.ID)
+	require.NoError(t, err)
+	require.Empty(t, detail.Endpoints)
+
+	_, err = fixture.service.ListTechnicalResources(context.Background(), fixture.authorization, ProviderSupplyListInput{
+		Type: string(model.TechnicalResourceEndpoint), Page: 1, PageSize: 20,
 	})
 	require.ErrorIs(t, err, ErrProviderSupplyInvalidInput)
 }
