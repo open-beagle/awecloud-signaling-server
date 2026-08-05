@@ -106,10 +106,15 @@ func TestInstallSignalScriptUsesChinesePromptAndAvoidsDuplicateLogRedirect(t *te
 }
 
 func TestInstallAgentScriptDeployRestartsServiceAndResetsTunnelState(t *testing.T) {
-	for _, scriptPath := range []string{
-		filepath.Join("..", "..", "scripts", "install_agent.sh"),
-		filepath.Join("..", "..", "..", "scripts", "install_agent.sh"),
-	} {
+	scriptPaths := []string{filepath.Join("..", "..", "scripts", "install_agent.sh")}
+	workspaceScript := filepath.Join("..", "..", "..", "scripts", "install_agent.sh")
+	if _, err := os.Stat(workspaceScript); err == nil {
+		scriptPaths = append(scriptPaths, workspaceScript)
+	} else if !os.IsNotExist(err) {
+		require.NoError(t, err)
+	}
+
+	for _, scriptPath := range scriptPaths {
 		t.Run(scriptPath, func(t *testing.T) {
 			script, err := os.ReadFile(scriptPath)
 			require.NoError(t, err)
