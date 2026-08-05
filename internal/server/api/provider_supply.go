@@ -38,12 +38,11 @@ const (
 )
 
 var providerSupplyIdempotencyPolicies = map[string]service.JSONFieldPolicy{
-	http.MethodPost + " " + providerTechnicalResourceCreateRoute:     service.NewJSONFieldPolicy("success", "data"),
-	http.MethodPost + " " + providerTechnicalResourceBindRoute:       service.NewJSONFieldPolicy("success", "data"),
-	http.MethodPost + " " + providerTechnicalResourceUpdateRoute:     service.NewJSONFieldPolicy("success", "data"),
-	http.MethodPost + " " + providerTechnicalResourceCredentialRoute: service.NewJSONFieldPolicy("success", "data"),
-	http.MethodDelete + " " + providerTechnicalResourceDeleteRoute:   service.NewJSONFieldPolicy("success", "data"),
-	http.MethodPost + " " + providerCandidateAcceptRoute:             service.NewJSONFieldPolicy("success", "data"),
+	http.MethodPost + " " + providerTechnicalResourceCreateRoute:   service.NewJSONFieldPolicy("success", "data"),
+	http.MethodPost + " " + providerTechnicalResourceBindRoute:     service.NewJSONFieldPolicy("success", "data"),
+	http.MethodPost + " " + providerTechnicalResourceUpdateRoute:   service.NewJSONFieldPolicy("success", "data"),
+	http.MethodDelete + " " + providerTechnicalResourceDeleteRoute: service.NewJSONFieldPolicy("success", "data"),
+	http.MethodPost + " " + providerCandidateAcceptRoute:           service.NewJSONFieldPolicy("success", "data"),
 }
 
 var providerSupplyOutboxPolicies = map[string]service.JSONFieldPolicy{
@@ -149,7 +148,7 @@ func (a *ProviderSupplyAPI) CreateDeploymentCredential(c *gin.Context) {
 		return
 	}
 	var request providerDeploymentCredentialRequest
-	body, ok := decodeProviderSupplyRequest(c, &request)
+	_, ok = decodeProviderSupplyRequest(c, &request)
 	if !ok {
 		return
 	}
@@ -166,7 +165,7 @@ func (a *ProviderSupplyAPI) CreateDeploymentCredential(c *gin.Context) {
 		scheme = "https"
 	}
 	serverAddr := scheme + "://" + c.Request.Host
-	executeProviderIdempotentMutation(c, authorization, body, http.StatusCreated, "create_technical_resource_deployment_credential", "generate deployment credential",
+	executeProviderMutationWithStatus(c, authorization, http.StatusCreated, "create_technical_resource_deployment_credential", "generate deployment credential",
 		func(supply *service.ProviderSupplyService) (any, string, string, int64, error) {
 			credential, err := supply.CreateTechnicalResourceDeploymentCredential(c.Request.Context(), authorization, c.Param("id"), request.Name, time.Duration(request.TTLMinutes)*time.Minute)
 			if err != nil {
@@ -736,6 +735,10 @@ func executeProviderIdempotentMutation(c *gin.Context, authorization *service.Ma
 }
 
 func executeProviderMutation(c *gin.Context, authorization *service.ManagementAuthorizationContext, action, reason string, mutation providerMutation) {
+	executeProviderMutationWithStatus(c, authorization, http.StatusOK, action, reason, mutation)
+}
+
+func executeProviderMutationWithStatus(c *gin.Context, authorization *service.ManagementAuthorizationContext, status int, action, reason string, mutation providerMutation) {
 	var data any
 	var rowVersion int64
 	err := db.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
@@ -758,7 +761,7 @@ func executeProviderMutation(c *gin.Context, authorization *service.ManagementAu
 		return
 	}
 	SetRevisionETag(c, rowVersion)
-	c.JSON(http.StatusOK, NewSuccessResponse(data))
+	c.JSON(status, NewSuccessResponse(data))
 }
 
 var (

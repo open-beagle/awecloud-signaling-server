@@ -100,8 +100,8 @@ Desktop 客户端位于独立仓库，使用其自身的 `version` 和构建说�
 
 GitHub Actions 工作流位于 `.github/workflows/build.yml`，支持以下触发方式：
 
-- 推送到 `main` 分支时自动构建并发布。
-- 在 GitHub Actions 页面使用 `workflow_dispatch` 手动触发。
+- 经发布批准后，将已验证的 `dev` 提交推送到 `release-v1.0` 分支，自动构建并发布。
+- `dev` 和 `main` 分支推送不会触发发布。
 
 流水线使用 Go 1.26、Node.js 24，并执行：
 
@@ -109,7 +109,6 @@ GitHub Actions 工作流位于 `.github/workflows/build.yml`，支持以下触�
 2. 交叉编译 Linux amd64/arm64 的 Server、Agent 和 Endpoint。
 3. 构建并推送 Server、Agent 双架构镜像及 multi-arch manifest。
 4. 上传 Agent、Endpoint 双架构二进制和安装脚本到 S3。
-5. 将 `beagle-access/signal-server` 更新到本次 Server 镜像，并等待 Kubernetes 滚动发布完成。
 
 镜像标签读取根目录 `version` 文件：
 
@@ -122,21 +121,16 @@ registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:<version>
 
 ### 迭代命令
 
-日常开发提交到 `dev`。准备流水线构建时，将 `dev` 合入 `main`；`main` 推送成功后会自动触发构建和发布，再把合并结果快进同步回 `dev`：
+日常开发、测试和版本号修改都在 `dev` 完成。未经发布批准，不得向 `release-v1.0` 推送。批准发布后，将已验证的 `dev` 提交推送到固定流水线分支：
 
 ```bash
 git switch dev && \
   git pull --ff-only origin dev && \
-  git switch main && \
-  git pull --ff-only origin main && \
-  git merge dev --no-ff && \
-  git push origin main && \
-  git switch dev && \
-  git merge main --ff-only && \
-  git push origin dev
+  git push origin dev && \
+  git push origin dev:release-v1.0
 ```
 
-只需重新运行当前提交的流水线时，在 GitHub Actions 页面选择 `Build Images`，点击 `Run workflow` 并选择目标分支。版本号仍以 `version` 文件为准，流水线不会自动修改版本号。
+版本号以 `version` 文件为准，流水线不会自动修改版本号。禁止创建 `release-v1.0.x` 补丁版本分支；`release-v1.0` 是 `v1.0.x` 系列唯一的发布流水线分支。
 
 ### 运行命令
 

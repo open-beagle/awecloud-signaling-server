@@ -228,7 +228,7 @@ export const createProviderAgent = (providerId: string, runtimeName: string, rea
 export const createProviderDeploymentCredential = (providerId: string, resourceId: string, name: string, ttlMinutes: number) =>
   request.post<any, { success: boolean; data: DeploymentCredentialResult }>(`/api/v1/management/provider/technical-resources/${resourceId}/deployment-credentials`, {
     name, ttl_minutes: ttlMinutes,
-  }, { headers: { ...providerHeaders(providerId), 'Idempotency-Key': crypto.randomUUID() } })
+  }, { headers: providerHeaders(providerId) })
 
 export const getProviderTechnicalResource = (providerId: string, resourceId: string) =>
   request.get<any, { success: boolean; data: TechnicalResourceDetail }>(`/api/v1/management/provider/technical-resources/${resourceId}`, {

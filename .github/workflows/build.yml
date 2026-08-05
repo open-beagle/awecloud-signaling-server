@@ -3,9 +3,7 @@ name: Release Signal Components
 on:
   push:
     branches:
-      - "release-v*"
-    tags:
-      - "release-v*"
+      - "release-v1.0"
 
 permissions:
   contents: read
@@ -34,12 +32,6 @@ jobs:
           version="$(tr -d '[:space:]' < version)"
           if [[ ! "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Invalid version file: ${version}" >&2
-            exit 1
-          fi
-
-          expected_ref="release-${version}"
-          if [[ "${GITHUB_REF_NAME}" != "${expected_ref}" ]]; then
-            echo "Release ref ${GITHUB_REF_NAME} does not match ${expected_ref}" >&2
             exit 1
           fi
 

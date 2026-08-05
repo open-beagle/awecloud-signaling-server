@@ -24,7 +24,8 @@ func prepareProviderSupplyAPIFixture(t *testing.T, flags config.FeatureFlagsSect
 	require.NoError(t, fixture.database.AutoMigrate(
 		&model.TechnicalResource{}, &model.TechnicalResourceBinding{}, &model.SupplyInventoryReceipt{},
 		&model.SupplyCandidate{}, &model.PlatformResource{}, &model.PlatformResourceSource{},
-		&model.NamespaceObservation{}, &model.ResourceScope{}, &model.OutboxEvent{},
+		&model.NamespaceObservation{}, &model.ResourceScope{}, &model.OutboxEvent{}, &model.TechnicalResourceDeployToken{},
+		&model.Node{}, &model.Endpoint{},
 	))
 	var providerMemberships int64
 	require.NoError(t, fixture.database.Model(&model.AdminProviderMembership{}).
@@ -56,6 +57,7 @@ func prepareProviderSupplyAPIFixture(t *testing.T, flags config.FeatureFlagsSect
 	provider.GET("/scopes/:id", RequireManagementPermission(service.PermissionProviderResourcesRead), RequireManagementPermission(service.PermissionProviderIsolationEvidenceRead), providerAPI.GetResourceScope)
 	provider.POST("/resources/:id/suspend", RequireManagementPermission(service.PermissionProviderResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), providerAPI.SetPlatformResourceLifecycle(model.PlatformResourceSuspended, "suspend_platform_resource"))
 	provider.POST("/technical-resources", RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIdempotencyKey(), providerAPI.CreateTechnicalResource)
+	provider.POST("/technical-resources/:id/deployment-credentials", RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), providerAPI.CreateDeploymentCredential)
 	provider.POST("/supply-candidates/:id/accept", RequireManagementPermission(service.PermissionProviderResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), RequireIdempotencyKey(), providerAPI.AcceptSupplyCandidate)
 	return fixture, fixture.login(t, fixture.admin.Username)
 }
@@ -199,6 +201,18 @@ func TestProviderSupplyAPICreateIsIdempotentAndTransactional(t *testing.T) {
 	require.Equal(t, http.StatusCreated, replayed.Code, replayed.Body.String())
 	require.JSONEq(t, created.Body.String(), replayed.Body.String())
 	require.Equal(t, `"1"`, replayed.Header().Get("ETag"))
+	var createdBody struct {
+		Data struct {
+			Result model.TechnicalResource `json:"result"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &createdBody))
+	credential := providerAPIRequest(fixture, login, http.MethodPost,
+		strings.Replace(providerTechnicalResourceCredentialRoute, ":id", createdBody.Data.Result.ID, 1), fixture.provider.ID,
+		`{"name":"agent-api-a","ttl_minutes":30}`, nil)
+	require.Equal(t, http.StatusCreated, credential.Code, credential.Body.String())
+	require.Equal(t, `"2"`, credential.Header().Get("ETag"))
+	require.Contains(t, credential.Body.String(), "install_command")
 
 	var resourceCount, outboxCount, auditCount, idempotencyCount int64
 	require.NoError(t, fixture.database.Model(&model.TechnicalResource{}).Count(&resourceCount).Error)
@@ -206,7 +220,7 @@ func TestProviderSupplyAPICreateIsIdempotentAndTransactional(t *testing.T) {
 	require.NoError(t, fixture.database.Model(&model.AuditLog{}).Where("action_type = ?", "create_technical_resource").Count(&auditCount).Error)
 	require.NoError(t, fixture.database.Model(&model.APIIdempotencyRecord{}).Count(&idempotencyCount).Error)
 	require.Equal(t, int64(1), resourceCount)
-	require.Equal(t, int64(1), outboxCount)
+	require.Equal(t, int64(2), outboxCount)
 	require.Equal(t, int64(1), auditCount)
 	require.Equal(t, int64(1), idempotencyCount)
 

@@ -145,6 +145,9 @@ func TestProviderCreatesResourceOwnedOneTimeDeploymentCredential(t *testing.T) {
 	require.Equal(t, resource.ID, token.TechnicalResourceID)
 	require.Equal(t, runtimeUser.ID, token.RuntimeUserID)
 	require.Equal(t, model.TechnicalResourceDeployTokenPending, token.Status)
+	var updatedResource model.TechnicalResource
+	require.NoError(t, fixture.database.First(&updatedResource, "id = ?", resource.ID).Error)
+	require.Equal(t, resource.RowVersion+1, updatedResource.RowVersion)
 }
 
 func TestProviderDeletesRetiredTechnicalResourceAsTombstone(t *testing.T) {

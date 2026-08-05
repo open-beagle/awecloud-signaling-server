@@ -66,6 +66,15 @@ func (s *ProviderSupplyService) CreateTechnicalResourceDeploymentCredential(ctx 
 		if err := tx.Create(&token).Error; err != nil {
 			return err
 		}
+		updated := tx.Model(&model.TechnicalResource{}).
+			Where("id = ? AND provider_id = ? AND row_version = ?", resource.ID, providerID, resource.RowVersion).
+			Update("row_version", gorm.Expr("row_version + 1"))
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected != 1 {
+			return ErrProviderSupplyVersionConflict
+		}
 		result = &TechnicalResourceDeploymentCredential{ID: token.ID, TechnicalResourceID: resource.ID, Token: rawToken, ExpiresAt: expiresAt}
 		return nil
 	})
