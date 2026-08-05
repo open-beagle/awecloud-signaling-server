@@ -9,6 +9,8 @@ export interface EndpointItem {
   user_id: number
   agent_name: string
   name: string
+  hostname: string
+  host_domain_label: string
   alias: string
   version: string
   status: string
@@ -24,6 +26,8 @@ export interface EndpointDetail {
   user_id: number
   agent_name: string
   name: string
+  hostname: string
+  host_domain_label: string
   alias: string
   version: string
   status: string
@@ -79,6 +83,9 @@ export const getEndpointDetail = (id: string) => {
 export const updateEndpoint = (id: string, data: UpdateEndpointData) => {
   return request.put<any, ApiResponse>(`/api/v1/admin/endpoints/${id}`, data)
 }
+
+export const updateEndpointHostDomainLabel = (id: string, hostDomainLabel: string) =>
+  request.put<any, ApiResponse>(`/api/v1/admin/endpoints/${id}/domain-label`, { host_domain_label: hostDomainLabel })
 
 // 注销
 export const revokeEndpoint = (id: string) => {

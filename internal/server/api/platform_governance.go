@@ -20,21 +20,22 @@ type PlatformGovernanceAPI struct{}
 func NewPlatformGovernanceAPI() *PlatformGovernanceAPI { return &PlatformGovernanceAPI{} }
 
 type platformOrganizationItem struct {
-	ID                        string    `json:"id"`
-	ScopeType                 string    `json:"scope_type"`
-	Key                       string    `json:"key"`
-	Name                      string    `json:"name"`
-	DomainLabel               string    `json:"domain_label,omitempty"`
-	Status                    string    `json:"status"`
-	ManagementMembershipCount int64     `json:"management_membership_count"`
-	BusinessMemberCount       int64     `json:"business_member_count"`
-	TechnicalResourceCount    int64     `json:"technical_resource_count"`
-	ResourceCount             int64     `json:"resource_count"`
-	ScopeCount                int64     `json:"scope_count"`
-	Revision                  int64     `json:"revision"`
-	RowVersion                int64     `json:"row_version"`
-	CreatedAt                 time.Time `json:"created_at"`
-	UpdatedAt                 time.Time `json:"updated_at"`
+	ID                        string                    `json:"id"`
+	ScopeType                 string                    `json:"scope_type"`
+	Key                       string                    `json:"key"`
+	Name                      string                    `json:"name"`
+	DomainLabel               string                    `json:"domain_label,omitempty"`
+	DomainScope               model.ProviderDomainScope `json:"domain_scope,omitempty"`
+	Status                    string                    `json:"status"`
+	ManagementMembershipCount int64                     `json:"management_membership_count"`
+	BusinessMemberCount       int64                     `json:"business_member_count"`
+	TechnicalResourceCount    int64                     `json:"technical_resource_count"`
+	ResourceCount             int64                     `json:"resource_count"`
+	ScopeCount                int64                     `json:"scope_count"`
+	Revision                  int64                     `json:"revision"`
+	RowVersion                int64                     `json:"row_version"`
+	CreatedAt                 time.Time                 `json:"created_at"`
+	UpdatedAt                 time.Time                 `json:"updated_at"`
 }
 
 func (a *PlatformGovernanceAPI) ListOrganizations(c *gin.Context) {
@@ -67,7 +68,7 @@ func (a *PlatformGovernanceAPI) ListOrganizations(c *gin.Context) {
 		if count > 0 {
 			var providerItems []platformOrganizationItem
 			if err := query.Select(`organization.id, 'provider' AS scope_type, organization.key,
-				organization.display_name AS name, organization.domain_label, organization.status,
+				organization.display_name AS name, organization.domain_scope, organization.domain_label, organization.status,
 				(SELECT COUNT(*) FROM admin_provider_membership AS membership JOIN user AS member_user ON member_user.id = membership.user_id
 					WHERE membership.provider_id = organization.id AND membership.enabled = ? AND member_user.enabled = ?
 					AND membership.valid_from <= ? AND (membership.expires_at IS NULL OR membership.expires_at > ?)) AS management_membership_count,

@@ -80,8 +80,8 @@ func newTenantResourceConstraintFixture(t *testing.T) tenantResourceConstraintFi
 	}).Error)
 	require.NoError(t, DB.Create(&model.GroupMember{ID: 401, GroupID: 301, UserID: member.ID}).Error)
 
-	providerA := model.ResourceProvider{ID: "provider-a", Key: "provider-a", DisplayName: "Provider A", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
-	providerB := model.ResourceProvider{ID: "provider-b", Key: "provider-b", DisplayName: "Provider B", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	providerA := model.ResourceProvider{ID: "provider-a", Key: "provider-a", DisplayName: "Provider A", DomainScope: model.ProviderDomainNamed, DomainLabel: "provider-a", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	providerB := model.ResourceProvider{ID: "provider-b", Key: "provider-b", DisplayName: "Provider B", DomainScope: model.ProviderDomainNamed, DomainLabel: "provider-b", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
 	require.NoError(t, DB.Create(&[]model.ResourceProvider{providerA, providerB}).Error)
 	clusterA := model.PlatformResource{ID: "cluster-a", ProviderID: providerA.ID, Type: model.SupplyResourceKubernetes, StableKey: "cluster-a", DisplayName: "Cluster A", LifecycleState: model.PlatformResourceActive, HealthState: model.ResourceHealthOnline, CapabilityRevision: 1, RowVersion: 1}
 	clusterB := model.PlatformResource{ID: "cluster-b", ProviderID: providerB.ID, Type: model.SupplyResourceKubernetes, StableKey: "cluster-b", DisplayName: "Cluster B", LifecycleState: model.PlatformResourceActive, HealthState: model.ResourceHealthOnline, CapabilityRevision: 1, RowVersion: 1}
@@ -96,8 +96,8 @@ func newTenantResourceConstraintFixture(t *testing.T) tenantResourceConstraintFi
 	namespaceB := model.ResourceScope{ID: "scope-namespace-b", ProviderID: providerB.ID, PlatformResourceID: clusterB.ID, Type: model.ResourceScopeNamespace, StableKey: "namespace-b", ParentID: &clusterScopeB.ID, NamespaceObservationID: &namespaceObservationB.ID, LifecycleState: model.ResourceScopeAllocatable, IsolationMode: model.ResourceScopeIsolationNamespaceIsolated, ConfigRevision: 1, EvidenceRevision: 1, RowVersion: 1}
 	require.NoError(t, DB.Create(&[]model.ResourceScope{namespaceA, namespaceB}).Error)
 
-	agentA := model.TechnicalResource{ID: "agent-a", ProviderID: providerA.ID, Type: model.TechnicalResourceAgent, StableKey: "agent-a", LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1}
-	agentB := model.TechnicalResource{ID: "agent-b", ProviderID: providerB.ID, Type: model.TechnicalResourceAgent, StableKey: "agent-b", LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1}
+	agentA := model.TechnicalResource{ID: "agent-a", ProviderID: providerA.ID, Type: model.TechnicalResourceAgent, StableKey: "agent-a", DomainLabel: "agent-a", LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1}
+	agentB := model.TechnicalResource{ID: "agent-b", ProviderID: providerB.ID, Type: model.TechnicalResourceAgent, StableKey: "agent-b", DomainLabel: "agent-b", LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1}
 	require.NoError(t, DB.Create(&[]model.TechnicalResource{agentA, agentB}).Error)
 	candidateA := model.SupplyCandidate{ID: "candidate-cluster-a", ProviderID: providerA.ID, TechnicalResourceID: agentA.ID, ResourceType: model.SupplyResourceKubernetes, StableKey: "cluster-a", IdentityQuality: model.SupplyIdentityStrong, PayloadHash: strings.Repeat("8", 64), FirstObservedAt: now, LastObservedAt: now, LeaseExpiresAt: now.Add(time.Hour), ReviewState: model.SupplyCandidateAccepted, RowVersion: 1}
 	candidateB := model.SupplyCandidate{ID: "candidate-cluster-b", ProviderID: providerB.ID, TechnicalResourceID: agentB.ID, ResourceType: model.SupplyResourceKubernetes, StableKey: "cluster-b", IdentityQuality: model.SupplyIdentityStrong, PayloadHash: strings.Repeat("9", 64), FirstObservedAt: now, LastObservedAt: now, LeaseExpiresAt: now.Add(time.Hour), ReviewState: model.SupplyCandidateAccepted, RowVersion: 1}
@@ -228,7 +228,7 @@ func TestTenantResourceConstraintsPreserveTrustedResourceAndSessionChain(t *test
 		crossProvider.ID = "workload-source-cross-provider"
 		crossProvider.SourceTechnicalResourceID = fixture.agentB.ID
 		requireS4ConstraintError(t, DB.Create(&crossProvider).Error, "S4_WORKLOAD_SOURCE_PROVIDER_MISMATCH")
-		unlinkedAgent := model.TechnicalResource{ID: "agent-a-unlinked", ProviderID: fixture.agentA.ProviderID, Type: model.TechnicalResourceAgent, StableKey: "agent-a-unlinked", LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1}
+		unlinkedAgent := model.TechnicalResource{ID: "agent-a-unlinked", ProviderID: fixture.agentA.ProviderID, Type: model.TechnicalResourceAgent, StableKey: "agent-a-unlinked", DomainLabel: "agent-a-unlinked", LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1}
 		require.NoError(t, DB.Create(&unlinkedAgent).Error)
 		sameProviderWrongSupply := fixture.evidence
 		sameProviderWrongSupply.ID = "workload-source-wrong-supply"

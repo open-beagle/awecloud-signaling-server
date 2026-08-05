@@ -39,6 +39,7 @@ export interface Node {
   ip?: string
   version?: string
   hostname?: string
+  host_domain_label: string
   system_info?: string
   status?: string
   last_heartbeat?: string
@@ -105,6 +106,9 @@ export const getNodeCapabilities = (id: number) => {
 export const updateNodeCapabilities = (id: number, data: Partial<CapabilityConfig>) => {
   return request.put<any, ApiResponse>(`/api/v1/admin/nodes/${id}/capabilities`, data)
 }
+
+export const updateNodeHostDomainLabel = (id: number, hostDomainLabel: string) =>
+  request.put<any, ApiResponse>(`/api/v1/admin/nodes/${id}/domain-label`, { host_domain_label: hostDomainLabel })
 
 // 重置 Agent 能力配置
 export const resetNodeCapabilities = (id: number) => {

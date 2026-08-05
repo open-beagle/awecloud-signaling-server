@@ -17,6 +17,8 @@ export interface TechnicalResource {
   provider_id: string
   type: TechnicalResourceType
   stable_key: string
+  domain_label: string
+  domain_namespace: string
   hostname: string
   hostname_source?: 'reported' | 'legacy_name'
   parent_hostname?: string
@@ -220,9 +222,9 @@ export const getProviderTechnicalResources = (providerId: string, params: Provid
     headers: providerHeaders(providerId),
   })
 
-export const createProviderAgent = (providerId: string, runtimeName: string, reason: string) =>
+export const createProviderAgent = (providerId: string, runtimeName: string, domainLabel: string, reason: string) =>
   request.post<any, { success: boolean; data: TechnicalResource }>('/api/v1/management/provider/technical-resources', {
-    type: 'agent', runtime_name: runtimeName, credential_revision: 1, reason,
+    type: 'agent', runtime_name: runtimeName, domain_label: domainLabel, credential_revision: 1, reason,
   }, { headers: { ...providerHeaders(providerId), 'Idempotency-Key': crypto.randomUUID() } })
 
 export const createProviderDeploymentCredential = (providerId: string, resourceId: string, name: string, ttlMinutes: number) =>
@@ -234,6 +236,11 @@ export const getProviderTechnicalResource = (providerId: string, resourceId: str
   request.get<any, { success: boolean; data: TechnicalResourceDetail }>(`/api/v1/management/provider/technical-resources/${resourceId}`, {
     headers: providerHeaders(providerId),
   })
+
+export const updateProviderAgentDomainLabel = (providerId: string, resource: TechnicalResource, domainLabel: string, reason: string) =>
+  request.patch<any, { success: boolean; data: TechnicalResource }>(`/api/v1/management/provider/technical-resources/${resource.id}/domain-label`, {
+    domain_label: domainLabel, reason,
+  }, { headers: { ...providerHeaders(providerId), 'If-Match': String(resource.row_version) } })
 
 export const getProviderTechnicalResourceCapabilities = (providerId: string, resourceId: string) =>
   request.get<any, { success: boolean; data: TechnicalResourceCapabilities }>(`/api/v1/management/provider/technical-resources/${resourceId}/capabilities`, {

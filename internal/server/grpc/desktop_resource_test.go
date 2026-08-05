@@ -107,11 +107,11 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 
 	provider := model.ResourceProvider{
 		ID: uuid.NewString(), Key: "projection-provider", DisplayName: "Projection Provider",
-		Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1,
+		DomainScope: model.ProviderDomainNamed, DomainLabel: "projection-provider", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1,
 	}
 	require.NoError(t, database.Create(&provider).Error)
 	technical := model.TechnicalResource{
-		ID: uuid.NewString(), ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "projection-agent",
+		ID: uuid.NewString(), ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "projection-agent", DomainLabel: "projection-agent",
 		LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline,
 		CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1,
 	}

@@ -23,6 +23,7 @@ type Node struct {
 	UpdaterProtocol      string     `gorm:"size:16" json:"updater_protocol"`                                                  // 支持的 updater 协议版本
 	ContainerSSHProtocol string     `gorm:"size:16" json:"container_ssh_protocol"`                                            // 支持的 ContainerSSH 协议版本
 	Hostname             string     `gorm:"size:100" json:"hostname"`                                                         // 主机名
+	HostDomainLabel      string     `gorm:"size:63;not null;default:'';index" json:"host_domain_label"`                       // SSH 主机域名标识
 	SystemInfo           string     `gorm:"type:text" json:"system_info"`                                                     // 系统信息 JSON
 	SecretHash           string     `gorm:"size:255" json:"-"`                                                                // 设备认证密钥哈希（Desktop 用）
 	LastHeartbeat        *time.Time `json:"last_heartbeat"`                                                                   // 最后心跳时间

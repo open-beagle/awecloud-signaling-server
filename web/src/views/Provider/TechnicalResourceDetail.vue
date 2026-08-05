@@ -40,12 +40,24 @@
               <el-descriptions-item label="名称来源">{{ hostnameSourceLabel(resource.hostname_source) }}</el-descriptions-item>
               <el-descriptions-item label="类型">{{ typeLabel(resource.type) }}</el-descriptions-item>
               <el-descriptions-item label="父 Agent">{{ resource.parent_hostname || '-' }}</el-descriptions-item>
+			  <el-descriptions-item v-if="resource.type === 'agent'" label="域名命名空间"><span class="mono">*.{{ resource.domain_namespace }}.beagle</span><el-button v-if="canWrite" link type="primary" @click="editAgentDomainLabel">编辑</el-button></el-descriptions-item>
               <el-descriptions-item label="最后上报">{{ formatTime(resource.last_received_at) }}</el-descriptions-item>
               <el-descriptions-item label="租约到期">{{ formatTime(resource.lease_expires_at) }}</el-descriptions-item>
               <el-descriptions-item label="库存进度">seq {{ resource.last_sequence }}</el-descriptions-item>
               <el-descriptions-item label="观测 Revision">{{ resource.observed_revision }}</el-descriptions-item>
             </el-descriptions>
           </section>
+		  <section class="detail-surface">
+			<h3>部署实例</h3>
+			<el-table v-if="bindings.length" :data="bindings" stripe>
+				<el-table-column label="实例类型" width="150"><template #default="{ row }">{{ row.source_type === 'legacy_node' ? 'Agent Node' : 'Endpoint' }}</template></el-table-column>
+				<el-table-column label="实例 ID" prop="source_id" min-width="220"><template #default="{ row }"><span class="mono">{{ row.source_id }}</span></template></el-table-column>
+				<el-table-column label="状态" width="120"><template #default="{ row }"><el-tag size="small" :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '生效' : '停用' }}</el-tag></template></el-table-column>
+				<el-table-column label="凭据 Revision" prop="credential_revision" width="150" />
+				<el-table-column label="绑定时间" width="190"><template #default="{ row }">{{ formatTime(row.created_at) }}</template></el-table-column>
+			</el-table>
+			<el-empty v-else description="暂无部署实例" />
+		  </section>
         </el-tab-pane>
         <el-tab-pane label="能力" name="capabilities">
           <section class="detail-surface">
@@ -118,8 +130,8 @@ import PageHeader from '@/components/Common/PageHeader.vue'
 import {
 	checkProviderTechnicalResourceDelete, createProviderTechnicalResourceUpdateTask, deleteProviderTechnicalResource,
 	getProviderTechnicalResource, getProviderTechnicalResourceCapabilities, getProviderTechnicalResourceReleases,
-	getProviderTechnicalResourceUpdateTasks, setProviderTechnicalResourceLifecycle, updateProviderTechnicalResourceCapabilities,
-	type ProviderRelease, type ProviderUpdateTask, type TechnicalResource, type TechnicalResourceCapabilities,
+	getProviderTechnicalResourceUpdateTasks, setProviderTechnicalResourceLifecycle, updateProviderAgentDomainLabel, updateProviderTechnicalResourceCapabilities,
+	type ProviderRelease, type ProviderUpdateTask, type TechnicalResource, type TechnicalResourceBinding, type TechnicalResourceCapabilities,
 	type TechnicalResourceDeleteCheck, type TechnicalResourceState,
 } from '@/api/providerSupply'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -130,6 +142,7 @@ const workspaceStore = useWorkspaceStore()
 const loading = ref(false)
 const errorMessage = ref('')
 const resource = ref<TechnicalResource>()
+const bindings = ref<TechnicalResourceBinding[]>([])
 const activeTab = ref('overview')
 const submitting = ref(false)
 const capabilityDialog = ref(false)
@@ -153,6 +166,26 @@ const capabilityRows = computed(() => resource.value ? [
   ...(resource.value.type === 'agent' ? [{ label: 'Endpoint 接入', description: '接受隔离网络 Endpoint 反向连接', enabled: resource.value.endpoint_access_enabled }] : []),
 ] : [])
 
+const editAgentDomainLabel = async () => {
+	if (!resource.value || resource.value.type !== 'agent' || !workspaceStore.providerId) return
+	try {
+		const label = await ElMessageBox.prompt('修改会同时切换该 Agent 下全部资源域名，旧域名立即失效。', '编辑 Agent 域名标识', {
+			inputValue: resource.value.domain_label,
+			inputPattern: /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
+			inputErrorMessage: '请输入有效的 DNS 单标签',
+			confirmButtonText: '下一步', cancelButtonText: '取消', type: 'warning',
+		})
+		const reason = await ElMessageBox.prompt(`确认切换为 ${label.value.trim().toLowerCase()}，请输入变更原因。`, '确认域名切换', {
+			inputPattern: /\S+/, inputErrorMessage: '请输入变更原因', confirmButtonText: '确认切换', cancelButtonText: '取消', type: 'warning',
+		})
+		await updateProviderAgentDomainLabel(workspaceStore.providerId, resource.value, label.value.trim().toLowerCase(), reason.value.trim())
+		ElMessage.success('Agent 域名标识已更新')
+		await load()
+	} catch (error) {
+		if (error !== 'cancel' && error !== 'close') throw error
+	}
+}
+
 const load = async () => {
   const providerId = workspaceStore.providerId
   if (!providerId) return
@@ -161,12 +194,14 @@ const load = async () => {
   try {
     const response = await getProviderTechnicalResource(providerId, String(route.params.id))
 	resource.value = response.success ? response.data.resource : undefined
+	bindings.value = response.success ? response.data.bindings || [] : []
 	if (resource.value && response.data.bindings?.length) {
 		const tasks = await getProviderTechnicalResourceUpdateTasks(providerId, resource.value.id)
 		updateTasks.value = tasks.success ? tasks.data : []
 	} else updateTasks.value = []
   } catch {
     resource.value = undefined
+	bindings.value = []
     errorMessage.value = '请确认技术资源仍属于当前资源方且当前账号具有查看权限。'
   } finally {
     loading.value = false

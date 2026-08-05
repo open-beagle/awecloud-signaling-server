@@ -22,7 +22,7 @@
         <el-table-column :label="scopeType === 'provider' ? '资源供应商' : '租户'" min-width="250">
           <template #default="{ row }"><strong>{{ row.name }}</strong><span class="secondary">{{ scopeLabel(row.scope_type) }} · {{ row.key }}</span></template>
         </el-table-column>
-        <el-table-column v-if="scopeType === 'provider'" label="域名标识" min-width="190"><template #default="{ row }"><strong class="domain-label">{{ row.domain_label }}</strong><span class="secondary">*.{{ row.domain_label }}.beagle</span></template></el-table-column>
+        <el-table-column v-if="scopeType === 'provider'" label="域名命名空间" min-width="190"><template #default="{ row }"><strong class="domain-label">{{ row.domain_scope === 'root' ? '根域名' : row.domain_label }}</strong><span class="secondary">{{ row.domain_scope === 'root' ? '*.beagle' : `*.${row.domain_label}.beagle` }}</span></template></el-table-column>
         <el-table-column label="状态" width="110"><template #default="{ row }"><el-tag size="small" :type="statusType(row.status)">{{ statusLabel(row.status) }}</el-tag></template></el-table-column>
         <el-table-column label="有效管理员" width="120" align="right"><template #default="{ row }">{{ row.management_membership_count }}</template></el-table-column>
         <el-table-column label="业务规模" min-width="230">
@@ -48,7 +48,10 @@
       <el-form class="organization-form" label-position="top">
         <el-form-item label="稳定标识" required><el-input v-model="form.key" :disabled="formDialog.mode === 'edit'" maxlength="100" placeholder="小写字母、数字和连字符，例如 north-provider" /></el-form-item>
         <el-form-item label="显示名称" required><el-input v-model="form.name" maxlength="200" placeholder="便于治理人员识别的组织名称" /></el-form-item>
-        <el-form-item v-if="scopeType === 'provider'" label="域名标识" required>
+        <el-form-item v-if="scopeType === 'provider' && formDialog.mode === 'create'" label="命名空间类型" required>
+          <el-radio-group v-model="form.domainScope"><el-radio-button value="named">普通命名空间</el-radio-button><el-radio-button value="root">根命名空间</el-radio-button></el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="scopeType === 'provider' && form.domainScope === 'named'" label="域名标识" required>
           <el-input v-model="form.domainLabel" maxlength="63" placeholder="例如 beagle-bj" />
           <span class="field-help">全局唯一；资源域名形如 &lt;resource&gt;.{{ form.domainLabel || 'domain-label' }}.beagle</span>
         </el-form-item>
@@ -106,11 +109,11 @@ const filters = reactive<{ status: PlatformOrganizationStatus | ''; search: stri
 const pagination = reactive({ page: 1, size: 20, total: 0 })
 const saving = ref(false)
 const formDialog = reactive<{ visible: boolean; mode: 'create' | 'edit'; organization?: PlatformOrganization }>({ visible: false, mode: 'create' })
-const form = reactive<{ key: string; name: string; domainLabel: string; domainConfirmation: string; reason: string }>({ key: '', name: '', domainLabel: '', domainConfirmation: '', reason: '' })
+const form = reactive<{ key: string; name: string; domainScope: 'root' | 'named'; domainLabel: string; domainConfirmation: string; reason: string }>({ key: '', name: '', domainScope: 'named', domainLabel: '', domainConfirmation: '', reason: '' })
 const transitionDialog = reactive<{ visible: boolean; action: 'suspend' | 'resume'; organization?: PlatformOrganization; reason: string }>({ visible: false, action: 'suspend', reason: '' })
 const normalizedDomainLabel = computed(() => form.domainLabel.trim().toLowerCase())
-const domainLabelChanged = computed(() => scopeType.value === 'provider' && formDialog.mode === 'edit' && normalizedDomainLabel.value !== (formDialog.organization?.domain_label || ''))
-const domainLabelValid = computed(() => scopeType.value !== 'provider' || /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(normalizedDomainLabel.value))
+const domainLabelChanged = computed(() => scopeType.value === 'provider' && form.domainScope === 'named' && formDialog.mode === 'edit' && normalizedDomainLabel.value !== (formDialog.organization?.domain_label || ''))
+const domainLabelValid = computed(() => scopeType.value !== 'provider' || form.domainScope === 'root' || /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(normalizedDomainLabel.value))
 const organizationFormValid = computed(() => /^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$/.test(form.key) && !!form.name.trim() && !!form.reason.trim() && domainLabelValid.value && (!domainLabelChanged.value || form.domainConfirmation.trim().toLowerCase() === normalizedDomainLabel.value))
 
 const load = async () => {
@@ -139,14 +142,14 @@ const scopeLabel = (scope: PlatformMembershipScopeType) => scope === 'provider' 
 const statusLabel = (status: PlatformOrganizationStatus) => status === 'active' ? '正常' : status === 'suspended' ? '已暂停' : '已退役'
 const statusType = (status: PlatformOrganizationStatus) => status === 'active' ? 'success' : status === 'suspended' ? 'warning' : 'info'
 const formatTime = (value: string) => new Date(value).toLocaleString('zh-CN', { hour12: false })
-const openCreate = () => { formDialog.mode = 'create'; formDialog.organization = undefined; form.key = ''; form.name = ''; form.domainLabel = ''; form.domainConfirmation = ''; form.reason = ''; formDialog.visible = true }
-const openEdit = (organization: PlatformOrganization) => { formDialog.mode = 'edit'; formDialog.organization = organization; form.key = organization.key; form.name = organization.name; form.domainLabel = organization.domain_label || organization.key; form.domainConfirmation = ''; form.reason = ''; formDialog.visible = true }
+const openCreate = () => { formDialog.mode = 'create'; formDialog.organization = undefined; form.key = ''; form.name = ''; form.domainScope = 'named'; form.domainLabel = ''; form.domainConfirmation = ''; form.reason = ''; formDialog.visible = true }
+const openEdit = (organization: PlatformOrganization) => { formDialog.mode = 'edit'; formDialog.organization = organization; form.key = organization.key; form.name = organization.name; form.domainScope = organization.domain_scope || 'named'; form.domainLabel = organization.domain_label || ''; form.domainConfirmation = ''; form.reason = ''; formDialog.visible = true }
 const openTransition = (organization: PlatformOrganization) => { transitionDialog.organization = organization; transitionDialog.action = organization.status === 'active' ? 'suspend' : 'resume'; transitionDialog.reason = ''; transitionDialog.visible = true }
 const saveOrganization = async () => {
   if (!canWrite.value || !organizationFormValid.value) return
   saving.value = true
   try {
-    const domainFields = scopeType.value === 'provider' ? { domain_label: normalizedDomainLabel.value } : {}
+    const domainFields = scopeType.value === 'provider' ? { domain_scope: form.domainScope, domain_label: form.domainScope === 'root' ? '' : normalizedDomainLabel.value } : {}
     if (formDialog.mode === 'create') await createPlatformOrganization(scopeType.value, { key: form.key, name: form.name.trim(), ...domainFields, reason: form.reason.trim() }, createIdempotencyKey())
     else if (formDialog.organization) await updatePlatformOrganization(formDialog.organization, { name: form.name.trim(), ...domainFields, domain_change_confirmation: domainLabelChanged.value ? form.domainConfirmation.trim().toLowerCase() : undefined, reason: form.reason.trim() })
     ElMessage.success(formDialog.mode === 'create' ? '组织对象已创建' : '组织信息已更新'); formDialog.visible = false; await load()

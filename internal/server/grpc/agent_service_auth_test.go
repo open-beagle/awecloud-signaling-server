@@ -26,10 +26,10 @@ func TestAgentAuthenticateAcceptsConsumedTechnicalResourceToken(t *testing.T) {
 
 	user := model.User{Name: "szzy", Role: model.UserRoleAgent, SecretHash: "not-the-runtime-secret", Enabled: true}
 	require.NoError(t, testDB.Create(&user).Error)
-	provider := model.ResourceProvider{ID: "provider-szzy", Key: "szzy", DisplayName: "Shenzhen Zhiyi", DomainLabel: "szzy", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	provider := model.ResourceProvider{ID: "provider-szzy", Key: "szzy", DisplayName: "Shenzhen Zhiyi", DomainScope: model.ProviderDomainNamed, DomainLabel: "szzy", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
 	require.NoError(t, testDB.Create(&provider).Error)
 	resource := model.TechnicalResource{
-		ID: "resource-szzy", ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "resource-szzy",
+		ID: "resource-szzy", ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "resource-szzy", DomainLabel: "resource-szzy",
 		LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline,
 		CredentialRevision: 1, RuntimeUserID: user.ID, ConfigRevision: 1, RowVersion: 1,
 	}

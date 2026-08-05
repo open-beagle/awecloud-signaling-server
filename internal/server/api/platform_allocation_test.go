@@ -38,7 +38,7 @@ func preparePlatformAllocationAPIFixture(t *testing.T, flags config.FeatureFlags
 	node := model.Node{ID: 9001, UserID: fixture.user.ID, Name: "allocation-agent", Type: model.NodeTypeAgent}
 	require.NoError(t, fixture.database.Create(&node).Error)
 	technical := model.TechnicalResource{
-		ID: uuid.NewString(), ProviderID: fixture.provider.ID, Type: model.TechnicalResourceAgent, StableKey: "allocation-agent",
+		ID: uuid.NewString(), ProviderID: fixture.provider.ID, Type: model.TechnicalResourceAgent, StableKey: "allocation-agent", DomainLabel: "allocation-agent",
 		LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline,
 		CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1,
 	}

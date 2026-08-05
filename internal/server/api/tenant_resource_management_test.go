@@ -57,7 +57,7 @@ func prepareTenantResourceAPIFixture(t *testing.T) tenantResourceAPIFixture {
 	require.NoError(t, fixture.database.Create(&[]model.Node{desktop, agentNode}).Error)
 
 	technical := model.TechnicalResource{
-		ID: uuid.NewString(), ProviderID: fixture.provider.ID, Type: model.TechnicalResourceAgent, StableKey: "tenant-api-agent",
+		ID: uuid.NewString(), ProviderID: fixture.provider.ID, Type: model.TechnicalResourceAgent, StableKey: "tenant-api-agent", DomainLabel: "tenant-api-agent",
 		LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline,
 		CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1,
 	}

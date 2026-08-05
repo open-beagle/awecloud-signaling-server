@@ -44,7 +44,7 @@ func seedResourceIdentityModels(t *testing.T, database *gorm.DB) {
 	}
 	require.NoError(t, database.Create(&profiles).Error)
 	require.NoError(t, database.Create(&Tenant{ID: "tenant-1", Key: "tenant-1", Name: "Tenant 1", Status: TenantStatusActive}).Error)
-	require.NoError(t, database.Create(&ResourceProvider{ID: "provider-1", Key: "provider-1", DisplayName: "Provider 1", Status: ProviderStatusActive, Revision: 1, RowVersion: 1}).Error)
+	require.NoError(t, database.Create(&ResourceProvider{ID: "provider-1", Key: "provider-1", DisplayName: "Provider 1", DomainScope: ProviderDomainNamed, DomainLabel: "provider-1", Status: ProviderStatusActive, Revision: 1, RowVersion: 1}).Error)
 }
 
 func TestResourceIdentitySchemaConstraints(t *testing.T) {
@@ -61,9 +61,9 @@ func TestResourceIdentitySchemaConstraints(t *testing.T) {
 	duplicateSubject.ID, duplicateSubject.UserID = "auth-2", 2
 	require.Error(t, database.Create(&duplicateSubject).Error)
 
-	invalidProvider := ResourceProvider{ID: "provider-invalid", Key: "provider-invalid", DisplayName: "Invalid", Status: ProviderStatus("unknown"), Revision: 1, RowVersion: 1}
+	invalidProvider := ResourceProvider{ID: "provider-invalid", Key: "provider-invalid", DisplayName: "Invalid", DomainScope: ProviderDomainNamed, DomainLabel: "provider-invalid", Status: ProviderStatus("unknown"), Revision: 1, RowVersion: 1}
 	require.Error(t, database.Create(&invalidProvider).Error)
-	duplicateProviderKey := ResourceProvider{ID: "provider-2", Key: "provider-1", DisplayName: "Duplicate", Status: ProviderStatusActive, Revision: 1, RowVersion: 1}
+	duplicateProviderKey := ResourceProvider{ID: "provider-2", Key: "provider-1", DisplayName: "Duplicate", DomainScope: ProviderDomainNamed, DomainLabel: "provider-2", Status: ProviderStatusActive, Revision: 1, RowVersion: 1}
 	require.Error(t, database.Create(&duplicateProviderKey).Error)
 
 	platformRole := PlatformRoleMembership{

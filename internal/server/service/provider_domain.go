@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -15,11 +16,31 @@ var (
 	ErrProviderDomainLabelInvalid  = errors.New("provider domain label is invalid")
 	ErrProviderDomainLabelExists   = errors.New("provider domain label already exists")
 	ErrProviderDomainConfirmation  = errors.New("provider domain label confirmation does not match")
+	ErrAgentDomainLabelInvalid     = errors.New("agent domain label is invalid")
+	ErrAgentDomainLabelExists      = errors.New("agent domain label already exists")
+	ErrHostDomainLabelInvalid      = errors.New("host domain label is invalid")
+	ErrHostDomainLabelExists       = errors.New("host domain label already exists")
+	ErrDomainOwnershipMissing      = errors.New("domain ownership is missing")
 	providerDomainLabelPattern     = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 	providerDomainLabelReservedSet = map[string]struct{}{
 		"admin": {}, "api": {}, "container": {}, "kubernetes": {}, "service": {}, "system": {},
 	}
 )
+
+type AgentDomainIdentity struct {
+	ProviderID      string
+	AgentResourceID string
+	AgentLabel      string
+	ProviderScope   model.ProviderDomainScope
+	ProviderLabel   string
+}
+
+func (i AgentDomainIdentity) Namespace() string {
+	if i.ProviderScope == model.ProviderDomainRoot {
+		return i.AgentLabel
+	}
+	return i.AgentLabel + "." + i.ProviderLabel
+}
 
 type ProviderDomainChangeResult struct {
 	DomainCount int64
@@ -27,44 +48,77 @@ type ProviderDomainChangeResult struct {
 }
 
 func NormalizeProviderDomainLabel(value string) (string, error) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if !providerDomainLabelPattern.MatchString(value) {
-		return "", ErrProviderDomainLabelInvalid
-	}
-	if _, reserved := providerDomainLabelReservedSet[value]; reserved {
-		return "", ErrProviderDomainLabelInvalid
-	}
-	return value, nil
+	return normalizeDomainLabel(value, ErrProviderDomainLabelInvalid)
 }
 
-func EffectiveProviderDomainLabel(ctx context.Context, database *gorm.DB, userID uint64, fallback string) string {
-	if database == nil || userID == 0 {
-		return fallback
+func NormalizeAgentDomainLabel(value string) (string, error) {
+	return normalizeDomainLabel(value, ErrAgentDomainLabelInvalid)
+}
+
+func NormalizeHostDomainLabel(value string) (string, error) {
+	return normalizeDomainLabel(value, ErrHostDomainLabelInvalid)
+}
+
+func SuggestedHostDomainLabel(ctx context.Context, database *gorm.DB, runtimeUserID uint64, value string) string {
+	label, err := NormalizeHostDomainLabel(value)
+	if err != nil || database == nil || runtimeUserID == 0 {
+		return ""
 	}
-	var label string
-	err := database.WithContext(ctx).Table("technical_resource AS resource").
-		Select("provider.domain_label").
-		Joins("JOIN resource_provider AS provider ON provider.id = resource.provider_id").
-		Where("resource.runtime_user_id = ? AND resource.deleted_at IS NULL AND provider.domain_label <> ''", userID).
-		Order("resource.type ASC, resource.id ASC").Limit(1).Scan(&label).Error
-	if err != nil || label == "" {
-		return fallback
+	var nodeCount, endpointCount int64
+	if err := database.WithContext(ctx).Model(&model.Node{}).
+		Where("user_id = ? AND type = ? AND lower(host_domain_label) = ?", runtimeUserID, model.NodeTypeAgent, label).
+		Count(&nodeCount).Error; err != nil {
+		return ""
+	}
+	if err := database.WithContext(ctx).Model(&model.Endpoint{}).
+		Where("user_id = ? AND revoked = ? AND lower(host_domain_label) = ?", runtimeUserID, false, label).
+		Count(&endpointCount).Error; err != nil {
+		return ""
+	}
+	if nodeCount+endpointCount > 0 {
+		return ""
 	}
 	return label
 }
 
-func NormalizeReportedProviderDomain(ctx context.Context, database *gorm.DB, userID uint64, fallback, domain string) string {
-	if fallback == "" && database != nil && userID > 0 {
-		var user model.User
-		if err := database.WithContext(ctx).Select("name").First(&user, userID).Error; err == nil {
-			fallback = user.Name
-		}
+func normalizeDomainLabel(value string, invalid error) (string, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if !providerDomainLabelPattern.MatchString(value) {
+		return "", invalid
 	}
-	label := EffectiveProviderDomainLabel(ctx, database, userID, fallback)
-	if label == "" || label == fallback {
-		return domain
+	if _, reserved := providerDomainLabelReservedSet[value]; reserved {
+		return "", invalid
 	}
-	return replaceDomainNamespace(domain, fallback, label, domainSuffix(ctx, database))
+	return value, nil
+}
+
+func ResolveAgentDomainForNode(ctx context.Context, database *gorm.DB, nodeID uint64) (AgentDomainIdentity, error) {
+	var identity AgentDomainIdentity
+	err := database.WithContext(ctx).Table("technical_resource_binding AS binding").
+		Select("agent.provider_id, agent.id AS agent_resource_id, agent.domain_label AS agent_label, provider.domain_scope AS provider_scope, provider.domain_label AS provider_label").
+		Joins("JOIN technical_resource AS agent ON agent.id = binding.technical_resource_id AND agent.type = ? AND agent.deleted_at IS NULL", model.TechnicalResourceAgent).
+		Joins("JOIN resource_provider AS provider ON provider.id = agent.provider_id").
+		Where("binding.source_type = ? AND binding.source_id = ? AND binding.enabled = ?", model.TechnicalResourceBindingLegacyNode, fmt.Sprint(nodeID), true).
+		Take(&identity).Error
+	if err != nil || identity.AgentLabel == "" || (identity.ProviderScope == model.ProviderDomainNamed && identity.ProviderLabel == "") {
+		return AgentDomainIdentity{}, ErrDomainOwnershipMissing
+	}
+	return identity, nil
+}
+
+func ResolveAgentDomainForEndpoint(ctx context.Context, database *gorm.DB, endpointID string) (AgentDomainIdentity, error) {
+	var identity AgentDomainIdentity
+	err := database.WithContext(ctx).Table("technical_resource_binding AS binding").
+		Select("agent.provider_id, agent.id AS agent_resource_id, agent.domain_label AS agent_label, provider.domain_scope AS provider_scope, provider.domain_label AS provider_label").
+		Joins("JOIN technical_resource AS endpoint_resource ON endpoint_resource.id = binding.technical_resource_id AND endpoint_resource.type = ? AND endpoint_resource.deleted_at IS NULL", model.TechnicalResourceEndpoint).
+		Joins("JOIN technical_resource AS agent ON agent.id = endpoint_resource.parent_id AND agent.type = ? AND agent.deleted_at IS NULL", model.TechnicalResourceAgent).
+		Joins("JOIN resource_provider AS provider ON provider.id = agent.provider_id").
+		Where("binding.source_type = ? AND binding.source_id = ? AND binding.enabled = ?", model.TechnicalResourceBindingLegacyEndpoint, endpointID, true).
+		Take(&identity).Error
+	if err != nil || identity.AgentLabel == "" || (identity.ProviderScope == model.ProviderDomainNamed && identity.ProviderLabel == "") {
+		return AgentDomainIdentity{}, ErrDomainOwnershipMissing
+	}
+	return identity, nil
 }
 
 func ChangeProviderDomainLabel(ctx context.Context, tx *gorm.DB, providerID, oldLabel, newLabel string) (ProviderDomainChangeResult, error) {
@@ -72,58 +126,27 @@ func ChangeProviderDomainLabel(ctx context.Context, tx *gorm.DB, providerID, old
 	if tx == nil || providerID == "" || oldLabel == "" || newLabel == "" {
 		return result, ErrProviderDomainLabelInvalid
 	}
-	var userIDs []uint64
-	if err := tx.WithContext(ctx).Model(&model.TechnicalResource{}).
-		Where("provider_id = ? AND runtime_user_id > 0 AND deleted_at IS NULL", providerID).
-		Distinct().Pluck("runtime_user_id", &userIDs).Error; err != nil {
-		return result, err
-	}
-	if len(userIDs) == 0 {
-		return result, nil
-	}
-	var users []model.User
-	if err := tx.WithContext(ctx).Where("id IN ?", userIDs).Find(&users).Error; err != nil {
-		return result, err
-	}
-	userNames := make(map[uint64]string, len(users))
-	for i := range users {
-		userNames[users[i].ID] = users[i].Name
-	}
 	var records []model.DomainRegistry
-	if err := tx.WithContext(ctx).Where("user_id IN ? AND status = ?", userIDs, model.DomainStatusOnline).Find(&records).Error; err != nil {
+	if err := tx.WithContext(ctx).Where("provider_id = ?", providerID).Find(&records).Error; err != nil {
 		return result, err
 	}
 	suffix := domainSuffix(ctx, tx)
+	oldNamespaceSuffix := "." + strings.ToLower(oldLabel) + suffix
+	newNamespaceSuffix := "." + strings.ToLower(newLabel) + suffix
 	for i := range records {
-		newDomain := replaceDomainNamespace(records[i].Domain, oldLabel, newLabel, suffix)
-		if newDomain == records[i].Domain {
-			newDomain = replaceDomainNamespace(records[i].Domain, userNames[records[i].UserID], newLabel, suffix)
+		if records[i].AgentResourceID == "" || !strings.HasSuffix(strings.ToLower(records[i].Domain), oldNamespaceSuffix) {
+			return result, ErrDomainOwnershipMissing
 		}
-		if newDomain == records[i].Domain {
-			continue
-		}
-		clone := records[i]
-		clone.ID = 0
-		clone.Domain = newDomain
-		clone.Status = model.DomainStatusOnline
-		clone.CreatedAt = records[i].CreatedAt
-		clone.UpdatedAt = records[i].UpdatedAt
-		var existing model.DomainRegistry
-		query := tx.WithContext(ctx).Where("domain = ? AND node_id = ? AND endpoint_id = ?", newDomain, clone.NodeID, clone.EndpointID)
-		if err := query.First(&existing).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			if err := tx.WithContext(ctx).Create(&clone).Error; err != nil {
-				return result, err
-			}
-		} else if err != nil {
-			return result, err
-		} else if err := tx.WithContext(ctx).Model(&existing).Updates(map[string]any{
-			"type": clone.Type, "user_id": clone.UserID, "target_ip": clone.TargetIP, "target_port": clone.TargetPort,
-			"namespace": clone.Namespace, "service_name": clone.ServiceName, "service_ports": clone.ServicePorts,
-			"ssh_users": clone.SshUsers, "status": model.DomainStatusOnline,
-		}).Error; err != nil {
+		newDomain := records[i].Domain[:len(records[i].Domain)-len(oldNamespaceSuffix)] + newNamespaceSuffix
+		var conflictCount int64
+		if err := tx.WithContext(ctx).Model(&model.DomainRegistry{}).
+			Where("domain = ? AND provider_id <> ?", newDomain, providerID).Count(&conflictCount).Error; err != nil {
 			return result, err
 		}
-		if err := tx.WithContext(ctx).Model(&records[i]).Update("status", model.DomainStatusOffline).Error; err != nil {
+		if conflictCount > 0 {
+			return result, ErrProviderDomainLabelExists
+		}
+		if err := tx.WithContext(ctx).Model(&records[i]).Update("domain", newDomain).Error; err != nil {
 			return result, err
 		}
 		result.DomainCount++
@@ -132,17 +155,6 @@ func ChangeProviderDomainLabel(ctx context.Context, tx *gorm.DB, providerID, old
 		}
 	}
 	return result, nil
-}
-
-func replaceDomainNamespace(domain, oldLabel, newLabel, suffix string) string {
-	if domain == "" || oldLabel == "" || newLabel == "" || oldLabel == newLabel {
-		return domain
-	}
-	oldSuffix := "." + strings.ToLower(oldLabel) + suffix
-	if !strings.HasSuffix(strings.ToLower(domain), oldSuffix) {
-		return domain
-	}
-	return domain[:len(domain)-len(oldSuffix)] + "." + newLabel + suffix
 }
 
 func domainSuffix(ctx context.Context, database *gorm.DB) string {

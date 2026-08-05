@@ -23,16 +23,16 @@ import (
 func TestResourceDeployTokenRegistersOnceAndBindsTechnicalResource(t *testing.T) {
 	database, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.NewString())), &gorm.Config{IgnoreRelationshipsWhenMigrating: true})
 	require.NoError(t, err)
-	require.NoError(t, database.AutoMigrate(&model.User{}, &model.Node{}, &model.ResourceProvider{}, &model.TechnicalResource{}, &model.TechnicalResourceBinding{}, &model.TechnicalResourceDeployToken{}, &model.DeployToken{}))
+	require.NoError(t, database.AutoMigrate(&model.User{}, &model.Node{}, &model.Endpoint{}, &model.ResourceProvider{}, &model.TechnicalResource{}, &model.TechnicalResourceBinding{}, &model.TechnicalResourceDeployToken{}, &model.DeployToken{}))
 	previous := serverdb.DB
 	serverdb.DB = database
 	t.Cleanup(func() { serverdb.DB = previous })
 
 	user := model.User{Name: "runtime-agent", Role: model.UserRoleAgent, SecretHash: "fixture", Enabled: true}
 	require.NoError(t, database.Create(&user).Error)
-	provider := model.ResourceProvider{ID: uuid.NewString(), Key: "provider-a", DisplayName: "Provider A", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	provider := model.ResourceProvider{ID: uuid.NewString(), Key: "provider-a", DisplayName: "Provider A", DomainScope: model.ProviderDomainNamed, DomainLabel: "provider-a", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
 	require.NoError(t, database.Create(&provider).Error)
-	resource := model.TechnicalResource{ID: uuid.NewString(), ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "resource:test", LifecycleState: model.TechnicalResourcePending, HealthState: model.ResourceHealthUnknown, CredentialRevision: 1, RuntimeUserID: user.ID, ConfigRevision: 1, RowVersion: 1}
+	resource := model.TechnicalResource{ID: uuid.NewString(), ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "resource:test", DomainLabel: "resource-test", LifecycleState: model.TechnicalResourcePending, HealthState: model.ResourceHealthUnknown, CredentialRevision: 1, RuntimeUserID: user.ID, ConfigRevision: 1, RowVersion: 1}
 	require.NoError(t, database.Create(&resource).Error)
 	expires := time.Now().Add(time.Hour)
 	token := model.TechnicalResourceDeployToken{ID: uuid.NewString(), TechnicalResourceID: resource.ID, Token: "resource-token", Name: "production-agent", RuntimeUserID: user.ID, Status: model.TechnicalResourceDeployTokenPending, ExpiresAt: &expires, CreatedByUserID: user.ID}

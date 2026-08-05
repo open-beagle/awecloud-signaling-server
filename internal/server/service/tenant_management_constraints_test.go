@@ -70,10 +70,10 @@ func newTenantManagementConstraintFixture(t *testing.T) tenantManagementConstrai
 	actorDesktop := model.Node{ID: 7203, UserID: actor.ID, Name: "tenant-trigger-admin-desktop", Type: model.NodeTypeDesktop, LastHeartbeat: &now}
 	require.NoError(t, database.Create(&[]model.Node{desktop, agentNode, actorDesktop}).Error)
 
-	provider := model.ResourceProvider{ID: uuid.NewString(), Key: "tenant-trigger-provider", DisplayName: "Tenant Trigger Provider", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	provider := model.ResourceProvider{ID: uuid.NewString(), Key: "tenant-trigger-provider", DisplayName: "Tenant Trigger Provider", DomainScope: model.ProviderDomainNamed, DomainLabel: "tenant-trigger-provider", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
 	require.NoError(t, database.Create(&provider).Error)
 	technical := model.TechnicalResource{
-		ID: uuid.NewString(), ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "tenant-trigger-agent",
+		ID: uuid.NewString(), ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "tenant-trigger-agent", DomainLabel: "tenant-trigger-agent",
 		LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline,
 		CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1,
 	}

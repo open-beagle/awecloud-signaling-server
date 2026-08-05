@@ -103,16 +103,24 @@ type PlatformRoleMembership struct {
 func (PlatformRoleMembership) TableName() string { return "platform_role_membership" }
 
 type ResourceProvider struct {
-	ID          string         `gorm:"primaryKey;size:36" json:"id"`
-	Key         string         `gorm:"size:100;not null;uniqueIndex" json:"key"`
-	DisplayName string         `gorm:"size:200;not null" json:"display_name"`
-	DomainLabel string         `gorm:"size:63;not null;default:'';index" json:"domain_label"`
-	Status      ProviderStatus `gorm:"size:20;not null;default:'active';index;check:chk_resource_provider_status,status IN ('active','suspended','retired')" json:"status"`
-	Revision    int64          `gorm:"not null;default:1;check:chk_resource_provider_revision,revision > 0" json:"revision"`
-	RowVersion  int64          `gorm:"not null;default:1;check:chk_resource_provider_row_version,row_version > 0" json:"row_version"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	ID          string              `gorm:"primaryKey;size:36" json:"id"`
+	Key         string              `gorm:"size:100;not null;uniqueIndex" json:"key"`
+	DisplayName string              `gorm:"size:200;not null" json:"display_name"`
+	DomainScope ProviderDomainScope `gorm:"size:16;not null;default:'named';index;check:chk_resource_provider_domain_scope,domain_scope IN ('root','named')" json:"domain_scope"`
+	DomainLabel string              `gorm:"size:63;not null;default:'';index;check:chk_resource_provider_domain_shape,(domain_scope = 'root' AND domain_label = '') OR (domain_scope = 'named' AND domain_label <> '')" json:"domain_label"`
+	Status      ProviderStatus      `gorm:"size:20;not null;default:'active';index;check:chk_resource_provider_status,status IN ('active','suspended','retired')" json:"status"`
+	Revision    int64               `gorm:"not null;default:1;check:chk_resource_provider_revision,revision > 0" json:"revision"`
+	RowVersion  int64               `gorm:"not null;default:1;check:chk_resource_provider_row_version,row_version > 0" json:"row_version"`
+	CreatedAt   time.Time           `json:"created_at"`
+	UpdatedAt   time.Time           `json:"updated_at"`
 }
+
+type ProviderDomainScope string
+
+const (
+	ProviderDomainRoot  ProviderDomainScope = "root"
+	ProviderDomainNamed ProviderDomainScope = "named"
+)
 
 func (ResourceProvider) TableName() string { return "resource_provider" }
 

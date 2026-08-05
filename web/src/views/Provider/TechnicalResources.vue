@@ -44,6 +44,7 @@
           </template>
         </el-table-column>
         <el-table-column label="类型" width="110"><template #default="{ row }">{{ typeLabel(row.type) }}</template></el-table-column>
+		<el-table-column label="域名命名空间" min-width="210"><template #default="{ row }"><span v-if="row.type === 'agent'" class="mono">*.{{ row.domain_namespace }}.beagle</span><span v-else class="secondary inline">继承父 Agent</span></template></el-table-column>
         <el-table-column label="生命周期" width="120"><template #default="{ row }"><el-tag size="small" :type="lifecycleTag(row.lifecycle_state)">{{ lifecycleLabel(row.lifecycle_state) }}</el-tag></template></el-table-column>
         <el-table-column label="健康" width="110"><template #default="{ row }"><el-tag size="small" effect="plain" :type="healthTag(row.health_state)">{{ healthLabel(row.health_state) }}</el-tag></template></el-table-column>
         <el-table-column label="开放能力" min-width="190"><template #default="{ row }"><div class="capabilities"><el-tag v-for="capability in capabilityLabels(row)" :key="capability" size="small" effect="plain" type="info">{{ capability }}</el-tag><span v-if="capabilityLabels(row).length === 0" class="secondary inline">未开放</span></div></template></el-table-column>
@@ -71,11 +72,13 @@
 
 	<el-dialog v-model="createDialog" title="创建 Agent" width="620px" destroy-on-close>
 		<el-form label-position="top">
-			<el-form-item label="Agent 名称" required><el-input v-model="createForm.name" maxlength="100" placeholder="小写字母、数字和连字符，例如 szzy" /></el-form-item>
+			<el-form-item label="Agent 名称" required><el-input v-model="createForm.name" maxlength="100" placeholder="例如 beijing" /></el-form-item>
+			<el-form-item label="Agent 域名标识" required><el-input v-model="createForm.domainLabel" maxlength="63" placeholder="例如 beijing" /><span class="field-help">逻辑集群命名空间，创建后与主机名独立。</span></el-form-item>
+			<el-form-item label="首台 Node 名称" required><el-input v-model="createForm.nodeName" maxlength="63" placeholder="例如 beagle-242" /><span class="field-help">用于本次部署凭据和默认 SSH 主机标签。</span></el-form-item>
 			<el-form-item label="Token 有效期"><el-input-number v-model="createForm.ttlMinutes" :min="1" :max="1440" :step="10" /> <span class="form-suffix">分钟</span></el-form-item>
 			<el-form-item label="创建原因" required><el-input v-model="createForm.reason" type="textarea" :rows="3" maxlength="500" show-word-limit /></el-form-item>
 		</el-form>
-		<template #footer><el-button @click="createDialog = false">取消</el-button><el-button type="primary" :loading="creating" :disabled="!agentNameValid || !createForm.reason.trim()" @click="createAgent">创建并生成命令</el-button></template>
+		<template #footer><el-button @click="createDialog = false">取消</el-button><el-button type="primary" :loading="creating" :disabled="!createFormValid" @click="createAgent">创建并生成命令</el-button></template>
 	</el-dialog>
 
 	<el-dialog v-model="commandDialog" title="部署 Agent" width="760px" :close-on-click-modal="false">
@@ -107,9 +110,12 @@ const commandDialog = ref(false)
 const creating = ref(false)
 const deletingResourceId = ref('')
 const installCommand = ref('')
-const createForm = reactive({ name: '', ttlMinutes: 30, reason: '' })
+const createForm = reactive({ name: '', domainLabel: '', nodeName: '', ttlMinutes: 30, reason: '' })
 const canWrite = computed(() => workspaceStore.can('provider.technical_resources.write'))
 const agentNameValid = computed(() => /^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$/.test(createForm.name.trim()))
+const domainLabelValid = computed(() => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(createForm.domainLabel.trim()))
+const nodeNameValid = computed(() => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(createForm.nodeName.trim()))
+const createFormValid = computed(() => agentNameValid.value && domainLabelValid.value && nodeNameValid.value && !!createForm.reason.trim())
 
 const load = async () => {
   const providerId = workspaceStore.providerId
@@ -143,6 +149,8 @@ const load = async () => {
 const openCreate = async () => {
 	if (!workspaceStore.providerId) return
 	createForm.name = ''
+	createForm.domainLabel = ''
+	createForm.nodeName = ''
 	createForm.reason = ''
 	createForm.ttlMinutes = 30
 	createDialog.value = true
@@ -152,9 +160,9 @@ const createAgent = async () => {
 	if (!workspaceStore.providerId || !agentNameValid.value) return
 	creating.value = true
 	try {
-		const created = await createProviderAgent(workspaceStore.providerId, createForm.name.trim(), createForm.reason.trim())
+		const created = await createProviderAgent(workspaceStore.providerId, createForm.name.trim(), createForm.domainLabel.trim(), createForm.reason.trim())
 		if (!created.success) return
-		const credential = await createProviderDeploymentCredential(workspaceStore.providerId, created.data.id, createForm.name.trim(), createForm.ttlMinutes)
+		const credential = await createProviderDeploymentCredential(workspaceStore.providerId, created.data.id, createForm.nodeName.trim(), createForm.ttlMinutes)
 		if (!credential.success) return
 		installCommand.value = credential.data.install_command
 		createDialog.value = false
@@ -228,6 +236,7 @@ onMounted(load)
 .search-input { width: 300px; }
 .filter-select { width: 160px; }
 .result-count { margin-left: auto; color: var(--text-secondary); font-size: 12px; }
+.field-help { display: block; margin-top: 6px; color: var(--text-secondary); font-size: 12px; }
 .secondary { display: block; margin-top: 3px; color: var(--text-secondary); font-size: 12px; }
 .secondary.inline { display: inline; margin-top: 0; }
 .mono { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; }

@@ -25,10 +25,11 @@ var (
 )
 
 type createPlatformOrganizationRequest struct {
-	Key         string `json:"key"`
-	Name        string `json:"name"`
-	DomainLabel string `json:"domain_label"`
-	Reason      string `json:"reason"`
+	Key         string                    `json:"key"`
+	Name        string                    `json:"name"`
+	DomainScope model.ProviderDomainScope `json:"domain_scope"`
+	DomainLabel string                    `json:"domain_label"`
+	Reason      string                    `json:"reason"`
 }
 
 type updatePlatformOrganizationRequest struct {
@@ -43,16 +44,17 @@ type transitionPlatformOrganizationRequest struct {
 }
 
 type platformOrganizationMutationResponse struct {
-	ID          string    `json:"id"`
-	ScopeType   string    `json:"scope_type"`
-	Key         string    `json:"key"`
-	Name        string    `json:"name"`
-	DomainLabel string    `json:"domain_label,omitempty"`
-	Status      string    `json:"status"`
-	Revision    int64     `json:"revision"`
-	RowVersion  int64     `json:"row_version"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string                    `json:"id"`
+	ScopeType   string                    `json:"scope_type"`
+	Key         string                    `json:"key"`
+	Name        string                    `json:"name"`
+	DomainLabel string                    `json:"domain_label,omitempty"`
+	DomainScope model.ProviderDomainScope `json:"domain_scope,omitempty"`
+	Status      string                    `json:"status"`
+	Revision    int64                     `json:"revision"`
+	RowVersion  int64                     `json:"row_version"`
+	CreatedAt   time.Time                 `json:"created_at"`
+	UpdatedAt   time.Time                 `json:"updated_at"`
 }
 
 func (a *PlatformGovernanceAPI) CreateProvider(c *gin.Context) {
@@ -105,18 +107,43 @@ func (a *PlatformGovernanceAPI) createOrganization(c *gin.Context, scopeType mod
 		id := uuid.NewString()
 		var response platformOrganizationMutationResponse
 		if scopeType == model.ManagementScopeProvider {
-			domainLabel, err := service.NormalizeProviderDomainLabel(request.DomainLabel)
-			if err != nil {
-				return response, err
+			if request.DomainScope != model.ProviderDomainRoot && request.DomainScope != model.ProviderDomainNamed {
+				return response, service.ErrProviderDomainLabelInvalid
 			}
-			var domainCount int64
-			if err := tx.Model(&model.ResourceProvider{}).Where("lower(domain_label) = ?", domainLabel).Count(&domainCount).Error; err != nil {
-				return response, err
+			domainLabel := ""
+			if request.DomainScope == model.ProviderDomainRoot {
+				if request.DomainLabel != "" {
+					return response, service.ErrProviderDomainLabelInvalid
+				}
+				var rootCount int64
+				if err := tx.Model(&model.ResourceProvider{}).Where("domain_scope = ?", model.ProviderDomainRoot).Count(&rootCount).Error; err != nil {
+					return response, err
+				}
+				if rootCount > 0 {
+					return response, service.ErrProviderDomainLabelExists
+				}
+			} else {
+				var err error
+				domainLabel, err = service.NormalizeProviderDomainLabel(request.DomainLabel)
+				if err != nil {
+					return response, err
+				}
+				var domainCount int64
+				if err := tx.Model(&model.ResourceProvider{}).Where("domain_scope = ? AND lower(domain_label) = ?", model.ProviderDomainNamed, domainLabel).Count(&domainCount).Error; err != nil {
+					return response, err
+				}
+				var rootAgentCount int64
+				if err := tx.Model(&model.TechnicalResource{}).
+					Joins("JOIN resource_provider ON resource_provider.id = technical_resource.provider_id AND resource_provider.domain_scope = ?", model.ProviderDomainRoot).
+					Where("technical_resource.type = ? AND lower(technical_resource.domain_label) = ? AND technical_resource.deleted_at IS NULL", model.TechnicalResourceAgent, domainLabel).
+					Count(&rootAgentCount).Error; err != nil {
+					return response, err
+				}
+				if domainCount > 0 || rootAgentCount > 0 {
+					return response, service.ErrProviderDomainLabelExists
+				}
 			}
-			if domainCount > 0 {
-				return response, service.ErrProviderDomainLabelExists
-			}
-			item := &model.ResourceProvider{ID: id, Key: request.Key, DisplayName: request.Name, DomainLabel: domainLabel, Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+			item := &model.ResourceProvider{ID: id, Key: request.Key, DisplayName: request.Name, DomainScope: request.DomainScope, DomainLabel: domainLabel, Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
 			if err := tx.Create(item).Error; err != nil {
 				return response, err
 			}
@@ -168,6 +195,9 @@ func (a *PlatformGovernanceAPI) updateOrganization(c *gin.Context, scopeType mod
 			updates := map[string]any{"display_name": request.Name, "revision": gorm.Expr("revision + 1"), "row_version": gorm.Expr("row_version + 1")}
 			domainChange := service.ProviderDomainChangeResult{}
 			newDomainLabel := current.DomainLabel
+			if current.DomainScope == model.ProviderDomainRoot && request.DomainLabel != "" {
+				return service.ErrProviderDomainLabelInvalid
+			}
 			if request.DomainLabel != "" {
 				var err error
 				newDomainLabel, err = service.NormalizeProviderDomainLabel(request.DomainLabel)
@@ -185,6 +215,16 @@ func (a *PlatformGovernanceAPI) updateOrganization(c *gin.Context, scopeType mod
 					return err
 				}
 				if count > 0 {
+					return service.ErrProviderDomainLabelExists
+				}
+				var rootAgentCount int64
+				if err := tx.Model(&model.TechnicalResource{}).
+					Joins("JOIN resource_provider ON resource_provider.id = technical_resource.provider_id AND resource_provider.domain_scope = ?", model.ProviderDomainRoot).
+					Where("technical_resource.type = ? AND technical_resource.deleted_at IS NULL AND lower(technical_resource.domain_label) = ?", model.TechnicalResourceAgent, newDomainLabel).
+					Count(&rootAgentCount).Error; err != nil {
+					return err
+				}
+				if rootAgentCount > 0 {
 					return service.ErrProviderDomainLabelExists
 				}
 				domainChange, err = service.ChangeProviderDomainLabel(c.Request.Context(), tx, id, current.DomainLabel, newDomainLabel)
@@ -371,7 +411,7 @@ func classifyOrganizationStateMiss(tx *gorm.DB, scopeType model.ManagementScopeT
 }
 
 func providerOrganizationMutationView(item *model.ResourceProvider) platformOrganizationMutationResponse {
-	return platformOrganizationMutationResponse{ID: item.ID, ScopeType: "provider", Key: item.Key, Name: item.DisplayName, DomainLabel: item.DomainLabel, Status: string(item.Status), Revision: item.Revision, RowVersion: item.RowVersion, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
+	return platformOrganizationMutationResponse{ID: item.ID, ScopeType: "provider", Key: item.Key, Name: item.DisplayName, DomainScope: item.DomainScope, DomainLabel: item.DomainLabel, Status: string(item.Status), Revision: item.Revision, RowVersion: item.RowVersion, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
 }
 func tenantOrganizationMutationView(item *model.Tenant) platformOrganizationMutationResponse {
 	return platformOrganizationMutationResponse{ID: item.ID, ScopeType: "tenant", Key: item.Key, Name: item.Name, Status: string(item.Status), Revision: item.Revision, RowVersion: item.RowVersion, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}

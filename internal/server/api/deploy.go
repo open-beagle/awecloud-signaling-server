@@ -19,6 +19,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 )
 
 // DeployAPI 统一部署 Token API（合并原 AgentDeployAPI 和 ClientTokenAPI）
@@ -505,33 +506,25 @@ func (a *DeployAPI) registerTechnicalResource(c *gin.Context, req RegisterReques
 		if err := tx.Where("id = ? AND role = ? AND enabled = ?", token.RuntimeUserID, model.UserRoleAgent, true).First(&user).Error; err != nil {
 			return err
 		}
-		err := tx.Where("user_id = ? AND type = ?", user.ID, model.NodeTypeAgent).First(&node).Error
+		err := tx.Where("user_id = ? AND type = ? AND name = ?", user.ID, model.NodeTypeAgent, token.Name).First(&node).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			node = model.Node{UserID: user.ID, Name: token.Name, Type: model.NodeTypeAgent}
+			hostLabel := service.SuggestedHostDomainLabel(ctx, tx, user.ID, token.Name)
+			node = model.Node{UserID: user.ID, Name: token.Name, Type: model.NodeTypeAgent, HostDomainLabel: hostLabel}
 			if err := tx.Create(&node).Error; err != nil {
 				return err
 			}
 		} else if err != nil {
 			return err
-		} else if node.Name != token.Name {
-			if err := tx.Model(&node).Update("name", token.Name).Error; err != nil {
-				return err
-			}
-			node.Name = token.Name
 		}
 		var existingBinding model.TechnicalResourceBinding
 		bindingErr := tx.Where("source_type = ? AND source_id = ?", model.TechnicalResourceBindingLegacyNode, strconv.FormatUint(node.ID, 10)).First(&existingBinding).Error
 		if bindingErr != nil && !errors.Is(bindingErr, gorm.ErrRecordNotFound) {
 			return bindingErr
 		}
-		if resource.LifecycleState == model.TechnicalResourceRegistered {
-			if bindingErr != nil || existingBinding.TechnicalResourceID != resource.ID || !existingBinding.Enabled {
-				return gorm.ErrDuplicatedKey
-			}
-		} else if bindingErr == nil {
+		if bindingErr == nil && (existingBinding.TechnicalResourceID != resource.ID || !existingBinding.Enabled) {
 			return gorm.ErrDuplicatedKey
 		}
-		if resource.LifecycleState == model.TechnicalResourcePending {
+		if errors.Is(bindingErr, gorm.ErrRecordNotFound) {
 			binding := model.TechnicalResourceBinding{
 				ID: uuid.NewString(), TechnicalResourceID: resource.ID, SourceType: model.TechnicalResourceBindingLegacyNode,
 				SourceID: strconv.FormatUint(node.ID, 10), CredentialRevision: resource.CredentialRevision, Enabled: true,
@@ -540,7 +533,7 @@ func (a *DeployAPI) registerTechnicalResource(c *gin.Context, req RegisterReques
 			if err := tx.Create(&binding).Error; err != nil {
 				return err
 			}
-			updated := tx.Model(&model.TechnicalResource{}).Where("id = ? AND lifecycle_state = ? AND row_version = ?", resource.ID, model.TechnicalResourcePending, resource.RowVersion).
+			updated := tx.Model(&model.TechnicalResource{}).Where("id = ? AND row_version = ?", resource.ID, resource.RowVersion).
 				Updates(map[string]any{"runtime_user_id": user.ID, "lifecycle_state": model.TechnicalResourceRegistered, "row_version": gorm.Expr("row_version + 1")})
 			if updated.Error != nil {
 				return updated.Error

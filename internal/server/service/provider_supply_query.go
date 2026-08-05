@@ -36,6 +36,7 @@ type TechnicalResourceDetail struct {
 type TechnicalResourceView struct {
 	model.TechnicalResource
 	Hostname              string `gorm:"column:hostname" json:"hostname"`
+	DomainNamespace       string `gorm:"column:domain_namespace" json:"domain_namespace"`
 	HostnameSource        string `gorm:"column:hostname_source" json:"hostname_source,omitempty"`
 	ParentHostname        string `gorm:"column:parent_hostname" json:"parent_hostname,omitempty"`
 	Version               string `gorm:"column:version" json:"version,omitempty"`
@@ -159,8 +160,11 @@ func (s *ProviderSupplyService) GetTechnicalResource(ctx context.Context, author
 
 func technicalResourceProjectionQuery(query *gorm.DB) *gorm.DB {
 	return query.Table("technical_resource").
+		Joins("JOIN resource_provider projection_provider ON projection_provider.id = technical_resource.provider_id").
 		Joins(`LEFT JOIN technical_resource_binding active_binding
-			ON active_binding.technical_resource_id = technical_resource.id AND active_binding.enabled = ?`, true).
+			ON active_binding.id = (SELECT selected_binding.id FROM technical_resource_binding selected_binding
+				WHERE selected_binding.technical_resource_id = technical_resource.id AND selected_binding.enabled = ?
+				ORDER BY selected_binding.created_at DESC, selected_binding.id ASC LIMIT 1)`, true).
 		Joins(`LEFT JOIN node agent_node
 			ON technical_resource.type = ? AND active_binding.source_type = ?
 			AND CAST(agent_node.id AS TEXT) = active_binding.source_id`, model.TechnicalResourceAgent, model.TechnicalResourceBindingLegacyNode).
@@ -170,13 +174,18 @@ func technicalResourceProjectionQuery(query *gorm.DB) *gorm.DB {
 			AND bound_endpoint.id = active_binding.source_id`, model.TechnicalResourceEndpoint, model.TechnicalResourceBindingLegacyEndpoint).
 		Joins(`LEFT JOIN technical_resource parent_resource ON parent_resource.id = technical_resource.parent_id`).
 		Joins(`LEFT JOIN technical_resource_binding parent_binding
-			ON parent_binding.technical_resource_id = parent_resource.id AND parent_binding.enabled = ?`, true).
+			ON parent_binding.id = (SELECT selected_parent_binding.id FROM technical_resource_binding selected_parent_binding
+				WHERE selected_parent_binding.technical_resource_id = parent_resource.id AND selected_parent_binding.enabled = ?
+				ORDER BY selected_parent_binding.created_at DESC, selected_parent_binding.id ASC LIMIT 1)`, true).
 		Joins(`LEFT JOIN node parent_node
 			ON parent_binding.source_type = ? AND CAST(parent_node.id AS TEXT) = parent_binding.source_id`, model.TechnicalResourceBindingLegacyNode)
 }
 
 func technicalResourceProjectionSelect() string {
 	return `technical_resource.*,
+		CASE WHEN technical_resource.type = 'agent' AND projection_provider.domain_scope = 'root' THEN technical_resource.domain_label
+			WHEN technical_resource.type = 'agent' THEN technical_resource.domain_label || '.' || projection_provider.domain_label
+			ELSE '' END AS domain_namespace,
 		CASE WHEN technical_resource.type = 'agent'
 			THEN COALESCE(NULLIF(agent_node.hostname, ''), agent_node.name, '')
 			ELSE COALESCE(bound_endpoint.name, '') END AS hostname,

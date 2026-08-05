@@ -161,21 +161,19 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 		}, nil
 	}
 
-	// 查询或创建 Node（Agent 类型按 user_id + type 唯一）
+	// 每个部署名称对应一个独立 Agent Node。
 	var node model.Node
 	// Agent 设备名：使用 DeployToken.Name（不使用系统 hostname）
 	deviceName := deployToken.Name
-	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", user.ID, model.NodeTypeAgent).First(&node).Error; err != nil {
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ? AND name = ?", user.ID, model.NodeTypeAgent, deviceName).First(&node).Error; err != nil {
 		// 创建新 Node
 		node = model.Node{
-			UserID: user.ID,
-			Name:   deviceName,
-			Type:   model.NodeTypeAgent,
+			UserID:          user.ID,
+			Name:            deviceName,
+			Type:            model.NodeTypeAgent,
+			HostDomainLabel: service.SuggestedHostDomainLabel(ctx, db.DB, user.ID, deviceName),
 		}
 		db.DB.WithContext(ctx).Create(&node)
-	} else {
-		// 更新 Node 名称
-		node.Name = deviceName
 	}
 
 	// 更新 Node 信息
@@ -305,11 +303,16 @@ func (s *AgentServiceServer) Authenticate(ctx context.Context, req *pb.AgentAuth
 
 	// 查询或创建 Node
 	var node model.Node
-	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", user.ID, model.NodeTypeAgent).First(&node).Error; err != nil {
+	nodeName := user.Name
+	if req.SystemInfo != nil && req.SystemInfo.Hostname != "" {
+		nodeName = req.SystemInfo.Hostname
+	}
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ? AND name = ?", user.ID, model.NodeTypeAgent, nodeName).First(&node).Error; err != nil {
 		node = model.Node{
-			UserID: user.ID,
-			Name:   user.Name,
-			Type:   model.NodeTypeAgent,
+			UserID:          user.ID,
+			Name:            nodeName,
+			Type:            model.NodeTypeAgent,
+			HostDomainLabel: service.SuggestedHostDomainLabel(ctx, db.DB, user.ID, nodeName),
 		}
 		db.DB.WithContext(ctx).Create(&node)
 	}
@@ -628,12 +631,13 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		// 注意：正常情况下，Node 应该在 Register 时已创建，这里是兜底逻辑
 		now := time.Now()
 		node = model.Node{
-			UserID:        agentID,
-			Name:          nodeName,
-			Type:          nodeType,
-			Hostname:      req.Hostname,
-			IP:            req.TunnelIp,
-			LastHeartbeat: &now,
+			UserID:          agentID,
+			Name:            nodeName,
+			Type:            nodeType,
+			Hostname:        req.Hostname,
+			HostDomainLabel: service.SuggestedHostDomainLabel(ctx, db.DB, agentID, req.Hostname),
+			IP:              req.TunnelIp,
+			LastHeartbeat:   &now,
 		}
 		if err := db.DB.WithContext(ctx).Create(&node).Error; err != nil {
 			logger.Errorf("创建 Node 失败: user_id=%d, type=%s, name=%s, err=%v", agentID, nodeType, nodeName, err)
@@ -735,11 +739,6 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		Where("user_id = ? AND type = ? AND name = ?", agentID, nodeType, nodeName).
 		Updates(updates).Error; err != nil {
 		logger.Errorf("更新 Node 心跳失败: %v", err)
-	}
-
-	// 处理域名注册上报
-	if len(req.DomainRegistrations) > 0 {
-		s.handleDomainRegistrations(ctx, agentID, node.ID, req.DomainRegistrations, req.TunnelIp)
 	}
 
 	// 处理已连接的 Endpoint 上报
@@ -1635,115 +1634,6 @@ func (s *AgentServiceServer) ReportNetworkChange(ctx context.Context, req *pb.Re
 	}, nil
 }
 
-// handleDomainRegistrations 处理 Agent 心跳中的域名注册上报
-// 逻辑：按 (domain, node_id) 或 (domain, endpoint_id) 联合唯一 upsert
-// 同一域名可有多条记录（不同 node_id），支持负载均衡
-// tunnelIp: Agent 的隧道 IP，当域名记录的 TargetIp 为空时自动填充
-// nodeID: 当前心跳对应的 Node ID，用于自动填充 Agent 自身域名的 node_id
-func (s *AgentServiceServer) handleDomainRegistrations(ctx context.Context, agentID uint64, nodeID uint64, registrations []*pb.DomainRegistration, tunnelIp string) {
-	registered := 0
-	updated := 0
-
-	for _, reg := range registrations {
-		var existing model.DomainRegistry
-		var err error
-		domain := service.NormalizeReportedProviderDomain(ctx, db.DB, agentID, "", reg.Domain)
-
-		// 自动填充 node_id 和 endpoint_id：
-		// 1. 如果有 endpoint_id，说明是 Endpoint 域名，保持不变
-		// 2. 如果没有 endpoint_id 也没有 node_id，说明是 Agent 自身域名，自动填充当前 nodeID
-		actualNodeID := reg.NodeId
-		actualEndpointID := reg.EndpointId
-		if actualEndpointID == "" && actualNodeID == 0 {
-			actualNodeID = nodeID
-		}
-
-		// 按联合唯一条件查询：node_id 和 endpoint_id 互斥
-		if actualNodeID > 0 {
-			err = db.DB.WithContext(ctx).Where("domain = ? AND node_id = ?", domain, actualNodeID).First(&existing).Error
-		} else if actualEndpointID != "" {
-			err = db.DB.WithContext(ctx).Where("domain = ? AND endpoint_id = ?", domain, actualEndpointID).First(&existing).Error
-		} else {
-			// 兼容：无 node_id 也无 endpoint_id，按 domain + user_id 查询
-			err = db.DB.WithContext(ctx).Where("domain = ? AND user_id = ? AND node_id = 0 AND endpoint_id = ''", domain, agentID).First(&existing).Error
-		}
-
-		// 当 TargetIp 为空时，使用 Agent 的隧道 IP 自动填充
-		targetIp := reg.TargetIp
-		if targetIp == "" && tunnelIp != "" {
-			targetIp = tunnelIp
-		}
-
-		// 将 ServicePorts 序列化为 JSON 数组
-		servicePortsJSON := "[]"
-		if len(reg.ServicePorts) > 0 {
-			if data, err := json.Marshal(reg.ServicePorts); err == nil {
-				servicePortsJSON = string(data)
-			}
-		}
-
-		// 将 SshUsers 序列化为 JSON 数组
-		sshUsersJSON := "[]"
-		if len(reg.SshUsers) > 0 {
-			if data, err := json.Marshal(reg.SshUsers); err == nil {
-				sshUsersJSON = string(data)
-			}
-		}
-
-		record := model.DomainRegistry{
-			Domain:       domain,
-			Type:         model.DomainType(reg.Type),
-			UserID:       agentID,
-			NodeID:       actualNodeID,
-			EndpointID:   actualEndpointID,
-			TargetIP:     targetIp,
-			TargetPort:   int(reg.TargetPort),
-			Namespace:    reg.Namespace,
-			ServiceName:  reg.ServiceName,
-			ServicePorts: servicePortsJSON,
-			SshUsers:     sshUsersJSON,
-			Status:       model.DomainStatusOnline,
-		}
-
-		if err != nil {
-			// 不存在，创建
-			if err := db.DB.WithContext(ctx).Create(&record).Error; err != nil {
-				logger.Errorf("域名注册失败: domain=%s, err=%v", domain, err)
-				continue
-			}
-			registered++
-		} else {
-			// 存在，更新（保留已有的 node_id，避免覆盖）
-			updates := map[string]any{
-				"type":          model.DomainType(reg.Type),
-				"user_id":       agentID,
-				"target_ip":     targetIp,
-				"target_port":   int(reg.TargetPort),
-				"namespace":     reg.Namespace,
-				"service_name":  reg.ServiceName,
-				"service_ports": servicePortsJSON,
-				"ssh_users":     sshUsersJSON,
-				"status":        model.DomainStatusOnline,
-			}
-			// 只有当上报的 node_id 不为 0 时才更新（避免覆盖已有的正确值）
-			if actualNodeID > 0 {
-				updates["node_id"] = actualNodeID
-			}
-			// 只有当上报的 endpoint_id 不为空时才更新
-			if actualEndpointID != "" {
-				updates["endpoint_id"] = actualEndpointID
-			}
-			if err := db.DB.WithContext(ctx).Model(&existing).Updates(updates).Error; err != nil {
-				logger.Errorf("域名更新失败: domain=%s, err=%v", domain, err)
-				continue
-			}
-			updated++
-		}
-	}
-
-	logger.Infof("Agent 域名注册上报完成: agent_id=%d, node_id=%d, registered=%d, updated=%d", agentID, nodeID, registered, updated)
-}
-
 // handleConnectedEndpoints 处理 Agent 心跳中的已连接 Endpoint 上报
 // 一个 Endpoint 节点对应统一 endpoint 表中的一行，各能力通过字段开关控制
 // 按 (user_id, name) 唯一 upsert，不在列表中的标记为 offline
@@ -1765,28 +1655,6 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 			LastHeartbeat: now,
 		})
 		logger.Debugf("更新 Endpoint 内存缓存: endpoint_name=%s, user_id=%d", ep.Name, agentID)
-
-		// 填充 domain_registry.node_id（如果 Endpoint 已有域名记录但 node_id=0）
-		// 查询该 Endpoint 的所有域名记录
-		var domains []model.DomainRegistry
-		if err := db.DB.WithContext(ctx).Where("endpoint_id = ? AND user_id = ? AND node_id = ?", ep.Name, agentID, 0).Find(&domains).Error; err == nil && len(domains) > 0 {
-			// 查询 Agent Node 的 Tailscale IP
-			var agentNode model.Node
-			if err := db.DB.WithContext(ctx).First(&agentNode, nodeID).Error; err == nil {
-				// 更新所有域名记录的 node_id 和 target_ip
-				if err := db.DB.WithContext(ctx).Model(&model.DomainRegistry{}).
-					Where("endpoint_id = ? AND user_id = ? AND node_id = ?", ep.Name, agentID, 0).
-					Updates(map[string]any{
-						"node_id":   nodeID,
-						"target_ip": agentNode.IP,
-					}).Error; err == nil {
-					logger.Infof("填充 Endpoint 域名记录: endpoint=%s, node_id=%d, target_ip=%s, count=%d",
-						ep.Name, nodeID, agentNode.IP, len(domains))
-				} else {
-					logger.Errorf("填充 Endpoint 域名记录失败: endpoint=%s, err=%v", ep.Name, err)
-				}
-			}
-		}
 
 		// upsert 统一 endpoint 表
 		var existing model.Endpoint
@@ -1821,6 +1689,8 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 				ID:                      uuid.New().String(),
 				UserID:                  agentID,
 				Name:                    ep.Name,
+				Hostname:                ep.Name,
+				HostDomainLabel:         service.SuggestedHostDomainLabel(ctx, db.DB, agentID, ep.Name),
 				Version:                 ep.Version,
 				UpdaterProtocol:         ep.UpdaterProtocol,
 				OS:                      ep.Os,
@@ -1936,7 +1806,7 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 					// 更新 SSH 域名的端口
 					if updatedEndpoint.SSHPort > 0 {
 						if err := db.DB.WithContext(ctx).Model(&model.DomainRegistry{}).
-							Where("endpoint_id = ? AND user_id = ? AND type = ?", ep.Name, agentID, model.DomainTypeSSH).
+							Where("endpoint_id = ? AND user_id = ? AND type = ?", updatedEndpoint.ID, agentID, model.DomainTypeSSH).
 							Update("target_port", updatedEndpoint.SSHPort).Error; err != nil {
 							logger.Errorf("更新 Endpoint SSH 域名端口失败: endpoint=%s, port=%d, err=%v", ep.Name, updatedEndpoint.SSHPort, err)
 						} else {
@@ -1947,7 +1817,7 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 					// 更新 K8SAPI 域名的端口
 					if updatedEndpoint.K8SAPIPort > 0 {
 						if err := db.DB.WithContext(ctx).Model(&model.DomainRegistry{}).
-							Where("endpoint_id = ? AND user_id = ? AND type = ?", ep.Name, agentID, model.DomainTypeK8SAPI).
+							Where("endpoint_id = ? AND user_id = ? AND type = ?", updatedEndpoint.ID, agentID, model.DomainTypeK8SAPI).
 							Update("target_port", updatedEndpoint.K8SAPIPort).Error; err != nil {
 							logger.Errorf("更新 Endpoint K8SAPI 域名端口失败: endpoint=%s, port=%d, err=%v", ep.Name, updatedEndpoint.K8SAPIPort, err)
 						} else {

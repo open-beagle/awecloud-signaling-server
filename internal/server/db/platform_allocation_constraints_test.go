@@ -46,7 +46,7 @@ func newAllocationConstraintFixture(t *testing.T) allocationConstraintFixture {
 	user := model.User{ID: 1, Name: "platform-admin", Role: model.UserRoleClient, SecretHash: "fixture", Enabled: true}
 	tenantA := model.Tenant{ID: "tenant-a", Key: "tenant-a", Name: "Tenant A", Status: model.TenantStatusActive}
 	tenantB := model.Tenant{ID: "tenant-b", Key: "tenant-b", Name: "Tenant B", Status: model.TenantStatusActive}
-	provider := model.ResourceProvider{ID: "provider-a", Key: "provider-a", DisplayName: "Provider A", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	provider := model.ResourceProvider{ID: "provider-a", Key: "provider-a", DisplayName: "Provider A", DomainScope: model.ProviderDomainNamed, DomainLabel: "provider-a", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
 	resource := model.PlatformResource{ID: "resource-a", ProviderID: provider.ID, Type: model.SupplyResourceKubernetes, StableKey: "resource-a", DisplayName: "Cluster A", LifecycleState: model.PlatformResourceActive, HealthState: model.ResourceHealthOnline, CapabilityRevision: 1, AllocatableScopeCount: 2, RowVersion: 1}
 	require.NoError(t, DB.Create(&user).Error)
 	require.NoError(t, DB.Create(&[]model.Tenant{tenantA, tenantB}).Error)

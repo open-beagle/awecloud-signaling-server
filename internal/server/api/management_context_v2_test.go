@@ -68,8 +68,8 @@ func newManagementContextAPIFixture(t *testing.T) managementContextAPIFixture {
 		ID: uuid.NewString(), UserID: user.ID, Role: model.PlatformRoleAdmin, Enabled: true, ValidFrom: now,
 		PermissionRevision: 7, CreatedByUserID: user.ID, Reason: "fixture", RowVersion: 1,
 	}).Error)
-	provider := model.ResourceProvider{ID: uuid.NewString(), Key: "provider-a", DisplayName: "Provider A", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
-	otherProvider := model.ResourceProvider{ID: uuid.NewString(), Key: "provider-b", DisplayName: "Provider B", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	provider := model.ResourceProvider{ID: uuid.NewString(), Key: "provider-a", DisplayName: "Provider A", DomainScope: model.ProviderDomainNamed, DomainLabel: "provider-a", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	otherProvider := model.ResourceProvider{ID: uuid.NewString(), Key: "provider-b", DisplayName: "Provider B", DomainScope: model.ProviderDomainNamed, DomainLabel: "provider-b", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
 	require.NoError(t, database.Create(&provider).Error)
 	require.NoError(t, database.Create(&otherProvider).Error)
 	require.NoError(t, database.Create(&model.AdminProviderMembership{

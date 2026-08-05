@@ -116,10 +116,10 @@ func seedSupplyInventoryAgent(t *testing.T, database *gorm.DB, token string, nod
 	require.NoError(t, database.Create(&user).Error)
 	require.NoError(t, database.Create(&model.Node{ID: nodeID, UserID: user.ID, Name: nodeName, Type: model.NodeTypeAgent}).Error)
 	require.NoError(t, database.Create(&model.DeployToken{Token: token, UserID: user.ID, Name: nodeName, Status: model.DeployTokenStatusBound, CreatedBy: user.ID}).Error)
-	provider := model.ResourceProvider{ID: uuid.NewString(), Key: "inventory-provider", DisplayName: "Inventory Provider", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	provider := model.ResourceProvider{ID: uuid.NewString(), Key: "inventory-provider", DisplayName: "Inventory Provider", DomainScope: model.ProviderDomainNamed, DomainLabel: "inventory-provider", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
 	require.NoError(t, database.Create(&provider).Error)
 	resource := model.TechnicalResource{
-		ID: resourceID, ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "agent-stable",
+		ID: resourceID, ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "agent-stable", DomainLabel: "agent-stable",
 		LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthUnknown,
 		CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1,
 	}

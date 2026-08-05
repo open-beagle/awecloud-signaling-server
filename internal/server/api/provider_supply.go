@@ -59,6 +59,7 @@ type providerTechnicalResourceCreateRequest struct {
 	ParentID           string                      `json:"parent_id"`
 	CredentialRevision int64                       `json:"credential_revision"`
 	RuntimeName        string                      `json:"runtime_name"`
+	DomainLabel        string                      `json:"domain_label"`
 	Reason             string                      `json:"reason"`
 }
 
@@ -81,6 +82,11 @@ type providerTechnicalResourceUpdateRequest struct {
 	ReleaseID string `json:"release_id"`
 	Force     bool   `json:"force"`
 	Reason    string `json:"reason"`
+}
+
+type providerAgentDomainLabelRequest struct {
+	DomainLabel string `json:"domain_label"`
+	Reason      string `json:"reason"`
 }
 
 type providerCandidateAcceptRequest struct {
@@ -132,13 +138,44 @@ func (a *ProviderSupplyAPI) CreateTechnicalResource(c *gin.Context) {
 	executeProviderIdempotentMutation(c, authorization, body, http.StatusCreated, "create_technical_resource", request.Reason,
 		func(supply *service.ProviderSupplyService) (any, string, string, int64, error) {
 			resource, err := supply.CreateTechnicalResource(c.Request.Context(), authorization, service.CreateTechnicalResourceInput{
-				Type: request.Type, StableKey: request.StableKey, ParentID: request.ParentID, CredentialRevision: request.CredentialRevision, RuntimeName: request.RuntimeName,
+				Type: request.Type, StableKey: request.StableKey, ParentID: request.ParentID, CredentialRevision: request.CredentialRevision, RuntimeName: request.RuntimeName, DomainLabel: request.DomainLabel,
 			})
 			if err != nil {
 				return nil, "", "", 0, err
 			}
 			return resource, "technical_resource", resource.ID, resource.RowVersion, nil
 		})
+}
+
+func (a *ProviderSupplyAPI) UpdateAgentDomainLabel(c *gin.Context) {
+	authorization, ok := currentManagementAuthorization(c)
+	if !ok {
+		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
+		return
+	}
+	rowVersion, ok := requiredRevision(c)
+	if !ok {
+		codedError(c, http.StatusPreconditionRequired, ErrorCodePreconditionRequired, "必须提供 If-Match revision")
+		return
+	}
+	var request providerAgentDomainLabelRequest
+	if _, ok := decodeProviderSupplyRequest(c, &request); !ok {
+		return
+	}
+	request.DomainLabel = strings.TrimSpace(request.DomainLabel)
+	request.Reason = strings.TrimSpace(request.Reason)
+	if request.Reason == "" || len(request.Reason) > 500 {
+		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "变更原因无效")
+		return
+	}
+	resource, err := service.NewProviderSupplyService(db.DB).ChangeAgentDomainLabel(c.Request.Context(), authorization, c.Param("id"), request.DomainLabel, rowVersion)
+	if err != nil {
+		writeProviderSupplyError(c, err, true)
+		return
+	}
+	recordAuditLog(c.Request.Context(), c, model.ActionUpdateAgent, "technical_resource", resource.ID, resource.DomainLabel, gin.H{"domain_label": resource.DomainLabel, "reason": request.Reason})
+	SetRevisionETag(c, resource.RowVersion)
+	c.JSON(http.StatusOK, NewSuccessResponse(resource))
 }
 
 func (a *ProviderSupplyAPI) CreateDeploymentCredential(c *gin.Context) {
@@ -603,6 +640,7 @@ func providerSupplyCreateRequest(c *gin.Context) (*service.ManagementAuthorizati
 	}
 	request.StableKey = strings.TrimSpace(request.StableKey)
 	request.ParentID = strings.TrimSpace(request.ParentID)
+	request.DomainLabel = strings.TrimSpace(request.DomainLabel)
 	request.Reason = strings.TrimSpace(request.Reason)
 	if request.Reason == "" || len(request.StableKey) > 128 || len(request.ParentID) > 36 ||
 		len(request.Reason) > 500 || request.CredentialRevision < 0 ||
@@ -610,6 +648,11 @@ func providerSupplyCreateRequest(c *gin.Context) (*service.ManagementAuthorizati
 		(request.Type == model.TechnicalResourceAgent && request.ParentID != "") ||
 		(request.Type == model.TechnicalResourceEndpoint && request.ParentID == "") {
 		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "技术资源参数无效")
+		return nil, nil, request, false
+	}
+	if (request.Type == model.TechnicalResourceAgent && request.DomainLabel == "") ||
+		(request.Type == model.TechnicalResourceEndpoint && request.DomainLabel != "") {
+		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "Agent 域名标识无效")
 		return nil, nil, request, false
 	}
 	if request.CredentialRevision == 0 {

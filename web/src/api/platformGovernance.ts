@@ -4,6 +4,7 @@ import type { ApiResponse, PagedResponse } from '@/types/models'
 export type PlatformMembershipScopeType = 'provider' | 'tenant'
 export type PlatformMembershipState = 'active' | 'disabled' | 'scheduled' | 'expired'
 export type PlatformOrganizationStatus = 'active' | 'suspended' | 'retired'
+export type ProviderDomainScope = 'root' | 'named'
 
 export interface PlatformOrganization {
   id: string
@@ -11,6 +12,7 @@ export interface PlatformOrganization {
   key: string
   name: string
   domain_label?: string
+  domain_scope?: ProviderDomainScope
   status: PlatformOrganizationStatus
   management_membership_count: number
   business_member_count: number
@@ -35,6 +37,7 @@ export interface PlatformOrganizationMutationRequest {
   key?: string
   name?: string
   domain_label?: string
+  domain_scope?: ProviderDomainScope
   domain_change_confirmation?: string
   reason: string
 }

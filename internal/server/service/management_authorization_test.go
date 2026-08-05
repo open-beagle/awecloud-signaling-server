@@ -53,8 +53,8 @@ func newManagementAuthorizationFixture(t *testing.T) managementAuthorizationFixt
 		ID: uuid.NewString(), UserID: actor.ID, Role: model.PlatformRoleAdmin, Enabled: true, ValidFrom: now.Add(-time.Hour),
 		PermissionRevision: 7, CreatedByUserID: actor.ID, Reason: "fixture", RowVersion: 1,
 	}).Error)
-	provider := model.ResourceProvider{ID: uuid.NewString(), Key: "provider-a", DisplayName: "Provider A", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
-	otherProvider := model.ResourceProvider{ID: uuid.NewString(), Key: "provider-b", DisplayName: "Provider B", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	provider := model.ResourceProvider{ID: uuid.NewString(), Key: "provider-a", DisplayName: "Provider A", DomainScope: model.ProviderDomainNamed, DomainLabel: "provider-a", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	otherProvider := model.ResourceProvider{ID: uuid.NewString(), Key: "provider-b", DisplayName: "Provider B", DomainScope: model.ProviderDomainNamed, DomainLabel: "provider-b", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
 	require.NoError(t, database.Create(&provider).Error)
 	require.NoError(t, database.Create(&otherProvider).Error)
 	require.NoError(t, database.Create(&model.AdminProviderMembership{

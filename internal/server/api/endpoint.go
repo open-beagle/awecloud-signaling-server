@@ -36,6 +36,8 @@ type EndpointListItem struct {
 	UserID            uint64    `json:"user_id"`
 	AgentName         string    `json:"agent_name"`
 	Name              string    `json:"name"`
+	Hostname          string    `json:"hostname"`
+	HostDomainLabel   string    `json:"host_domain_label"`
 	Alias             string    `json:"alias"`
 	Version           string    `json:"version"`
 	Status            string    `json:"status"`
@@ -105,6 +107,8 @@ func (a *EndpointAPI) ListEndpoints(c *gin.Context) {
 			UserID:            ep.UserID,
 			AgentName:         agentName,
 			Name:              ep.Name,
+			Hostname:          ep.Hostname,
+			HostDomainLabel:   ep.HostDomainLabel,
 			Alias:             ep.Alias,
 			Version:           ep.Version,
 			Status:            ep.Status,
@@ -126,6 +130,8 @@ type EndpointDetailResponse struct {
 	UserID                  uint64    `json:"user_id"`
 	AgentName               string    `json:"agent_name"`
 	Name                    string    `json:"name"`
+	Hostname                string    `json:"hostname"`
+	HostDomainLabel         string    `json:"host_domain_label"`
 	Alias                   string    `json:"alias"`
 	Version                 string    `json:"version"`
 	Status                  string    `json:"status"`
@@ -178,6 +184,8 @@ func (a *EndpointAPI) GetEndpointDetail(c *gin.Context) {
 		UserID:                  ep.UserID,
 		AgentName:               agentName,
 		Name:                    ep.Name,
+		Hostname:                ep.Hostname,
+		HostDomainLabel:         ep.HostDomainLabel,
 		Alias:                   ep.Alias,
 		Version:                 ep.Version,
 		Status:                  ep.Status,
@@ -193,6 +201,25 @@ func (a *EndpointAPI) GetEndpointDetail(c *gin.Context) {
 		CreatedAt:               ep.CreatedAt,
 		UpdatedAt:               ep.UpdatedAt,
 	}))
+}
+
+func (a *EndpointAPI) UpdateHostDomainLabel(c *gin.Context) {
+	id := c.Param("id")
+	var request hostDomainLabelRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
+		return
+	}
+	if err := a.domainService.UpdateEndpointHostDomainLabel(c.Request.Context(), id, request.HostDomainLabel); err != nil {
+		status := http.StatusConflict
+		if err == service.ErrHostDomainLabelInvalid {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, NewErrorResponse(err.Error()))
+		return
+	}
+	recordAuditLog(c.Request.Context(), c, model.ActionUpdateEndpoint, "endpoint", id, request.HostDomainLabel, gin.H{"host_domain_label": request.HostDomainLabel})
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("SSH 域名标识已更新", nil))
 }
 
 // ========== Endpoint 更新 ==========
@@ -278,7 +305,7 @@ func (a *EndpointAPI) UpdateEndpoint(c *gin.Context) {
 						}
 					} else {
 						// SSH 关闭 → 删除域名
-						if err := a.domainService.DeleteEndpointSSHDomain(ctx, ep.Name, &user); err != nil {
+						if err := a.domainService.DeleteEndpointSSHDomain(ctx, ep.ID, &user); err != nil {
 							logger.Errorf("删除 Endpoint SSH 域名失败: endpoint=%s, err=%v", ep.Name, err)
 						}
 					}
@@ -303,7 +330,7 @@ func (a *EndpointAPI) UpdateEndpoint(c *gin.Context) {
 						}
 					} else {
 						// K8S API 关闭 → 删除域名
-						if err := a.domainService.DeleteEndpointK8SAPIDomain(ctx, ep.Name, &user); err != nil {
+						if err := a.domainService.DeleteEndpointK8SAPIDomain(ctx, ep.ID, &user); err != nil {
 							logger.Errorf("删除 Endpoint K8S API 域名失败: endpoint=%s, err=%v", ep.Name, err)
 						}
 					}
@@ -339,7 +366,7 @@ func (a *EndpointAPI) RevokeEndpoint(c *gin.Context) {
 	}
 
 	// 删除 Endpoint 的所有域名
-	if err := a.domainService.DeleteEndpointAllDomains(ctx, ep.Name); err != nil {
+	if err := a.domainService.DeleteEndpointAllDomains(ctx, ep.ID); err != nil {
 		logger.Errorf("删除 Endpoint 所有域名失败: endpoint=%s, err=%v", ep.Name, err)
 	}
 

@@ -195,12 +195,12 @@ func TestInitDBEnforcesS2RelationshipsWithoutGlobalForeignKeys(t *testing.T) {
 	require.NoError(t, DB.Create(&model.User{ID: 1, Name: "provider-admin", Role: model.UserRoleClient, SecretHash: "fixture-hash", Enabled: true}).Error)
 	require.NoError(t, DB.Create(&model.Node{ID: 1001, UserID: 1, Name: "fixture-agent", Type: model.NodeTypeAgent}).Error)
 	require.NoError(t, DB.Create(&[]model.ResourceProvider{
-		{ID: "provider-a", Key: "provider-a", DisplayName: "Provider A", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1},
-		{ID: "provider-b", Key: "provider-b", DisplayName: "Provider B", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1},
+		{ID: "provider-a", Key: "provider-a", DisplayName: "Provider A", DomainScope: model.ProviderDomainNamed, DomainLabel: "provider-a", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1},
+		{ID: "provider-b", Key: "provider-b", DisplayName: "Provider B", DomainScope: model.ProviderDomainNamed, DomainLabel: "provider-b", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1},
 	}).Error)
 	require.NoError(t, DB.Create(&[]model.TechnicalResource{
-		{ID: "agent-a", ProviderID: "provider-a", Type: model.TechnicalResourceAgent, StableKey: "agent-a", LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1},
-		{ID: "agent-b", ProviderID: "provider-b", Type: model.TechnicalResourceAgent, StableKey: "agent-b", LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1},
+		{ID: "agent-a", ProviderID: "provider-a", Type: model.TechnicalResourceAgent, StableKey: "agent-a", DomainLabel: "agent-a", LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1},
+		{ID: "agent-b", ProviderID: "provider-b", Type: model.TechnicalResourceAgent, StableKey: "agent-b", DomainLabel: "agent-b", LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1},
 	}).Error)
 
 	crossProviderParent := model.TechnicalResource{ID: "endpoint-b", ProviderID: "provider-b", Type: model.TechnicalResourceEndpoint, StableKey: "endpoint-b", ParentID: stringPointer("agent-a"), LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1}

@@ -38,12 +38,92 @@ func NewProviderSupplyService(database *gorm.DB) *ProviderSupplyService {
 	return &ProviderSupplyService{db: database, now: time.Now}
 }
 
+func (s *ProviderSupplyService) ChangeAgentDomainLabel(ctx context.Context, authorization *ManagementAuthorizationContext, resourceID, value string, expectedRowVersion int64) (*model.TechnicalResource, error) {
+	label, err := NormalizeAgentDomainLabel(value)
+	if err != nil || expectedRowVersion <= 0 {
+		return nil, ErrAgentDomainLabelInvalid
+	}
+	var resource model.TechnicalResource
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		providerID, err := reauthorizeProviderPermission(tx, authorization, PermissionProviderTechnicalResourcesWrite, s.now().UTC())
+		if err != nil {
+			return err
+		}
+		if err := tx.Where("id = ? AND provider_id = ? AND type = ? AND deleted_at IS NULL", resourceID, providerID, model.TechnicalResourceAgent).First(&resource).Error; err != nil {
+			return providerSupplyNotFound(err)
+		}
+		if resource.RowVersion != expectedRowVersion {
+			return ErrProviderSupplyVersionConflict
+		}
+		if resource.DomainLabel == label {
+			return nil
+		}
+		var duplicateCount int64
+		if err := tx.Model(&model.TechnicalResource{}).
+			Where("provider_id = ? AND type = ? AND lower(domain_label) = ? AND id <> ? AND deleted_at IS NULL", providerID, model.TechnicalResourceAgent, label, resource.ID).
+			Count(&duplicateCount).Error; err != nil {
+			return err
+		}
+		var provider model.ResourceProvider
+		if err := tx.First(&provider, "id = ?", providerID).Error; err != nil {
+			return err
+		}
+		if provider.DomainScope == model.ProviderDomainRoot {
+			var namedProviderCount int64
+			if err := tx.Model(&model.ResourceProvider{}).Where("domain_scope = ? AND lower(domain_label) = ?", model.ProviderDomainNamed, label).Count(&namedProviderCount).Error; err != nil {
+				return err
+			}
+			duplicateCount += namedProviderCount
+		}
+		if duplicateCount > 0 {
+			return ErrAgentDomainLabelExists
+		}
+		oldIdentity := AgentDomainIdentity{ProviderID: providerID, AgentResourceID: resource.ID, AgentLabel: resource.DomainLabel, ProviderScope: provider.DomainScope, ProviderLabel: provider.DomainLabel}
+		newIdentity := oldIdentity
+		newIdentity.AgentLabel = label
+		oldSuffix := "." + oldIdentity.Namespace() + domainSuffix(ctx, tx)
+		newSuffix := "." + newIdentity.Namespace() + domainSuffix(ctx, tx)
+		var records []model.DomainRegistry
+		if err := tx.Where("agent_resource_id = ?", resource.ID).Find(&records).Error; err != nil {
+			return err
+		}
+		for i := range records {
+			if !strings.HasSuffix(records[i].Domain, oldSuffix) {
+				return ErrDomainOwnershipMissing
+			}
+			newDomain := strings.TrimSuffix(records[i].Domain, oldSuffix) + newSuffix
+			var count int64
+			if err := tx.Model(&model.DomainRegistry{}).Where("domain = ? AND agent_resource_id <> ?", newDomain, resource.ID).Count(&count).Error; err != nil {
+				return err
+			}
+			if count > 0 {
+				return ErrProviderSupplyConflict
+			}
+			if err := tx.Model(&records[i]).Update("domain", newDomain).Error; err != nil {
+				return err
+			}
+		}
+		updated := tx.Model(&resource).Where("row_version = ?", expectedRowVersion).Updates(map[string]any{
+			"domain_label": label, "config_revision": gorm.Expr("config_revision + 1"), "row_version": gorm.Expr("row_version + 1"),
+		})
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected != 1 {
+			return ErrProviderSupplyVersionConflict
+		}
+		return tx.First(&resource, "id = ?", resource.ID).Error
+	})
+	return &resource, err
+}
+
 type CreateTechnicalResourceInput struct {
 	Type               model.TechnicalResourceType
 	StableKey          string
 	ParentID           string
 	CredentialRevision int64
 	RuntimeName        string
+	DomainLabel        string
 }
 
 var technicalResourceRuntimeNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$`)
@@ -55,6 +135,7 @@ func (s *ProviderSupplyService) CreateTechnicalResource(ctx context.Context, aut
 	input.StableKey = strings.TrimSpace(input.StableKey)
 	input.ParentID = strings.TrimSpace(input.ParentID)
 	input.RuntimeName = strings.ToLower(strings.TrimSpace(input.RuntimeName))
+	input.DomainLabel = strings.ToLower(strings.TrimSpace(input.DomainLabel))
 	if len(input.StableKey) > 128 || input.CredentialRevision <= 0 {
 		return nil, ErrProviderSupplyInvalidInput
 	}
@@ -69,10 +150,19 @@ func (s *ProviderSupplyService) CreateTechnicalResource(ctx context.Context, aut
 		(input.Type == model.TechnicalResourceEndpoint && input.RuntimeName != "") {
 		return nil, ErrProviderSupplyInvalidInput
 	}
+	if input.Type == model.TechnicalResourceAgent {
+		var err error
+		input.DomainLabel, err = NormalizeAgentDomainLabel(input.DomainLabel)
+		if err != nil {
+			return nil, err
+		}
+	} else if input.DomainLabel != "" {
+		return nil, ErrProviderSupplyInvalidInput
+	}
 
 	now := s.now().UTC()
 	resource := &model.TechnicalResource{
-		ID: uuid.NewString(), Type: input.Type, StableKey: input.StableKey,
+		ID: uuid.NewString(), Type: input.Type, StableKey: input.StableKey, DomainLabel: input.DomainLabel,
 		LifecycleState: model.TechnicalResourcePending, HealthState: model.ResourceHealthUnknown,
 		CredentialRevision: input.CredentialRevision, ConfigRevision: 1, ObservedRevision: 0, RowVersion: 1,
 	}
@@ -88,6 +178,32 @@ func (s *ProviderSupplyService) CreateTechnicalResource(ctx context.Context, aut
 			return err
 		}
 		resource.ProviderID = providerID
+		if resource.Type == model.TechnicalResourceAgent {
+			var duplicateCount int64
+			if err := tx.Model(&model.TechnicalResource{}).
+				Where("provider_id = ? AND type = ? AND lower(domain_label) = ? AND deleted_at IS NULL", providerID, model.TechnicalResourceAgent, resource.DomainLabel).
+				Count(&duplicateCount).Error; err != nil {
+				return err
+			}
+			if duplicateCount > 0 {
+				return ErrAgentDomainLabelExists
+			}
+			var provider model.ResourceProvider
+			if err := tx.First(&provider, "id = ?", providerID).Error; err != nil {
+				return err
+			}
+			if provider.DomainScope == model.ProviderDomainRoot {
+				var namespaceCount int64
+				if err := tx.Model(&model.ResourceProvider{}).
+					Where("domain_scope = ? AND lower(domain_label) = ?", model.ProviderDomainNamed, resource.DomainLabel).
+					Count(&namespaceCount).Error; err != nil {
+					return err
+				}
+				if namespaceCount > 0 {
+					return ErrAgentDomainLabelExists
+				}
+			}
+		}
 		if resource.ParentID != nil {
 			var parent model.TechnicalResource
 			if err := tx.Where("provider_id = ? AND id = ? AND type = ? AND lifecycle_state = ?",
@@ -198,7 +314,7 @@ func (s *ProviderSupplyService) BindTechnicalResource(ctx context.Context, autho
 			Where("technical_resource_id = ? AND enabled = ?", resource.ID, true).Count(&activeBindingCount).Error; err != nil {
 			return err
 		}
-		if activeBindingCount != 0 {
+		if activeBindingCount != 0 && (resource.Type != model.TechnicalResourceAgent || input.SourceType != model.TechnicalResourceBindingLegacyNode) {
 			return ErrProviderSupplyConflict
 		}
 
@@ -287,7 +403,7 @@ func (s *ProviderSupplyService) SetTechnicalResourceLifecycle(ctx context.Contex
 				Where("technical_resource_id = ? AND enabled = ?", resource.ID, true).Count(&activeBindings).Error; err != nil {
 				return err
 			}
-			if activeBindings != 1 {
+			if activeBindings == 0 || (resource.Type != model.TechnicalResourceAgent && activeBindings != 1) {
 				return ErrTechnicalResourceUnbound
 			}
 		}

@@ -122,6 +122,41 @@ func TestTechnicalResourceQueriesProjectAndSearchRuntimeHostname(t *testing.T) {
 	require.ErrorIs(t, err, ErrProviderSupplyObjectNotFound)
 }
 
+func TestTechnicalResourceQueriesReturnOneAgentWithAllNodeBindings(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	agent := fixture.createBoundAgent(t, "agent-ha", 1001)
+	bound, err := fixture.service.BindTechnicalResource(context.Background(), fixture.authorization, BindTechnicalResourceInput{
+		TechnicalResourceID: agent.ID, SourceType: model.TechnicalResourceBindingLegacyNode,
+		SourceID: "1002", ExpectedResourceVersion: agent.RowVersion, Reason: "second HA node",
+	})
+	require.NoError(t, err)
+
+	result, err := fixture.service.ListTechnicalResources(context.Background(), fixture.authorization, ProviderSupplyListInput{Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, result.Total)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, agent.ID, result.Items[0].ID)
+
+	detail, err := fixture.service.GetTechnicalResource(context.Background(), fixture.authorization, bound.TechnicalResource.ID)
+	require.NoError(t, err)
+	require.Len(t, detail.Bindings, 2)
+	require.ElementsMatch(t, []string{"1001", "1002"}, []string{detail.Bindings[0].SourceID, detail.Bindings[1].SourceID})
+
+	_, err = fixture.service.UpdateTechnicalResourceCapabilities(context.Background(), fixture.authorization, UpdateTechnicalResourceCapabilitiesInput{
+		TechnicalResourceID: agent.ID, ExpectedRowVersion: bound.TechnicalResource.RowVersion,
+		Capabilities: TechnicalResourceCapabilities{SVCEnabled: true, SVCNamespaces: []string{"shared"}},
+	})
+	require.NoError(t, err)
+	var configuredNodes []model.Node
+	require.NoError(t, fixture.database.Where("id IN ?", []uint64{1001, 1002}).Order("id").Find(&configuredNodes).Error)
+	require.Len(t, configuredNodes, 2)
+	for i := range configuredNodes {
+		require.NotNil(t, configuredNodes[i].SVCEnabled)
+		require.True(t, *configuredNodes[i].SVCEnabled)
+		require.Equal(t, `["shared"]`, configuredNodes[i].SVCNamespaces)
+	}
+}
+
 func TestProviderSupplyQueriesValidateFiltersAndReauthorize(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	createLifecycleSupplyResource(t, fixture)

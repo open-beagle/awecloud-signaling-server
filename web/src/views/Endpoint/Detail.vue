@@ -15,6 +15,8 @@
           <el-descriptions-item :label="$t('endpoint.name')">{{ endpoint.name }}</el-descriptions-item>
           <el-descriptions-item :label="$t('endpoint.alias')">{{ endpoint.alias || '-' }}</el-descriptions-item>
           <el-descriptions-item :label="$t('endpoint.ownerAgent')">{{ endpoint.agent_name || '-' }}</el-descriptions-item>
+		  <el-descriptions-item label="上报主机名">{{ endpoint.hostname || '-' }}</el-descriptions-item>
+		  <el-descriptions-item label="SSH 域名标识"><span class="mono">{{ endpoint.host_domain_label || '待配置' }}</span><el-button link type="primary" @click="editHostDomainLabel">编辑</el-button></el-descriptions-item>
           <el-descriptions-item :label="$t('endpoint.version')">{{ endpoint.version || '-' }}</el-descriptions-item>
           <el-descriptions-item :label="$t('endpoint.capabilities')">
             <el-tag v-if="endpoint.ssh_enabled" size="small" class="tag-item">SSH</el-tag>
@@ -112,7 +114,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getEndpointDetail, updateEndpoint, revokeEndpoint, type EndpointDetail } from '@/api/endpoint'
+import { getEndpointDetail, updateEndpoint, updateEndpointHostDomainLabel, revokeEndpoint, type EndpointDetail } from '@/api/endpoint'
 import { formatTime } from '@/utils/time'
 
 const { t } = useI18n()
@@ -124,6 +126,24 @@ const toggling = ref(false)
 const endpoint = ref<EndpointDetail | null>(null)
 const showEditDialog = ref(false)
 const editAlias = ref('')
+
+const editHostDomainLabel = async () => {
+  if (!endpoint.value) return
+  try {
+    const result = await ElMessageBox.prompt('修改后旧 SSH 域名立即失效。', '编辑 SSH 域名标识', {
+      inputValue: endpoint.value.host_domain_label,
+      inputPattern: /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
+      inputErrorMessage: '请输入有效的 DNS 单标签',
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+    })
+    await updateEndpointHostDomainLabel(endpoint.value.id, result.value.trim().toLowerCase())
+    ElMessage.success('SSH 域名标识已更新')
+    await fetchDetail()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') throw error
+  }
+}
 
 // 获取详情
 const fetchDetail = async () => {

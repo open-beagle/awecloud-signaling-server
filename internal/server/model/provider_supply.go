@@ -33,6 +33,7 @@ type TechnicalResource struct {
 	ProviderID         string                          `gorm:"size:36;not null;uniqueIndex:uk_technical_resource_identity,priority:1;uniqueIndex:uk_technical_resource_provider_id,priority:1;index" json:"provider_id"`
 	Type               TechnicalResourceType           `gorm:"size:20;not null;uniqueIndex:uk_technical_resource_identity,priority:2;index;check:chk_technical_resource_type,type IN ('agent','endpoint')" json:"type"`
 	StableKey          string                          `gorm:"size:128;not null;uniqueIndex:uk_technical_resource_identity,priority:3" json:"stable_key"`
+	DomainLabel        string                          `gorm:"size:63;not null;default:'';index;check:chk_technical_resource_domain_shape,(type = 'agent' AND domain_label <> '') OR (type = 'endpoint' AND domain_label = '')" json:"domain_label"`
 	ParentID           *string                         `gorm:"size:36;index;check:chk_technical_resource_parent,(type = 'agent' AND parent_id IS NULL) OR (type = 'endpoint' AND parent_id IS NOT NULL)" json:"parent_id,omitempty"`
 	LifecycleState     TechnicalResourceLifecycleState `gorm:"size:20;not null;default:'pending';index;check:chk_technical_resource_lifecycle,lifecycle_state IN ('pending','registered','disabled','retired')" json:"lifecycle_state"`
 	HealthState        ResourceHealthState             `gorm:"size:20;not null;default:'unknown';index;check:chk_technical_resource_health,health_state IN ('unknown','online','degraded','offline')" json:"health_state"`
@@ -65,7 +66,7 @@ const (
 
 type TechnicalResourceBinding struct {
 	ID                  string                             `gorm:"primaryKey;size:36" json:"id"`
-	TechnicalResourceID string                             `gorm:"size:36;not null;uniqueIndex:uk_active_technical_resource_binding,where:enabled = true;index" json:"technical_resource_id"`
+	TechnicalResourceID string                             `gorm:"size:36;not null;index" json:"technical_resource_id"`
 	SourceType          TechnicalResourceBindingSourceType `gorm:"size:32;not null;uniqueIndex:uk_technical_resource_binding_source,priority:1;check:chk_technical_resource_binding_source_type,source_type IN ('legacy_node','legacy_endpoint')" json:"source_type"`
 	SourceID            string                             `gorm:"size:100;not null;uniqueIndex:uk_technical_resource_binding_source,priority:2" json:"source_id"`
 	CredentialRevision  int64                              `gorm:"not null;check:chk_technical_resource_binding_credential_revision,credential_revision > 0" json:"credential_revision"`

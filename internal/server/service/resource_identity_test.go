@@ -42,7 +42,7 @@ func newResourceIdentityServiceDB(t *testing.T) *gorm.DB {
 func TestResourceIdentityCreationValidatesReferences(t *testing.T) {
 	database := newResourceIdentityServiceDB(t)
 	now := time.Date(2026, 1, 15, 8, 0, 0, 0, time.UTC)
-	provider := model.ResourceProvider{ID: "provider-1", Key: "provider-1", DisplayName: "Provider 1", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	provider := model.ResourceProvider{ID: "provider-1", Key: "provider-1", DisplayName: "Provider 1", DomainScope: model.ProviderDomainNamed, DomainLabel: "provider-1", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
 	require.NoError(t, CreateResourceProvider(database, &provider))
 
 	providerMembership := model.AdminProviderMembership{
@@ -101,7 +101,7 @@ func TestUserSimulationSessionSupportsProviderAndTenantMemberScopes(t *testing.T
 		PermissionRevision: 1, CreatedByUserID: 1, Reason: "fixture bootstrap", RowVersion: 1,
 	}
 	require.NoError(t, CreatePlatformRoleMembership(database, &actorRole))
-	provider := model.ResourceProvider{ID: "provider-1", Key: "provider-1", DisplayName: "Provider 1", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	provider := model.ResourceProvider{ID: "provider-1", Key: "provider-1", DisplayName: "Provider 1", DomainScope: model.ProviderDomainNamed, DomainLabel: "provider-1", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
 	require.NoError(t, CreateResourceProvider(database, &provider))
 	providerMembership := model.AdminProviderMembership{
 		ID: "provider-membership-1", UserID: 2, ProviderID: provider.ID, Role: model.ProviderManagementRoleOperator,
@@ -137,7 +137,7 @@ func TestUserSimulationMembershipTimeComparisonNormalizesOffsets(t *testing.T) {
 	}))
 	provider := model.ResourceProvider{
 		ID: "provider-offset", Key: "provider-offset", DisplayName: "Provider Offset",
-		Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1,
+		DomainScope: model.ProviderDomainNamed, DomainLabel: "provider-offset", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1,
 	}
 	require.NoError(t, CreateResourceProvider(database, &provider))
 	require.NoError(t, CreateAdminProviderMembership(database, &model.AdminProviderMembership{

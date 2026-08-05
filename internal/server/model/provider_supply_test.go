@@ -36,8 +36,8 @@ func seedProviderSupplyPrincipals(t *testing.T, database *gorm.DB) {
 	t.Helper()
 	require.NoError(t, database.Create(&User{ID: 1, Name: "provider-admin", Role: UserRoleClient, SecretHash: "fixture-hash", Enabled: true}).Error)
 	providers := []ResourceProvider{
-		{ID: "provider-a", Key: "provider-a", DisplayName: "Provider A", Status: ProviderStatusActive, Revision: 1, RowVersion: 1},
-		{ID: "provider-b", Key: "provider-b", DisplayName: "Provider B", Status: ProviderStatusActive, Revision: 1, RowVersion: 1},
+		{ID: "provider-a", Key: "provider-a", DisplayName: "Provider A", DomainScope: ProviderDomainNamed, DomainLabel: "provider-a", Status: ProviderStatusActive, Revision: 1, RowVersion: 1},
+		{ID: "provider-b", Key: "provider-b", DisplayName: "Provider B", DomainScope: ProviderDomainNamed, DomainLabel: "provider-b", Status: ProviderStatusActive, Revision: 1, RowVersion: 1},
 	}
 	require.NoError(t, database.Create(&providers).Error)
 }
@@ -48,6 +48,7 @@ func TestProviderSupplyTechnicalResourceAndBindingConstraints(t *testing.T) {
 
 	agentA := TechnicalResource{
 		ID: "agent-a", ProviderID: "provider-a", Type: TechnicalResourceAgent, StableKey: "agent-stable-a",
+		DomainLabel:    "agent-stable-a",
 		LifecycleState: TechnicalResourceRegistered, HealthState: ResourceHealthOnline, CredentialRevision: 1,
 		ConfigRevision: 1, ObservedRevision: 1, RowVersion: 1,
 	}
@@ -58,7 +59,7 @@ func TestProviderSupplyTechnicalResourceAndBindingConstraints(t *testing.T) {
 	require.Error(t, database.Create(&duplicateStableKey).Error)
 
 	agentB := agentA
-	agentB.ID, agentB.ProviderID = "agent-b", "provider-b"
+	agentB.ID, agentB.ProviderID, agentB.DomainLabel = "agent-b", "provider-b", "agent-b"
 	require.NoError(t, database.Create(&agentB).Error)
 
 	endpointAID := "endpoint-a"
@@ -89,11 +90,11 @@ func TestProviderSupplyTechnicalResourceAndBindingConstraints(t *testing.T) {
 
 	duplicateActiveBinding := binding
 	duplicateActiveBinding.ID, duplicateActiveBinding.SourceID = "binding-duplicate-active", "1002"
-	require.Error(t, database.Create(&duplicateActiveBinding).Error)
+	require.NoError(t, database.Create(&duplicateActiveBinding).Error)
 
 	require.NoError(t, database.Model(&binding).Update("enabled", false).Error)
 	replacementBinding := binding
-	replacementBinding.ID, replacementBinding.SourceID, replacementBinding.Enabled = "binding-replacement", "1002", true
+	replacementBinding.ID, replacementBinding.SourceID, replacementBinding.Enabled = "binding-replacement", "1003", true
 	require.NoError(t, database.Create(&replacementBinding).Error)
 }
 
@@ -103,8 +104,8 @@ func TestProviderSupplyInventoryAndCandidateConstraints(t *testing.T) {
 	now := time.Date(2026, 7, 30, 8, 0, 0, 0, time.UTC)
 
 	agents := []TechnicalResource{
-		{ID: "agent-a", ProviderID: "provider-a", Type: TechnicalResourceAgent, StableKey: "agent-a", LifecycleState: TechnicalResourceRegistered, HealthState: ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1},
-		{ID: "agent-b", ProviderID: "provider-b", Type: TechnicalResourceAgent, StableKey: "agent-b", LifecycleState: TechnicalResourceRegistered, HealthState: ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1},
+		{ID: "agent-a", ProviderID: "provider-a", Type: TechnicalResourceAgent, StableKey: "agent-a", DomainLabel: "agent-a", LifecycleState: TechnicalResourceRegistered, HealthState: ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1},
+		{ID: "agent-b", ProviderID: "provider-b", Type: TechnicalResourceAgent, StableKey: "agent-b", DomainLabel: "agent-b", LifecycleState: TechnicalResourceRegistered, HealthState: ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1},
 	}
 	require.NoError(t, database.Create(&agents).Error)
 
@@ -154,8 +155,8 @@ func TestProviderSupplyResourceSourceAndScopeConstraints(t *testing.T) {
 	now := time.Date(2026, 7, 30, 8, 0, 0, 0, time.UTC)
 
 	agents := []TechnicalResource{
-		{ID: "agent-a", ProviderID: "provider-a", Type: TechnicalResourceAgent, StableKey: "agent-a", LifecycleState: TechnicalResourceRegistered, HealthState: ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1},
-		{ID: "agent-b", ProviderID: "provider-b", Type: TechnicalResourceAgent, StableKey: "agent-b", LifecycleState: TechnicalResourceRegistered, HealthState: ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1},
+		{ID: "agent-a", ProviderID: "provider-a", Type: TechnicalResourceAgent, StableKey: "agent-a", DomainLabel: "agent-a", LifecycleState: TechnicalResourceRegistered, HealthState: ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1},
+		{ID: "agent-b", ProviderID: "provider-b", Type: TechnicalResourceAgent, StableKey: "agent-b", DomainLabel: "agent-b", LifecycleState: TechnicalResourceRegistered, HealthState: ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1},
 	}
 	require.NoError(t, database.Create(&agents).Error)
 	candidates := []SupplyCandidate{

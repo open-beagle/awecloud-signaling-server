@@ -512,6 +512,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					providerGroup.GET("/audit-logs", api.RequireManagementPermission(service.PermissionProviderAuditRead), providerGovernanceAPI.ListAuditLogs)
 					providerGroup.GET("/technical-resources", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.ListTechnicalResources)
 					providerGroup.GET("/technical-resources/:id", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.GetTechnicalResource)
+					providerGroup.PATCH("/technical-resources/:id/domain-label", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.UpdateAgentDomainLabel)
 					providerGroup.GET("/technical-resources/:id/capabilities", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.GetTechnicalResourceCapabilities)
 					providerGroup.PATCH("/technical-resources/:id/config", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.UpdateTechnicalResourceCapabilities)
 					providerGroup.GET("/technical-resources/:id/releases", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.ListTechnicalResourceReleases)
@@ -636,6 +637,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					nodeAPI.SetAgentService(s.agentService)
 					adminAuthGroup.GET("/nodes", nodeAPI.List)
 					adminAuthGroup.GET("/nodes/:id", nodeAPI.Get)
+					adminAuthGroup.PUT("/nodes/:id/domain-label", nodeAPI.UpdateHostDomainLabel)
 					adminAuthGroup.GET("/nodes/:id/capabilities", nodeAPI.GetCapabilities)
 					adminAuthGroup.PUT("/nodes/:id/capabilities", nodeAPI.UpdateCapabilities)
 					adminAuthGroup.DELETE("/nodes/:id/capabilities", nodeAPI.ResetCapabilities)
@@ -737,6 +739,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					endpointAPI := api.NewEndpointAPI(s.config)
 					adminAuthGroup.GET("/endpoints", endpointAPI.ListEndpoints)
 					adminAuthGroup.GET("/endpoints/:id", endpointAPI.GetEndpointDetail)
+					adminAuthGroup.PUT("/endpoints/:id/domain-label", endpointAPI.UpdateHostDomainLabel)
 					adminAuthGroup.PUT("/endpoints/:id", endpointAPI.UpdateEndpoint)
 					adminAuthGroup.DELETE("/endpoints/:id", endpointAPI.RevokeEndpoint)
 

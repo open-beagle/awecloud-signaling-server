@@ -27,6 +27,7 @@
           </el-descriptions-item>
           <el-descriptions-item :label="$t('node.ip')">{{ node.ip || '-' }}</el-descriptions-item>
           <el-descriptions-item :label="$t('node.hostname')">{{ node.hostname || '-' }}</el-descriptions-item>
+		  <el-descriptions-item v-if="node.type === 'agent'" label="SSH 域名标识"><span class="mono">{{ node.host_domain_label || '待配置' }}</span><el-button link type="primary" @click="editHostDomainLabel">编辑</el-button></el-descriptions-item>
           <el-descriptions-item :label="$t('node.version')">{{ node.version || '-' }}</el-descriptions-item>
           <el-descriptions-item :label="$t('node.lastHeartbeat')">
             {{ node.last_heartbeat ? formatTime(node.last_heartbeat) : '-' }}
@@ -202,7 +203,7 @@
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getNode, getNodeCapabilities, updateNodeCapabilities, resetNodeCapabilities, regenerateEndpointToken, type NodeDetail, type NodeSystemInfo } from '@/api/node'
+import { getNode, getNodeCapabilities, updateNodeCapabilities, updateNodeHostDomainLabel, resetNodeCapabilities, regenerateEndpointToken, type NodeDetail, type NodeSystemInfo } from '@/api/node'
 import { formatTime } from '@/utils/time'
 import { useI18n } from 'vue-i18n'
 
@@ -210,6 +211,24 @@ const { t } = useI18n()
 const route = useRoute()
 const loading = ref(false)
 const node = ref<NodeDetail | null>(null)
+
+const editHostDomainLabel = async () => {
+  if (!node.value || node.value.type !== 'agent') return
+  try {
+    const result = await ElMessageBox.prompt('SSH 域名将明确指向当前主机，修改后旧域名立即失效。', '编辑 SSH 域名标识', {
+      inputValue: node.value.host_domain_label,
+      inputPattern: /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
+      inputErrorMessage: '请输入有效的 DNS 单标签',
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+    })
+    await updateNodeHostDomainLabel(node.value.id, result.value.trim().toLowerCase())
+    ElMessage.success('SSH 域名标识已更新')
+    await fetchNode()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') throw error
+  }
+}
 
 // 能力配置
 const capLoading = ref(false)

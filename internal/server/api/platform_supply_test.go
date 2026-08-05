@@ -27,12 +27,12 @@ func TestPlatformSupplyConflictAPIIsScopedAggregatedAndFiltered(t *testing.T) {
 	now := time.Now().UTC()
 	technicalA := model.TechnicalResource{
 		ID: uuid.NewString(), ProviderID: fixture.provider.ID, Type: model.TechnicalResourceAgent,
-		StableKey: "platform-conflict-agent-a", LifecycleState: model.TechnicalResourceRegistered,
+		StableKey: "platform-conflict-agent-a", DomainLabel: "platform-conflict-agent-a", LifecycleState: model.TechnicalResourceRegistered,
 		HealthState: model.ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1,
 	}
 	technicalB := model.TechnicalResource{
 		ID: uuid.NewString(), ProviderID: fixture.otherProvider.ID, Type: model.TechnicalResourceAgent,
-		StableKey: "platform-conflict-agent-b", LifecycleState: model.TechnicalResourceRegistered,
+		StableKey: "platform-conflict-agent-b", DomainLabel: "platform-conflict-agent-b", LifecycleState: model.TechnicalResourceRegistered,
 		HealthState: model.ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1,
 	}
 	require.NoError(t, fixture.database.Create(&technicalA).Error)

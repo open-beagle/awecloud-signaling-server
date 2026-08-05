@@ -47,8 +47,8 @@ func newProviderSupplyFixture(t *testing.T) providerSupplyFixture {
 	require.NoError(t, database.Create(&actor).Error)
 	require.NoError(t, database.Create(&otherUser).Error)
 	require.NoError(t, database.Create(&model.UserIdentityProfile{UserID: actor.ID, Username: "provider-actor", DisplayName: "Provider Actor", Enabled: true, AuthRevision: 1, RowVersion: 1}).Error)
-	provider := model.ResourceProvider{ID: uuid.NewString(), Key: "provider-a", DisplayName: "Provider A", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
-	otherProvider := model.ResourceProvider{ID: uuid.NewString(), Key: "provider-b", DisplayName: "Provider B", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	provider := model.ResourceProvider{ID: uuid.NewString(), Key: "provider-a", DisplayName: "Provider A", DomainScope: model.ProviderDomainNamed, DomainLabel: "provider-a", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	otherProvider := model.ResourceProvider{ID: uuid.NewString(), Key: "provider-b", DisplayName: "Provider B", DomainScope: model.ProviderDomainNamed, DomainLabel: "provider-b", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
 	require.NoError(t, database.Create(&provider).Error)
 	require.NoError(t, database.Create(&otherProvider).Error)
 	require.NoError(t, database.Create(&model.AdminProviderMembership{
@@ -98,7 +98,7 @@ func TestProviderTechnicalResourceCapabilitiesAndUpdaterUseScopedBinding(t *test
 	require.Equal(t, `["team-a"]`, node.SVCNamespaces)
 
 	foreign := model.TechnicalResource{
-		ID: uuid.NewString(), ProviderID: fixture.otherProvider.ID, Type: model.TechnicalResourceAgent, StableKey: "foreign-operations",
+		ID: uuid.NewString(), ProviderID: fixture.otherProvider.ID, Type: model.TechnicalResourceAgent, StableKey: "foreign-operations", DomainLabel: "foreign-operations",
 		LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthUnknown, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1,
 	}
 	require.NoError(t, fixture.database.Create(&foreign).Error)
@@ -128,7 +128,7 @@ func TestProviderCreatesResourceOwnedOneTimeDeploymentCredential(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	ctx := context.Background()
 	resource, err := fixture.service.CreateTechnicalResource(ctx, fixture.authorization, CreateTechnicalResourceInput{
-		Type: model.TechnicalResourceAgent, CredentialRevision: 1, RuntimeName: "new-agent",
+		Type: model.TechnicalResourceAgent, CredentialRevision: 1, RuntimeName: "new-agent", DomainLabel: "new-agent",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "resource:"+resource.ID, resource.StableKey)
@@ -148,6 +148,19 @@ func TestProviderCreatesResourceOwnedOneTimeDeploymentCredential(t *testing.T) {
 	var updatedResource model.TechnicalResource
 	require.NoError(t, fixture.database.First(&updatedResource, "id = ?", resource.ID).Error)
 	require.Equal(t, resource.RowVersion+1, updatedResource.RowVersion)
+
+	require.NoError(t, fixture.database.Model(&updatedResource).Update("lifecycle_state", model.TechnicalResourceRegistered).Error)
+	require.NoError(t, fixture.database.Model(&token).Update("status", model.TechnicalResourceDeployTokenConsumed).Error)
+	rotated, err := fixture.service.CreateTechnicalResourceDeploymentCredential(ctx, fixture.authorization, resource.ID, "new-agent-reinstall", 30*time.Minute)
+	require.NoError(t, err)
+	require.NotEqual(t, credential.Token, rotated.Token)
+	require.NoError(t, fixture.database.First(&token, "id = ?", token.ID).Error)
+	require.Equal(t, model.TechnicalResourceDeployTokenConsumed, token.Status)
+	var rotatedToken model.TechnicalResourceDeployToken
+	require.NoError(t, fixture.database.First(&rotatedToken, "id = ?", rotated.ID).Error)
+	require.Equal(t, model.TechnicalResourceDeployTokenPending, rotatedToken.Status)
+	require.NoError(t, fixture.database.First(&updatedResource, "id = ?", resource.ID).Error)
+	require.Equal(t, resource.RowVersion+2, updatedResource.RowVersion)
 }
 
 func TestProviderDeletesRetiredTechnicalResourceAsTombstone(t *testing.T) {
@@ -204,7 +217,8 @@ func TestProviderDeletesOfflineTechnicalResourceWithoutRetiring(t *testing.T) {
 func (f providerSupplyFixture) createBoundAgent(t *testing.T, stableKey string, nodeID uint64) *model.TechnicalResource {
 	t.Helper()
 	resource, err := f.service.CreateTechnicalResource(context.Background(), f.authorization, CreateTechnicalResourceInput{
-		Type: model.TechnicalResourceAgent, StableKey: stableKey, CredentialRevision: 1, RuntimeName: strings.ReplaceAll(stableKey, ":", "-"),
+		Type: model.TechnicalResourceAgent, StableKey: stableKey, CredentialRevision: 1,
+		RuntimeName: strings.ReplaceAll(stableKey, ":", "-"), DomainLabel: strings.ReplaceAll(stableKey, ":", "-"),
 	})
 	require.NoError(t, err)
 	bound, err := f.service.BindTechnicalResource(context.Background(), f.authorization, BindTechnicalResourceInput{
@@ -225,19 +239,19 @@ func TestProviderSupplyTechnicalResourceBindingAndScopeIsolation(t *testing.T) {
 	require.Equal(t, int64(2), agent.RowVersion)
 
 	_, err := fixture.service.CreateTechnicalResource(ctx, fixture.authorization, CreateTechnicalResourceInput{
-		Type: model.TechnicalResourceAgent, StableKey: "agent-stable-a", CredentialRevision: 1, RuntimeName: "agent-stable-duplicate",
+		Type: model.TechnicalResourceAgent, StableKey: "agent-stable-a", CredentialRevision: 1, RuntimeName: "agent-stable-duplicate", DomainLabel: "agent-stable-duplicate",
 	})
 	require.ErrorIs(t, err, ErrProviderSupplyConflict)
 
 	forgedAuthorization := *fixture.authorization
 	forgedAuthorization.ScopeID = fixture.otherProvider.ID
 	_, err = fixture.service.CreateTechnicalResource(ctx, &forgedAuthorization, CreateTechnicalResourceInput{
-		Type: model.TechnicalResourceAgent, StableKey: "forged-provider", CredentialRevision: 1, RuntimeName: "forged-provider",
+		Type: model.TechnicalResourceAgent, StableKey: "forged-provider", CredentialRevision: 1, RuntimeName: "forged-provider", DomainLabel: "forged-provider",
 	})
 	require.ErrorIs(t, err, ErrManagementPermissionDenied)
 
 	otherProviderResource := model.TechnicalResource{
-		ID: uuid.NewString(), ProviderID: fixture.otherProvider.ID, Type: model.TechnicalResourceAgent, StableKey: "other-provider-agent",
+		ID: uuid.NewString(), ProviderID: fixture.otherProvider.ID, Type: model.TechnicalResourceAgent, StableKey: "other-provider-agent", DomainLabel: "other-provider-agent",
 		LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthUnknown,
 		CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1,
 	}

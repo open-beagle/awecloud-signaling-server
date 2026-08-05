@@ -44,7 +44,8 @@ func (s *ProviderSupplyService) CreateTechnicalResourceDeploymentCredential(ctx 
 			return err
 		}
 		var resource model.TechnicalResource
-		if err := tx.Where("id = ? AND provider_id = ? AND lifecycle_state = ?", strings.TrimSpace(resourceID), providerID, model.TechnicalResourcePending).First(&resource).Error; err != nil {
+		if err := tx.Where("id = ? AND provider_id = ? AND lifecycle_state IN ?", strings.TrimSpace(resourceID), providerID,
+			[]model.TechnicalResourceLifecycleState{model.TechnicalResourcePending, model.TechnicalResourceRegistered}).First(&resource).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrProviderSupplyObjectNotFound
 			}
@@ -54,7 +55,7 @@ func (s *ProviderSupplyService) CreateTechnicalResourceDeploymentCredential(ctx 
 			return ErrProviderSupplyConflict
 		}
 		if err := tx.Model(&model.TechnicalResourceDeployToken{}).
-			Where("technical_resource_id = ? AND status <> ?", resource.ID, model.TechnicalResourceDeployTokenRevoked).
+			Where("technical_resource_id = ? AND status = ?", resource.ID, model.TechnicalResourceDeployTokenPending).
 			Updates(map[string]any{"status": model.TechnicalResourceDeployTokenRevoked, "revoked_at": now}).Error; err != nil {
 			return err
 		}
@@ -266,97 +267,107 @@ func (s *ProviderSupplyService) UpdateTechnicalResourceCapabilities(ctx context.
 	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		capability := input.Capabilities
-		switch binding.SourceType {
-		case model.TechnicalResourceBindingLegacyNode:
-			id, parseErr := strconv.ParseUint(binding.SourceID, 10, 64)
-			if parseErr != nil {
+		bindings := []model.TechnicalResourceBinding{*binding}
+		if resource.Type == model.TechnicalResourceAgent {
+			if err := tx.Where("technical_resource_id = ? AND enabled = ?", resource.ID, true).
+				Order("created_at ASC, id ASC").Find(&bindings).Error; err != nil {
+				return err
+			}
+		}
+		for i := range bindings {
+			binding = &bindings[i]
+			switch binding.SourceType {
+			case model.TechnicalResourceBindingLegacyNode:
+				id, parseErr := strconv.ParseUint(binding.SourceID, 10, 64)
+				if parseErr != nil {
+					return ErrProviderSupplyConflict
+				}
+				var node model.Node
+				if err := tx.First(&node, id).Error; err != nil {
+					return ErrProviderSupplyObjectNotFound
+				}
+				if err := tx.Model(&model.User{}).Where("id = ?", node.UserID).Update("ssh_enabled", capability.SSHEnabled).Error; err != nil {
+					return err
+				}
+				updates := map[string]any{
+					"k8s_enabled": capability.K8SEnabled, "k8s_api_server": strings.TrimSpace(capability.K8SAPIAddress),
+					"svc_enabled": capability.SVCEnabled, "svc_label_selector": strings.TrimSpace(capability.SVCLabelSelector),
+					"svc_namespaces": encodeStringList(capability.SVCNamespaces), "endpoint_enabled": capability.EndpointAccessEnabled,
+				}
+				if capability.K8SListenPort != nil {
+					updates["k8s_listen_port"] = *capability.K8SListenPort
+				}
+				if capability.SVCListenPortBase != nil {
+					updates["svc_listen_port_base"] = *capability.SVCListenPortBase
+				}
+				if capability.EndpointListenPort != nil {
+					updates["endpoint_listen_port"] = *capability.EndpointListenPort
+				}
+				if err := tx.Model(&node).Updates(updates).Error; err != nil {
+					return err
+				}
+				var user model.User
+				if err := tx.First(&user, node.UserID).Error; err != nil {
+					return err
+				}
+				if err := tx.First(&node, node.ID).Error; err != nil {
+					return err
+				}
+				domains := NewDomainService(tx)
+				if capability.SSHEnabled {
+					if err := domains.CreateNodeSSHDomain(ctx, &node, &user); err != nil {
+						return err
+					}
+				} else if err := domains.DeleteNodeSSHDomain(ctx, &node, &user); err != nil {
+					return err
+				}
+				if capability.K8SEnabled {
+					if err := domains.CreateNodeK8SAPIDomain(ctx, &node, &user); err != nil {
+						return err
+					}
+				} else if err := domains.DeleteNodeK8SAPIDomain(ctx, &node, &user); err != nil {
+					return err
+				}
+			case model.TechnicalResourceBindingLegacyEndpoint:
+				updates := map[string]any{
+					"ssh_enabled": capability.SSHEnabled, "ssh_users": encodeStringList(capability.SSHUsers),
+					"k8sapi_enabled": capability.K8SEnabled, "k8sapi_api_server": strings.TrimSpace(capability.K8SAPIAddress),
+					"k8sservice_enabled": capability.SVCEnabled, "k8sservice_label_selector": strings.TrimSpace(capability.SVCLabelSelector),
+					"k8sservice_namespaces": encodeStringList(capability.SVCNamespaces),
+				}
+				if err := tx.Model(&model.Endpoint{}).Where("id = ?", binding.SourceID).Updates(updates).Error; err != nil {
+					return err
+				}
+				var endpoint model.Endpoint
+				if err := tx.First(&endpoint, "id = ?", binding.SourceID).Error; err != nil {
+					return err
+				}
+				var agent model.Node
+				if err := tx.Where("user_id = ? AND type = ?", endpoint.UserID, model.NodeTypeAgent).First(&agent).Error; err != nil {
+					return err
+				}
+				var user model.User
+				if err := tx.First(&user, endpoint.UserID).Error; err != nil {
+					return err
+				}
+				domains := NewDomainService(tx)
+				if capability.SSHEnabled {
+					if err := domains.CreateEndpointSSHDomain(ctx, &endpoint, &agent, &user); err != nil {
+						return err
+					}
+				} else if err := domains.DeleteEndpointSSHDomain(ctx, endpoint.ID, &user); err != nil {
+					return err
+				}
+				if capability.K8SEnabled {
+					if err := domains.CreateEndpointK8SAPIDomain(ctx, &endpoint, &agent, &user); err != nil {
+						return err
+					}
+				} else if err := domains.DeleteEndpointK8SAPIDomain(ctx, endpoint.ID, &user); err != nil {
+					return err
+				}
+			default:
 				return ErrProviderSupplyConflict
 			}
-			var node model.Node
-			if err := tx.First(&node, id).Error; err != nil {
-				return ErrProviderSupplyObjectNotFound
-			}
-			if err := tx.Model(&model.User{}).Where("id = ?", node.UserID).Update("ssh_enabled", capability.SSHEnabled).Error; err != nil {
-				return err
-			}
-			updates := map[string]any{
-				"k8s_enabled": capability.K8SEnabled, "k8s_api_server": strings.TrimSpace(capability.K8SAPIAddress),
-				"svc_enabled": capability.SVCEnabled, "svc_label_selector": strings.TrimSpace(capability.SVCLabelSelector),
-				"svc_namespaces": encodeStringList(capability.SVCNamespaces), "endpoint_enabled": capability.EndpointAccessEnabled,
-			}
-			if capability.K8SListenPort != nil {
-				updates["k8s_listen_port"] = *capability.K8SListenPort
-			}
-			if capability.SVCListenPortBase != nil {
-				updates["svc_listen_port_base"] = *capability.SVCListenPortBase
-			}
-			if capability.EndpointListenPort != nil {
-				updates["endpoint_listen_port"] = *capability.EndpointListenPort
-			}
-			if err := tx.Model(&node).Updates(updates).Error; err != nil {
-				return err
-			}
-			var user model.User
-			if err := tx.First(&user, node.UserID).Error; err != nil {
-				return err
-			}
-			if err := tx.First(&node, node.ID).Error; err != nil {
-				return err
-			}
-			domains := NewDomainService(tx)
-			if capability.SSHEnabled {
-				if err := domains.CreateNodeSSHDomain(ctx, &node, &user); err != nil {
-					return err
-				}
-			} else if err := domains.DeleteNodeSSHDomain(ctx, &node, &user); err != nil {
-				return err
-			}
-			if capability.K8SEnabled {
-				if err := domains.CreateNodeK8SAPIDomain(ctx, &node, &user); err != nil {
-					return err
-				}
-			} else if err := domains.DeleteNodeK8SAPIDomain(ctx, &node, &user); err != nil {
-				return err
-			}
-		case model.TechnicalResourceBindingLegacyEndpoint:
-			updates := map[string]any{
-				"ssh_enabled": capability.SSHEnabled, "ssh_users": encodeStringList(capability.SSHUsers),
-				"k8sapi_enabled": capability.K8SEnabled, "k8sapi_api_server": strings.TrimSpace(capability.K8SAPIAddress),
-				"k8sservice_enabled": capability.SVCEnabled, "k8sservice_label_selector": strings.TrimSpace(capability.SVCLabelSelector),
-				"k8sservice_namespaces": encodeStringList(capability.SVCNamespaces),
-			}
-			if err := tx.Model(&model.Endpoint{}).Where("id = ?", binding.SourceID).Updates(updates).Error; err != nil {
-				return err
-			}
-			var endpoint model.Endpoint
-			if err := tx.First(&endpoint, "id = ?", binding.SourceID).Error; err != nil {
-				return err
-			}
-			var agent model.Node
-			if err := tx.Where("user_id = ? AND type = ?", endpoint.UserID, model.NodeTypeAgent).First(&agent).Error; err != nil {
-				return err
-			}
-			var user model.User
-			if err := tx.First(&user, endpoint.UserID).Error; err != nil {
-				return err
-			}
-			domains := NewDomainService(tx)
-			if capability.SSHEnabled {
-				if err := domains.CreateEndpointSSHDomain(ctx, &endpoint, &agent, &user); err != nil {
-					return err
-				}
-			} else if err := domains.DeleteEndpointSSHDomain(ctx, endpoint.Name, &user); err != nil {
-				return err
-			}
-			if capability.K8SEnabled {
-				if err := domains.CreateEndpointK8SAPIDomain(ctx, &endpoint, &agent, &user); err != nil {
-					return err
-				}
-			} else if err := domains.DeleteEndpointK8SAPIDomain(ctx, endpoint.Name, &user); err != nil {
-				return err
-			}
-		default:
-			return ErrProviderSupplyConflict
 		}
 		result := tx.Model(&model.TechnicalResource{}).Where("id = ? AND provider_id = ? AND row_version = ?", resource.ID, authorization.ScopeID, input.ExpectedRowVersion).
 			Updates(map[string]any{"config_revision": gorm.Expr("config_revision + 1"), "row_version": gorm.Expr("row_version + 1")})

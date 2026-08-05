@@ -65,17 +65,18 @@ type NodeUserInfo struct {
 
 // NodeListItem 设备列表项
 type NodeListItem struct {
-	ID            uint64        `json:"id"`
-	Name          string        `json:"name"`
-	Type          string        `json:"type"`
-	UserID        uint64        `json:"user_id"`
-	User          *NodeUserInfo `json:"user,omitempty"`
-	IP            string        `json:"ip"`
-	Version       string        `json:"version"`
-	Hostname      string        `json:"hostname"`
-	Status        string        `json:"status"`
-	LastHeartbeat *time.Time    `json:"last_heartbeat"`
-	CreatedAt     time.Time     `json:"created_at"`
+	ID              uint64        `json:"id"`
+	Name            string        `json:"name"`
+	Type            string        `json:"type"`
+	UserID          uint64        `json:"user_id"`
+	User            *NodeUserInfo `json:"user,omitempty"`
+	IP              string        `json:"ip"`
+	Version         string        `json:"version"`
+	Hostname        string        `json:"hostname"`
+	HostDomainLabel string        `json:"host_domain_label"`
+	Status          string        `json:"status"`
+	LastHeartbeat   *time.Time    `json:"last_heartbeat"`
+	CreatedAt       time.Time     `json:"created_at"`
 }
 
 // List 获取设备列表
@@ -134,17 +135,18 @@ func (a *NodeAPI) List(c *gin.Context) {
 		}
 
 		result[i] = NodeListItem{
-			ID:            node.ID,
-			Name:          node.Name,
-			Type:          string(node.Type),
-			UserID:        node.UserID,
-			User:          userInfo,
-			IP:            node.IP,
-			Version:       node.Version,
-			Hostname:      node.Hostname,
-			Status:        status,
-			LastHeartbeat: node.LastHeartbeat,
-			CreatedAt:     node.CreatedAt,
+			ID:              node.ID,
+			Name:            node.Name,
+			Type:            string(node.Type),
+			UserID:          node.UserID,
+			User:            userInfo,
+			IP:              node.IP,
+			Version:         node.Version,
+			Hostname:        node.Hostname,
+			HostDomainLabel: node.HostDomainLabel,
+			Status:          status,
+			LastHeartbeat:   node.LastHeartbeat,
+			CreatedAt:       node.CreatedAt,
 		}
 	}
 
@@ -176,6 +178,7 @@ type NodeDetail struct {
 	IP              string             `json:"ip"`
 	Version         string             `json:"version"`
 	Hostname        string             `json:"hostname"`
+	HostDomainLabel string             `json:"host_domain_label"`
 	SystemInfo      string             `json:"system_info"`
 	Status          string             `json:"status"`
 	LastHeartbeat   *time.Time         `json:"last_heartbeat"`
@@ -225,6 +228,7 @@ func (a *NodeAPI) Get(c *gin.Context) {
 		IP:              node.IP,
 		Version:         node.Version,
 		Hostname:        node.Hostname,
+		HostDomainLabel: node.HostDomainLabel,
 		SystemInfo:      node.SystemInfo,
 		Status:          status,
 		LastHeartbeat:   node.LastHeartbeat,
@@ -264,6 +268,33 @@ func (a *NodeAPI) Get(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+type hostDomainLabelRequest struct {
+	HostDomainLabel string `json:"host_domain_label"`
+}
+
+func (a *NodeAPI) UpdateHostDomainLabel(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
+		return
+	}
+	var request hostDomainLabelRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
+		return
+	}
+	if err := a.domainService.UpdateNodeHostDomainLabel(c.Request.Context(), id, request.HostDomainLabel); err != nil {
+		status := http.StatusConflict
+		if err == service.ErrHostDomainLabelInvalid {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, NewErrorResponse(err.Error()))
+		return
+	}
+	recordAuditLog(c.Request.Context(), c, model.ActionUpdateAgent, "node", strconv.FormatUint(id, 10), request.HostDomainLabel, gin.H{"host_domain_label": request.HostDomainLabel})
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("SSH 域名标识已更新", nil))
 }
 
 // Expire 注销设备（使其过期）

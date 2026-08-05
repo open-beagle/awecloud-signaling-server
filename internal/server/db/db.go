@@ -231,9 +231,6 @@ func autoMigrate() error {
 	if err := ensureProviderSupplyConstraints(DB); err != nil {
 		return err
 	}
-	if err := migrateAgentDeployTokensToTechnicalResources(DB); err != nil {
-		return err
-	}
 	if err := ensureProviderDomainLabelSchema(DB); err != nil {
 		return err
 	}
@@ -244,26 +241,20 @@ func autoMigrate() error {
 }
 
 func ensureProviderDomainLabelSchema(database *gorm.DB) error {
-	var providers []model.ResourceProvider
-	if err := database.Where("domain_label = '' OR domain_label IS NULL").Order("id").Find(&providers).Error; err != nil {
-		return fmt.Errorf("list providers missing domain label: %w", err)
+	if err := database.Exec(`DROP INDEX IF EXISTS uk_active_technical_resource_binding`).Error; err != nil {
+		return fmt.Errorf("remove obsolete single-node Agent constraint: %w", err)
 	}
-	for i := range providers {
-		label := strings.ToLower(strings.TrimSpace(providers[i].Key))
-		if len(label) > 63 {
-			compactID := strings.ReplaceAll(providers[i].ID, "-", "")
-			if len(compactID) > 8 {
-				compactID = compactID[:8]
-			}
-			label = strings.TrimRight(label[:54], "-") + "-" + compactID
-		}
-		if err := database.Model(&model.ResourceProvider{}).Where("id = ?", providers[i].ID).Update("domain_label", label).Error; err != nil {
-			return fmt.Errorf("backfill provider domain label %s: %w", providers[i].ID, err)
-		}
+	statements := []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS uk_resource_provider_root ON resource_provider(domain_scope) WHERE domain_scope = 'root'`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uk_resource_provider_domain_label ON resource_provider(lower(domain_label)) WHERE domain_scope = 'named'`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uk_agent_domain_label ON technical_resource(provider_id, lower(domain_label)) WHERE type = 'agent' AND deleted_at IS NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uk_domain_registry_resource ON domain_registry(domain, resource_kind, resource_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uk_domain_registry_ssh_domain ON domain_registry(lower(domain)) WHERE type = 'ssh'`,
 	}
-	if err := database.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uk_resource_provider_domain_label
-		ON resource_provider(lower(domain_label)) WHERE domain_label <> ''`).Error; err != nil {
-		return fmt.Errorf("create provider domain label index: %w", err)
+	for _, statement := range statements {
+		if err := database.Exec(statement).Error; err != nil {
+			return fmt.Errorf("create domain namespace constraint: %w", err)
+		}
 	}
 	return nil
 }

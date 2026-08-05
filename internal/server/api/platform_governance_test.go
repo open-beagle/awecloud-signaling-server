@@ -211,7 +211,7 @@ func TestPlatformGovernanceAPIMutatesOrganizations(t *testing.T) {
 	createBody := `{"key":"audit-team","name":"审计团队","reason":"ORG-1001 新租户建档"}`
 	missingDomain := request(http.MethodPost, "/platform-organizations/providers", `{"key":"missing-domain","name":"缺少域名标识","reason":"ORG-0999 校验必填"}`, map[string]string{HeaderIdempotencyKey: "create-missing-domain"})
 	require.Equal(t, http.StatusBadRequest, missingDomain.Code, missingDomain.Body.String())
-	providerCreated := request(http.MethodPost, "/platform-organizations/providers", `{"key":"edge-provider","name":"边缘资源服务商","domain_label":"edge-north","reason":"ORG-1000 新 Provider 建档"}`, map[string]string{HeaderIdempotencyKey: "create-edge-provider"})
+	providerCreated := request(http.MethodPost, "/platform-organizations/providers", `{"key":"edge-provider","name":"边缘资源服务商","domain_scope":"named","domain_label":"edge-north","reason":"ORG-1000 新 Provider 建档"}`, map[string]string{HeaderIdempotencyKey: "create-edge-provider"})
 	require.Equal(t, http.StatusCreated, providerCreated.Code, providerCreated.Body.String())
 	require.Contains(t, providerCreated.Body.String(), `"scope_type":"provider"`)
 	var providerCreatedBody struct {
@@ -219,13 +219,18 @@ func TestPlatformGovernanceAPIMutatesOrganizations(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(providerCreated.Body.Bytes(), &providerCreatedBody))
 	require.Equal(t, "edge-north", providerCreatedBody.Data.DomainLabel)
+	require.Equal(t, model.ProviderDomainNamed, providerCreatedBody.Data.DomainScope)
 	mismatch := request(http.MethodPatch, "/platform-organizations/providers/"+providerCreatedBody.Data.ID, `{"name":"边缘资源服务商","domain_label":"edge-south","domain_change_confirmation":"edge-wrong","reason":"ORG-1003 域名调整"}`, map[string]string{HeaderIfMatch: "1"})
 	require.Equal(t, http.StatusBadRequest, mismatch.Code, mismatch.Body.String())
 	providerUpdated := request(http.MethodPatch, "/platform-organizations/providers/"+providerCreatedBody.Data.ID, `{"name":"边缘资源服务商","domain_label":"edge-south","domain_change_confirmation":"edge-south","reason":"ORG-1003 域名调整"}`, map[string]string{HeaderIfMatch: "1"})
 	require.Equal(t, http.StatusOK, providerUpdated.Code, providerUpdated.Body.String())
 	require.Contains(t, providerUpdated.Body.String(), `"domain_label":"edge-south"`)
-	domainConflict := request(http.MethodPost, "/platform-organizations/providers", `{"key":"edge-provider-2","name":"第二资源服务商","domain_label":"EDGE-SOUTH","reason":"ORG-1004 新 Provider 建档"}`, map[string]string{HeaderIdempotencyKey: "create-edge-provider-2"})
+	domainConflict := request(http.MethodPost, "/platform-organizations/providers", `{"key":"edge-provider-2","name":"第二资源服务商","domain_scope":"named","domain_label":"EDGE-SOUTH","reason":"ORG-1004 新 Provider 建档"}`, map[string]string{HeaderIdempotencyKey: "create-edge-provider-2"})
 	require.Equal(t, http.StatusConflict, domainConflict.Code, domainConflict.Body.String())
+	rootCreated := request(http.MethodPost, "/platform-organizations/providers", `{"key":"beagle","name":"北京比格","domain_scope":"root","domain_label":"","reason":"ORG-1005 设置根 Provider"}`, map[string]string{HeaderIdempotencyKey: "create-root-provider"})
+	require.Equal(t, http.StatusCreated, rootCreated.Code, rootCreated.Body.String())
+	secondRoot := request(http.MethodPost, "/platform-organizations/providers", `{"key":"beagle-2","name":"第二根 Provider","domain_scope":"root","domain_label":"","reason":"ORG-1006 冲突校验"}`, map[string]string{HeaderIdempotencyKey: "create-second-root-provider"})
+	require.Equal(t, http.StatusConflict, secondRoot.Code, secondRoot.Body.String())
 	created := request(http.MethodPost, "/platform-organizations/tenants", createBody, map[string]string{HeaderIdempotencyKey: "create-audit-team"})
 	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 	var createdBody struct {
@@ -267,7 +272,11 @@ func TestPlatformGovernanceAPIMutatesOrganizations(t *testing.T) {
 	require.EqualValues(t, 1, count)
 	for _, action := range []string{"create_provider", "update_provider", "create_tenant", "update_tenant", "suspend_tenant", "resume_tenant"} {
 		require.NoError(t, fixture.database.Model(&model.AuditLog{}).Where("action_type = ?", action).Count(&count).Error)
-		require.EqualValues(t, 1, count, action)
+		expected := int64(1)
+		if action == "create_provider" {
+			expected = 2
+		}
+		require.EqualValues(t, expected, count, action)
 	}
 }
 
