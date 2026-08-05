@@ -31,7 +31,6 @@
           <el-option label="已注册" value="registered" />
           <el-option label="维护中" value="disabled" />
           <el-option label="已退役" value="retired" />
-          <el-option label="已删除" value="deleted" />
         </el-select>
         <span class="result-count">{{ pagination.total }} 项技术资源</span>
       </div>
@@ -54,7 +53,9 @@
         <el-table-column label="" width="62" fixed="right" align="center">
           <template #default="{ row }">
             <el-dropdown trigger="click" @command="command => handleRowCommand(command, row)">
-              <el-button text :icon="MoreFilled" :loading="deletingResourceId === row.id" aria-label="更多操作" @click.stop />
+              <el-button class="row-actions-button" text :loading="deletingResourceId === row.id" aria-label="更多操作" @click.stop>
+                <el-icon v-if="deletingResourceId !== row.id" class="row-actions-icon"><MoreFilled /></el-icon>
+              </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="detail">查看详情</el-dropdown-item>
@@ -242,6 +243,8 @@ onMounted(load)
 .mono { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; }
 .resource-name { max-width: 100%; font-weight: 650; }
 .capabilities { display: flex; flex-wrap: wrap; gap: 4px; }
+.row-actions-button { width: 32px; height: 32px; padding: 0; }
+.row-actions-icon { transform: rotate(90deg); }
 .pagination { display: flex; justify-content: flex-end; padding: 16px; }
 .form-suffix { margin-left: 8px; color: var(--text-secondary); }
 .command-box { display: flex; align-items: flex-start; gap: 12px; margin-top: 14px; padding: 14px; border: 1px solid var(--border-light); border-radius: 5px; background: #f7f8fa; }

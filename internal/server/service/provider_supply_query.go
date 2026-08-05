@@ -84,6 +84,7 @@ func (s *ProviderSupplyService) ListTechnicalResources(ctx context.Context, auth
 	if err != nil {
 		return nil, err
 	}
+	query = query.Where("technical_resource.deleted_at IS NULL")
 	if input.Type != "" {
 		typeValue := model.TechnicalResourceType(input.Type)
 		if typeValue != model.TechnicalResourceAgent && typeValue != model.TechnicalResourceEndpoint {
@@ -94,16 +95,10 @@ func (s *ProviderSupplyService) ListTechnicalResources(ctx context.Context, auth
 	if input.State != "" {
 		state := model.TechnicalResourceLifecycleState(input.State)
 		if state != model.TechnicalResourcePending && state != model.TechnicalResourceRegistered &&
-			state != model.TechnicalResourceDisabled && state != model.TechnicalResourceRetired && state != model.TechnicalResourceDeleted {
+			state != model.TechnicalResourceDisabled && state != model.TechnicalResourceRetired {
 			return nil, ErrProviderSupplyInvalidInput
 		}
-		if state == model.TechnicalResourceDeleted {
-			query = query.Where("technical_resource.deleted_at IS NOT NULL")
-		} else if state == model.TechnicalResourceRetired {
-			query = query.Where("technical_resource.lifecycle_state = ? AND technical_resource.deleted_at IS NULL", state)
-		} else {
-			query = query.Where("technical_resource.lifecycle_state = ? AND technical_resource.deleted_at IS NULL", state)
-		}
+		query = query.Where("technical_resource.lifecycle_state = ?", state)
 	}
 	query = technicalResourceProjectionQuery(query)
 	if input.Search != "" {
@@ -123,11 +118,6 @@ func (s *ProviderSupplyService) ListTechnicalResources(ctx context.Context, auth
 		Offset((input.Page - 1) * input.PageSize).Limit(input.PageSize).Scan(&result.Items).Error; err != nil {
 		return nil, err
 	}
-	for i := range result.Items {
-		if result.Items[i].DeletedAt != nil {
-			result.Items[i].LifecycleState = model.TechnicalResourceDeleted
-		}
-	}
 	return result, nil
 }
 
@@ -144,12 +134,9 @@ func (s *ProviderSupplyService) GetTechnicalResource(ctx context.Context, author
 	var resource TechnicalResourceView
 	if err := technicalResourceProjectionQuery(query).
 		Select(technicalResourceProjectionSelect()).
-		Where("technical_resource.provider_id = ? AND technical_resource.id = ?", providerID, resourceID).
+		Where("technical_resource.provider_id = ? AND technical_resource.id = ? AND technical_resource.deleted_at IS NULL", providerID, resourceID).
 		Take(&resource).Error; err != nil {
 		return nil, providerSupplyNotFound(err)
-	}
-	if resource.DeletedAt != nil {
-		resource.LifecycleState = model.TechnicalResourceDeleted
 	}
 	bindings := []model.TechnicalResourceBinding{}
 	if err := query.Where("technical_resource_id = ?", resource.ID).Order("created_at DESC, id ASC").Find(&bindings).Error; err != nil {

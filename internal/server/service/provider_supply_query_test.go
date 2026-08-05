@@ -157,6 +157,25 @@ func TestTechnicalResourceQueriesReturnOneAgentWithAllNodeBindings(t *testing.T)
 	}
 }
 
+func TestTechnicalResourceQueriesHideDeletedResources(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	agent := fixture.createBoundAgent(t, "deleted-agent", 1001)
+	require.NoError(t, fixture.database.Model(&model.TechnicalResource{}).Where("id = ?", agent.ID).
+		Update("deleted_at", fixture.service.now().UTC()).Error)
+
+	result, err := fixture.service.ListTechnicalResources(context.Background(), fixture.authorization, ProviderSupplyListInput{Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	require.Zero(t, result.Total)
+	require.Empty(t, result.Items)
+
+	_, err = fixture.service.GetTechnicalResource(context.Background(), fixture.authorization, agent.ID)
+	require.ErrorIs(t, err, ErrProviderSupplyObjectNotFound)
+	_, err = fixture.service.ListTechnicalResources(context.Background(), fixture.authorization, ProviderSupplyListInput{
+		State: string(model.TechnicalResourceDeleted), Page: 1, PageSize: 20,
+	})
+	require.ErrorIs(t, err, ErrProviderSupplyInvalidInput)
+}
+
 func TestProviderSupplyQueriesValidateFiltersAndReauthorize(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	createLifecycleSupplyResource(t, fixture)
