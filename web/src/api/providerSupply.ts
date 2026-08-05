@@ -107,6 +107,13 @@ export interface DeploymentCredentialResult {
   install_command: string
 }
 
+export interface ProviderMutationResult<T> {
+  result: T
+  row_version: number
+}
+
+export type ProviderMutationResponse<T> = { success: boolean; data: ProviderMutationResult<T> | T }
+
 export interface SupplyCandidate {
   id: string
   provider_id: string
@@ -226,7 +233,7 @@ export const getProviderTechnicalResources = (providerId: string, params: Provid
   })
 
 export const createProviderAgent = (providerId: string, runtimeName: string, domainLabel: string, reason: string) =>
-  request.post<any, { success: boolean; data: TechnicalResource }>('/api/v1/management/provider/technical-resources', {
+  request.post<any, ProviderMutationResponse<TechnicalResource>>('/api/v1/management/provider/technical-resources', {
     type: 'agent', runtime_name: runtimeName, domain_label: domainLabel, credential_revision: 1, reason,
   }, { headers: { ...providerHeaders(providerId), 'Idempotency-Key': crypto.randomUUID() } })
 

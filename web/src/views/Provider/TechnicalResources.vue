@@ -114,6 +114,12 @@ const domainLabelValid = computed(() => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
 const nodeNameValid = computed(() => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(createForm.nodeName.trim()))
 const createFormValid = computed(() => agentNameValid.value && domainLabelValid.value && nodeNameValid.value && !!createForm.reason.trim())
 
+const createdResourceId = (response: Awaited<ReturnType<typeof createProviderAgent>>) => {
+	if (!response.success || !response.data) return ''
+	if ('result' in response.data) return response.data.result?.id || ''
+	return response.data.id || ''
+}
+
 const load = async () => {
   const providerId = workspaceStore.providerId
   if (!providerId) {
@@ -157,9 +163,18 @@ const createAgent = async () => {
 	creating.value = true
 	try {
 		const created = await createProviderAgent(workspaceStore.providerId, createForm.name.trim(), createForm.domainLabel.trim(), createForm.reason.trim())
-		if (!created.success) return
-		const credential = await createProviderDeploymentCredential(workspaceStore.providerId, created.data.id, createForm.nodeName.trim(), createForm.ttlMinutes)
-		if (!credential.success) return
+		const resourceId = createdResourceId(created)
+		if (!resourceId) {
+			ElMessage.error('Agent 已创建，但服务端未返回资源 ID，请刷新列表后重试生成部署命令。')
+			await load()
+			return
+		}
+		const credential = await createProviderDeploymentCredential(workspaceStore.providerId, resourceId, createForm.nodeName.trim(), createForm.ttlMinutes)
+		if (!credential.success || !credential.data?.install_command) {
+			ElMessage.error('部署命令生成失败，请刷新列表后重试。')
+			await load()
+			return
+		}
 		installCommand.value = credential.data.install_command
 		createDialog.value = false
 		commandDialog.value = true
