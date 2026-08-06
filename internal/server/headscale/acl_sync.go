@@ -407,6 +407,11 @@ func (s *ACLSyncService) generateACLPolicy(ctx context.Context) (*ACLPolicy, err
 	} else {
 		policy.SSH = sshRules
 	}
+	sshACLRules, err := s.generateSSHTCPACLRules(ctx, usedTags)
+	if err != nil {
+		return nil, err
+	}
+	policy.ACLs = append(policy.ACLs, sshACLRules...)
 
 	return policy, nil
 }
@@ -779,6 +784,82 @@ func (s *ACLSyncService) generateSSHRules(ctx context.Context, usedTags map[stri
 
 	logger.Infof("生成 %d 条 SSH 规则", len(rules))
 	return rules, nil
+}
+
+// generateSSHTCPACLRules 为普通 TCP SSH 连接生成端口 ACL。
+// Tailscale SSH 使用 policy.ssh，Agent 自定义 SSH 端口则通过 tsnet TCP 转发，需要同时放行 ACL 端口。
+func (s *ACLSyncService) generateSSHTCPACLRules(ctx context.Context, usedTags map[string]bool) ([]ACLRule, error) {
+	var rules []ACLRule
+
+	var userPerms []model.AclSSHUserPermission
+	if err := db.DB.WithContext(ctx).Preload("TargetUser").Preload("User").Where("enabled = ?", true).Find(&userPerms).Error; err != nil {
+		return nil, fmt.Errorf("查询 SSH 用户授权端口失败: %w", err)
+	}
+	for _, perm := range userPerms {
+		if perm.TargetUser == nil || perm.User == nil || len(parseSSHUsers(perm.SSHUsers)) == 0 {
+			continue
+		}
+		srcTag := fmt.Sprintf("tag:%s-%s", perm.User.Role, perm.User.Name)
+		dstTag := fmt.Sprintf("tag:%s-%s", perm.TargetUser.Role, perm.TargetUser.Name)
+		usedTags[srcTag] = true
+		usedTags[dstTag] = true
+		rules = append(rules, sshTCPACLRulesForTarget(ctx, srcTag, dstTag, perm.TargetUserID)...)
+	}
+
+	var groupPerms []model.AclSSHGroupPermission
+	if err := db.DB.WithContext(ctx).Preload("TargetUser").Preload("Group").Where("enabled = ?", true).Find(&groupPerms).Error; err != nil {
+		return nil, fmt.Errorf("查询 SSH 分组授权端口失败: %w", err)
+	}
+	for _, perm := range groupPerms {
+		if perm.TargetUser == nil || perm.Group == nil || len(parseSSHUsers(perm.SSHUsers)) == 0 {
+			continue
+		}
+		srcTag := fmt.Sprintf("tag:group-%s", perm.Group.Name)
+		dstTag := fmt.Sprintf("tag:%s-%s", perm.TargetUser.Role, perm.TargetUser.Name)
+		usedTags[srcTag] = true
+		usedTags[dstTag] = true
+		rules = append(rules, sshTCPACLRulesForTarget(ctx, srcTag, dstTag, perm.TargetUserID)...)
+	}
+
+	return appendUniqueJSON(nil, rules), nil
+}
+
+func sshTCPACLRulesForTarget(ctx context.Context, srcTag, dstTag string, targetUserID uint64) []ACLRule {
+	ports := sshTCPPortsForTarget(ctx, targetUserID)
+	rules := make([]ACLRule, 0, len(ports))
+	for _, port := range ports {
+		rules = append(rules, ACLRule{
+			Action: "accept",
+			Src:    []string{srcTag},
+			Dst:    []string{fmt.Sprintf("%s:%d", dstTag, port)},
+		})
+	}
+	return rules
+}
+
+func sshTCPPortsForTarget(ctx context.Context, targetUserID uint64) []int {
+	var domains []model.DomainRegistry
+	if err := db.DB.WithContext(ctx).
+		Where("user_id = ? AND type = ? AND target_port > 0", targetUserID, model.DomainTypeSSH).
+		Find(&domains).Error; err != nil {
+		logger.Warnf("查询 SSH 域名端口失败: target_user_id=%d err=%v", targetUserID, err)
+		return []int{22}
+	}
+
+	seen := map[int]bool{}
+	ports := make([]int, 0, len(domains))
+	for _, domain := range domains {
+		if seen[domain.TargetPort] {
+			continue
+		}
+		seen[domain.TargetPort] = true
+		ports = append(ports, domain.TargetPort)
+	}
+	if len(ports) == 0 {
+		ports = append(ports, 22)
+	}
+	sort.Ints(ports)
+	return ports
 }
 
 // getClientSSHUsers 获取 Client 用户的 SSH 用户名列表（从 deploy token 中读取）

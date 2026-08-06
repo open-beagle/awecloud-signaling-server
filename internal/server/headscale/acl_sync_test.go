@@ -1,11 +1,18 @@
 package headscale
 
 import (
+	"context"
+	"fmt"
 	"testing"
+	"time"
 
+	"github.com/glebarez/sqlite"
 	v1 "github.com/juanfont/headscale/gen/go/headscale/v1"
-
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
 func TestSelectPreferredNodeByGivenNamePrefersOnlineThenNewest(t *testing.T) {
@@ -60,4 +67,71 @@ func TestMergeACLPoliciesAcceptsEquivalentGroupMemberOrder(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"tag:a", "tag:b"}, merged.Groups["group:shared"])
+}
+
+func TestGenerateACLPolicyAllowsGrantedSSHUserOnNodeDomainTargetPort(t *testing.T) {
+	database := newHeadscaleACLTestDB(t)
+	agent := model.User{Name: "aliyun", Role: model.UserRoleAgent, Enabled: true}
+	client := model.User{Name: "devops", Role: model.UserRoleClient, Enabled: true}
+	require.NoError(t, database.Create(&agent).Error)
+	require.NoError(t, database.Create(&client).Error)
+	require.NoError(t, database.Create(&model.Node{
+		UserID: agent.ID,
+		Name:   "aliyun-119",
+		Type:   model.NodeTypeAgent,
+		IP:     "100.64.0.123",
+	}).Error)
+	require.NoError(t, database.Create(&model.DomainRegistry{
+		Domain:       "aliyun-119.ali.szzy.beagle",
+		Type:         model.DomainTypeSSH,
+		UserID:       agent.ID,
+		ResourceKind: model.DomainResourceNode,
+		ResourceID:   "1",
+		TargetIP:     "100.64.0.123",
+		TargetPort:   2222,
+		Status:       model.DomainStatusOnline,
+	}).Error)
+	require.NoError(t, database.Create(&model.AclSSHUserPermission{
+		TargetUserID: agent.ID,
+		UserID:       client.ID,
+		SSHUsers:     `["root"]`,
+		Enabled:      true,
+	}).Error)
+
+	policy, err := NewACLSyncService(nil).generateACLPolicy(context.Background())
+	require.NoError(t, err)
+	require.Contains(t, policy.ACLs, ACLRule{
+		Action: "accept",
+		Src:    []string{"tag:client-devops"},
+		Dst:    []string{"tag:agent-aliyun:2222"},
+	})
+}
+
+func newHeadscaleACLTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	original := db.DB
+	t.Cleanup(func() { db.DB = original })
+
+	database, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:headscale_acl_%d?mode=memory&cache=shared", time.Now().UnixNano())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, database.AutoMigrate(
+		&model.User{},
+		&model.Group{},
+		&model.GroupMember{},
+		&model.Node{},
+		&model.DomainRegistry{},
+		&model.DeployToken{},
+		&model.ProxyService{},
+		&model.AclServiceUserPermission{},
+		&model.AclServiceGroupPermission{},
+		&model.AclUserUserPermission{},
+		&model.AclUserGroupPermission{},
+		&model.AclGroupUserPermission{},
+		&model.AclGroupGroupPermission{},
+		&model.AclSSHUserPermission{},
+		&model.AclSSHGroupPermission{},
+	))
+	db.DB = database
+	return database
 }
