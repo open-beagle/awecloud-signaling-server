@@ -57,9 +57,11 @@ type Agent struct {
 	k8sAPIProxy           *K8SAPIProxy           // K8S API 反向代理
 	svcInformer           *K8SServiceInformer    // K8S Service Informer
 	svcProxy              *K8SSVCProxy           // K8S Service gRPC 代理
+	nodeSSHProxy          *NodeSSHProxy          // Agent 节点 SSH 本机端口转发
 	containerDiscovery    *K8SContainerDiscovery // ContainerSSH Pod 候选发现
 	containerExecBroker   *ContainerExecBroker   // ContainerSSH Kubernetes Exec 数据面
 	containerSSHProxy     *ContainerSSHProxy     // ContainerSSH tsnet SSH 入口
+	hostSSHProxy          *HostSSHProxy          // Agent 节点宿主机 SSH 转发（非 22 端口）
 	containerSessions     *ContainerSessionManager
 	sessionAuthorizations *SessionAuthorizationCache
 	inventoryReporter     *KubernetesInventoryReporter
@@ -214,8 +216,14 @@ func (a *Agent) Run() error {
 	if a.containerDiscovery != nil {
 		a.containerDiscovery.Stop()
 	}
-	if a.containerSSHProxy != nil {
-		a.containerSSHProxy.Stop()
+		if a.containerSSHProxy != nil {
+			a.containerSSHProxy.Stop()
+		}
+		if a.hostSSHProxy != nil {
+			a.hostSSHProxy.Stop()
+		}
+	if a.nodeSSHProxy != nil {
+		a.nodeSSHProxy.Stop()
 	}
 
 	// 停止 Endpoint K8SAPI 代理
@@ -597,14 +605,24 @@ func (a *Agent) register() error {
 		a.tailscaleIP = a.tsManager.GetIP()
 		logger.Infof("Tailscale 已连接，IP: %s", a.tailscaleIP)
 
-		// 初始化 ProxyManager
-		if a.proxyManager == nil {
-			a.proxyManager = NewProxyManager(a.tsManager, a.grpcClient, a.agentID, a.ctx)
-		}
+			// 初始化 ProxyManager
+			if a.proxyManager == nil {
+				a.proxyManager = NewProxyManager(a.tsManager, a.grpcClient, a.agentID, a.ctx)
+			}
+			if err := a.startHostSSHProxy(); err != nil {
+				logger.Warnf("启动 Agent 节点 SSH 转发失败: %v", err)
+			}
 
 		// 初始化 VisitorManager
 		if a.visitorManager == nil {
 			a.visitorManager = NewVisitorManager(a.tsManager, a.config, a.grpcClient, a.agentID, a.ctx)
+		}
+
+		if a.nodeSSHProxy == nil && a.config.Tunnel.EnableSSH && a.nodeSSHPort() != 22 {
+			a.nodeSSHProxy = NewNodeSSHProxy(a.tsManager, uint16(a.nodeSSHPort()), a.ctx)
+			if err := a.nodeSSHProxy.Start(); err != nil {
+				logger.Warnf("启动 Node SSH 代理失败: %v", err)
+			}
 		}
 
 		// VPN 就绪，通知 ProxyManager 启动等待中的服务
@@ -1190,6 +1208,26 @@ func (a *Agent) nodeSSHPort() int32 {
 		return 22
 	}
 	return int32(a.config.Tunnel.SSHPort)
+}
+
+func (a *Agent) shouldStartHostSSHProxy() bool {
+	return a.shouldRegisterSSHDomain() && a.nodeSSHPort() != 22
+}
+
+func (a *Agent) startHostSSHProxy() error {
+	if !a.shouldStartHostSSHProxy() {
+		return nil
+	}
+	if a.tsManager == nil {
+		return fmt.Errorf("Tailscale 未启动")
+	}
+	port := uint16(a.nodeSSHPort())
+	proxy := NewHostSSHProxy(a.tsManager, port, fmt.Sprintf("127.0.0.1:%d", port), a.ctx)
+	if err := proxy.Start(); err != nil {
+		return err
+	}
+	a.hostSSHProxy = proxy
+	return nil
 }
 
 // buildDomainRegistrations 构建域名注册列表
