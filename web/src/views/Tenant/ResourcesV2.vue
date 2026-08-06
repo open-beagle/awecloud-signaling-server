@@ -20,6 +20,7 @@
         <el-table-column label="可用性" width="110"><template #default="{ row }"><el-tag size="small" :type="availabilityTag(row.availability_state)">{{ availabilityLabel(row.availability_state) }}</el-tag></template></el-table-column>
         <el-table-column label="版本" width="110"><template #default="{ row }">r{{ row.revision }} / v{{ row.row_version }}</template></el-table-column>
         <el-table-column label="更新时间" width="180"><template #default="{ row }">{{ formatTime(row.updated_at) }}</template></el-table-column>
+        <el-table-column label="操作" width="110" fixed="right" align="right"><template #default="{ row }"><el-button v-if="canGrant(row)" type="primary" link :icon="Key" @click.stop="openGrant(row)">授权</el-button></template></el-table-column>
       </el-table>
       <el-empty v-if="!loading && !errorMessage && items.length === 0" description="当前租户没有符合条件的已发布资源" />
     </section>
@@ -29,7 +30,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Refresh, Search } from '@element-plus/icons-vue'
+import { Key, Refresh, Search } from '@element-plus/icons-vue'
 import PageHeader from '@/components/Common/PageHeader.vue'
 import { getTenantResourcesV2, type TenantResourceV2 } from '@/api/tenantResourcesV2'
 import { useTenantStore } from '@/stores/tenant'
@@ -56,6 +57,8 @@ const availabilityTag = (value: string) => ({ available: 'success', degraded: 'w
 const locationLabel = (row: TenantResourceV2) => row.type === 'host_ssh' ? (row.ssh_domain || row.display_name) : (row.namespace_name || '-')
 const targetLabel = (row: TenantResourceV2) => row.type === 'host_ssh' ? `${row.target_ip || '-'}:${row.target_port || 22}` : row.type === 'container_service' ? `${row.service_name || '-'}:${row.port_number || '-'}` : `${row.pod_name || row.workload_name || '-'} / ${row.container_name || '-'}`
 const formatTime = (value: string) => new Date(value).toLocaleString('zh-CN', { hour12: false })
+const canGrant = (row: TenantResourceV2) => row.type === 'host_ssh' && tenantStore.canTenant('tenant.grants.write')
+const openGrant = (row: TenantResourceV2) => router.push({ path: `/resources/${row.resource_id}`, query: { grant: '1' } })
 watch(() => tenantStore.contextRevision, () => { filters.query = ''; filters.type = ''; filters.availability = ''; load() })
 onMounted(load)
 </script>
