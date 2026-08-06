@@ -230,7 +230,7 @@ func (m *LocalProxyManager) handleConn(clientConn net.Conn, domain *pb.DomainInf
 
 	switch domain.Type {
 	case "ssh":
-		// SSH：连接到 Endpoint SSH 代理端口（如 100.64.0.22:50053）
+		// SSH：连接到 Agent/Endpoint 在 tsnet 上注册的 SSH 代理端口。
 		targetAddr = fmt.Sprintf("%s:%d", domain.TargetIp, domain.TargetPort)
 
 	case "k8sapi":

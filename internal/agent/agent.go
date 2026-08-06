@@ -61,7 +61,6 @@ type Agent struct {
 	containerDiscovery    *K8SContainerDiscovery // ContainerSSH Pod 候选发现
 	containerExecBroker   *ContainerExecBroker   // ContainerSSH Kubernetes Exec 数据面
 	containerSSHProxy     *ContainerSSHProxy     // ContainerSSH tsnet SSH 入口
-	hostSSHProxy          *HostSSHProxy          // Agent 节点宿主机 SSH 转发（非 22 端口）
 	containerSessions     *ContainerSessionManager
 	sessionAuthorizations *SessionAuthorizationCache
 	inventoryReporter     *KubernetesInventoryReporter
@@ -216,12 +215,9 @@ func (a *Agent) Run() error {
 	if a.containerDiscovery != nil {
 		a.containerDiscovery.Stop()
 	}
-		if a.containerSSHProxy != nil {
-			a.containerSSHProxy.Stop()
-		}
-		if a.hostSSHProxy != nil {
-			a.hostSSHProxy.Stop()
-		}
+	if a.containerSSHProxy != nil {
+		a.containerSSHProxy.Stop()
+	}
 	if a.nodeSSHProxy != nil {
 		a.nodeSSHProxy.Stop()
 	}
@@ -605,14 +601,10 @@ func (a *Agent) register() error {
 		a.tailscaleIP = a.tsManager.GetIP()
 		logger.Infof("Tailscale 已连接，IP: %s", a.tailscaleIP)
 
-			// 初始化 ProxyManager
-			if a.proxyManager == nil {
-				a.proxyManager = NewProxyManager(a.tsManager, a.grpcClient, a.agentID, a.ctx)
-			}
-			if err := a.startHostSSHProxy(); err != nil {
-				logger.Warnf("启动 Agent 节点 SSH 转发失败: %v", err)
-			}
-
+		// 初始化 ProxyManager
+		if a.proxyManager == nil {
+			a.proxyManager = NewProxyManager(a.tsManager, a.grpcClient, a.agentID, a.ctx)
+		}
 		// 初始化 VisitorManager
 		if a.visitorManager == nil {
 			a.visitorManager = NewVisitorManager(a.tsManager, a.config, a.grpcClient, a.agentID, a.ctx)
@@ -1208,26 +1200,6 @@ func (a *Agent) nodeSSHPort() int32 {
 		return 22
 	}
 	return int32(a.config.Tunnel.SSHPort)
-}
-
-func (a *Agent) shouldStartHostSSHProxy() bool {
-	return a.shouldRegisterSSHDomain() && a.nodeSSHPort() != 22
-}
-
-func (a *Agent) startHostSSHProxy() error {
-	if !a.shouldStartHostSSHProxy() {
-		return nil
-	}
-	if a.tsManager == nil {
-		return fmt.Errorf("Tailscale 未启动")
-	}
-	port := uint16(a.nodeSSHPort())
-	proxy := NewHostSSHProxy(a.tsManager, port, fmt.Sprintf("127.0.0.1:%d", port), a.ctx)
-	if err := proxy.Start(); err != nil {
-		return err
-	}
-	a.hostSSHProxy = proxy
-	return nil
 }
 
 // buildDomainRegistrations 构建域名注册列表

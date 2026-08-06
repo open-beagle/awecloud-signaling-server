@@ -177,13 +177,13 @@ func (s *DialSocketServer) resolveDialAddr(targetAddr string) string {
 	}
 
 	// 调试日志：输出 domainInfo 的详细信息
-	logger.Debugf("DialSocket 域名缓存信息: domain=%s, type=%s, target_ip=%s, target_port=%d", 
+	logger.Debugf("DialSocket 域名缓存信息: domain=%s, type=%s, target_ip=%s, target_port=%d",
 		host, domainInfo.Type, domainInfo.TargetIp, domainInfo.TargetPort)
 
 	// 使用 domainInfo 中的 target_ip 和 target_port
 	// 对于 SSH 类型：
 	//   - 如果 target_port 是 22，说明是 Agent 自身的 Tailscale SSH，保持用户请求的端口（22）
-	//   - 如果 target_port 不是 22，说明是 Endpoint SSH（通过 Agent FallbackTCPHandler 转发），使用 target_port
+	//   - 如果 target_port 不是 22，说明是 Agent/Endpoint SSH 代理端口，使用 target_port
 	// 对于其他类型，使用 target_port（如 K8SAPI 的 50153、K8SSVC 的 50051）
 	resolvedPort := port
 	if domainInfo.TargetPort > 0 {
