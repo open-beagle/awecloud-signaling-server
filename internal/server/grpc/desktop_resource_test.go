@@ -144,6 +144,8 @@ func TestDesktopListDomainsIncludesUnifiedHostSSHGrantCreatedInLocalTimezone(t *
 	group := model.Group{TenantID: tenant.ID, Name: "devops"}
 	require.NoError(t, testDB.Create(&group).Error)
 	require.NoError(t, testDB.Create(&model.GroupMember{GroupID: group.ID, UserID: client.ID}).Error)
+	desktopNode := model.Node{ID: 6300, UserID: client.ID, Name: "desktop-local", Type: model.NodeTypeDesktop, IP: "100.64.0.31", LastHeartbeat: &now}
+	require.NoError(t, testDB.Create(&desktopNode).Error)
 	agentNode := model.Node{ID: 6301, UserID: agentUser.ID, Name: "host-local", Type: model.NodeTypeAgent, IP: "100.64.0.123", LastHeartbeat: &now}
 	require.NoError(t, testDB.Create(&agentNode).Error)
 	resource := model.Resource{
@@ -165,6 +167,12 @@ func TestDesktopListDomainsIncludesUnifiedHostSSHGrantCreatedInLocalTimezone(t *
 	require.NoError(t, err)
 	require.Len(t, resp.Domains, 1)
 	require.Equal(t, "host-local.ali.szzy.beagle", resp.Domains[0].Domain)
+
+	domainResp, err := (&DesktopServiceServer{}).GetDomainList(context.Background(), &pb.GetDomainListRequest{DesktopId: desktopNode.ID})
+	require.NoError(t, err)
+	require.Len(t, domainResp.Domains, 1)
+	require.Equal(t, "host-local.ali.szzy.beagle", domainResp.Domains[0].Domain)
+	require.Equal(t, []string{"root"}, domainResp.Domains[0].SshUsers)
 }
 
 func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t *testing.T) {

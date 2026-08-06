@@ -2220,6 +2220,7 @@ func (s *DesktopServiceServer) GetDomainList(ctx context.Context, req *pb.GetDom
 
 	// 查询所有可访问的域名
 	domains := s.queryAccessibleDomains(ctx, clientID, groupIDs)
+	domains = appendUniqueDomainItems(domains, s.queryUnifiedHostSSHDomainItems(ctx, clientID, groupIDs))
 
 	logger.Infof("Desktop %d 域名列表查询: 共 %d 条域名", req.DesktopId, len(domains))
 
@@ -2468,6 +2469,46 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 	}
 
 	return domains
+}
+
+func (s *DesktopServiceServer) queryUnifiedHostSSHDomainItems(ctx context.Context, userID uint64, groupIDs []int64) []*pb.DomainItem {
+	records := s.queryUnifiedHostSSHDomains(ctx, userID, groupIDs)
+	items := make([]*pb.DomainItem, 0, len(records))
+	for _, record := range records {
+		item := &pb.DomainItem{
+			Domain: record.Domain, Type: string(record.Type), Status: s.getDomainStatus(ctx, &record),
+			Namespace: record.Namespace, ServiceName: record.ServiceName, Region: s.extractRegionFromDomain(record.Domain),
+		}
+		if record.Type == model.DomainTypeSSH && record.SshUsers != "" {
+			var users []string
+			if err := json.Unmarshal([]byte(record.SshUsers), &users); err == nil {
+				item.SshUsers = users
+			}
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+func appendUniqueDomainItems(items []*pb.DomainItem, extra []*pb.DomainItem) []*pb.DomainItem {
+	seen := make(map[string]struct{}, len(items)+len(extra))
+	for _, item := range items {
+		if item == nil || item.Domain == "" {
+			continue
+		}
+		seen[item.Domain] = struct{}{}
+	}
+	for _, item := range extra {
+		if item == nil || item.Domain == "" {
+			continue
+		}
+		if _, exists := seen[item.Domain]; exists {
+			continue
+		}
+		seen[item.Domain] = struct{}{}
+		items = append(items, item)
+	}
+	return items
 }
 
 // extractRegionFromDomain 从域名中提取 region
