@@ -152,6 +152,39 @@ func TestProviderChangesBoundAgentHostDomainLabel(t *testing.T) {
 	require.ErrorIs(t, err, ErrProviderSupplyVersionConflict)
 }
 
+func TestProviderChangesAgentDisplayNameWithoutChangingDomains(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	ctx := context.Background()
+	agent := fixture.createBoundAgent(t, "agent-display", 1001)
+	require.NoError(t, fixture.database.Model(&model.Node{}).Where("id = ?", 1001).Updates(map[string]any{
+		"hostname": "reported-hostname", "host_domain_label": "ssh-host",
+	}).Error)
+	require.NoError(t, fixture.database.Exec(
+		`INSERT INTO domain_registry (domain, type, user_id, provider_id, agent_resource_id, resource_kind, resource_id, node_id, endpoint_id, target_ip, target_port, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+		agent.DomainLabel+"."+fixture.provider.DomainLabel+".beagle", model.DomainTypeK8SAPI, agent.RuntimeUserID, agent.ProviderID, agent.ID,
+		model.DomainResourceKubernetes, "1001", 1001, "100.64.0.10", 6443, model.DomainStatusOnline, fixture.now, fixture.now,
+	).Error)
+
+	updated, err := fixture.service.UpdateAgentDisplayName(ctx, fixture.authorization, agent.ID, "A100 平台", agent.RowVersion)
+	require.NoError(t, err)
+	require.Equal(t, agent.RowVersion+1, updated.RowVersion)
+	require.Equal(t, agent.DomainLabel, updated.DomainLabel)
+
+	var runtimeUser model.User
+	require.NoError(t, fixture.database.First(&runtimeUser, agent.RuntimeUserID).Error)
+	require.Equal(t, "A100 平台", runtimeUser.Alias)
+	var node model.Node
+	require.NoError(t, fixture.database.First(&node, 1001).Error)
+	require.Equal(t, "ssh-host", node.HostDomainLabel)
+	var domain model.DomainRegistry
+	require.NoError(t, fixture.database.First(&domain, "agent_resource_id = ?", agent.ID).Error)
+	require.Equal(t, agent.DomainLabel+"."+fixture.provider.DomainLabel+".beagle", domain.Domain)
+
+	detail, err := fixture.service.GetTechnicalResource(ctx, fixture.authorization, agent.ID)
+	require.NoError(t, err)
+	require.Equal(t, "A100 平台", detail.Resource.DisplayName)
+}
+
 func TestProviderCreatesResourceOwnedOneTimeDeploymentCredential(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	ctx := context.Background()

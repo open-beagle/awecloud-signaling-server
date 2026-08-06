@@ -67,6 +67,30 @@ func TestReportSupplyInventoryAuthenticatesAgentAndReturnsStableAcks(t *testing.
 	require.NotZero(t, retry.RetryAfterSeconds)
 }
 
+func TestReportSupplyInventoryAuthenticatesTechnicalResourceDeployToken(t *testing.T) {
+	database := newSupplyInventoryGRPCDatabase(t)
+	oldDB := db.DB
+	db.DB = database
+	t.Cleanup(func() { db.DB = oldDB })
+
+	seedTechnicalResourceInventoryAgent(t, database, "tr-agent-token", 1001, "agent-a", "technical-agent-a")
+	cfg := &config.ServerConfig{FeatureFlags: config.FeatureFlagsSection{
+		ResourceModelWrite: true, ResourceReconciliation: true,
+	}}
+	server := &AgentServiceServer{config: cfg, providerSupply: service.NewProviderSupplyService(database)}
+	client, cleanup := startSupplyInventoryAgentServer(t, server)
+	defer cleanup()
+
+	ctx := metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", "Bearer tr-agent-token"))
+	stream, err := client.ReportSupplyInventory(ctx)
+	require.NoError(t, err)
+	require.NoError(t, stream.Send(testSupplyInventoryEnvelope(t, 1)))
+	ack, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, "SNAPSHOT_COMMITTED", ack.ResultCode)
+	require.True(t, ack.SnapshotCommitted)
+}
+
 func TestReportSupplyInventoryFailsClosedWithoutTokenOrFlags(t *testing.T) {
 	database := newSupplyInventoryGRPCDatabase(t)
 	oldDB := db.DB
@@ -103,7 +127,7 @@ func newSupplyInventoryGRPCDatabase(t *testing.T) *gorm.DB {
 	database, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, database.AutoMigrate(
-		&model.User{}, &model.ResourceProvider{}, &model.Node{}, &model.DeployToken{},
+		&model.User{}, &model.ResourceProvider{}, &model.Node{}, &model.DeployToken{}, &model.TechnicalResourceDeployToken{},
 		&model.TechnicalResource{}, &model.TechnicalResourceBinding{}, &model.SupplyInventoryReceipt{}, &model.SupplyCandidate{},
 		&model.PlatformResource{}, &model.PlatformResourceSource{}, &model.NamespaceObservation{}, &model.ResourceScope{},
 	))
@@ -127,6 +151,31 @@ func seedSupplyInventoryAgent(t *testing.T, database *gorm.DB, token string, nod
 	require.NoError(t, database.Create(&model.TechnicalResourceBinding{
 		ID: uuid.NewString(), TechnicalResourceID: resource.ID, SourceType: model.TechnicalResourceBindingLegacyNode,
 		SourceID: "1001", CredentialRevision: 1, Enabled: true, BoundByUserID: user.ID, Reason: "fixture", RowVersion: 1,
+	}).Error)
+}
+
+func seedTechnicalResourceInventoryAgent(t *testing.T, database *gorm.DB, token string, nodeID uint64, nodeName, resourceID string) {
+	t.Helper()
+	user := model.User{Name: "inventory-agent", Role: model.UserRoleAgent, SecretHash: "fixture", Enabled: true}
+	require.NoError(t, database.Create(&user).Error)
+	require.NoError(t, database.Create(&model.Node{ID: nodeID, UserID: user.ID, Name: nodeName, Type: model.NodeTypeAgent}).Error)
+	provider := model.ResourceProvider{ID: uuid.NewString(), Key: "inventory-provider", DisplayName: "Inventory Provider", DomainScope: model.ProviderDomainNamed, DomainLabel: "inventory-provider", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	require.NoError(t, database.Create(&provider).Error)
+	resource := model.TechnicalResource{
+		ID: resourceID, ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "agent-stable", DomainLabel: "agent-stable",
+		LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthUnknown,
+		CredentialRevision: 1, RuntimeUserID: user.ID, ConfigRevision: 1, RowVersion: 1,
+	}
+	require.NoError(t, database.Create(&resource).Error)
+	require.NoError(t, database.Create(&model.TechnicalResourceBinding{
+		ID: uuid.NewString(), TechnicalResourceID: resource.ID, SourceType: model.TechnicalResourceBindingLegacyNode,
+		SourceID: "1001", CredentialRevision: 1, Enabled: true, BoundByUserID: user.ID, Reason: "fixture", RowVersion: 1,
+	}).Error)
+	now := time.Now().UTC()
+	require.NoError(t, database.Create(&model.TechnicalResourceDeployToken{
+		ID: uuid.NewString(), TechnicalResourceID: resource.ID, Token: token, Name: nodeName,
+		RuntimeUserID: user.ID, Status: model.TechnicalResourceDeployTokenConsumed, DeviceFingerprint: "fingerprint",
+		ConsumedAt: &now, CreatedByUserID: user.ID,
 	}).Error)
 }
 

@@ -25,7 +25,7 @@ func prepareProviderSupplyAPIFixture(t *testing.T, flags config.FeatureFlagsSect
 		&model.TechnicalResource{}, &model.TechnicalResourceBinding{}, &model.SupplyInventoryReceipt{},
 		&model.SupplyCandidate{}, &model.PlatformResource{}, &model.PlatformResourceSource{},
 		&model.NamespaceObservation{}, &model.ResourceScope{}, &model.OutboxEvent{}, &model.TechnicalResourceDeployToken{},
-		&model.Node{}, &model.Endpoint{},
+		&model.Node{}, &model.Endpoint{}, &model.DomainRegistry{},
 	))
 	var providerMemberships int64
 	require.NoError(t, fixture.database.Model(&model.AdminProviderMembership{}).
@@ -46,11 +46,12 @@ func prepareProviderSupplyAPIFixture(t *testing.T, flags config.FeatureFlagsSect
 	management.Use(RequireFeatureFlag(config.FeatureFlagsSection{ManagementContextV2: true}, config.FeatureManagementContextV2, false))
 	management.Use(UnifiedManagementIdentityMiddleware())
 	provider := management.Group("/provider")
-	providerAPI := NewProviderSupplyAPI()
+	providerAPI := NewProviderSupplyAPI(fixture.config)
 	providerGovernanceAPI := NewProviderGovernanceAPI()
 	provider.GET("/memberships", RequireManagementPermission(service.PermissionProviderMembershipsRead), providerGovernanceAPI.ListMemberships)
 	provider.GET("/audit-logs", RequireManagementPermission(service.PermissionProviderAuditRead), providerGovernanceAPI.ListAuditLogs)
 	provider.GET("/technical-resources/:id", RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerAPI.GetTechnicalResource)
+	provider.PATCH("/technical-resources/:id/display-name", RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), providerAPI.UpdateAgentDisplayName)
 	provider.GET("/resources", RequireManagementPermission(service.PermissionProviderResourcesRead), providerAPI.ListPlatformResources)
 	provider.GET("/resources/:id", RequireManagementPermission(service.PermissionProviderResourcesRead), providerAPI.GetPlatformResource)
 	provider.GET("/scopes", RequireManagementPermission(service.PermissionProviderResourcesRead), providerAPI.ListResourceScopes)
@@ -238,6 +239,56 @@ func TestProviderSupplyAPICreateIsIdempotentAndTransactional(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
 		assertResponseErrorCode(t, response, ErrorCodeInvalidArgument)
 	}
+}
+
+func TestProviderSupplyAPIDeploymentCredentialUsesPublicURL(t *testing.T) {
+	fixture, login := prepareProviderSupplyAPIFixture(t, config.FeatureFlagsSection{ResourceModelWrite: true})
+	fixture.config.Server.PublicURL = "https://signal.wodcloud.com"
+	body := `{"type":"agent","stable_key":"agent-public-url","runtime_name":"agent-public-url","domain_label":"agent-public-url","credential_revision":1,"reason":"register API agent"}`
+	created := providerAPIRequest(fixture, login, http.MethodPost, providerTechnicalResourceCreateRoute, fixture.provider.ID,
+		body, map[string]string{HeaderIdempotencyKey: "provider-create-agent-public-url"})
+	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
+	var createdBody struct {
+		Data struct {
+			Result model.TechnicalResource `json:"result"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &createdBody))
+
+	credential := providerAPIRequest(fixture, login, http.MethodPost,
+		strings.Replace(providerTechnicalResourceCredentialRoute, ":id", createdBody.Data.Result.ID, 1), fixture.provider.ID,
+		`{"name":"agent-public-url","ttl_minutes":30}`, nil)
+	require.Equal(t, http.StatusCreated, credential.Code, credential.Body.String())
+	require.Contains(t, credential.Body.String(), "curl -fsSL https://signal.wodcloud.com/api/v1/download/install_agent.sh")
+	require.Contains(t, credential.Body.String(), "-s https://signal.wodcloud.com")
+	require.NotContains(t, credential.Body.String(), "http://signal.wodcloud.com")
+}
+
+func TestProviderSupplyAPIUpdatesAgentDisplayNameOnly(t *testing.T) {
+	fixture, login := prepareProviderSupplyAPIFixture(t, config.FeatureFlagsSection{ResourceModelWrite: true})
+	body := `{"type":"agent","stable_key":"agent-display-api","runtime_name":"agent-display-api","domain_label":"agent-display-api","credential_revision":1,"reason":"register display agent"}`
+	created := providerAPIRequest(fixture, login, http.MethodPost, providerTechnicalResourceCreateRoute, fixture.provider.ID,
+		body, map[string]string{HeaderIdempotencyKey: "provider-create-agent-display"})
+	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
+	var createdBody struct {
+		Data struct {
+			Result model.TechnicalResource `json:"result"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &createdBody))
+
+	path := "/api/v1/management/provider/technical-resources/" + createdBody.Data.Result.ID + "/display-name"
+	updated := providerAPIRequest(fixture, login, http.MethodPatch, path, fixture.provider.ID,
+		`{"display_name":"  A100 平台  "}`, map[string]string{HeaderIfMatch: `"1"`})
+	require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+	require.Equal(t, `"2"`, updated.Header().Get("ETag"))
+	require.Contains(t, updated.Body.String(), `"display_name":"A100 平台"`)
+
+	detail := providerAPIRequest(fixture, login, http.MethodGet,
+		"/api/v1/management/provider/technical-resources/"+createdBody.Data.Result.ID, fixture.provider.ID, "", nil)
+	require.Equal(t, http.StatusOK, detail.Code, detail.Body.String())
+	require.Contains(t, detail.Body.String(), `"display_name":"A100 平台"`)
+	require.Contains(t, detail.Body.String(), `"domain_label":"agent-display-api"`)
 }
 
 func TestProviderSupplyAPICreateAgentDomainConflictReturnsConflict(t *testing.T) {

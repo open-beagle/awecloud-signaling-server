@@ -36,6 +36,7 @@ type TechnicalResourceDetail struct {
 // data; Provider ownership continues to come exclusively from TechnicalResource.
 type TechnicalResourceView struct {
 	model.TechnicalResource
+	DisplayName           string `gorm:"column:display_name" json:"display_name"`
 	Hostname              string `gorm:"column:hostname" json:"hostname"`
 	HostDomainLabel       string `gorm:"column:host_domain_label" json:"host_domain_label"`
 	DomainNamespace       string `gorm:"column:domain_namespace" json:"domain_namespace"`
@@ -57,14 +58,19 @@ type SupplyCandidateListResult struct {
 }
 
 type PlatformResourceListResult struct {
-	Items []model.PlatformResource `json:"items"`
-	Total int64                    `json:"total"`
+	Items []PlatformResourceView `json:"items"`
+	Total int64                  `json:"total"`
 }
 
 type PlatformResourceDetail struct {
-	Resource *model.PlatformResource        `json:"resource"`
+	Resource *PlatformResourceView          `json:"resource"`
 	Sources  []model.PlatformResourceSource `json:"sources"`
 	Scopes   []model.ResourceScope          `json:"scopes"`
+}
+
+type PlatformResourceView struct {
+	model.PlatformResource
+	AccessDomain string `gorm:"column:access_domain" json:"access_domain"`
 }
 
 type ResourceScopeListInput struct {
@@ -73,13 +79,20 @@ type ResourceScopeListInput struct {
 }
 
 type ResourceScopeListResult struct {
-	Items []model.ResourceScope `json:"items"`
-	Total int64                 `json:"total"`
+	Items []ResourceScopeView `json:"items"`
+	Total int64               `json:"total"`
 }
 
 type ResourceScopeDetail struct {
 	Scope       *model.ResourceScope        `json:"scope"`
 	Observation *model.NamespaceObservation `json:"observation,omitempty"`
+}
+
+type ResourceScopeView struct {
+	model.ResourceScope
+	PlatformResourceDisplayName  string `gorm:"column:platform_resource_display_name" json:"platform_resource_display_name"`
+	PlatformResourceStableKey    string `gorm:"column:platform_resource_stable_key" json:"platform_resource_stable_key"`
+	PlatformResourceAccessDomain string `gorm:"column:platform_resource_access_domain" json:"platform_resource_access_domain"`
 }
 
 func (s *ProviderSupplyService) ListTechnicalResources(ctx context.Context, authorization *ManagementAuthorizationContext, input ProviderSupplyListInput) (*TechnicalResourceListResult, error) {
@@ -103,9 +116,10 @@ func (s *ProviderSupplyService) ListTechnicalResources(ctx context.Context, auth
 	if input.Search != "" {
 		pattern := "%" + escapeProviderLike(input.Search) + "%"
 		query = query.Where(`(technical_resource.stable_key LIKE ? ESCAPE '\'
+			OR runtime_user.alias LIKE ? ESCAPE '\'
 			OR agent_node.hostname LIKE ? ESCAPE '\'
 			OR agent_node.name LIKE ? ESCAPE '\'
-			OR agent_node.host_domain_label LIKE ? ESCAPE '\')`, pattern, pattern, pattern, pattern)
+			OR agent_node.host_domain_label LIKE ? ESCAPE '\')`, pattern, pattern, pattern, pattern, pattern)
 	}
 	result := &TechnicalResourceListResult{Items: []TechnicalResourceView{}}
 	query = query.Where("technical_resource.provider_id = ?", providerID)
@@ -165,6 +179,7 @@ func technicalResourceProjectionQuery(query *gorm.DB) *gorm.DB {
 		Joins(`LEFT JOIN node agent_node
 			ON technical_resource.type = ? AND active_binding.source_type = ?
 			AND CAST(agent_node.id AS TEXT) = active_binding.source_id`, model.TechnicalResourceAgent, model.TechnicalResourceBindingLegacyNode).
+		Joins(`LEFT JOIN user runtime_user ON runtime_user.id = technical_resource.runtime_user_id`).
 		Joins(`LEFT JOIN user agent_user ON agent_user.id = agent_node.user_id`).
 		Joins(`LEFT JOIN endpoint bound_endpoint
 			ON technical_resource.type = ? AND active_binding.source_type = ?
@@ -180,6 +195,9 @@ func technicalResourceProjectionQuery(query *gorm.DB) *gorm.DB {
 
 func technicalResourceProjectionSelect() string {
 	return `technical_resource.*,
+		CASE WHEN technical_resource.type = 'agent'
+			THEN COALESCE(NULLIF(runtime_user.alias, ''), technical_resource.domain_label)
+			ELSE COALESCE(NULLIF(bound_endpoint.alias, ''), bound_endpoint.name, '') END AS display_name,
 		CASE WHEN technical_resource.type = 'agent' AND projection_provider.domain_scope = 'root' THEN technical_resource.domain_label
 			WHEN technical_resource.type = 'agent' THEN technical_resource.domain_label || '.' || projection_provider.domain_label
 			WHEN technical_resource.type = 'endpoint' AND projection_provider.domain_scope = 'root' THEN parent_resource.domain_label
@@ -293,14 +311,16 @@ func (s *ProviderSupplyService) ListPlatformResources(ctx context.Context, autho
 	}
 	if input.Search != "" {
 		pattern := "%" + escapeProviderLike(input.Search) + "%"
-		query = query.Where("display_name LIKE ? ESCAPE '\\' OR stable_key LIKE ? ESCAPE '\\'", pattern, pattern)
+		query = query.Where("display_name LIKE ? ESCAPE '\\' OR stable_key LIKE ? ESCAPE '\\' OR "+platformResourceAccessDomainSubquery()+" LIKE ? ESCAPE '\\'", pattern, pattern, pattern)
 	}
-	result := &PlatformResourceListResult{Items: []model.PlatformResource{}}
+	result := &PlatformResourceListResult{Items: []PlatformResourceView{}}
 	query = query.Model(&model.PlatformResource{}).Where("provider_id = ?", providerID)
 	if err := query.Count(&result.Total).Error; err != nil {
 		return nil, err
 	}
-	if err := query.Order("created_at DESC, id ASC").Offset((input.Page - 1) * input.PageSize).Limit(input.PageSize).Find(&result.Items).Error; err != nil {
+	if err := query.Select(platformResourceProjectionSelect()).
+		Order("created_at DESC, id ASC").
+		Offset((input.Page - 1) * input.PageSize).Limit(input.PageSize).Scan(&result.Items).Error; err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -316,8 +336,11 @@ func (s *ProviderSupplyService) GetPlatformResource(ctx context.Context, authori
 	if validateRequired("resource_id", resourceID, 36) != nil {
 		return nil, ErrProviderSupplyInvalidInput
 	}
-	var resource model.PlatformResource
-	if err := query.Where("provider_id = ? AND id = ?", providerID, resourceID).First(&resource).Error; err != nil {
+	var resource PlatformResourceView
+	if err := query.Model(&model.PlatformResource{}).
+		Select(platformResourceProjectionSelect()).
+		Where("provider_id = ? AND id = ?", providerID, resourceID).
+		Take(&resource).Error; err != nil {
 		return nil, providerSupplyNotFound(err)
 	}
 	sources := []model.PlatformResourceSource{}
@@ -331,6 +354,40 @@ func (s *ProviderSupplyService) GetPlatformResource(ctx context.Context, authori
 		return nil, err
 	}
 	return &PlatformResourceDetail{Resource: &resource, Sources: sources, Scopes: scopes}, nil
+}
+
+func platformResourceProjectionSelect() string {
+	return "platform_resource.*, " + platformResourceAccessDomainSubquery() + " AS access_domain"
+}
+
+func platformResourceAccessDomainSubquery() string {
+	return `COALESCE((
+		SELECT domain_registry.domain
+		FROM platform_resource_source access_source
+		JOIN supply_candidate access_candidate
+			ON access_candidate.id = access_source.supply_candidate_id
+			AND access_candidate.provider_id = access_source.provider_id
+		JOIN technical_resource_binding access_binding
+			ON access_binding.technical_resource_id = access_candidate.technical_resource_id
+			AND access_binding.enabled = true
+		JOIN domain_registry
+			ON domain_registry.provider_id = platform_resource.provider_id
+			AND domain_registry.status = 'online'
+		WHERE access_source.provider_id = platform_resource.provider_id
+			AND access_source.platform_resource_id = platform_resource.id
+			AND platform_resource.type = 'kubernetes'
+			AND domain_registry.type = 'k8sapi'
+			AND (
+				(access_binding.source_type = 'legacy_node'
+					AND domain_registry.resource_kind = 'kubernetes'
+					AND domain_registry.resource_id = access_binding.source_id)
+				OR (access_binding.source_type = 'legacy_endpoint'
+					AND domain_registry.resource_kind = 'endpoint'
+					AND domain_registry.resource_id = access_binding.source_id)
+			)
+		ORDER BY access_source.is_primary DESC, domain_registry.status DESC, domain_registry.domain ASC, domain_registry.id ASC
+		LIMIT 1
+	), '')`
 }
 
 func (s *ProviderSupplyService) ListResourceScopes(ctx context.Context, authorization *ManagementAuthorizationContext, input ResourceScopeListInput) (*ResourceScopeListResult, error) {
@@ -351,14 +408,14 @@ func (s *ProviderSupplyService) ListResourceScopes(ctx context.Context, authoriz
 		if count != 1 {
 			return nil, ErrProviderSupplyObjectNotFound
 		}
-		query = query.Where("platform_resource_id = ?", input.PlatformResourceID)
+		query = query.Where("resource_scope.platform_resource_id = ?", input.PlatformResourceID)
 	}
 	if input.Type != "" {
 		typeValue := model.ResourceScopeType(input.Type)
 		if typeValue != model.ResourceScopeCluster && typeValue != model.ResourceScopeNamespace {
 			return nil, ErrProviderSupplyInvalidInput
 		}
-		query = query.Where("type = ?", typeValue)
+		query = query.Where("resource_scope.type = ?", typeValue)
 	}
 	if input.State != "" {
 		state := model.ResourceScopeLifecycleState(input.State)
@@ -368,20 +425,29 @@ func (s *ProviderSupplyService) ListResourceScopes(ctx context.Context, authoriz
 		default:
 			return nil, ErrProviderSupplyInvalidInput
 		}
-		query = query.Where("lifecycle_state = ?", state)
+		query = query.Where("resource_scope.lifecycle_state = ?", state)
 	}
 	if input.Search != "" {
-		query = query.Where("stable_key LIKE ? ESCAPE '\\'", "%"+escapeProviderLike(input.Search)+"%")
+		query = query.Where("resource_scope.stable_key LIKE ? ESCAPE '\\'", "%"+escapeProviderLike(input.Search)+"%")
 	}
-	result := &ResourceScopeListResult{Items: []model.ResourceScope{}}
-	query = query.Model(&model.ResourceScope{}).Where("provider_id = ?", providerID)
+	result := &ResourceScopeListResult{Items: []ResourceScopeView{}}
+	query = query.Table("resource_scope").
+		Joins("JOIN platform_resource ON platform_resource.provider_id = resource_scope.provider_id AND platform_resource.id = resource_scope.platform_resource_id").
+		Where("resource_scope.provider_id = ?", providerID)
 	if err := query.Count(&result.Total).Error; err != nil {
 		return nil, err
 	}
-	if err := query.Order("type ASC, created_at DESC, id ASC").Offset((input.Page - 1) * input.PageSize).Limit(input.PageSize).Find(&result.Items).Error; err != nil {
+	if err := query.Select(resourceScopeProjectionSelect()).
+		Order("resource_scope.type ASC, resource_scope.created_at DESC, resource_scope.id ASC").
+		Offset((input.Page - 1) * input.PageSize).Limit(input.PageSize).Scan(&result.Items).Error; err != nil {
 		return nil, err
 	}
 	return result, nil
+}
+
+func resourceScopeProjectionSelect() string {
+	return "resource_scope.*, platform_resource.display_name AS platform_resource_display_name, platform_resource.stable_key AS platform_resource_stable_key, " +
+		platformResourceAccessDomainSubquery() + " AS platform_resource_access_domain"
 }
 
 func (s *ProviderSupplyService) GetResourceScope(ctx context.Context, authorization *ManagementAuthorizationContext, scopeID string) (*ResourceScopeDetail, error) {

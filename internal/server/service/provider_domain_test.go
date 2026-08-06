@@ -133,12 +133,18 @@ func TestDomainServiceBuildsNamedProviderAndEndpointDomains(t *testing.T) {
 	require.Equal(t, endpoint.ID, records[1].ResourceID)
 
 	require.ErrorIs(t, domains.UpdateEndpointHostDomainLabel(ctx, endpoint.ID, "beagle-242"), ErrHostDomainLabelExists)
+	require.NoError(t, database.Model(&model.DomainRegistry{}).
+		Where("domain = ? AND type = ?", "beagle-242.aliyun.szzy.beagle", model.DomainTypeSSH).
+		Update("ssh_users", `["root","ubuntu"]`).Error)
 	require.NoError(t, domains.UpdateNodeHostDomainLabel(ctx, nodes[0].ID, "beagle-244"))
 	var oldCount, newCount int64
 	require.NoError(t, database.Model(&model.DomainRegistry{}).Where("domain = ?", "beagle-242.aliyun.szzy.beagle").Count(&oldCount).Error)
 	require.NoError(t, database.Model(&model.DomainRegistry{}).Where("domain = ?", "beagle-244.aliyun.szzy.beagle").Count(&newCount).Error)
 	require.Zero(t, oldCount)
 	require.EqualValues(t, 1, newCount)
+	var renamed model.DomainRegistry
+	require.NoError(t, database.Where("domain = ? AND type = ?", "beagle-244.aliyun.szzy.beagle", model.DomainTypeSSH).First(&renamed).Error)
+	require.Equal(t, `["root","ubuntu"]`, renamed.SshUsers)
 }
 
 func TestDomainServiceRejectsMissingStructuredOwnership(t *testing.T) {

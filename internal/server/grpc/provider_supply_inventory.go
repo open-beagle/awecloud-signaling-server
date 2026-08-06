@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
@@ -81,6 +82,13 @@ func authenticateSupplyInventoryAgent(ctx context.Context) (service.TechnicalRes
 		return service.TechnicalResourceCredential{}, err
 	}
 
+	if credential, ok, err := authenticateTechnicalResourceInventoryToken(ctx, token); ok || err != nil {
+		return credential, err
+	}
+	return authenticateLegacyInventoryToken(ctx, token)
+}
+
+func authenticateLegacyInventoryToken(ctx context.Context, token string) (service.TechnicalResourceCredential, error) {
 	var deployToken model.DeployToken
 	if err := db.DB.WithContext(ctx).Where("token = ? AND status = ?", token, model.DeployTokenStatusBound).First(&deployToken).Error; err != nil {
 		return service.TechnicalResourceCredential{}, status.Error(codes.Unauthenticated, "INVALID_AGENT_TOKEN")
@@ -98,6 +106,34 @@ func authenticateSupplyInventoryAgent(ctx context.Context) (service.TechnicalRes
 		SourceType: model.TechnicalResourceBindingLegacyNode,
 		SourceID:   strconv.FormatUint(node.ID, 10),
 	}, nil
+}
+
+func authenticateTechnicalResourceInventoryToken(ctx context.Context, token string) (service.TechnicalResourceCredential, bool, error) {
+	var deployToken model.TechnicalResourceDeployToken
+	err := db.DB.WithContext(ctx).
+		Where("token = ? AND status = ?", token, model.TechnicalResourceDeployTokenConsumed).
+		First(&deployToken).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return service.TechnicalResourceCredential{}, false, nil
+	}
+	if err != nil {
+		return service.TechnicalResourceCredential{}, true, status.Error(codes.Unauthenticated, "INVALID_AGENT_TOKEN")
+	}
+	var resource model.TechnicalResource
+	if err := db.DB.WithContext(ctx).First(&resource, "id = ?", deployToken.TechnicalResourceID).Error; err != nil {
+		return service.TechnicalResourceCredential{}, true, status.Error(codes.PermissionDenied, "AGENT_NOT_ALLOWED")
+	}
+	if resource.RuntimeUserID != deployToken.RuntimeUserID || resource.LifecycleState != model.TechnicalResourceRegistered {
+		return service.TechnicalResourceCredential{}, true, status.Error(codes.PermissionDenied, "AGENT_NOT_ALLOWED")
+	}
+	var node model.Node
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ? AND name = ?", deployToken.RuntimeUserID, model.NodeTypeAgent, deployToken.Name).First(&node).Error; err != nil {
+		return service.TechnicalResourceCredential{}, true, status.Error(codes.PermissionDenied, "AGENT_NODE_UNBOUND")
+	}
+	return service.TechnicalResourceCredential{
+		SourceType: model.TechnicalResourceBindingLegacyNode,
+		SourceID:   strconv.FormatUint(node.ID, 10),
+	}, true, nil
 }
 
 func bearerTokenFromIncomingContext(ctx context.Context) (string, error) {

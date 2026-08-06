@@ -21,7 +21,7 @@
 
     <section class="data-surface">
       <div class="toolbar">
-        <el-input v-model="filters.search" class="search-input" clearable :prefix-icon="Search" placeholder="搜索主机名或稳定标识" @keyup.enter="applyFilters" @clear="applyFilters" />
+        <el-input v-model="filters.search" class="search-input" clearable :prefix-icon="Search" placeholder="搜索 Agent 名称或稳定标识" @keyup.enter="applyFilters" @clear="applyFilters" />
         <el-select v-model="filters.state" class="filter-select" clearable placeholder="全部生命周期" @change="applyFilters">
           <el-option label="待注册" value="pending" />
           <el-option label="已注册" value="registered" />
@@ -34,8 +34,8 @@
       <el-table v-loading="loading" :data="items" stripe>
         <el-table-column label="Agent" min-width="250">
           <template #default="{ row }">
-              <el-link class="resource-name" type="primary" :underline="false" @click="openDetail(row.id)">{{ row.host_domain_label || row.hostname || '等待主机注册' }}</el-link>
-            <span class="secondary"><span class="mono">{{ row.stable_key }}</span></span>
+              <el-link class="resource-name" type="primary" :underline="false" @click="openDetail(row.id)">{{ row.display_name || row.domain_label }}</el-link>
+            <span class="secondary"><span class="mono">{{ row.stable_key }}</span><template v-if="row.host_domain_label"> · SSH {{ row.host_domain_label }}</template></span>
           </template>
         </el-table-column>
 		<el-table-column label="域名命名空间" min-width="210"><template #default="{ row }"><span class="mono">*.{{ row.domain_namespace }}.beagle</span></template></el-table-column>

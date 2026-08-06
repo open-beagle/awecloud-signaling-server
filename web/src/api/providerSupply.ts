@@ -17,6 +17,7 @@ export interface TechnicalResource {
   provider_id: string
   type: TechnicalResourceType
   stable_key: string
+  display_name: string
   domain_label: string
   domain_namespace: string
   hostname: string
@@ -140,6 +141,7 @@ export interface PlatformResource {
   type: SupplyResourceType
   stable_key: string
   display_name: string
+  access_domain?: string
   lifecycle_state: PlatformResourceState
   health_state: ResourceHealthState
   capability_revision: number
@@ -153,6 +155,9 @@ export interface ResourceScope {
   id: string
   provider_id: string
   platform_resource_id: string
+  platform_resource_display_name?: string
+  platform_resource_stable_key?: string
+  platform_resource_access_domain?: string
   type: ResourceScopeType
   stable_key: string
   parent_id?: string
@@ -250,6 +255,11 @@ export const getProviderTechnicalResource = (providerId: string, resourceId: str
 export const updateProviderAgentDomainLabel = (providerId: string, resource: TechnicalResource, domainLabel: string, reason: string) =>
   request.patch<any, { success: boolean; data: TechnicalResource }>(`/api/v1/management/provider/technical-resources/${resource.id}/domain-label`, {
     domain_label: domainLabel, reason,
+  }, { headers: { ...providerHeaders(providerId), 'If-Match': String(resource.row_version) } })
+
+export const updateProviderAgentDisplayName = (providerId: string, resource: TechnicalResource, displayName: string) =>
+  request.patch<any, { success: boolean; data: TechnicalResource }>(`/api/v1/management/provider/technical-resources/${resource.id}/display-name`, {
+    display_name: displayName,
   }, { headers: { ...providerHeaders(providerId), 'If-Match': String(resource.row_version) } })
 
 export const updateProviderAgentHostDomainLabel = (providerId: string, resource: TechnicalResource, hostDomainLabel: string) =>

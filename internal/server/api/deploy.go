@@ -638,8 +638,12 @@ func (a *DeployAPI) createClientAuthKey(ctx context.Context, user *model.User) s
 // getServerAddr 获取 Server 外部访问地址
 // 优先使用配置的 PublicURL，否则从请求 Header 推断
 func (a *DeployAPI) getServerAddr(c *gin.Context) string {
-	if a.config.Server.PublicURL != "" {
-		return a.config.Server.PublicURL
+	return serverAddrFromRequest(a.config, c)
+}
+
+func serverAddrFromRequest(cfg *config.ServerConfig, c *gin.Context) string {
+	if cfg != nil && cfg.Server.PublicURL != "" {
+		return cfg.Server.PublicURL
 	}
 
 	// 从请求推断：优先 X-Forwarded 系列 Header（反向代理场景）

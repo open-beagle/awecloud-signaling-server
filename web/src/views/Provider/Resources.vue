@@ -20,7 +20,10 @@
 
       <el-table v-loading="loading" :data="items" stripe>
         <el-table-column :label="resourceType === 'kubernetes' ? 'Kubernetes' : '主机'" min-width="250">
-          <template #default="{ row }"><strong>{{ row.display_name || row.stable_key }}</strong><span class="secondary mono">{{ row.stable_key }}</span></template>
+          <template #default="{ row }">
+            <strong class="mono">{{ resourcePrimaryName(row) }}</strong>
+            <span class="secondary">{{ resourceSecondaryName(row) }}</span>
+          </template>
         </el-table-column>
         <el-table-column label="健康" width="110"><template #default="{ row }"><el-tag size="small" effect="plain" :type="healthTag(row.health_state)">{{ healthLabel(row.health_state) }}</el-tag></template></el-table-column>
         <el-table-column label="生命周期" width="120"><template #default="{ row }"><el-tag size="small" :type="lifecycleTag(row.lifecycle_state)">{{ lifecycleLabel(row.lifecycle_state) }}</el-tag></template></el-table-column>
@@ -54,7 +57,7 @@ const pageTitle = computed(() => props.resourceType === 'kubernetes' ? 'Kubernet
 const pageDescription = computed(() => props.resourceType === 'kubernetes'
   ? '查看当前资源方确认的 Kubernetes Cluster、健康状态和可分配 Namespace 数量。'
   : '查看当前资源方确认的 Host、健康状态和 whole-host Scope 可分配情况。')
-const searchPlaceholder = computed(() => props.resourceType === 'kubernetes' ? '搜索集群名称或稳定标识' : '搜索主机名称或稳定标识')
+const searchPlaceholder = computed(() => props.resourceType === 'kubernetes' ? '搜索访问域名、集群名称或稳定标识' : '搜索主机名称或稳定标识')
 
 const load = async () => {
   const providerId = workspaceStore.providerId
@@ -91,6 +94,11 @@ const lifecycleTag = (state: PlatformResourceState) => ({ draft: 'warning', acti
 const healthLabel = (state: string) => ({ unknown: '未知', online: '健康', degraded: '异常', offline: '离线' }[state] || state)
 const healthTag = (state: string) => ({ online: 'success', degraded: 'warning', offline: 'danger', unknown: 'info' }[state] || 'info') as any
 const formatTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
+const resourcePrimaryName = (resource: PlatformResource) => resource.access_domain || resource.display_name || resource.stable_key
+const resourceSecondaryName = (resource: PlatformResource) => {
+  const names = [resource.display_name, resource.stable_key].filter(value => value && value !== resourcePrimaryName(resource))
+  return names.join(' · ') || '-'
+}
 
 watch(() => [workspaceStore.providerId, props.resourceType], () => { pagination.page = 1; load() })
 onMounted(load)

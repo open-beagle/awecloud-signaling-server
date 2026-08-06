@@ -504,7 +504,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					platformGroup.POST("/allocations/:id/renew", api.RequireManagementPermission(service.PermissionPlatformAllocationsWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceAllocation, true), api.RequireIfMatch(), api.RequireIdempotencyKey(), platformAllocationAPI.Renew)
 				}
 
-				providerSupplyAPI := api.NewProviderSupplyAPI()
+				providerSupplyAPI := api.NewProviderSupplyAPI(s.config)
 				providerGovernanceAPI := api.NewProviderGovernanceAPI()
 				providerGroup := managementGroup.Group("/provider")
 				{
@@ -514,6 +514,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					providerGroup.GET("/technical-resources/:id", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.GetTechnicalResource)
 					providerGroup.PATCH("/technical-resources/:id/domain-label", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.UpdateAgentDomainLabel)
 					providerGroup.PATCH("/technical-resources/:id/host-domain-label", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.UpdateAgentHostDomainLabel)
+					providerGroup.PATCH("/technical-resources/:id/display-name", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.UpdateAgentDisplayName)
 					providerGroup.GET("/technical-resources/:id/capabilities", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.GetTechnicalResourceCapabilities)
 					providerGroup.PATCH("/technical-resources/:id/config", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.UpdateTechnicalResourceCapabilities)
 					providerGroup.GET("/technical-resources/:id/releases", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.ListTechnicalResourceReleases)

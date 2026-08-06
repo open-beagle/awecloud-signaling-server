@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -530,18 +531,42 @@ func updateNodeHostDomainLabel(ctx context.Context, tx *gorm.DB, nodeID uint64, 
 	if err := tx.Model(&node).Update("host_domain_label", label).Error; err != nil {
 		return err
 	}
-	if err := NewDomainService(tx).DeleteNodeSSHDomain(ctx, &node, &model.User{ID: node.UserID}); err != nil {
-		return err
-	}
 	var user model.User
 	if err := tx.First(&user, node.UserID).Error; err != nil {
 		return err
 	}
+	domains := NewDomainService(tx)
 	node.HostDomainLabel = label
-	if user.SSHEnabled {
-		return NewDomainService(tx).CreateNodeSSHDomain(ctx, &node, &user)
+	if !user.SSHEnabled {
+		return domains.DeleteNodeSSHDomain(ctx, &node, &user)
 	}
-	return nil
+	var existing model.DomainRegistry
+	err = tx.Where("resource_kind = ? AND resource_id = ? AND type = ?", model.DomainResourceNode, fmt.Sprint(node.ID), model.DomainTypeSSH).First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return domains.CreateNodeSSHDomain(ctx, &node, &user)
+	}
+	if err != nil {
+		return err
+	}
+	newDomain := domains.agentDomain(ctx, identity, label)
+	var conflictCount int64
+	if err := tx.Model(&model.DomainRegistry{}).
+		Where("lower(domain) = ? AND type = ? AND id <> ?", strings.ToLower(newDomain), model.DomainTypeSSH, existing.ID).
+		Count(&conflictCount).Error; err != nil {
+		return err
+	}
+	if conflictCount > 0 {
+		return ErrHostDomainLabelExists
+	}
+	return tx.Model(&existing).Updates(map[string]any{
+		"domain":            newDomain,
+		"user_id":           user.ID,
+		"provider_id":       identity.ProviderID,
+		"agent_resource_id": identity.AgentResourceID,
+		"node_id":           node.ID,
+		"target_ip":         node.IP,
+		"target_port":       22,
+	}).Error
 }
 
 func (s *DomainService) UpdateEndpointHostDomainLabel(ctx context.Context, endpointID, value string) error {

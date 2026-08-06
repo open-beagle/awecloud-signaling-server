@@ -21,7 +21,7 @@
 
       <el-table v-loading="loading" :data="items" stripe>
         <el-table-column label="Namespace 稳定标识" min-width="270"><template #default="{ row }"><strong class="mono">{{ row.stable_key }}</strong><span class="secondary mono">{{ row.id }}</span></template></el-table-column>
-        <el-table-column label="Kubernetes" min-width="220"><template #default="{ row }"><strong>{{ resourceName(row.platform_resource_id) }}</strong><span class="secondary mono">{{ row.platform_resource_id }}</span></template></el-table-column>
+        <el-table-column label="Kubernetes" min-width="220"><template #default="{ row }"><strong class="mono">{{ resourceName(row) }}</strong><span class="secondary">{{ resourceSummary(row) }}</span></template></el-table-column>
         <el-table-column label="隔离模式" width="150"><template #default="{ row }">{{ isolationLabel(row.isolation_mode) }}</template></el-table-column>
         <el-table-column label="Scope 状态" width="125"><template #default="{ row }"><el-tag size="small" :type="scopeTag(row.lifecycle_state)">{{ scopeLabel(row.lifecycle_state) }}</el-tag></template></el-table-column>
         <el-table-column label="证据 Revision" width="140"><template #default="{ row }">{{ row.evidence_revision }}</template></el-table-column>
@@ -39,14 +39,13 @@
 import { onMounted, reactive, ref, watch } from 'vue'
 import { Refresh, Search } from '@element-plus/icons-vue'
 import PageHeader from '@/components/Common/PageHeader.vue'
-import { getProviderPlatformResources, getProviderResourceScopes, type PlatformResource, type ResourceScope, type ResourceScopeIsolationMode, type ResourceScopeState } from '@/api/providerSupply'
+import { getProviderResourceScopes, type ResourceScope, type ResourceScopeIsolationMode, type ResourceScopeState } from '@/api/providerSupply'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspaceStore = useWorkspaceStore()
 const loading = ref(false)
 const errorMessage = ref('')
 const items = ref<ResourceScope[]>([])
-const resources = ref<PlatformResource[]>([])
 const filters = reactive({ search: '', state: '' })
 const pagination = reactive({ page: 1, size: 20, total: 0 })
 
@@ -54,7 +53,6 @@ const load = async () => {
   const providerId = workspaceStore.providerId
   if (!providerId) {
     items.value = []
-    resources.value = []
     pagination.total = 0
     errorMessage.value = '当前没有有效的资源方上下文。'
     return
@@ -62,16 +60,11 @@ const load = async () => {
   loading.value = true
   errorMessage.value = ''
   try {
-    const [scopeResponse, resourceResponse] = await Promise.all([
-      getProviderResourceScopes(providerId, { search: filters.search.trim() || undefined, type: 'namespace', state: filters.state || undefined, page: pagination.page, size: pagination.size }),
-      getProviderPlatformResources(providerId, { type: 'kubernetes', page: 1, size: 100 }),
-    ])
+    const scopeResponse = await getProviderResourceScopes(providerId, { search: filters.search.trim() || undefined, type: 'namespace', state: filters.state || undefined, page: pagination.page, size: pagination.size })
     items.value = scopeResponse.success && scopeResponse.data ? scopeResponse.data : []
-    resources.value = resourceResponse.success && resourceResponse.data ? resourceResponse.data : []
     pagination.total = scopeResponse.total || 0
   } catch {
     items.value = []
-    resources.value = []
     pagination.total = 0
     errorMessage.value = '请确认当前资源方权限和服务状态后重试。'
   } finally {
@@ -80,7 +73,12 @@ const load = async () => {
 }
 
 const applyFilters = () => { pagination.page = 1; load() }
-const resourceName = (id: string) => resources.value.find(resource => resource.id === id)?.display_name || id
+const resourceName = (scope: ResourceScope) => scope.platform_resource_access_domain || scope.platform_resource_display_name || scope.platform_resource_id
+const resourceSummary = (scope: ResourceScope) => {
+  const primary = resourceName(scope)
+  const names = [scope.platform_resource_display_name, scope.platform_resource_stable_key].filter(value => value && value !== primary)
+  return names.join(' · ') || scope.platform_resource_id
+}
 const isolationLabel = (mode: ResourceScopeIsolationMode) => ({ namespace_isolated: 'Namespace 隔离', reviewed_shared: '已审核共享', '': '-' }[mode])
 const scopeLabel = (state: ResourceScopeState) => ({ draft: '草稿', active: '生效中', allocatable: '可分配', suspended: '已暂停', retired: '已退役' }[state])
 const scopeTag = (state: ResourceScopeState) => ({ draft: 'warning', active: 'success', allocatable: 'success', suspended: 'warning', retired: 'info' }[state] as any)

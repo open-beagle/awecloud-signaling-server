@@ -69,6 +69,109 @@ func TestProviderSupplyQueriesAreProviderScoped(t *testing.T) {
 	require.ErrorIs(t, err, ErrProviderSupplyObjectNotFound)
 }
 
+func TestPlatformResourceQueriesProjectAccessDomain(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	accepted := createLifecycleSupplyResource(t, fixture)
+	require.NoError(t, fixture.database.Exec(
+		`INSERT INTO domain_registry (domain, type, user_id, provider_id, agent_resource_id, resource_kind, resource_id, node_id, endpoint_id, target_ip, target_port, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+		"kubernetes.agent-lifecycle.provider-a.beagle", model.DomainTypeK8SAPI, fixture.actor.ID, fixture.provider.ID, accepted.Candidate.TechnicalResourceID,
+		model.DomainResourceKubernetes, "1001", 1001, "100.64.0.10", 6443, model.DomainStatusOnline, fixture.now, fixture.now,
+	).Error)
+
+	resources, err := fixture.service.ListPlatformResources(context.Background(), fixture.authorization, ProviderSupplyListInput{
+		Type: string(model.SupplyResourceKubernetes), Search: "kubernetes.agent-lifecycle", Page: 1, PageSize: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, resources.Items, 1)
+	require.Equal(t, accepted.Resource.ID, resources.Items[0].ID)
+	require.Equal(t, "kubernetes.agent-lifecycle.provider-a.beagle", resources.Items[0].AccessDomain)
+
+	detail, err := fixture.service.GetPlatformResource(context.Background(), fixture.authorization, accepted.Resource.ID)
+	require.NoError(t, err)
+	require.Equal(t, "kubernetes.agent-lifecycle.provider-a.beagle", detail.Resource.AccessDomain)
+}
+
+func TestPlatformResourceQueriesIgnoreOfflineAccessDomain(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	accepted := createLifecycleSupplyResource(t, fixture)
+	require.NoError(t, fixture.database.Exec(
+		`INSERT INTO domain_registry (domain, type, user_id, provider_id, agent_resource_id, resource_kind, resource_id, node_id, endpoint_id, target_ip, target_port, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+		"kubernetes.offline-agent.provider-a.beagle", model.DomainTypeK8SAPI, fixture.actor.ID, fixture.provider.ID, accepted.Candidate.TechnicalResourceID,
+		model.DomainResourceKubernetes, "1001", 1001, "100.64.0.10", 6443, model.DomainStatusOffline, fixture.now, fixture.now,
+	).Error)
+
+	resources, err := fixture.service.ListPlatformResources(context.Background(), fixture.authorization, ProviderSupplyListInput{
+		Type: string(model.SupplyResourceKubernetes), Search: "offline-agent", Page: 1, PageSize: 10,
+	})
+	require.NoError(t, err)
+	require.Empty(t, resources.Items)
+
+	detail, err := fixture.service.GetPlatformResource(context.Background(), fixture.authorization, accepted.Resource.ID)
+	require.NoError(t, err)
+	require.Empty(t, detail.Resource.AccessDomain)
+}
+
+func TestPlatformResourceQueriesProjectEndpointAccessDomain(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	ctx := context.Background()
+	agent := fixture.createBoundAgent(t, "agent-endpoint-k8s", 1001)
+	endpoint, err := fixture.service.CreateTechnicalResource(ctx, fixture.authorization, CreateTechnicalResourceInput{
+		Type: model.TechnicalResourceEndpoint, StableKey: "endpoint-k8s", ParentID: agent.ID, CredentialRevision: 1,
+	})
+	require.NoError(t, err)
+	bound, err := fixture.service.BindTechnicalResource(ctx, fixture.authorization, BindTechnicalResourceInput{
+		TechnicalResourceID: endpoint.ID, SourceType: model.TechnicalResourceBindingLegacyEndpoint,
+		SourceID: "legacy-endpoint-a", ExpectedResourceVersion: endpoint.RowVersion, Reason: "endpoint k8s binding",
+	})
+	require.NoError(t, err)
+	candidate := reportSupplyCandidate(t, fixture, TechnicalResourceCredential{
+		SourceType: model.TechnicalResourceBindingLegacyNode, SourceID: "1001", CredentialRevision: 1,
+	}, "epoch-endpoint", 1, "snapshot-endpoint", `{
+		"cluster_uid":"cluster-endpoint",
+		"display_name":"Endpoint Cluster",
+		"namespaces":[]
+	}`)
+	require.NoError(t, fixture.database.Model(&model.SupplyCandidate{}).Where("id = ?", candidate.ID).
+		Update("technical_resource_id", bound.TechnicalResource.ID).Error)
+	require.NoError(t, fixture.database.First(&candidate, "id = ?", candidate.ID).Error)
+	accepted, err := fixture.service.AcceptSupplyCandidate(ctx, fixture.authorization, AcceptSupplyCandidateInput{
+		CandidateID: candidate.ID, ExpectedRowVersion: candidate.RowVersion, Reason: "endpoint-backed acceptance",
+	})
+	require.NoError(t, err)
+	require.NoError(t, fixture.database.Exec(
+		`INSERT INTO domain_registry (domain, type, user_id, provider_id, agent_resource_id, resource_kind, resource_id, node_id, endpoint_id, target_ip, target_port, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"kubernetes.endpoint-a.agent-endpoint-k8s.provider-a.beagle", model.DomainTypeK8SAPI, fixture.actor.ID, fixture.provider.ID, agent.ID,
+		model.DomainResourceEndpoint, "legacy-endpoint-a", uint64(1001), "legacy-endpoint-a", "100.64.0.10", 16443, model.DomainStatusOnline, fixture.now, fixture.now,
+	).Error)
+
+	resources, err := fixture.service.ListPlatformResources(ctx, fixture.authorization, ProviderSupplyListInput{
+		Type: string(model.SupplyResourceKubernetes), Search: "kubernetes.endpoint-a", Page: 1, PageSize: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, resources.Items, 1)
+	require.Equal(t, accepted.Resource.ID, resources.Items[0].ID)
+	require.Equal(t, "kubernetes.endpoint-a.agent-endpoint-k8s.provider-a.beagle", resources.Items[0].AccessDomain)
+}
+
+func TestResourceScopeQueriesProjectPlatformResourceAccessDomain(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	accepted := createLifecycleSupplyResource(t, fixture)
+	require.NoError(t, fixture.database.Exec(
+		`INSERT INTO domain_registry (domain, type, user_id, provider_id, agent_resource_id, resource_kind, resource_id, node_id, endpoint_id, target_ip, target_port, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+		"kubernetes.agent-lifecycle.provider-a.beagle", model.DomainTypeK8SAPI, fixture.actor.ID, fixture.provider.ID, accepted.Candidate.TechnicalResourceID,
+		model.DomainResourceKubernetes, "1001", 1001, "100.64.0.10", 6443, model.DomainStatusOnline, fixture.now, fixture.now,
+	).Error)
+
+	scopes, err := fixture.service.ListResourceScopes(context.Background(), fixture.authorization, ResourceScopeListInput{
+		ProviderSupplyListInput: ProviderSupplyListInput{Type: string(model.ResourceScopeNamespace), Page: 1, PageSize: 10},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, scopes.Items)
+	require.Equal(t, "kubernetes.agent-lifecycle.provider-a.beagle", scopes.Items[0].PlatformResourceAccessDomain)
+	require.Equal(t, accepted.Resource.DisplayName, scopes.Items[0].PlatformResourceDisplayName)
+	require.Equal(t, accepted.Resource.StableKey, scopes.Items[0].PlatformResourceStableKey)
+}
+
 func TestTechnicalResourceQueriesProjectAndSearchRuntimeHostname(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	require.NoError(t, fixture.database.Model(&model.Node{}).Where("id = ?", 1001).Updates(map[string]any{

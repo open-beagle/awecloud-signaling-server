@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
@@ -49,9 +50,13 @@ var providerSupplyOutboxPolicies = map[string]service.JSONFieldPolicy{
 	providerSupplyOutboxEventType: service.NewJSONFieldPolicy("provider_id", "aggregate_type", "aggregate_id", "row_version", "action"),
 }
 
-type ProviderSupplyAPI struct{}
+type ProviderSupplyAPI struct {
+	config *config.ServerConfig
+}
 
-func NewProviderSupplyAPI() *ProviderSupplyAPI { return &ProviderSupplyAPI{} }
+func NewProviderSupplyAPI(cfg *config.ServerConfig) *ProviderSupplyAPI {
+	return &ProviderSupplyAPI{config: cfg}
+}
 
 type providerTechnicalResourceCreateRequest struct {
 	Type               model.TechnicalResourceType `json:"type"`
@@ -91,6 +96,10 @@ type providerAgentDomainLabelRequest struct {
 
 type providerAgentHostDomainLabelRequest struct {
 	HostDomainLabel string `json:"host_domain_label"`
+}
+
+type providerAgentDisplayNameRequest struct {
+	DisplayName string `json:"display_name"`
 }
 
 type providerCandidateAcceptRequest struct {
@@ -208,6 +217,38 @@ func (a *ProviderSupplyAPI) UpdateAgentHostDomainLabel(c *gin.Context) {
 	c.JSON(http.StatusOK, NewSuccessResponse(resource))
 }
 
+func (a *ProviderSupplyAPI) UpdateAgentDisplayName(c *gin.Context) {
+	authorization, ok := currentManagementAuthorization(c)
+	if !ok {
+		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
+		return
+	}
+	rowVersion, ok := requiredRevision(c)
+	if !ok {
+		codedError(c, http.StatusPreconditionRequired, ErrorCodePreconditionRequired, "必须提供 If-Match revision")
+		return
+	}
+	var request providerAgentDisplayNameRequest
+	if _, ok := decodeProviderSupplyRequest(c, &request); !ok {
+		return
+	}
+	displayName := strings.TrimSpace(request.DisplayName)
+	supply := service.NewProviderSupplyService(db.DB)
+	resource, err := supply.UpdateAgentDisplayName(c.Request.Context(), authorization, c.Param("id"), displayName, rowVersion)
+	if err != nil {
+		writeProviderSupplyError(c, err, true)
+		return
+	}
+	detail, err := supply.GetTechnicalResource(c.Request.Context(), authorization, resource.ID)
+	if err != nil {
+		writeProviderSupplyError(c, err, false)
+		return
+	}
+	recordAuditLog(c.Request.Context(), c, model.ActionUpdateAgent, "technical_resource", resource.ID, displayName, gin.H{"display_name": displayName})
+	SetRevisionETag(c, resource.RowVersion)
+	c.JSON(http.StatusOK, NewSuccessResponse(detail.Resource))
+}
+
 func (a *ProviderSupplyAPI) CreateDeploymentCredential(c *gin.Context) {
 	authorization, ok := currentManagementAuthorization(c)
 	if !ok {
@@ -227,11 +268,7 @@ func (a *ProviderSupplyAPI) CreateDeploymentCredential(c *gin.Context) {
 		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "部署凭据参数无效")
 		return
 	}
-	scheme := "http"
-	if c.Request.TLS != nil {
-		scheme = "https"
-	}
-	serverAddr := scheme + "://" + c.Request.Host
+	serverAddr := serverAddrFromRequest(a.config, c)
 	executeProviderMutationWithStatus(c, authorization, http.StatusCreated, "create_technical_resource_deployment_credential", "generate deployment credential",
 		func(supply *service.ProviderSupplyService) (any, string, string, int64, error) {
 			credential, err := supply.CreateTechnicalResourceDeploymentCredential(c.Request.Context(), authorization, c.Param("id"), request.Name, time.Duration(request.TTLMinutes)*time.Minute)

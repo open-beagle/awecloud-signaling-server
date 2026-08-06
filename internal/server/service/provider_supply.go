@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -158,6 +159,44 @@ func (s *ProviderSupplyService) ChangeAgentHostDomainLabel(ctx context.Context, 
 		}
 		updated := tx.Model(&resource).Where("row_version = ?", expectedRowVersion).Updates(map[string]any{
 			"config_revision": gorm.Expr("config_revision + 1"), "row_version": gorm.Expr("row_version + 1"),
+		})
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected != 1 {
+			return ErrProviderSupplyVersionConflict
+		}
+		return tx.First(&resource, "id = ?", resource.ID).Error
+	})
+	return &resource, err
+}
+
+func (s *ProviderSupplyService) UpdateAgentDisplayName(ctx context.Context, authorization *ManagementAuthorizationContext, resourceID, value string, expectedRowVersion int64) (*model.TechnicalResource, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 100 || !utf8.ValidString(value) || expectedRowVersion <= 0 {
+		return nil, ErrProviderSupplyInvalidInput
+	}
+	var resource model.TechnicalResource
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		providerID, err := reauthorizeProviderPermission(tx, authorization, PermissionProviderTechnicalResourcesWrite, s.now().UTC())
+		if err != nil {
+			return err
+		}
+		if err := tx.Where("id = ? AND provider_id = ? AND type = ? AND deleted_at IS NULL", resourceID, providerID, model.TechnicalResourceAgent).First(&resource).Error; err != nil {
+			return providerSupplyNotFound(err)
+		}
+		if resource.RowVersion != expectedRowVersion {
+			return ErrProviderSupplyVersionConflict
+		}
+		var runtimeUser model.User
+		if err := tx.First(&runtimeUser, resource.RuntimeUserID).Error; err != nil {
+			return providerSupplyNotFound(err)
+		}
+		if err := tx.Model(&runtimeUser).Update("alias", value).Error; err != nil {
+			return err
+		}
+		updated := tx.Model(&resource).Where("row_version = ?", expectedRowVersion).Updates(map[string]any{
+			"row_version": gorm.Expr("row_version + 1"),
 		})
 		if updated.Error != nil {
 			return updated.Error

@@ -1,6 +1,6 @@
 <template>
   <div class="provider-page">
-    <PageHeader :title="displayHostname" :description="resourceDescription">
+    <PageHeader :title="resourceTitle" :description="resourceDescription">
       <template #actions>
         <el-button :icon="ArrowLeft" @click="returnFromDetail">{{ resource?.type === 'endpoint' ? '返回 Agent' : '返回列表' }}</el-button>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
@@ -24,7 +24,7 @@
       <section class="summary-surface">
         <div class="summary-identity">
           <span class="resource-icon"><el-icon><Cpu v-if="resource.type === 'agent'" /><Connection v-else /></el-icon></span>
-          <div><h2>{{ displayHostname }}</h2><p>{{ typeLabel(resource.type) }}<template v-if="resource.parent_hostname"> · 父 Agent {{ resource.parent_hostname }}</template></p></div>
+          <div><h2>{{ resourceTitle }}</h2><p>{{ typeLabel(resource.type) }}<template v-if="resource.parent_hostname"> · 父 Agent {{ resource.parent_hostname }}</template></p></div>
         </div>
         <div class="summary-item"><span>生命周期</span><el-tag size="small" :type="lifecycleTag(resource.lifecycle_state)">{{ lifecycleLabel(resource.lifecycle_state) }}</el-tag></div>
         <div class="summary-item"><span>健康</span><el-tag size="small" effect="plain" :type="healthTag(resource.health_state)">{{ healthLabel(resource.health_state) }}</el-tag></div>
@@ -36,7 +36,9 @@
           <section class="detail-surface">
             <h3>运行概况</h3>
             <el-descriptions :column="4" border>
-              <el-descriptions-item label="主机名"><span class="mono">{{ displayHostname }}</span><el-button v-if="resource.type === 'agent' && canWrite && hasBinding" link type="primary" @click="editAgentHostDomainLabel">编辑</el-button></el-descriptions-item>
+              <el-descriptions-item v-if="resource.type === 'agent'" label="Agent 名称"><span>{{ resource.display_name || resource.domain_label }}</span><el-button v-if="canWrite" link type="primary" @click="editAgentDisplayName">编辑</el-button></el-descriptions-item>
+              <el-descriptions-item v-else label="Endpoint 名称"><span>{{ resource.display_name || resource.hostname || '-' }}</span></el-descriptions-item>
+              <el-descriptions-item v-if="resource.type === 'agent'" label="SSH 主机域名标识"><span class="mono">{{ resource.host_domain_label || '待配置' }}</span></el-descriptions-item>
               <el-descriptions-item label="SSH 域名"><span class="mono">{{ sshHostname }}</span></el-descriptions-item>
               <el-descriptions-item label="类型">{{ typeLabel(resource.type) }}</el-descriptions-item>
               <el-descriptions-item label="父 Agent">{{ resource.parent_hostname || '-' }}</el-descriptions-item>
@@ -152,7 +154,7 @@ import PageHeader from '@/components/Common/PageHeader.vue'
 import {
 	checkProviderTechnicalResourceDelete, createProviderTechnicalResourceUpdateTask, deleteProviderTechnicalResource,
 	getProviderTechnicalResource, getProviderTechnicalResourceCapabilities, getProviderTechnicalResourceReleases,
-	getProviderTechnicalResourceUpdateTasks, setProviderTechnicalResourceLifecycle, updateProviderAgentDomainLabel, updateProviderAgentHostDomainLabel, updateProviderTechnicalResourceCapabilities,
+	getProviderTechnicalResourceUpdateTasks, setProviderTechnicalResourceLifecycle, updateProviderAgentDisplayName, updateProviderAgentDomainLabel, updateProviderTechnicalResourceCapabilities,
 	type ProviderRelease, type ProviderUpdateTask, type TechnicalResource, type TechnicalResourceBinding, type TechnicalResourceCapabilities,
 	type TechnicalResourceDeleteCheck, type TechnicalResourceState,
 } from '@/api/providerSupply'
@@ -178,7 +180,7 @@ const deleteCheck = ref<TechnicalResourceDeleteCheck>()
 const updateForm = reactive({ releaseId: '', reason: '', force: false })
 const canWrite = computed(() => workspaceStore.can('provider.technical_resources.write'))
 const hasBinding = computed(() => !!resource.value && resource.value.lifecycle_state !== 'pending')
-const displayHostname = computed(() => resource.value?.host_domain_label || resource.value?.hostname || '等待主机注册')
+const resourceTitle = computed(() => resource.value?.display_name || resource.value?.domain_label || resource.value?.hostname || '等待主机注册')
 const sshHostname = computed(() => resource.value
 	? resource.value.type === 'agent' && resource.value.host_domain_label
 		? `${resource.value.host_domain_label}.${resource.value.domain_namespace}.beagle`
@@ -194,7 +196,7 @@ const capabilityRows = computed(() => resource.value ? [
   { label: 'Kubernetes Service', description: '发现并代理集群服务', enabled: resource.value.svc_enabled },
   ...(resource.value.type === 'agent' ? [{ label: 'Endpoint 接入', description: '接受隔离网络 Endpoint 反向连接', enabled: resource.value.endpoint_access_enabled }] : []),
 ] : [])
-const endpointName = (endpoint: TechnicalResource) => endpoint.host_domain_label || endpoint.hostname || '等待主机注册'
+const endpointName = (endpoint: TechnicalResource) => endpoint.display_name || endpoint.host_domain_label || endpoint.hostname || '等待主机注册'
 const endpointDomain = (endpoint: TechnicalResource) => endpoint.host_domain_label && endpoint.domain_namespace
 	? `${endpoint.host_domain_label}.${endpoint.domain_namespace}.beagle`
 	: '-'
@@ -235,17 +237,17 @@ const editAgentDomainLabel = async () => {
 	}
 }
 
-const editAgentHostDomainLabel = async () => {
-	if (!resource.value || resource.value.type !== 'agent' || !workspaceStore.providerId || !hasBinding.value) return
+const editAgentDisplayName = async () => {
+	if (!resource.value || resource.value.type !== 'agent' || !workspaceStore.providerId) return
 	try {
-		const result = await ElMessageBox.prompt(`修改后 SSH 域名为 <主机名>.${resource.value.domain_namespace}.beagle，旧主机域名立即失效。`, '编辑 Agent 主机名', {
-			inputValue: resource.value.host_domain_label || resource.value.hostname,
-			inputPattern: /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
-			inputErrorMessage: '请输入有效的 DNS 单标签',
+		const result = await ElMessageBox.prompt('请输入 Agent 名称', '编辑 Agent 名称', {
+			inputValue: resource.value.display_name || resource.value.domain_label,
+			inputPattern: /\S+/,
+			inputErrorMessage: '请输入 Agent 名称',
 			confirmButtonText: '保存', cancelButtonText: '取消',
 		})
-		await updateProviderAgentHostDomainLabel(workspaceStore.providerId, resource.value, result.value.trim().toLowerCase())
-		ElMessage.success('Agent 主机名和 SSH 域名已更新')
+		await updateProviderAgentDisplayName(workspaceStore.providerId, resource.value, result.value.trim())
+		ElMessage.success('Agent 名称已更新')
 		await load()
 	} catch (error) {
 		if (error !== 'cancel' && error !== 'close') throw error
