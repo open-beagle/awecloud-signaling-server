@@ -46,6 +46,7 @@ type TenantMembership struct {
 	Role      string     `gorm:"size:30;not null;default:'member'" json:"role"`
 	Enabled   bool       `gorm:"not null;default:true;index" json:"enabled"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	DeletedAt *time.Time `gorm:"index" json:"deleted_at,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }

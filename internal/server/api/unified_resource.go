@@ -225,7 +225,7 @@ func (a *UnifiedResourceAPI) AddTenantMember(c *gin.Context) {
 	}
 	membership := model.TenantMembership{TenantID: tenantID, UserID: req.UserID, Role: req.Role, Enabled: true}
 	if err := db.DB.WithContext(c.Request.Context()).Where("tenant_id = ? AND user_id = ?", tenantID, req.UserID).
-		Assign(map[string]interface{}{"role": req.Role, "enabled": true}).FirstOrCreate(&membership).Error; err != nil {
+		Assign(map[string]interface{}{"role": req.Role, "enabled": true, "deleted_at": nil}).FirstOrCreate(&membership).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("添加租户成员失败"))
 		return
 	}
@@ -265,6 +265,61 @@ func (a *UnifiedResourceAPI) DisableTenantMember(c *gin.Context) {
 	c.JSON(http.StatusOK, NewSuccessResponse(membership))
 }
 
+// DeleteTenantMember removes the membership from the Tenant while retaining
+// its identity for historical session references.
+func (a *UnifiedResourceAPI) DeleteTenantMember(c *gin.Context) {
+	tenantID := c.Param("id")
+	if !requireTenantPermission(c, tenantID, PermissionTenantMembersWrite) {
+		return
+	}
+	userID, err := strconv.ParseUint(c.Param("user_id"), 10, 64)
+	if err != nil || userID == 0 {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("用户 ID 无效"))
+		return
+	}
+
+	ctx := c.Request.Context()
+	var tenant model.Tenant
+	if err := db.DB.WithContext(ctx).First(&tenant, "id = ?", tenantID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("租户不存在"))
+		return
+	}
+	var user model.User
+	if err := db.DB.WithContext(ctx).First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("租户成员不存在"))
+		return
+	}
+
+	var membership model.TenantMembership
+	err = db.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("tenant_id = ? AND user_id = ? AND deleted_at IS NULL", tenantID, userID).First(&membership).Error; err != nil {
+			return err
+		}
+		wasEnabled := membership.Enabled
+		deletedAt := time.Now().UTC()
+		if err := tx.Model(&membership).Updates(map[string]interface{}{"enabled": false, "deleted_at": deletedAt}).Error; err != nil {
+			return err
+		}
+		targetName := user.Alias
+		if targetName == "" {
+			targetName = user.Name
+		}
+		return recordAuditLogStrictWithDB(ctx, tx, c, "delete_tenant_member", "tenant_member", strconv.FormatUint(userID, 10), targetName, map[string]interface{}{
+			"tenant_id": tenantID, "user_id": userID, "user_name": user.Name, "user_alias": user.Alias,
+			"role": membership.Role, "was_enabled": wasEnabled,
+		})
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, NewErrorResponse("租户成员不存在"))
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除租户成员失败"))
+		return
+	}
+	c.JSON(http.StatusOK, NewSuccessResponse(nil))
+}
+
 // ListTenantMembers returns only active business identities in one Tenant.
 // It is safe for Tenant Admin selectors and does not expose the global user directory.
 func (a *UnifiedResourceAPI) ListTenantMembers(c *gin.Context) {
@@ -273,7 +328,7 @@ func (a *UnifiedResourceAPI) ListTenantMembers(c *gin.Context) {
 		return
 	}
 	var memberships []model.TenantMembership
-	if err := db.DB.WithContext(c.Request.Context()).Where("tenant_id = ?", tenantID).Order("created_at ASC").Find(&memberships).Error; err != nil {
+	if err := db.DB.WithContext(c.Request.Context()).Where("tenant_id = ? AND deleted_at IS NULL", tenantID).Order("created_at ASC").Find(&memberships).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询租户成员失败"))
 		return
 	}

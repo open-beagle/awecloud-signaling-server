@@ -786,6 +786,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.GET("/tenants/:id/members", unifiedResourceAPI.ListTenantMembers)
 					adminAuthGroup.POST("/tenants/:id/members", unifiedResourceAPI.AddTenantMember)
 					adminAuthGroup.POST("/tenants/:id/members/:user_id/disable", unifiedResourceAPI.DisableTenantMember)
+					adminAuthGroup.DELETE("/tenants/:id/members/:user_id", unifiedResourceAPI.DeleteTenantMember)
 					adminAuthGroup.GET("/tenants/:id/member-devices", tenantBusinessAPI.ListMemberDevices)
 					adminAuthGroup.GET("/tenants/:id/audit-logs", tenantBusinessAPI.ListAuditLogs)
 					adminAuthGroup.GET("/resources", unifiedResourceAPI.List)

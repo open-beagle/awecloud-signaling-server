@@ -220,6 +220,10 @@ export const disableTenantMember = (tenantId: string, userId: number) => {
   return request.post<any, ApiResponse<TenantMember>>(`/api/v1/admin/tenants/${tenantId}/members/${userId}/disable`, undefined, { headers: { 'X-Tenant-ID': tenantId } })
 }
 
+export const deleteTenantMember = (tenantId: string, userId: number) => {
+  return request.delete<any, ApiResponse<null>>(`/api/v1/admin/tenants/${tenantId}/members/${userId}`, { headers: { 'X-Tenant-ID': tenantId } })
+}
+
 export const getProviderTenantBindings = (params?: { provider_id?: string; status?: string; page?: number; size?: number }) => {
   return request.get<any, PagedResponse<ProviderTenantBinding[]>>('/api/v1/admin/provider-tenant-bindings', { params })
 }

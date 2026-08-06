@@ -261,3 +261,113 @@ func TestTenantMemberDisableRestorePreservesMembership(t *testing.T) {
 	require.NotEmpty(t, audit.RequestID)
 	require.NotEmpty(t, audit.SourceIP)
 }
+
+func TestTenantMemberDeleteHidesMembershipAndRecordsActor(t *testing.T) {
+	oldDB := db.DB
+	t.Cleanup(func() { db.DB = oldDB })
+	database, err := gorm.Open(sqlite.Open("file:tenant_member_delete_test?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	db.DB = database
+	require.NoError(t, database.AutoMigrate(&model.Admin{}, &model.AdminTenantMembership{}, &model.User{}, &model.Tenant{}, &model.TenantMembership{}, &model.AuditLog{}))
+
+	tenant := model.Tenant{ID: uuid.NewString(), Key: "tenant-delete", Name: "Tenant Delete", Status: model.TenantStatusActive}
+	otherTenant := model.Tenant{ID: uuid.NewString(), Key: "tenant-delete-other", Name: "Tenant Delete Other", Status: model.TenantStatusActive}
+	admin := model.Admin{Username: "tenant-member-deleter", PasswordHash: "test", Role: "tenant_admin"}
+	user := model.User{Name: "deleted-user", Alias: "Deleted User", Role: model.UserRoleClient, SecretHash: "test", Enabled: true}
+	require.NoError(t, database.Create(&tenant).Error)
+	require.NoError(t, database.Create(&otherTenant).Error)
+	require.NoError(t, database.Create(&admin).Error)
+	require.NoError(t, database.Create(&user).Error)
+	require.NoError(t, database.Create(&model.AdminTenantMembership{AdminID: admin.ID, TenantID: tenant.ID, Role: "tenant_admin", Enabled: true}).Error)
+	require.NoError(t, database.Create(&model.TenantMembership{TenantID: tenant.ID, UserID: user.ID, Role: "member", Enabled: true}).Error)
+
+	api := NewUnifiedResourceAPI()
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("admin_id", admin.ID) })
+	router.GET("/tenants/:id/members", api.ListTenantMembers)
+	router.POST("/tenants/:id/members", api.AddTenantMember)
+	router.DELETE("/tenants/:id/members/:user_id", api.DeleteTenantMember)
+
+	crossTenantReq := httptest.NewRequest(http.MethodDelete, "/tenants/"+otherTenant.ID+"/members/"+strconv.FormatUint(user.ID, 10), nil)
+	crossTenantReq.Header.Set("X-Tenant-ID", otherTenant.ID)
+	crossTenantResp := httptest.NewRecorder()
+	router.ServeHTTP(crossTenantResp, crossTenantReq)
+	require.Equal(t, http.StatusForbidden, crossTenantResp.Code)
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/tenants/"+tenant.ID+"/members/"+strconv.FormatUint(user.ID, 10), nil)
+	deleteReq.Header.Set("X-Tenant-ID", tenant.ID)
+	deleteResp := httptest.NewRecorder()
+	router.ServeHTTP(deleteResp, deleteReq)
+	require.Equal(t, http.StatusOK, deleteResp.Code, deleteResp.Body.String())
+
+	var membership model.TenantMembership
+	require.NoError(t, database.First(&membership, "tenant_id = ? AND user_id = ?", tenant.ID, user.ID).Error)
+	require.False(t, membership.Enabled)
+	require.NotNil(t, membership.DeletedAt)
+
+	listReq := httptest.NewRequest(http.MethodGet, "/tenants/"+tenant.ID+"/members", nil)
+	listReq.Header.Set("X-Tenant-ID", tenant.ID)
+	listResp := httptest.NewRecorder()
+	router.ServeHTTP(listResp, listReq)
+	require.Equal(t, http.StatusOK, listResp.Code)
+	var listBody struct {
+		Data []tenantMemberListItem `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(listResp.Body.Bytes(), &listBody))
+	require.Empty(t, listBody.Data)
+
+	var audit model.AuditLog
+	require.NoError(t, database.Where("action_type = ?", "delete_tenant_member").First(&audit).Error)
+	require.Equal(t, admin.ID, audit.ActorAdminID)
+	require.Equal(t, admin.Username, audit.ActorUsername)
+	require.Equal(t, tenant.ID, audit.TenantID)
+	require.Equal(t, "tenant_member", audit.TargetType)
+	require.Equal(t, strconv.FormatUint(user.ID, 10), audit.TargetID)
+	require.Equal(t, user.Alias, audit.TargetName)
+	require.NotContains(t, audit.Detail, "reason")
+
+	restoreBody := bytes.NewBufferString(`{"user_id":` + strconv.FormatUint(user.ID, 10) + `,"role":"viewer"}`)
+	restoreReq := httptest.NewRequest(http.MethodPost, "/tenants/"+tenant.ID+"/members", restoreBody)
+	restoreReq.Header.Set("Content-Type", "application/json")
+	restoreReq.Header.Set("X-Tenant-ID", tenant.ID)
+	restoreResp := httptest.NewRecorder()
+	router.ServeHTTP(restoreResp, restoreReq)
+	require.Equal(t, http.StatusCreated, restoreResp.Code, restoreResp.Body.String())
+	var restoredMembership model.TenantMembership
+	require.NoError(t, database.First(&restoredMembership, "tenant_id = ? AND user_id = ?", tenant.ID, user.ID).Error)
+	require.True(t, restoredMembership.Enabled)
+	require.Nil(t, restoredMembership.DeletedAt)
+	require.Equal(t, "viewer", restoredMembership.Role)
+}
+
+func TestTenantMemberDeleteRollsBackWhenAuditFails(t *testing.T) {
+	oldDB := db.DB
+	t.Cleanup(func() { db.DB = oldDB })
+	database, err := gorm.Open(sqlite.Open("file:tenant_member_delete_audit_rollback_test?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	db.DB = database
+	require.NoError(t, database.AutoMigrate(&model.Admin{}, &model.AdminTenantMembership{}, &model.User{}, &model.Tenant{}, &model.TenantMembership{}))
+
+	tenant := model.Tenant{ID: uuid.NewString(), Key: "tenant-delete-rollback", Name: "Tenant Delete Rollback", Status: model.TenantStatusActive}
+	admin := model.Admin{Username: "tenant-member-delete-rollback", PasswordHash: "test", Role: "tenant_admin"}
+	user := model.User{Name: "delete-rollback-user", Role: model.UserRoleClient, SecretHash: "test", Enabled: true}
+	require.NoError(t, database.Create(&tenant).Error)
+	require.NoError(t, database.Create(&admin).Error)
+	require.NoError(t, database.Create(&user).Error)
+	require.NoError(t, database.Create(&model.AdminTenantMembership{AdminID: admin.ID, TenantID: tenant.ID, Role: "tenant_admin", Enabled: true}).Error)
+	require.NoError(t, database.Create(&model.TenantMembership{TenantID: tenant.ID, UserID: user.ID, Role: "member", Enabled: true}).Error)
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("admin_id", admin.ID) })
+	router.DELETE("/tenants/:id/members/:user_id", NewUnifiedResourceAPI().DeleteTenantMember)
+	request := httptest.NewRequest(http.MethodDelete, "/tenants/"+tenant.ID+"/members/"+strconv.FormatUint(user.ID, 10), nil)
+	request.Header.Set("X-Tenant-ID", tenant.ID)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusInternalServerError, response.Code)
+
+	var membership model.TenantMembership
+	require.NoError(t, database.First(&membership, "tenant_id = ? AND user_id = ?", tenant.ID, user.ID).Error)
+	require.True(t, membership.Enabled)
+	require.Nil(t, membership.DeletedAt)
+}
