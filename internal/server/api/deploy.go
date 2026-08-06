@@ -542,6 +542,9 @@ func (a *DeployAPI) registerTechnicalResource(c *gin.Context, req RegisterReques
 				return gorm.ErrInvalidTransaction
 			}
 		}
+		if err := service.EnsureLegacyHostPlatformResource(tx, &resource, &node, token.CreatedByUserID, now); err != nil {
+			return err
+		}
 		consumed := tx.Model(&model.TechnicalResourceDeployToken{}).Where("id = ? AND status = ?", token.ID, model.TechnicalResourceDeployTokenPending).
 			Updates(map[string]any{"status": model.TechnicalResourceDeployTokenConsumed, "device_fingerprint": req.DeviceFingerprint, "consumed_at": now})
 		if consumed.Error != nil {

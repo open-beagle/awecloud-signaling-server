@@ -55,6 +55,26 @@ func createBoundAgentForProvider(t *testing.T, fixture providerSupplyFixture, au
 	return bound.TechnicalResource
 }
 
+func TestEnsureLegacyHostPlatformResourceRefreshesExistingLease(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	agent := fixture.createBoundAgent(t, "agent-host-refresh", 1001)
+	var node model.Node
+	require.NoError(t, fixture.database.First(&node, 1001).Error)
+
+	firstAt := fixture.now
+	require.NoError(t, EnsureLegacyHostPlatformResource(fixture.database, agent, &node, fixture.actor.ID, firstAt))
+	stableKey := LegacyHostStableKey(model.TechnicalResourceBindingLegacyNode, fmt.Sprint(node.ID))
+	var first model.SupplyCandidate
+	require.NoError(t, fixture.database.First(&first, "technical_resource_id = ? AND resource_type = ? AND stable_key = ?", agent.ID, model.SupplyResourceHost, stableKey).Error)
+
+	secondAt := firstAt.Add(5 * time.Minute)
+	require.NoError(t, EnsureLegacyHostPlatformResource(fixture.database, agent, &node, fixture.actor.ID, secondAt))
+	var second model.SupplyCandidate
+	require.NoError(t, fixture.database.First(&second, "id = ?", first.ID).Error)
+	require.True(t, second.LastObservedAt.After(first.LastObservedAt))
+	require.True(t, second.LeaseExpiresAt.After(first.LeaseExpiresAt))
+}
+
 func TestSupplyCandidateProjectionUpdateAndRejectedDecision(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	agent := fixture.createBoundAgent(t, "agent-candidate-update", 1001)

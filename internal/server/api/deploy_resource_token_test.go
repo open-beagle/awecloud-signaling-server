@@ -23,7 +23,10 @@ import (
 func TestResourceDeployTokenRegistersOnceAndBindsTechnicalResource(t *testing.T) {
 	database, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.NewString())), &gorm.Config{IgnoreRelationshipsWhenMigrating: true})
 	require.NoError(t, err)
-	require.NoError(t, database.AutoMigrate(&model.User{}, &model.Node{}, &model.Endpoint{}, &model.ResourceProvider{}, &model.TechnicalResource{}, &model.TechnicalResourceBinding{}, &model.TechnicalResourceDeployToken{}, &model.DeployToken{}))
+	require.NoError(t, database.AutoMigrate(
+		&model.User{}, &model.Node{}, &model.Endpoint{}, &model.ResourceProvider{}, &model.TechnicalResource{}, &model.TechnicalResourceBinding{},
+		&model.SupplyCandidate{}, &model.PlatformResource{}, &model.PlatformResourceSource{}, &model.TechnicalResourceDeployToken{}, &model.DeployToken{},
+	))
 	previous := serverdb.DB
 	serverdb.DB = database
 	t.Cleanup(func() { serverdb.DB = previous })
@@ -58,6 +61,16 @@ func TestResourceDeployTokenRegistersOnceAndBindsTechnicalResource(t *testing.T)
 	require.Equal(t, model.TechnicalResourceDeployTokenConsumed, token.Status)
 	var binding model.TechnicalResourceBinding
 	require.NoError(t, database.First(&binding, "technical_resource_id = ? AND enabled = ?", resource.ID, true).Error)
+	hostStableKey := "legacy-host-legacy_node:" + binding.SourceID
+	var candidate model.SupplyCandidate
+	require.NoError(t, database.First(&candidate, "technical_resource_id = ? AND resource_type = ? AND stable_key = ?", resource.ID, model.SupplyResourceHost, hostStableKey).Error)
+	require.Equal(t, model.SupplyCandidateLinked, candidate.ReviewState)
+	var hostResource model.PlatformResource
+	require.NoError(t, database.First(&hostResource, "provider_id = ? AND type = ? AND stable_key = ?", provider.ID, model.SupplyResourceHost, hostStableKey).Error)
+	require.Equal(t, "production-agent", hostResource.DisplayName)
+	require.Equal(t, model.PlatformResourceActive, hostResource.LifecycleState)
+	var source model.PlatformResourceSource
+	require.NoError(t, database.First(&source, "platform_resource_id = ? AND supply_candidate_id = ? AND is_primary = ?", hostResource.ID, candidate.ID, true).Error)
 
 	second := register(token.Token)
 	require.Equal(t, http.StatusForbidden, second.Code)

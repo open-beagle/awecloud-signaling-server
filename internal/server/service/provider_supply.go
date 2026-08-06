@@ -587,7 +587,19 @@ func (s *ProviderSupplyService) RecordTechnicalResourceHeartbeat(ctx context.Con
 		if updated.RowsAffected != 1 {
 			return ErrTechnicalResourceDisabled
 		}
-		return tx.First(resource, "id = ?", resource.ID).Error
+		if err := tx.First(resource, "id = ?", resource.ID).Error; err != nil {
+			return err
+		}
+		if credential.SourceType == model.TechnicalResourceBindingLegacyNode {
+			var node model.Node
+			if err := tx.First(&node, "id = ?", credential.SourceID).Error; err != nil {
+				return err
+			}
+			if err := EnsureLegacyHostPlatformResource(tx, resource, &node, 0, now); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

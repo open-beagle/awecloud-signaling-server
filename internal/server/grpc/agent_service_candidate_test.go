@@ -100,6 +100,7 @@ func TestAgentHeartbeatRefreshesBoundTechnicalResourceHealth(t *testing.T) {
 	db.DB = testDB
 	require.NoError(t, testDB.AutoMigrate(
 		&model.User{}, &model.Node{}, &model.ResourceProvider{}, &model.TechnicalResource{}, &model.TechnicalResourceBinding{},
+		&model.SupplyCandidate{}, &model.PlatformResource{}, &model.PlatformResourceSource{},
 	))
 
 	agent := model.User{Name: "managed-agent", Role: model.UserRoleAgent, SecretHash: "fixture", Enabled: true}
@@ -131,6 +132,17 @@ func TestAgentHeartbeatRefreshesBoundTechnicalResourceHealth(t *testing.T) {
 	require.NotNil(t, resource.LeaseExpiresAt)
 	require.False(t, resource.LastReceivedAt.Before(before))
 	require.WithinDuration(t, resource.LastReceivedAt.Add(technicalResourceHeartbeatLeaseDuration), *resource.LeaseExpiresAt, time.Second)
+
+	hostStableKey := "legacy-host-legacy_node:" + fmt.Sprint(node.ID)
+	var candidate model.SupplyCandidate
+	require.NoError(t, testDB.First(&candidate, "technical_resource_id = ? AND resource_type = ? AND stable_key = ?", resource.ID, model.SupplyResourceHost, hostStableKey).Error)
+	require.Equal(t, model.SupplyCandidateLinked, candidate.ReviewState)
+	var hostResource model.PlatformResource
+	require.NoError(t, testDB.First(&hostResource, "provider_id = ? AND type = ? AND stable_key = ?", provider.ID, model.SupplyResourceHost, hostStableKey).Error)
+	require.Equal(t, node.Name, hostResource.DisplayName)
+	require.Equal(t, model.PlatformResourceActive, hostResource.LifecycleState)
+	var source model.PlatformResourceSource
+	require.NoError(t, testDB.First(&source, "platform_resource_id = ? AND supply_candidate_id = ? AND is_primary = ?", hostResource.ID, candidate.ID, true).Error)
 }
 
 func TestAgentHeartbeatRefreshesNodeSSHDomainTargetIP(t *testing.T) {

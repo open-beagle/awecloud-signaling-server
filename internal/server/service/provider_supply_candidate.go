@@ -593,6 +593,109 @@ func linkPlatformResourceSource(tx *gorm.DB, resource *model.PlatformResource, c
 	return source, nil
 }
 
+func LegacyHostStableKey(sourceType model.TechnicalResourceBindingSourceType, sourceID string) string {
+	return fmt.Sprintf("legacy-host-%s:%s", sourceType, strings.TrimSpace(sourceID))
+}
+
+func EnsureLegacyHostPlatformResource(tx *gorm.DB, source *model.TechnicalResource, node *model.Node, reviewedByUserID uint64, now time.Time) error {
+	if tx == nil || source == nil || node == nil || source.ID == "" || source.ProviderID == "" || node.ID == 0 || now.IsZero() {
+		return ErrProviderSupplyInvalidInput
+	}
+	sourceID := fmt.Sprint(node.ID)
+	stableKey := LegacyHostStableKey(model.TechnicalResourceBindingLegacyNode, sourceID)
+	displayName := strings.TrimSpace(node.Name)
+	if displayName == "" {
+		displayName = strings.TrimSpace(node.Hostname)
+	}
+	if displayName == "" {
+		displayName = stableKey
+	}
+	evidence := map[string]any{
+		"source_type":       string(model.TechnicalResourceBindingLegacyNode),
+		"source_id":         sourceID,
+		"node_id":           node.ID,
+		"name":              node.Name,
+		"hostname":          node.Hostname,
+		"host_domain_label": node.HostDomainLabel,
+	}
+	payload, err := json.Marshal(evidence)
+	if err != nil || len(payload) == 0 || len(payload) > maxSupplyCandidateSnapshotBytes {
+		return ErrProviderSupplyInvalidInput
+	}
+	observedAt := now.UTC()
+	leaseExpiresAt := observedAt.Add(supplyCandidateLeaseDuration)
+	var reviewedBy *uint64
+	if reviewedByUserID != 0 {
+		reviewedBy = &reviewedByUserID
+	}
+
+	var candidate model.SupplyCandidate
+	err = tx.Where("technical_resource_id = ? AND resource_type = ? AND stable_key = ?", source.ID, model.SupplyResourceHost, stableKey).
+		First(&candidate).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		candidate = model.SupplyCandidate{
+			ID: uuid.NewString(), ProviderID: source.ProviderID, TechnicalResourceID: source.ID,
+			ResourceType: model.SupplyResourceHost, StableKey: stableKey, IdentityQuality: model.SupplyIdentityStrong,
+			PayloadHash: sha256Hex(payload), ObservationSnapshot: string(payload),
+			FirstObservedAt: observedAt, LastObservedAt: observedAt, LeaseExpiresAt: leaseExpiresAt,
+			ReviewState: model.SupplyCandidateLinked, ReviewedByUserID: reviewedBy, ReviewedAt: &observedAt, RowVersion: 1,
+		}
+		if err := tx.Create(&candidate).Error; err != nil {
+			if isDatabaseConstraintError(err) {
+				return ErrProviderSupplyConflict
+			}
+			return err
+		}
+	} else if err != nil {
+		return err
+	} else if candidate.ProviderID != source.ProviderID {
+		return ErrProviderSupplyConflict
+	} else {
+		updates := map[string]any{
+			"identity_quality":     model.SupplyIdentityStrong,
+			"payload_hash":         sha256Hex(payload),
+			"observation_snapshot": string(payload),
+			"last_observed_at":     observedAt,
+			"lease_expires_at":     leaseExpiresAt,
+			"review_state":         model.SupplyCandidateLinked,
+			"conflict_code":        "",
+			"reviewed_at":          observedAt,
+			"row_version":          gorm.Expr("row_version + 1"),
+		}
+		if reviewedBy != nil {
+			updates["reviewed_by_user_id"] = *reviewedBy
+		}
+		if err := tx.Model(&model.SupplyCandidate{}).Where("provider_id = ? AND id = ?", candidate.ProviderID, candidate.ID).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("provider_id = ? AND id = ?", candidate.ProviderID, candidate.ID).First(&candidate).Error; err != nil {
+			return err
+		}
+	}
+
+	var resource model.PlatformResource
+	err = tx.Where("provider_id = ? AND type = ? AND stable_key = ?", source.ProviderID, model.SupplyResourceHost, stableKey).First(&resource).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		resource = model.PlatformResource{
+			ID: uuid.NewString(), ProviderID: source.ProviderID, Type: model.SupplyResourceHost, StableKey: stableKey,
+			DisplayName: displayName, LifecycleState: model.PlatformResourceActive, HealthState: model.ResourceHealthOnline,
+			CapabilityRevision: 1, AllocatableScopeCount: 0, RowVersion: 1,
+		}
+		if err := tx.Create(&resource).Error; err != nil {
+			if isDatabaseConstraintError(err) {
+				return ErrProviderSupplyConflict
+			}
+			return err
+		}
+	} else if err != nil {
+		return err
+	} else if resource.LifecycleState == model.PlatformResourceRetired {
+		return ErrProviderSupplyConflict
+	}
+	_, err = linkPlatformResourceSource(tx, &resource, &candidate, observedAt)
+	return err
+}
+
 func materializeKubernetesScopes(tx *gorm.DB, resource *model.PlatformResource, evidence supplyClusterEvidence, now time.Time) (*model.ResourceScope, []model.ResourceScope, error) {
 	clusterScope, err := findOrCreateClusterScope(tx, resource)
 	if err != nil {
