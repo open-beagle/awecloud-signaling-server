@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,7 +47,7 @@ type TenantResourceListResult struct {
 
 type TenantResourceView struct {
 	ResourceID          string                                `json:"resource_id"`
-	Type                model.TenantResourceType              `json:"type"`
+	Type                string                                `json:"type"`
 	DisplayName         string                                `json:"display_name"`
 	Description         string                                `json:"description,omitempty"`
 	VisibilityState     model.TenantResourceVisibilityState   `json:"visibility_state"`
@@ -70,6 +71,11 @@ type TenantResourceView struct {
 	PodName             string                                `json:"pod_name,omitempty"`
 	ContainerName       string                                `json:"container_name,omitempty"`
 	IdentityQuality     model.WorkloadIdentityQuality         `json:"identity_quality,omitempty"`
+	AgentNodeID         uint64                                `json:"agent_node_id,omitempty"`
+	SSHDomain           string                                `json:"ssh_domain,omitempty"`
+	TargetIP            string                                `json:"target_ip,omitempty"`
+	TargetPort          int                                   `json:"target_port,omitempty"`
+	SSHUsers            []string                              `json:"ssh_users,omitempty"`
 	CreatedAt           time.Time                             `json:"created_at"`
 	UpdatedAt           time.Time                             `json:"updated_at"`
 }
@@ -113,7 +119,7 @@ func (s *TenantResourceService) List(ctx context.Context, authorization *Managem
 		len(input.Namespace) > 253 || len(input.Query) > 200 || len(input.Cursor) > 36 {
 		return nil, ErrTenantResourceInvalidInput
 	}
-	if input.Type != "" && !model.TenantResourceType(input.Type).Valid() {
+	if input.Type != "" && input.Type != string(model.ResourceTypeHostSSH) && !model.TenantResourceType(input.Type).Valid() {
 		return nil, ErrTenantResourceInvalidInput
 	}
 	if input.Visibility != "" && !validTenantResourceVisibility(model.TenantResourceVisibilityState(input.Visibility)) {
@@ -126,6 +132,9 @@ func (s *TenantResourceService) List(ctx context.Context, authorization *Managem
 	now := s.now().UTC()
 	if err := reauthorizeTenantPermission(s.db.WithContext(ctx), authorization, tenantID, PermissionTenantResourcesRead, now); err != nil {
 		return nil, err
+	}
+	if input.Type == string(model.ResourceTypeHostSSH) {
+		return s.listHostSSHResources(ctx, tenantID, input)
 	}
 	query := s.db.WithContext(ctx).Model(&model.TenantResource{}).Where("tenant_id = ?", tenantID)
 	if input.Candidates {
@@ -192,6 +201,15 @@ func (s *TenantResourceService) List(ctx context.Context, authorization *Managem
 		}
 		result.Items = append(result.Items, *view)
 	}
+	if !input.Candidates && input.Type == "" && result.NextCursor == "" && len(result.Items) < input.Limit {
+		hostInput := input
+		hostInput.Limit = input.Limit - len(result.Items)
+		hosts, err := s.listHostSSHResources(ctx, tenantID, hostInput)
+		if err != nil {
+			return nil, err
+		}
+		result.Items = append(result.Items, hosts.Items...)
+	}
 	return result, nil
 }
 
@@ -216,11 +234,106 @@ func (s *TenantResourceService) Get(ctx context.Context, authorization *Manageme
 	var resource model.TenantResource
 	if err := query.First(&resource).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if !candidate {
+				return s.getHostSSHResourceView(ctx, tenantID, resourceID)
+			}
 			return nil, ErrTenantResourceNotFound
 		}
 		return nil, err
 	}
 	return tenantResourceView(s.db.WithContext(ctx), &resource, now, true)
+}
+
+func (s *TenantResourceService) listHostSSHResources(ctx context.Context, tenantID string, input TenantResourceListInput) (*TenantResourceListResult, error) {
+	if input.Candidates {
+		return &TenantResourceListResult{Items: []TenantResourceView{}}, nil
+	}
+	query := s.db.WithContext(ctx).Model(&model.Resource{}).Where("tenant_id = ? AND type = ?", tenantID, model.ResourceTypeHostSSH)
+	query = applyHostSSHResourceFilters(query, input)
+	var resources []model.Resource
+	if err := query.Order("created_at DESC, id DESC").Limit(input.Limit).Find(&resources).Error; err != nil {
+		return nil, err
+	}
+	result := &TenantResourceListResult{Items: make([]TenantResourceView, 0, len(resources))}
+	for i := range resources {
+		view := s.hostSSHResourceView(ctx, &resources[i])
+		result.Items = append(result.Items, view)
+	}
+	return result, nil
+}
+
+func (s *TenantResourceService) getHostSSHResourceView(ctx context.Context, tenantID, resourceID string) (*TenantResourceView, error) {
+	var resource model.Resource
+	if err := s.db.WithContext(ctx).Where("tenant_id = ? AND id = ? AND type = ?", tenantID, resourceID, model.ResourceTypeHostSSH).First(&resource).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTenantResourceNotFound
+		}
+		return nil, err
+	}
+	view := s.hostSSHResourceView(ctx, &resource)
+	return &view, nil
+}
+
+func applyHostSSHResourceFilters(query *gorm.DB, input TenantResourceListInput) *gorm.DB {
+	switch model.TenantResourceVisibilityState(input.Visibility) {
+	case model.TenantResourceVisible:
+		query = query.Where("state NOT IN ?", []model.ResourceState{model.ResourceStatePending, model.ResourceStateRevoked})
+	case model.TenantResourcePending:
+		query = query.Where("state = ?", model.ResourceStatePending)
+	case model.TenantResourceRetired:
+		query = query.Where("state = ?", model.ResourceStateRevoked)
+	}
+	switch model.TenantResourceAvailabilityState(input.Availability) {
+	case model.TenantResourceAvailable:
+		query = query.Where("state = ?", model.ResourceStateAvailable)
+	case model.TenantResourceDegraded:
+		query = query.Where("state = ?", model.ResourceStateDegraded)
+	case model.TenantResourceUnavailable:
+		query = query.Where("state IN ?", []model.ResourceState{model.ResourceStateDraining, model.ResourceStateStopped, model.ResourceStateRevoked})
+	case model.TenantResourceUnknown:
+		query = query.Where("state = ?", model.ResourceStatePending)
+	}
+	if input.Query != "" {
+		pattern := "%" + escapeProviderLike(input.Query) + "%"
+		query = query.Where("display_name LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\'", pattern, pattern)
+	}
+	return query
+}
+
+func (s *TenantResourceService) hostSSHResourceView(ctx context.Context, resource *model.Resource) TenantResourceView {
+	visibility, availability := hostSSHResourceStates(resource.State)
+	view := TenantResourceView{
+		ResourceID: resource.ID, Type: string(model.ResourceTypeHostSSH), DisplayName: resource.DisplayName,
+		VisibilityState: visibility, AvailabilityState: availability, Revision: max(resource.TargetRevision, 1),
+		RowVersion: max(resource.TargetRevision, 1), AgentNodeID: resource.AgentNodeID, Ready: availability == model.TenantResourceAvailable,
+		CreatedAt: resource.CreatedAt, UpdatedAt: resource.UpdatedAt,
+	}
+	var domain model.DomainRegistry
+	nodeID := strconv.FormatUint(resource.AgentNodeID, 10)
+	if err := s.db.WithContext(ctx).Where("type = ? AND resource_kind = ? AND resource_id = ?", model.DomainTypeSSH, model.DomainResourceNode, nodeID).
+		Or("type = ? AND node_id = ?", model.DomainTypeSSH, resource.AgentNodeID).
+		Order("updated_at DESC, id DESC").First(&domain).Error; err == nil {
+		view.SSHDomain = domain.Domain
+		view.TargetIP = domain.TargetIP
+		view.TargetPort = domain.TargetPort
+		view.SSHUsers = domain.GetSSHUsers()
+	}
+	return view
+}
+
+func hostSSHResourceStates(state model.ResourceState) (model.TenantResourceVisibilityState, model.TenantResourceAvailabilityState) {
+	switch state {
+	case model.ResourceStateAvailable:
+		return model.TenantResourceVisible, model.TenantResourceAvailable
+	case model.ResourceStateDegraded:
+		return model.TenantResourceVisible, model.TenantResourceDegraded
+	case model.ResourceStateRevoked:
+		return model.TenantResourceRetired, model.TenantResourceUnavailable
+	case model.ResourceStatePending:
+		return model.TenantResourcePending, model.TenantResourceUnknown
+	default:
+		return model.TenantResourceVisible, model.TenantResourceUnavailable
+	}
 }
 
 type ReviewTenantResourceInput struct {
@@ -567,7 +680,7 @@ func validTenantTargetSnapshot(resourceType model.TenantResourceType, targetType
 
 func tenantResourceView(tx *gorm.DB, resource *model.TenantResource, now time.Time, includeRuntimeIdentity bool) (*TenantResourceView, error) {
 	view := &TenantResourceView{
-		ResourceID: resource.ID, Type: resource.Type, DisplayName: resource.DisplayName, Description: resource.Description,
+		ResourceID: resource.ID, Type: string(resource.Type), DisplayName: resource.DisplayName, Description: resource.Description,
 		VisibilityState: resource.VisibilityState, AvailabilityState: resource.AvailabilityState,
 		Revision: resource.Revision, RowVersion: resource.RowVersion, CreatedAt: resource.CreatedAt, UpdatedAt: resource.UpdatedAt,
 	}

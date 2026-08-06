@@ -194,6 +194,20 @@ func TestUnifiedResourceTenantAndGrantBoundaries(t *testing.T) {
 		require.Equal(t, tc.want, resp.Code)
 	}
 
+	hostResource := model.Resource{
+		ID: uuid.NewString(), TenantID: tenantA.ID, Type: model.ResourceTypeHostSSH,
+		DisplayName: "Host A", State: model.ResourceStateAvailable, AgentNodeID: agentNode.ID,
+	}
+	require.NoError(t, testDB.Create(&hostResource).Error)
+	hostGrantReq := httptest.NewRequest(http.MethodPost, "/resources/"+hostResource.ID+"/grants", bytes.NewReader(grantJSON))
+	hostGrantReq.Header.Set("Content-Type", "application/json")
+	hostGrantResp := httptest.NewRecorder()
+	r.ServeHTTP(hostGrantResp, hostGrantReq)
+	require.Equal(t, http.StatusCreated, hostGrantResp.Code, hostGrantResp.Body.String())
+	var hostGrant model.AccessGrant
+	require.NoError(t, testDB.First(&hostGrant, "resource_id = ? AND subject_user_id = ?", hostResource.ID, user.ID).Error)
+	require.Equal(t, model.ResourceTypeHostSSH, hostResource.Type)
+
 	revokeResp := httptest.NewRecorder()
 	r.ServeHTTP(revokeResp, httptest.NewRequest(http.MethodPost, "/grants/"+createdGrant.Data.ID+"/revoke", nil))
 	require.Equal(t, http.StatusOK, revokeResp.Code)

@@ -1,7 +1,7 @@
 import request from '@/utils/request'
 import type { ApiResponse, PagedResponse } from '@/types/models'
 
-export type TenantResourceType = 'container_ssh' | 'container_service'
+export type TenantResourceType = 'host_ssh' | 'container_ssh' | 'container_service'
 export type TenantResourceVisibility = 'pending' | 'visible' | 'hidden' | 'retired'
 export type TenantResourceAvailability = 'unknown' | 'available' | 'degraded' | 'unavailable'
 
@@ -31,6 +31,11 @@ export interface TenantResourceV2 {
   pod_name?: string
   container_name?: string
   identity_quality?: string
+  agent_node_id?: number
+  ssh_domain?: string
+  target_ip?: string
+  target_port?: number
+  ssh_users?: string[]
   created_at: string
   updated_at: string
 }

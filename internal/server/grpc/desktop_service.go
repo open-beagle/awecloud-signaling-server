@@ -2650,8 +2650,9 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 	for id := range agentUserIDs {
 		allowedAgentIDs = append(allowedAgentIDs, id)
 	}
+	unifiedHostDomains := s.queryUnifiedHostSSHDomains(ctx, userID, groupIDs)
 
-	if len(allowedAgentIDs) == 0 {
+	if len(allowedAgentIDs) == 0 && len(unifiedHostDomains) == 0 {
 		// 没有任何权限，返回空列表
 		logger.Infof("%s %d 域名列表查询: 无权限，返回空列表", userType, userID)
 		return &pb.ListDomainsResponse{
@@ -2660,7 +2661,10 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 	}
 
 	// 查询域名记录（Preload Endpoint 关联，用于填充 endpoint_name）
-	query.Preload("Endpoint").Where("user_id IN ?", allowedAgentIDs).Find(&domainRecords)
+	if len(allowedAgentIDs) > 0 {
+		query.Preload("Endpoint").Where("user_id IN ?", allowedAgentIDs).Find(&domainRecords)
+	}
+	domainRecords = appendUniqueDomainRecords(domainRecords, unifiedHostDomains)
 
 	// 构建响应
 	var domains []*pb.DomainInfo
@@ -2721,6 +2725,99 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 	return &pb.ListDomainsResponse{
 		Domains: domains,
 	}, nil
+}
+
+func appendUniqueDomainRecords(records []model.DomainRegistry, extra []model.DomainRegistry) []model.DomainRegistry {
+	seen := make(map[string]struct{}, len(records)+len(extra))
+	for _, record := range records {
+		seen[record.Domain] = struct{}{}
+	}
+	for _, record := range extra {
+		if _, exists := seen[record.Domain]; exists {
+			continue
+		}
+		seen[record.Domain] = struct{}{}
+		records = append(records, record)
+	}
+	return records
+}
+
+func (s *DesktopServiceServer) queryUnifiedHostSSHDomains(ctx context.Context, userID uint64, groupIDs []int64) []model.DomainRegistry {
+	now := time.Now().UTC()
+	var memberships []model.TenantMembership
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", userID, true, now).Find(&memberships).Error; err != nil {
+		return nil
+	}
+	tenantIDs := make([]string, 0, len(memberships))
+	for _, membership := range memberships {
+		tenantIDs = append(tenantIDs, membership.TenantID)
+	}
+	if len(tenantIDs) == 0 {
+		return nil
+	}
+	var tenants []model.Tenant
+	if err := db.DB.WithContext(ctx).Where("id IN ? AND status = ?", tenantIDs, model.TenantStatusActive).Find(&tenants).Error; err != nil {
+		return nil
+	}
+	activeTenantIDs := make([]string, 0, len(tenants))
+	for _, tenant := range tenants {
+		activeTenantIDs = append(activeTenantIDs, tenant.ID)
+	}
+	if len(activeTenantIDs) == 0 {
+		return nil
+	}
+	grantQuery := db.DB.WithContext(ctx).Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND expires_at > ?", activeTenantIDs, "enabled", now, now).
+		Where("subject_type = ? AND subject_user_id = ?", "user", userID)
+	if len(groupIDs) > 0 {
+		grantQuery = db.DB.WithContext(ctx).Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND expires_at > ?", activeTenantIDs, "enabled", now, now).
+			Where("(subject_type = ? AND subject_user_id = ?) OR (subject_type = ? AND subject_group_id IN ?)", "user", userID, "group", groupIDs)
+	}
+	var grants []model.AccessGrant
+	if err := grantQuery.Find(&grants).Error; err != nil {
+		return nil
+	}
+	resourceIDs := make([]string, 0, len(grants))
+	seenResource := make(map[string]struct{}, len(grants))
+	for _, grant := range grants {
+		if grant.SubjectType == "group" && !grpcGroupGrantMatchesTenant(ctx, grant) {
+			continue
+		}
+		if !containsAction(parseJSONStringArray(grant.Actions), "shell") {
+			continue
+		}
+		if _, exists := seenResource[grant.ResourceID]; exists {
+			continue
+		}
+		seenResource[grant.ResourceID] = struct{}{}
+		resourceIDs = append(resourceIDs, grant.ResourceID)
+	}
+	if len(resourceIDs) == 0 {
+		return nil
+	}
+	var resources []model.Resource
+	if err := db.DB.WithContext(ctx).Where("id IN ? AND tenant_id IN ? AND type = ? AND state IN ?", resourceIDs, activeTenantIDs, model.ResourceTypeHostSSH,
+		[]model.ResourceState{model.ResourceStateAvailable, model.ResourceStateDegraded}).Find(&resources).Error; err != nil {
+		return nil
+	}
+	nodeIDs := make([]uint64, 0, len(resources))
+	nodeIDStrings := make([]string, 0, len(resources))
+	for _, resource := range resources {
+		if resource.AgentNodeID == 0 {
+			continue
+		}
+		nodeIDs = append(nodeIDs, resource.AgentNodeID)
+		nodeIDStrings = append(nodeIDStrings, strconv.FormatUint(resource.AgentNodeID, 10))
+	}
+	if len(nodeIDs) == 0 {
+		return nil
+	}
+	var domains []model.DomainRegistry
+	if err := db.DB.WithContext(ctx).Where("type = ? AND resource_kind = ? AND resource_id IN ?", model.DomainTypeSSH, model.DomainResourceNode, nodeIDStrings).
+		Or("type = ? AND node_id IN ?", model.DomainTypeSSH, nodeIDs).
+		Order("domain ASC").Find(&domains).Error; err != nil {
+		return nil
+	}
+	return domains
 }
 
 // getNodeStatus 获取节点状态

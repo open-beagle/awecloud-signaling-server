@@ -42,6 +42,7 @@ func prepareTenantResourceAPIFixture(t *testing.T) tenantResourceAPIFixture {
 		&model.WorkloadObservation{}, &model.WorkloadObservationSource{},
 		&model.TenantResource{}, &model.TenantResourceSource{}, &model.TenantResourceReviewDecision{}, &model.TenantResourceTargetRevision{},
 		&model.TenantAccessGrant{}, &model.TenantAccessGrantEvent{},
+		&model.Resource{}, &model.AccessGrant{}, &model.DomainRegistry{},
 		&model.ResourceSession{}, &model.ResourceSessionEvent{}, &model.ResourceSessionTermination{},
 		&model.OutboxEvent{}, &model.AuditLog{},
 	))
@@ -193,6 +194,42 @@ func prepareTenantResourceAPIFixture(t *testing.T) tenantResourceAPIFixture {
 		managementContextAPIFixture: fixture, login: fixture.login(t, fixture.admin.Username),
 		resource: resource, otherTenant: otherTenant, other: other, desktop: desktop,
 	}
+}
+
+func TestTenantResourceAPIProjectsUnifiedHostSSHResourcesAndGrants(t *testing.T) {
+	fixture := prepareTenantResourceAPIFixture(t)
+	now := time.Now().UTC()
+	agentUser := model.User{Name: "host-agent-api", Role: model.UserRoleAgent, SecretHash: "test", Enabled: true}
+	require.NoError(t, fixture.database.Create(&agentUser).Error)
+	hostNode := model.Node{ID: 9201, UserID: agentUser.ID, Name: "xny-a100", Type: model.NodeTypeAgent, IP: "100.64.0.117", LastHeartbeat: &now}
+	require.NoError(t, fixture.database.Create(&hostNode).Error)
+	host := model.Resource{
+		ID: uuid.NewString(), TenantID: fixture.tenant.ID, Type: model.ResourceTypeHostSSH,
+		DisplayName: "xny-a100", AgentNodeID: hostNode.ID, State: model.ResourceStateAvailable,
+		CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute),
+	}
+	require.NoError(t, fixture.database.Create(&host).Error)
+	grant := model.AccessGrant{
+		ID: uuid.NewString(), TenantID: fixture.tenant.ID, ResourceID: host.ID,
+		SubjectType: "user", SubjectUserID: fixture.user.ID, Actions: `["shell"]`,
+		ValidFrom: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour), MaxSessionSeconds: 3600,
+		Status: "enabled", Revision: 1,
+	}
+	require.NoError(t, fixture.database.Create(&grant).Error)
+
+	resources := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/resources?type=host_ssh", "", nil)
+	require.Equal(t, http.StatusOK, resources.Code, resources.Body.String())
+	require.Contains(t, resources.Body.String(), host.ID)
+	require.Contains(t, resources.Body.String(), `"type":"host_ssh"`)
+
+	detail := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/resources/"+host.ID, "", nil)
+	require.Equal(t, http.StatusOK, detail.Code, detail.Body.String())
+	require.Contains(t, detail.Body.String(), host.ID)
+
+	grants := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/grants?resource_id="+host.ID, "", nil)
+	require.Equal(t, http.StatusOK, grants.Code, grants.Body.String())
+	require.Contains(t, grants.Body.String(), grant.ID)
+	require.Contains(t, grants.Body.String(), host.ID)
 }
 
 func seedTenantResourceIsolationRecords(t *testing.T, fixture *tenantResourceAPIFixture) {

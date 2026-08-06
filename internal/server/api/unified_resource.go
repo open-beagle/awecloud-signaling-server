@@ -803,8 +803,12 @@ func (a *UnifiedResourceAPI) CreateGrant(c *gin.Context) {
 		codedError(c, http.StatusNotFound, ErrorCodeTenantObjectNotFound, "当前租户范围内对象不存在")
 		return
 	}
-	if resource.Type != model.ResourceTypeContainerSSH {
+	if resource.Type != model.ResourceTypeContainerSSH && resource.Type != model.ResourceTypeHostSSH {
 		c.JSON(http.StatusConflict, NewErrorResponse("该资源类型的统一授权契约尚未启用，请继续使用兼容授权入口"))
+		return
+	}
+	if resource.Type == model.ResourceTypeHostSSH && resource.State != model.ResourceStateAvailable && resource.State != model.ResourceStateDegraded {
+		c.JSON(http.StatusConflict, NewErrorResponse("SSH 主机资源尚不可用，不能创建访问策略"))
 		return
 	}
 	var req grantRequest
@@ -851,7 +855,7 @@ func (a *UnifiedResourceAPI) CreateGrant(c *gin.Context) {
 		req.Actions = []string{"shell"}
 	}
 	if len(req.Actions) != 1 || req.Actions[0] != "shell" {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("ContainerSSH 当前只支持 shell Action"))
+		c.JSON(http.StatusBadRequest, NewErrorResponse("当前资源类型只支持 shell Action"))
 		return
 	}
 	if req.ValidFrom.IsZero() {

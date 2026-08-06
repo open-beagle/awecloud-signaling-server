@@ -319,8 +319,8 @@ export const createResourceGrant = (id: string, data: {
   valid_from?: string
   expires_at?: string
   max_session_seconds?: number
-}) => {
-  return request.post<any, ApiResponse<AccessGrant>>(`/api/v1/admin/resources/${id}/grants`, data)
+}, tenantId?: string) => {
+  return request.post<any, ApiResponse<AccessGrant>>(`/api/v1/admin/resources/${id}/grants`, data, tenantId ? { headers: { 'X-Tenant-ID': tenantId } } : undefined)
 }
 
 export const revokeResourceGrant = (id: string) => {

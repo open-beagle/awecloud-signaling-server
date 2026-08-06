@@ -126,7 +126,58 @@ func (s *TenantAccessGrantService) List(ctx context.Context, authorization *Mana
 		}
 		result.Items = append(result.Items, *view)
 	}
+	hostGrants, hostTotal, err := s.listUnifiedHostSSHGrants(ctx, tenantID, input, now)
+	if err != nil {
+		return nil, err
+	}
+	result.Total += hostTotal
+	if len(result.Items) < input.PageSize {
+		remaining := input.PageSize - len(result.Items)
+		if len(hostGrants) > remaining {
+			hostGrants = hostGrants[:remaining]
+		}
+		result.Items = append(result.Items, hostGrants...)
+	}
 	return result, nil
+}
+
+func (s *TenantAccessGrantService) listUnifiedHostSSHGrants(ctx context.Context, tenantID string, input TenantGrantListInput, now time.Time) ([]TenantGrantView, int64, error) {
+	query := s.db.WithContext(ctx).Model(&model.AccessGrant{}).
+		Joins("JOIN resource ON resource.id = access_grant.resource_id AND resource.tenant_id = access_grant.tenant_id").
+		Where("access_grant.tenant_id = ? AND resource.type = ?", tenantID, model.ResourceTypeHostSSH)
+	if input.ResourceID != "" {
+		query = query.Where("access_grant.resource_id = ?", input.ResourceID)
+	}
+	if input.SubjectType != "" {
+		query = query.Where("access_grant.subject_type = ?", input.SubjectType)
+	}
+	if input.Status != "" {
+		query = query.Where("access_grant.status = ?", input.Status)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		if strings.Contains(err.Error(), "no such table") {
+			return nil, 0, nil
+		}
+		return nil, 0, err
+	}
+	if total == 0 {
+		return []TenantGrantView{}, 0, nil
+	}
+	var grants []model.AccessGrant
+	offset := (input.Page - 1) * input.PageSize
+	if err := query.Order("access_grant.created_at DESC, access_grant.id DESC").Offset(offset).Limit(input.PageSize).Find(&grants).Error; err != nil {
+		return nil, 0, err
+	}
+	views := make([]TenantGrantView, 0, len(grants))
+	for i := range grants {
+		view, err := unifiedHostSSHGrantView(&grants[i], now)
+		if err != nil {
+			return nil, 0, err
+		}
+		views = append(views, *view)
+	}
+	return views, total, nil
 }
 
 func (s *TenantAccessGrantService) Get(ctx context.Context, authorization *ManagementAuthorizationContext, tenantID, grantID string) (*TenantGrantView, error) {
@@ -589,6 +640,36 @@ func tenantGrantView(grant *model.TenantAccessGrant) (*TenantGrantView, error) {
 		ValidFrom: grant.ValidFrom, ExpiresAt: grant.ExpiresAt, MaxSessionSeconds: grant.MaxSessionSeconds,
 		Status: grant.Status, Revision: grant.Revision, RowVersion: grant.RowVersion,
 		RevokedAt: grant.RevokedAt, RevokeReason: grant.RevokeReason, CreatedAt: grant.CreatedAt, UpdatedAt: grant.UpdatedAt,
+	}, nil
+}
+
+func unifiedHostSSHGrantView(grant *model.AccessGrant, now time.Time) (*TenantGrantView, error) {
+	var actions []string
+	if err := json.Unmarshal([]byte(grant.Actions), &actions); err != nil {
+		return nil, fmt.Errorf("decode HostSSH grant actions: %w", err)
+	}
+	if actions == nil {
+		actions = []string{}
+	}
+	status := model.TenantAccessGrantStatus(grant.Status)
+	if grant.Status == "enabled" && !grant.ExpiresAt.IsZero() && !grant.ExpiresAt.After(now) {
+		status = model.TenantAccessGrantExpired
+	}
+	var userID *uint64
+	if grant.SubjectUserID != 0 {
+		value := grant.SubjectUserID
+		userID = &value
+	}
+	expiresAt := &grant.ExpiresAt
+	if grant.ExpiresAt.IsZero() {
+		expiresAt = nil
+	}
+	return &TenantGrantView{
+		ID: grant.ID, ResourceID: grant.ResourceID, SubjectType: model.TenantAccessGrantSubjectType(grant.SubjectType),
+		SubjectUserID: userID, SubjectGroupID: grant.SubjectGroupID, Actions: actions,
+		ValidFrom: grant.ValidFrom, ExpiresAt: expiresAt, MaxSessionSeconds: grant.MaxSessionSeconds,
+		Status: status, Revision: max(grant.Revision, 1), RowVersion: max(grant.Revision, 1),
+		CreatedAt: grant.CreatedAt, UpdatedAt: grant.UpdatedAt,
 	}, nil
 }
 
