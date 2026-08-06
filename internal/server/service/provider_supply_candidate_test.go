@@ -47,6 +47,10 @@ func createBoundAgentForProvider(t *testing.T, fixture providerSupplyFixture, au
 		Type: model.TechnicalResourceAgent, StableKey: stableKey, CredentialRevision: 1, RuntimeName: stableKey, DomainLabel: stableKey,
 	})
 	require.NoError(t, err)
+	require.NoError(t, fixture.database.Model(&model.Node{}).Where("id = ?", nodeID).Update("user_id", resource.RuntimeUserID).Error)
+	if nodeID == 1001 {
+		require.NoError(t, fixture.database.Model(&model.Endpoint{}).Where("id = ?", "legacy-endpoint-a").Update("user_id", resource.RuntimeUserID).Error)
+	}
 	bound, err := fixture.service.BindTechnicalResource(context.Background(), authorization, BindTechnicalResourceInput{
 		TechnicalResourceID: resource.ID, SourceType: model.TechnicalResourceBindingLegacyNode,
 		SourceID: strconv.FormatUint(nodeID, 10), ExpectedResourceVersion: resource.RowVersion, Reason: "Provider fixture binding",

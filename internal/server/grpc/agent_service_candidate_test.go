@@ -177,6 +177,135 @@ func TestAgentHeartbeatRefreshesNodeSSHDomainTargetIP(t *testing.T) {
 	require.Equal(t, 22, domain.TargetPort)
 }
 
+func TestAgentHeartbeatCreatesNodeSSHDomainFromRegistration(t *testing.T) {
+	oldDB := db.DB
+	t.Cleanup(func() { db.DB = oldDB })
+	testDB, err := gorm.Open(sqlite.Open("file:agent_ssh_domain_registration_test?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	db.DB = testDB
+	require.NoError(t, testDB.AutoMigrate(
+		&model.User{}, &model.Node{}, &model.ResourceProvider{}, &model.TechnicalResource{},
+		&model.TechnicalResourceBinding{}, &model.DomainRegistry{}, &model.SystemConfig{},
+	))
+
+	agent := model.User{Name: "provider-a-cpu", Role: model.UserRoleAgent, SecretHash: "test", Enabled: true, SSHEnabled: true}
+	require.NoError(t, testDB.Create(&agent).Error)
+	node := model.Node{UserID: agent.ID, Name: "cpu-119", Type: model.NodeTypeAgent, Hostname: "172.24.69.119", HostDomainLabel: "aliyun-119"}
+	require.NoError(t, testDB.Create(&node).Error)
+	provider := model.ResourceProvider{ID: "provider-a", Key: "provider-a", DisplayName: "Provider A", DomainScope: model.ProviderDomainNamed, DomainLabel: "xny", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1}
+	require.NoError(t, testDB.Create(&provider).Error)
+	resource := model.TechnicalResource{
+		ID: "provider-a-agent", ProviderID: provider.ID, Type: model.TechnicalResourceAgent, StableKey: "cpu-agent",
+		DomainLabel: "a100", LifecycleState: model.TechnicalResourceRegistered, RuntimeUserID: agent.ID,
+		CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1,
+	}
+	require.NoError(t, testDB.Create(&resource).Error)
+	require.NoError(t, testDB.Create(&model.TechnicalResourceBinding{
+		ID: "provider-a-agent-node", TechnicalResourceID: resource.ID, SourceType: model.TechnicalResourceBindingLegacyNode,
+		SourceID: fmt.Sprint(node.ID), CredentialRevision: 1, Enabled: true, BoundByUserID: agent.ID, Reason: "test", RowVersion: 1,
+	}).Error)
+	require.NoError(t, testDB.Create(&model.DomainRegistry{
+		Domain: "cpu-119.provider-a-cpu.beagle", Type: model.DomainTypeSSH, UserID: agent.ID,
+		ProviderID: provider.ID, AgentResourceID: resource.ID, ResourceKind: model.DomainResourceNode,
+		ResourceID: fmt.Sprint(node.ID), NodeID: node.ID, TargetIP: "100.64.0.4", TargetPort: 22,
+		Status: model.DomainStatusOffline, SshUsers: `["old"]`,
+	}).Error)
+	require.NoError(t, testDB.Create(&model.DomainRegistry{
+		Domain: "duplicate.provider-a-cpu.beagle", Type: model.DomainTypeSSH, UserID: agent.ID,
+		ProviderID: provider.ID, AgentResourceID: resource.ID, ResourceKind: model.DomainResourceNode,
+		ResourceID: fmt.Sprint(node.ID), NodeID: node.ID, TargetIP: "100.64.0.5", TargetPort: 22,
+		Status: model.DomainStatusOffline, SshUsers: `["duplicate"]`,
+	}).Error)
+
+	server := &AgentServiceServer{}
+	nodeID := server.handleHeartbeat(context.Background(), agent.ID, &pb.AgentHeartbeatRequest{
+		DeviceName: "cpu-119", Hostname: "172.24.69.119", TunnelIp: "100.64.0.123", TunnelConnected: true,
+		DomainRegistrations: []*pb.DomainRegistration{{
+			Domain: "cpu-119.provider-a-cpu.beagle", Type: "ssh", TargetIp: "100.64.0.123", TargetPort: 22,
+			SshUsers: []string{"root", "ubuntu"},
+		}},
+	})
+	require.Equal(t, node.ID, nodeID)
+
+	var domain model.DomainRegistry
+	require.NoError(t, testDB.First(&domain, "node_id = ? AND type = ?", node.ID, model.DomainTypeSSH).Error)
+	require.Equal(t, "aliyun-119.a100.xny.beagle", domain.Domain)
+	require.Equal(t, agent.ID, domain.UserID)
+	require.Equal(t, provider.ID, domain.ProviderID)
+	require.Equal(t, resource.ID, domain.AgentResourceID)
+	require.Equal(t, model.DomainResourceNode, domain.ResourceKind)
+	require.Equal(t, fmt.Sprint(node.ID), domain.ResourceID)
+	require.Equal(t, "100.64.0.123", domain.TargetIP)
+	require.Equal(t, 22, domain.TargetPort)
+	require.Equal(t, model.DomainStatusOnline, domain.Status)
+	require.JSONEq(t, `["root","ubuntu"]`, domain.SshUsers)
+	var domainCount int64
+	require.NoError(t, testDB.Model(&model.DomainRegistry{}).Where("node_id = ? AND type = ?", node.ID, model.DomainTypeSSH).Count(&domainCount).Error)
+	require.EqualValues(t, 1, domainCount)
+
+	server.handleHeartbeat(context.Background(), agent.ID, &pb.AgentHeartbeatRequest{
+		DeviceName: "cpu-119", Hostname: "172.24.69.119", TunnelIp: "100.64.0.123", TunnelConnected: true,
+		DomainRegistrations: []*pb.DomainRegistration{{
+			Domain: "cpu-119.provider-a-cpu.beagle", Type: "ssh", TargetIp: "100.64.0.123", TargetPort: 22,
+			SshUsers: []string{},
+		}},
+	})
+	require.NoError(t, testDB.First(&domain, "node_id = ? AND type = ?", node.ID, model.DomainTypeSSH).Error)
+	require.JSONEq(t, `[]`, domain.SshUsers)
+}
+
+func TestAgentHeartbeatSkipsNodeSSHDomainWhenSSHDisabled(t *testing.T) {
+	oldDB := db.DB
+	t.Cleanup(func() { db.DB = oldDB })
+	testDB, err := gorm.Open(sqlite.Open("file:agent_ssh_disabled_domain_test?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	db.DB = testDB
+	require.NoError(t, testDB.AutoMigrate(
+		&model.User{}, &model.Node{}, &model.ResourceProvider{}, &model.TechnicalResource{}, &model.TechnicalResourceBinding{},
+		&model.DomainRegistry{},
+	))
+
+	agent := model.User{Name: "provider-a-cpu-disabled", Role: model.UserRoleAgent, SecretHash: "test", Enabled: true, SSHEnabled: false}
+	require.NoError(t, testDB.Create(&agent).Error)
+	node := model.Node{UserID: agent.ID, Name: "cpu-119", Type: model.NodeTypeAgent, HostDomainLabel: "aliyun-119", IP: "100.64.0.122"}
+	require.NoError(t, testDB.Create(&node).Error)
+	provider := model.ResourceProvider{
+		ID: uuid.NewString(), Key: "provider-a", DisplayName: "Provider A",
+		DomainScope: model.ProviderDomainNamed, DomainLabel: "xny", Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1,
+	}
+	require.NoError(t, testDB.Create(&provider).Error)
+	resource := model.TechnicalResource{
+		ID: uuid.NewString(), ProviderID: provider.ID, Type: model.TechnicalResourceAgent,
+		StableKey: "agent-disabled", DomainLabel: "a100", RuntimeUserID: agent.ID,
+		LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOnline,
+		CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1,
+	}
+	require.NoError(t, testDB.Create(&resource).Error)
+	require.NoError(t, testDB.Create(&model.TechnicalResourceBinding{
+		ID: "provider-a-disabled-node", TechnicalResourceID: resource.ID, SourceType: model.TechnicalResourceBindingLegacyNode,
+		SourceID: fmt.Sprint(node.ID), CredentialRevision: 1, Enabled: true, BoundByUserID: agent.ID, Reason: "test", RowVersion: 1,
+	}).Error)
+	require.NoError(t, testDB.Create(&model.DomainRegistry{
+		Domain: "aliyun-119.a100.xny.beagle", Type: model.DomainTypeSSH, UserID: agent.ID,
+		ProviderID: provider.ID, AgentResourceID: resource.ID, ResourceKind: model.DomainResourceNode,
+		ResourceID: fmt.Sprint(node.ID), NodeID: node.ID, TargetIP: "100.64.0.122", TargetPort: 22,
+		Status: model.DomainStatusOnline, SshUsers: `["root"]`,
+	}).Error)
+
+	server := &AgentServiceServer{}
+	server.handleHeartbeat(context.Background(), agent.ID, &pb.AgentHeartbeatRequest{
+		DeviceName: "cpu-119", Hostname: "172.24.69.119", TunnelIp: "100.64.0.123", TunnelConnected: true,
+		DomainRegistrations: []*pb.DomainRegistration{{
+			Domain: "aliyun-119.a100.xny.beagle", Type: "ssh", TargetIp: "100.64.0.123", TargetPort: 22,
+			SshUsers: []string{"root", "ubuntu"},
+		}},
+	})
+
+	var domainCount int64
+	require.NoError(t, testDB.Model(&model.DomainRegistry{}).Where("node_id = ? AND type = ?", node.ID, model.DomainTypeSSH).Count(&domainCount).Error)
+	require.Zero(t, domainCount)
+}
+
 func TestHandleContainerCandidatesAutomaticallyPublishesAndIsIdempotent(t *testing.T) {
 	oldDB := db.DB
 	t.Cleanup(func() { db.DB = oldDB })

@@ -98,6 +98,10 @@ type providerAgentHostDomainLabelRequest struct {
 	HostDomainLabel string `json:"host_domain_label"`
 }
 
+type providerPlatformHostDomainLabelRequest struct {
+	HostDomainLabel string `json:"host_domain_label"`
+}
+
 type providerAgentDisplayNameRequest struct {
 	DisplayName string `json:"display_name"`
 }
@@ -601,6 +605,32 @@ func (a *ProviderSupplyAPI) GetPlatformResource(c *gin.Context) {
 	}
 	SetRevisionETag(c, result.Resource.RowVersion)
 	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+func (a *ProviderSupplyAPI) UpdatePlatformHostDomainLabel(c *gin.Context) {
+	authorization, ok := currentManagementAuthorization(c)
+	if !ok {
+		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
+		return
+	}
+	rowVersion, ok := requiredRevision(c)
+	if !ok {
+		codedError(c, http.StatusPreconditionRequired, ErrorCodePreconditionRequired, "必须提供 If-Match revision")
+		return
+	}
+	var request providerPlatformHostDomainLabelRequest
+	if _, ok := decodeProviderSupplyRequest(c, &request); !ok {
+		return
+	}
+	request.HostDomainLabel = strings.TrimSpace(request.HostDomainLabel)
+	resource, err := service.NewProviderSupplyService(db.DB).ChangePlatformHostDomainLabel(c.Request.Context(), authorization, c.Param("id"), request.HostDomainLabel, rowVersion)
+	if err != nil {
+		writeProviderSupplyError(c, err, true)
+		return
+	}
+	recordAuditLog(c.Request.Context(), c, model.ActionUpdateAgent, "platform_resource", resource.ID, request.HostDomainLabel, gin.H{"host_domain_label": request.HostDomainLabel})
+	SetRevisionETag(c, resource.RowVersion)
+	c.JSON(http.StatusOK, NewSuccessResponse(resource))
 }
 
 func (a *ProviderSupplyAPI) SetPlatformResourceLifecycle(target model.PlatformResourceLifecycleState, action string) gin.HandlerFunc {

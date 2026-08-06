@@ -31,6 +31,13 @@
         <el-table-column label="能力 Revision" width="140"><template #default="{ row }">{{ row.capability_revision }}</template></el-table-column>
         <el-table-column label="对象 Revision" width="140"><template #default="{ row }">{{ row.row_version }}</template></el-table-column>
         <el-table-column label="更新时间" width="180"><template #default="{ row }">{{ formatTime(row.updated_at) }}</template></el-table-column>
+        <el-table-column v-if="resourceType === 'host'" label="操作" width="90" fixed="right" align="right">
+          <template #default="{ row }">
+            <el-tooltip :disabled="!!row.source_node_id" content="仅 legacy Agent 主机支持编辑 SSH 主机域名标识" placement="top">
+              <span><el-button link type="primary" :icon="Edit" :disabled="!canWrite || !row.source_node_id" @click="editHostDomainLabel(row)">编辑</el-button></span>
+            </el-tooltip>
+          </template>
+        </el-table-column>
       </el-table>
 
       <el-empty v-if="!loading && !errorMessage && items.length === 0" :description="`当前资源方没有符合条件的${pageTitle}`" />
@@ -41,9 +48,10 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { Refresh, Search } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Edit, Refresh, Search } from '@element-plus/icons-vue'
 import PageHeader from '@/components/Common/PageHeader.vue'
-import { getProviderPlatformResources, type PlatformResource, type PlatformResourceState, type SupplyResourceType } from '@/api/providerSupply'
+import { getProviderPlatformResources, updateProviderPlatformHostDomainLabel, type PlatformResource, type PlatformResourceState, type SupplyResourceType } from '@/api/providerSupply'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const props = defineProps<{ resourceType: SupplyResourceType }>()
@@ -53,6 +61,7 @@ const errorMessage = ref('')
 const items = ref<PlatformResource[]>([])
 const filters = reactive({ search: '', state: '' })
 const pagination = reactive({ page: 1, size: 20, total: 0 })
+const canWrite = computed(() => workspaceStore.can('provider.resources.write'))
 const pageTitle = computed(() => props.resourceType === 'kubernetes' ? 'Kubernetes 资源' : '主机资源')
 const pageDescription = computed(() => props.resourceType === 'kubernetes'
   ? '查看当前资源方确认的 Kubernetes Cluster、健康状态和可分配 Namespace 数量。'
@@ -96,8 +105,25 @@ const healthTag = (state: string) => ({ online: 'success', degraded: 'warning', 
 const formatTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
 const resourcePrimaryName = (resource: PlatformResource) => resource.access_domain || resource.display_name || resource.stable_key
 const resourceSecondaryName = (resource: PlatformResource) => {
-  const names = [resource.display_name, resource.stable_key].filter(value => value && value !== resourcePrimaryName(resource))
+  const names = [resource.host_domain_label, resource.display_name, resource.stable_key].filter(value => value && value !== resourcePrimaryName(resource))
   return names.join(' · ') || '-'
+}
+
+const editHostDomainLabel = async (resource: PlatformResource) => {
+  if (!workspaceStore.providerId || resource.type !== 'host') return
+  try {
+    const result = await ElMessageBox.prompt('修改后 Desktop 展示和连接使用的新 SSH 域名会同步生效，旧域名立即失效。', '编辑 SSH 主机域名标识', {
+      inputValue: resource.host_domain_label || '',
+      inputPattern: /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
+      inputErrorMessage: '请输入有效的 DNS 单标签',
+      confirmButtonText: '保存', cancelButtonText: '取消', type: 'warning',
+    })
+    await updateProviderPlatformHostDomainLabel(workspaceStore.providerId, resource, result.value.trim().toLowerCase())
+    ElMessage.success('SSH 主机域名标识已更新')
+    await load()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') throw error
+  }
 }
 
 watch(() => [workspaceStore.providerId, props.resourceType], () => { pagination.page = 1; load() })

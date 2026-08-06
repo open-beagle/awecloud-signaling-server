@@ -154,7 +154,7 @@ func (s *ProviderSupplyService) ChangeAgentHostDomainLabel(ctx context.Context, 
 		if node.HostDomainLabel == label {
 			return nil
 		}
-		if err := updateNodeHostDomainLabel(ctx, tx, nodeID, label); err != nil {
+		if err := updateNodeHostDomainLabelForAgent(ctx, tx, nodeID, label, resource.ID); err != nil {
 			return err
 		}
 		updated := tx.Model(&resource).Where("row_version = ?", expectedRowVersion).Updates(map[string]any{
@@ -169,6 +169,85 @@ func (s *ProviderSupplyService) ChangeAgentHostDomainLabel(ctx context.Context, 
 		return tx.First(&resource, "id = ?", resource.ID).Error
 	})
 	return &resource, err
+}
+
+func (s *ProviderSupplyService) ChangePlatformHostDomainLabel(ctx context.Context, authorization *ManagementAuthorizationContext, resourceID, value string, expectedRowVersion int64) (*model.PlatformResource, error) {
+	label, err := NormalizeHostDomainLabel(value)
+	if err != nil || expectedRowVersion <= 0 {
+		return nil, ErrHostDomainLabelInvalid
+	}
+	var resource model.PlatformResource
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		providerID, err := reauthorizeProviderPermission(tx, authorization, PermissionProviderResourcesWrite, s.now().UTC())
+		if err != nil {
+			return err
+		}
+		if err := tx.Where("id = ? AND provider_id = ? AND type = ?", resourceID, providerID, model.SupplyResourceHost).First(&resource).Error; err != nil {
+			return providerSupplyNotFound(err)
+		}
+		if resource.RowVersion != expectedRowVersion {
+			return ErrProviderSupplyVersionConflict
+		}
+		if resource.LifecycleState == model.PlatformResourceRetired {
+			return ErrPlatformResourceStateTransition
+		}
+		nodeID, agentResourceID, err := platformHostSourceNodeID(tx, providerID, resource.ID)
+		if err != nil {
+			return err
+		}
+		var node model.Node
+		if err := tx.Select("host_domain_label").First(&node, nodeID).Error; err != nil {
+			return providerSupplyNotFound(err)
+		}
+		if node.HostDomainLabel != label {
+			if err := updateNodeHostDomainLabelForAgent(ctx, tx, nodeID, label, agentResourceID); err != nil {
+				return err
+			}
+		}
+		updated := tx.Model(&resource).Where("row_version = ?", expectedRowVersion).Updates(map[string]any{
+			"row_version": gorm.Expr("row_version + 1"),
+		})
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected != 1 {
+			return ErrProviderSupplyVersionConflict
+		}
+		return tx.First(&resource, "id = ?", resource.ID).Error
+	})
+	return &resource, err
+}
+
+func platformHostSourceNodeID(tx *gorm.DB, providerID, resourceID string) (uint64, string, error) {
+	var candidate model.SupplyCandidate
+	err := tx.Table("platform_resource_source AS source").
+		Select("candidate.*").
+		Joins("JOIN supply_candidate AS candidate ON candidate.id = source.supply_candidate_id AND candidate.provider_id = source.provider_id").
+		Where("source.provider_id = ? AND source.platform_resource_id = ?", providerID, resourceID).
+		Order("source.is_primary DESC, source.created_at ASC, source.id ASC").
+		Take(&candidate).Error
+	if err != nil {
+		return 0, "", providerSupplyNotFound(err)
+	}
+	prefix := LegacyHostStableKey(model.TechnicalResourceBindingLegacyNode, "")
+	if candidate.ResourceType != model.SupplyResourceHost || !strings.HasPrefix(candidate.StableKey, prefix) {
+		return 0, "", ErrProviderSupplyConflict
+	}
+	nodeID, err := strconv.ParseUint(strings.TrimPrefix(candidate.StableKey, prefix), 10, 64)
+	if err != nil || nodeID == 0 {
+		return 0, "", ErrProviderSupplyConflict
+	}
+	var bindingCount int64
+	if err := tx.Model(&model.TechnicalResourceBinding{}).
+		Where("technical_resource_id = ? AND source_type = ? AND source_id = ? AND enabled = ?",
+			candidate.TechnicalResourceID, model.TechnicalResourceBindingLegacyNode, strconv.FormatUint(nodeID, 10), true).
+		Count(&bindingCount).Error; err != nil {
+		return 0, "", err
+	}
+	if bindingCount != 1 {
+		return 0, "", ErrTechnicalResourceUnbound
+	}
+	return nodeID, candidate.TechnicalResourceID, nil
 }
 
 func (s *ProviderSupplyService) UpdateAgentDisplayName(ctx context.Context, authorization *ManagementAuthorizationContext, resourceID, value string, expectedRowVersion int64) (*model.TechnicalResource, error) {
@@ -664,6 +743,9 @@ func validateLegacyTechnicalResourceSource(tx *gorm.DB, resource *model.Technica
 				return ErrProviderSupplyObjectNotFound
 			}
 			return err
+		}
+		if resource.RuntimeUserID != 0 && node.UserID != resource.RuntimeUserID {
+			return ErrTechnicalResourceUnbound
 		}
 	case model.TechnicalResourceEndpoint:
 		if sourceType != model.TechnicalResourceBindingLegacyEndpoint || resource.ParentID == nil {

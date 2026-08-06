@@ -152,6 +152,85 @@ func TestProviderChangesBoundAgentHostDomainLabel(t *testing.T) {
 	require.ErrorIs(t, err, ErrProviderSupplyVersionConflict)
 }
 
+func TestProviderChangesPlatformHostDomainLabel(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	ctx := context.Background()
+	agent := fixture.createBoundAgent(t, "agent-host-resource", 1001)
+	require.NoError(t, fixture.database.Model(&model.Node{}).Where("id = ?", 1001).Updates(map[string]any{
+		"name": "cpu-119", "hostname": "172.24.69.119", "host_domain_label": "aliyun-119", "ip": "100.64.0.123",
+	}).Error)
+	var runtimeUser model.User
+	require.NoError(t, fixture.database.First(&runtimeUser, agent.RuntimeUserID).Error)
+	runtimeUser.SSHEnabled = true
+	require.NoError(t, fixture.database.Save(&runtimeUser).Error)
+	require.NoError(t, fixture.database.Model(&model.Node{}).Where("id = ?", 1001).Update("user_id", runtimeUser.ID).Error)
+	var node model.Node
+	require.NoError(t, fixture.database.First(&node, 1001).Error)
+	require.NoError(t, fixture.database.Exec(
+		`INSERT INTO domain_registry (domain, type, user_id, provider_id, agent_resource_id, resource_kind, resource_id, node_id, endpoint_id, target_ip, target_port, ssh_users, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+		"aliyun-119."+agent.DomainLabel+"."+fixture.provider.DomainLabel+".beagle", model.DomainTypeSSH, runtimeUser.ID, agent.ProviderID, agent.ID,
+		model.DomainResourceNode, fmt.Sprint(node.ID), node.ID, node.IP, 22, `["root","ubuntu"]`, model.DomainStatusOnline, fixture.now, fixture.now,
+	).Error)
+	require.NoError(t, EnsureLegacyHostPlatformResource(fixture.database, agent, &node, fixture.actor.ID, fixture.now))
+	var hostResource model.PlatformResource
+	require.NoError(t, fixture.database.First(&hostResource, "provider_id = ? AND type = ?", fixture.provider.ID, model.SupplyResourceHost).Error)
+
+	updated, err := fixture.service.ChangePlatformHostDomainLabel(ctx, fixture.authorization, hostResource.ID, "xny-a100", hostResource.RowVersion)
+	require.NoError(t, err)
+	require.Equal(t, hostResource.RowVersion+1, updated.RowVersion)
+
+	require.NoError(t, fixture.database.First(&node, 1001).Error)
+	require.Equal(t, "xny-a100", node.HostDomainLabel)
+	var domain model.DomainRegistry
+	require.NoError(t, fixture.database.First(&domain, "node_id = ? AND type = ?", node.ID, model.DomainTypeSSH).Error)
+	require.Equal(t, "xny-a100."+agent.DomainLabel+"."+fixture.provider.DomainLabel+".beagle", domain.Domain)
+	require.JSONEq(t, `["root","ubuntu"]`, domain.SshUsers)
+
+	resources, err := fixture.service.ListPlatformResources(ctx, fixture.authorization, ProviderSupplyListInput{Type: string(model.SupplyResourceHost), Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	require.Len(t, resources.Items, 1)
+	require.Equal(t, domain.Domain, resources.Items[0].AccessDomain)
+	require.Equal(t, "xny-a100", resources.Items[0].HostDomainLabel)
+	require.Equal(t, node.ID, resources.Items[0].SourceNodeID)
+}
+
+func TestProviderChangesPlatformHostDomainLabelKeepsCurrentSSHUsersFromDuplicateDomain(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	ctx := context.Background()
+	agent := fixture.createBoundAgent(t, "agent-host-duplicate", 1001)
+	require.NoError(t, fixture.database.Model(&model.Node{}).Where("id = ?", 1001).Updates(map[string]any{
+		"name": "cpu-119", "hostname": "172.24.69.119", "host_domain_label": "aliyun-119", "ip": "100.64.0.123",
+	}).Error)
+	var runtimeUser model.User
+	require.NoError(t, fixture.database.First(&runtimeUser, agent.RuntimeUserID).Error)
+	runtimeUser.SSHEnabled = true
+	require.NoError(t, fixture.database.Save(&runtimeUser).Error)
+	var node model.Node
+	require.NoError(t, fixture.database.First(&node, 1001).Error)
+	require.NoError(t, fixture.database.Exec(
+		`INSERT INTO domain_registry (domain, type, user_id, provider_id, agent_resource_id, resource_kind, resource_id, node_id, endpoint_id, target_ip, target_port, ssh_users, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+		"stale."+agent.DomainLabel+"."+fixture.provider.DomainLabel+".beagle", model.DomainTypeSSH, runtimeUser.ID, agent.ProviderID, agent.ID,
+		model.DomainResourceNode, fmt.Sprint(node.ID), node.ID, "100.64.0.1", 22, `[]`, model.DomainStatusOffline, fixture.now.Add(-time.Minute), fixture.now.Add(-time.Minute),
+	).Error)
+	require.NoError(t, fixture.database.Exec(
+		`INSERT INTO domain_registry (domain, type, user_id, provider_id, agent_resource_id, resource_kind, resource_id, node_id, endpoint_id, target_ip, target_port, ssh_users, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+		"aliyun-119."+agent.DomainLabel+"."+fixture.provider.DomainLabel+".beagle", model.DomainTypeSSH, runtimeUser.ID, agent.ProviderID, agent.ID,
+		model.DomainResourceNode, fmt.Sprint(node.ID), node.ID, node.IP, 22, `["root","ubuntu"]`, model.DomainStatusOnline, fixture.now, fixture.now,
+	).Error)
+	require.NoError(t, EnsureLegacyHostPlatformResource(fixture.database, agent, &node, fixture.actor.ID, fixture.now))
+	var hostResource model.PlatformResource
+	require.NoError(t, fixture.database.First(&hostResource, "provider_id = ? AND type = ?", fixture.provider.ID, model.SupplyResourceHost).Error)
+
+	_, err := fixture.service.ChangePlatformHostDomainLabel(ctx, fixture.authorization, hostResource.ID, "xny-a100", hostResource.RowVersion)
+	require.NoError(t, err)
+	var domains []model.DomainRegistry
+	require.NoError(t, fixture.database.Where("node_id = ? AND type = ?", node.ID, model.DomainTypeSSH).Find(&domains).Error)
+	require.Len(t, domains, 1)
+	require.Equal(t, "xny-a100."+agent.DomainLabel+"."+fixture.provider.DomainLabel+".beagle", domains[0].Domain)
+	require.JSONEq(t, `["root","ubuntu"]`, domains[0].SshUsers)
+	require.Equal(t, model.DomainStatusOnline, domains[0].Status)
+}
+
 func TestProviderChangesAgentDisplayNameWithoutChangingDomains(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	ctx := context.Background()
@@ -384,6 +463,10 @@ func (f providerSupplyFixture) createBoundAgent(t *testing.T, stableKey string, 
 		RuntimeName: strings.ReplaceAll(stableKey, ":", "-"), DomainLabel: strings.ReplaceAll(stableKey, ":", "-"),
 	})
 	require.NoError(t, err)
+	require.NoError(t, f.database.Model(&model.Node{}).Where("id = ?", nodeID).Update("user_id", resource.RuntimeUserID).Error)
+	if nodeID == 1001 {
+		require.NoError(t, f.database.Model(&model.Endpoint{}).Where("id = ?", "legacy-endpoint-a").Update("user_id", resource.RuntimeUserID).Error)
+	}
 	bound, err := f.service.BindTechnicalResource(context.Background(), f.authorization, BindTechnicalResourceInput{
 		TechnicalResourceID: resource.ID, SourceType: model.TechnicalResourceBindingLegacyNode,
 		SourceID: strconv.FormatUint(nodeID, 10), ExpectedResourceVersion: resource.RowVersion, Reason: "anonymous fixture binding",

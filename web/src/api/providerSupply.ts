@@ -142,6 +142,8 @@ export interface PlatformResource {
   stable_key: string
   display_name: string
   access_domain?: string
+  host_domain_label?: string
+  source_node_id?: number
   lifecycle_state: PlatformResourceState
   health_state: ResourceHealthState
   capability_revision: number
@@ -319,6 +321,11 @@ export const getProviderPlatformResources = (providerId: string, params: Provide
     params,
     headers: providerHeaders(providerId),
   })
+
+export const updateProviderPlatformHostDomainLabel = (providerId: string, resource: PlatformResource, hostDomainLabel: string) =>
+  request.patch<any, { success: boolean; data: PlatformResource }>(`/api/v1/management/provider/resources/${resource.id}/host-domain-label`, {
+    host_domain_label: hostDomainLabel,
+  }, { headers: { ...providerHeaders(providerId), 'If-Match': String(resource.row_version) } })
 
 export const getProviderResourceScopes = (providerId: string, params: ProviderSupplyListParams) =>
   request.get<any, PagedResponse<ResourceScope[]>>('/api/v1/management/provider/scopes', {

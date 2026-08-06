@@ -93,13 +93,27 @@ func normalizeDomainLabel(value string, invalid error) (string, error) {
 }
 
 func ResolveAgentDomainForNode(ctx context.Context, database *gorm.DB, nodeID uint64) (AgentDomainIdentity, error) {
+	return ResolveAgentDomainForNodeUser(ctx, database, nodeID, 0)
+}
+
+func ResolveAgentDomainForNodeUser(ctx context.Context, database *gorm.DB, nodeID, runtimeUserID uint64) (AgentDomainIdentity, error) {
+	return ResolveAgentDomainForNodeUserResource(ctx, database, nodeID, runtimeUserID, "")
+}
+
+func ResolveAgentDomainForNodeUserResource(ctx context.Context, database *gorm.DB, nodeID, runtimeUserID uint64, agentResourceID string) (AgentDomainIdentity, error) {
 	var identity AgentDomainIdentity
-	err := database.WithContext(ctx).Table("technical_resource_binding AS binding").
+	query := database.WithContext(ctx).Table("technical_resource_binding AS binding").
 		Select("agent.provider_id, agent.id AS agent_resource_id, agent.domain_label AS agent_label, provider.domain_scope AS provider_scope, provider.domain_label AS provider_label").
 		Joins("JOIN technical_resource AS agent ON agent.id = binding.technical_resource_id AND agent.type = ? AND agent.deleted_at IS NULL", model.TechnicalResourceAgent).
 		Joins("JOIN resource_provider AS provider ON provider.id = agent.provider_id").
-		Where("binding.source_type = ? AND binding.source_id = ? AND binding.enabled = ?", model.TechnicalResourceBindingLegacyNode, fmt.Sprint(nodeID), true).
-		Take(&identity).Error
+		Where("binding.source_type = ? AND binding.source_id = ? AND binding.enabled = ?", model.TechnicalResourceBindingLegacyNode, fmt.Sprint(nodeID), true)
+	if runtimeUserID != 0 {
+		query = query.Where("agent.runtime_user_id = ?", runtimeUserID)
+	}
+	if strings.TrimSpace(agentResourceID) != "" {
+		query = query.Where("agent.id = ?", strings.TrimSpace(agentResourceID))
+	}
+	err := query.Take(&identity).Error
 	if err != nil || identity.AgentLabel == "" || (identity.ProviderScope == model.ProviderDomainNamed && identity.ProviderLabel == "") {
 		return AgentDomainIdentity{}, ErrDomainOwnershipMissing
 	}

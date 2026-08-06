@@ -77,6 +77,11 @@ func TestPlatformResourceQueriesProjectAccessDomain(t *testing.T) {
 		"kubernetes.agent-lifecycle.provider-a.beagle", model.DomainTypeK8SAPI, fixture.actor.ID, fixture.provider.ID, accepted.Candidate.TechnicalResourceID,
 		model.DomainResourceKubernetes, "1001", 1001, "100.64.0.10", 6443, model.DomainStatusOnline, fixture.now, fixture.now,
 	).Error)
+	require.NoError(t, fixture.database.Exec(
+		`INSERT INTO domain_registry (domain, type, user_id, provider_id, agent_resource_id, resource_kind, resource_id, node_id, endpoint_id, target_ip, target_port, ssh_users, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+		"host-1001.agent-lifecycle.provider-a.beagle", model.DomainTypeSSH, fixture.actor.ID, fixture.provider.ID, accepted.Candidate.TechnicalResourceID,
+		model.DomainResourceNode, "1001", 1001, "100.64.0.10", 22, `["root"]`, model.DomainStatusOnline, fixture.now, fixture.now,
+	).Error)
 
 	resources, err := fixture.service.ListPlatformResources(context.Background(), fixture.authorization, ProviderSupplyListInput{
 		Type: string(model.SupplyResourceKubernetes), Search: "kubernetes.agent-lifecycle", Page: 1, PageSize: 10,
@@ -85,10 +90,14 @@ func TestPlatformResourceQueriesProjectAccessDomain(t *testing.T) {
 	require.Len(t, resources.Items, 1)
 	require.Equal(t, accepted.Resource.ID, resources.Items[0].ID)
 	require.Equal(t, "kubernetes.agent-lifecycle.provider-a.beagle", resources.Items[0].AccessDomain)
+	require.Empty(t, resources.Items[0].HostDomainLabel)
+	require.Zero(t, resources.Items[0].SourceNodeID)
 
 	detail, err := fixture.service.GetPlatformResource(context.Background(), fixture.authorization, accepted.Resource.ID)
 	require.NoError(t, err)
 	require.Equal(t, "kubernetes.agent-lifecycle.provider-a.beagle", detail.Resource.AccessDomain)
+	require.Empty(t, detail.Resource.HostDomainLabel)
+	require.Zero(t, detail.Resource.SourceNodeID)
 }
 
 func TestPlatformResourceQueriesIgnoreOfflineAccessDomain(t *testing.T) {
@@ -178,9 +187,8 @@ func TestTechnicalResourceQueriesProjectAndSearchRuntimeHostname(t *testing.T) {
 		"hostname": "beagle-prod-01", "version": "v1.2.0", "updater_protocol": "v2",
 		"container_ssh_protocol": "v1", "k8s_enabled": true,
 	}).Error)
-	fixture.actor.SSHEnabled = true
-	require.NoError(t, fixture.database.Model(&model.User{}).Where("id = ?", fixture.actor.ID).Update("ssh_enabled", true).Error)
 	agent := fixture.createBoundAgent(t, "legacy-node:1001", 1001)
+	require.NoError(t, fixture.database.Model(&model.User{}).Where("id = ?", agent.RuntimeUserID).Update("ssh_enabled", true).Error)
 	require.NoError(t, fixture.database.Model(&model.Endpoint{}).Where("id = ?", "legacy-endpoint-a").Update("host_domain_label", "endpoint-a").Error)
 
 	endpoint, err := fixture.service.CreateTechnicalResource(context.Background(), fixture.authorization, CreateTechnicalResourceInput{
@@ -239,6 +247,7 @@ func TestTechnicalResourceQueriesProjectAndSearchRuntimeHostname(t *testing.T) {
 func TestTechnicalResourceQueriesReturnOneAgentWithAllNodeBindings(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	agent := fixture.createBoundAgent(t, "agent-ha", 1001)
+	require.NoError(t, fixture.database.Model(&model.Node{}).Where("id = ?", 1002).Update("user_id", agent.RuntimeUserID).Error)
 	bound, err := fixture.service.BindTechnicalResource(context.Background(), fixture.authorization, BindTechnicalResourceInput{
 		TechnicalResourceID: agent.ID, SourceType: model.TechnicalResourceBindingLegacyNode,
 		SourceID: "1002", ExpectedResourceVersion: agent.RowVersion, Reason: "second HA node",

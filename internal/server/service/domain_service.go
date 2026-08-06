@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -33,7 +32,16 @@ func (s *DomainService) agentDomain(ctx context.Context, identity AgentDomainIde
 // CreateNodeSSHDomain 创建 Node SSH 域名
 // domain = "{node_name}.{domain_label}.{domain_suffix}"
 func (s *DomainService) CreateNodeSSHDomain(ctx context.Context, node *model.Node, user *model.User) error {
-	identity, err := ResolveAgentDomainForNode(ctx, s.db, node.ID)
+	return s.CreateNodeSSHDomainWithUsers(ctx, node, user, nil)
+}
+
+// CreateNodeSSHDomainWithUsers 创建或刷新 Node SSH 域名，并保存 Agent 实际可用 SSH 用户。
+func (s *DomainService) CreateNodeSSHDomainWithUsers(ctx context.Context, node *model.Node, user *model.User, sshUsers []string) error {
+	return s.createNodeSSHDomainWithUsers(ctx, node, user, "", sshUsers)
+}
+
+func (s *DomainService) createNodeSSHDomainWithUsers(ctx context.Context, node *model.Node, user *model.User, agentResourceID string, sshUsers []string) error {
+	identity, err := ResolveAgentDomainForNodeUserResource(ctx, s.db, node.ID, user.ID, agentResourceID)
 	if err != nil {
 		return err
 	}
@@ -43,22 +51,61 @@ func (s *DomainService) CreateNodeSSHDomain(ctx context.Context, node *model.Nod
 	}
 	domain := s.agentDomain(ctx, identity, hostLabel)
 
-	// 检查是否已存在
-	var existing model.DomainRegistry
-	err = s.db.WithContext(ctx).Where("domain = ? AND resource_kind = ? AND resource_id = ?", domain, model.DomainResourceNode, fmt.Sprint(node.ID)).First(&existing).Error
-	if err == nil {
+	resourceID := fmt.Sprint(node.ID)
+	var existingRecords []model.DomainRegistry
+	err = s.db.WithContext(ctx).
+		Where("resource_kind = ? AND resource_id = ? AND type = ?", model.DomainResourceNode, resourceID, model.DomainTypeSSH).
+		Order("id ASC").Find(&existingRecords).Error
+	if err != nil {
+		return fmt.Errorf("查询域名失败: %w", err)
+	}
+	if len(existingRecords) > 0 {
+		existingIndex := preferredNodeSSHDomainIndex(existingRecords, domain, identity, user.ID)
+		existing := existingRecords[existingIndex]
+		existingIDs := make([]int64, 0, len(existingRecords))
+		for i := range existingRecords {
+			existingIDs = append(existingIDs, existingRecords[i].ID)
+		}
+		var conflictCount int64
+		if err := s.db.WithContext(ctx).Model(&model.DomainRegistry{}).
+			Where("lower(domain) = ? AND type = ? AND id NOT IN ?", strings.ToLower(domain), model.DomainTypeSSH, existingIDs).Count(&conflictCount).Error; err != nil {
+			return err
+		}
+		if conflictCount > 0 {
+			return ErrHostDomainLabelExists
+		}
 		updates := map[string]any{
-			"target_ip":   node.IP,
-			"target_port": 22,
+			"domain":            domain,
+			"user_id":           user.ID,
+			"provider_id":       identity.ProviderID,
+			"agent_resource_id": identity.AgentResourceID,
+			"resource_kind":     model.DomainResourceNode,
+			"resource_id":       resourceID,
+			"node_id":           node.ID,
+			"target_ip":         node.IP,
+			"target_port":       22,
+			"status":            model.DomainStatusOnline,
+		}
+		if sshUsers != nil {
+			updates["ssh_users"] = encodeDomainSSHUsers(sshUsers)
 		}
 		if err := s.db.WithContext(ctx).Model(&existing).Updates(updates).Error; err != nil {
 			return fmt.Errorf("更新 Node SSH 域名失败: %w", err)
 		}
+		if len(existingRecords) > 1 {
+			duplicateIDs := make([]int64, 0, len(existingRecords)-1)
+			for i := range existingRecords {
+				if i == existingIndex {
+					continue
+				}
+				duplicateIDs = append(duplicateIDs, existingRecords[i].ID)
+			}
+			if err := s.db.WithContext(ctx).Where("id IN ?", duplicateIDs).Delete(&model.DomainRegistry{}).Error; err != nil {
+				return fmt.Errorf("清理重复 Node SSH 域名失败: %w", err)
+			}
+		}
 		logger.Infof("Node SSH 域名已存在，已刷新目标地址: domain=%s, target_ip=%s", domain, node.IP)
 		return nil
-	}
-	if err != gorm.ErrRecordNotFound {
-		return fmt.Errorf("查询域名失败: %w", err)
 	}
 	var conflictCount int64
 	if err := s.db.WithContext(ctx).Model(&model.DomainRegistry{}).
@@ -77,10 +124,13 @@ func (s *DomainService) CreateNodeSSHDomain(ctx context.Context, node *model.Nod
 		ProviderID:      identity.ProviderID,
 		AgentResourceID: identity.AgentResourceID,
 		ResourceKind:    model.DomainResourceNode,
-		ResourceID:      fmt.Sprint(node.ID),
+		ResourceID:      resourceID,
 		NodeID:          node.ID,
 		TargetIP:        node.IP,
 		TargetPort:      22,
+	}
+	if sshUsers != nil {
+		domainRecord.SshUsers = encodeDomainSSHUsers(sshUsers)
 	}
 
 	if err := s.db.WithContext(ctx).Create(domainRecord).Error; err != nil {
@@ -89,6 +139,79 @@ func (s *DomainService) CreateNodeSSHDomain(ctx context.Context, node *model.Nod
 
 	logger.Infof("创建 Node SSH 域名成功: domain=%s, node_id=%d, user_id=%d", domain, node.ID, user.ID)
 	return nil
+}
+
+func encodeDomainSSHUsers(users []string) string {
+	seen := map[string]struct{}{}
+	normalized := make([]string, 0, len(users))
+	for _, user := range users {
+		user = strings.TrimSpace(user)
+		if user == "" {
+			continue
+		}
+		if _, exists := seen[user]; exists {
+			continue
+		}
+		seen[user] = struct{}{}
+		normalized = append(normalized, user)
+	}
+	if len(normalized) == 0 {
+		return "[]"
+	}
+	data, err := json.Marshal(normalized)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func preferredNodeSSHDomainIndex(records []model.DomainRegistry, domain string, identity AgentDomainIdentity, userID uint64) int {
+	bestIndex := 0
+	bestScore := -1
+	for i := range records {
+		score := 0
+		record := records[i]
+		if strings.EqualFold(record.Domain, domain) {
+			score += 100
+		}
+		if record.ProviderID == identity.ProviderID {
+			score += 20
+		}
+		if record.AgentResourceID == identity.AgentResourceID {
+			score += 20
+		}
+		if record.UserID == userID {
+			score += 10
+		}
+		if record.Status == model.DomainStatusOnline {
+			score += 10
+		}
+		if hasDomainSSHUsers(record.SshUsers) {
+			score += 5
+		}
+		if score > bestScore {
+			bestScore = score
+			bestIndex = i
+		}
+	}
+	return bestIndex
+}
+
+func hasDomainSSHUsers(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "[]" {
+		return false
+	}
+	var users []string
+	if err := json.Unmarshal([]byte(value), &users); err != nil {
+		return true
+	}
+	for _, user := range users {
+		if strings.TrimSpace(user) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // CreateNodeK8SAPIDomain 创建 Node K8S API 域名
@@ -506,7 +629,15 @@ func (s *DomainService) UpdateNodeHostDomainLabel(ctx context.Context, nodeID ui
 }
 
 func updateNodeHostDomainLabel(ctx context.Context, tx *gorm.DB, nodeID uint64, label string) error {
-	identity, err := ResolveAgentDomainForNode(ctx, tx, nodeID)
+	return updateNodeHostDomainLabelForAgent(ctx, tx, nodeID, label, "")
+}
+
+func updateNodeHostDomainLabelForAgent(ctx context.Context, tx *gorm.DB, nodeID uint64, label, agentResourceID string) error {
+	var node model.Node
+	if err := tx.First(&node, nodeID).Error; err != nil {
+		return err
+	}
+	identity, err := ResolveAgentDomainForNodeUserResource(ctx, tx, nodeID, node.UserID, agentResourceID)
 	if err != nil {
 		return err
 	}
@@ -524,13 +655,10 @@ func updateNodeHostDomainLabel(ctx context.Context, tx *gorm.DB, nodeID uint64, 
 	if nodeCount+endpointCount > 0 {
 		return ErrHostDomainLabelExists
 	}
-	var node model.Node
-	if err := tx.First(&node, nodeID).Error; err != nil {
-		return err
-	}
 	if err := tx.Model(&node).Update("host_domain_label", label).Error; err != nil {
 		return err
 	}
+	node.HostDomainLabel = label
 	var user model.User
 	if err := tx.First(&user, node.UserID).Error; err != nil {
 		return err
@@ -540,33 +668,7 @@ func updateNodeHostDomainLabel(ctx context.Context, tx *gorm.DB, nodeID uint64, 
 	if !user.SSHEnabled {
 		return domains.DeleteNodeSSHDomain(ctx, &node, &user)
 	}
-	var existing model.DomainRegistry
-	err = tx.Where("resource_kind = ? AND resource_id = ? AND type = ?", model.DomainResourceNode, fmt.Sprint(node.ID), model.DomainTypeSSH).First(&existing).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return domains.CreateNodeSSHDomain(ctx, &node, &user)
-	}
-	if err != nil {
-		return err
-	}
-	newDomain := domains.agentDomain(ctx, identity, label)
-	var conflictCount int64
-	if err := tx.Model(&model.DomainRegistry{}).
-		Where("lower(domain) = ? AND type = ? AND id <> ?", strings.ToLower(newDomain), model.DomainTypeSSH, existing.ID).
-		Count(&conflictCount).Error; err != nil {
-		return err
-	}
-	if conflictCount > 0 {
-		return ErrHostDomainLabelExists
-	}
-	return tx.Model(&existing).Updates(map[string]any{
-		"domain":            newDomain,
-		"user_id":           user.ID,
-		"provider_id":       identity.ProviderID,
-		"agent_resource_id": identity.AgentResourceID,
-		"node_id":           node.ID,
-		"target_ip":         node.IP,
-		"target_port":       22,
-	}).Error
+	return domains.createNodeSSHDomainWithUsers(ctx, &node, &user, agentResourceID, nil)
 }
 
 func (s *DomainService) UpdateEndpointHostDomainLabel(ctx context.Context, endpointID, value string) error {

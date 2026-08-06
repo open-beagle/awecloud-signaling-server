@@ -70,7 +70,9 @@ type PlatformResourceDetail struct {
 
 type PlatformResourceView struct {
 	model.PlatformResource
-	AccessDomain string `gorm:"column:access_domain" json:"access_domain"`
+	AccessDomain    string `gorm:"column:access_domain" json:"access_domain"`
+	HostDomainLabel string `gorm:"column:host_domain_label" json:"host_domain_label,omitempty"`
+	SourceNodeID    uint64 `gorm:"column:source_node_id" json:"source_node_id,omitempty"`
 }
 
 type ResourceScopeListInput struct {
@@ -357,7 +359,9 @@ func (s *ProviderSupplyService) GetPlatformResource(ctx context.Context, authori
 }
 
 func platformResourceProjectionSelect() string {
-	return "platform_resource.*, " + platformResourceAccessDomainSubquery() + " AS access_domain"
+	return "platform_resource.*, " + platformResourceAccessDomainSubquery() + " AS access_domain, " +
+		platformResourceHostDomainLabelSubquery() + " AS host_domain_label, " +
+		platformResourceSourceNodeIDSubquery() + " AS source_node_id"
 }
 
 func platformResourceAccessDomainSubquery() string {
@@ -375,19 +379,68 @@ func platformResourceAccessDomainSubquery() string {
 			AND domain_registry.status = 'online'
 		WHERE access_source.provider_id = platform_resource.provider_id
 			AND access_source.platform_resource_id = platform_resource.id
-			AND platform_resource.type = 'kubernetes'
-			AND domain_registry.type = 'k8sapi'
 			AND (
-				(access_binding.source_type = 'legacy_node'
+				(platform_resource.type = 'host'
+					AND access_binding.source_type = 'legacy_node'
+					AND access_candidate.stable_key = 'legacy-host-legacy_node:' || access_binding.source_id
+					AND domain_registry.type = 'ssh'
+					AND domain_registry.resource_kind = 'node'
+					AND domain_registry.resource_id = access_binding.source_id)
+				OR (platform_resource.type = 'kubernetes'
+					AND access_binding.source_type = 'legacy_node'
+					AND domain_registry.type = 'k8sapi'
 					AND domain_registry.resource_kind = 'kubernetes'
 					AND domain_registry.resource_id = access_binding.source_id)
-				OR (access_binding.source_type = 'legacy_endpoint'
+				OR (platform_resource.type = 'kubernetes'
+					AND access_binding.source_type = 'legacy_endpoint'
+					AND domain_registry.type = 'k8sapi'
 					AND domain_registry.resource_kind = 'endpoint'
 					AND domain_registry.resource_id = access_binding.source_id)
 			)
 		ORDER BY access_source.is_primary DESC, domain_registry.status DESC, domain_registry.domain ASC, domain_registry.id ASC
 		LIMIT 1
 	), '')`
+}
+
+func platformResourceHostDomainLabelSubquery() string {
+	return `COALESCE((
+		SELECT node.host_domain_label
+		FROM platform_resource_source access_source
+		JOIN supply_candidate access_candidate
+			ON access_candidate.id = access_source.supply_candidate_id
+			AND access_candidate.provider_id = access_source.provider_id
+		JOIN technical_resource_binding access_binding
+			ON access_binding.technical_resource_id = access_candidate.technical_resource_id
+			AND access_binding.enabled = true
+			AND access_binding.source_type = 'legacy_node'
+			AND access_candidate.stable_key = 'legacy-host-legacy_node:' || access_binding.source_id
+		JOIN node ON node.id = CAST(access_binding.source_id AS INTEGER)
+		WHERE access_source.provider_id = platform_resource.provider_id
+			AND access_source.platform_resource_id = platform_resource.id
+			AND platform_resource.type = 'host'
+		ORDER BY access_source.is_primary DESC, access_source.created_at ASC, access_source.id ASC
+		LIMIT 1
+	), '')`
+}
+
+func platformResourceSourceNodeIDSubquery() string {
+	return `COALESCE((
+		SELECT CAST(access_binding.source_id AS INTEGER)
+		FROM platform_resource_source access_source
+		JOIN supply_candidate access_candidate
+			ON access_candidate.id = access_source.supply_candidate_id
+			AND access_candidate.provider_id = access_source.provider_id
+		JOIN technical_resource_binding access_binding
+			ON access_binding.technical_resource_id = access_candidate.technical_resource_id
+			AND access_binding.enabled = true
+			AND access_binding.source_type = 'legacy_node'
+			AND access_candidate.stable_key = 'legacy-host-legacy_node:' || access_binding.source_id
+		WHERE access_source.provider_id = platform_resource.provider_id
+			AND access_source.platform_resource_id = platform_resource.id
+			AND platform_resource.type = 'host'
+		ORDER BY access_source.is_primary DESC, access_source.created_at ASC, access_source.id ASC
+		LIMIT 1
+	), 0)`
 }
 
 func (s *ProviderSupplyService) ListResourceScopes(ctx context.Context, authorization *ManagementAuthorizationContext, input ResourceScopeListInput) (*ResourceScopeListResult, error) {

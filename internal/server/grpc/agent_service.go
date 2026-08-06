@@ -769,7 +769,16 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		Updates(updates).Error; err != nil {
 		logger.Errorf("更新 Node 心跳失败: %v", err)
 	} else {
+		if req.TunnelIp != "" {
+			node.IP = req.TunnelIp
+		}
+		if req.Hostname != "" {
+			node.Hostname = req.Hostname
+		}
 		s.recordNodeTechnicalResourceHeartbeat(ctx, node.ID)
+	}
+	if len(req.DomainRegistrations) > 0 && nodeType == model.NodeTypeAgent {
+		s.handleNodeDomainRegistrations(ctx, &node, &user, req.TunnelIp, req.DomainRegistrations)
 	}
 	if req.TunnelIp != "" {
 		if err := db.DB.WithContext(ctx).Model(&model.DomainRegistry{}).
@@ -830,6 +839,35 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	// 旧的 DiscoveredServices 字段已废弃，不再处理
 
 	return node.ID
+}
+
+func (s *AgentServiceServer) handleNodeDomainRegistrations(ctx context.Context, node *model.Node, user *model.User, tunnelIP string, registrations []*pb.DomainRegistration) {
+	if node == nil || user == nil || node.ID == 0 {
+		return
+	}
+	domains := s.domainService
+	if domains == nil {
+		domains = service.NewDomainService(db.DB)
+	}
+	for _, registration := range registrations {
+		if registration == nil || strings.ToLower(strings.TrimSpace(registration.Type)) != string(model.DomainTypeSSH) || registration.EndpointId != "" {
+			continue
+		}
+		if !user.SSHEnabled {
+			if err := domains.DeleteNodeSSHDomain(ctx, node, user); err != nil {
+				logger.Errorf("处理 Agent SSH 域名禁用失败: node_id=%d, reported_domain=%s, err=%v", node.ID, registration.Domain, err)
+			}
+			continue
+		}
+		if tunnelIP != "" {
+			node.IP = strings.TrimSpace(tunnelIP)
+		} else if registration.TargetIp != "" {
+			node.IP = strings.TrimSpace(registration.TargetIp)
+		}
+		if err := domains.CreateNodeSSHDomainWithUsers(ctx, node, user, registration.SshUsers); err != nil {
+			logger.Errorf("处理 Agent SSH 域名注册失败: node_id=%d, reported_domain=%s, err=%v", node.ID, registration.Domain, err)
+		}
+	}
 }
 
 func (s *AgentServiceServer) recordNodeTechnicalResourceHeartbeat(ctx context.Context, nodeID uint64) {

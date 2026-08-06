@@ -151,6 +151,9 @@ func TestSupplyInventoryEndpointForwardingIsBoundToParentAgent(t *testing.T) {
 	agentA := fixture.createBoundAgent(t, "agent-forward-a", 1001)
 	agentB := fixture.createBoundAgent(t, "agent-forward-b", 1002)
 	ctx := context.Background()
+	require.NoError(t, fixture.database.Model(&model.Endpoint{}).
+		Where("id = ?", "legacy-endpoint-a").
+		Update("user_id", agentB.RuntimeUserID).Error)
 	endpoint, err := fixture.service.CreateTechnicalResource(ctx, fixture.authorization, CreateTechnicalResourceInput{
 		Type: model.TechnicalResourceEndpoint, StableKey: "endpoint-forward", ParentID: agentB.ID, CredentialRevision: 1,
 	})
