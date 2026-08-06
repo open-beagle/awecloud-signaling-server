@@ -34,3 +34,26 @@ func TestShouldRegisterSSHDomain(t *testing.T) {
 		})
 	}
 }
+
+func TestNodeSSHPortDefaultsAndUsesTunnelConfig(t *testing.T) {
+	tests := []struct {
+		name string
+		port int
+		want int32
+	}{
+		{name: "default", want: 22},
+		{name: "configured", port: 2222, want: 2222},
+		{name: "invalid falls back", port: -1, want: 22},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent := &Agent{config: &config.AgentConfig{
+				Tunnel: config.TunnelSection{SSHPort: tt.port},
+			}}
+			if got := agent.nodeSSHPort(); got != tt.want {
+				t.Fatalf("nodeSSHPort() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}

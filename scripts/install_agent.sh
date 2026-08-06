@@ -17,6 +17,7 @@ AGENT_TOKEN=""
 SERVER_ADDRESS=""
 DEVICE_NAME=""  # 设备名，默认使用 hostname
 ENABLE_SSH="true"  # 默认启用 SSH
+SSH_PORT="22"      # Agent 节点实际 SSH 端口
 UPGRADE_MODE="false"
 UNINSTALL_MODE="false"
 DEPLOY_MODE="false"  # 部署模式：使用 Token 自动注册
@@ -51,6 +52,7 @@ AWECloud Agent 安装脚本
   -s, --server <url>      Server 地址（必填，如 https://signal.example.com）
   -d, --device <name>     设备名（可选，默认使用 hostname）
       --no-ssh            禁用 SSH（默认启用）
+      --ssh-port <port>   Agent 节点实际 SSH 端口（默认 22）
       --deploy            部署模式：使用 Token 自动注册获取配置
   -u, --upgrade           升级模式，保留现有配置
   -U, --uninstall         卸载 Agent
@@ -102,6 +104,10 @@ parse_args() {
             --no-ssh)
                 ENABLE_SSH="false"
                 shift
+                ;;
+            --ssh-port)
+                SSH_PORT="$2"
+                shift 2
                 ;;
             --deploy)
                 DEPLOY_MODE="true"
@@ -261,6 +267,7 @@ server = "${SERVER_ADDRESS}"
 state_dir = "${TUNNEL_STATE_DIR}"
 state_sync_interval = 5
 enable_ssh = ${ENABLE_SSH}
+ssh_port = ${SSH_PORT}
 
 # Visitor
 [visitor]
@@ -541,6 +548,7 @@ main() {
     echo "Agent 名称: ${AGENT_NAME}"
     echo "设备名称:   ${DEVICE_NAME}"
     echo "SSH 功能:   ${ENABLE_SSH}"
+    echo "SSH 端口:   ${SSH_PORT}"
     echo
     echo "常用命令:"
     echo "  查看状态: systemctl status ${SERVICE_NAME}"

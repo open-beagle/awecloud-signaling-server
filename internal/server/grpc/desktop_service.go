@@ -1692,6 +1692,7 @@ func (s *DesktopServiceServer) GetResources(ctx context.Context, req *pb.GetReso
 		resp.K8SService = s.queryK8SServiceResourcesGRPC(ctx, clientID, groupIDs)
 		resp.ContainerSsh = s.queryContainerSSHResourcesGRPC(ctx, clientID, groupIDs)
 	}
+	resp.Ssh = appendUniqueSSHResources(resp.Ssh, s.queryUnifiedHostSSHResourcesGRPC(ctx, clientID, groupIDs, req.TenantId)...)
 	if req.ResourceProtocol == sessionAuthorizationProtocolV2 && s.config != nil &&
 		s.config.FeatureFlags.Enabled(config.FeatureResourceModelWrite) && s.config.FeatureFlags.Enabled(config.FeatureSessionAuthorizationV2) {
 		containerSSH, containerServices := s.queryTenantContainerResourcesGRPC(ctx, &node, groupIDs, req.TenantId)
@@ -2070,6 +2071,64 @@ func (s *DesktopServiceServer) querySSHResourcesGRPC(ctx context.Context, client
 		}
 	}
 
+	return resources
+}
+
+func (s *DesktopServiceServer) queryUnifiedHostSSHResourcesGRPC(ctx context.Context, clientID uint64, groupIDs []int64, tenantID string) []*pb.SSHResource {
+	domains := s.queryUnifiedHostSSHDomains(ctx, clientID, groupIDs, tenantID)
+	if len(domains) == 0 {
+		return nil
+	}
+	nodeIDs := make([]uint64, 0, len(domains))
+	for _, domain := range domains {
+		if domain.NodeID != 0 {
+			nodeIDs = append(nodeIDs, domain.NodeID)
+		}
+	}
+	nodesByID := make(map[uint64]model.Node, len(nodeIDs))
+	if len(nodeIDs) > 0 {
+		var nodes []model.Node
+		if err := db.DB.WithContext(ctx).Where("id IN ?", nodeIDs).Find(&nodes).Error; err == nil {
+			for _, node := range nodes {
+				nodesByID[node.ID] = node
+			}
+		}
+	}
+	resources := make([]*pb.SSHResource, 0, len(domains))
+	for _, domain := range domains {
+		users := parseJSONStringArrayGRPC(domain.SshUsers)
+		if len(users) == 0 {
+			continue
+		}
+		agentName := domain.Domain
+		if node, ok := nodesByID[domain.NodeID]; ok && node.Name != "" {
+			agentName = node.Name
+		}
+		resources = append(resources, &pb.SSHResource{
+			AgentId: domain.UserID, AgentName: agentName, Domain: domain.Domain, SshUsers: users,
+		})
+	}
+	return resources
+}
+
+func appendUniqueSSHResources(resources []*pb.SSHResource, extra ...*pb.SSHResource) []*pb.SSHResource {
+	seen := make(map[string]struct{}, len(resources)+len(extra))
+	for _, resource := range resources {
+		if resource == nil || resource.Domain == "" {
+			continue
+		}
+		seen[resource.Domain] = struct{}{}
+	}
+	for _, resource := range extra {
+		if resource == nil || resource.Domain == "" {
+			continue
+		}
+		if _, exists := seen[resource.Domain]; exists {
+			continue
+		}
+		seen[resource.Domain] = struct{}{}
+		resources = append(resources, resource)
+	}
 	return resources
 }
 
@@ -2472,7 +2531,7 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 }
 
 func (s *DesktopServiceServer) queryUnifiedHostSSHDomainItems(ctx context.Context, userID uint64, groupIDs []int64) []*pb.DomainItem {
-	records := s.queryUnifiedHostSSHDomains(ctx, userID, groupIDs)
+	records := s.queryUnifiedHostSSHDomains(ctx, userID, groupIDs, "")
 	items := make([]*pb.DomainItem, 0, len(records))
 	for _, record := range records {
 		item := &pb.DomainItem{
@@ -2691,7 +2750,7 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 	for id := range agentUserIDs {
 		allowedAgentIDs = append(allowedAgentIDs, id)
 	}
-	unifiedHostDomains := s.queryUnifiedHostSSHDomains(ctx, userID, groupIDs)
+	unifiedHostDomains := s.queryUnifiedHostSSHDomains(ctx, userID, groupIDs, "")
 
 	if len(allowedAgentIDs) == 0 && len(unifiedHostDomains) == 0 {
 		// 没有任何权限，返回空列表
@@ -2783,10 +2842,14 @@ func appendUniqueDomainRecords(records []model.DomainRegistry, extra []model.Dom
 	return records
 }
 
-func (s *DesktopServiceServer) queryUnifiedHostSSHDomains(ctx context.Context, userID uint64, groupIDs []int64) []model.DomainRegistry {
+func (s *DesktopServiceServer) queryUnifiedHostSSHDomains(ctx context.Context, userID uint64, groupIDs []int64, tenantID string) []model.DomainRegistry {
 	now := time.Now().UTC()
 	var memberships []model.TenantMembership
-	if err := db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", userID, true, now).Find(&memberships).Error; err != nil {
+	membershipQuery := db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", userID, true, now)
+	if tenantID != "" {
+		membershipQuery = membershipQuery.Where("tenant_id = ?", tenantID)
+	}
+	if err := membershipQuery.Find(&memberships).Error; err != nil {
 		return nil
 	}
 	tenantIDs := make([]string, 0, len(memberships))

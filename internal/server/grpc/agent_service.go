@@ -781,9 +781,13 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		s.handleNodeDomainRegistrations(ctx, &node, &user, req.TunnelIp, req.DomainRegistrations)
 	}
 	if req.TunnelIp != "" {
+		updates := map[string]any{"target_ip": req.TunnelIp}
+		if sshPort, ok := nodeSSHTargetPortFromRegistrations(req.DomainRegistrations); ok {
+			updates["target_port"] = sshPort
+		}
 		if err := db.DB.WithContext(ctx).Model(&model.DomainRegistry{}).
 			Where("node_id = ? AND resource_kind = ? AND type = ?", node.ID, model.DomainResourceNode, model.DomainTypeSSH).
-			Updates(map[string]any{"target_ip": req.TunnelIp, "target_port": 22}).Error; err != nil {
+			Updates(updates).Error; err != nil {
 			logger.Errorf("同步 Node SSH 域名目标地址失败: node_id=%d, ip=%s, err=%v", node.ID, req.TunnelIp, err)
 		}
 	}
@@ -864,7 +868,7 @@ func (s *AgentServiceServer) handleNodeDomainRegistrations(ctx context.Context, 
 		} else if registration.TargetIp != "" {
 			node.IP = strings.TrimSpace(registration.TargetIp)
 		}
-		if err := domains.CreateNodeSSHDomainWithUsers(ctx, node, user, registration.SshUsers); err != nil {
+		if err := domains.CreateNodeSSHDomainWithPortAndUsers(ctx, node, user, int(registration.TargetPort), registration.SshUsers); err != nil {
 			logger.Errorf("处理 Agent SSH 域名注册失败: node_id=%d, reported_domain=%s, err=%v", node.ID, registration.Domain, err)
 			continue
 		}
@@ -872,6 +876,21 @@ func (s *AgentServiceServer) handleNodeDomainRegistrations(ctx context.Context, 
 			logger.Warnf("同步 HostSSH 租户资源失败: node_id=%d, reported_domain=%s, err=%v", node.ID, registration.Domain, err)
 		}
 	}
+}
+
+func nodeSSHTargetPortFromRegistrations(registrations []*pb.DomainRegistration) (int, bool) {
+	for _, registration := range registrations {
+		if registration == nil {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(registration.Type)) != string(model.DomainTypeSSH) || registration.EndpointId != "" {
+			continue
+		}
+		if registration.TargetPort > 0 {
+			return int(registration.TargetPort), true
+		}
+	}
+	return 0, false
 }
 
 func (s *AgentServiceServer) syncNodeHostSSHResource(ctx context.Context, node *model.Node) error {

@@ -160,7 +160,7 @@ func TestAgentHeartbeatRefreshesNodeSSHDomainTargetIP(t *testing.T) {
 	require.NoError(t, testDB.Create(&model.DomainRegistry{
 		Domain: "duyingjun.oxaf1y22qr36.beagle", Type: model.DomainTypeSSH,
 		UserID: client.ID, ResourceKind: model.DomainResourceNode, ResourceID: fmt.Sprint(node.ID),
-		NodeID: node.ID, TargetIP: "100.64.0.4", TargetPort: 22,
+		NodeID: node.ID, TargetIP: "100.64.0.4", TargetPort: 2222,
 	}).Error)
 
 	server := &AgentServiceServer{}
@@ -174,7 +174,7 @@ func TestAgentHeartbeatRefreshesNodeSSHDomainTargetIP(t *testing.T) {
 	var domain model.DomainRegistry
 	require.NoError(t, testDB.First(&domain, "node_id = ? AND type = ?", node.ID, model.DomainTypeSSH).Error)
 	require.Equal(t, "100.64.0.119", domain.TargetIP)
-	require.Equal(t, 22, domain.TargetPort)
+	require.Equal(t, 2222, domain.TargetPort)
 }
 
 func TestAgentHeartbeatCreatesNodeSSHDomainFromRegistration(t *testing.T) {
@@ -221,7 +221,7 @@ func TestAgentHeartbeatCreatesNodeSSHDomainFromRegistration(t *testing.T) {
 	nodeID := server.handleHeartbeat(context.Background(), agent.ID, &pb.AgentHeartbeatRequest{
 		DeviceName: "cpu-119", Hostname: "172.24.69.119", TunnelIp: "100.64.0.123", TunnelConnected: true,
 		DomainRegistrations: []*pb.DomainRegistration{{
-			Domain: "cpu-119.provider-a-cpu.beagle", Type: "ssh", TargetIp: "100.64.0.123", TargetPort: 22,
+			Domain: "cpu-119.provider-a-cpu.beagle", Type: "ssh", TargetIp: "100.64.0.123", TargetPort: 2222,
 			SshUsers: []string{"root", "ubuntu"},
 		}},
 	})
@@ -236,7 +236,7 @@ func TestAgentHeartbeatCreatesNodeSSHDomainFromRegistration(t *testing.T) {
 	require.Equal(t, model.DomainResourceNode, domain.ResourceKind)
 	require.Equal(t, fmt.Sprint(node.ID), domain.ResourceID)
 	require.Equal(t, "100.64.0.123", domain.TargetIP)
-	require.Equal(t, 22, domain.TargetPort)
+	require.Equal(t, 2222, domain.TargetPort)
 	require.Equal(t, model.DomainStatusOnline, domain.Status)
 	require.JSONEq(t, `["root","ubuntu"]`, domain.SshUsers)
 	var domainCount int64
@@ -246,12 +246,24 @@ func TestAgentHeartbeatCreatesNodeSSHDomainFromRegistration(t *testing.T) {
 	server.handleHeartbeat(context.Background(), agent.ID, &pb.AgentHeartbeatRequest{
 		DeviceName: "cpu-119", Hostname: "172.24.69.119", TunnelIp: "100.64.0.123", TunnelConnected: true,
 		DomainRegistrations: []*pb.DomainRegistration{{
-			Domain: "cpu-119.provider-a-cpu.beagle", Type: "ssh", TargetIp: "100.64.0.123", TargetPort: 22,
+			Domain: "cpu-119.provider-a-cpu.beagle", Type: "ssh", TargetIp: "100.64.0.123", TargetPort: 2222,
 			SshUsers: []string{},
 		}},
 	})
 	require.NoError(t, testDB.First(&domain, "node_id = ? AND type = ?", node.ID, model.DomainTypeSSH).Error)
+	require.Equal(t, 2222, domain.TargetPort)
 	require.JSONEq(t, `[]`, domain.SshUsers)
+
+	server.handleHeartbeat(context.Background(), agent.ID, &pb.AgentHeartbeatRequest{
+		DeviceName: "cpu-119", Hostname: "172.24.69.119", TunnelIp: "100.64.0.123", TunnelConnected: true,
+		DomainRegistrations: []*pb.DomainRegistration{{
+			Domain: "cpu-119.provider-a-cpu.beagle", Type: "ssh", TargetIp: "100.64.0.123", TargetPort: 2233,
+			SshUsers: []string{"root"},
+		}},
+	})
+	require.NoError(t, testDB.First(&domain, "node_id = ? AND type = ?", node.ID, model.DomainTypeSSH).Error)
+	require.Equal(t, 2233, domain.TargetPort)
+	require.JSONEq(t, `["root"]`, domain.SshUsers)
 }
 
 func TestAgentHeartbeatProjectsNodeSSHDomainToTenantHostResource(t *testing.T) {

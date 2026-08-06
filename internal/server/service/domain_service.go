@@ -37,10 +37,18 @@ func (s *DomainService) CreateNodeSSHDomain(ctx context.Context, node *model.Nod
 
 // CreateNodeSSHDomainWithUsers 创建或刷新 Node SSH 域名，并保存 Agent 实际可用 SSH 用户。
 func (s *DomainService) CreateNodeSSHDomainWithUsers(ctx context.Context, node *model.Node, user *model.User, sshUsers []string) error {
-	return s.createNodeSSHDomainWithUsers(ctx, node, user, "", sshUsers)
+	return s.CreateNodeSSHDomainWithPortAndUsers(ctx, node, user, 22, sshUsers)
 }
 
-func (s *DomainService) createNodeSSHDomainWithUsers(ctx context.Context, node *model.Node, user *model.User, agentResourceID string, sshUsers []string) error {
+// CreateNodeSSHDomainWithPortAndUsers 创建或刷新 Node SSH 域名，并保存 Agent 实际 SSH 端口和可用用户。
+func (s *DomainService) CreateNodeSSHDomainWithPortAndUsers(ctx context.Context, node *model.Node, user *model.User, sshPort int, sshUsers []string) error {
+	if sshPort <= 0 {
+		sshPort = 22
+	}
+	return s.createNodeSSHDomainWithUsers(ctx, node, user, "", sshPort, sshUsers)
+}
+
+func (s *DomainService) createNodeSSHDomainWithUsers(ctx context.Context, node *model.Node, user *model.User, agentResourceID string, sshPort int, sshUsers []string) error {
 	identity, err := ResolveAgentDomainForNodeUserResource(ctx, s.db, node.ID, user.ID, agentResourceID)
 	if err != nil {
 		return err
@@ -83,7 +91,7 @@ func (s *DomainService) createNodeSSHDomainWithUsers(ctx context.Context, node *
 			"resource_id":       resourceID,
 			"node_id":           node.ID,
 			"target_ip":         node.IP,
-			"target_port":       22,
+			"target_port":       sshPort,
 			"status":            model.DomainStatusOnline,
 		}
 		if sshUsers != nil {
@@ -127,7 +135,7 @@ func (s *DomainService) createNodeSSHDomainWithUsers(ctx context.Context, node *
 		ResourceID:      resourceID,
 		NodeID:          node.ID,
 		TargetIP:        node.IP,
-		TargetPort:      22,
+		TargetPort:      sshPort,
 	}
 	if sshUsers != nil {
 		domainRecord.SshUsers = encodeDomainSSHUsers(sshUsers)
@@ -668,7 +676,14 @@ func updateNodeHostDomainLabelForAgent(ctx context.Context, tx *gorm.DB, nodeID 
 	if !user.SSHEnabled {
 		return domains.DeleteNodeSSHDomain(ctx, &node, &user)
 	}
-	return domains.createNodeSSHDomainWithUsers(ctx, &node, &user, agentResourceID, nil)
+	sshPort := 22
+	var existing model.DomainRegistry
+	if err := tx.Select("target_port").
+		Where("resource_kind = ? AND resource_id = ? AND type = ?", model.DomainResourceNode, fmt.Sprint(node.ID), model.DomainTypeSSH).
+		Order("id ASC").First(&existing).Error; err == nil && existing.TargetPort > 0 {
+		sshPort = existing.TargetPort
+	}
+	return domains.createNodeSSHDomainWithUsers(ctx, &node, &user, agentResourceID, sshPort, nil)
 }
 
 func (s *DomainService) UpdateEndpointHostDomainLabel(ctx context.Context, endpointID, value string) error {

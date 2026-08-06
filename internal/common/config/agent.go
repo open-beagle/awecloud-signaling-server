@@ -36,6 +36,7 @@ type TunnelSection struct {
 	StateDir          string `toml:"state_dir"`           // 隧道状态存储目录，支持 ~ 扩展
 	StateSyncInterval int    `toml:"state_sync_interval"` // 状态同步到 Server 的间隔（分钟），默认 5
 	EnableSSH         bool   `toml:"enable_ssh"`          // 是否启用 SSH，默认 false
+	SSHPort           int    `toml:"ssh_port"`            // Agent 节点实际 SSH 端口，默认 22
 }
 
 // VisitorSection Visitor 配置（服务访问）
@@ -175,6 +176,14 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 			logDeprecation("TUNNEL_STATE_SYNC_INTERVAL", "SIGNAL_STATE_SYNC_INTERVAL")
 		}
 	}
+	if v, deprecated := getEnvWithDeprecation("SIGNAL_SSH_PORT", "TUNNEL_SSH_PORT"); v != "" {
+		if port, err := strconv.Atoi(v); err == nil {
+			cfg.Tunnel.SSHPort = port
+		}
+		if deprecated {
+			logDeprecation("TUNNEL_SSH_PORT", "SIGNAL_SSH_PORT")
+		}
+	}
 
 	// CloudIDE 专属（仅 SIGNAL_* 前缀）
 	if v := os.Getenv("SIGNAL_SOCKS"); v != "" {
@@ -286,6 +295,9 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	}
 	if cfg.Tunnel.StateSyncInterval == 0 {
 		cfg.Tunnel.StateSyncInterval = 5
+	}
+	if cfg.Tunnel.SSHPort <= 0 {
+		cfg.Tunnel.SSHPort = 22
 	}
 
 	// CloudIDE 默认值

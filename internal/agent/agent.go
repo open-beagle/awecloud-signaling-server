@@ -1185,6 +1185,13 @@ func (a *Agent) shouldRegisterSSHDomain() bool {
 	return a != nil && a.config != nil && a.config.Tunnel.EnableSSH
 }
 
+func (a *Agent) nodeSSHPort() int32 {
+	if a == nil || a.config == nil || a.config.Tunnel.SSHPort <= 0 {
+		return 22
+	}
+	return int32(a.config.Tunnel.SSHPort)
+}
+
 // buildDomainRegistrations 构建域名注册列表
 // 根据 Agent 当前配置和状态，生成需要上报给 Server 的域名列表
 func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
@@ -1234,7 +1241,7 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 			Domain:     device + "." + a.userName + a.domainSuffix,
 			Type:       "ssh",
 			TargetIp:   agentIP,
-			TargetPort: 22,
+			TargetPort: a.nodeSSHPort(),
 			SshUsers:   sshUsers,
 		})
 	}

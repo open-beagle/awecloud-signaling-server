@@ -173,6 +173,14 @@ func TestDesktopListDomainsIncludesUnifiedHostSSHGrantCreatedInLocalTimezone(t *
 	require.Len(t, domainResp.Domains, 1)
 	require.Equal(t, "host-local.ali.szzy.beagle", domainResp.Domains[0].Domain)
 	require.Equal(t, []string{"root"}, domainResp.Domains[0].SshUsers)
+
+	resourceResp, err := (&DesktopServiceServer{}).GetResources(context.Background(), &pb.GetResourcesRequest{
+		DesktopId: desktopNode.ID, ResourceProtocol: sessionAuthorizationProtocolV2, TenantId: tenant.ID,
+	})
+	require.NoError(t, err)
+	require.Len(t, resourceResp.Ssh, 1)
+	require.Equal(t, "host-local.ali.szzy.beagle", resourceResp.Ssh[0].Domain)
+	require.Equal(t, []string{"root"}, resourceResp.Ssh[0].SshUsers)
 }
 
 func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t *testing.T) {
