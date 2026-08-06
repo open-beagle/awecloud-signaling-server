@@ -866,8 +866,101 @@ func (s *AgentServiceServer) handleNodeDomainRegistrations(ctx context.Context, 
 		}
 		if err := domains.CreateNodeSSHDomainWithUsers(ctx, node, user, registration.SshUsers); err != nil {
 			logger.Errorf("处理 Agent SSH 域名注册失败: node_id=%d, reported_domain=%s, err=%v", node.ID, registration.Domain, err)
+			continue
+		}
+		if err := s.syncNodeHostSSHResource(ctx, node); err != nil {
+			logger.Warnf("同步 HostSSH 租户资源失败: node_id=%d, reported_domain=%s, err=%v", node.ID, registration.Domain, err)
 		}
 	}
+}
+
+func (s *AgentServiceServer) syncNodeHostSSHResource(ctx context.Context, node *model.Node) error {
+	if node == nil || node.ID == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	var binding model.TechnicalResourceBinding
+	if err := db.DB.WithContext(ctx).
+		Where("source_type = ? AND source_id = ? AND enabled = ?", model.TechnicalResourceBindingLegacyNode, fmt.Sprint(node.ID), true).
+		Order("updated_at DESC, created_at DESC").
+		First(&binding).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	var membership model.UserTenantManagementMembership
+	if err := db.DB.WithContext(ctx).
+		Where("user_id = ? AND enabled = ? AND valid_from <= ? AND (expires_at IS NULL OR expires_at > ?)", binding.BoundByUserID, true, now, now).
+		Order("CASE role WHEN 'tenant_admin' THEN 0 WHEN 'security_auditor' THEN 1 ELSE 2 END, updated_at DESC").
+		First(&membership).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	var tenant model.Tenant
+	if err := db.DB.WithContext(ctx).Where("id = ? AND status = ?", membership.TenantID, model.TenantStatusActive).First(&tenant).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	var domain model.DomainRegistry
+	if err := db.DB.WithContext(ctx).
+		Where("type = ? AND resource_kind = ? AND resource_id = ?", model.DomainTypeSSH, model.DomainResourceNode, fmt.Sprint(node.ID)).
+		Or("type = ? AND node_id = ?", model.DomainTypeSSH, node.ID).
+		Order("updated_at DESC, id DESC").
+		First(&domain).Error; err != nil {
+		return err
+	}
+	displayName := strings.TrimSpace(domain.Domain)
+	if displayName == "" {
+		displayName = strings.TrimSpace(node.Name)
+	}
+	if displayName == "" {
+		displayName = fmt.Sprintf("node-%d", node.ID)
+	}
+	state := model.ResourceStateDegraded
+	if domain.Status == model.DomainStatusOnline {
+		state = model.ResourceStateAvailable
+	}
+	providerID := strings.TrimSpace(domain.ProviderID)
+	if providerID == "" {
+		var technical model.TechnicalResource
+		if err := db.DB.WithContext(ctx).Select("provider_id").First(&technical, "id = ?", binding.TechnicalResourceID).Error; err == nil {
+			providerID = technical.ProviderID
+		}
+	}
+
+	var resource model.Resource
+	err := db.DB.WithContext(ctx).Where("type = ? AND agent_node_id = ?", model.ResourceTypeHostSSH, node.ID).First(&resource).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		resource = model.Resource{
+			ID:             uuid.NewString(),
+			TenantID:       tenant.ID,
+			Type:           model.ResourceTypeHostSSH,
+			DisplayName:    displayName,
+			ProviderID:     providerID,
+			AgentNodeID:    node.ID,
+			State:          state,
+			TargetRevision: 1,
+		}
+		return db.DB.WithContext(ctx).Create(&resource).Error
+	}
+	if err != nil {
+		return err
+	}
+	updates := map[string]any{
+		"tenant_id":       tenant.ID,
+		"display_name":    displayName,
+		"provider_id":     providerID,
+		"agent_node_id":   node.ID,
+		"state":           state,
+		"target_revision": gorm.Expr("CASE WHEN target_revision < 1 THEN 1 ELSE target_revision END"),
+		"updated_at":      now,
+	}
+	return db.DB.WithContext(ctx).Model(&resource).Updates(updates).Error
 }
 
 func (s *AgentServiceServer) recordNodeTechnicalResourceHeartbeat(ctx context.Context, nodeID uint64) {
