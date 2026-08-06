@@ -118,6 +118,55 @@ func TestDesktopListDomainsIncludesUnifiedHostSSHGrant(t *testing.T) {
 	require.Equal(t, []string{"root"}, resp.Domains[0].SshUsers)
 }
 
+func TestDesktopListDomainsIncludesUnifiedHostSSHGrantCreatedInLocalTimezone(t *testing.T) {
+	oldDB := db.DB
+	t.Cleanup(func() { db.DB = oldDB })
+	testDB, err := gorm.Open(sqlite.Open("file:desktop_host_domains_localtime_test?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	db.DB = testDB
+	require.NoError(t, testDB.AutoMigrate(
+		&model.User{}, &model.Node{}, &model.Tenant{}, &model.TenantMembership{}, &model.Group{}, &model.GroupMember{},
+		&model.Resource{}, &model.AccessGrant{}, &model.DomainRegistry{},
+		&model.AclSSHUserPermission{}, &model.AclSSHGroupPermission{},
+		&model.AclK8SUserPermission{}, &model.AclK8SGroupPermission{},
+		&model.AclK8SServiceUserPermission{}, &model.AclK8SServiceGroupPermission{},
+	))
+
+	now := time.Now().UTC()
+	localTime := now.In(time.FixedZone("CST", 8*60*60))
+	client := model.User{Name: "desktop-host-local-user", Role: model.UserRoleClient, SecretHash: "test", Enabled: true}
+	agentUser := model.User{Name: "host-agent-local", Role: model.UserRoleAgent, SecretHash: "test", Enabled: true}
+	require.NoError(t, testDB.Create(&client).Error)
+	require.NoError(t, testDB.Create(&agentUser).Error)
+	tenant := model.Tenant{ID: uuid.NewString(), Key: "host-local-tenant", Name: "Host Local Tenant", Status: model.TenantStatusActive}
+	require.NoError(t, testDB.Create(&tenant).Error)
+	require.NoError(t, testDB.Create(&model.TenantMembership{TenantID: tenant.ID, UserID: client.ID, Role: "member", Enabled: true}).Error)
+	group := model.Group{TenantID: tenant.ID, Name: "devops"}
+	require.NoError(t, testDB.Create(&group).Error)
+	require.NoError(t, testDB.Create(&model.GroupMember{GroupID: group.ID, UserID: client.ID}).Error)
+	agentNode := model.Node{ID: 6301, UserID: agentUser.ID, Name: "host-local", Type: model.NodeTypeAgent, IP: "100.64.0.123", LastHeartbeat: &now}
+	require.NoError(t, testDB.Create(&agentNode).Error)
+	resource := model.Resource{
+		ID: uuid.NewString(), TenantID: tenant.ID, Type: model.ResourceTypeHostSSH, DisplayName: "host-local",
+		AgentNodeID: agentNode.ID, State: model.ResourceStateAvailable,
+	}
+	require.NoError(t, testDB.Create(&resource).Error)
+	require.NoError(t, testDB.Create(&model.AccessGrant{
+		ID: uuid.NewString(), TenantID: tenant.ID, ResourceID: resource.ID, SubjectType: "group", SubjectGroupID: &group.ID,
+		Actions: `["shell"]`, ValidFrom: localTime.Add(-time.Minute), ExpiresAt: localTime.Add(time.Hour), Status: "enabled",
+	}).Error)
+	require.NoError(t, testDB.Create(&model.DomainRegistry{
+		Domain: "host-local.ali.szzy.beagle", Type: model.DomainTypeSSH, UserID: agentUser.ID,
+		ResourceKind: model.DomainResourceNode, ResourceID: fmt.Sprint(agentNode.ID), NodeID: agentNode.ID,
+		TargetIP: "100.64.0.123", TargetPort: 22, SshUsers: `["root"]`, Status: model.DomainStatusOnline,
+	}).Error)
+
+	resp, err := (&DesktopServiceServer{}).ListDomains(context.WithValue(context.Background(), "client_id", client.ID), &pb.ListDomainsRequest{})
+	require.NoError(t, err)
+	require.Len(t, resp.Domains, 1)
+	require.Equal(t, "host-local.ali.szzy.beagle", resp.Domains[0].Domain)
+}
+
 func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t *testing.T) {
 	originalDB := db.DB
 	t.Cleanup(func() { db.DB = originalDB })

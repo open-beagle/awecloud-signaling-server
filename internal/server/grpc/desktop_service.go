@@ -2766,10 +2766,10 @@ func (s *DesktopServiceServer) queryUnifiedHostSSHDomains(ctx context.Context, u
 	if len(activeTenantIDs) == 0 {
 		return nil
 	}
-	grantQuery := db.DB.WithContext(ctx).Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND expires_at > ?", activeTenantIDs, "enabled", now, now).
+	grantQuery := db.DB.WithContext(ctx).Where("tenant_id IN ? AND status = ? AND datetime(valid_from) <= datetime(?) AND datetime(expires_at) > datetime(?)", activeTenantIDs, "enabled", now, now).
 		Where("subject_type = ? AND subject_user_id = ?", "user", userID)
 	if len(groupIDs) > 0 {
-		grantQuery = db.DB.WithContext(ctx).Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND expires_at > ?", activeTenantIDs, "enabled", now, now).
+		grantQuery = db.DB.WithContext(ctx).Where("tenant_id IN ? AND status = ? AND datetime(valid_from) <= datetime(?) AND datetime(expires_at) > datetime(?)", activeTenantIDs, "enabled", now, now).
 			Where("(subject_type = ? AND subject_user_id = ?) OR (subject_type = ? AND subject_group_id IN ?)", "user", userID, "group", groupIDs)
 	}
 	var grants []model.AccessGrant
