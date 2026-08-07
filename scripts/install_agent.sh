@@ -17,7 +17,8 @@ AGENT_TOKEN=""
 SERVER_ADDRESS=""
 DEVICE_NAME=""  # 设备名，默认使用 hostname
 ENABLE_SSH="true"  # 默认启用 SSH
-SSH_PORT="22"      # Agent 节点实际 SSH 端口
+SSH_PORT=""        # Agent 节点实际 SSH 端口，留空则自动检测，检测失败回退 22
+SSH_PORT_EXPLICIT="false"
 UPGRADE_MODE="false"
 UNINSTALL_MODE="false"
 DEPLOY_MODE="false"  # 部署模式：使用 Token 自动注册
@@ -107,6 +108,7 @@ parse_args() {
                 ;;
             --ssh-port)
                 SSH_PORT="$2"
+                SSH_PORT_EXPLICIT="true"
                 shift 2
                 ;;
             --deploy)
@@ -158,6 +160,64 @@ detect_arch() {
             error "不支持的架构: $arch"
             ;;
     esac
+}
+
+is_tcp_listening() {
+    local port="$1"
+    if command -v ss &> /dev/null; then
+        ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:|\\])${port}$"
+        return $?
+    fi
+    if command -v netstat &> /dev/null; then
+        netstat -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:|\\])${port}$"
+        return $?
+    fi
+    return 1
+}
+
+detect_ssh_port() {
+    if [[ "$ENABLE_SSH" != "true" ]]; then
+        [[ -z "$SSH_PORT" ]] && SSH_PORT="22"
+        return
+    fi
+
+    if [[ "$SSH_PORT_EXPLICIT" == "true" ]]; then
+        info "使用指定 SSH 端口: ${SSH_PORT}"
+        return
+    fi
+
+    local detected=""
+    local current_ssh_port=""
+    if [[ -n "${SSH_CONNECTION:-}" ]]; then
+        current_ssh_port=$(echo "$SSH_CONNECTION" | awk '{print $4}')
+        if [[ "$current_ssh_port" =~ ^[0-9]+$ ]] && is_tcp_listening "$current_ssh_port"; then
+            detected="$current_ssh_port"
+        fi
+    fi
+
+    if [[ -z "$detected" ]]; then
+        local listen22="false"
+        local listen2222="false"
+        is_tcp_listening "22" && listen22="true"
+        is_tcp_listening "2222" && listen2222="true"
+
+        if [[ "$listen22" == "true" && "$listen2222" != "true" ]]; then
+            detected="22"
+        elif [[ "$listen2222" == "true" && "$listen22" != "true" ]]; then
+            detected="2222"
+        elif [[ "$listen22" == "true" && "$listen2222" == "true" ]]; then
+            detected="22"
+            warn "检测到 22 和 2222 同时监听，默认使用 22，可通过 --ssh-port 覆盖"
+        fi
+    fi
+
+    if [[ -z "$detected" ]]; then
+        detected="22"
+        warn "未能自动检测 SSH 端口，默认使用 22，可通过 --ssh-port 覆盖"
+    fi
+
+    SSH_PORT="$detected"
+    info "Agent SSH 端口: ${SSH_PORT}"
 }
 
 # 下载 Agent 二进制
@@ -530,6 +590,8 @@ main() {
     if [[ "$DEPLOY_MODE" == "true" ]]; then
         deploy_with_token
     fi
+
+    detect_ssh_port
     
     # 全新安装
     download_agent

@@ -283,7 +283,7 @@ func (a *ProviderSupplyAPI) CreateDeploymentCredential(c *gin.Context) {
 			if err != nil {
 				return nil, "", "", 0, err
 			}
-			data := gin.H{"credential": credential, "install_command": fmt.Sprintf("curl -fsSL %s/api/v1/download/install_agent.sh | sudo bash -s -- --deploy -t %s -s %s --ssh-port 2222", serverAddr, credential.Token, serverAddr)}
+			data := gin.H{"credential": credential, "install_command": fmt.Sprintf("curl -fsSL %s/api/v1/download/install_agent.sh | sudo bash -s -- --deploy -t %s -s %s", serverAddr, credential.Token, serverAddr)}
 			return data, "technical_resource", c.Param("id"), detail.Resource.RowVersion, nil
 		})
 }
