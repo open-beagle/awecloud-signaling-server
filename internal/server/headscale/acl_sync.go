@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -39,6 +40,13 @@ type SSHRule struct {
 	Src    []string `json:"src"`
 	Dst    []string `json:"dst"`
 	Users  []string `json:"users,omitempty"`
+}
+
+type unifiedHostSSHAccess struct {
+	SrcTag     string
+	DstTag     string
+	TargetPort int
+	SSHUsers   []string
 }
 
 // ACLSyncService ACL 同步服务
@@ -756,6 +764,24 @@ func (s *ACLSyncService) generateSSHRules(ctx context.Context, usedTags map[stri
 		rules = append(rules, rule)
 	}
 
+	unifiedAccesses, err := generateUnifiedHostSSHAccesses(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, access := range unifiedAccesses {
+		if len(access.SSHUsers) == 0 {
+			continue
+		}
+		usedTags[access.SrcTag] = true
+		usedTags[access.DstTag] = true
+		rules = append(rules, SSHRule{
+			Action: "accept",
+			Src:    []string{access.SrcTag},
+			Dst:    []string{access.DstTag},
+			Users:  access.SSHUsers,
+		})
+	}
+
 	// 3. 同用户 Client SSH 互访规则
 	// Client 用户（如 CloudIDE）的多个节点之间可以 SSH 互访，无需 ssh_enabled 开关
 	var clientUsers []model.User
@@ -782,6 +808,7 @@ func (s *ACLSyncService) generateSSHRules(ctx context.Context, usedTags map[stri
 		}
 	}
 
+	rules = appendUniqueJSON(nil, rules)
 	logger.Infof("生成 %d 条 SSH 规则", len(rules))
 	return rules, nil
 }
@@ -821,7 +848,206 @@ func (s *ACLSyncService) generateSSHTCPACLRules(ctx context.Context, usedTags ma
 		rules = append(rules, sshTCPACLRulesForTarget(ctx, srcTag, dstTag, perm.TargetUserID)...)
 	}
 
+	unifiedAccesses, err := generateUnifiedHostSSHAccesses(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, access := range unifiedAccesses {
+		if access.TargetPort <= 0 {
+			continue
+		}
+		usedTags[access.SrcTag] = true
+		usedTags[access.DstTag] = true
+		rules = append(rules, ACLRule{
+			Action: "accept",
+			Src:    []string{access.SrcTag},
+			Dst:    []string{fmt.Sprintf("%s:%d", access.DstTag, access.TargetPort)},
+		})
+	}
+
 	return appendUniqueJSON(nil, rules), nil
+}
+
+func generateUnifiedHostSSHAccesses(ctx context.Context) ([]unifiedHostSSHAccess, error) {
+	now := time.Now().UTC()
+	var grants []model.AccessGrant
+	if err := db.DB.WithContext(ctx).
+		Where("status = ? AND datetime(valid_from) <= datetime(?) AND datetime(expires_at) > datetime(?)", "enabled", now, now).
+		Find(&grants).Error; err != nil {
+		return nil, fmt.Errorf("查询统一 SSH 资源授权失败: %w", err)
+	}
+
+	resourceIDs := make([]string, 0, len(grants))
+	seenResourceIDs := make(map[string]struct{}, len(grants))
+	for _, grant := range grants {
+		if !accessGrantAllowsShell(grant) {
+			continue
+		}
+		if _, exists := seenResourceIDs[grant.ResourceID]; exists {
+			continue
+		}
+		seenResourceIDs[grant.ResourceID] = struct{}{}
+		resourceIDs = append(resourceIDs, grant.ResourceID)
+	}
+	if len(resourceIDs) == 0 {
+		return nil, nil
+	}
+
+	var resources []model.Resource
+	if err := db.DB.WithContext(ctx).
+		Where("id IN ? AND type = ? AND state IN ?", resourceIDs, model.ResourceTypeHostSSH,
+			[]model.ResourceState{model.ResourceStateAvailable, model.ResourceStateDegraded}).
+		Find(&resources).Error; err != nil {
+		return nil, fmt.Errorf("查询统一 HostSSH 资源失败: %w", err)
+	}
+	resourcesByID := make(map[string]model.Resource, len(resources))
+	nodeIDs := make([]uint64, 0, len(resources))
+	nodeIDStrings := make([]string, 0, len(resources))
+	for _, resource := range resources {
+		if resource.AgentNodeID == 0 {
+			continue
+		}
+		resourcesByID[resource.ID] = resource
+		nodeIDs = append(nodeIDs, resource.AgentNodeID)
+		nodeIDStrings = append(nodeIDStrings, strconv.FormatUint(resource.AgentNodeID, 10))
+	}
+	if len(nodeIDs) == 0 {
+		return nil, nil
+	}
+
+	var domains []model.DomainRegistry
+	if err := db.DB.WithContext(ctx).
+		Where("type = ? AND status = ?", model.DomainTypeSSH, model.DomainStatusOnline).
+		Where("(resource_kind = ? AND resource_id IN ?) OR node_id IN ?", model.DomainResourceNode, nodeIDStrings, nodeIDs).
+		Order("domain ASC").
+		Find(&domains).Error; err != nil {
+		return nil, fmt.Errorf("查询统一 HostSSH 域名失败: %w", err)
+	}
+	domainsByNodeID := make(map[uint64][]model.DomainRegistry, len(domains))
+	domainsByResourceID := make(map[string][]model.DomainRegistry, len(domains))
+	for _, domain := range domains {
+		if domain.NodeID != 0 {
+			domainsByNodeID[domain.NodeID] = append(domainsByNodeID[domain.NodeID], domain)
+		}
+		if domain.ResourceID != "" {
+			domainsByResourceID[domain.ResourceID] = append(domainsByResourceID[domain.ResourceID], domain)
+		}
+	}
+
+	accesses := make([]unifiedHostSSHAccess, 0, len(grants))
+	for _, grant := range grants {
+		if !accessGrantAllowsShell(grant) {
+			continue
+		}
+		resource, ok := resourcesByID[grant.ResourceID]
+		if !ok {
+			continue
+		}
+		srcTag, ok := accessGrantSourceTag(ctx, grant, now)
+		if !ok {
+			continue
+		}
+		resourceDomains := appendDomainsForNode(nil, domainsByNodeID[resource.AgentNodeID], domainsByResourceID[strconv.FormatUint(resource.AgentNodeID, 10)])
+		for _, domain := range resourceDomains {
+			targetUser, ok := loadACLUser(ctx, domain.UserID)
+			if !ok {
+				continue
+			}
+			sshUsers := parseSSHUsers(domain.SshUsers)
+			if len(sshUsers) == 0 {
+				continue
+			}
+			targetPort := domain.TargetPort
+			if targetPort <= 0 {
+				targetPort = 22
+			}
+			accesses = append(accesses, unifiedHostSSHAccess{
+				SrcTag:     srcTag,
+				DstTag:     aclUserTag(targetUser),
+				TargetPort: targetPort,
+				SSHUsers:   sshUsers,
+			})
+		}
+	}
+
+	return appendUniqueJSON(nil, accesses), nil
+}
+
+func accessGrantAllowsShell(grant model.AccessGrant) bool {
+	var actions []string
+	if err := json.Unmarshal([]byte(grant.Actions), &actions); err != nil {
+		logger.Warnf("解析 AccessGrant actions 失败: grant_id=%s err=%v", grant.ID, err)
+		return false
+	}
+	for _, action := range actions {
+		if action == "shell" {
+			return true
+		}
+	}
+	return false
+}
+
+func accessGrantSourceTag(ctx context.Context, grant model.AccessGrant, now time.Time) (string, bool) {
+	switch grant.SubjectType {
+	case "user":
+		if grant.SubjectUserID == 0 {
+			return "", false
+		}
+		var user model.User
+		err := db.DB.WithContext(ctx).
+			Joins("JOIN tenant_membership ON tenant_membership.user_id = user.id AND tenant_membership.tenant_id = ?", grant.TenantID).
+			Where("tenant_membership.enabled = ? AND tenant_membership.deleted_at IS NULL AND (tenant_membership.expires_at IS NULL OR tenant_membership.expires_at > ?)", true, now).
+			Where("user.id = ? AND user.enabled = ?", grant.SubjectUserID, true).
+			First(&user).Error
+		if err != nil {
+			return "", false
+		}
+		return aclUserTag(user), true
+	case "group":
+		if grant.SubjectGroupID == nil {
+			return "", false
+		}
+		var group model.Group
+		if err := db.DB.WithContext(ctx).Where("id = ? AND tenant_id = ?", *grant.SubjectGroupID, grant.TenantID).First(&group).Error; err != nil {
+			return "", false
+		}
+		return aclGroupTag(group), true
+	default:
+		return "", false
+	}
+}
+
+func appendDomainsForNode(dst []model.DomainRegistry, groups ...[]model.DomainRegistry) []model.DomainRegistry {
+	seen := make(map[int64]struct{}, len(dst))
+	for _, domain := range dst {
+		seen[domain.ID] = struct{}{}
+	}
+	for _, group := range groups {
+		for _, domain := range group {
+			if _, exists := seen[domain.ID]; exists {
+				continue
+			}
+			seen[domain.ID] = struct{}{}
+			dst = append(dst, domain)
+		}
+	}
+	return dst
+}
+
+func loadACLUser(ctx context.Context, userID uint64) (model.User, bool) {
+	var user model.User
+	if err := db.DB.WithContext(ctx).First(&user, "id = ?", userID).Error; err != nil {
+		return model.User{}, false
+	}
+	return user, true
+}
+
+func aclUserTag(user model.User) string {
+	return fmt.Sprintf("tag:%s-%s", user.Role, user.Name)
+}
+
+func aclGroupTag(group model.Group) string {
+	return fmt.Sprintf("tag:group-%s", group.Name)
 }
 
 func sshTCPACLRulesForTarget(ctx context.Context, srcTag, dstTag string, targetUserID uint64) []ACLRule {

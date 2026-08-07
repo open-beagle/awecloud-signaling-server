@@ -107,6 +107,72 @@ func TestGenerateACLPolicyAllowsGrantedSSHUserOnNodeDomainTargetPort(t *testing.
 	})
 }
 
+func TestGenerateACLPolicyAllowsUnifiedHostSSHGroupGrantOnNodeDomainTargetPort(t *testing.T) {
+	database := newHeadscaleACLTestDB(t)
+	tenantID := "tenant-a"
+	agent := model.User{Name: "szzy-szzy-49533781", Role: model.UserRoleAgent, Enabled: true}
+	require.NoError(t, database.Create(&agent).Error)
+	require.NoError(t, database.Create(&model.Node{
+		ID:     140,
+		UserID: agent.ID,
+		Name:   "szzy",
+		Type:   model.NodeTypeAgent,
+		IP:     "100.64.0.126",
+	}).Error)
+	require.NoError(t, database.Create(&model.Group{ID: 2, TenantID: tenantID, Name: "devops"}).Error)
+	require.NoError(t, database.Create(&model.Resource{
+		ID:             "resource-host-ssh",
+		TenantID:       tenantID,
+		Type:           model.ResourceTypeHostSSH,
+		DisplayName:    "szzy.szzy.szzy.beagle",
+		AgentNodeID:    140,
+		TargetRevision: 1,
+		State:          model.ResourceStateAvailable,
+	}).Error)
+	require.NoError(t, database.Create(&model.DomainRegistry{
+		Domain:       "szzy.szzy.szzy.beagle",
+		Type:         model.DomainTypeSSH,
+		UserID:       agent.ID,
+		ResourceKind: model.DomainResourceNode,
+		ResourceID:   "140",
+		NodeID:       140,
+		TargetIP:     "100.64.0.126",
+		TargetPort:   2222,
+		SshUsers:     `["root"]`,
+		Status:       model.DomainStatusOnline,
+	}).Error)
+	require.NoError(t, database.Create(&model.AccessGrant{
+		ID:             "grant-group-devops",
+		TenantID:       tenantID,
+		ResourceID:     "resource-host-ssh",
+		SubjectType:    "group",
+		SubjectGroupID: ptrInt64(2),
+		Actions:        `["shell"]`,
+		ValidFrom:      time.Now().Add(-time.Minute),
+		ExpiresAt:      time.Now().Add(time.Hour),
+		Revision:       1,
+		Status:         "enabled",
+	}).Error)
+
+	policy, err := NewACLSyncService(nil).generateACLPolicy(context.Background())
+	require.NoError(t, err)
+	require.Contains(t, policy.ACLs, ACLRule{
+		Action: "accept",
+		Src:    []string{"tag:group-devops"},
+		Dst:    []string{"tag:agent-szzy-szzy-49533781:2222"},
+	})
+	require.Contains(t, policy.SSH, SSHRule{
+		Action: "accept",
+		Src:    []string{"tag:group-devops"},
+		Dst:    []string{"tag:agent-szzy-szzy-49533781"},
+		Users:  []string{"root"},
+	})
+}
+
+func ptrInt64(value int64) *int64 {
+	return &value
+}
+
 func newHeadscaleACLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -121,6 +187,8 @@ func newHeadscaleACLTestDB(t *testing.T) *gorm.DB {
 		&model.GroupMember{},
 		&model.Node{},
 		&model.DomainRegistry{},
+		&model.Resource{},
+		&model.AccessGrant{},
 		&model.DeployToken{},
 		&model.ProxyService{},
 		&model.AclServiceUserPermission{},
