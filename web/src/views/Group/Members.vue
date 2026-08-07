@@ -122,8 +122,9 @@ const canManage = computed(() => tenantStore.canTenant('tenant.groups.write') &&
 
 // 获取分组信息
 const fetchGroup = async () => {
+  if (!tenantStore.tenantId) return
   try {
-    const res = await getGroup(groupId)
+    const res = await getGroup(groupId, tenantStore.tenantId)
     if (res.success && res.data) {
       group.value = res.data
       await fetchUsers()
@@ -135,9 +136,13 @@ const fetchGroup = async () => {
 
 // 获取成员列表
 const fetchMembers = async () => {
+  if (!tenantStore.tenantId) {
+    members.value = []
+    return
+  }
   loading.value = true
   try {
-    const res = await getGroupMembers(groupId)
+    const res = await getGroupMembers(groupId, tenantStore.tenantId)
     if (res.success && res.data) {
       members.value = res.data
     }
@@ -173,7 +178,7 @@ const handleAddMember = async () => {
     
     submitting.value = true
     try {
-      const res = await addGroupMember(groupId, form.userId)
+      const res = await addGroupMember(groupId, form.userId, tenantStore.tenantId)
       if (res.success) {
         ElMessage.success(t('group.addSuccess'))
         handleCloseDialog()
@@ -199,7 +204,7 @@ const handleRemove = async (row: GroupMember) => {
       t('common.warning'),
       { type: 'warning' }
     )
-    const res = await removeGroupMember(groupId, row.user_id)
+    const res = await removeGroupMember(groupId, row.user_id, tenantStore.tenantId)
     if (res.success) {
       ElMessage.success(t('group.removeSuccess'))
       fetchMembers()
