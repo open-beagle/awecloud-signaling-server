@@ -44,7 +44,11 @@ service.interceptors.request.use(
 		const platformResourcePaths = ['/api/v1/admin/nodes', '/api/v1/admin/endpoints', '/api/v1/admin/legacy-resource-claims']
 		const isPlatformResource = platformResourcePaths.some(path => config.url === path || config.url?.startsWith(`${path}/`))
 		const isContextFree = isPlatformResource || (config.method?.toLowerCase() === 'get' && contextFreePaths.some(path => config.url === path || config.url?.startsWith(`${path}/`)))
-		if (tenantId && activeWorkspace === 'tenant' && !isContextFree && !isManagementRequest) {
+		const requestTenantId = typeof config.params?.tenant_id === 'string' ? config.params.tenant_id : ''
+		const routeMeta = router.currentRoute.value.meta
+		const routeIsTenant = routeMeta.scope === 'tenant' || routeMeta.workspace === 'tenant'
+		const shouldAttachTenant = activeWorkspace === 'tenant' || routeIsTenant || (requestTenantId !== '' && requestTenantId === tenantId)
+		if (tenantId && shouldAttachTenant && !isContextFree && !isManagementRequest) {
       config.headers['X-Tenant-ID'] = tenantId
     }
     return config
