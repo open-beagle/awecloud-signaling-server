@@ -27,42 +27,46 @@ export interface GroupMember {
   }
 }
 
+const tenantHeaders = (tenantId?: string) => tenantId
+  ? { headers: { 'X-Tenant-ID': tenantId } }
+  : {}
+
 // 获取分组列表
 export const getGroups = (params?: { tenant_id?: string; search?: string; page?: number; size?: number }) => {
-  return request.get<any, PagedResponse<Group[]>>('/api/v1/admin/groups', { params })
+  return request.get<any, PagedResponse<Group[]>>('/api/v1/admin/groups', { params, ...tenantHeaders(params?.tenant_id) })
 }
 
 // 获取分组详情
-export const getGroup = (id: number) => {
-  return request.get<any, ApiResponse<Group>>(`/api/v1/admin/groups/${id}`)
+export const getGroup = (id: number, tenantId?: string) => {
+  return request.get<any, ApiResponse<Group>>(`/api/v1/admin/groups/${id}`, tenantHeaders(tenantId))
 }
 
 // 创建分组
 export const createGroup = (data: { tenant_id?: string; name: string; alias?: string; description?: string }) => {
-  return request.post<any, ApiResponse<Group>>('/api/v1/admin/groups', data)
+  return request.post<any, ApiResponse<Group>>('/api/v1/admin/groups', data, tenantHeaders(data.tenant_id))
 }
 
 // 更新分组
-export const updateGroup = (id: number, data: { name?: string; alias?: string; description?: string }) => {
-  return request.put<any, ApiResponse<Group>>(`/api/v1/admin/groups/${id}`, data)
+export const updateGroup = (id: number, data: { name?: string; alias?: string; description?: string }, tenantId?: string) => {
+  return request.put<any, ApiResponse<Group>>(`/api/v1/admin/groups/${id}`, data, tenantHeaders(tenantId))
 }
 
 // 删除分组
-export const deleteGroup = (id: number) => {
-  return request.delete<any, ApiResponse>(`/api/v1/admin/groups/${id}`)
+export const deleteGroup = (id: number, tenantId?: string) => {
+  return request.delete<any, ApiResponse>(`/api/v1/admin/groups/${id}`, tenantHeaders(tenantId))
 }
 
 // 获取分组成员
-export const getGroupMembers = (groupId: number) => {
-  return request.get<any, ApiResponse<GroupMember[]>>(`/api/v1/admin/groups/${groupId}/members`)
+export const getGroupMembers = (groupId: number, tenantId?: string) => {
+  return request.get<any, ApiResponse<GroupMember[]>>(`/api/v1/admin/groups/${groupId}/members`, tenantHeaders(tenantId))
 }
 
 // 添加分组成员
-export const addGroupMember = (groupId: number, userId: number) => {
-  return request.post<any, ApiResponse>(`/api/v1/admin/groups/${groupId}/members`, { user_ids: [userId] })
+export const addGroupMember = (groupId: number, userId: number, tenantId?: string) => {
+  return request.post<any, ApiResponse>(`/api/v1/admin/groups/${groupId}/members`, { user_ids: [userId] }, tenantHeaders(tenantId))
 }
 
 // 移除分组成员
-export const removeGroupMember = (groupId: number, userId: number) => {
-  return request.delete<any, ApiResponse>(`/api/v1/admin/groups/${groupId}/members/${userId}`)
+export const removeGroupMember = (groupId: number, userId: number, tenantId?: string) => {
+  return request.delete<any, ApiResponse>(`/api/v1/admin/groups/${groupId}/members/${userId}`, tenantHeaders(tenantId))
 }

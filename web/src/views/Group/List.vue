@@ -126,6 +126,11 @@ const rules: FormRules = {
 
 // 获取分组列表
 const fetchGroups = async () => {
+  if (!tenantStore.tenantId) {
+    groups.value = []
+    pagination.total = 0
+    return
+  }
   loading.value = true
   try {
     const res = await getGroups({
@@ -181,7 +186,7 @@ const handleDelete = async (row: Group) => {
       t('common.warning'),
       { type: 'warning' }
     )
-    const res = await deleteGroup(row.id)
+    const res = await deleteGroup(row.id, tenantStore.tenantId)
     if (res.success) {
       ElMessage.success(t('common.deleteSuccess'))
       fetchGroups()
@@ -207,7 +212,7 @@ const handleSubmit = async () => {
     try {
       let res
       if (editingGroup.value) {
-        res = await updateGroup(editingGroup.value.id, form)
+        res = await updateGroup(editingGroup.value.id, form, tenantStore.tenantId)
       } else {
         res = await createGroup({ ...form, tenant_id: tenantStore.tenantId || undefined })
       }
