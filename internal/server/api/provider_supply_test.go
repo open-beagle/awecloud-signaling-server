@@ -262,6 +262,7 @@ func TestProviderSupplyAPIDeploymentCredentialUsesPublicURL(t *testing.T) {
 	require.Equal(t, http.StatusCreated, credential.Code, credential.Body.String())
 	require.Contains(t, credential.Body.String(), "curl -fsSL https://signal.wodcloud.com/api/v1/download/install_agent.sh")
 	require.Contains(t, credential.Body.String(), "-s https://signal.wodcloud.com")
+	require.Contains(t, credential.Body.String(), "--ssh-port 2222")
 	require.NotContains(t, credential.Body.String(), "http://signal.wodcloud.com")
 }
 
