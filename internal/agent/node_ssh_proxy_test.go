@@ -53,7 +53,11 @@ func TestNodeSSHProxyForwardsConfiguredPortToLocalSSH(t *testing.T) {
 
 	client, server := net.Pipe()
 	defer client.Close()
-	registered(server)
+	done := make(chan struct{})
+	go func() {
+		registered(server)
+		close(done)
+	}()
 
 	if _, err := client.Write([]byte("ping")); err != nil {
 		t.Fatalf("client write: %v", err)
@@ -66,6 +70,7 @@ func TestNodeSSHProxyForwardsConfiguredPortToLocalSSH(t *testing.T) {
 	if string(buf) != "pong" {
 		t.Fatalf("client got %q, want pong", string(buf))
 	}
+	<-done
 }
 
 func TestNodeSSHProxySkipsDefaultTailscaleSSHPort(t *testing.T) {

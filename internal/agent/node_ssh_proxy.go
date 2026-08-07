@@ -60,9 +60,7 @@ func (p *NodeSSHProxy) Start() error {
 		if dst.Port() != p.listenPort {
 			return nil, false
 		}
-		return func(conn net.Conn) {
-			go p.handleConn(conn)
-		}, true
+		return p.handleConn, true
 	})
 	logger.Infof("[NodeSSH] 代理已启动: tsnet:%d -> %s", p.listenPort, p.targetAddr)
 	return nil
