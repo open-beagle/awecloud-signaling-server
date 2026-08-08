@@ -113,16 +113,17 @@ func TestKubernetesInventoryCollectsOnlyConfiguredSelectedWorkloads(t *testing.T
 	reporter.users = staticContainerUserDiscoverer{user: "code"}
 
 	snapshot, err := reporter.collect(kubernetesInventoryOptions{
-		Namespaces: []string{"tenant-a"}, ServiceNamespaces: []string{"tenant-a"}, ContainerNamespaces: []string{"tenant-a"},
+		Namespaces: []string{"tenant-a", "tenant-b"}, ServiceNamespaces: []string{"tenant-a", "tenant-b"}, ContainerNamespaces: []string{"tenant-a"},
 		ServiceEnabled: true, ServiceLabelSelector: "signal.beagle.io/expose=true",
 		ContainerEnabled: true, ContainerLabelSelector: "signal.beagle.io/container-ssh=true",
 	})
 	require.NoError(t, err)
 	require.Equal(t, stableInventoryDigest("kubernetes-cluster-v1:cluster_uid", "system-uid"), snapshot.clusterKey)
 	require.Equal(t, "v1.30.14", snapshot.cluster.KubernetesVersion)
-	require.Len(t, snapshot.cluster.Namespaces, 1)
+	require.Len(t, snapshot.cluster.Namespaces, 2)
 	require.Equal(t, map[string]string{"team": "a"}, snapshot.cluster.Namespaces[0].Labels)
 	require.Len(t, snapshot.servicePorts["tenant-a"], 1)
+	require.NotContains(t, snapshot.servicePorts, "tenant-b")
 	require.Equal(t, uint32(443), snapshot.servicePorts["tenant-a"][0].PortNumber)
 	require.Equal(t, map[string]string{"signal.beagle.io/expose": "true"}, snapshot.servicePorts["tenant-a"][0].LabelsAllowlist)
 	require.Len(t, snapshot.containers["tenant-a"], 1)

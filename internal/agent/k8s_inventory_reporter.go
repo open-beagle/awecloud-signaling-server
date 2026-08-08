@@ -326,7 +326,10 @@ func (r *KubernetesInventoryReporter) collect(options kubernetesInventoryOptions
 			}
 		}
 		for _, namespaceName := range options.ServiceNamespaces {
-			snapshot.servicePorts[namespaceName] = workloadServicePorts(servicesByNamespace[namespaceName])
+			ports := workloadServicePorts(servicesByNamespace[namespaceName])
+			if len(ports) > 0 {
+				snapshot.servicePorts[namespaceName] = ports
+			}
 		}
 	}
 	for _, namespaceName := range options.Namespaces {
