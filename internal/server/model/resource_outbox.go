@@ -22,7 +22,7 @@ func (s OutboxEventStatus) Valid() bool {
 
 type OutboxEvent struct {
 	ID                string            `gorm:"primaryKey;size:36" json:"id"`
-	Consumer          string            `gorm:"size:100;not null;uniqueIndex:uk_outbox_consumer_key,priority:1;index:idx_outbox_claim,priority:1" json:"consumer"`
+	Consumer          string            `gorm:"size:100;not null;uniqueIndex:uk_outbox_consumer_key,priority:1;index:idx_outbox_claim,priority:1;index:idx_outbox_processing_lease,priority:1" json:"consumer"`
 	EventType         string            `gorm:"size:100;not null;index" json:"event_type"`
 	AggregateType     string            `gorm:"size:64;not null;index:idx_outbox_aggregate,priority:1" json:"aggregate_type"`
 	AggregateID       string            `gorm:"size:100;not null;index:idx_outbox_aggregate,priority:2" json:"aggregate_id"`
@@ -31,11 +31,11 @@ type OutboxEvent struct {
 	Payload           string            `gorm:"type:text;not null;check:chk_outbox_payload_size,length(CAST(payload AS BLOB)) <= 65536" json:"-"`
 	PayloadHash       string            `gorm:"size:64;not null" json:"payload_hash"`
 	RequestID         string            `gorm:"size:64;not null;index" json:"request_id"`
-	Status            OutboxEventStatus `gorm:"size:20;not null;default:'pending';index:idx_outbox_claim,priority:2;check:chk_outbox_status,status IN ('pending','processing','processed','dead_letter')" json:"status"`
+	Status            OutboxEventStatus `gorm:"size:20;not null;default:'pending';index:idx_outbox_claim,priority:2;index:idx_outbox_processing_lease,priority:2;check:chk_outbox_status,status IN ('pending','processing','processed','dead_letter')" json:"status"`
 	AvailableAt       time.Time         `gorm:"not null;index:idx_outbox_claim,priority:3" json:"available_at"`
 	LeaseOwner        string            `gorm:"size:100" json:"lease_owner,omitempty"`
 	LeaseToken        string            `gorm:"size:36" json:"-"`
-	LeaseExpiresAt    *time.Time        `gorm:"index" json:"lease_expires_at,omitempty"`
+	LeaseExpiresAt    *time.Time        `gorm:"index;index:idx_outbox_processing_lease,priority:3" json:"lease_expires_at,omitempty"`
 	AttemptCount      int               `gorm:"not null;default:0;check:chk_outbox_attempt_count,attempt_count >= 0" json:"attempt_count"`
 	MaxAttempts       int               `gorm:"not null;default:5;check:chk_outbox_max_attempts,max_attempts > 0" json:"max_attempts"`
 	LastErrorCode     string            `gorm:"size:100" json:"last_error_code,omitempty"`

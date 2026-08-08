@@ -231,6 +231,25 @@ func TestOutboxRetryAndDeadLetter(t *testing.T) {
 	require.NotContains(t, dead.LastErrorSummary, dead.Payload)
 }
 
+func TestOutboxClaimSweepsExhaustedEventsWhenQueueIsIdle(t *testing.T) {
+	database := newResourceDeliveryServiceDB(t)
+	outbox := newOutboxForTest(database)
+	clock := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+	outbox.now = func() time.Time { return clock }
+	event := appendOutboxForTest(t, database, outbox, 1, "exhausted", clock, 1)
+
+	require.NoError(t, database.Model(&model.OutboxEvent{}).Where("id = ?", event.ID).
+		Updates(map[string]any{"attempt_count": 1, "status": model.OutboxEventPending}).Error)
+	_, err := outbox.Claim(context.Background(), event.Consumer, "worker", time.Minute)
+	require.ErrorIs(t, err, ErrOutboxNoEvent)
+
+	var persisted model.OutboxEvent
+	require.NoError(t, database.First(&persisted, "id = ?", event.ID).Error)
+	require.Equal(t, model.OutboxEventDeadLetter, persisted.Status)
+	require.Equal(t, "LEASE_EXPIRED_MAX_ATTEMPTS", persisted.LastErrorCode)
+	require.NotNil(t, persisted.DeadLetterAt)
+}
+
 func TestOutboxConcurrentClaimHasSingleWinner(t *testing.T) {
 	database := newResourceDeliveryServiceDB(t)
 	outbox := newOutboxForTest(database)

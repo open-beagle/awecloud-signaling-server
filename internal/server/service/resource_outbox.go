@@ -136,27 +136,37 @@ func (s *ResourceOutboxService) Claim(ctx context.Context, consumer, owner strin
 	}
 
 	now := s.now().UTC()
-	if err := s.deadLetterExpiredAttempts(ctx, consumer, now); err != nil {
-		return nil, err
-	}
 	for attempt := 0; attempt < 16; attempt++ {
 		var candidate model.OutboxEvent
-		err := s.db.WithContext(ctx).
-			Select("id").
-			Where("consumer = ? AND attempt_count < max_attempts AND ((status = ? AND available_at <= ?) OR (status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?))",
-				consumer, model.OutboxEventPending, now, model.OutboxEventProcessing, now).
-			Order("available_at ASC, created_at ASC, id ASC").
-			First(&candidate).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrOutboxNoEvent
+		result := s.db.WithContext(ctx).Raw(`
+			SELECT id FROM (
+				SELECT id, available_at, created_at
+				FROM outbox_event
+				WHERE consumer = ? AND status = ? AND attempt_count < max_attempts AND available_at <= ?
+				UNION ALL
+				SELECT id, available_at, created_at
+				FROM outbox_event
+				WHERE consumer = ? AND status = ? AND attempt_count < max_attempts
+					AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
+			)
+			ORDER BY available_at ASC, created_at ASC, id ASC
+			LIMIT 1`,
+			consumer, model.OutboxEventPending, now,
+			consumer, model.OutboxEventProcessing, now,
+		).Scan(&candidate)
+		if result.Error != nil {
+			return nil, result.Error
 		}
-		if err != nil {
-			return nil, err
+		if result.RowsAffected == 0 {
+			if err := s.deadLetterExpiredAttempts(ctx, consumer, now); err != nil {
+				return nil, err
+			}
+			return nil, ErrOutboxNoEvent
 		}
 
 		leaseToken := uuid.NewString()
 		leaseExpiresAt := now.Add(leaseDuration)
-		result := s.db.WithContext(ctx).Model(&model.OutboxEvent{}).
+		result = s.db.WithContext(ctx).Model(&model.OutboxEvent{}).
 			Where("id = ? AND consumer = ? AND attempt_count < max_attempts AND ((status = ? AND available_at <= ?) OR (status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?))",
 				candidate.ID, consumer, model.OutboxEventPending, now, model.OutboxEventProcessing, now).
 			Updates(map[string]any{
