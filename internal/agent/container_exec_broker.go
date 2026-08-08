@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -55,14 +54,11 @@ type ContainerExecBroker struct {
 	pods        kubernetes.Interface
 	permissions *PermissionCache
 	executor    ContainerExecutor
-	dialContext func(context.Context, string, string) (net.Conn, error)
+	dialPort    func(context.Context, *ContainerSSHUserPermission, uint32) (net.Conn, error)
 }
 
 func NewContainerExecBroker(pods kubernetes.Interface, permissions *PermissionCache, executor ContainerExecutor) *ContainerExecBroker {
-	return &ContainerExecBroker{
-		pods: pods, permissions: permissions, executor: executor,
-		dialContext: (&net.Dialer{}).DialContext,
-	}
+	return &ContainerExecBroker{pods: pods, permissions: permissions, executor: executor}
 }
 
 // NewContainerExecBrokerFromKubeconfig binds the real Kubernetes client and
@@ -80,7 +76,13 @@ func NewContainerExecBrokerFromKubeconfig(kubeconfig string, permissions *Permis
 	if err != nil {
 		return nil, err
 	}
-	return NewContainerExecBroker(pods, permissions, executor), nil
+	dialPort, err := newKubernetesPodPortDialer(restConfig, pods.CoreV1().RESTClient())
+	if err != nil {
+		return nil, err
+	}
+	broker := NewContainerExecBroker(pods, permissions, executor)
+	broker.dialPort = dialPort
+	return broker, nil
 }
 
 // OpenShell starts the fixed interactive-shell operation for one authorized
@@ -109,7 +111,7 @@ func (b *ContainerExecBroker) OpenAuthorizedShell(ctx context.Context, authoriza
 }
 
 func (b *ContainerExecBroker) DialAuthorizedPort(ctx context.Context, authorizations *SessionAuthorizationCache, permission *pb.ResourceSessionPermissionV2, host string, port uint32) (net.Conn, error) {
-	if b == nil || b.pods == nil || b.dialContext == nil || authorizations == nil || permission == nil || permission.Target == nil {
+	if b == nil || b.pods == nil || b.dialPort == nil || authorizations == nil || permission == nil || permission.Target == nil {
 		return nil, fmt.Errorf("ContainerSSH broker is not configured")
 	}
 	if !isContainerLoopback(host) || port == 0 || port > 65535 {
@@ -119,14 +121,10 @@ func (b *ContainerExecBroker) DialAuthorizedPort(ctx context.Context, authorizat
 	if err != nil {
 		return nil, err
 	}
-	pod, err := b.authorizedPod(ctx, target)
-	if err != nil {
+	if _, err := b.authorizedPod(ctx, target); err != nil {
 		return nil, err
 	}
-	if pod.Status.PodIP == "" {
-		return nil, fmt.Errorf("ContainerSSH target Pod has no IP")
-	}
-	return b.dialContext(ctx, "tcp", net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(int(port))))
+	return b.dialPort(ctx, target, port)
 }
 
 func (b *ContainerExecBroker) authorizedV2Target(authorizations *SessionAuthorizationCache, permission *pb.ResourceSessionPermissionV2) (*ContainerSSHUserPermission, error) {

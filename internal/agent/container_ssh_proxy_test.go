@@ -285,9 +285,12 @@ func TestContainerSSHProxyV2ForwardsDirectTCPIPToAuthorizedPod(t *testing.T) {
 	broker := NewContainerExecBroker(fake.NewSimpleClientset(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "ide-0", Namespace: "dev", UID: types.UID("pod-a")},
 		Status: corev1.PodStatus{
-			PodIP: "127.0.0.1", ContainerStatuses: []corev1.ContainerStatus{{Name: "workspace", Ready: true}},
+			ContainerStatuses: []corev1.ContainerStatus{{Name: "workspace", Ready: true}},
 		},
 	}), NewPermissionCache(), &recordingContainerExecutor{})
+	broker.dialPort = func(ctx context.Context, _ *ContainerSSHUserPermission, _ uint32) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", backend.Addr().String())
+	}
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 	hostKey, err := ssh.NewSignerFromKey(privateKey)
