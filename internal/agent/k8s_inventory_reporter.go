@@ -565,7 +565,7 @@ func (r *KubernetesInventoryReporter) reportWorkloads(cfg *pb.WorkloadInventoryC
 		if options.ServiceEnabled && inventoryNamespaceIncluded(options.ServiceNamespaces, namespaceName) {
 			ports, collected := snapshot.servicePorts[namespaceName]
 			if collected {
-				if err := r.reportWorkload(cfg, snapshot, namespace, "service_port", ports, nil); err != nil {
+				if err := r.reportWorkloadWithRetry(cfg, snapshot, namespace, "service_port", ports, nil); err != nil {
 					return err
 				}
 			}
@@ -573,13 +573,51 @@ func (r *KubernetesInventoryReporter) reportWorkloads(cfg *pb.WorkloadInventoryC
 		if options.ContainerEnabled && inventoryNamespaceIncluded(options.ContainerNamespaces, namespaceName) {
 			containers, collected := snapshot.containers[namespaceName]
 			if collected {
-				if err := r.reportWorkload(cfg, snapshot, namespace, "container", nil, containers); err != nil {
+				if err := r.reportWorkloadWithRetry(cfg, snapshot, namespace, "container", nil, containers); err != nil {
 					return err
 				}
 			}
 		}
 	}
 	return nil
+}
+
+type workloadReportRejectedError struct {
+	kind         string
+	namespace    string
+	code         string
+	retryable    bool
+	retryAfterMS uint32
+}
+
+func (e *workloadReportRejectedError) Error() string {
+	return fmt.Sprintf("workload rejected: kind=%s namespace=%s code=%s retryable=%v", e.kind, e.namespace, e.code, e.retryable)
+}
+
+func (r *KubernetesInventoryReporter) reportWorkloadWithRetry(cfg *pb.WorkloadInventoryConfig, snapshot *kubernetesInventorySnapshot, namespace *corev1.Namespace, kind string, ports []*pb.WorkloadServicePort, containers []*pb.WorkloadContainer) error {
+	for attempt := 0; ; attempt++ {
+		err := r.reportWorkload(cfg, snapshot, namespace, kind, ports, containers)
+		var rejected *workloadReportRejectedError
+		if err == nil || !errors.As(err, &rejected) || !rejected.retryable || attempt >= 2 {
+			return err
+		}
+		delay := time.Duration(rejected.retryAfterMS) * time.Millisecond
+		if delay <= 0 {
+			delay = 250 * time.Millisecond
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-timer.C:
+		case <-r.ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return r.ctx.Err()
+		}
+	}
 }
 
 func (r *KubernetesInventoryReporter) reportWorkload(cfg *pb.WorkloadInventoryConfig, snapshot *kubernetesInventorySnapshot, namespace *corev1.Namespace, kind string, ports []*pb.WorkloadServicePort, containers []*pb.WorkloadContainer) error {
@@ -612,7 +650,10 @@ func (r *KubernetesInventoryReporter) reportWorkload(cfg *pb.WorkloadInventoryCo
 		return err
 	}
 	if ack.AcceptedSequence != sequence || ack.SnapshotId != envelope.SnapshotId || ack.BatchIndex != 0 || (!ack.Committed && !ack.Replayed) {
-		return fmt.Errorf("workload rejected: kind=%s namespace=%s code=%s retryable=%v", kind, namespace.Name, ack.ResultCode, ack.Retryable)
+		return &workloadReportRejectedError{
+			kind: kind, namespace: namespace.Name, code: ack.ResultCode,
+			retryable: ack.Retryable, retryAfterMS: ack.RetryAfterMs,
+		}
 	}
 	r.mu.Lock()
 	if r.workSequence < sequence {
