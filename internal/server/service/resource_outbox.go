@@ -140,14 +140,22 @@ func (s *ResourceOutboxService) Claim(ctx context.Context, consumer, owner strin
 		var candidate model.OutboxEvent
 		result := s.db.WithContext(ctx).Raw(`
 			SELECT id FROM (
-				SELECT id, available_at, created_at
-				FROM outbox_event
-				WHERE consumer = ? AND status = ? AND attempt_count < max_attempts AND available_at <= ?
+				SELECT id, available_at, created_at FROM (
+					SELECT id, available_at, created_at
+					FROM outbox_event
+					WHERE consumer = ? AND status = ? AND attempt_count < max_attempts AND available_at <= ?
+					ORDER BY available_at ASC, created_at ASC, id ASC
+					LIMIT 1
+				)
 				UNION ALL
-				SELECT id, available_at, created_at
-				FROM outbox_event
-				WHERE consumer = ? AND status = ? AND attempt_count < max_attempts
-					AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
+				SELECT id, available_at, created_at FROM (
+					SELECT id, available_at, created_at
+					FROM outbox_event
+					WHERE consumer = ? AND status = ? AND attempt_count < max_attempts
+						AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
+					ORDER BY available_at ASC, created_at ASC, id ASC
+					LIMIT 1
+				)
 			)
 			ORDER BY available_at ASC, created_at ASC, id ASC
 			LIMIT 1`,
