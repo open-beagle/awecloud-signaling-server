@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -223,6 +224,7 @@ func TestContainerSSHProxyV2UsesServerSessionAndHeadscaleNodeIdentity(t *testing
 	sshConfig := &ssh.ServerConfig{NoClientAuth: true}
 	sshConfig.AddHostKey(hostKey)
 	sessions := NewContainerSessionManager()
+	sessions.idleGrace = 0
 	proxy := &ContainerSSHProxy{
 		permissions: NewPermissionCache(), authorizations: authorizations, broker: broker, sessions: sessions,
 		identity: staticPeerIdentity{identity: &PeerIdentity{UserName: "alice", NodeID: 7001, Role: "client"}}, sshConfig: sshConfig,
@@ -258,6 +260,79 @@ func TestContainerSSHProxyV2UsesServerSessionAndHeadscaleNodeIdentity(t *testing
 	require.Equal(t, "session-server", events[0].SessionId)
 	require.Equal(t, int64(1), events[0].SourceSequence)
 	require.Equal(t, int64(2), events[1].SourceSequence)
+}
+
+func TestContainerSSHProxyV2ForwardsDirectTCPIPToAuthorizedPod(t *testing.T) {
+	now := time.Now().UTC()
+	authorizations := NewSessionAuthorizationCache()
+	permission := sessionPermission(now, "session-server", "resource-v2", "alice", 7001, uint32(ContainerSSHPortBase))
+	require.NoError(t, authorizations.Apply(signedSessionSnapshot(t, 1, now, permission), now))
+
+	backend, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer backend.Close()
+	backendDone := make(chan struct{})
+	go func() {
+		defer close(backendDone)
+		conn, acceptErr := backend.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = io.Copy(conn, conn)
+	}()
+
+	broker := NewContainerExecBroker(fake.NewSimpleClientset(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "ide-0", Namespace: "dev", UID: types.UID("pod-a")},
+		Status: corev1.PodStatus{
+			PodIP: "127.0.0.1", ContainerStatuses: []corev1.ContainerStatus{{Name: "workspace", Ready: true}},
+		},
+	}), NewPermissionCache(), &recordingContainerExecutor{})
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	hostKey, err := ssh.NewSignerFromKey(privateKey)
+	require.NoError(t, err)
+	sshConfig := &ssh.ServerConfig{NoClientAuth: true}
+	sshConfig.AddHostKey(hostKey)
+	sessions := NewContainerSessionManager()
+	sessions.idleGrace = 0
+	proxy := &ContainerSSHProxy{
+		permissions: NewPermissionCache(), authorizations: authorizations, broker: broker, sessions: sessions,
+		identity: staticPeerIdentity{identity: &PeerIdentity{UserName: "alice", NodeID: 7001, Role: "client"}}, sshConfig: sshConfig,
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		serverConn, acceptErr := listener.Accept()
+		if acceptErr == nil {
+			proxy.handleConn(context.Background(), serverConn, ContainerSSHPortBase, "")
+		}
+	}()
+	client, err := ssh.Dial("tcp", listener.Addr().String(), &ssh.ClientConfig{
+		User: "code", HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	})
+	require.NoError(t, err)
+	forwarded, err := client.Dial("tcp", backend.Addr().String())
+	require.NoError(t, err)
+	_, err = forwarded.Write([]byte("vscode-forward"))
+	require.NoError(t, err)
+	reply := make([]byte, len("vscode-forward"))
+	_, err = io.ReadFull(forwarded, reply)
+	require.NoError(t, err)
+	require.Equal(t, "vscode-forward", string(reply))
+	require.NoError(t, forwarded.Close())
+	require.NoError(t, client.Close())
+	<-done
+	<-backendDone
+
+	events := sessions.ResourceEventsForHeartbeat()
+	require.Len(t, events, 2)
+	require.Equal(t, "connected", events[0].EventType)
+	require.Equal(t, "ended", events[1].EventType)
 }
 
 func TestContainerSSHProxyV2EnforcementBlocksLegacyFallback(t *testing.T) {

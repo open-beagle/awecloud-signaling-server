@@ -110,6 +110,7 @@ func TestContainerSessionManagerV2UsesServerSessionIDAndReplaysDurableEvents(t *
 	stateDir := t.TempDir()
 	manager, err := NewPersistentContainerSessionManager(stateDir)
 	require.NoError(t, err)
+	manager.idleGrace = 0
 	permission := sessionPermission(now, "session-server", "resource-a", "alice", 7001, 50200)
 
 	sessionCtx, err := manager.BeginV2(context.Background(), permission)
@@ -145,6 +146,7 @@ func TestContainerSessionManagerV2UsesServerSessionIDAndReplaysDurableEvents(t *
 func TestContainerSessionManagerV2SharesOneAuthorizationAcrossConcurrentConnections(t *testing.T) {
 	now := time.Now().UTC()
 	manager := NewContainerSessionManager()
+	manager.idleGrace = 0
 	permission := sessionPermission(now, "session-server", "resource-a", "alice", 7001, 50200)
 
 	firstCtx, err := manager.BeginV2(context.Background(), permission)
@@ -172,6 +174,63 @@ func TestContainerSessionManagerV2SharesOneAuthorizationAcrossConcurrentConnecti
 	case <-time.After(time.Second):
 		t.Fatal("shared authorization context was not canceled")
 	}
+}
+
+func TestContainerSessionManagerV2ReusesAuthorizationDuringIdleGrace(t *testing.T) {
+	now := time.Now().UTC()
+	manager := NewContainerSessionManager()
+	manager.idleGrace = 30 * time.Millisecond
+	permission := sessionPermission(now, "session-server", "resource-a", "alice", 7001, 50200)
+
+	firstCtx, err := manager.BeginV2(context.Background(), permission)
+	require.NoError(t, err)
+	require.NoError(t, manager.EndV2WithIdleGrace(permission.SessionId, "success", "shell_exited"))
+	require.Len(t, manager.ResourceEventsForHeartbeat(), 1)
+
+	secondCtx, err := manager.BeginV2(context.Background(), permission)
+	require.NoError(t, err)
+	require.Equal(t, firstCtx, secondCtx)
+	select {
+	case <-secondCtx.Done():
+		t.Fatal("shared authorization was canceled during idle grace")
+	default:
+	}
+	require.Len(t, manager.ResourceEventsForHeartbeat(), 1)
+
+	require.NoError(t, manager.EndV2WithIdleGrace(permission.SessionId, "success", "shell_exited"))
+	require.Eventually(t, func() bool {
+		events := manager.ResourceEventsForHeartbeat()
+		return len(events) == 2 && events[1].EventType == "ended"
+	}, time.Second, 5*time.Millisecond)
+	select {
+	case <-secondCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("shared authorization context was not canceled after idle grace")
+	}
+}
+
+func TestContainerSessionManagerV2TerminationEndsIdleGraceImmediately(t *testing.T) {
+	now := time.Now().UTC()
+	manager := NewContainerSessionManager()
+	manager.idleGrace = time.Minute
+	permission := sessionPermission(now, "session-server", "resource-a", "alice", 7001, 50200)
+
+	sessionCtx, err := manager.BeginV2(context.Background(), permission)
+	require.NoError(t, err)
+	require.NoError(t, manager.EndV2WithIdleGrace(permission.SessionId, "success", "shell_exited"))
+	require.NoError(t, manager.ApplyTerminationCommands([]*pb.ResourceSessionTerminationCommandV2{{
+		SessionId: permission.SessionId, CommandRevision: 1, ReasonCode: "GRANT_REVOKED",
+	}}))
+
+	select {
+	case <-sessionCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("termination did not cancel the idle shared authorization")
+	}
+	events := manager.ResourceEventsForHeartbeat()
+	require.Len(t, events, 2)
+	require.Equal(t, "terminated", events[1].EventType)
+	require.Equal(t, "GRANT_REVOKED", events[1].ResultCode)
 }
 
 func TestContainerSessionManagerV2RejectsConcurrentIdentityChange(t *testing.T) {

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -150,38 +152,151 @@ func (p *ContainerSSHProxy) handleConn(ctx context.Context, conn net.Conn, liste
 	}
 	logger.Infof("[ContainerSSH] SSH 握手完成: desktop_user=%s ssh_user=%s resource=%s", identity.UserName, sshUser, resourceID)
 
+	var channelHandlers sync.WaitGroup
 	for newChannel := range channels {
-		if newChannel.ChannelType() != "session" {
-			_ = newChannel.Reject(ssh.UnknownChannelType, "unsupported channel type")
-			continue
-		}
-		channel, channelRequests, err := newChannel.Accept()
-		if err != nil {
+		channelHandlers.Add(1)
+		go func() {
+			defer channelHandlers.Done()
+			p.handleSSHChannel(ctx, newChannel, identity, resourceID, legacyPermission, v2Permission)
+		}()
+	}
+	channelHandlers.Wait()
+}
+
+func (p *ContainerSSHProxy) handleSSHChannel(ctx context.Context, newChannel ssh.NewChannel, identity *PeerIdentity, resourceID string, legacyPermission *ContainerSSHUserPermission, v2Permission *pb.ResourceSessionPermissionV2) {
+	switch newChannel.ChannelType() {
+	case "session":
+		p.handleSSHSessionChannel(ctx, newChannel, identity, resourceID, legacyPermission, v2Permission)
+	case "direct-tcpip":
+		p.handleSSHDirectTCPIPChannel(ctx, newChannel, identity, resourceID, v2Permission)
+	default:
+		_ = newChannel.Reject(ssh.UnknownChannelType, "unsupported channel type")
+	}
+}
+
+func (p *ContainerSSHProxy) handleSSHSessionChannel(ctx context.Context, newChannel ssh.NewChannel, identity *PeerIdentity, resourceID string, legacyPermission *ContainerSSHUserPermission, v2Permission *pb.ResourceSessionPermissionV2) {
+	channel, channelRequests, err := newChannel.Accept()
+	if err != nil {
+		return
+	}
+	defer channel.Close()
+	if v2Permission != nil {
+		sessionCtx, beginErr := p.sessions.BeginV2(ctx, v2Permission)
+		if beginErr != nil {
+			logger.Warnf("[ContainerSSH] v2 会话注册失败: session_id=%s err=%v", v2Permission.SessionId, beginErr)
 			return
 		}
-		if v2Permission != nil {
-			sessionCtx, beginErr := p.sessions.BeginV2(ctx, v2Permission)
-			if beginErr != nil {
-				_ = channel.Close()
-				logger.Warnf("[ContainerSSH] v2 会话注册失败: session_id=%s err=%v", v2Permission.SessionId, beginErr)
-				return
-			}
-			opener := &authorizedContainerShellOpener{broker: p.broker, authorizations: p.authorizations, permission: v2Permission}
-			err = ServeContainerSSHSession(sessionCtx, channel, channelRequests, opener, identity.UserName, resourceID)
-			result, reason := containerSessionOutcome(err)
-			if endErr := p.sessions.EndV2(v2Permission.SessionId, result, reason); endErr != nil {
-				logger.Errorf("[ContainerSSH] v2 会话事件持久化失败: session_id=%s err=%v", v2Permission.SessionId, endErr)
-			}
-		} else {
-			sessionID, sessionCtx := p.sessions.Begin(ctx, identity, legacyPermission)
-			err = ServeContainerSSHSession(sessionCtx, channel, channelRequests, p.broker, identity.UserName, resourceID)
-			result, reason := containerSessionOutcome(err)
-			p.sessions.End(sessionID, result, reason)
+		opener := &authorizedContainerShellOpener{broker: p.broker, authorizations: p.authorizations, permission: v2Permission}
+		err = ServeContainerSSHSession(sessionCtx, channel, channelRequests, opener, identity.UserName, resourceID)
+		result, reason := containerSessionOutcome(err)
+		if endErr := p.sessions.EndV2WithIdleGrace(v2Permission.SessionId, result, reason); endErr != nil {
+			logger.Errorf("[ContainerSSH] v2 会话事件持久化失败: session_id=%s err=%v", v2Permission.SessionId, endErr)
 		}
-		if err != nil {
-			logger.Warnf("[ContainerSSH] 会话结束: user=%s resource=%s err=%v", identity.UserName, resourceID, err)
-		}
+	} else {
+		sessionID, sessionCtx := p.sessions.Begin(ctx, identity, legacyPermission)
+		err = ServeContainerSSHSession(sessionCtx, channel, channelRequests, p.broker, identity.UserName, resourceID)
+		result, reason := containerSessionOutcome(err)
+		p.sessions.End(sessionID, result, reason)
+	}
+	if err != nil {
+		logger.Warnf("[ContainerSSH] 会话结束: user=%s resource=%s err=%v", identity.UserName, resourceID, err)
+	}
+}
+
+type directTCPIPChannelData struct {
+	DestinationHost string
+	DestinationPort uint32
+	OriginHost      string
+	OriginPort      uint32
+}
+
+func (p *ContainerSSHProxy) handleSSHDirectTCPIPChannel(ctx context.Context, newChannel ssh.NewChannel, identity *PeerIdentity, resourceID string, permission *pb.ResourceSessionPermissionV2) {
+	if permission == nil {
+		_ = newChannel.Reject(ssh.Prohibited, "port forwarding requires current authorization")
 		return
+	}
+	var request directTCPIPChannelData
+	if err := ssh.Unmarshal(newChannel.ExtraData(), &request); err != nil || !isContainerLoopback(request.DestinationHost) || request.DestinationPort == 0 || request.DestinationPort > 65535 {
+		_ = newChannel.Reject(ssh.Prohibited, "port forwarding target is not allowed")
+		return
+	}
+	sessionCtx, err := p.sessions.BeginV2(ctx, permission)
+	if err != nil {
+		_ = newChannel.Reject(ssh.Prohibited, "resource session is unavailable")
+		logger.Warnf("[ContainerSSH] v2 端口转发会话注册失败: session_id=%s err=%v", permission.SessionId, err)
+		return
+	}
+	result, reason := "success", "port_forward_closed"
+	defer func() {
+		if endErr := p.sessions.EndV2WithIdleGrace(permission.SessionId, result, reason); endErr != nil {
+			logger.Errorf("[ContainerSSH] v2 端口转发事件持久化失败: session_id=%s err=%v", permission.SessionId, endErr)
+		}
+	}()
+	target, err := p.broker.DialAuthorizedPort(sessionCtx, p.authorizations, permission, request.DestinationHost, request.DestinationPort)
+	if err != nil {
+		result, reason = containerPortForwardOutcome(err)
+		_ = newChannel.Reject(ssh.ConnectionFailed, "container port is unavailable")
+		logger.Warnf("[ContainerSSH] 端口转发连接失败: user=%s resource=%s port=%d err=%v", identity.UserName, resourceID, request.DestinationPort, err)
+		return
+	}
+	defer target.Close()
+	channel, requests, err := newChannel.Accept()
+	if err != nil {
+		result, reason = "failed", "PORT_FORWARD_CHANNEL_FAILED"
+		return
+	}
+	defer channel.Close()
+	go ssh.DiscardRequests(requests)
+	if err := bridgeContainerSSHPort(sessionCtx, channel, target); err != nil {
+		result, reason = containerPortForwardOutcome(err)
+		logger.Warnf("[ContainerSSH] 端口转发结束: user=%s resource=%s port=%d err=%v", identity.UserName, resourceID, request.DestinationPort, err)
+	}
+}
+
+func bridgeContainerSSHPort(ctx context.Context, channel ssh.Channel, target net.Conn) error {
+	done := make(chan error, 2)
+	go func() {
+		_, err := io.Copy(target, channel)
+		if closeWriter, ok := target.(interface{ CloseWrite() error }); ok {
+			_ = closeWriter.CloseWrite()
+		}
+		done <- err
+	}()
+	go func() {
+		_, err := io.Copy(channel, target)
+		_ = channel.CloseWrite()
+		done <- err
+	}()
+	select {
+	case firstErr := <-done:
+		select {
+		case secondErr := <-done:
+			if firstErr != nil {
+				return firstErr
+			}
+			return secondErr
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func containerPortForwardOutcome(err error) (string, string) {
+	if err == nil {
+		return "success", "port_forward_closed"
+	}
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "target no longer exists"), strings.Contains(message, "Pod UID changed"), strings.Contains(message, "container is not ready"):
+		return "failed", "target_gone"
+	case strings.Contains(message, "access denied"), strings.Contains(message, "not allowed"):
+		return "rejected", "grant_revoked"
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return "ended", "context_canceled"
+	default:
+		return "failed", "PORT_FORWARD_FAILED"
 	}
 }
 

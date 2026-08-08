@@ -21,13 +21,17 @@ import (
 const (
 	resourceSessionEventStateVersion  = 1
 	resourceSessionHeartbeatBatchSize = 100
+	resourceSessionIdleGrace          = 30 * time.Second
 )
 
 type containerActiveSession struct {
 	ctx                   context.Context
 	cancel                context.CancelFunc
 	expiryTimer           *time.Timer
+	idleTimer             *time.Timer
 	connections           int
+	idleResult            string
+	idleReason            string
 	reason                string
 	userName              string
 	resourceID            string
@@ -71,6 +75,7 @@ type ContainerSessionManager struct {
 	nextSequence    map[string]int64
 	terminationAcks map[string]*pb.ResourceSessionTerminationAckV2
 	statePath       string
+	idleGrace       time.Duration
 }
 
 func NewContainerSessionManager() *ContainerSessionManager {
@@ -100,6 +105,7 @@ func newContainerSessionManager(statePath string) *ContainerSessionManager {
 		nextSequence:    make(map[string]int64),
 		terminationAcks: make(map[string]*pb.ResourceSessionTerminationAckV2),
 		statePath:       statePath,
+		idleGrace:       resourceSessionIdleGrace,
 	}
 }
 
@@ -141,6 +147,15 @@ func (m *ContainerSessionManager) BeginV2(parent context.Context, permission *pb
 		if !active.v2 || active.userName != permission.UserName || active.resourceID != permission.ResourceId ||
 			active.grantRevision != permission.GrantRevision || active.authorizationRevision != permission.AuthorizationRevision {
 			return nil, fmt.Errorf("resource session identity changed")
+		}
+		if active.reason != "" || active.ctx.Err() != nil {
+			return nil, fmt.Errorf("resource session is ending")
+		}
+		if active.idleTimer != nil {
+			active.idleTimer.Stop()
+			active.idleTimer = nil
+			active.idleResult = ""
+			active.idleReason = ""
 		}
 		active.connections++
 		return active.ctx, nil
@@ -187,6 +202,9 @@ func (m *ContainerSessionManager) resetV2ExpiryTimerLocked(sessionID string, act
 			current.reason = "SESSION_AUTHORIZATION_EXPIRED"
 		}
 		current.cancel()
+		if current.connections == 0 {
+			_ = m.finalizeV2Locked(sessionID, current, "ended", "context_canceled")
+		}
 	})
 }
 
@@ -243,6 +261,9 @@ func (m *ContainerSessionManager) ReconcileV2(authorizations *SessionAuthorizati
 				active.reason = "SESSION_AUTHORIZATION_REVOKED"
 			}
 			active.cancel()
+			if active.connections == 0 {
+				_ = m.finalizeV2Locked(sessionID, active, "ended", "context_canceled")
+			}
 			continue
 		}
 		validUntil := permission.ValidUntil.AsTime().UTC()
@@ -290,6 +311,9 @@ func (m *ContainerSessionManager) ApplyTerminationCommands(commands []*pb.Resour
 		if active := m.active[command.SessionId]; active != nil && active.v2 {
 			active.reason = command.ReasonCode
 			active.cancel()
+			if active.connections == 0 {
+				_ = m.finalizeV2Locked(command.SessionId, active, "ended", "context_canceled")
+			}
 		}
 	}
 	previous := m.terminationAcks
@@ -302,14 +326,18 @@ func (m *ContainerSessionManager) ApplyTerminationCommands(commands []*pb.Resour
 }
 
 func (m *ContainerSessionManager) End(sessionID, result, reason string) {
-	_ = m.end(sessionID, result, reason)
+	_ = m.end(sessionID, result, reason, false)
 }
 
 func (m *ContainerSessionManager) EndV2(sessionID, result, reason string) error {
-	return m.end(sessionID, result, reason)
+	return m.end(sessionID, result, reason, false)
 }
 
-func (m *ContainerSessionManager) end(sessionID, result, reason string) error {
+func (m *ContainerSessionManager) EndV2WithIdleGrace(sessionID, result, reason string) error {
+	return m.end(sessionID, result, reason, true)
+}
+
+func (m *ContainerSessionManager) end(sessionID, result, reason string, allowIdleGrace bool) error {
 	if m == nil {
 		return nil
 	}
@@ -319,8 +347,35 @@ func (m *ContainerSessionManager) end(sessionID, result, reason string) error {
 		m.mu.Unlock()
 		return nil
 	}
-	if active.v2 && active.connections > 1 {
+	if active.v2 {
+		if active.connections <= 0 {
+			m.mu.Unlock()
+			return nil
+		}
 		active.connections--
+		if active.connections > 0 {
+			m.mu.Unlock()
+			return nil
+		}
+		if !allowIdleGrace || active.reason != "" || result == "failed" || result == "rejected" || m.idleGrace <= 0 {
+			err := m.finalizeV2Locked(sessionID, active, result, reason)
+			m.mu.Unlock()
+			return err
+		}
+		active.idleResult = result
+		active.idleReason = reason
+		var timer *time.Timer
+		timer = time.AfterFunc(m.idleGrace, func() {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			current := m.active[sessionID]
+			if current != active || current.idleTimer != timer || current.connections != 0 {
+				return
+			}
+			current.idleTimer = nil
+			_ = m.finalizeV2Locked(sessionID, current, current.idleResult, current.idleReason)
+		})
+		active.idleTimer = timer
 		m.mu.Unlock()
 		return nil
 	}
@@ -329,18 +384,6 @@ func (m *ContainerSessionManager) end(sessionID, result, reason string) error {
 		active.expiryTimer.Stop()
 	}
 	active.cancel()
-	if active.v2 {
-		eventType := "ended"
-		resultCode := reason
-		if active.reason != "" {
-			eventType, resultCode = "terminated", active.reason
-		} else if result == "failed" || result == "rejected" {
-			eventType = "failed"
-		}
-		err := m.queueResourceEventLocked(sessionID, eventType, resultCode, false)
-		m.mu.Unlock()
-		return err
-	}
 	if active.reason != "" {
 		result, reason = "revoked", active.reason
 	}
@@ -351,6 +394,29 @@ func (m *ContainerSessionManager) end(sessionID, result, reason string) error {
 	m.events[event.EventId] = &containerPendingEvent{event: event}
 	m.mu.Unlock()
 	return nil
+}
+
+func (m *ContainerSessionManager) finalizeV2Locked(sessionID string, active *containerActiveSession, result, reason string) error {
+	if m.active[sessionID] != active {
+		return nil
+	}
+	delete(m.active, sessionID)
+	if active.expiryTimer != nil {
+		active.expiryTimer.Stop()
+	}
+	if active.idleTimer != nil {
+		active.idleTimer.Stop()
+		active.idleTimer = nil
+	}
+	active.cancel()
+	eventType := "ended"
+	resultCode := reason
+	if active.reason != "" {
+		eventType, resultCode = "terminated", active.reason
+	} else if result == "failed" || result == "rejected" {
+		eventType = "failed"
+	}
+	return m.queueResourceEventLocked(sessionID, eventType, resultCode, false)
 }
 
 func (m *ContainerSessionManager) Disconnect(sessionIDs []string, reason string) {

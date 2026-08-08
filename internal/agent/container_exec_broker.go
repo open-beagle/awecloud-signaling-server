@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -52,10 +55,14 @@ type ContainerExecBroker struct {
 	pods        kubernetes.Interface
 	permissions *PermissionCache
 	executor    ContainerExecutor
+	dialContext func(context.Context, string, string) (net.Conn, error)
 }
 
 func NewContainerExecBroker(pods kubernetes.Interface, permissions *PermissionCache, executor ContainerExecutor) *ContainerExecBroker {
-	return &ContainerExecBroker{pods: pods, permissions: permissions, executor: executor}
+	return &ContainerExecBroker{
+		pods: pods, permissions: permissions, executor: executor,
+		dialContext: (&net.Dialer{}).DialContext,
+	}
 }
 
 // NewContainerExecBrokerFromKubeconfig binds the real Kubernetes client and
@@ -94,9 +101,38 @@ func (b *ContainerExecBroker) OpenAuthorizedShell(ctx context.Context, authoriza
 	if b == nil || b.pods == nil || b.executor == nil || authorizations == nil || permission == nil || permission.Target == nil {
 		return fmt.Errorf("ContainerSSH broker is not configured")
 	}
+	target, err := b.authorizedV2Target(authorizations, permission)
+	if err != nil {
+		return err
+	}
+	return b.openAuthorizedTarget(ctx, target, stream)
+}
+
+func (b *ContainerExecBroker) DialAuthorizedPort(ctx context.Context, authorizations *SessionAuthorizationCache, permission *pb.ResourceSessionPermissionV2, host string, port uint32) (net.Conn, error) {
+	if b == nil || b.pods == nil || b.dialContext == nil || authorizations == nil || permission == nil || permission.Target == nil {
+		return nil, fmt.Errorf("ContainerSSH broker is not configured")
+	}
+	if !isContainerLoopback(host) || port == 0 || port > 65535 {
+		return nil, fmt.Errorf("ContainerSSH port forwarding target is not allowed")
+	}
+	target, err := b.authorizedV2Target(authorizations, permission)
+	if err != nil {
+		return nil, err
+	}
+	pod, err := b.authorizedPod(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+	if pod.Status.PodIP == "" {
+		return nil, fmt.Errorf("ContainerSSH target Pod has no IP")
+	}
+	return b.dialContext(ctx, "tcp", net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(int(port))))
+}
+
+func (b *ContainerExecBroker) authorizedV2Target(authorizations *SessionAuthorizationCache, permission *pb.ResourceSessionPermissionV2) (*ContainerSSHUserPermission, error) {
 	current, allowed := authorizations.Permission(permission.SessionId, time.Now().UTC())
 	if !allowed || !sameResourceSessionIdentity(current, permission) {
-		return fmt.Errorf("ContainerSSH access denied")
+		return nil, fmt.Errorf("ContainerSSH access denied")
 	}
 	// The Server can extend valid_until and advance authorization_revision on
 	// its short refresh loop between route selection and exec startup. Use the
@@ -104,16 +140,15 @@ func (b *ContainerExecBroker) OpenAuthorizedShell(ctx context.Context, authoriza
 	// Session identity is unchanged.
 	permission = current
 	if len(permission.SshUsers) != 1 {
-		return fmt.Errorf("ContainerSSH discovered user is invalid")
+		return nil, fmt.Errorf("ContainerSSH discovered user is invalid")
 	}
-	target := &ContainerSSHUserPermission{
+	return &ContainerSSHUserPermission{
 		UserID: permission.UserId, ResourceID: permission.ResourceId,
 		Namespace: permission.Target.NamespaceName, PodName: permission.Target.PodName,
 		PodUID: permission.Target.PodUid, ContainerName: permission.Target.ContainerName,
 		SSHUser:       permission.SshUsers[0],
 		GrantRevision: permission.GrantRevision, ListenPort: uint16(permission.ListenPort),
-	}
-	return b.openAuthorizedTarget(ctx, target, stream)
+	}, nil
 }
 
 func sameResourceSessionIdentity(current, selected *pb.ResourceSessionPermissionV2) bool {
@@ -131,18 +166,8 @@ func sameResourceSessionIdentity(current, selected *pb.ResourceSessionPermission
 }
 
 func (b *ContainerExecBroker) openAuthorizedTarget(ctx context.Context, permission *ContainerSSHUserPermission, stream ContainerExecStream) error {
-	pod, err := b.pods.CoreV1().Pods(permission.Namespace).Get(ctx, permission.PodName, metav1.GetOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("ContainerSSH target no longer exists")
-		}
-		return fmt.Errorf("read ContainerSSH target: %w", err)
-	}
-	if string(pod.UID) != permission.PodUID {
-		return fmt.Errorf("ContainerSSH target Pod UID changed")
-	}
-	if !podContainerReady(pod, permission.ContainerName) {
-		return fmt.Errorf("ContainerSSH target container is not ready")
+	if _, err := b.authorizedPod(ctx, permission); err != nil {
+		return err
 	}
 
 	if permission.MaxSessionSeconds > 0 {
@@ -151,6 +176,31 @@ func (b *ContainerExecBroker) openAuthorizedTarget(ctx context.Context, permissi
 		defer cancel()
 	}
 	return b.executor.Execute(ctx, permission, stream)
+}
+
+func (b *ContainerExecBroker) authorizedPod(ctx context.Context, permission *ContainerSSHUserPermission) (*corev1.Pod, error) {
+	pod, err := b.pods.CoreV1().Pods(permission.Namespace).Get(ctx, permission.PodName, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("ContainerSSH target no longer exists")
+		}
+		return nil, fmt.Errorf("read ContainerSSH target: %w", err)
+	}
+	if string(pod.UID) != permission.PodUID {
+		return nil, fmt.Errorf("ContainerSSH target Pod UID changed")
+	}
+	if !podContainerReady(pod, permission.ContainerName) {
+		return nil, fmt.Errorf("ContainerSSH target container is not ready")
+	}
+	return pod, nil
+}
+
+func isContainerLoopback(host string) bool {
+	if strings.EqualFold(strings.TrimSpace(host), "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	return ip != nil && ip.IsLoopback()
 }
 
 func podContainerReady(pod *corev1.Pod, containerName string) bool {
