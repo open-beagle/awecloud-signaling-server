@@ -150,16 +150,8 @@ func projectTenantResourceForAllocation(tx *gorm.DB, observation *model.Workload
 	if selected == nil {
 		return nil
 	}
-	sshUsers := `[]`
 	if resourceType == model.TenantResourceContainerSSH {
-		var target struct {
-			SSHUsers []string `json:"ssh_users"`
-		}
-		if json.Unmarshal([]byte(selected.TargetSnapshot), &target) != nil {
-			return ErrWorkloadInventoryInvalidInput
-		}
-		sshUsers, err = encodeTenantResourceSSHUsers(resourceType, target.SSHUsers)
-		if err != nil {
+		if _, err := containerSSHUsersFromTargetSnapshot(selected.TargetSnapshot); err != nil {
 			return ErrWorkloadInventoryInvalidInput
 		}
 	}
@@ -171,7 +163,6 @@ func projectTenantResourceForAllocation(tx *gorm.DB, observation *model.Workload
 		resource = model.TenantResource{
 			ID: uuid.NewString(), TenantID: allocation.TenantID, Type: resourceType, StableKey: observation.StableKey,
 			EntitlementLineageID: root.ID, DisplayName: workloadDisplayName(observation.Kind, selected.TargetSnapshot),
-			SSHUsers:        sshUsers,
 			VisibilityState: model.TenantResourcePending, AvailabilityState: model.TenantResourceUnknown,
 			Revision: 1, RowVersion: 1,
 		}
@@ -184,20 +175,6 @@ func projectTenantResourceForAllocation(tx *gorm.DB, observation *model.Workload
 	} else if resource.VisibilityState == model.TenantResourceRetired {
 		return nil
 	}
-	if !created && resource.SSHUsers != sshUsers {
-		updated := tx.Model(&model.TenantResource{}).Where("id = ? AND row_version = ?", resource.ID, resource.RowVersion).
-			Updates(map[string]any{"ssh_users": sshUsers, "revision": gorm.Expr("revision + 1"), "row_version": gorm.Expr("row_version + 1")})
-		if updated.Error != nil {
-			return updated.Error
-		}
-		if updated.RowsAffected != 1 {
-			return ErrWorkloadSequenceConflict
-		}
-		resource.SSHUsers = sshUsers
-		resource.Revision++
-		resource.RowVersion++
-	}
-
 	var resourceSource model.TenantResourceSource
 	err = tx.Where("tenant_resource_id = ? AND allocation_item_id = ? AND workload_observation_id = ?", resource.ID, item.ID, observation.ID).First(&resourceSource).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

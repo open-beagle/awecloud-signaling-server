@@ -1871,7 +1871,7 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 				ResourceId: projection.resource.ID, TenantId: projection.resource.TenantID, TenantName: projection.tenant.Name,
 				DisplayName: projection.resource.DisplayName, State: state, TargetRevision: projection.target.Revision,
 				AgentNodeId: projection.agent.ID, Capability: string(model.TenantResourceContainerSSH), ListenPort: uint32(listenPort),
-				Domain: domain, AgentIp: projection.agent.IP, SshUsers: parseJSONStringArrayGRPC(projection.resource.SSHUsers),
+				Domain: domain, AgentIp: projection.agent.IP, SshUsers: permission.SSHUsers,
 				SessionId: projection.session.ID, SourceId: projection.session.TenantResourceSourceID,
 				TargetRevisionId: projection.session.TargetRevisionID, AuthorizationRevision: permission.AuthorizationRevision,
 			})

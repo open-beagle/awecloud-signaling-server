@@ -172,7 +172,6 @@ type TenantResource struct {
 	EntitlementLineageID string                          `gorm:"size:36;not null;uniqueIndex:uk_tenant_resource_identity,priority:4;index" json:"entitlement_lineage_id"`
 	DisplayName          string                          `gorm:"size:200;not null" json:"display_name"`
 	Description          string                          `gorm:"size:1000" json:"description,omitempty"`
-	SSHUsers             string                          `gorm:"type:text;not null;default:'[]';check:chk_tenant_resource_ssh_users,length(CAST(ssh_users AS BLOB)) <= 256" json:"-"`
 	VisibilityState      TenantResourceVisibilityState   `gorm:"size:20;not null;default:'pending';index:idx_tenant_resource_catalog,priority:3;check:chk_tenant_resource_visibility,visibility_state IN ('pending','visible','hidden','retired')" json:"visibility_state"`
 	AvailabilityState    TenantResourceAvailabilityState `gorm:"size:20;not null;default:'unknown';index:idx_tenant_resource_catalog,priority:4;check:chk_tenant_resource_availability,availability_state IN ('unknown','available','degraded','unavailable')" json:"availability_state"`
 	Revision             int64                           `gorm:"not null;default:1;check:chk_tenant_resource_revision,revision > 0" json:"revision"`

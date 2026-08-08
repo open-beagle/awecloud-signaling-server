@@ -298,7 +298,6 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 	sshResource := model.TenantResource{
 		ID: uuid.NewString(), TenantID: tenant.ID, Type: model.TenantResourceContainerSSH,
 		StableKey: strings.Repeat("b", 64), EntitlementLineageID: allocation.ID, DisplayName: "Projection Shell",
-		SSHUsers:        `["code"]`,
 		VisibilityState: model.TenantResourceVisible, AvailabilityState: model.TenantResourceAvailable,
 		Revision: 1, RowVersion: 1,
 	}

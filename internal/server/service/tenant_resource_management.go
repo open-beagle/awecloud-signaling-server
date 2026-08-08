@@ -391,8 +391,7 @@ func (s *TenantResourceService) Review(ctx context.Context, authorization *Manag
 				return err
 			}
 			if chain.Resource.Type == model.TenantResourceContainerSSH {
-				var users []string
-				if json.Unmarshal([]byte(chain.Resource.SSHUsers), &users) != nil || len(users) == 0 {
+				if _, err := containerSSHUsersFromTargetSnapshot(chain.Target.TargetSnapshot); err != nil {
 					return ErrTenantResourceUpstreamUnavailable
 				}
 			}
@@ -421,7 +420,7 @@ func (s *TenantResourceService) Review(ctx context.Context, authorization *Manag
 		}
 		updated := tx.Model(&model.TenantResource{}).
 			Where("tenant_id = ? AND id = ? AND row_version = ? AND visibility_state = ?", input.TenantID, input.ResourceID, input.ExpectedRowVersion, model.TenantResourcePending).
-			Updates(map[string]any{"visibility_state": visibility, "ssh_users": chain.Resource.SSHUsers, "revision": gorm.Expr("revision + 1"), "row_version": gorm.Expr("row_version + 1")})
+			Updates(map[string]any{"visibility_state": visibility, "revision": gorm.Expr("revision + 1"), "row_version": gorm.Expr("row_version + 1")})
 		if updated.Error != nil {
 			return mapTenantResourceConstraint(updated.Error)
 		}
@@ -743,7 +742,8 @@ func tenantResourceView(tx *gorm.DB, resource *model.TenantResource, now time.Ti
 		return view, nil
 	}
 	if resource.Type == model.TenantResourceContainerSSH {
-		if err := json.Unmarshal([]byte(resource.SSHUsers), &view.SSHUsers); err != nil || len(view.SSHUsers) == 0 {
+		view.SSHUsers, err = containerSSHUsersFromTargetSnapshot(chain.Target.TargetSnapshot)
+		if err != nil {
 			return nil, ErrTenantResourceInvalidInput
 		}
 	}
@@ -791,37 +791,18 @@ func tenantResourceView(tx *gorm.DB, resource *model.TenantResource, now time.Ti
 	return view, nil
 }
 
-func encodeTenantResourceSSHUsers(resourceType model.TenantResourceType, users []string) (string, error) {
-	if resourceType != model.TenantResourceContainerSSH {
-		if len(users) != 0 {
-			return "", ErrTenantResourceInvalidInput
-		}
-		return `[]`, nil
+func containerSSHUsersFromTargetSnapshot(snapshot string) ([]string, error) {
+	var target struct {
+		SSHUsers []string `json:"ssh_users"`
 	}
-	if len(users) == 0 {
-		return "", ErrTenantResourceInvalidInput
+	if json.Unmarshal([]byte(snapshot), &target) != nil || len(target.SSHUsers) != 1 {
+		return nil, ErrTenantResourceInvalidInput
 	}
-	normalized := make([]string, 0, len(users))
-	seen := make(map[string]struct{}, len(users))
-	for _, raw := range users {
-		user := strings.TrimSpace(raw)
-		if !validContainerSSHUser(user) {
-			return "", ErrTenantResourceInvalidInput
-		}
-		if _, exists := seen[user]; exists {
-			continue
-		}
-		seen[user] = struct{}{}
-		normalized = append(normalized, user)
+	user := strings.TrimSpace(target.SSHUsers[0])
+	if !validContainerSSHUser(user) {
+		return nil, ErrTenantResourceInvalidInput
 	}
-	if len(normalized) == 0 || len(normalized) > 8 {
-		return "", ErrTenantResourceInvalidInput
-	}
-	encoded, err := json.Marshal(normalized)
-	if err != nil || len(encoded) > 256 {
-		return "", ErrTenantResourceInvalidInput
-	}
-	return string(encoded), nil
+	return []string{user}, nil
 }
 
 func validContainerSSHUser(user string) bool {

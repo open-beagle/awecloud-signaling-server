@@ -271,7 +271,8 @@ func (s *SessionAuthorizationService) revalidateSession(tx *gorm.DB, session *mo
 	}
 	var sshUsers []string
 	if chain.Resource.Type == model.TenantResourceContainerSSH {
-		if json.Unmarshal([]byte(chain.Resource.SSHUsers), &sshUsers) != nil || len(sshUsers) == 0 {
+		sshUsers, err = containerSSHUsersFromTargetSnapshot(chain.Target.TargetSnapshot)
+		if err != nil {
 			return nil, sessionAuthorizationInvalidCode, nil
 		}
 	}
