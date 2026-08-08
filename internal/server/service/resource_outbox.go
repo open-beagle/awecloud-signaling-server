@@ -242,14 +242,24 @@ func (s *ResourceOutboxService) Complete(ctx context.Context, eventID, leaseToke
 			}
 			return err
 		}
+		effectiveEvent := event
+		var latest model.OutboxEvent
+		err := tx.Where("consumer = ? AND aggregate_type = ? AND aggregate_id = ? AND status = ? AND attempt_count < max_attempts AND available_at <= ? AND aggregate_revision > ?",
+			event.Consumer, event.AggregateType, event.AggregateID, model.OutboxEventPending, now, event.AggregateRevision).
+			Order("aggregate_revision DESC, created_at DESC, id DESC").First(&latest).Error
+		if err == nil {
+			effectiveEvent = latest
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
 
 		checkpoint := model.ConsumerRevision{
 			ID:            uuid.NewString(),
-			Consumer:      event.Consumer,
-			AggregateType: event.AggregateType,
-			AggregateID:   event.AggregateID,
-			LastRevision:  event.AggregateRevision,
-			LastEventID:   event.ID,
+			Consumer:      effectiveEvent.Consumer,
+			AggregateType: effectiveEvent.AggregateType,
+			AggregateID:   effectiveEvent.AggregateID,
+			LastRevision:  effectiveEvent.AggregateRevision,
+			LastEventID:   effectiveEvent.ID,
 			RowVersion:    1,
 			UpdatedAt:     now,
 		}
@@ -270,8 +280,8 @@ func (s *ResourceOutboxService) Complete(ctx context.Context, eventID, leaseToke
 		}
 		if result.RowsAffected == 1 {
 			if err := effect(tx, OutboxAggregateRef{
-				EventID: event.ID, Consumer: event.Consumer, AggregateType: event.AggregateType,
-				AggregateID: event.AggregateID, AggregateRevision: event.AggregateRevision,
+				EventID: effectiveEvent.ID, Consumer: effectiveEvent.Consumer, AggregateType: effectiveEvent.AggregateType,
+				AggregateID: effectiveEvent.AggregateID, AggregateRevision: effectiveEvent.AggregateRevision,
 			}); err != nil {
 				return err
 			}
@@ -292,6 +302,21 @@ func (s *ResourceOutboxService) Complete(ctx context.Context, eventID, leaseToke
 		}
 		if result.RowsAffected != 1 {
 			return ErrOutboxLeaseLost
+		}
+		if effectiveEvent.ID != event.ID {
+			result = tx.Model(&model.OutboxEvent{}).
+				Where("consumer = ? AND aggregate_type = ? AND aggregate_id = ? AND status = ? AND attempt_count < max_attempts AND available_at <= ? AND aggregate_revision <= ?",
+					event.Consumer, event.AggregateType, event.AggregateID, model.OutboxEventPending, now, effectiveEvent.AggregateRevision).
+				Updates(map[string]any{
+					"status":           model.OutboxEventProcessed,
+					"processed_at":     now,
+					"lease_owner":      "",
+					"lease_token":      "",
+					"lease_expires_at": nil,
+				})
+			if result.Error != nil {
+				return result.Error
+			}
 		}
 		return nil
 	})

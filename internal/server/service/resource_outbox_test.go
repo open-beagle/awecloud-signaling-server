@@ -195,6 +195,36 @@ func TestOutboxEffectFailureRollsBackCheckpointAndSideEffect(t *testing.T) {
 	require.Equal(t, model.OutboxEventProcessing, persisted.Status)
 }
 
+func TestOutboxCompletionCoalescesReadyAggregateRevisions(t *testing.T) {
+	database := newResourceDeliveryServiceDB(t)
+	outbox := newOutboxForTest(database)
+	clock := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+	outbox.now = func() time.Time { return clock }
+	appendOutboxForTest(t, database, outbox, 1, "coalesce-1", clock, 3)
+	appendOutboxForTest(t, database, outbox, 2, "coalesce-2", clock, 3)
+	appendOutboxForTest(t, database, outbox, 3, "coalesce-3", clock, 3)
+
+	claimed, err := outbox.Claim(context.Background(), "resource_projection", "worker", time.Minute)
+	require.NoError(t, err)
+	var appliedRevision int64
+	executed, err := outbox.Complete(context.Background(), claimed.ID, claimed.LeaseToken, func(tx *gorm.DB, aggregate OutboxAggregateRef) error {
+		appliedRevision = aggregate.AggregateRevision
+		return nil
+	})
+	require.NoError(t, err)
+	require.True(t, executed)
+	require.EqualValues(t, 3, appliedRevision)
+
+	var processed int64
+	require.NoError(t, database.Model(&model.OutboxEvent{}).Where("status = ?", model.OutboxEventProcessed).Count(&processed).Error)
+	require.EqualValues(t, 3, processed)
+	_, err = outbox.Claim(context.Background(), "resource_projection", "worker", time.Minute)
+	require.ErrorIs(t, err, ErrOutboxNoEvent)
+	var checkpoint model.ConsumerRevision
+	require.NoError(t, database.First(&checkpoint, "consumer = ? AND aggregate_id = ?", "resource_projection", "resource-1").Error)
+	require.EqualValues(t, 3, checkpoint.LastRevision)
+}
+
 func TestOutboxRetryAndDeadLetter(t *testing.T) {
 	database := newResourceDeliveryServiceDB(t)
 	outbox := newOutboxForTest(database)
