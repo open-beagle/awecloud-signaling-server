@@ -9,6 +9,7 @@ import (
 
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -139,6 +140,51 @@ func TestContainerSessionManagerV2UsesServerSessionIDAndReplaysDurableEvents(t *
 	require.Equal(t, int64(1), replayed[0].SourceSequence)
 	require.Equal(t, int64(2), replayed[1].SourceSequence)
 	require.Equal(t, "ended", replayed[1].EventType)
+}
+
+func TestContainerSessionManagerV2SharesOneAuthorizationAcrossConcurrentConnections(t *testing.T) {
+	now := time.Now().UTC()
+	manager := NewContainerSessionManager()
+	permission := sessionPermission(now, "session-server", "resource-a", "alice", 7001, 50200)
+
+	firstCtx, err := manager.BeginV2(context.Background(), permission)
+	require.NoError(t, err)
+	secondCtx, err := manager.BeginV2(context.Background(), permission)
+	require.NoError(t, err)
+	require.Equal(t, firstCtx, secondCtx)
+	require.Len(t, manager.ResourceEventsForHeartbeat(), 1)
+	require.Equal(t, "connected", manager.ResourceEventsForHeartbeat()[0].EventType)
+
+	require.NoError(t, manager.EndV2(permission.SessionId, "success", "shell_exited"))
+	require.Len(t, manager.ResourceEventsForHeartbeat(), 1)
+	select {
+	case <-secondCtx.Done():
+		t.Fatal("shared authorization ended while another connection was active")
+	default:
+	}
+
+	require.NoError(t, manager.EndV2(permission.SessionId, "success", "shell_exited"))
+	events := manager.ResourceEventsForHeartbeat()
+	require.Len(t, events, 2)
+	require.Equal(t, "ended", events[1].EventType)
+	select {
+	case <-secondCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("shared authorization context was not canceled")
+	}
+}
+
+func TestContainerSessionManagerV2RejectsConcurrentIdentityChange(t *testing.T) {
+	now := time.Now().UTC()
+	manager := NewContainerSessionManager()
+	permission := sessionPermission(now, "session-server", "resource-a", "alice", 7001, 50200)
+	_, err := manager.BeginV2(context.Background(), permission)
+	require.NoError(t, err)
+
+	changed := proto.Clone(permission).(*pb.ResourceSessionPermissionV2)
+	changed.UserName = "mallory"
+	_, err = manager.BeginV2(context.Background(), changed)
+	require.ErrorContains(t, err, "identity changed")
 }
 
 func TestContainerSessionManagerV2TerminationCancelsAndPersistsAck(t *testing.T) {

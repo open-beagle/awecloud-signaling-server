@@ -24,8 +24,10 @@ const (
 )
 
 type containerActiveSession struct {
+	ctx                   context.Context
 	cancel                context.CancelFunc
 	expiryTimer           *time.Timer
+	connections           int
 	reason                string
 	userName              string
 	resourceID            string
@@ -133,23 +135,26 @@ func (m *ContainerSessionManager) BeginV2(parent context.Context, permission *pb
 	if !validUntil.After(time.Now().UTC()) {
 		return nil, ErrSessionSnapshotExpired
 	}
-	ctx, cancel := context.WithCancel(parent)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, exists := m.active[permission.SessionId]; exists {
-		cancel()
-		return nil, fmt.Errorf("resource session is already active")
+	if active := m.active[permission.SessionId]; active != nil {
+		if !active.v2 || active.userName != permission.UserName || active.resourceID != permission.ResourceId ||
+			active.grantRevision != permission.GrantRevision || active.authorizationRevision != permission.AuthorizationRevision {
+			return nil, fmt.Errorf("resource session identity changed")
+		}
+		active.connections++
+		return active.ctx, nil
 	}
 	if m.nextSequence[permission.SessionId] > 0 {
-		cancel()
 		return nil, fmt.Errorf("resource session has already started")
 	}
+	ctx, cancel := context.WithCancel(parent)
 	if err := m.queueResourceEventLocked(permission.SessionId, "connected", "", true); err != nil {
 		cancel()
 		return nil, err
 	}
 	active := &containerActiveSession{
-		cancel: cancel, userName: permission.UserName, resourceID: permission.ResourceId,
+		ctx: ctx, cancel: cancel, connections: 1, userName: permission.UserName, resourceID: permission.ResourceId,
 		grantRevision: permission.GrantRevision, authorizationRevision: permission.AuthorizationRevision,
 		validUntil: validUntil, v2: true,
 	}
@@ -311,6 +316,11 @@ func (m *ContainerSessionManager) end(sessionID, result, reason string) error {
 	m.mu.Lock()
 	active, ok := m.active[sessionID]
 	if !ok {
+		m.mu.Unlock()
+		return nil
+	}
+	if active.v2 && active.connections > 1 {
+		active.connections--
 		m.mu.Unlock()
 		return nil
 	}
