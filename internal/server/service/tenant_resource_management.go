@@ -21,7 +21,6 @@ var (
 	ErrTenantResourceUpstreamUnavailable  = errors.New("Tenant resource upstream is unavailable")
 	ErrTenantResourceReviewStale          = errors.New("Tenant resource review is stale")
 	ErrTenantResourceTargetNotTrusted     = errors.New("Tenant resource target is not trusted")
-	ErrTenantResourceServicePortChanged   = errors.New("Tenant resource service port changed")
 	ErrTenantResourceStateTransition      = errors.New("Tenant resource state transition is invalid")
 	ErrTenantResourceCrossTenantReference = errors.New("Tenant resource reference is outside the Tenant")
 )
@@ -93,12 +92,13 @@ type tenantResourceChain struct {
 }
 
 type TenantResourceService struct {
-	db  *gorm.DB
-	now func() time.Time
+	db        *gorm.DB
+	now       func() time.Time
+	snapshots *WorkloadSnapshotStore
 }
 
-func NewTenantResourceService(database *gorm.DB) *TenantResourceService {
-	return &TenantResourceService{db: database, now: time.Now}
+func NewTenantResourceService(database *gorm.DB, snapshots *WorkloadSnapshotStore) *TenantResourceService {
+	return &TenantResourceService{db: database, now: time.Now, snapshots: snapshots}
 }
 
 func (s *TenantResourceService) List(ctx context.Context, authorization *ManagementAuthorizationContext, tenantID string, input TenantResourceListInput) (*TenantResourceListResult, error) {
@@ -136,20 +136,32 @@ func (s *TenantResourceService) List(ctx context.Context, authorization *Managem
 	if input.Type == string(model.ResourceTypeHostSSH) {
 		return s.listHostSSHResources(ctx, tenantID, input)
 	}
-	query := s.db.WithContext(ctx).Model(&model.TenantResource{}).Where("tenant_id = ?", tenantID)
 	if input.Candidates {
-		query = query.Where("visibility_state = ?", model.TenantResourcePending).
-			Where(`NOT EXISTS (
-				SELECT 1 FROM tenant_resource_review_decision decision
-				JOIN tenant_resource_source source ON source.tenant_resource_id = tenant_resource.id
-				JOIN workload_observation observation ON observation.id = source.workload_observation_id
-				WHERE decision.tenant_resource_id = tenant_resource.id
-					AND decision.observation_revision = observation.observed_revision
-					AND decision.decision = ?
-			)`, model.TenantResourceReviewRejected)
-	} else {
-		query = query.Where("visibility_state <> ?", model.TenantResourcePending)
+		candidates, err := s.memoryCandidates(ctx, tenantID, now)
+		if err != nil {
+			return nil, err
+		}
+		candidates = filterMemoryCandidates(candidates, input)
+		start, err := candidateCursorIndex(candidates, input.Cursor)
+		if err != nil {
+			return nil, err
+		}
+		result := &TenantResourceListResult{Items: []TenantResourceView{}}
+		if start >= len(candidates) {
+			return result, nil
+		}
+		end := min(start+input.Limit, len(candidates))
+		result.Items = make([]TenantResourceView, 0, end-start)
+		for i := start; i < end; i++ {
+			result.Items = append(result.Items, candidates[i].view)
+		}
+		if end < len(candidates) {
+			result.NextCursor = candidates[end-1].view.ResourceID
+		}
+		return result, nil
 	}
+	query := s.db.WithContext(ctx).Model(&model.TenantResource{}).Where("tenant_id = ?", tenantID)
+	query = query.Where("visibility_state <> ?", model.TenantResourcePending)
 	if input.Type != "" {
 		query = query.Where("type = ?", input.Type)
 	}
@@ -225,12 +237,16 @@ func (s *TenantResourceService) Get(ctx context.Context, authorization *Manageme
 	if err := reauthorizeTenantPermission(s.db.WithContext(ctx), authorization, tenantID, PermissionTenantResourcesRead, now); err != nil {
 		return nil, err
 	}
-	query := s.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, resourceID)
 	if candidate {
-		query = query.Where("visibility_state = ?", model.TenantResourcePending)
-	} else {
-		query = query.Where("visibility_state <> ?", model.TenantResourcePending)
+		memoryCandidate, err := s.memoryCandidate(ctx, tenantID, resourceID, now)
+		if err != nil {
+			return nil, err
+		}
+		view := memoryCandidate.view
+		return &view, nil
 	}
+	query := s.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, resourceID)
+	query = query.Where("visibility_state <> ?", model.TenantResourcePending)
 	var resource model.TenantResource
 	if err := query.First(&resource).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -360,6 +376,25 @@ func (s *TenantResourceService) Review(ctx context.Context, authorization *Manag
 		if err := reauthorizeTenantPermission(tx, authorization, input.TenantID, PermissionTenantResourcesWrite, now); err != nil {
 			return err
 		}
+		var persisted model.TenantResource
+		if err := tx.Where("tenant_id = ? AND id = ?", input.TenantID, input.ResourceID).First(&persisted).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			candidateService := &TenantResourceService{db: tx, now: s.now, snapshots: s.snapshots}
+			candidate, candidateErr := candidateService.memoryCandidate(ctx, input.TenantID, input.ResourceID, now)
+			if candidateErr != nil {
+				return candidateErr
+			}
+			if !input.Publish && input.ExpectedRowVersion == 0 {
+				input.ExpectedRowVersion = candidate.view.RowVersion
+			}
+			if candidate.view.RowVersion != input.ExpectedRowVersion || candidate.view.ObservationRevision != input.ObservationRevision {
+				return ErrTenantResourceReviewStale
+			}
+			if err := materializeMemoryCandidate(tx, candidate, now); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
 		chain, err := loadTenantResourceChain(tx, input.TenantID, input.ResourceID, now, false)
 		if err != nil {
 			return err
@@ -430,6 +465,60 @@ func (s *TenantResourceService) Review(ctx context.Context, authorization *Manag
 		return tx.Where("tenant_id = ? AND id = ?", input.TenantID, input.ResourceID).First(&resource).Error
 	})
 	return &resource, err
+}
+
+func materializeMemoryCandidate(tx *gorm.DB, candidate *memoryTenantResourceCandidate, now time.Time) error {
+	if tx == nil || candidate == nil || candidate.view.ResourceID == "" {
+		return ErrTenantResourceInvalidInput
+	}
+	observation := model.WorkloadObservation{
+		ID:               uuid.NewSHA1(uuid.NameSpaceOID, []byte(candidate.view.ResourceID+"\x00observation")).String(),
+		NamespaceScopeID: candidate.scope.ID, Kind: candidate.snapshot.Kind, StableKey: candidate.projection.StableKey,
+		IdentityQuality: candidate.projection.IdentityQuality, State: model.WorkloadObservationEligible,
+		Ready: candidate.projection.Ready, ObservedRevision: candidate.snapshot.Sequence,
+		LabelSnapshot: candidate.projection.Labels, FirstObservedAt: candidate.snapshot.ObservedAt,
+		LastObservedAt: candidate.snapshot.ReceivedAt, LeaseExpiresAt: candidate.snapshot.LeaseExpiresAt, RowVersion: 1,
+	}
+	if err := tx.Create(&observation).Error; err != nil {
+		return err
+	}
+	evidence := model.WorkloadObservationSource{
+		ID: uuid.NewString(), WorkloadObservationID: observation.ID,
+		SourceTechnicalResourceID: candidate.snapshot.SourceTechnicalResourceID,
+		SourceEpoch:               candidate.snapshot.SourceEpoch, Sequence: candidate.snapshot.Sequence,
+		PayloadHash: candidate.projection.PayloadHash, State: model.WorkloadObservationSourceObserved,
+		Ready: candidate.projection.Ready, TargetSnapshot: candidate.projection.Target,
+		ObservedAt: candidate.snapshot.ObservedAt, ReceivedAt: candidate.snapshot.ReceivedAt,
+		LeaseExpiresAt: candidate.snapshot.LeaseExpiresAt, SourceRevision: 1, RowVersion: 1,
+	}
+	if err := tx.Create(&evidence).Error; err != nil {
+		return err
+	}
+	resourceType := model.TenantResourceType(candidate.view.Type)
+	resource := model.TenantResource{
+		ID: candidate.view.ResourceID, TenantID: candidate.allocation.TenantID, Type: resourceType,
+		StableKey: candidate.projection.StableKey, EntitlementLineageID: candidate.lineage.ID,
+		DisplayName: candidate.view.DisplayName, VisibilityState: model.TenantResourcePending,
+		AvailabilityState: candidate.view.AvailabilityState, Revision: candidate.view.Revision, RowVersion: candidate.view.RowVersion,
+	}
+	if err := tx.Create(&resource).Error; err != nil {
+		return err
+	}
+	source := model.TenantResourceSource{
+		ID: uuid.NewString(), TenantResourceID: resource.ID, AllocationItemID: candidate.item.ID,
+		WorkloadObservationID: observation.ID, Enabled: true, EnabledAt: now, SourceRevision: 1, RowVersion: 1,
+	}
+	if err := tx.Create(&source).Error; err != nil {
+		return err
+	}
+	target := model.TenantResourceTargetRevision{
+		ID: uuid.NewString(), TenantResourceSourceID: source.ID, Revision: 1, TargetType: candidate.snapshot.Kind,
+		TargetSnapshot: candidate.projection.Target, SourceTechnicalResourceID: candidate.snapshot.SourceTechnicalResourceID,
+		AccessTechnicalResourceID: candidate.snapshot.SourceTechnicalResourceID, Ready: candidate.projection.Ready,
+		ObservedAt: candidate.snapshot.ObservedAt, ObservationRevision: candidate.snapshot.Sequence,
+		SourceRevision: source.SourceRevision, CreatedAt: now,
+	}
+	return tx.Create(&target).Error
 }
 
 type UpdateTenantResourceInput struct {
@@ -595,7 +684,6 @@ func reauthorizeTenantPermission(tx *gorm.DB, authorization *ManagementAuthoriza
 
 func loadTenantResourceChain(tx *gorm.DB, tenantID, resourceID string, now time.Time, requireTrusted bool) (*tenantResourceChain, error) {
 	var chain tenantResourceChain
-	servicePortChanged := false
 	targetUntrusted := false
 	if err := tx.Where("tenant_id = ? AND id = ?", tenantID, resourceID).First(&chain.Resource).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -644,21 +732,14 @@ func loadTenantResourceChain(tx *gorm.DB, tenantID, resourceID string, now time.
 		}
 		if !sources[i].Enabled || candidate.Allocation.State != model.ResourceAllocationActive || candidate.Allocation.ValidFrom.After(now) ||
 			(candidate.Allocation.ExpiresAt != nil && !candidate.Allocation.ExpiresAt.After(now)) ||
-			candidate.Observation.State != model.WorkloadObservationEligible || !candidate.Observation.Ready || !candidate.Observation.LeaseExpiresAt.After(now) ||
 			!candidate.Target.Ready || candidate.Target.ObservationRevision != candidate.Observation.ObservedRevision || candidate.Target.SourceRevision != sources[i].SourceRevision {
 			continue
 		}
 		if _, err := loadAllocatableNamespaceScope(tx, candidate.Scope.ID, now); err != nil {
 			continue
 		}
-		if err := tx.Where("workload_observation_id = ? AND source_technical_resource_id = ? AND state = ? AND ready = ? AND lease_expires_at > ?",
-			candidate.Observation.ID, candidate.Target.SourceTechnicalResourceID, model.WorkloadObservationSourceObserved, true, now).First(&candidate.Evidence).Error; err != nil {
-			continue
-		}
-		if candidate.Target.TargetSnapshot != candidate.Evidence.TargetSnapshot {
-			if candidate.Resource.Type == model.TenantResourceContainerService {
-				servicePortChanged = true
-			}
+		if err := tx.Where("workload_observation_id = ? AND source_technical_resource_id = ?",
+			candidate.Observation.ID, candidate.Target.SourceTechnicalResourceID).First(&candidate.Evidence).Error; err != nil {
 			continue
 		}
 		var technical model.TechnicalResource
@@ -684,9 +765,6 @@ func loadTenantResourceChain(tx *gorm.DB, tenantID, resourceID string, now time.
 	if requireTrusted {
 		if targetUntrusted {
 			return nil, ErrTenantResourceTargetNotTrusted
-		}
-		if servicePortChanged {
-			return nil, ErrTenantResourceServicePortChanged
 		}
 		return nil, ErrTenantResourceUpstreamUnavailable
 	}

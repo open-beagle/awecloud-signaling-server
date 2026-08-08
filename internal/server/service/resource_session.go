@@ -223,8 +223,7 @@ func (s *ResourceSessionService) create(ctx context.Context, authorization *Mana
 		}
 		deviceValidUntil := device.LastHeartbeat.UTC().Add(resourceSessionDeviceHeartbeatTTL)
 		validUntil := calculateResourceSessionValidUntil(now, now, grant.MaxSessionSeconds,
-			membership.ExpiresAt, chain.Allocation.ExpiresAt, &chain.Observation.LeaseExpiresAt,
-			&chain.Evidence.LeaseExpiresAt, grant.ExpiresAt, &deviceValidUntil, namespaceLeaseDeadline(chain))
+			membership.ExpiresAt, chain.Allocation.ExpiresAt, grant.ExpiresAt, &deviceValidUntil, namespaceLeaseDeadline(chain))
 		if !validUntil.After(now) {
 			return ErrResourceSessionAuthorizationDenied
 		}

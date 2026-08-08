@@ -125,14 +125,6 @@ func (s *ResourceOutboxService) Append(tx *gorm.DB, input AppendOutboxEventInput
 }
 
 func (s *ResourceOutboxService) Claim(ctx context.Context, consumer, owner string, leaseDuration time.Duration) (*model.OutboxEvent, error) {
-	return s.claim(ctx, consumer, owner, leaseDuration, nil)
-}
-
-func (s *ResourceOutboxService) ClaimPrioritized(ctx context.Context, consumer, owner string, leaseDuration time.Duration, priorityAggregateTypes ...string) (*model.OutboxEvent, error) {
-	return s.claim(ctx, consumer, owner, leaseDuration, priorityAggregateTypes)
-}
-
-func (s *ResourceOutboxService) claim(ctx context.Context, consumer, owner string, leaseDuration time.Duration, priorityAggregateTypes []string) (*model.OutboxEvent, error) {
 	if err := validateRequired("consumer", consumer, 100); err != nil {
 		return nil, err
 	}
@@ -142,56 +134,33 @@ func (s *ResourceOutboxService) claim(ctx context.Context, consumer, owner strin
 	if leaseDuration <= 0 {
 		return nil, fmt.Errorf("%w: lease duration must be positive", ErrInvalidDeliveryInput)
 	}
-	priorityExpression := "0"
-	priorityArgs := make([]any, 0, len(priorityAggregateTypes))
-	if len(priorityAggregateTypes) > 0 {
-		whenClauses := make([]string, 0, len(priorityAggregateTypes))
-		seen := make(map[string]struct{}, len(priorityAggregateTypes))
-		for _, aggregateType := range priorityAggregateTypes {
-			aggregateType = strings.TrimSpace(aggregateType)
-			if err := validateRequired("priority_aggregate_type", aggregateType, 64); err != nil {
-				return nil, err
-			}
-			if _, exists := seen[aggregateType]; exists {
-				continue
-			}
-			seen[aggregateType] = struct{}{}
-			whenClauses = append(whenClauses, fmt.Sprintf("WHEN ? THEN %d", len(whenClauses)))
-			priorityArgs = append(priorityArgs, aggregateType)
-		}
-		priorityExpression = fmt.Sprintf("CASE aggregate_type %s ELSE %d END", strings.Join(whenClauses, " "), len(whenClauses))
-	}
-
 	now := s.now().UTC()
 	for attempt := 0; attempt < 16; attempt++ {
 		var candidate model.OutboxEvent
-		query := fmt.Sprintf(`
+		result := s.db.WithContext(ctx).Raw(`
 			SELECT id FROM (
-				SELECT id, claim_priority, available_at, created_at FROM (
-					SELECT id, %s AS claim_priority, available_at, created_at
+				SELECT id, available_at, created_at FROM (
+					SELECT id, available_at, created_at
 					FROM outbox_event
 					WHERE consumer = ? AND status = ? AND attempt_count < max_attempts AND available_at <= ?
-					ORDER BY claim_priority ASC, available_at ASC, created_at ASC, id ASC
+					ORDER BY available_at ASC, created_at ASC, id ASC
 					LIMIT 1
 				)
 				UNION ALL
-				SELECT id, claim_priority, available_at, created_at FROM (
-					SELECT id, %s AS claim_priority, available_at, created_at
+				SELECT id, available_at, created_at FROM (
+					SELECT id, available_at, created_at
 					FROM outbox_event
 					WHERE consumer = ? AND status = ? AND attempt_count < max_attempts
 						AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
-					ORDER BY claim_priority ASC, available_at ASC, created_at ASC, id ASC
+					ORDER BY available_at ASC, created_at ASC, id ASC
 					LIMIT 1
 				)
 			)
-			ORDER BY claim_priority ASC, available_at ASC, created_at ASC, id ASC
-			LIMIT 1`, priorityExpression, priorityExpression)
-		queryArgs := make([]any, 0, len(priorityArgs)*2+6)
-		queryArgs = append(queryArgs, priorityArgs...)
-		queryArgs = append(queryArgs, consumer, model.OutboxEventPending, now)
-		queryArgs = append(queryArgs, priorityArgs...)
-		queryArgs = append(queryArgs, consumer, model.OutboxEventProcessing, now)
-		result := s.db.WithContext(ctx).Raw(query, queryArgs...).Scan(&candidate)
+			ORDER BY available_at ASC, created_at ASC, id ASC
+			LIMIT 1`,
+			consumer, model.OutboxEventPending, now,
+			consumer, model.OutboxEventProcessing, now,
+		).Scan(&candidate)
 		if result.Error != nil {
 			return nil, result.Error
 		}

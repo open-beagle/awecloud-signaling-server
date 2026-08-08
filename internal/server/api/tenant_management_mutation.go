@@ -205,8 +205,6 @@ func writeTenantManagementError(c *gin.Context, err error) {
 		codedError(c, http.StatusConflict, "TENANT_RESOURCE_REVIEW_STALE", "Candidate 观测版本已变化")
 	case errors.Is(err, service.ErrTenantResourceTargetNotTrusted):
 		codedError(c, http.StatusConflict, "TENANT_RESOURCE_TARGET_NOT_TRUSTED", "当前没有可信 Target")
-	case errors.Is(err, service.ErrTenantResourceServicePortChanged):
-		codedError(c, http.StatusConflict, "TENANT_RESOURCE_SERVICE_PORT_CHANGED", "Service Port 或协议已变化")
 	case errors.Is(err, service.ErrTenantResourceStateTransition):
 		codedError(c, http.StatusConflict, "TENANT_RESOURCE_STATE_TRANSITION_INVALID", "Tenant Resource 状态转换无效")
 	case errors.Is(err, service.ErrContainerSSHBusinessDomainInvalid):

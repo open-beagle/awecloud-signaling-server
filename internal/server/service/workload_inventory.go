@@ -11,24 +11,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
 const (
-	WorkloadInventoryResultAccepted           = "WORKLOAD_ACCEPTED"
-	WorkloadInventoryResultReplayed           = "WORKLOAD_REPLAYED"
-	WorkloadInventoryResultSnapshotIncomplete = "WORKLOAD_SNAPSHOT_INCOMPLETE"
-	workloadInventorySchemaVersion            = 1
-	workloadInventoryLeaseDuration            = 10 * time.Minute
-	workloadInventoryPayloadRetention         = 24 * time.Hour
-	maxWorkloadInventoryPayloadBytes          = 1024 * 1024
-	maxWorkloadInventoryBatchCount            = 1024
-	maxWorkloadInventoryObjectsPerBatch       = 4096
-	maxWorkloadLabelsPerObject                = 64
-	workloadExposeLabel                       = "signal.beagle.io/expose"
+	WorkloadInventoryResultAccepted     = "WORKLOAD_ACCEPTED"
+	WorkloadInventoryResultReplayed     = "WORKLOAD_REPLAYED"
+	workloadInventorySchemaVersion      = 1
+	workloadInventoryLeaseDuration      = 10 * time.Minute
+	maxWorkloadInventoryPayloadBytes    = 1024 * 1024
+	maxWorkloadInventoryObjectsPerBatch = 4096
+	maxWorkloadLabelsPerObject          = 64
+	workloadExposeLabel                 = "signal.beagle.io/expose"
 )
 
 var (
@@ -37,8 +33,6 @@ var (
 	ErrWorkloadSequenceGap               = errors.New("WORKLOAD_SEQUENCE_GAP")
 	ErrWorkloadSequenceConflict          = errors.New("WORKLOAD_SEQUENCE_CONFLICT")
 	ErrWorkloadSourceEpochStale          = errors.New("WORKLOAD_SOURCE_EPOCH_STALE")
-	ErrWorkloadSnapshotMetadataConflict  = errors.New("WORKLOAD_SNAPSHOT_METADATA_CONFLICT")
-	ErrWorkloadSnapshotIncomplete        = errors.New(WorkloadInventoryResultSnapshotIncomplete)
 	ErrWorkloadScopeNotTrusted           = errors.New("WORKLOAD_SCOPE_NOT_TRUSTED")
 	ErrWorkloadProtocolUnsupported       = errors.New("WORKLOAD_PROTOCOL_UNSUPPORTED")
 	ErrWorkloadIdentityInsufficient      = errors.New("WORKLOAD_IDENTITY_INSUFFICIENT")
@@ -47,12 +41,13 @@ var (
 )
 
 type WorkloadInventoryService struct {
-	db  *gorm.DB
-	now func() time.Time
+	db        *gorm.DB
+	now       func() time.Time
+	snapshots *WorkloadSnapshotStore
 }
 
-func NewWorkloadInventoryService(database *gorm.DB) *WorkloadInventoryService {
-	return &WorkloadInventoryService{db: database, now: time.Now}
+func NewWorkloadInventoryService(database *gorm.DB, snapshots *WorkloadSnapshotStore) *WorkloadInventoryService {
+	return &WorkloadInventoryService{db: database, now: time.Now, snapshots: snapshots}
 }
 
 type ReceiveWorkloadInventoryBatchInput struct {
@@ -125,7 +120,7 @@ type workloadProjection struct {
 }
 
 func (s *WorkloadInventoryService) ReceiveBatch(ctx context.Context, input ReceiveWorkloadInventoryBatchInput) (*WorkloadInventoryAck, error) {
-	if s == nil || s.db == nil {
+	if s == nil || s.db == nil || s.snapshots == nil {
 		return nil, ErrWorkloadInventoryInvalidInput
 	}
 	if err := normalizeWorkloadInventoryInput(&input); err != nil {
@@ -140,7 +135,10 @@ func (s *WorkloadInventoryService) ReceiveBatch(ctx context.Context, input Recei
 	}
 
 	now := s.now().UTC()
-	var ack *WorkloadInventoryAck
+	if input.BatchCount != 1 || input.BatchIndex != 0 {
+		return nil, ErrWorkloadProtocolUnsupported
+	}
+	var snapshot workloadSnapshot
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		source, err := resolveWorkloadInventorySource(tx, input)
 		if err != nil {
@@ -151,85 +149,47 @@ func (s *WorkloadInventoryService) ReceiveBatch(ctx context.Context, input Recei
 			return err
 		}
 
-		var existing model.WorkloadInventoryReceipt
-		err = tx.Where("source_technical_resource_id = ? AND source_epoch = ? AND sequence = ?", source.ID, input.SourceEpoch, input.Sequence).First(&existing).Error
-		if err == nil {
-			if !sameWorkloadReceiptMetadata(&existing, input) {
-				return ErrWorkloadSequenceConflict
-			}
-			ack = workloadAckFromReceipt(&existing, true, now)
-			return nil
+		if scope.NamespaceObservationID == nil {
+			return ErrWorkloadScopeNotTrusted
 		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
+		var namespace model.NamespaceObservation
+		if err := tx.Where("id = ? AND provider_id = ? AND cluster_resource_id = ?", *scope.NamespaceObservationID, scope.ProviderID, scope.PlatformResourceID).First(&namespace).Error; err != nil {
+			return ErrWorkloadScopeNotTrusted
+		}
+		projections, err := decodeWorkloadDocument(input.Kind, string(canonicalPayload))
+		if err != nil {
 			return err
 		}
-		if err := validateWorkloadSequence(tx, source.ID, input.SourceEpoch, input.Sequence); err != nil {
-			return err
-		}
-
-		var snapshotReceipts []model.WorkloadInventoryReceipt
-		if err := tx.Where("source_technical_resource_id = ? AND snapshot_id = ?", source.ID, input.SnapshotID).
-			Order("batch_index ASC").Find(&snapshotReceipts).Error; err != nil {
-			return err
-		}
-		for i := range snapshotReceipts {
-			if snapshotReceipts[i].Status == model.WorkloadInventoryReceiptRejected {
-				return ErrWorkloadSnapshotIncomplete
-			}
-			if !sameWorkloadSnapshotMetadata(&snapshotReceipts[i], input) || snapshotReceipts[i].Status != model.WorkloadInventoryReceiptStaging {
-				return ErrWorkloadSnapshotMetadataConflict
-			}
-		}
-
-		receipt := &model.WorkloadInventoryReceipt{
-			ID: uuid.NewString(), SourceTechnicalResourceID: source.ID, SourceEpoch: input.SourceEpoch, Sequence: input.Sequence,
-			SchemaVersion: input.SchemaVersion, SnapshotID: input.SnapshotID, BatchIndex: input.BatchIndex, BatchCount: input.BatchCount,
-			ClusterIdentityDigest: input.ClusterIdentityDigest, NamespaceUID: input.NamespaceUID, NamespaceName: input.NamespaceName,
-			Kind: input.Kind, PayloadHash: input.PayloadHash, ObservedAt: input.ObservedAt, ReceivedAt: now,
-			LeaseExpiresAt: now.Add(workloadInventoryLeaseDuration), Status: model.WorkloadInventoryReceiptStaging,
-			ResultCode: WorkloadInventoryResultAccepted, Retryable: false,
-			PayloadDeleteAfter: timePointer(now.Add(workloadInventoryPayloadRetention)),
-		}
-		if err := tx.Create(receipt).Error; err != nil {
-			if isDatabaseConstraintError(err) {
-				return ErrWorkloadSequenceConflict
-			}
-			return err
-		}
-		if err := tx.Create(&model.WorkloadInventoryBatch{
-			ID: uuid.NewString(), ReceiptID: receipt.ID, CanonicalPayload: string(canonicalPayload), CreatedAt: now,
-		}).Error; err != nil {
-			return err
-		}
-
-		snapshotReceipts = append(snapshotReceipts, *receipt)
-		if len(snapshotReceipts) == input.BatchCount {
-			if err := projectWorkloadSnapshot(tx, source, scope, snapshotReceipts, now); err != nil {
+		for i := range projections {
+			projections[i].Target, err = workloadTargetWithTrustedNamespace(projections[i].Target, &namespace)
+			if err != nil {
 				return err
 			}
-			committedAt := now
-			updated := tx.Model(&model.WorkloadInventoryReceipt{}).
-				Where("source_technical_resource_id = ? AND snapshot_id = ? AND status = ?", source.ID, input.SnapshotID, model.WorkloadInventoryReceiptStaging).
-				Updates(map[string]any{
-					"status": model.WorkloadInventoryReceiptCommitted, "result_code": WorkloadInventoryResultAccepted,
-					"committed_at": committedAt,
-				})
-			if updated.Error != nil {
-				return updated.Error
-			}
-			if updated.RowsAffected != int64(input.BatchCount) {
-				return ErrWorkloadSnapshotMetadataConflict
-			}
-			receipt.Status = model.WorkloadInventoryReceiptCommitted
-			receipt.CommittedAt = &committedAt
 		}
-		ack = workloadAckFromReceipt(receipt, false, now)
+		snapshot = workloadSnapshot{
+			SourceTechnicalResourceID: source.ID, NamespaceScopeID: scope.ID, NamespaceUID: namespace.NamespaceUID,
+			NamespaceName: namespace.Name, Kind: input.Kind, SourceEpoch: input.SourceEpoch, Sequence: input.Sequence,
+			SnapshotID: input.SnapshotID, ObservedAt: input.ObservedAt, ReceivedAt: now,
+			LeaseExpiresAt: now.Add(workloadInventoryLeaseDuration), Projections: projections,
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return ack, nil
+	replayed, err := s.snapshots.replace(snapshot, input.PayloadHash)
+	if err != nil {
+		return nil, err
+	}
+	resultCode := WorkloadInventoryResultAccepted
+	if replayed {
+		resultCode = WorkloadInventoryResultReplayed
+	}
+	return &WorkloadInventoryAck{
+		TechnicalResourceID: snapshot.SourceTechnicalResourceID, AcceptedSequence: input.Sequence,
+		SnapshotID: input.SnapshotID, BatchIndex: input.BatchIndex, ResultCode: resultCode,
+		Replayed: replayed, Committed: true, Retryable: false, ServerReceivedAt: now,
+	}, nil
 }
 
 func normalizeWorkloadInventoryInput(input *ReceiveWorkloadInventoryBatchInput) error {
@@ -244,8 +204,8 @@ func normalizeWorkloadInventoryInput(input *ReceiveWorkloadInventoryBatchInput) 
 	input.NamespaceName = strings.TrimSpace(input.NamespaceName)
 	input.PayloadHash = strings.ToLower(strings.TrimSpace(input.PayloadHash))
 	input.ObservedAt = input.ObservedAt.UTC()
-	if input.SchemaVersion != workloadInventorySchemaVersion || input.Sequence <= 0 || input.BatchCount <= 0 || input.BatchCount > maxWorkloadInventoryBatchCount ||
-		input.BatchIndex < 0 || input.BatchIndex >= input.BatchCount || !input.Kind.Valid() || input.ObservedAt.IsZero() ||
+	if input.SchemaVersion != workloadInventorySchemaVersion || input.Sequence <= 0 || input.BatchCount != 1 || input.BatchIndex != 0 ||
+		!input.Kind.Valid() || input.ObservedAt.IsZero() ||
 		validateRequired("source_epoch", input.SourceEpoch, 36) != nil || validateRequired("snapshot_id", input.SnapshotID, 36) != nil ||
 		validateRequired("namespace_uid", input.NamespaceUID, 128) != nil || len(input.NamespaceName) > 253 ||
 		validateOptionalSHA256("cluster_identity_digest", input.ClusterIdentityDigest) != nil || input.ClusterIdentityDigest == "" ||
@@ -378,6 +338,46 @@ func workloadSourceHasCapability(tx *gorm.DB, source *model.TechnicalResource, p
 	return false, nil
 }
 
+func workloadTargetWithTrustedNamespace(targetJSON string, namespace *model.NamespaceObservation) (string, error) {
+	if namespace == nil || strings.TrimSpace(namespace.NamespaceUID) == "" || strings.TrimSpace(namespace.Name) == "" {
+		return "", ErrWorkloadScopeNotTrusted
+	}
+	var target map[string]any
+	if err := json.Unmarshal([]byte(targetJSON), &target); err != nil {
+		return "", ErrWorkloadInventoryInvalidInput
+	}
+	target["namespace_uid"] = namespace.NamespaceUID
+	target["namespace_name"] = namespace.Name
+	canonical, err := json.Marshal(target)
+	if err != nil {
+		return "", ErrWorkloadInventoryInvalidInput
+	}
+	return string(canonical), nil
+}
+
+func workloadExposureAllowed(labelsJSON string) bool {
+	var labels map[string]string
+	if json.Unmarshal([]byte(labelsJSON), &labels) != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(labels[workloadExposeLabel]), "true")
+}
+
+func workloadTechnicalResourceBindingCurrent(tx *gorm.DB, technical *model.TechnicalResource) (bool, error) {
+	if technical == nil || technical.LifecycleState != model.TechnicalResourceRegistered ||
+		(technical.Type != model.TechnicalResourceAgent && technical.Type != model.TechnicalResourceEndpoint) {
+		return false, nil
+	}
+	binding, err := loadActiveTechnicalResourceBinding(tx, technical.ID)
+	if errors.Is(err, ErrTechnicalResourceUnbound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return binding.CredentialRevision == technical.CredentialRevision, nil
+}
+
 func (s *WorkloadInventoryService) ReportingSource(ctx context.Context, sourceType model.TechnicalResourceBindingSourceType, sourceID string) (*model.TechnicalResource, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrWorkloadInventoryInvalidInput
@@ -398,34 +398,6 @@ func (s *WorkloadInventoryService) ReportingSource(ctx context.Context, sourceTy
 		return nil, ErrWorkloadTechnicalCapabilityDenied
 	}
 	return &resource, nil
-}
-
-func validateWorkloadSequence(tx *gorm.DB, sourceID, epoch string, sequence int64) error {
-	var latest model.WorkloadInventoryReceipt
-	err := tx.Where("source_technical_resource_id = ? AND source_epoch = ?", sourceID, epoch).
-		Order("sequence DESC").First(&latest).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		if sequence != 1 {
-			return ErrWorkloadSequenceGap
-		}
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	var newerEpochCount int64
-	if err := tx.Model(&model.WorkloadInventoryReceipt{}).
-		Where("source_technical_resource_id = ? AND source_epoch <> ? AND received_at > ?", sourceID, epoch, latest.ReceivedAt).
-		Count(&newerEpochCount).Error; err != nil {
-		return err
-	}
-	if newerEpochCount != 0 {
-		return ErrWorkloadSourceEpochStale
-	}
-	if sequence != latest.Sequence+1 {
-		return ErrWorkloadSequenceGap
-	}
-	return nil
 }
 
 func canonicalizeWorkloadInventoryPayload(kind model.WorkloadObservationKind, payload []byte) ([]byte, error) {
@@ -625,61 +597,6 @@ func normalizeWorkloadLabels(labels map[string]string) (map[string]string, error
 		}
 	}
 	return result, nil
-}
-
-func sameWorkloadReceiptMetadata(receipt *model.WorkloadInventoryReceipt, input ReceiveWorkloadInventoryBatchInput) bool {
-	return receipt != nil && receipt.PayloadHash == input.PayloadHash && sameWorkloadSnapshotMetadata(receipt, input) &&
-		receipt.Sequence == input.Sequence && receipt.BatchIndex == input.BatchIndex
-}
-
-func sameWorkloadSnapshotMetadata(receipt *model.WorkloadInventoryReceipt, input ReceiveWorkloadInventoryBatchInput) bool {
-	return receipt != nil && receipt.SourceEpoch == input.SourceEpoch && receipt.SchemaVersion == input.SchemaVersion && receipt.SnapshotID == input.SnapshotID &&
-		receipt.BatchCount == input.BatchCount && receipt.ClusterIdentityDigest == input.ClusterIdentityDigest && receipt.NamespaceUID == input.NamespaceUID &&
-		receipt.NamespaceName == input.NamespaceName && receipt.Kind == input.Kind && receipt.ObservedAt.Equal(input.ObservedAt)
-}
-
-func workloadAckFromReceipt(receipt *model.WorkloadInventoryReceipt, replayed bool, now time.Time) *WorkloadInventoryAck {
-	resultCode := receipt.ResultCode
-	if replayed && receipt.Status != model.WorkloadInventoryReceiptRejected {
-		resultCode = WorkloadInventoryResultReplayed
-	}
-	return &WorkloadInventoryAck{
-		TechnicalResourceID: receipt.SourceTechnicalResourceID, AcceptedSequence: receipt.Sequence, SnapshotID: receipt.SnapshotID,
-		BatchIndex: receipt.BatchIndex, ResultCode: resultCode, Replayed: replayed,
-		Committed: receipt.Status == model.WorkloadInventoryReceiptCommitted, Retryable: receipt.Retryable, ServerReceivedAt: now,
-	}
-}
-
-func (s *WorkloadInventoryService) PurgeExpiredPayloads(ctx context.Context, at time.Time) (int64, error) {
-	if s == nil || s.db == nil || at.IsZero() {
-		return 0, ErrWorkloadInventoryInvalidInput
-	}
-	at = at.UTC()
-	var purged int64
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var expired []model.WorkloadInventoryReceipt
-		if err := tx.Where("payload_delete_after IS NOT NULL AND payload_delete_after <= ?", at).Find(&expired).Error; err != nil {
-			return err
-		}
-		for i := range expired {
-			updates := map[string]any{"payload_delete_after": nil}
-			if expired[i].Status == model.WorkloadInventoryReceiptStaging {
-				updates["status"] = model.WorkloadInventoryReceiptRejected
-				updates["result_code"] = WorkloadInventoryResultSnapshotIncomplete
-				updates["retryable"] = false
-			}
-			if err := tx.Model(&model.WorkloadInventoryReceipt{}).Where("id = ?", expired[i].ID).Updates(updates).Error; err != nil {
-				return err
-			}
-			deleted := tx.Where("receipt_id = ?", expired[i].ID).Delete(&model.WorkloadInventoryBatch{})
-			if deleted.Error != nil {
-				return deleted.Error
-			}
-			purged += deleted.RowsAffected
-		}
-		return nil
-	})
-	return purged, err
 }
 
 func sortWorkloadProjections(projections []workloadProjection) {

@@ -169,7 +169,7 @@ func prepareTenantResourceAPIFixture(t *testing.T) tenantResourceAPIFixture {
 	management.Use(UnifiedManagementIdentityMiddleware())
 	tenant := management.Group("/tenants/:tenant_id")
 	tenant.Use(RequireFeatureFlag(flags, config.FeatureTenantResourceReadV2, false))
-	resourceAPI := NewTenantResourceManagementAPI()
+	resourceAPI := NewTenantResourceManagementAPI(service.NewWorkloadSnapshotStore())
 	grantAPI := NewTenantAccessGrantAPI()
 	sessionAPI := NewResourceSessionManagementAPI()
 	tenant.GET("/resource-candidates", RequireManagementPermission(service.PermissionTenantResourcesRead), resourceAPI.ListCandidates)
@@ -299,7 +299,7 @@ func TestTenantResourceAPIIsScopeFirstAndRedactsTrustedTargets(t *testing.T) {
 	seedTenantResourceIsolationRecords(t, &fixture)
 	list := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/resource-candidates", "", nil)
 	require.Equal(t, http.StatusOK, list.Code, list.Body.String())
-	require.Contains(t, list.Body.String(), fixture.resource.ID)
+	require.NotContains(t, list.Body.String(), fixture.resource.ID)
 	require.NotContains(t, list.Body.String(), fixture.other.ID)
 	require.NotContains(t, list.Body.String(), "10.0.0.10")
 	require.NotContains(t, list.Body.String(), "labels_allowlist")
@@ -412,25 +412,6 @@ func TestTenantResourcePublishGrantSessionAndTerminationAreIdempotent(t *testing
 	require.Equal(t, int64(1), grantEventCount)
 	require.Equal(t, int64(4), outboxCount)
 	require.Equal(t, int64(4), auditCount)
-}
-
-func TestTenantResourceRejectHidesOnlyCurrentCandidateRevision(t *testing.T) {
-	fixture := prepareTenantResourceAPIFixture(t)
-	path := "/api/v1/management/tenants/" + fixture.tenant.ID + "/resource-candidates/" + fixture.resource.ID + "/reject"
-	rejected := tenantAPIRequest(fixture, http.MethodPost, path, `{"observation_revision":1,"reason":"not intended for Tenant access"}`, nil)
-	require.Equal(t, http.StatusOK, rejected.Code, rejected.Body.String())
-	require.Equal(t, `"2"`, rejected.Header().Get("ETag"))
-
-	list := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/resource-candidates", "", nil)
-	require.Equal(t, http.StatusOK, list.Code, list.Body.String())
-	require.NotContains(t, list.Body.String(), fixture.resource.ID)
-	detail := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/resource-candidates/"+fixture.resource.ID, "", nil)
-	require.Equal(t, http.StatusOK, detail.Code, detail.Body.String())
-	require.Contains(t, detail.Body.String(), fixture.resource.ID)
-
-	repeated := tenantAPIRequest(fixture, http.MethodPost, path, `{"observation_revision":1,"reason":"repeat"}`, nil)
-	require.Equal(t, http.StatusConflict, repeated.Code, repeated.Body.String())
-	assertResponseErrorCode(t, repeated, "TENANT_RESOURCE_REVIEW_STALE")
 }
 
 func TestTenantResourcePublishReportsStaleObservationBeforeTargetUnavailable(t *testing.T) {

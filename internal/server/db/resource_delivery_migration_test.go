@@ -48,8 +48,6 @@ func TestInitDBRegistersResourceDeliveryTables(t *testing.T) {
 		&model.ResourceScope{},
 		&model.ResourceAllocation{},
 		&model.ResourceAllocationItem{},
-		&model.WorkloadInventoryReceipt{},
-		&model.WorkloadInventoryBatch{},
 		&model.WorkloadObservation{},
 		&model.WorkloadObservationSource{},
 		&model.TenantResource{},
@@ -107,7 +105,7 @@ func TestInitDBAddsM1ATablesWithoutChangingLegacyRows(t *testing.T) {
 		&model.TechnicalResource{}, &model.TechnicalResourceBinding{}, &model.SupplyInventoryReceipt{}, &model.SupplyCandidate{},
 		&model.PlatformResource{}, &model.PlatformResourceSource{}, &model.NamespaceObservation{}, &model.ResourceScope{},
 		&model.ResourceAllocation{}, &model.ResourceAllocationItem{},
-		&model.WorkloadInventoryReceipt{}, &model.WorkloadInventoryBatch{}, &model.WorkloadObservation{}, &model.WorkloadObservationSource{},
+		&model.WorkloadObservation{}, &model.WorkloadObservationSource{},
 		&model.TenantResource{}, &model.TenantResourceSource{}, &model.TenantResourceReviewDecision{}, &model.TenantResourceTargetRevision{},
 		&model.TenantAccessGrant{}, &model.TenantAccessGrantEvent{}, &model.ResourceSession{}, &model.ResourceSessionEvent{},
 		&model.ResourceSessionTermination{},
@@ -126,7 +124,7 @@ func TestInitDBAddsM1ATablesWithoutChangingLegacyRows(t *testing.T) {
 	require.Zero(t, allocationCount)
 	require.Zero(t, allocationItemCount)
 	for _, table := range []any{
-		&model.WorkloadInventoryReceipt{}, &model.WorkloadInventoryBatch{}, &model.WorkloadObservation{}, &model.WorkloadObservationSource{},
+		&model.WorkloadObservation{}, &model.WorkloadObservationSource{},
 		&model.TenantResource{}, &model.TenantResourceSource{}, &model.TenantResourceReviewDecision{}, &model.TenantResourceTargetRevision{},
 		&model.TenantAccessGrant{}, &model.TenantAccessGrantEvent{}, &model.ResourceSession{}, &model.ResourceSessionEvent{},
 		&model.ResourceSessionTermination{},

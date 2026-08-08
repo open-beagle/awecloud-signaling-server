@@ -50,8 +50,8 @@ type Server struct {
 	reconciliationService         *service.ResourceReconciliationService
 	providerReconciliationService *service.ProviderSupplyReconciliationService
 	allocationExpiryService       *service.PlatformAllocationExpiryService
-	workloadReconciliationService *service.WorkloadReconciliationService
 	tenantAuthorizationService    *service.TenantAuthorizationMaintenanceService
+	workloadSnapshots             *service.WorkloadSnapshotStore
 	reconciliationCtx             context.Context
 	reconciliationCancel          context.CancelFunc
 }
@@ -114,6 +114,7 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 		logger.Warn("Headscale 配置未设置，ACL 同步服务未启动")
 	}
 
+	workloadSnapshots := service.NewWorkloadSnapshotStore()
 	return &Server{
 		config:                        cfg,
 		headscaleClient:               headscaleClient,
@@ -123,7 +124,7 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 		reconciliationService:         service.NewResourceReconciliationService(db.DB),
 		providerReconciliationService: service.NewProviderSupplyReconciliationService(db.DB),
 		allocationExpiryService:       service.NewPlatformAllocationExpiryService(db.DB),
-		workloadReconciliationService: service.NewWorkloadReconciliationService(db.DB),
+		workloadSnapshots:             workloadSnapshots,
 		tenantAuthorizationService:    service.NewTenantAuthorizationMaintenanceService(db.DB),
 		reconciliationCtx:             reconciliationCtx,
 		reconciliationCancel:          reconciliationCancel,
@@ -149,7 +150,7 @@ func (s *Server) Run() error {
 		logger.Info("Gin 运行在 Release 模式")
 	}
 
-	s.agentService = grpcserver.NewAgentServiceServer(s.config)
+	s.agentService = grpcserver.NewAgentServiceServer(s.config, s.workloadSnapshots)
 	s.desktopService = grpcserver.NewDesktopServiceServer(s.config)
 	s.desktopService.SetAgentService(s.agentService)
 
@@ -275,12 +276,6 @@ func (s *Server) Run() error {
 		go s.allocationExpiryService.StartPeriodicExpiration(s.reconciliationCtx)
 	} else {
 		logger.Info("Platform Allocation 到期任务已禁用")
-	}
-	if s.workloadReconciliationService != nil && s.config.FeatureFlags.ResourceModelWrite &&
-		s.config.FeatureFlags.ResourceReconciliation && s.config.FeatureFlags.ResourceAllocation {
-		go s.workloadReconciliationService.StartPeriodicMaintenance(s.reconciliationCtx)
-	} else {
-		logger.Info("Workload/Tenant Resource 对账已禁用")
 	}
 	if s.tenantAuthorizationService != nil && s.config.FeatureFlags.ManagementContextV2 &&
 		s.config.FeatureFlags.TenantResourceReadV2 && s.config.FeatureFlags.ResourceModelWrite &&
@@ -553,7 +548,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					providerGroup.POST("/scopes/:id/retire", api.RequireManagementPermission(service.PermissionProviderResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.SetResourceScopeLifecycle(model.ResourceScopeRetired, "retire_resource_scope"))
 				}
 
-				tenantResourceAPI := api.NewTenantResourceManagementAPI()
+				tenantResourceAPI := api.NewTenantResourceManagementAPI(s.workloadSnapshots)
 				tenantGrantAPI := api.NewTenantAccessGrantAPI()
 				resourceSessionAPI := api.NewResourceSessionManagementAPI()
 				tenantGovernanceAPI := api.NewTenantGovernanceAPI()

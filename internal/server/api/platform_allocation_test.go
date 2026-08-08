@@ -163,7 +163,7 @@ func TestPlatformAllocationAPICreateActivateAndReplayAreTransactional(t *testing
 	require.NoError(t, fixture.database.Model(&model.APIIdempotencyRecord{}).Count(&idempotencyCount).Error)
 	require.Equal(t, int64(1), allocationCount)
 	require.Equal(t, int64(1), itemCount)
-	require.Equal(t, int64(2), outboxCount)
+	require.Zero(t, outboxCount)
 	require.Equal(t, int64(2), auditCount)
 	require.Equal(t, int64(2), idempotencyCount)
 	var createAudit model.AuditLog
@@ -173,12 +173,6 @@ func TestPlatformAllocationAPICreateActivateAndReplayAreTransactional(t *testing
 	require.Equal(t, string(model.ManagementScopePlatform), createAudit.ScopeType)
 	require.Empty(t, createAudit.ScopeID)
 	require.Equal(t, int64(7), createAudit.PermissionRevision)
-	var createdEvent model.OutboxEvent
-	require.NoError(t, fixture.database.Where("aggregate_id = ? AND event_type = ?", allocationID, "resource_allocation.created").First(&createdEvent).Error)
-	require.Equal(t, service.PlatformAllocationOutboxConsumer, createdEvent.Consumer)
-	require.NotContains(t, createdEvent.Payload, "contract_ref")
-	require.NotContains(t, createdEvent.Payload, "reason")
-
 	detail := platformAllocationAPIRequest(fixture, http.MethodGet, "/api/v1/management/platform/allocations/"+allocationID, "", nil, model.ManagementScopePlatform, "")
 	require.Equal(t, http.StatusOK, detail.Code, detail.Body.String())
 	require.Equal(t, `"2"`, detail.Header().Get("ETag"))
@@ -232,19 +226,4 @@ func TestPlatformAllocationAPIFailsClosedOnFlagsContextAndInput(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, write.Code, write.Body.String())
 	})
 
-	t.Run("outbox failure rolls back business and audit", func(t *testing.T) {
-		fixture := preparePlatformAllocationAPIFixture(t, config.FeatureFlagsSection{ResourceModelWrite: true, ResourceAllocation: true})
-		require.NoError(t, fixture.database.Migrator().DropTable(&model.OutboxEvent{}))
-		response := platformAllocationAPIRequest(fixture, http.MethodPost, platformAllocationCreateRoute,
-			platformAllocationCreateBody(fixture, string(model.ResourceAllocationLeased)), map[string]string{HeaderIdempotencyKey: "allocation-outbox-failure"}, model.ManagementScopePlatform, "")
-		require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
-		assertResponseErrorCode(t, response, ErrorCodePlatformAllocationOutboxFailed)
-		var allocationCount, itemCount, auditCount int64
-		require.NoError(t, fixture.database.Model(&model.ResourceAllocation{}).Count(&allocationCount).Error)
-		require.NoError(t, fixture.database.Model(&model.ResourceAllocationItem{}).Count(&itemCount).Error)
-		require.NoError(t, fixture.database.Model(&model.AuditLog{}).Where("target_type = ?", "resource_allocation").Count(&auditCount).Error)
-		require.Zero(t, allocationCount)
-		require.Zero(t, itemCount)
-		require.Zero(t, auditCount)
-	})
 }

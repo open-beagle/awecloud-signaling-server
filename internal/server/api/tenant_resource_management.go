@@ -13,10 +13,12 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 )
 
-type TenantResourceManagementAPI struct{}
+type TenantResourceManagementAPI struct {
+	workloadSnapshots *service.WorkloadSnapshotStore
+}
 
-func NewTenantResourceManagementAPI() *TenantResourceManagementAPI {
-	return &TenantResourceManagementAPI{}
+func NewTenantResourceManagementAPI(workloadSnapshots *service.WorkloadSnapshotStore) *TenantResourceManagementAPI {
+	return &TenantResourceManagementAPI{workloadSnapshots: workloadSnapshots}
 }
 
 type tenantResourceReviewRequest struct {
@@ -50,7 +52,7 @@ func (a *TenantResourceManagementAPI) list(c *gin.Context, candidates bool) {
 	if !ok {
 		return
 	}
-	result, err := service.NewTenantResourceService(db.DB).List(c.Request.Context(), authorization, tenantID, input)
+	result, err := service.NewTenantResourceService(db.DB, a.workloadSnapshots).List(c.Request.Context(), authorization, tenantID, input)
 	if err != nil {
 		writeTenantManagementError(c, err)
 		return
@@ -71,7 +73,7 @@ func (a *TenantResourceManagementAPI) get(c *gin.Context, candidate bool) {
 	if !ok {
 		return
 	}
-	view, err := service.NewTenantResourceService(db.DB).Get(c.Request.Context(), authorization, tenantID, tenantResourceIDParam(c), candidate)
+	view, err := service.NewTenantResourceService(db.DB, a.workloadSnapshots).Get(c.Request.Context(), authorization, tenantID, tenantResourceIDParam(c), candidate)
 	if err != nil {
 		writeTenantManagementError(c, err)
 		return
@@ -98,7 +100,7 @@ func (a *TenantResourceManagementAPI) PublishCandidate(c *gin.Context) {
 	request.Reason = strings.TrimSpace(request.Reason)
 	executeTenantIdempotentMutation(c, authorization, tenantID, body, http.StatusOK, "publish_tenant_resource", request.Reason,
 		func(tx *gorm.DB) (*tenantMutationResult, error) {
-			resourceService := service.NewTenantResourceService(tx)
+			resourceService := service.NewTenantResourceService(tx, a.workloadSnapshots)
 			resource, err := resourceService.Review(c.Request.Context(), authorization, service.ReviewTenantResourceInput{
 				TenantID: tenantID, ResourceID: tenantResourceIDParam(c), ExpectedRowVersion: rowVersion,
 				ObservationRevision: request.ObservationRevision, Reason: request.Reason, Publish: true,
@@ -126,7 +128,11 @@ func (a *TenantResourceManagementAPI) RejectCandidate(c *gin.Context) {
 	request.Reason = strings.TrimSpace(request.Reason)
 	executeTenantMutation(c, tenantID, "reject_tenant_resource", request.Reason, http.StatusOK,
 		func(tx *gorm.DB) (*tenantMutationResult, error) {
-			resourceService := service.NewTenantResourceService(tx)
+			resourceService := service.NewTenantResourceService(tx, a.workloadSnapshots)
+			view, err := resourceService.Get(c.Request.Context(), authorization, tenantID, tenantResourceIDParam(c), true)
+			if err != nil {
+				return nil, err
+			}
 			resource, err := resourceService.Review(c.Request.Context(), authorization, service.ReviewTenantResourceInput{
 				TenantID: tenantID, ResourceID: tenantResourceIDParam(c), ObservationRevision: request.ObservationRevision,
 				Reason: request.Reason, Publish: false,
@@ -134,10 +140,7 @@ func (a *TenantResourceManagementAPI) RejectCandidate(c *gin.Context) {
 			if err != nil {
 				return nil, err
 			}
-			view, err := resourceService.Get(c.Request.Context(), authorization, tenantID, resource.ID, true)
-			if err != nil {
-				return nil, err
-			}
+			view.Revision, view.RowVersion, view.UpdatedAt = resource.Revision, resource.RowVersion, resource.UpdatedAt
 			return tenantResourceMutationResult(view, "tenant_resource.rejected"), nil
 		})
 }
@@ -158,7 +161,7 @@ func (a *TenantResourceManagementAPI) UpdateResource(c *gin.Context) {
 	}
 	executeTenantMutation(c, tenantID, "update_tenant_resource", "", http.StatusOK,
 		func(tx *gorm.DB) (*tenantMutationResult, error) {
-			resourceService := service.NewTenantResourceService(tx)
+			resourceService := service.NewTenantResourceService(tx, a.workloadSnapshots)
 			resource, err := resourceService.Update(c.Request.Context(), authorization, service.UpdateTenantResourceInput{
 				TenantID: tenantID, ResourceID: tenantResourceIDParam(c), ExpectedRowVersion: rowVersion,
 				DisplayName: request.DisplayName, Description: request.Description,
@@ -203,7 +206,7 @@ func (a *TenantResourceManagementAPI) setVisibility(c *gin.Context, target model
 	}
 	executeTenantMutation(c, tenantID, action, request.Reason, http.StatusOK,
 		func(tx *gorm.DB) (*tenantMutationResult, error) {
-			resourceService := service.NewTenantResourceService(tx)
+			resourceService := service.NewTenantResourceService(tx, a.workloadSnapshots)
 			resource, err := resourceService.SetVisibility(c.Request.Context(), authorization, tenantID, tenantResourceIDParam(c), rowVersion, target)
 			if err != nil {
 				return nil, err

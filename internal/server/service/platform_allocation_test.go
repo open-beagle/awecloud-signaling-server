@@ -231,14 +231,14 @@ func TestPlatformAllocationExpiryIsExplicitAndIdempotent(t *testing.T) {
 	require.Equal(t, platformAllocationExpiryReason, expired.TerminationReason)
 
 	var outboxCount, auditCount int64
-	require.NoError(t, fixture.database.Model(&model.OutboxEvent{}).Where("aggregate_id = ? AND event_type = ?", expired.ID, "resource_allocation.expired").Count(&outboxCount).Error)
+	require.NoError(t, fixture.database.Model(&model.OutboxEvent{}).Where("aggregate_id = ?", expired.ID).Count(&outboxCount).Error)
 	require.NoError(t, fixture.database.Model(&model.AuditLog{}).Where("target_id = ? AND action_type = ?", expired.ID, "expire_resource_allocation").Count(&auditCount).Error)
-	require.Equal(t, int64(1), outboxCount)
+	require.Zero(t, outboxCount)
 	require.Equal(t, int64(1), auditCount)
 
 	count, err = expiry.ExpireDue(ctx, 100)
 	require.NoError(t, err)
 	require.Zero(t, count)
 	require.NoError(t, fixture.database.Model(&model.OutboxEvent{}).Where("aggregate_id = ?", expired.ID).Count(&outboxCount).Error)
-	require.Equal(t, int64(1), outboxCount)
+	require.Zero(t, outboxCount)
 }

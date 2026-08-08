@@ -68,9 +68,6 @@ func (s *PlatformAllocationExpiryService) ExpireDue(ctx context.Context, limit i
 			if err != nil {
 				return err
 			}
-			if err := AppendPlatformAllocationOutbox(tx, s.db, allocation, "resource_allocation.expired", requestID, now); err != nil {
-				return err
-			}
 			detail, err := json.Marshal(map[string]any{
 				"reason": platformAllocationExpiryReason, "tenant_id": allocation.TenantID,
 				"state": allocation.State, "row_version": allocation.RowVersion,

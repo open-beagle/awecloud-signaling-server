@@ -167,8 +167,6 @@ func autoMigrate() error {
 		&model.GroupMember{},
 
 		// Tenant 资源与会话（S4，新增 Schema，业务入口仍由 Feature Flag 关闭）
-		&model.WorkloadInventoryReceipt{},
-		&model.WorkloadInventoryBatch{},
 		&model.WorkloadObservation{},
 		&model.WorkloadObservationSource{},
 		&model.TenantResource{},

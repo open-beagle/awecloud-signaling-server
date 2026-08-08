@@ -211,19 +211,6 @@ func TestTenantResourceConstraintsPreserveTrustedResourceAndSessionChain(t *test
 	fixture := newTenantResourceConstraintFixture(t)
 
 	t.Run("inventory and provider evidence", func(t *testing.T) {
-		receipt := model.WorkloadInventoryReceipt{
-			ID: "receipt-a", SourceTechnicalResourceID: fixture.agentA.ID, SourceEpoch: "epoch-a", Sequence: 1,
-			SchemaVersion: 1, SnapshotID: "snapshot-a", BatchIndex: 0, BatchCount: 1,
-			ClusterIdentityDigest: strings.Repeat("d", 64), NamespaceUID: "namespace-uid-a",
-			Kind: model.WorkloadObservationServicePort, PayloadHash: strings.Repeat("e", 64),
-			ObservedAt: fixture.now, ReceivedAt: fixture.now, Status: model.WorkloadInventoryReceiptStaging,
-			LeaseExpiresAt: fixture.now.Add(30 * time.Second), ResultCode: "BATCH_STAGED",
-		}
-		require.NoError(t, DB.Create(&receipt).Error)
-		requireS4ConstraintError(t, DB.Delete(&receipt).Error, "S4_WORKLOAD_RECEIPT_DELETE_FORBIDDEN")
-		missingReceiptBatch := model.WorkloadInventoryBatch{ID: "batch-missing", ReceiptID: "missing", CanonicalPayload: "{}"}
-		requireS4ConstraintError(t, DB.Create(&missingReceiptBatch).Error, "S4_WORKLOAD_RECEIPT_NOT_FOUND")
-
 		crossProvider := fixture.evidence
 		crossProvider.ID = "workload-source-cross-provider"
 		crossProvider.SourceTechnicalResourceID = fixture.agentB.ID

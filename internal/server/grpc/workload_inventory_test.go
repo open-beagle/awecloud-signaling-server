@@ -33,7 +33,7 @@ func TestReportWorkloadInventoryUsesDeployTokenAndStableAcks(t *testing.T) {
 	clusterDigest, namespaceUID := seedWorkloadInventoryAgent(t, database, "agent-token", 1001, "agent-a", "technical-agent-a")
 
 	cfg := &config.ServerConfig{FeatureFlags: config.FeatureFlagsSection{ResourceModelWrite: true, ResourceReconciliation: true}}
-	workload := service.NewWorkloadInventoryService(database)
+	workload := service.NewWorkloadInventoryService(database, service.NewWorkloadSnapshotStore())
 	server := &AgentServiceServer{config: cfg, workloadInventory: workload}
 	client, cleanup := startSupplyInventoryAgentServer(t, server)
 	defer cleanup()
@@ -79,7 +79,7 @@ func TestReportWorkloadInventoryFailsClosedForFeatureAndUntrustedScope(t *testin
 
 	disabled := &AgentServiceServer{
 		config:            &config.ServerConfig{FeatureFlags: config.FeatureFlagsSection{ResourceModelWrite: true}},
-		workloadInventory: service.NewWorkloadInventoryService(database),
+		workloadInventory: service.NewWorkloadInventoryService(database, service.NewWorkloadSnapshotStore()),
 	}
 	disabledClient, disabledCleanup := startSupplyInventoryAgentServer(t, disabled)
 	disabledStream, err := disabledClient.ReportWorkloadInventory(ctx)
@@ -92,7 +92,7 @@ func TestReportWorkloadInventoryFailsClosedForFeatureAndUntrustedScope(t *testin
 
 	enabled := &AgentServiceServer{
 		config:            &config.ServerConfig{FeatureFlags: config.FeatureFlagsSection{ResourceModelWrite: true, ResourceReconciliation: true}},
-		workloadInventory: service.NewWorkloadInventoryService(database),
+		workloadInventory: service.NewWorkloadInventoryService(database, service.NewWorkloadSnapshotStore()),
 	}
 	client, cleanup := startSupplyInventoryAgentServer(t, enabled)
 	defer cleanup()
@@ -109,7 +109,7 @@ func newWorkloadInventoryGRPCDatabase(t *testing.T) *gorm.DB {
 	database := newSupplyInventoryGRPCDatabase(t)
 	require.NoError(t, database.AutoMigrate(
 		&model.Tenant{}, &model.ResourceAllocation{}, &model.ResourceAllocationItem{},
-		&model.WorkloadInventoryReceipt{}, &model.WorkloadInventoryBatch{}, &model.WorkloadObservation{}, &model.WorkloadObservationSource{},
+		&model.WorkloadObservation{}, &model.WorkloadObservationSource{},
 		&model.TenantResource{}, &model.TenantResourceSource{}, &model.TenantResourceReviewDecision{}, &model.TenantResourceTargetRevision{},
 		&model.OutboxEvent{}, &model.ConsumerRevision{}, &model.AuditLog{},
 	))

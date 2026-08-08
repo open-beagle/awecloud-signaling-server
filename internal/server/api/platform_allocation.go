@@ -27,21 +27,20 @@ const (
 	platformAllocationRevokeRoute   = "/api/v1/management/platform/allocations/:id/revoke"
 	platformAllocationRenewRoute    = "/api/v1/management/platform/allocations/:id/renew"
 
-	ErrorCodePlatformAllocationNotFound     = "ALLOCATION_NOT_FOUND"
-	ErrorCodePlatformAllocationVersion      = "ALLOCATION_VERSION_CONFLICT"
-	ErrorCodePlatformAllocationState        = "ALLOCATION_STATE_TRANSITION_INVALID"
-	ErrorCodePlatformAllocationMode         = "ALLOCATION_MODE_UNSUPPORTED"
-	ErrorCodePlatformAllocationTime         = "ALLOCATION_TIME_INVALID"
-	ErrorCodePlatformAllocationTenant       = "ALLOCATION_TENANT_NOT_ACTIVE"
-	ErrorCodePlatformAllocationScope        = "ALLOCATION_SCOPE_NOT_ALLOCATABLE"
-	ErrorCodePlatformAllocationItem         = "ALLOCATION_ITEM_POLICY_VIOLATION"
-	ErrorCodePlatformAllocationConflict     = "ALLOCATION_SCOPE_CONFLICT"
-	ErrorCodePlatformAllocationHierarchy    = "ALLOCATION_SCOPE_HIERARCHY_CONFLICT"
-	ErrorCodePlatformAllocationReason       = "ALLOCATION_REASON_REQUIRED"
-	ErrorCodePlatformAllocationWriteFailed  = "ALLOCATION_WRITE_FAILED"
-	ErrorCodePlatformAllocationQueryFailed  = "ALLOCATION_QUERY_FAILED"
-	ErrorCodePlatformAllocationOutboxFailed = "ALLOCATION_OUTBOX_FAILED"
-	ErrorCodePlatformAllocationAuditFailed  = "ALLOCATION_AUDIT_FAILED"
+	ErrorCodePlatformAllocationNotFound    = "ALLOCATION_NOT_FOUND"
+	ErrorCodePlatformAllocationVersion     = "ALLOCATION_VERSION_CONFLICT"
+	ErrorCodePlatformAllocationState       = "ALLOCATION_STATE_TRANSITION_INVALID"
+	ErrorCodePlatformAllocationMode        = "ALLOCATION_MODE_UNSUPPORTED"
+	ErrorCodePlatformAllocationTime        = "ALLOCATION_TIME_INVALID"
+	ErrorCodePlatformAllocationTenant      = "ALLOCATION_TENANT_NOT_ACTIVE"
+	ErrorCodePlatformAllocationScope       = "ALLOCATION_SCOPE_NOT_ALLOCATABLE"
+	ErrorCodePlatformAllocationItem        = "ALLOCATION_ITEM_POLICY_VIOLATION"
+	ErrorCodePlatformAllocationConflict    = "ALLOCATION_SCOPE_CONFLICT"
+	ErrorCodePlatformAllocationHierarchy   = "ALLOCATION_SCOPE_HIERARCHY_CONFLICT"
+	ErrorCodePlatformAllocationReason      = "ALLOCATION_REASON_REQUIRED"
+	ErrorCodePlatformAllocationWriteFailed = "ALLOCATION_WRITE_FAILED"
+	ErrorCodePlatformAllocationQueryFailed = "ALLOCATION_QUERY_FAILED"
+	ErrorCodePlatformAllocationAuditFailed = "ALLOCATION_AUDIT_FAILED"
 )
 
 var platformAllocationIdempotencyPolicies = map[string]service.JSONFieldPolicy{
@@ -321,7 +320,7 @@ func platformAllocationListInput(c *gin.Context) (service.PlatformAllocationList
 	return input, true
 }
 
-func executePlatformAllocationMutation(c *gin.Context, authorization *service.ManagementAuthorizationContext, body []byte, status int, action, eventType, reason string, mutation platformAllocationMutation) {
+func executePlatformAllocationMutation(c *gin.Context, authorization *service.ManagementAuthorizationContext, body []byte, status int, action, _ string, reason string, mutation platformAllocationMutation) {
 	idempotencyBody, err := platformAllocationIdempotencyBody(c, body)
 	if err != nil {
 		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "幂等请求参数无效")
@@ -354,9 +353,6 @@ func executePlatformAllocationMutation(c *gin.Context, authorization *service.Ma
 		if mutationErr != nil {
 			return mutationErr
 		}
-		if err := appendPlatformAllocationOutbox(tx, c, allocation, eventType); err != nil {
-			return fmt.Errorf("%w: %v", errPlatformAllocationOutbox, err)
-		}
 		if err := recordPlatformAllocationAudit(tx, c, allocation, action, reason); err != nil {
 			return fmt.Errorf("%w: %v", errPlatformAllocationAudit, err)
 		}
@@ -375,13 +371,8 @@ func executePlatformAllocationMutation(c *gin.Context, authorization *service.Ma
 }
 
 var (
-	errPlatformAllocationOutbox = errors.New("Platform allocation outbox write failed")
-	errPlatformAllocationAudit  = errors.New("Platform allocation audit write failed")
+	errPlatformAllocationAudit = errors.New("Platform allocation audit write failed")
 )
-
-func appendPlatformAllocationOutbox(tx *gorm.DB, c *gin.Context, allocation *model.ResourceAllocation, eventType string) error {
-	return service.AppendPlatformAllocationOutbox(tx, db.DB, allocation, eventType, requestID(c), time.Now().UTC())
-}
 
 func recordPlatformAllocationAudit(tx *gorm.DB, c *gin.Context, allocation *model.ResourceAllocation, action, reason string) error {
 	scopeIDs := make([]string, 0, len(allocation.Items))
@@ -438,8 +429,6 @@ func writePlatformAllocationError(c *gin.Context, err error, write bool) {
 		codedError(c, http.StatusConflict, ErrorCodePlatformAllocationHierarchy, "Scope 与现有 Cluster/Namespace 分配冲突")
 	case errors.Is(err, service.ErrPlatformAllocationReasonRequired):
 		codedError(c, http.StatusUnprocessableEntity, ErrorCodePlatformAllocationReason, "必须提供有效操作原因")
-	case errors.Is(err, errPlatformAllocationOutbox):
-		codedError(c, http.StatusServiceUnavailable, ErrorCodePlatformAllocationOutboxFailed, "资源分配事件写入失败")
 	case errors.Is(err, errPlatformAllocationAudit):
 		codedError(c, http.StatusServiceUnavailable, ErrorCodePlatformAllocationAuditFailed, "资源分配审计写入失败")
 	default:

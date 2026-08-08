@@ -171,16 +171,14 @@ func workloadInventoryErrorAck(envelope *pb.WorkloadInventoryEnvelope, err error
 		ack.SnapshotId, ack.BatchIndex = envelope.SnapshotId, envelope.BatchIndex
 	}
 	for target, code := range map[error]string{
-		service.ErrWorkloadPayloadHashMismatch:      "WORKLOAD_PAYLOAD_HASH_MISMATCH",
-		service.ErrWorkloadSequenceGap:              "WORKLOAD_SEQUENCE_GAP",
-		service.ErrWorkloadSequenceConflict:         "WORKLOAD_SEQUENCE_CONFLICT",
-		service.ErrWorkloadSourceEpochStale:         "WORKLOAD_SOURCE_EPOCH_STALE",
-		service.ErrWorkloadSnapshotMetadataConflict: "WORKLOAD_SNAPSHOT_METADATA_CONFLICT",
-		service.ErrWorkloadSnapshotIncomplete:       "WORKLOAD_SNAPSHOT_INCOMPLETE",
-		service.ErrWorkloadProtocolUnsupported:      "WORKLOAD_PROTOCOL_UNSUPPORTED",
-		service.ErrWorkloadIdentityInsufficient:     "WORKLOAD_IDENTITY_INSUFFICIENT",
-		service.ErrWorkloadPayloadForbidden:         "WORKLOAD_PAYLOAD_FORBIDDEN",
-		service.ErrWorkloadInventoryInvalidInput:    "WORKLOAD_INVALID_INVENTORY",
+		service.ErrWorkloadPayloadHashMismatch:   "WORKLOAD_PAYLOAD_HASH_MISMATCH",
+		service.ErrWorkloadSequenceGap:           "WORKLOAD_SEQUENCE_GAP",
+		service.ErrWorkloadSequenceConflict:      "WORKLOAD_SEQUENCE_CONFLICT",
+		service.ErrWorkloadSourceEpochStale:      "WORKLOAD_SOURCE_EPOCH_STALE",
+		service.ErrWorkloadProtocolUnsupported:   "WORKLOAD_PROTOCOL_UNSUPPORTED",
+		service.ErrWorkloadIdentityInsufficient:  "WORKLOAD_IDENTITY_INSUFFICIENT",
+		service.ErrWorkloadPayloadForbidden:      "WORKLOAD_PAYLOAD_FORBIDDEN",
+		service.ErrWorkloadInventoryInvalidInput: "WORKLOAD_INVALID_INVENTORY",
 	} {
 		if errors.Is(err, target) {
 			ack.ResultCode = code

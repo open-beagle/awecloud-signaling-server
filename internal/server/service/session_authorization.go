@@ -246,8 +246,7 @@ func (s *SessionAuthorizationService) revalidateSession(tx *gorm.DB, session *mo
 	}
 	deviceValidUntil := device.LastHeartbeat.UTC().Add(resourceSessionDeviceHeartbeatTTL)
 	validUntil := calculateResourceSessionValidUntil(now, session.StartedAt, grant.MaxSessionSeconds,
-		membership.ExpiresAt, chain.Allocation.ExpiresAt, &chain.Observation.LeaseExpiresAt,
-		&chain.Evidence.LeaseExpiresAt, grant.ExpiresAt, &deviceValidUntil, namespaceLeaseDeadline(chain))
+		membership.ExpiresAt, chain.Allocation.ExpiresAt, grant.ExpiresAt, &deviceValidUntil, namespaceLeaseDeadline(chain))
 	if !validUntil.After(now) {
 		return nil, sessionAuthorizationExpiredCode, nil
 	}

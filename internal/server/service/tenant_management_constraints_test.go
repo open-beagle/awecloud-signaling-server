@@ -222,7 +222,7 @@ func TestTenantManagementServicesRespectS4Triggers(t *testing.T) {
 	candidateTarget.ID = uuid.NewString()
 	candidateTarget.TenantResourceSourceID = candidateSource.ID
 	require.NoError(t, database.Create(&candidateTarget).Error)
-	published, err := NewTenantResourceService(database).Review(context.Background(), fixture.authorization, ReviewTenantResourceInput{
+	published, err := NewTenantResourceService(database, NewWorkloadSnapshotStore()).Review(context.Background(), fixture.authorization, ReviewTenantResourceInput{
 		TenantID: fixture.tenant.ID, ResourceID: candidateResource.ID, ExpectedRowVersion: 1,
 		ObservationRevision: 1, Reason: "approved by trigger test", Publish: true,
 	})
@@ -231,7 +231,7 @@ func TestTenantManagementServicesRespectS4Triggers(t *testing.T) {
 	require.Equal(t, int64(2), published.Revision)
 
 	displayName := "Tenant Trigger Service 443"
-	resource, err := NewTenantResourceService(database).Update(context.Background(), fixture.authorization, UpdateTenantResourceInput{
+	resource, err := NewTenantResourceService(database, NewWorkloadSnapshotStore()).Update(context.Background(), fixture.authorization, UpdateTenantResourceInput{
 		TenantID: fixture.tenant.ID, ResourceID: fixture.resource.ID, ExpectedRowVersion: 1, DisplayName: &displayName,
 	})
 	require.NoError(t, err)

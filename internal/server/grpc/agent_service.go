@@ -84,7 +84,7 @@ type AgentServiceServer struct {
 }
 
 // NewAgentServiceServer 创建 Agent 服务
-func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
+func NewAgentServiceServer(cfg *config.ServerConfig, workloadSnapshots *service.WorkloadSnapshotStore) *AgentServiceServer {
 	s := &AgentServiceServer{
 		connections:                 make(map[uint64]*AgentConnection),
 		configVersion:               time.Now().Unix(),
@@ -93,7 +93,7 @@ func NewAgentServiceServer(cfg *config.ServerConfig) *AgentServiceServer {
 		updateService:               service.NewUpdateService(db.DB),
 		resourceReconciler:          service.NewResourceReconciliationService(db.DB),
 		providerSupply:              service.NewProviderSupplyService(db.DB),
-		workloadInventory:           service.NewWorkloadInventoryService(db.DB),
+		workloadInventory:           service.NewWorkloadInventoryService(db.DB, workloadSnapshots),
 		sessionAuthorization:        service.NewSessionAuthorizationService(db.DB),
 		containerSessionAcks:        make(map[uint64][]string),
 		authorizationSnapshotStates: make(map[string]*authorizationSnapshotState),

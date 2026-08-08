@@ -14,11 +14,6 @@ type tenantResourceTrigger struct {
 }
 
 var tenantResourceTriggers = []tenantResourceTrigger{
-	{name: "trg_s4_workload_inventory_receipt_insert", table: "workload_inventory_receipt", operation: "INSERT", body: workloadInventoryReceiptTriggerBody},
-	{name: "trg_s4_workload_inventory_receipt_update", table: "workload_inventory_receipt", operation: "UPDATE", body: workloadInventoryReceiptUpdateTriggerBody},
-	{name: "trg_s4_workload_inventory_receipt_delete", table: "workload_inventory_receipt", operation: "DELETE", body: `SELECT RAISE(ABORT, 'S4_WORKLOAD_RECEIPT_DELETE_FORBIDDEN');`},
-	{name: "trg_s4_workload_inventory_batch_insert", table: "workload_inventory_batch", operation: "INSERT", body: workloadInventoryBatchTriggerBody},
-	{name: "trg_s4_workload_inventory_batch_update", table: "workload_inventory_batch", operation: "UPDATE", body: workloadInventoryBatchTriggerBody},
 	{name: "trg_s4_workload_observation_insert", table: "workload_observation", operation: "INSERT", body: workloadObservationTriggerBody},
 	{name: "trg_s4_workload_observation_update", table: "workload_observation", operation: "UPDATE", body: workloadObservationUpdateTriggerBody},
 	{name: "trg_s4_workload_observation_source_insert", table: "workload_observation_source", operation: "INSERT", body: workloadObservationSourceTriggerBody},
@@ -52,24 +47,6 @@ var tenantResourceTriggers = []tenantResourceTrigger{
 	{name: "trg_s4_resource_session_termination_update", table: "resource_session_termination", operation: "UPDATE", body: resourceSessionTerminationUpdateTriggerBody},
 	{name: "trg_s4_resource_session_termination_delete", table: "resource_session_termination", operation: "DELETE", body: `SELECT RAISE(ABORT, 'S4_SESSION_TERMINATION_DELETE_FORBIDDEN');`},
 }
-
-const workloadInventoryReceiptTriggerBody = `
-	SELECT CASE WHEN NOT EXISTS (
-		SELECT 1 FROM technical_resource WHERE id = NEW.source_technical_resource_id
-	) THEN RAISE(ABORT, 'S4_WORKLOAD_SOURCE_NOT_FOUND') END;`
-
-const workloadInventoryReceiptUpdateTriggerBody = workloadInventoryReceiptTriggerBody + `
-	SELECT CASE WHEN NEW.source_technical_resource_id IS NOT OLD.source_technical_resource_id
-		OR NEW.source_epoch IS NOT OLD.source_epoch OR NEW.sequence IS NOT OLD.sequence
-		OR NEW.snapshot_id IS NOT OLD.snapshot_id OR NEW.batch_index IS NOT OLD.batch_index
-		OR NEW.batch_count IS NOT OLD.batch_count OR NEW.schema_version IS NOT OLD.schema_version
-		OR NEW.payload_hash IS NOT OLD.payload_hash OR NEW.lease_expires_at IS NOT OLD.lease_expires_at
-		THEN RAISE(ABORT, 'S4_WORKLOAD_RECEIPT_IDENTITY_IMMUTABLE') END;`
-
-const workloadInventoryBatchTriggerBody = `
-	SELECT CASE WHEN NOT EXISTS (
-		SELECT 1 FROM workload_inventory_receipt WHERE id = NEW.receipt_id
-	) THEN RAISE(ABORT, 'S4_WORKLOAD_RECEIPT_NOT_FOUND') END;`
 
 const workloadObservationTriggerBody = `
 	SELECT CASE WHEN NOT EXISTS (

@@ -2,14 +2,6 @@ package model
 
 import "time"
 
-type WorkloadInventoryReceiptStatus string
-
-const (
-	WorkloadInventoryReceiptStaging   WorkloadInventoryReceiptStatus = "staging"
-	WorkloadInventoryReceiptCommitted WorkloadInventoryReceiptStatus = "committed"
-	WorkloadInventoryReceiptRejected  WorkloadInventoryReceiptStatus = "rejected"
-)
-
 type WorkloadObservationKind string
 
 const (
@@ -45,48 +37,6 @@ const (
 	WorkloadObservationSourceConflict WorkloadObservationSourceState = "conflict"
 	WorkloadObservationSourceStale    WorkloadObservationSourceState = "stale"
 )
-
-type WorkloadInventoryReceipt struct {
-	ID                        string                         `gorm:"primaryKey;size:36" json:"id"`
-	SourceTechnicalResourceID string                         `gorm:"size:36;not null;uniqueIndex:uk_workload_inventory_sequence,priority:1;uniqueIndex:uk_workload_inventory_batch,priority:1;index" json:"source_technical_resource_id"`
-	SourceEpoch               string                         `gorm:"size:36;not null;uniqueIndex:uk_workload_inventory_sequence,priority:2" json:"source_epoch"`
-	Sequence                  int64                          `gorm:"not null;uniqueIndex:uk_workload_inventory_sequence,priority:3;check:chk_workload_inventory_sequence,sequence > 0" json:"sequence"`
-	SchemaVersion             int                            `gorm:"not null;check:chk_workload_inventory_schema_version,schema_version > 0" json:"schema_version"`
-	SnapshotID                string                         `gorm:"size:36;not null;uniqueIndex:uk_workload_inventory_batch,priority:2;index" json:"snapshot_id"`
-	BatchIndex                int                            `gorm:"not null;uniqueIndex:uk_workload_inventory_batch,priority:3;check:chk_workload_inventory_batch_index,batch_index >= 0 AND batch_index < batch_count" json:"batch_index"`
-	BatchCount                int                            `gorm:"not null;check:chk_workload_inventory_batch_count,batch_count > 0" json:"batch_count"`
-	ClusterIdentityDigest     string                         `gorm:"size:64;not null;check:chk_workload_inventory_cluster_digest,length(cluster_identity_digest) = 64" json:"cluster_identity_digest"`
-	NamespaceUID              string                         `gorm:"size:100;not null;index" json:"namespace_uid"`
-	NamespaceName             string                         `gorm:"size:200" json:"namespace_name,omitempty"`
-	Kind                      WorkloadObservationKind        `gorm:"size:20;not null;index;check:chk_workload_inventory_kind,kind IN ('service_port','container')" json:"kind"`
-	PayloadHash               string                         `gorm:"size:64;not null;check:chk_workload_inventory_payload_hash,length(payload_hash) = 64" json:"payload_hash"`
-	ObservedAt                time.Time                      `gorm:"not null" json:"observed_at"`
-	ReceivedAt                time.Time                      `gorm:"not null;index" json:"received_at"`
-	LeaseExpiresAt            time.Time                      `gorm:"not null;index;check:chk_workload_inventory_lease,lease_expires_at > received_at" json:"lease_expires_at"`
-	Status                    WorkloadInventoryReceiptStatus `gorm:"size:20;not null;default:'staging';index;check:chk_workload_inventory_status,status IN ('staging','committed','rejected');check:chk_workload_inventory_committed,(status = 'committed' AND committed_at IS NOT NULL) OR (status IN ('staging','rejected') AND committed_at IS NULL)" json:"status"`
-	ResultCode                string                         `gorm:"size:100;not null" json:"result_code"`
-	Retryable                 bool                           `gorm:"not null;default:false" json:"retryable"`
-	CommittedAt               *time.Time                     `json:"committed_at,omitempty"`
-	PayloadDeleteAfter        *time.Time                     `gorm:"index" json:"payload_delete_after,omitempty"`
-	CreatedAt                 time.Time                      `json:"created_at"`
-	UpdatedAt                 time.Time                      `json:"updated_at"`
-
-	SourceTechnicalResource *TechnicalResource      `gorm:"foreignKey:SourceTechnicalResourceID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT" json:"-"`
-	Batch                   *WorkloadInventoryBatch `gorm:"foreignKey:ReceiptID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT" json:"-"`
-}
-
-func (WorkloadInventoryReceipt) TableName() string { return "workload_inventory_receipt" }
-
-type WorkloadInventoryBatch struct {
-	ID               string    `gorm:"primaryKey;size:36" json:"id"`
-	ReceiptID        string    `gorm:"size:36;not null;uniqueIndex" json:"receipt_id"`
-	CanonicalPayload string    `gorm:"type:text;not null;check:chk_workload_inventory_batch_payload_size,length(CAST(canonical_payload AS BLOB)) <= 1048576" json:"-"`
-	CreatedAt        time.Time `json:"created_at"`
-
-	Receipt *WorkloadInventoryReceipt `gorm:"foreignKey:ReceiptID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT" json:"-"`
-}
-
-func (WorkloadInventoryBatch) TableName() string { return "workload_inventory_batch" }
 
 type WorkloadObservation struct {
 	ID               string                   `gorm:"primaryKey;size:36" json:"id"`
