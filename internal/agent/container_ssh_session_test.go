@@ -5,7 +5,20 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 )
+
+func TestParseExecCommand(t *testing.T) {
+	payload := ssh.Marshal(struct{ Command string }{Command: "bash -lc 'echo ready'"})
+	command, ok := parseExecCommand(payload)
+	require.True(t, ok)
+	require.Equal(t, "bash -lc 'echo ready'", command)
+
+	_, ok = parseExecCommand(ssh.Marshal(struct{ Command string }{}))
+	require.False(t, ok)
+	_, ok = parseExecCommand(ssh.Marshal(struct{ Command string }{Command: "echo\x00bad"}))
+	require.False(t, ok)
+}
 
 func TestParsePTYSize(t *testing.T) {
 	payload := make([]byte, 4+5+8)

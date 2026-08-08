@@ -17,16 +17,17 @@ import (
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
-// ContainerExecStream contains only the transport endpoints needed for an
-// interactive shell. It deliberately has no command, namespace, or target
-// fields; those always originate from PermissionCache.
+// ContainerExecStream contains the SSH request and its transport endpoints.
+// Namespace and target identity always originate from PermissionCache.
 type ContainerExecStream struct {
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
-	Rows   uint16
-	Cols   uint16
-	Resize <-chan ContainerTerminalSize
+	Command string
+	TTY     bool
+	Stdin   io.Reader
+	Stdout  io.Writer
+	Stderr  io.Writer
+	Rows    uint16
+	Cols    uint16
+	Resize  <-chan ContainerTerminalSize
 }
 
 type ContainerTerminalSize struct {

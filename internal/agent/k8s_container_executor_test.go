@@ -69,7 +69,7 @@ func TestKubernetesContainerExecutorForwardsResizeAndStreamFailure(t *testing.T)
 	close(resize)
 	err = executor.Execute(context.Background(), &ContainerSSHUserPermission{
 		Namespace: "team-a", PodName: "ide-0", ContainerName: "workspace",
-	}, ContainerExecStream{Rows: 40, Cols: 120, Resize: resize})
+	}, ContainerExecStream{TTY: true, Rows: 40, Cols: 120, Resize: resize})
 	require.ErrorIs(t, err, streamFailure)
 	require.False(t, probe.options.Tty)
 	require.Equal(t, &remotecommand.TerminalSize{Width: 120, Height: 40}, remote.options.TerminalSizeQueue.Next())
@@ -96,7 +96,7 @@ func TestKubernetesContainerExecutorUsesFixedShellAndTarget(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	err = executor.Execute(context.Background(), &ContainerSSHUserPermission{Namespace: "team-a", PodName: "ide-0", ContainerName: "workspace"}, ContainerExecStream{
-		Stdin: strings.NewReader("exit\n"), Stdout: &stdout, Stderr: &stderr, Rows: 40, Cols: 120,
+		TTY: true, Stdin: strings.NewReader("exit\n"), Stdout: &stdout, Stderr: &stderr, Rows: 40, Cols: 120,
 	})
 	require.NoError(t, err)
 	require.Equal(t, http.MethodPost, method)
@@ -119,6 +119,35 @@ func TestKubernetesContainerExecutorUsesFixedShellAndTarget(t *testing.T) {
 	require.Equal(t, uint16(120), size.Width)
 	require.Equal(t, uint16(40), size.Height)
 	require.Nil(t, remote.options.TerminalSizeQueue.Next())
+}
+
+func TestKubernetesContainerExecutorRunsExecThroughPreferredShellWithoutTTY(t *testing.T) {
+	executor, err := NewKubernetesContainerExecutor(&rest.Config{Host: "https://kubernetes.example"})
+	require.NoError(t, err)
+	probe := &recordingRemoteExecutor{}
+	remote := &recordingRemoteExecutor{}
+	var urls []*url.URL
+	executor.newExecutor = func(_ *rest.Config, _ string, got *url.URL) (remotecommand.Executor, error) {
+		urls = append(urls, got)
+		if len(urls) == 1 {
+			return probe, nil
+		}
+		return remote, nil
+	}
+
+	err = executor.Execute(context.Background(), &ContainerSSHUserPermission{
+		Namespace: "team-a", PodName: "ide-0", ContainerName: "workspace",
+	}, ContainerExecStream{Command: "bash", Stdin: strings.NewReader("echo ready\n"), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	require.NoError(t, err)
+	require.Len(t, urls, 2)
+	require.Equal(t, []string{"/bin/bash", "-c", "bash"}, urls[1].Query()["command"])
+	require.Equal(t, "true", urls[1].Query().Get("stdin"))
+	require.Equal(t, "true", urls[1].Query().Get("stdout"))
+	require.Equal(t, "true", urls[1].Query().Get("stderr"))
+	require.Equal(t, "false", urls[1].Query().Get("tty"))
+	require.False(t, remote.options.Tty)
+	require.NotNil(t, remote.options.Stderr)
+	require.Nil(t, remote.options.TerminalSizeQueue)
 }
 
 func TestKubernetesContainerExecutorDeclaresStdinOnlyWhenProvided(t *testing.T) {

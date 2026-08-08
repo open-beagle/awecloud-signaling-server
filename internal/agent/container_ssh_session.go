@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"strings"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -15,9 +16,9 @@ type containerShellOpener interface {
 	OpenShell(context.Context, string, string, ContainerExecStream) error
 }
 
-// ServeContainerSSHSession accepts only an interactive SSH shell. Resource ID
-// and user identity are supplied by the authenticated connection handler; no
-// SSH request can replace them with arbitrary Kubernetes parameters.
+// ServeContainerSSHSession accepts standard SSH shell and exec requests.
+// Resource ID and user identity are supplied by the authenticated connection
+// handler; no SSH request can replace them with Kubernetes parameters.
 func ServeContainerSSHSession(ctx context.Context, channel ssh.Channel, requests <-chan *ssh.Request, opener containerShellOpener, userName, resourceID string) error {
 	if opener == nil || userName == "" || resourceID == "" {
 		return fmt.Errorf("ContainerSSH session is not configured")
@@ -30,6 +31,7 @@ func ServeContainerSSHSession(ctx context.Context, channel ssh.Channel, requests
 	defer close(resize)
 	result := make(chan error, 1)
 	rows, cols := uint16(24), uint16(80)
+	ptyRequested := false
 	shellStarted := false
 	for {
 		select {
@@ -58,6 +60,7 @@ func ServeContainerSSHSession(ctx context.Context, channel ssh.Channel, requests
 					continue
 				}
 				rows, cols = parsedRows, parsedCols
+				ptyRequested = true
 				if request.WantReply {
 					request.Reply(true, nil)
 				}
@@ -70,12 +73,40 @@ func ServeContainerSSHSession(ctx context.Context, channel ssh.Channel, requests
 				}
 				shellStarted = true
 				initialRows, initialCols := rows, cols
+				tty := ptyRequested
 				if request.WantReply {
 					request.Reply(true, nil)
 				}
 				go func() {
 					result <- opener.OpenShell(sessionCtx, userName, resourceID, ContainerExecStream{
-						Stdin: channel, Stdout: channel, Stderr: channel.Stderr(), Rows: initialRows, Cols: initialCols, Resize: resize,
+						TTY: tty, Stdin: channel, Stdout: channel, Stderr: channel.Stderr(),
+						Rows: initialRows, Cols: initialCols, Resize: resize,
+					})
+				}()
+			case "exec":
+				if shellStarted {
+					if request.WantReply {
+						request.Reply(false, nil)
+					}
+					continue
+				}
+				command, ok := parseExecCommand(request.Payload)
+				if !ok {
+					if request.WantReply {
+						request.Reply(false, nil)
+					}
+					continue
+				}
+				shellStarted = true
+				initialRows, initialCols := rows, cols
+				tty := ptyRequested
+				if request.WantReply {
+					request.Reply(true, nil)
+				}
+				go func() {
+					result <- opener.OpenShell(sessionCtx, userName, resourceID, ContainerExecStream{
+						Command: command, TTY: tty, Stdin: channel, Stdout: channel, Stderr: channel.Stderr(),
+						Rows: initialRows, Cols: initialCols, Resize: resize,
 					})
 				}()
 			case "window-change":
@@ -97,6 +128,16 @@ func ServeContainerSSHSession(ctx context.Context, channel ssh.Channel, requests
 			}
 		}
 	}
+}
+
+func parseExecCommand(payload []byte) (string, bool) {
+	var request struct {
+		Command string
+	}
+	if err := ssh.Unmarshal(payload, &request); err != nil || request.Command == "" || len(request.Command) > 32768 || strings.IndexByte(request.Command, 0) >= 0 {
+		return "", false
+	}
+	return request.Command, true
 }
 
 type containerSSHExitError interface {

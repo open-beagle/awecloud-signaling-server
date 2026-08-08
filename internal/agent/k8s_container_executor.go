@@ -49,7 +49,11 @@ func (e *KubernetesContainerExecutor) Execute(ctx context.Context, target *Conta
 	if err != nil {
 		return err
 	}
-	return e.execute(ctx, target, []string{shell}, stream, true)
+	command := []string{shell}
+	if stream.Command != "" {
+		command = []string{shell, "-c", stream.Command}
+	}
+	return e.execute(ctx, target, command, stream, stream.TTY)
 }
 
 func (e *KubernetesContainerExecutor) effectiveUser(ctx context.Context, target *ContainerSSHUserPermission) (string, error) {
