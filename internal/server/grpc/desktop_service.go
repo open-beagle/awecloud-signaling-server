@@ -1863,11 +1863,16 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 			if listenPort == 0 {
 				continue
 			}
+			domain, err := service.ContainerSSHBusinessDomain(ctx, db.DB, projection.session.AccessTechnicalResourceID, projection.target.TargetSnapshot)
+			if err != nil {
+				logger.Warnf("Desktop ContainerSSH 业务域名无效: resource_id=%s err=%v", projection.resource.ID, err)
+				continue
+			}
 			sshResources = append(sshResources, &pb.ContainerSSHResource{
 				ResourceId: projection.resource.ID, TenantId: projection.resource.TenantID, TenantName: projection.tenant.Name,
 				DisplayName: projection.resource.DisplayName, State: state, TargetRevision: projection.target.Revision,
 				AgentNodeId: projection.agent.ID, Capability: string(model.TenantResourceContainerSSH), ListenPort: uint32(listenPort),
-				Domain: projection.resource.ID + ".container" + domainSuffix, AgentIp: projection.agent.IP, SshUser: "container",
+				Domain: domain, AgentIp: projection.agent.IP, SshUser: "container",
 				SessionId: projection.session.ID, SourceId: projection.session.TenantResourceSourceID,
 				TargetRevisionId: projection.session.TargetRevisionID, AuthorizationRevision: permission.AuthorizationRevision,
 			})

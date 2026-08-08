@@ -15,6 +15,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -315,7 +316,11 @@ func (r *KubernetesInventoryReporter) collect(options kubernetesInventoryOptions
 			if err != nil {
 				logger.Warnf("Kubernetes Inventory 跳过不可读 Container 快照: namespace=%s err=%v", namespaceName, err)
 			} else {
-				snapshot.containers[namespaceName] = workloadContainers(pods.Items)
+				replicaSets, err := r.k8s.AppsV1().ReplicaSets(namespaceName).List(ctx, metav1.ListOptions{})
+				if err != nil {
+					return nil, fmt.Errorf("read ReplicaSet owners: namespace=%s: %w", namespaceName, err)
+				}
+				snapshot.containers[namespaceName] = workloadContainers(pods.Items, replicaSets.Items)
 			}
 		}
 	}
@@ -365,15 +370,21 @@ func workloadServicePorts(services []corev1.Service) []*pb.WorkloadServicePort {
 	return result
 }
 
-func workloadContainers(pods []corev1.Pod) []*pb.WorkloadContainer {
+func workloadContainers(pods []corev1.Pod, replicaSets []appsv1.ReplicaSet) []*pb.WorkloadContainer {
+	replicaSetOwners := make(map[string]metav1.OwnerReference, len(replicaSets))
+	for i := range replicaSets {
+		owner := controllerOwner(replicaSets[i].OwnerReferences)
+		if owner.Kind == "Deployment" && owner.UID != "" {
+			replicaSetOwners[string(replicaSets[i].UID)] = owner
+		}
+	}
 	result := make([]*pb.WorkloadContainer, 0)
 	for i := range pods {
 		pod := &pods[i]
-		owner := metav1.OwnerReference{}
-		for _, candidate := range pod.OwnerReferences {
-			if candidate.Controller != nil && *candidate.Controller {
-				owner = candidate
-				break
+		owner := controllerOwner(pod.OwnerReferences)
+		if owner.Kind == "ReplicaSet" {
+			if deployment, ok := replicaSetOwners[string(owner.UID)]; ok {
+				owner = deployment
 			}
 		}
 		for _, container := range pod.Spec.Containers {
@@ -389,6 +400,15 @@ func workloadContainers(pods []corev1.Pod) []*pb.WorkloadContainer {
 		return strings.Join([]string{left.PodUid, left.ContainerName}, "\x00") < strings.Join([]string{right.PodUid, right.ContainerName}, "\x00")
 	})
 	return result
+}
+
+func controllerOwner(references []metav1.OwnerReference) metav1.OwnerReference {
+	for _, candidate := range references {
+		if candidate.Controller != nil && *candidate.Controller {
+			return candidate
+		}
+	}
+	return metav1.OwnerReference{}
 }
 
 func inventoryLabels(source map[string]string) map[string]string {

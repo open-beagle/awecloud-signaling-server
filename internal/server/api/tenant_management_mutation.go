@@ -209,6 +209,10 @@ func writeTenantManagementError(c *gin.Context, err error) {
 		codedError(c, http.StatusConflict, "TENANT_RESOURCE_SERVICE_PORT_CHANGED", "Service Port 或协议已变化")
 	case errors.Is(err, service.ErrTenantResourceStateTransition):
 		codedError(c, http.StatusConflict, "TENANT_RESOURCE_STATE_TRANSITION_INVALID", "Tenant Resource 状态转换无效")
+	case errors.Is(err, service.ErrContainerSSHBusinessDomainInvalid):
+		codedError(c, http.StatusUnprocessableEntity, "CONTAINER_SSH_BUSINESS_DOMAIN_INVALID", "ContainerSSH 工作负载、Namespace 或资源域标识无效")
+	case errors.Is(err, service.ErrContainerSSHBusinessDomainConflict):
+		codedError(c, http.StatusConflict, "CONTAINER_SSH_BUSINESS_DOMAIN_CONFLICT", "ContainerSSH 业务域已被其他资源占用")
 	case errors.Is(err, service.ErrTenantGrantActionUnsupported):
 		codedError(c, http.StatusUnprocessableEntity, "TENANT_GRANT_ACTION_UNSUPPORTED", "Grant action 不适用于该资源")
 	case errors.Is(err, service.ErrTenantGrantSubjectInvalid):
