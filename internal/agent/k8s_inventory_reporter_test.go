@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -204,6 +205,48 @@ func TestInventoryReporterAdvancesSequencesOnlyAfterCommittedAck(t *testing.T) {
 	require.Equal(t, uint64(1), (<-server.supply).Sequence)
 	require.Equal(t, uint64(1), (<-server.workloads).Sequence)
 	require.Equal(t, uint64(2), (<-server.workloads).Sequence)
+}
+
+func TestWorkloadContainersResolveReplicaSetOwnerToDeployment(t *testing.T) {
+	deploymentOwner := metav1.OwnerReference{
+		APIVersion: "apps/v1", Kind: "Deployment", Name: "ide-public", UID: types.UID("deployment-uid"), Controller: boolPointer(true),
+	}
+	replicaSet := appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{
+		Name: "ide-public-6ffbc8766b", UID: types.UID("replicaset-uid"), OwnerReferences: []metav1.OwnerReference{deploymentOwner},
+	}}
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "ide-public-6ffbc8766b-6nrrz", UID: types.UID("pod-uid"),
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "apps/v1", Kind: "ReplicaSet", Name: replicaSet.Name, UID: replicaSet.UID, Controller: boolPointer(true),
+			}},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "ide"}}},
+	}
+
+	containers := workloadContainers([]corev1.Pod{pod}, []appsv1.ReplicaSet{replicaSet})
+	require.Len(t, containers, 1)
+	require.Equal(t, "Deployment", containers[0].WorkloadKind)
+	require.Equal(t, "ide-public", containers[0].WorkloadName)
+	require.Equal(t, "deployment-uid", containers[0].WorkloadUid)
+}
+
+func TestWorkloadContainersKeepDirectControllerIdentity(t *testing.T) {
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "database-0", UID: types.UID("pod-uid"),
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "apps/v1", Kind: "StatefulSet", Name: "database", UID: types.UID("statefulset-uid"), Controller: boolPointer(true),
+			}},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "database"}}},
+	}
+
+	containers := workloadContainers([]corev1.Pod{pod}, nil)
+	require.Len(t, containers, 1)
+	require.Equal(t, "StatefulSet", containers[0].WorkloadKind)
+	require.Equal(t, "database", containers[0].WorkloadName)
+	require.Equal(t, "statefulset-uid", containers[0].WorkloadUid)
 }
 
 func boolPointer(value bool) *bool { return &value }

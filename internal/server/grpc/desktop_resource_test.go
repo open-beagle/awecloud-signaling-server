@@ -330,7 +330,7 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 	}
 	require.NoError(t, database.Create(&grant).Error)
 
-	sshTargetSnapshot := `{"namespace_uid":"projection-namespace-uid","namespace_name":"projection-workloads","workload_uid":"projection-shell-workload","pod_name":"projection-shell-0","pod_uid":"projection-shell-pod-uid","container_name":"shell","labels_allowlist":{}}`
+	sshTargetSnapshot := `{"namespace_uid":"projection-namespace-uid","namespace_name":"projection-workloads","workload_uid":"projection-shell-workload","workload_kind":"Deployment","workload_name":"projection-shell","pod_name":"projection-shell-0","pod_uid":"projection-shell-pod-uid","container_name":"shell","labels_allowlist":{}}`
 	sshObservation := model.WorkloadObservation{
 		ID: uuid.NewString(), NamespaceScopeID: namespaceScope.ID, Kind: model.WorkloadObservationContainer,
 		StableKey: strings.Repeat("9", 64), IdentityQuality: model.WorkloadIdentityStrong,
@@ -412,7 +412,7 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 	require.Len(t, sshResources, 1)
 	projectedSSH := sshResources[0]
 	require.Equal(t, sshResource.ID, projectedSSH.ResourceId)
-	require.Equal(t, sshResource.ID+".container.beagle", projectedSSH.Domain)
+	require.Equal(t, "projection-shell.projection-workloads.projection-agent.projection-provider.beagle", projectedSSH.Domain)
 	require.Equal(t, agentNode.IP, projectedSSH.AgentIp)
 	require.Equal(t, "container", projectedSSH.SshUser)
 	require.Greater(t, projectedSSH.ListenPort, uint32(0))

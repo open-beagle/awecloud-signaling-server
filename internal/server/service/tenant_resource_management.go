@@ -387,6 +387,9 @@ func (s *TenantResourceService) Review(ctx context.Context, authorization *Manag
 			if chain.Observation.ObservedRevision != input.ObservationRevision || chain.Target.ObservationRevision != input.ObservationRevision {
 				return ErrTenantResourceReviewStale
 			}
+			if err := ensureContainerSSHBusinessDomainUnique(ctx, tx, chain, now); err != nil {
+				return err
+			}
 		}
 		decisionType := model.TenantResourceReviewRejected
 		visibility := model.TenantResourcePending
@@ -512,6 +515,15 @@ func (s *TenantResourceService) SetVisibility(ctx context.Context, authorization
 		if !valid {
 			return ErrTenantResourceStateTransition
 		}
+		if target == model.TenantResourceVisible {
+			chain, err := loadTenantResourceChain(tx, tenantID, resourceID, now, true)
+			if err != nil {
+				return err
+			}
+			if err := ensureContainerSSHBusinessDomainUnique(ctx, tx, chain, now); err != nil {
+				return err
+			}
+		}
 		result := tx.Model(&model.TenantResource{}).Where("tenant_id = ? AND id = ? AND row_version = ? AND visibility_state = ?", tenantID, resourceID, expectedRowVersion, current.VisibilityState).
 			Updates(map[string]any{"visibility_state": target, "revision": gorm.Expr("revision + 1"), "row_version": gorm.Expr("row_version + 1")})
 		if result.Error != nil {
@@ -523,6 +535,34 @@ func (s *TenantResourceService) SetVisibility(ctx context.Context, authorization
 		return tx.Where("tenant_id = ? AND id = ?", tenantID, resourceID).First(&resource).Error
 	})
 	return &resource, err
+}
+
+func ensureContainerSSHBusinessDomainUnique(ctx context.Context, tx *gorm.DB, chain *tenantResourceChain, now time.Time) error {
+	if chain == nil || chain.Resource.Type != model.TenantResourceContainerSSH {
+		return nil
+	}
+	domain, err := ContainerSSHBusinessDomain(ctx, tx, chain.Target.AccessTechnicalResourceID, chain.Target.TargetSnapshot)
+	if err != nil {
+		return err
+	}
+	var visible []model.TenantResource
+	if err := tx.Where("type = ? AND visibility_state = ? AND id <> ?", model.TenantResourceContainerSSH, model.TenantResourceVisible, chain.Resource.ID).Find(&visible).Error; err != nil {
+		return err
+	}
+	for i := range visible {
+		other, err := loadTenantResourceChain(tx, visible[i].TenantID, visible[i].ID, now, false)
+		if err != nil || other.Target.ID == "" {
+			continue
+		}
+		otherDomain, err := ContainerSSHBusinessDomain(ctx, tx, other.Target.AccessTechnicalResourceID, other.Target.TargetSnapshot)
+		if err != nil {
+			continue
+		}
+		if otherDomain == domain && visible[i].StableKey != chain.Resource.StableKey {
+			return ErrContainerSSHBusinessDomainConflict
+		}
+	}
+	return nil
 }
 
 func reauthorizeTenantPermission(tx *gorm.DB, authorization *ManagementAuthorizationContext, tenantID, permission string, at time.Time) error {
