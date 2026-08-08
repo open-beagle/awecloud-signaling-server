@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -170,14 +171,30 @@ func TestCanonicalInventoryPayloadsMatchWireContract(t *testing.T) {
 		Namespaces:   []*pb.KubernetesNamespaceInventory{{Uid: "namespace-a", Name: "tenant-a", Labels: map[string]string{}, Status: "active"}},
 	}})
 	require.NoError(t, err)
-	require.JSONEq(t, `{"kubernetes_clusters":[{"cluster_uid":"","kube_system_namespace_uid":"system-uid","ca_sha256":"","display_name":"cluster","kubernetes_version":"v1","capabilities":["workload_inventory_v1"],"namespaces":[{"uid":"namespace-a","name":"tenant-a","labels":{},"status":"active"}]}]}`, string(supply))
+	require.JSONEq(t, `{"kubernetes_clusters":[{"cluster_uid":"","kube_system_namespace_uid":"system-uid","ca_sha256":"","display_name":"cluster","kubernetes_version":"v1","capabilities":["workload_inventory_v1"],"namespaces":[{"uid":"namespace-a","name":"tenant-a","labels":null,"status":"active"}]}]}`, string(supply))
 
 	workload, err := canonicalWorkloadInventoryPayload("service_port", []*pb.WorkloadServicePort{{
 		ServiceUid: "service-a", ServiceName: "api", ClusterIp: "10.96.0.10", PortName: "https",
 		PortNumber: 443, Protocol: "TCP", Ready: true, LabelsAllowlist: map[string]string{},
 	}}, nil)
 	require.NoError(t, err)
-	require.JSONEq(t, `{"service_ports":[{"service_uid":"service-a","service_name":"api","cluster_ip":"10.96.0.10","port_name":"https","port_number":443,"protocol":"TCP","ready":true,"labels_allowlist":{}}]}`, string(workload))
+	require.JSONEq(t, `{"service_ports":[{"service_uid":"service-a","service_name":"api","cluster_ip":"10.96.0.10","port_name":"https","port_number":443,"protocol":"TCP","ready":true,"labels_allowlist":null}]}`, string(workload))
+}
+
+func TestCanonicalSupplyPayloadSurvivesProtobufRoundTrip(t *testing.T) {
+	before := []*pb.KubernetesClusterInventory{{
+		ClusterUid: "cluster-a", KubeSystemNamespaceUid: "system-a",
+		Namespaces: []*pb.KubernetesNamespaceInventory{{Uid: "namespace-a", Name: "tenant-a", Labels: map[string]string{}}},
+	}}
+	raw, err := proto.Marshal(before[0])
+	require.NoError(t, err)
+	after := &pb.KubernetesClusterInventory{}
+	require.NoError(t, proto.Unmarshal(raw, after))
+	beforePayload, err := canonicalSupplyInventoryPayload(before)
+	require.NoError(t, err)
+	afterPayload, err := canonicalSupplyInventoryPayload([]*pb.KubernetesClusterInventory{after})
+	require.NoError(t, err)
+	require.Equal(t, beforePayload, afterPayload)
 }
 
 type inventoryAckServer struct {

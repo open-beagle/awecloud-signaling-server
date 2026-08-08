@@ -655,7 +655,9 @@ func canonicalSupplyInventoryPayload(clusters []*pb.KubernetesClusterInventory) 
 			if namespace == nil {
 				return nil, errors.New("nil Kubernetes namespace inventory")
 			}
-			item.Namespaces = append(item.Namespaces, supplyPayloadNamespace{UID: namespace.Uid, Name: namespace.Name, Labels: namespace.Labels, Status: namespace.Status})
+			item.Namespaces = append(item.Namespaces, supplyPayloadNamespace{
+				UID: namespace.Uid, Name: namespace.Name, Labels: canonicalInventoryLabels(namespace.Labels), Status: namespace.Status,
+			})
 		}
 		document.KubernetesClusters = append(document.KubernetesClusters, item)
 	}
@@ -701,7 +703,7 @@ func canonicalWorkloadInventoryPayload(kind string, ports []*pb.WorkloadServiceP
 			}
 			document.ServicePorts = append(document.ServicePorts, workloadServicePortPayload{
 				ServiceUID: item.ServiceUid, ServiceName: item.ServiceName, ClusterIP: item.ClusterIp, PortName: item.PortName,
-				PortNumber: int(item.PortNumber), Protocol: item.Protocol, Ready: item.Ready, LabelsAllowlist: item.LabelsAllowlist,
+				PortNumber: int(item.PortNumber), Protocol: item.Protocol, Ready: item.Ready, LabelsAllowlist: canonicalInventoryLabels(item.LabelsAllowlist),
 			})
 		}
 	case "container":
@@ -713,13 +715,20 @@ func canonicalWorkloadInventoryPayload(kind string, ports []*pb.WorkloadServiceP
 			document.Containers = append(document.Containers, workloadContainerPayload{
 				WorkloadUID: item.WorkloadUid, WorkloadKind: item.WorkloadKind, WorkloadName: item.WorkloadName,
 				PodUID: item.PodUid, PodName: item.PodName, ContainerName: item.ContainerName,
-				Ready: item.Ready, LabelsAllowlist: item.LabelsAllowlist, SSHUsers: item.SshUsers,
+				Ready: item.Ready, LabelsAllowlist: canonicalInventoryLabels(item.LabelsAllowlist), SSHUsers: item.SshUsers,
 			})
 		}
 	default:
 		return nil, fmt.Errorf("unsupported workload inventory kind %q", kind)
 	}
 	return canonicalJSON(document)
+}
+
+func canonicalInventoryLabels(labels map[string]string) map[string]string {
+	if len(labels) == 0 {
+		return nil
+	}
+	return labels
 }
 
 func canonicalJSON(value any) ([]byte, error) {
