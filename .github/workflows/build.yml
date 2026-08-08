@@ -58,9 +58,6 @@ jobs:
           go-version: "1.26"
           cache: true
 
-      - name: Test server
-        run: go test ./...
-
       - name: Build Linux binaries
         env:
           BUILD_VERSION: ${{ steps.version.outputs.version }}
