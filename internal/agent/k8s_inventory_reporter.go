@@ -598,7 +598,7 @@ func (r *KubernetesInventoryReporter) reportWorkloadWithRetry(cfg *pb.WorkloadIn
 	for attempt := 0; ; attempt++ {
 		err := r.reportWorkload(cfg, snapshot, namespace, kind, ports, containers)
 		var rejected *workloadReportRejectedError
-		if err == nil || !errors.As(err, &rejected) || !rejected.retryable || attempt >= 2 {
+		if err == nil || !errors.As(err, &rejected) || !rejected.retryable || attempt >= 9 {
 			return err
 		}
 		delay := time.Duration(rejected.retryAfterMS) * time.Millisecond
