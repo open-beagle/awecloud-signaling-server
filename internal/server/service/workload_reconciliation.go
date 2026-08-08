@@ -19,7 +19,7 @@ import (
 const (
 	TenantResourceProjectionConsumer = "tenant_resource_projection"
 	workloadReconciliationInterval   = 30 * time.Second
-	workloadProjectionLeaseDuration  = time.Minute
+	workloadProjectionLeaseDuration  = 10 * time.Minute
 )
 
 var workloadProjectionOutboxPolicies = map[string]JSONFieldPolicy{
@@ -528,7 +528,7 @@ func (s *WorkloadReconciliationService) StartPeriodicMaintenance(ctx context.Con
 			if _, err := s.Reconcile(ctx, s.now().UTC()); err != nil {
 				logger.Errorf("Workload Inventory lease reconciliation failed: %v", err)
 			}
-			for i := 0; i < 100; i++ {
+			for i := 0; i < 1000; i++ {
 				processed, err := s.projection.ProcessNext(ctx)
 				if err != nil {
 					logger.Errorf("Tenant Resource projection failed: %v", err)
