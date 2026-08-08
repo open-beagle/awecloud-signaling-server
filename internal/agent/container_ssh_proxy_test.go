@@ -90,7 +90,7 @@ func TestContainerSSHProxyRoutesAuthenticatedDesktopToBroker(t *testing.T) {
 	}()
 
 	client, err := ssh.Dial("tcp", listener.Addr().String(), &ssh.ClientConfig{
-		User: "ignored-shell-user", HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		User: "code", HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	})
 	require.NoError(t, err)
 	session, err := client.NewSession()
@@ -139,7 +139,7 @@ func TestContainerSSHProxyForwardsPTYResizeAndExitStatus(t *testing.T) {
 		}
 	}()
 	client, err := ssh.Dial("tcp", listener.Addr().String(), &ssh.ClientConfig{
-		User: "ignored-shell-user", HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		User: "code", HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	})
 	require.NoError(t, err)
 	session, err := client.NewSession()
@@ -193,7 +193,7 @@ func TestContainerSSHProxyV2UsesServerSessionAndHeadscaleNodeIdentity(t *testing
 		}
 	}()
 	client, err := ssh.Dial("tcp", listener.Addr().String(), &ssh.ClientConfig{
-		User: "ignored-shell-user", HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		User: "code", HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	})
 	require.NoError(t, err)
 	session, err := client.NewSession()

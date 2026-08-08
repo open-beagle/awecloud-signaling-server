@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"testing"
 	"time"
@@ -19,6 +20,15 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
+
+type staticContainerUserDiscoverer struct {
+	user string
+	err  error
+}
+
+func (d staticContainerUserDiscoverer) Discover(context.Context, string, string, string) (string, error) {
+	return d.user, d.err
+}
 
 func TestInventoryOptionsRequireExplicitNamespaceUnion(t *testing.T) {
 	cfg := &config.AgentConfig{}
@@ -99,6 +109,7 @@ func TestKubernetesInventoryCollectsOnlyConfiguredSelectedWorkloads(t *testing.T
 	discovery := client.Discovery().(*fake.FakeDiscovery)
 	discovery.FakedServerVersion = &k8sversion.Info{GitVersion: "v1.30.14"}
 	reporter := newKubernetesInventoryReporter(nil, client, kubernetesInventoryOptions{}, context.Background())
+	reporter.users = staticContainerUserDiscoverer{user: "code"}
 
 	snapshot, err := reporter.collect(kubernetesInventoryOptions{
 		Namespaces: []string{"tenant-a"}, ServiceNamespaces: []string{"tenant-a"}, ContainerNamespaces: []string{"tenant-a"},
@@ -115,6 +126,7 @@ func TestKubernetesInventoryCollectsOnlyConfiguredSelectedWorkloads(t *testing.T
 	require.Equal(t, map[string]string{"signal.beagle.io/expose": "true"}, snapshot.servicePorts["tenant-a"][0].LabelsAllowlist)
 	require.Len(t, snapshot.containers["tenant-a"], 1)
 	require.Equal(t, "deployment-a", snapshot.containers["tenant-a"][0].WorkloadUid)
+	require.Equal(t, []string{"code"}, snapshot.containers["tenant-a"][0].SshUsers)
 	require.Equal(t, map[string]string{"team": "a"}, snapshot.containers["tenant-a"][0].LabelsAllowlist)
 
 	actions := client.Actions()
@@ -123,6 +135,20 @@ func TestKubernetesInventoryCollectsOnlyConfiguredSelectedWorkloads(t *testing.T
 			t.Fatal("inventory reporter must GET configured namespaces, not list every namespace")
 		}
 	}
+}
+
+func TestWorkloadContainerUserDiscoveryFailureMarksContainerNotReady(t *testing.T) {
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "ide-public-0", Namespace: "beagle-ide", UID: types.UID("pod-a")},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "ide"}}},
+		Status:     corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "ide", Ready: true}}},
+	}
+	containers := workloadContainersWithUsers(context.Background(), staticContainerUserDiscoverer{
+		err: fmt.Errorf("id -un failed"),
+	}, []corev1.Pod{pod}, nil)
+	require.Len(t, containers, 1)
+	require.False(t, containers[0].Ready)
+	require.Empty(t, containers[0].SshUsers)
 }
 
 func TestCanonicalInventoryPayloadsMatchWireContract(t *testing.T) {

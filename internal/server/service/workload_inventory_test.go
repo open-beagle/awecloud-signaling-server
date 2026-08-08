@@ -369,7 +369,7 @@ func TestWorkloadInventoryReadinessAndLeaseDoNotAdvanceObservedRevision(t *testi
 func TestWorkloadContainerPodRebuildKeepsStableTenantResource(t *testing.T) {
 	fixture := newWorkloadInventoryFixture(t)
 	containerPayload := func(podUID, podName string) ([]byte, string) {
-		raw := []byte(`{"containers":[{"workload_uid":"deployment-api","workload_kind":"Deployment","workload_name":"api","pod_uid":"` + podUID + `","pod_name":"` + podName + `","container_name":"app","ready":true,"labels_allowlist":{"signal.beagle.io/expose":"true"}}]}`)
+		raw := []byte(`{"containers":[{"workload_uid":"deployment-api","workload_kind":"Deployment","workload_name":"api","pod_uid":"` + podUID + `","pod_name":"` + podName + `","container_name":"app","ready":true,"labels_allowlist":{"signal.beagle.io/expose":"true"},"ssh_users":["code"]}]}`)
 		canonical, err := canonicalizeWorkloadInventoryPayload(model.WorkloadObservationContainer, raw)
 		require.NoError(t, err)
 		return canonical, sha256Hex(canonical)

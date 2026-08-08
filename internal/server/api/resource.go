@@ -2,8 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -74,28 +72,9 @@ type K8SServiceResource struct {
 
 // ResourcesResponse 资源发现响应
 type ResourcesResponse struct {
-	SSH          []SSHResource          `json:"ssh"`
-	K8SAPI       []K8SAPIResource       `json:"k8s_api"`
-	K8SService   []K8SServiceResource   `json:"k8s_service"`
-	ContainerSSH []ContainerSSHResource `json:"container_ssh"`
-}
-
-type ContainerSSHResource struct {
-	ResourceID          string `json:"resource_id"`
-	TenantID            string `json:"tenant_id"`
-	TenantName          string `json:"tenant_name"`
-	DisplayName         string `json:"display_name"`
-	ProviderID          string `json:"provider_id"`
-	ExternalWorkspaceID string `json:"external_workspace_id"`
-	State               string `json:"state"`
-	TargetRevision      int64  `json:"target_revision"`
-	AgentNodeID         uint64 `json:"agent_node_id"`
-	ClusterID           string `json:"cluster_id"`
-	Capability          string `json:"capability"`
-	ListenPort          uint16 `json:"listen_port"`
-	Domain              string `json:"domain"`
-	AgentIP             string `json:"agent_ip"`
-	SSHUser             string `json:"ssh_user"`
+	SSH        []SSHResource        `json:"ssh"`
+	K8SAPI     []K8SAPIResource     `json:"k8s_api"`
+	K8SService []K8SServiceResource `json:"k8s_service"`
 }
 
 // GetResources 查询当前用户可访问的资源列表
@@ -121,10 +100,9 @@ func (a *ResourceAPI) GetResources(c *gin.Context) {
 	}
 
 	result := ResourcesResponse{
-		SSH:          make([]SSHResource, 0),
-		K8SAPI:       make([]K8SAPIResource, 0),
-		K8SService:   make([]K8SServiceResource, 0),
-		ContainerSSH: make([]ContainerSSHResource, 0),
+		SSH:        make([]SSHResource, 0),
+		K8SAPI:     make([]K8SAPIResource, 0),
+		K8SService: make([]K8SServiceResource, 0),
 	}
 
 	// 1. 查询 SSH 资源
@@ -135,93 +113,7 @@ func (a *ResourceAPI) GetResources(c *gin.Context) {
 
 	// 3. 查询 K8S Service 资源
 	result.K8SService = a.queryK8SServiceResources(ctx, clientID, groupIDs)
-	result.ContainerSSH = a.queryContainerSSHResources(clientID, groupIDs)
-
 	c.JSON(http.StatusOK, NewSuccessResponse(result))
-}
-
-func (a *ResourceAPI) queryContainerSSHResources(clientID uint64, groupIDs []int64) []ContainerSSHResource {
-	now := time.Now()
-	var memberships []model.TenantMembership
-	db.DB.Where("user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", clientID, true, now).Find(&memberships)
-	if len(memberships) == 0 {
-		return []ContainerSSHResource{}
-	}
-	tenantIDs := make([]string, 0, len(memberships))
-	for _, membership := range memberships {
-		tenantIDs = append(tenantIDs, membership.TenantID)
-	}
-	var tenants []model.Tenant
-	db.DB.Where("id IN ? AND status = ?", tenantIDs, model.TenantStatusActive).Find(&tenants)
-	if len(tenants) == 0 {
-		return []ContainerSSHResource{}
-	}
-	tenantNames := make(map[string]string, len(tenants))
-	activeTenantIDs := make([]string, 0, len(tenants))
-	for _, tenant := range tenants {
-		tenantNames[tenant.ID] = tenant.Name
-		activeTenantIDs = append(activeTenantIDs, tenant.ID)
-	}
-	grantQuery := db.DB.Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND expires_at > ?", activeTenantIDs, "enabled", now, now).
-		Where("(subject_type = ? AND subject_user_id = ?)", "user", clientID)
-	if len(groupIDs) > 0 {
-		grantQuery = db.DB.Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND expires_at > ?", activeTenantIDs, "enabled", now, now).
-			Where("(subject_type = ? AND subject_user_id = ?) OR (subject_type = ? AND subject_group_id IN ?)", "user", clientID, "group", groupIDs)
-	}
-	var grants []model.AccessGrant
-	grantQuery.Find(&grants)
-	resourceIDs := make([]string, 0, len(grants))
-	seen := make(map[string]struct{}, len(grants))
-	for _, grant := range grants {
-		if grant.SubjectType == "group" && !groupGrantMatchesTenant(grant) {
-			continue
-		}
-		if !resourceContainsAction(parseJSONStringArray(grant.Actions), "shell") {
-			continue
-		}
-		if _, exists := seen[grant.ResourceID]; !exists {
-			seen[grant.ResourceID] = struct{}{}
-			resourceIDs = append(resourceIDs, grant.ResourceID)
-		}
-	}
-	if len(resourceIDs) == 0 {
-		return []ContainerSSHResource{}
-	}
-	var resources []model.Resource
-	db.DB.Where("id IN ? AND type = ? AND target_revision > 0 AND state IN ?", resourceIDs, model.ResourceTypeContainerSSH, []model.ResourceState{model.ResourceStateAvailable, model.ResourceStateDegraded}).Order("display_name ASC").Find(&resources)
-	result := make([]ContainerSSHResource, 0, len(resources))
-	domainSuffix := model.DefaultDomainSuffix
-	var domainConfig model.SystemConfig
-	if err := db.DB.Where("key = ?", model.ConfigDomainSuffix).First(&domainConfig).Error; err == nil && domainConfig.Value != "" {
-		domainSuffix = domainConfig.Value
-	}
-	if !strings.HasPrefix(domainSuffix, ".") {
-		domainSuffix = "." + domainSuffix
-	}
-	for _, resource := range resources {
-		if resource.ContainerSSHPort == 0 {
-			continue
-		}
-		var agentNode model.Node
-		if err := db.DB.Where("id = ? AND type = ? AND ip <> ?", resource.AgentNodeID, model.NodeTypeAgent, "").First(&agentNode).Error; err != nil {
-			continue
-		}
-		result = append(result, ContainerSSHResource{
-			ResourceID: resource.ID, TenantID: resource.TenantID, TenantName: tenantNames[resource.TenantID], DisplayName: resource.DisplayName,
-			ProviderID: resource.ProviderID, ExternalWorkspaceID: resource.ExternalWorkspaceID, State: string(resource.State), TargetRevision: resource.TargetRevision,
-			AgentNodeID: resource.AgentNodeID, ClusterID: resource.ClusterID, Capability: string(model.ResourceTypeContainerSSH),
-			ListenPort: resource.ContainerSSHPort, Domain: resource.ID + ".container" + domainSuffix, AgentIP: agentNode.IP, SSHUser: "container",
-		})
-	}
-	return result
-}
-
-func groupGrantMatchesTenant(grant model.AccessGrant) bool {
-	if grant.SubjectGroupID == nil || grant.TenantID == "" {
-		return false
-	}
-	var group model.Group
-	return db.DB.Where("id = ? AND tenant_id = ?", *grant.SubjectGroupID, grant.TenantID).First(&group).Error == nil
 }
 
 func resourceContainsAction(actions []string, expected string) bool {

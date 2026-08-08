@@ -111,6 +111,7 @@ type workloadContainerEvidence struct {
 	ContainerName   string            `json:"container_name"`
 	Ready           bool              `json:"ready"`
 	LabelsAllowlist map[string]string `json:"labels_allowlist"`
+	SSHUsers        []string          `json:"ssh_users"`
 }
 
 type workloadProjection struct {
@@ -568,6 +569,15 @@ func normalizeWorkloadContainer(item workloadContainerEvidence) (workloadProject
 		validateRequired("container_name", item.ContainerName, 253) != nil || len(item.WorkloadUID) > 128 || len(item.WorkloadKind) > 64 || len(item.WorkloadName) > 253 {
 		return workloadProjection{}, ErrWorkloadIdentityInsufficient
 	}
+	if item.Ready && (len(item.SSHUsers) != 1 || !validContainerSSHUser(strings.TrimSpace(item.SSHUsers[0]))) {
+		return workloadProjection{}, ErrWorkloadInventoryInvalidInput
+	}
+	if len(item.SSHUsers) > 1 {
+		return workloadProjection{}, ErrWorkloadInventoryInvalidInput
+	}
+	for i := range item.SSHUsers {
+		item.SSHUsers[i] = strings.TrimSpace(item.SSHUsers[i])
+	}
 	quality := model.WorkloadIdentityStrong
 	identityDomain, identityValue := "workload-container-v1", item.WorkloadUID
 	if item.WorkloadUID == "" {
@@ -585,6 +595,7 @@ func normalizeWorkloadContainer(item workloadContainerEvidence) (workloadProject
 	target := map[string]any{
 		"workload_uid": item.WorkloadUID, "workload_kind": item.WorkloadKind, "workload_name": item.WorkloadName,
 		"pod_uid": item.PodUID, "pod_name": item.PodName, "container_name": item.ContainerName, "labels_allowlist": labels,
+		"ssh_users": item.SSHUsers,
 	}
 	targetJSON, _ := json.Marshal(target)
 	payloadJSON, _ := json.Marshal(item)

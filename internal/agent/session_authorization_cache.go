@@ -198,6 +198,7 @@ func validateSessionPermission(permission *pb.ResourceSessionPermissionV2, now, 
 	switch permission.ResourceType {
 	case "container_ssh":
 		if permission.Action != "shell" || permission.ListenPort < uint32(ContainerSSHPortBase) || permission.ListenPort > uint32(ContainerSSHPortEnd) ||
+			len(permission.SshUsers) != 1 || strings.TrimSpace(permission.SshUsers[0]) == "" ||
 			strings.TrimSpace(target.NamespaceUid) == "" || strings.TrimSpace(target.NamespaceName) == "" ||
 			strings.TrimSpace(target.PodName) == "" || strings.TrimSpace(target.PodUid) == "" || strings.TrimSpace(target.ContainerName) == "" {
 			return ErrSessionSnapshotInvalid

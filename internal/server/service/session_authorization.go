@@ -58,6 +58,7 @@ type SessionAuthorizationPermission struct {
 	GrantRevision         int64
 	AuthorizationRevision int64
 	ValidUntil            time.Time
+	SSHUsers              []string
 	Target                SessionAuthorizationTarget
 }
 
@@ -268,13 +269,19 @@ func (s *SessionAuthorizationService) revalidateSession(tx *gorm.DB, session *mo
 	if err := json.Unmarshal([]byte(chain.Target.TargetSnapshot), &target); err != nil {
 		return nil, sessionAuthorizationInvalidCode, nil
 	}
+	var sshUsers []string
+	if chain.Resource.Type == model.TenantResourceContainerSSH {
+		if json.Unmarshal([]byte(chain.Resource.SSHUsers), &sshUsers) != nil || len(sshUsers) == 0 {
+			return nil, sessionAuthorizationInvalidCode, nil
+		}
+	}
 	return &SessionAuthorizationPermission{
 		SessionID: session.ID, TenantID: session.TenantID, ResourceID: session.TenantResourceID,
 		SourceID: session.TenantResourceSourceID, TargetRevisionID: session.TargetRevisionID,
 		UserID: session.UserID, UserName: user.Name, DeviceID: session.DeviceID, DeviceHeadscaleNodeID: device.HeadscaleNodeID,
 		ResourceType: chain.Resource.Type, Action: session.Action, AllocationID: session.AllocationID,
 		GrantID: session.GrantID, GrantRevision: session.GrantRevision,
-		AuthorizationRevision: session.AuthorizationRevision, ValidUntil: validUntil, Target: target,
+		AuthorizationRevision: session.AuthorizationRevision, ValidUntil: validUntil, SSHUsers: sshUsers, Target: target,
 	}, "", nil
 }
 

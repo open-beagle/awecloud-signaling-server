@@ -390,6 +390,12 @@ func (s *TenantResourceService) Review(ctx context.Context, authorization *Manag
 			if err := ensureContainerSSHBusinessDomainUnique(ctx, tx, chain, now); err != nil {
 				return err
 			}
+			if chain.Resource.Type == model.TenantResourceContainerSSH {
+				var users []string
+				if json.Unmarshal([]byte(chain.Resource.SSHUsers), &users) != nil || len(users) == 0 {
+					return ErrTenantResourceUpstreamUnavailable
+				}
+			}
 		}
 		decisionType := model.TenantResourceReviewRejected
 		visibility := model.TenantResourcePending
@@ -415,7 +421,7 @@ func (s *TenantResourceService) Review(ctx context.Context, authorization *Manag
 		}
 		updated := tx.Model(&model.TenantResource{}).
 			Where("tenant_id = ? AND id = ? AND row_version = ? AND visibility_state = ?", input.TenantID, input.ResourceID, input.ExpectedRowVersion, model.TenantResourcePending).
-			Updates(map[string]any{"visibility_state": visibility, "revision": gorm.Expr("revision + 1"), "row_version": gorm.Expr("row_version + 1")})
+			Updates(map[string]any{"visibility_state": visibility, "ssh_users": chain.Resource.SSHUsers, "revision": gorm.Expr("revision + 1"), "row_version": gorm.Expr("row_version + 1")})
 		if updated.Error != nil {
 			return mapTenantResourceConstraint(updated.Error)
 		}
@@ -736,6 +742,11 @@ func tenantResourceView(tx *gorm.DB, resource *model.TenantResource, now time.Ti
 	if chain.Target.ID == "" {
 		return view, nil
 	}
+	if resource.Type == model.TenantResourceContainerSSH {
+		if err := json.Unmarshal([]byte(resource.SSHUsers), &view.SSHUsers); err != nil || len(view.SSHUsers) == 0 {
+			return nil, ErrTenantResourceInvalidInput
+		}
+	}
 	if resource.Type == model.TenantResourceContainerService {
 		var target struct {
 			ServiceUID    string `json:"service_uid"`
@@ -778,6 +789,52 @@ func tenantResourceView(tx *gorm.DB, resource *model.TenantResource, now time.Ti
 		view.IdentityQuality = chain.Observation.IdentityQuality
 	}
 	return view, nil
+}
+
+func encodeTenantResourceSSHUsers(resourceType model.TenantResourceType, users []string) (string, error) {
+	if resourceType != model.TenantResourceContainerSSH {
+		if len(users) != 0 {
+			return "", ErrTenantResourceInvalidInput
+		}
+		return `[]`, nil
+	}
+	if len(users) == 0 {
+		return "", ErrTenantResourceInvalidInput
+	}
+	normalized := make([]string, 0, len(users))
+	seen := make(map[string]struct{}, len(users))
+	for _, raw := range users {
+		user := strings.TrimSpace(raw)
+		if !validContainerSSHUser(user) {
+			return "", ErrTenantResourceInvalidInput
+		}
+		if _, exists := seen[user]; exists {
+			continue
+		}
+		seen[user] = struct{}{}
+		normalized = append(normalized, user)
+	}
+	if len(normalized) == 0 || len(normalized) > 8 {
+		return "", ErrTenantResourceInvalidInput
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil || len(encoded) > 256 {
+		return "", ErrTenantResourceInvalidInput
+	}
+	return string(encoded), nil
+}
+
+func validContainerSSHUser(user string) bool {
+	if len(user) == 0 || len(user) > 32 || user[0] == '-' {
+		return false
+	}
+	for _, char := range user {
+		if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '_' || char == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validTenantResourceVisibility(value model.TenantResourceVisibilityState) bool {

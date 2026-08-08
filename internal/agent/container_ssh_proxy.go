@@ -143,6 +143,12 @@ func (p *ContainerSSHProxy) handleConn(ctx context.Context, conn net.Conn, liste
 	}
 	defer sshConn.Close()
 	go ssh.DiscardRequests(requests)
+	sshUser := strings.TrimSpace(sshConn.User())
+	if v2Permission != nil && !containsContainerSSHUser(v2Permission.SshUsers, sshUser) {
+		logger.Warnf("[ContainerSSH] SSH 用户未由 Agent 发现，拒绝连接: desktop_user=%s ssh_user=%s resource=%s allowed=%v", identity.UserName, sshUser, resourceID, v2Permission.SshUsers)
+		return
+	}
+	logger.Infof("[ContainerSSH] SSH 握手完成: desktop_user=%s ssh_user=%s resource=%s", identity.UserName, sshUser, resourceID)
 
 	for newChannel := range channels {
 		if newChannel.ChannelType() != "session" {
@@ -177,6 +183,18 @@ func (p *ContainerSSHProxy) handleConn(ctx context.Context, conn net.Conn, liste
 		}
 		return
 	}
+}
+
+func containsContainerSSHUser(users []string, requested string) bool {
+	if requested == "" {
+		return false
+	}
+	for _, user := range users {
+		if user == requested {
+			return true
+		}
+	}
+	return false
 }
 
 type authorizedContainerShellOpener struct {

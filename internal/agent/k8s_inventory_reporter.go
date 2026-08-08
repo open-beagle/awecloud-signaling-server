@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -38,6 +39,7 @@ const (
 type KubernetesInventoryReporter struct {
 	client pb.AgentServiceClient
 	k8s    kubernetes.Interface
+	users  containerUserDiscoverer
 	ctx    context.Context
 
 	mu             sync.RWMutex
@@ -79,7 +81,17 @@ func NewKubernetesInventoryReporter(client pb.AgentServiceClient, cfg *config.Ag
 	if err != nil {
 		return nil, fmt.Errorf("create inventory Kubernetes client: %w", err)
 	}
-	return newKubernetesInventoryReporter(client, clientset, inventoryOptionsFromAgentConfig(cfg), parent), nil
+	reporter := newKubernetesInventoryReporter(client, clientset, inventoryOptionsFromAgentConfig(cfg), parent)
+	restConfig, err := loadK8SRESTConfig(inventoryKubeconfig(cfg))
+	if err != nil {
+		return nil, fmt.Errorf("create container user discovery config: %w", err)
+	}
+	executor, err := NewKubernetesContainerExecutor(restConfig)
+	if err != nil {
+		return nil, fmt.Errorf("create container user discoverer: %w", err)
+	}
+	reporter.users = &kubernetesContainerUserDiscoverer{executor: executor}
+	return reporter, nil
 }
 
 func inventoryKubeconfig(cfg *config.AgentConfig) string {
@@ -320,7 +332,7 @@ func (r *KubernetesInventoryReporter) collect(options kubernetesInventoryOptions
 				if err != nil {
 					return nil, fmt.Errorf("read ReplicaSet owners: namespace=%s: %w", namespaceName, err)
 				}
-				snapshot.containers[namespaceName] = workloadContainers(pods.Items, replicaSets.Items)
+				snapshot.containers[namespaceName] = r.workloadContainers(ctx, pods.Items, replicaSets.Items)
 			}
 		}
 	}
@@ -371,6 +383,53 @@ func workloadServicePorts(services []corev1.Service) []*pb.WorkloadServicePort {
 }
 
 func workloadContainers(pods []corev1.Pod, replicaSets []appsv1.ReplicaSet) []*pb.WorkloadContainer {
+	return workloadContainersWithUsers(context.Background(), nil, pods, replicaSets)
+}
+
+func (r *KubernetesInventoryReporter) workloadContainers(ctx context.Context, pods []corev1.Pod, replicaSets []appsv1.ReplicaSet) []*pb.WorkloadContainer {
+	return workloadContainersWithUsers(ctx, r.users, pods, replicaSets)
+}
+
+type containerUserDiscoverer interface {
+	Discover(context.Context, string, string, string) (string, error)
+}
+
+type kubernetesContainerUserDiscoverer struct {
+	executor *KubernetesContainerExecutor
+}
+
+func (d *kubernetesContainerUserDiscoverer) Discover(ctx context.Context, namespace, pod, container string) (string, error) {
+	if d == nil || d.executor == nil {
+		return "", fmt.Errorf("container user discoverer is unavailable")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	var stdout, stderr bytes.Buffer
+	target := &ContainerSSHUserPermission{Namespace: namespace, PodName: pod, ContainerName: container}
+	if err := d.executor.execute(ctx, target, []string{"id", "-un"}, ContainerExecStream{Stdout: &stdout, Stderr: &stderr}, false); err != nil {
+		return "", fmt.Errorf("exec id -un: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	user := strings.TrimSpace(stdout.String())
+	if !validDiscoveredContainerUser(user) {
+		return "", fmt.Errorf("invalid id -un output %q", user)
+	}
+	return user, nil
+}
+
+func validDiscoveredContainerUser(user string) bool {
+	if len(user) == 0 || len(user) > 32 || user[0] == '-' {
+		return false
+	}
+	for _, char := range user {
+		if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '_' || char == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func workloadContainersWithUsers(ctx context.Context, users containerUserDiscoverer, pods []corev1.Pod, replicaSets []appsv1.ReplicaSet) []*pb.WorkloadContainer {
 	replicaSetOwners := make(map[string]metav1.OwnerReference, len(replicaSets))
 	for i := range replicaSets {
 		owner := controllerOwner(replicaSets[i].OwnerReferences)
@@ -388,10 +447,21 @@ func workloadContainers(pods []corev1.Pod, replicaSets []appsv1.ReplicaSet) []*p
 			}
 		}
 		for _, container := range pod.Spec.Containers {
+			ready := containerReady(pod, container.Name)
+			var sshUsers []string
+			if ready && users != nil {
+				user, err := users.Discover(ctx, pod.Namespace, pod.Name, container.Name)
+				if err != nil {
+					ready = false
+					logger.Warnf("Kubernetes Inventory 无法发现 ContainerSSH 用户: namespace=%s pod=%s container=%s err=%v", pod.Namespace, pod.Name, container.Name, err)
+				} else {
+					sshUsers = []string{user}
+				}
+			}
 			result = append(result, &pb.WorkloadContainer{
 				WorkloadUid: string(owner.UID), WorkloadKind: owner.Kind, WorkloadName: owner.Name,
 				PodUid: string(pod.UID), PodName: pod.Name, ContainerName: container.Name,
-				Ready: containerReady(pod, container.Name), LabelsAllowlist: inventoryLabels(pod.Labels),
+				Ready: ready, LabelsAllowlist: inventoryLabels(pod.Labels), SshUsers: sshUsers,
 			})
 		}
 	}
@@ -600,6 +670,7 @@ type workloadContainerPayload struct {
 	ContainerName   string            `json:"container_name"`
 	Ready           bool              `json:"ready"`
 	LabelsAllowlist map[string]string `json:"labels_allowlist"`
+	SSHUsers        []string          `json:"ssh_users"`
 }
 
 func canonicalWorkloadInventoryPayload(kind string, ports []*pb.WorkloadServicePort, containers []*pb.WorkloadContainer) ([]byte, error) {
@@ -625,7 +696,7 @@ func canonicalWorkloadInventoryPayload(kind string, ports []*pb.WorkloadServiceP
 			document.Containers = append(document.Containers, workloadContainerPayload{
 				WorkloadUID: item.WorkloadUid, WorkloadKind: item.WorkloadKind, WorkloadName: item.WorkloadName,
 				PodUID: item.PodUid, PodName: item.PodName, ContainerName: item.ContainerName,
-				Ready: item.Ready, LabelsAllowlist: item.LabelsAllowlist,
+				Ready: item.Ready, LabelsAllowlist: item.LabelsAllowlist, SSHUsers: item.SshUsers,
 			})
 		}
 	default:

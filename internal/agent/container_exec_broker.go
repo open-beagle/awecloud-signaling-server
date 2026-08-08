@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -101,10 +102,14 @@ func (b *ContainerExecBroker) OpenAuthorizedShell(ctx context.Context, authoriza
 	// latest authoritative cache entry after verifying that the immutable
 	// Session identity is unchanged.
 	permission = current
+	if len(permission.SshUsers) != 1 {
+		return fmt.Errorf("ContainerSSH discovered user is invalid")
+	}
 	target := &ContainerSSHUserPermission{
 		UserID: permission.UserId, ResourceID: permission.ResourceId,
 		Namespace: permission.Target.NamespaceName, PodName: permission.Target.PodName,
 		PodUID: permission.Target.PodUid, ContainerName: permission.Target.ContainerName,
+		SSHUser:       permission.SshUsers[0],
 		GrantRevision: permission.GrantRevision, ListenPort: uint16(permission.ListenPort),
 	}
 	return b.openAuthorizedTarget(ctx, target, stream)
@@ -120,6 +125,7 @@ func sameResourceSessionIdentity(current, selected *pb.ResourceSessionPermission
 		current.ResourceType == selected.ResourceType && current.Action == selected.Action &&
 		current.AllocationId == selected.AllocationId && current.GrantId == selected.GrantId &&
 		current.GrantRevision == selected.GrantRevision && current.ListenPort == selected.ListenPort &&
+		slices.Equal(current.SshUsers, selected.SshUsers) &&
 		proto.Equal(current.Target, selected.Target)
 }
 

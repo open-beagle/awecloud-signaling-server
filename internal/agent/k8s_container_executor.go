@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
@@ -35,6 +36,15 @@ func (e *KubernetesContainerExecutor) Execute(ctx context.Context, target *Conta
 	if e == nil || e.restConfig == nil || e.newExecutor == nil || target == nil {
 		return fmt.Errorf("Kubernetes ContainerSSH executor is not configured")
 	}
+	if target.SSHUser != "" {
+		actual, err := e.effectiveUser(ctx, target)
+		if err != nil {
+			return err
+		}
+		if actual != target.SSHUser {
+			return fmt.Errorf("ContainerSSH user changed: discovered=%s actual=%s", target.SSHUser, actual)
+		}
+	}
 	shell, err := e.preferredShell(ctx, target)
 	if err != nil {
 		return err
@@ -42,7 +52,23 @@ func (e *KubernetesContainerExecutor) Execute(ctx context.Context, target *Conta
 	return e.execute(ctx, target, []string{shell}, stream, true)
 }
 
+func (e *KubernetesContainerExecutor) effectiveUser(ctx context.Context, target *ContainerSSHUserPermission) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var stdout, stderr bytes.Buffer
+	if err := e.execute(ctx, target, []string{"id", "-un"}, ContainerExecStream{Stdout: &stdout, Stderr: &stderr}, false); err != nil {
+		return "", fmt.Errorf("verify ContainerSSH user: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	user := strings.TrimSpace(stdout.String())
+	if user == "" {
+		return "", fmt.Errorf("verify ContainerSSH user: empty id -un output")
+	}
+	return user, nil
+}
+
 func (e *KubernetesContainerExecutor) preferredShell(ctx context.Context, target *ContainerSSHUserPermission) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	var stderr bytes.Buffer
 	err := e.execute(ctx, target, []string{"/bin/bash", "--noprofile", "--norc", "-c", "exit 0"}, ContainerExecStream{Stderr: &stderr}, false)
 	if err == nil {

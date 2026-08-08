@@ -120,7 +120,7 @@ func sessionPermission(now time.Time, sessionID, resourceID, userName string, no
 		SessionId: sessionID, TenantId: "tenant-a", ResourceId: resourceID, SourceId: "source-a", TargetRevisionId: "target-a",
 		UserId: 10, UserName: userName, DeviceId: 20, DeviceHeadscaleNodeId: nodeID, ResourceType: "container_ssh", Action: "shell",
 		AllocationId: "allocation-a", GrantId: "grant-a", GrantRevision: 3, AuthorizationRevision: 4,
-		ValidUntil: timestamppb.New(now.Add(time.Minute)), ListenPort: listenPort,
+		ValidUntil: timestamppb.New(now.Add(time.Minute)), ListenPort: listenPort, SshUsers: []string{"code"},
 		Target: &pb.ResourceSessionTargetV2{
 			NamespaceUid: "namespace-uid", NamespaceName: "dev", WorkloadUid: "workload-a", PodName: "ide-0", PodUid: "pod-a", ContainerName: "workspace",
 		},

@@ -231,6 +231,7 @@ func (s *AgentServiceServer) toProtoAuthorizationSnapshot(snapshot *service.Sess
 			DeviceHeadscaleNodeId: permission.DeviceHeadscaleNodeID, ResourceType: string(permission.ResourceType), Action: permission.Action,
 			AllocationId: permission.AllocationID, GrantId: permission.GrantID, GrantRevision: permission.GrantRevision,
 			AuthorizationRevision: permission.AuthorizationRevision, ValidUntil: timestamppb.New(permission.ValidUntil),
+			SshUsers:   permission.SSHUsers,
 			ListenPort: uint32(listenPorts[permission.ResourceID]),
 			Target: &pb.ResourceSessionTargetV2{
 				NamespaceUid: permission.Target.NamespaceUID, NamespaceName: permission.Target.NamespaceName,

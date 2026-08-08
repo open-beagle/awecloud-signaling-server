@@ -152,6 +152,7 @@ message ResourceSessionPermissionV2 {
   google.protobuf.Timestamp valid_until = 16;
   ResourceSessionTargetV2 target = 17;
   uint32 listen_port = 18; // Server 生成的 Agent/Endpoint 本地入口；客户端不能提交
+  repeated string ssh_users = 19; // Agent 在运行容器内发现的 Unix 用户
 }
 
 message ResourceSessionTargetV2 {
@@ -313,6 +314,7 @@ message WorkloadContainer {
   string container_name = 6;
   bool ready = 7;
   map<string, string> labels_allowlist = 8;
+  repeated string ssh_users = 9; // Agent 在运行容器内发现的 Unix 用户
 }
 
 message WorkloadInventoryAck {

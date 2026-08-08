@@ -518,7 +518,7 @@ message ContainerSSHResource {
   uint32 listen_port = 12;
   string domain = 13;
   string agent_ip = 14;
-  string ssh_user = 15;
+  repeated string ssh_users = 15;
   string session_id = 16;
   string source_id = 17;
   string target_revision_id = 18;

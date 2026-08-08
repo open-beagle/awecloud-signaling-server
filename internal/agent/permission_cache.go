@@ -36,6 +36,7 @@ type ContainerSSHUserPermission struct {
 	PodName           string
 	PodUID            string
 	ContainerName     string
+	SSHUser           string
 	TargetRevision    int64
 	GrantRevision     int64
 	MaxSessionSeconds int

@@ -15,6 +15,7 @@ import (
 type recordingRemoteExecutor struct {
 	options remotecommand.StreamOptions
 	err     error
+	stdout  string
 	stderr  string
 }
 
@@ -22,10 +23,29 @@ func (e *recordingRemoteExecutor) Stream(remotecommand.StreamOptions) error { re
 
 func (e *recordingRemoteExecutor) StreamWithContext(_ context.Context, options remotecommand.StreamOptions) error {
 	e.options = options
+	if options.Stdout != nil && e.stdout != "" {
+		_, _ = fmt.Fprint(options.Stdout, e.stdout)
+	}
 	if options.Stderr != nil && e.stderr != "" {
 		_, _ = fmt.Fprint(options.Stderr, e.stderr)
 	}
 	return e.err
+}
+
+func TestKubernetesContainerExecutorRejectsRuntimeUserChange(t *testing.T) {
+	executor, err := NewKubernetesContainerExecutor(&rest.Config{Host: "https://kubernetes.example"})
+	require.NoError(t, err)
+	calls := 0
+	executor.newExecutor = func(*rest.Config, string, *url.URL) (remotecommand.Executor, error) {
+		calls++
+		return &recordingRemoteExecutor{stdout: "root\n"}, nil
+	}
+
+	err = executor.Execute(context.Background(), &ContainerSSHUserPermission{
+		Namespace: "team-a", PodName: "ide-0", ContainerName: "workspace", SSHUser: "code",
+	}, ContainerExecStream{})
+	require.ErrorContains(t, err, "ContainerSSH user changed: discovered=code actual=root")
+	require.Equal(t, 1, calls)
 }
 
 func TestKubernetesContainerExecutorForwardsResizeAndStreamFailure(t *testing.T) {

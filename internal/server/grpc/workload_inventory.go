@@ -47,6 +47,7 @@ type workloadContainerPayload struct {
 	ContainerName   string            `json:"container_name"`
 	Ready           bool              `json:"ready"`
 	LabelsAllowlist map[string]string `json:"labels_allowlist"`
+	SSHUsers        []string          `json:"ssh_users"`
 }
 
 func (s *AgentServiceServer) ReportWorkloadInventory(stream pb.AgentService_ReportWorkloadInventoryServer) error {
@@ -147,7 +148,7 @@ func marshalWorkloadInventoryPayload(kind model.WorkloadObservationKind, service
 			payload.Containers = append(payload.Containers, workloadContainerPayload{
 				WorkloadUID: item.WorkloadUid, WorkloadKind: item.WorkloadKind, WorkloadName: item.WorkloadName,
 				PodUID: item.PodUid, PodName: item.PodName, ContainerName: item.ContainerName,
-				Ready: item.Ready, LabelsAllowlist: item.LabelsAllowlist,
+				Ready: item.Ready, LabelsAllowlist: item.LabelsAllowlist, SSHUsers: item.SshUsers,
 			})
 		}
 	default:

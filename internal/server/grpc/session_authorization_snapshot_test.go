@@ -71,6 +71,7 @@ func testSessionAuthorizationPermission(now time.Time, sessionID, resourceID, us
 		UserID: 10, UserName: userName, DeviceID: 20, DeviceHeadscaleNodeID: nodeID,
 		ResourceType: model.TenantResourceContainerSSH, Action: "shell", AllocationID: "allocation-a", GrantID: "grant-a",
 		GrantRevision: 3, AuthorizationRevision: 4, ValidUntil: now.Add(time.Minute),
+		SSHUsers: []string{"code"},
 		Target: service.SessionAuthorizationTarget{
 			NamespaceUID: "namespace-uid", NamespaceName: "dev", WorkloadUID: "workload-a",
 			PodName: "ide-0", PodUID: "pod-a", ContainerName: "workspace",
