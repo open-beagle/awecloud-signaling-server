@@ -22,7 +22,7 @@ const (
 	WorkloadInventoryResultReplayed           = "WORKLOAD_REPLAYED"
 	WorkloadInventoryResultSnapshotIncomplete = "WORKLOAD_SNAPSHOT_INCOMPLETE"
 	workloadInventorySchemaVersion            = 1
-	workloadInventoryLeaseDuration            = 2 * time.Minute
+	workloadInventoryLeaseDuration            = 10 * time.Minute
 	workloadInventoryPayloadRetention         = 24 * time.Hour
 	maxWorkloadInventoryPayloadBytes          = 1024 * 1024
 	maxWorkloadInventoryBatchCount            = 1024

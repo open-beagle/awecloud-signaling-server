@@ -29,8 +29,10 @@ import (
 )
 
 const (
-	k8sInventoryProtocolVersion = "v1"
-	k8sInventoryReportInterval  = 30 * time.Second
+	k8sInventoryProtocolVersion      = "v1"
+	k8sInventoryReportInterval       = 30 * time.Second
+	workloadInventoryRefreshInterval = 5 * time.Minute
+	workloadInventoryBatchPause      = 250 * time.Millisecond
 )
 
 // KubernetesInventoryReporter maintains the S2/S4 inventory leases for an
@@ -50,7 +52,13 @@ type KubernetesInventoryReporter struct {
 	workEpoch      string
 	supplySequence uint64
 	workSequence   uint64
+	workloadStates map[string]workloadReportState
 	wake           chan struct{}
+}
+
+type workloadReportState struct {
+	payloadHash string
+	reportedAt  time.Time
 }
 
 type kubernetesInventoryOptions struct {
@@ -113,7 +121,7 @@ func inventoryKubeconfig(cfg *config.AgentConfig) string {
 func newKubernetesInventoryReporter(client pb.AgentServiceClient, clientset kubernetes.Interface, options kubernetesInventoryOptions, parent context.Context) *KubernetesInventoryReporter {
 	return &KubernetesInventoryReporter{
 		client: client, k8s: clientset, ctx: parent, options: options,
-		supplyEpoch: uuid.NewString(), workEpoch: uuid.NewString(), wake: make(chan struct{}, 1),
+		supplyEpoch: uuid.NewString(), workEpoch: uuid.NewString(), workloadStates: make(map[string]workloadReportState), wake: make(chan struct{}, 1),
 	}
 }
 
@@ -565,16 +573,24 @@ func (r *KubernetesInventoryReporter) reportWorkloads(cfg *pb.WorkloadInventoryC
 		if options.ServiceEnabled && inventoryNamespaceIncluded(options.ServiceNamespaces, namespaceName) {
 			ports, collected := snapshot.servicePorts[namespaceName]
 			if collected {
-				if err := r.reportWorkloadWithRetry(cfg, snapshot, namespace, "service_port", ports, nil); err != nil {
+				reported, err := r.reportWorkloadWithRetry(cfg, snapshot, namespace, "service_port", ports, nil)
+				if err != nil {
 					return err
+				}
+				if reported && !r.waitWorkloadBatchPause() {
+					return r.ctx.Err()
 				}
 			}
 		}
 		if options.ContainerEnabled && inventoryNamespaceIncluded(options.ContainerNamespaces, namespaceName) {
 			containers, collected := snapshot.containers[namespaceName]
 			if collected {
-				if err := r.reportWorkloadWithRetry(cfg, snapshot, namespace, "container", nil, containers); err != nil {
+				reported, err := r.reportWorkloadWithRetry(cfg, snapshot, namespace, "container", nil, containers)
+				if err != nil {
 					return err
+				}
+				if reported && !r.waitWorkloadBatchPause() {
+					return r.ctx.Err()
 				}
 			}
 		}
@@ -594,12 +610,29 @@ func (e *workloadReportRejectedError) Error() string {
 	return fmt.Sprintf("workload rejected: kind=%s namespace=%s code=%s retryable=%v", e.kind, e.namespace, e.code, e.retryable)
 }
 
-func (r *KubernetesInventoryReporter) reportWorkloadWithRetry(cfg *pb.WorkloadInventoryConfig, snapshot *kubernetesInventorySnapshot, namespace *corev1.Namespace, kind string, ports []*pb.WorkloadServicePort, containers []*pb.WorkloadContainer) error {
+func (r *KubernetesInventoryReporter) reportWorkloadWithRetry(cfg *pb.WorkloadInventoryConfig, snapshot *kubernetesInventorySnapshot, namespace *corev1.Namespace, kind string, ports []*pb.WorkloadServicePort, containers []*pb.WorkloadContainer) (bool, error) {
+	payload, err := canonicalWorkloadInventoryPayload(kind, ports, containers)
+	if err != nil {
+		return false, err
+	}
+	stateKey, payloadHash := kind+"\x00"+string(namespace.UID), sha256Hex(payload)
+	r.mu.RLock()
+	state, exists := r.workloadStates[stateKey]
+	r.mu.RUnlock()
+	if exists && state.payloadHash == payloadHash && time.Since(state.reportedAt) < workloadInventoryRefreshInterval {
+		return false, nil
+	}
 	for attempt := 0; ; attempt++ {
-		err := r.reportWorkload(cfg, snapshot, namespace, kind, ports, containers)
+		err = r.reportWorkload(cfg, snapshot, namespace, kind, ports, containers)
 		var rejected *workloadReportRejectedError
-		if err == nil || !errors.As(err, &rejected) || !rejected.retryable || attempt >= 9 {
-			return err
+		if err == nil {
+			r.mu.Lock()
+			r.workloadStates[stateKey] = workloadReportState{payloadHash: payloadHash, reportedAt: time.Now()}
+			r.mu.Unlock()
+			return true, nil
+		}
+		if !errors.As(err, &rejected) || !rejected.retryable || attempt >= 9 {
+			return false, err
 		}
 		delay := time.Duration(rejected.retryAfterMS) * time.Millisecond
 		if delay <= 0 {
@@ -615,8 +648,19 @@ func (r *KubernetesInventoryReporter) reportWorkloadWithRetry(cfg *pb.WorkloadIn
 				default:
 				}
 			}
-			return r.ctx.Err()
+			return false, r.ctx.Err()
 		}
+	}
+}
+
+func (r *KubernetesInventoryReporter) waitWorkloadBatchPause() bool {
+	timer := time.NewTimer(workloadInventoryBatchPause)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-r.ctx.Done():
+		return false
 	}
 }
 
