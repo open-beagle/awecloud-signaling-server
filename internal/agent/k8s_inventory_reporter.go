@@ -270,9 +270,18 @@ func (r *KubernetesInventoryReporter) collect(options kubernetesInventoryOptions
 	if err != nil {
 		return nil, fmt.Errorf("read Kubernetes version: %w", err)
 	}
-	kubeSystem, err := r.k8s.CoreV1().Namespaces().Get(ctx, metav1.NamespaceSystem, metav1.GetOptions{})
+	namespaceList, err := r.k8s.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("read kube-system identity: %w", err)
+		return nil, fmt.Errorf("list Kubernetes namespaces: %w", err)
+	}
+	namespaceByName := make(map[string]*corev1.Namespace, len(namespaceList.Items))
+	for i := range namespaceList.Items {
+		namespace := &namespaceList.Items[i]
+		namespaceByName[namespace.Name] = namespace
+	}
+	kubeSystem := namespaceByName[metav1.NamespaceSystem]
+	if kubeSystem == nil {
+		return nil, fmt.Errorf("kube-system namespace is unavailable")
 	}
 	if kubeSystem.UID == "" {
 		return nil, fmt.Errorf("kube-system identity is empty")
@@ -304,10 +313,26 @@ func (r *KubernetesInventoryReporter) collect(options kubernetesInventoryOptions
 	if err != nil {
 		return nil, fmt.Errorf("container selector: %w", err)
 	}
-	for _, namespaceName := range options.Namespaces {
-		namespace, err := r.k8s.CoreV1().Namespaces().Get(ctx, namespaceName, metav1.GetOptions{})
+	if options.ServiceEnabled {
+		services, err := r.k8s.CoreV1().Services(metav1.NamespaceAll).List(ctx, metav1.ListOptions{LabelSelector: serviceSelector})
 		if err != nil {
-			logger.Warnf("Kubernetes Inventory 跳过不可读 Namespace: namespace=%s err=%v", namespaceName, err)
+			return nil, fmt.Errorf("list Kubernetes services: %w", err)
+		}
+		servicesByNamespace := make(map[string][]corev1.Service, len(options.ServiceNamespaces))
+		for i := range services.Items {
+			service := services.Items[i]
+			if inventoryNamespaceIncluded(options.ServiceNamespaces, service.Namespace) {
+				servicesByNamespace[service.Namespace] = append(servicesByNamespace[service.Namespace], service)
+			}
+		}
+		for _, namespaceName := range options.ServiceNamespaces {
+			snapshot.servicePorts[namespaceName] = workloadServicePorts(servicesByNamespace[namespaceName])
+		}
+	}
+	for _, namespaceName := range options.Namespaces {
+		namespace := namespaceByName[namespaceName]
+		if namespace == nil {
+			logger.Warnf("Kubernetes Inventory 跳过不存在的 Namespace: namespace=%s", namespaceName)
 			continue
 		}
 		snapshot.namespaces[namespaceName] = namespace
@@ -315,14 +340,6 @@ func (r *KubernetesInventoryReporter) collect(options kubernetesInventoryOptions
 			Uid: string(namespace.UID), Name: namespace.Name, Labels: inventoryLabels(namespace.Labels),
 			Status: strings.ToLower(string(namespace.Status.Phase)),
 		})
-		if options.ServiceEnabled && inventoryNamespaceIncluded(options.ServiceNamespaces, namespaceName) {
-			services, err := r.k8s.CoreV1().Services(namespaceName).List(ctx, metav1.ListOptions{LabelSelector: serviceSelector})
-			if err != nil {
-				logger.Warnf("Kubernetes Inventory 跳过不可读 Service 快照: namespace=%s err=%v", namespaceName, err)
-			} else {
-				snapshot.servicePorts[namespaceName] = workloadServicePorts(services.Items)
-			}
-		}
 		if options.ContainerEnabled && inventoryNamespaceIncluded(options.ContainerNamespaces, namespaceName) {
 			pods, err := r.k8s.CoreV1().Pods(namespaceName).List(ctx, metav1.ListOptions{LabelSelector: containerSelector})
 			if err != nil {

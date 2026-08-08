@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -1819,17 +1820,20 @@ func boolStr(b bool) string {
 	return "禁用"
 }
 
-// parseNamespaces 解析逗号分隔的命名空间列表
+// parseNamespaces parses the JSON array stored by the management API.
 func parseNamespaces(s string) []string {
-	if s == "" {
+	if strings.TrimSpace(s) == "" {
 		return nil
 	}
-	parts := strings.Split(s, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			result = append(result, p)
+	var values []string
+	if err := json.Unmarshal([]byte(s), &values); err != nil {
+		logger.Warnf("远程配置: SVC Namespaces JSON 无效: %v", err)
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			result = append(result, value)
 		}
 	}
 	return result

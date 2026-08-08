@@ -130,11 +130,23 @@ func TestKubernetesInventoryCollectsOnlyConfiguredSelectedWorkloads(t *testing.T
 	require.Equal(t, map[string]string{"team": "a"}, snapshot.containers["tenant-a"][0].LabelsAllowlist)
 
 	actions := client.Actions()
+	namespaceLists := 0
+	serviceLists := 0
 	for _, action := range actions {
 		if action.GetVerb() == "list" && action.GetResource() == (schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}) {
-			t.Fatal("inventory reporter must GET configured namespaces, not list every namespace")
+			namespaceLists++
+		}
+		if action.GetVerb() == "list" && action.GetResource() == (schema.GroupVersionResource{Version: "v1", Resource: "services"}) {
+			serviceLists++
 		}
 	}
+	require.Equal(t, 1, namespaceLists)
+	require.Equal(t, 1, serviceLists)
+}
+
+func TestParseNamespacesUsesManagementJSONEncoding(t *testing.T) {
+	require.Equal(t, []string{"tenant-a", "tenant-b"}, parseNamespaces(`["tenant-a"," tenant-b ",""]`))
+	require.Empty(t, parseNamespaces("tenant-a,tenant-b"))
 }
 
 func TestWorkloadContainerUserDiscoveryFailureMarksContainerNotReady(t *testing.T) {
