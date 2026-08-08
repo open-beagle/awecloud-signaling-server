@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -92,19 +94,27 @@ func TestKubernetesContainerExecutorUsesFixedShellAndTarget(t *testing.T) {
 		return remote, nil
 	}
 
-	err = executor.Execute(context.Background(), &ContainerSSHUserPermission{Namespace: "team-a", PodName: "ide-0", ContainerName: "workspace"}, ContainerExecStream{Rows: 40, Cols: 120})
+	var stdout, stderr bytes.Buffer
+	err = executor.Execute(context.Background(), &ContainerSSHUserPermission{Namespace: "team-a", PodName: "ide-0", ContainerName: "workspace"}, ContainerExecStream{
+		Stdin: strings.NewReader("exit\n"), Stdout: &stdout, Stderr: &stderr, Rows: 40, Cols: 120,
+	})
 	require.NoError(t, err)
 	require.Equal(t, http.MethodPost, method)
 	require.Len(t, urls, 2)
 	require.Equal(t, []string{"/bin/bash", "--noprofile", "--norc", "-c", "exit 0"}, urls[0].Query()["command"])
 	require.Equal(t, "false", urls[0].Query().Get("stdin"))
+	require.Equal(t, "false", urls[0].Query().Get("stdout"))
+	require.Equal(t, "true", urls[0].Query().Get("stderr"))
 	require.Equal(t, "false", urls[0].Query().Get("tty"))
 	require.Equal(t, "/base/api/v1/namespaces/team-a/pods/ide-0/exec", gotURL.Path)
 	require.Equal(t, "/bin/bash", gotURL.Query().Get("command"))
 	require.Equal(t, "workspace", gotURL.Query().Get("container"))
-	require.Equal(t, "false", gotURL.Query().Get("stdin"))
+	require.Equal(t, "true", gotURL.Query().Get("stdin"))
+	require.Equal(t, "true", gotURL.Query().Get("stdout"))
+	require.Equal(t, "false", gotURL.Query().Get("stderr"))
 	require.Equal(t, "true", gotURL.Query().Get("tty"))
 	require.True(t, remote.options.Tty)
+	require.Nil(t, remote.options.Stderr)
 	size := remote.options.TerminalSizeQueue.Next()
 	require.Equal(t, uint16(120), size.Width)
 	require.Equal(t, uint16(40), size.Height)
@@ -116,13 +126,17 @@ func TestKubernetesContainerExecutorDeclaresStdinOnlyWhenProvided(t *testing.T) 
 	require.NoError(t, err)
 	target := &ContainerSSHUserPermission{Namespace: "team-a", PodName: "ide-0", ContainerName: "workspace"}
 
-	nonInteractive, err := executor.execURL(target, []string{"id", "-un"}, false, false)
+	nonInteractive, err := executor.execURL(target, []string{"id", "-un"}, false, true, true, false)
 	require.NoError(t, err)
 	require.Equal(t, "false", nonInteractive.Query().Get("stdin"))
+	require.Equal(t, "true", nonInteractive.Query().Get("stdout"))
+	require.Equal(t, "true", nonInteractive.Query().Get("stderr"))
 
-	interactive, err := executor.execURL(target, []string{"/bin/bash"}, true, true)
+	interactive, err := executor.execURL(target, []string{"/bin/bash"}, true, true, false, true)
 	require.NoError(t, err)
 	require.Equal(t, "true", interactive.Query().Get("stdin"))
+	require.Equal(t, "true", interactive.Query().Get("stdout"))
+	require.Equal(t, "false", interactive.Query().Get("stderr"))
 }
 
 func TestKubernetesContainerExecutorFallsBackOnlyWhenBashIsMissing(t *testing.T) {
