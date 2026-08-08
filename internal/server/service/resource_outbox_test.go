@@ -170,6 +170,40 @@ func TestOutboxClaimLeaseRecoveryAndRevisionOrdering(t *testing.T) {
 	require.EqualValues(t, 2, checkpoint.LastRevision)
 }
 
+func TestOutboxClaimRetainsFIFOOrdering(t *testing.T) {
+	database := newResourceDeliveryServiceDB(t)
+	outbox := newOutboxForTest(database)
+	clock := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+	outbox.now = func() time.Time { return clock }
+	oldest := appendOutboxForTest(t, database, outbox, 1, "oldest-workload", clock.Add(-time.Minute), 3)
+	newer := appendOutboxForTest(t, database, outbox, 1, "newer-allocation", clock, 3)
+	require.NoError(t, database.Model(&model.OutboxEvent{}).Where("id = ?", oldest.ID).Update("aggregate_type", "workload_observation").Error)
+	require.NoError(t, database.Model(&model.OutboxEvent{}).Where("id = ?", newer.ID).Updates(map[string]any{
+		"aggregate_type": "resource_allocation", "aggregate_id": "allocation-1",
+	}).Error)
+
+	claimed, err := outbox.Claim(context.Background(), "resource_projection", "worker", time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, oldest.ID, claimed.ID)
+}
+
+func TestOutboxClaimPrioritizesAggregateType(t *testing.T) {
+	database := newResourceDeliveryServiceDB(t)
+	outbox := newOutboxForTest(database)
+	clock := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+	outbox.now = func() time.Time { return clock }
+	oldest := appendOutboxForTest(t, database, outbox, 1, "oldest-workload", clock.Add(-time.Minute), 3)
+	newer := appendOutboxForTest(t, database, outbox, 1, "newer-allocation", clock, 3)
+	require.NoError(t, database.Model(&model.OutboxEvent{}).Where("id = ?", oldest.ID).Update("aggregate_type", "workload_observation").Error)
+	require.NoError(t, database.Model(&model.OutboxEvent{}).Where("id = ?", newer.ID).Updates(map[string]any{
+		"aggregate_type": "resource_allocation", "aggregate_id": "allocation-1",
+	}).Error)
+
+	claimed, err := outbox.ClaimPrioritized(context.Background(), "resource_projection", "worker", time.Minute, "resource_allocation")
+	require.NoError(t, err)
+	require.Equal(t, newer.ID, claimed.ID)
+}
+
 func TestOutboxEffectFailureRollsBackCheckpointAndSideEffect(t *testing.T) {
 	database := newResourceDeliveryServiceDB(t)
 	outbox := newOutboxForTest(database)

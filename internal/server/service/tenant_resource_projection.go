@@ -35,7 +35,7 @@ func (s *TenantResourceProjectionService) ProcessNext(ctx context.Context) (bool
 	if s == nil || s.db == nil || s.outbox == nil {
 		return false, ErrWorkloadInventoryInvalidInput
 	}
-	event, err := s.outbox.Claim(ctx, TenantResourceProjectionConsumer, "tenant-resource-projection", workloadProjectionLeaseDuration)
+	event, err := s.outbox.ClaimPrioritized(ctx, TenantResourceProjectionConsumer, "tenant-resource-projection", workloadProjectionLeaseDuration, "resource_allocation")
 	if errors.Is(err, ErrOutboxNoEvent) {
 		return false, nil
 	}
