@@ -74,7 +74,7 @@ func sqliteDSN(path string) string {
 	if strings.Contains(path, "?") {
 		separator = "&"
 	}
-	return fmt.Sprintf("%s%s_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)",
+	return fmt.Sprintf("%s%s_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate",
 		path, separator, sqliteBusyTimeout.Milliseconds())
 }
 
