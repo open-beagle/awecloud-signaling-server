@@ -79,6 +79,30 @@ func TestEnsureLegacyHostPlatformResourceRefreshesExistingLease(t *testing.T) {
 	require.True(t, second.LeaseExpiresAt.After(first.LeaseExpiresAt))
 }
 
+func TestSupplyInventoryReconcilesWithActiveLegacyHostResource(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	agent := fixture.createBoundAgent(t, "agent-host-and-kubernetes", 1001)
+	var node model.Node
+	require.NoError(t, fixture.database.First(&node, 1001).Error)
+	require.NoError(t, EnsureLegacyHostPlatformResource(fixture.database, agent, &node, fixture.actor.ID, fixture.now))
+
+	payload, hash := inventoryPayload(t, `{"kubernetes_clusters":[{
+		"cluster_uid":"cluster-host-and-kubernetes",
+		"display_name":"Host Kubernetes",
+		"namespaces":[]
+	}]}`)
+	ack, err := fixture.service.ReceiveSupplyInventoryBatch(context.Background(), inventoryInput(
+		TechnicalResourceCredential{SourceType: model.TechnicalResourceBindingLegacyNode, SourceID: "1001", CredentialRevision: 1},
+		payload, hash, "epoch-host-and-kubernetes", 1, "snapshot-host-and-kubernetes", 0, 1,
+	))
+	require.NoError(t, err)
+	require.True(t, ack.SnapshotCommitted)
+
+	var host model.PlatformResource
+	require.NoError(t, fixture.database.First(&host, "provider_id = ? AND type = ?", fixture.provider.ID, model.SupplyResourceHost).Error)
+	require.Equal(t, model.ResourceHealthOnline, host.HealthState)
+}
+
 func TestSupplyCandidateProjectionUpdateAndRejectedDecision(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	agent := fixture.createBoundAgent(t, "agent-candidate-update", 1001)

@@ -204,16 +204,6 @@ jobs:
           mc cp signal_agent-version.json "${s3_bucket}/signal_agent-version.json"
           mc cp signal_endpoint-version.json "${s3_bucket}/signal_endpoint-version.json"
 
-          mc anonymous set download "${s3_bucket}/install_agent.sh"
-          mc anonymous set download "${s3_bucket}/install_signal.sh"
-          mc anonymous set download "${s3_bucket}/install_endpoint.sh"
-          mc anonymous set download "${s3_bucket}/signal_agent-version.json"
-          mc anonymous set download "${s3_bucket}/signal_endpoint-version.json"
-          mc anonymous set download "${s3_bucket}/signal_agent-${VERSION}-linux-amd64"
-          mc anonymous set download "${s3_bucket}/signal_agent-${VERSION}-linux-arm64"
-          mc anonymous set download "${s3_bucket}/signal_endpoint-${VERSION}-linux-amd64"
-          mc anonymous set download "${s3_bucket}/signal_endpoint-${VERSION}-linux-arm64"
-
       - name: Publish release summary
         env:
           VERSION: ${{ steps.version.outputs.version }}

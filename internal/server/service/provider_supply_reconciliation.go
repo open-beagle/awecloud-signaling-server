@@ -290,6 +290,12 @@ func reconcilePlatformResourceEvidence(tx *gorm.DB, providerID, resourceID strin
 	if resource.LifecycleState == model.PlatformResourceRetired {
 		return refreshPlatformResourceHealth(tx, providerID, resourceID, at)
 	}
+	if resource.Type == model.SupplyResourceHost {
+		return refreshPlatformResourceHealth(tx, providerID, resourceID, at)
+	}
+	if resource.Type != model.SupplyResourceKubernetes {
+		return ErrProviderSupplyInvalidInput
+	}
 
 	var candidates []model.SupplyCandidate
 	if err := tx.Model(&model.SupplyCandidate{}).
