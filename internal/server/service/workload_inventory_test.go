@@ -201,7 +201,10 @@ func TestWorkloadInventoryMultiSourceLeaseAndNewEpoch(t *testing.T) {
 	observedRevision, resourceRevision := observation.ObservedRevision, resource.Revision
 
 	reconciler := NewWorkloadReconciliationService(fixture.database)
-	reconcileAt := fixture.now.Add(2*time.Minute + 15*time.Second)
+	reconcileAt := fixture.now.Add(workloadInventoryLeaseDuration + 15*time.Second)
+	evidenceLease := reconcileAt.Add(time.Minute)
+	require.NoError(t, fixture.database.Model(&model.SupplyCandidate{}).Where("1 = 1").Update("lease_expires_at", evidenceLease).Error)
+	require.NoError(t, fixture.database.Model(&model.NamespaceObservation{}).Where("1 = 1").Update("lease_expires_at", evidenceLease).Error)
 	result, err := reconciler.Reconcile(context.Background(), reconcileAt)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), result.StaleSources)

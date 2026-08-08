@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/glebarez/sqlite" // 纯 Go SQLite 驱动
 	"github.com/google/uuid"
@@ -29,6 +30,8 @@ const (
 	beagleWorkspaceKey        = "beagle"
 	beagleWorkspaceName       = "Beagle"
 	legacyBeagleWorkspaceName = "Beagle 工作空间"
+	sqliteMaxOpenConnections  = 8
+	sqliteBusyTimeout         = 30 * time.Second
 )
 
 // InitDB 初始化数据库
@@ -42,13 +45,20 @@ func InitDB(cfg config.DatabaseSection) error {
 	}
 
 	// 连接数据库（使用自定义 logger，统一日志格式）
-	DB, err = gorm.Open(sqlite.Open(cfg.Path), &gorm.Config{
+	DB, err = gorm.Open(sqlite.Open(sqliteDSN(cfg.Path)), &gorm.Config{
 		Logger:                           NewGormLogger(gormlogger.Warn),
 		IgnoreRelationshipsWhenMigrating: true,
 	})
 	if err != nil {
 		return fmt.Errorf("连接数据库失败: %w", err)
 	}
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return fmt.Errorf("获取数据库连接池失败: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(sqliteMaxOpenConnections)
+	sqlDB.SetMaxIdleConns(sqliteMaxOpenConnections)
+	sqlDB.SetConnMaxLifetime(0)
 
 	// 自动迁移
 	if err := autoMigrate(); err != nil {
@@ -57,6 +67,15 @@ func InitDB(cfg config.DatabaseSection) error {
 
 	logger.Info("数据库初始化成功")
 	return nil
+}
+
+func sqliteDSN(path string) string {
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return fmt.Sprintf("%s%s_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)",
+		path, separator, sqliteBusyTimeout.Milliseconds())
 }
 
 // EnableTracing 启用 OpenTelemetry 追踪
