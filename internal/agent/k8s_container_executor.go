@@ -90,7 +90,7 @@ func bashExecutableMissing(err error, stderr string) bool {
 }
 
 func (e *KubernetesContainerExecutor) execute(ctx context.Context, target *ContainerSSHUserPermission, command []string, stream ContainerExecStream, tty bool) error {
-	execURL, err := e.execURL(target, command, tty)
+	execURL, err := e.execURL(target, command, stream.Stdin != nil, tty)
 	if err != nil {
 		return err
 	}
@@ -114,7 +114,7 @@ func terminalSizeQueueForStream(tty bool, stream ContainerExecStream) remotecomm
 	return newTerminalSizeQueue(stream.Rows, stream.Cols, stream.Resize)
 }
 
-func (e *KubernetesContainerExecutor) execURL(target *ContainerSSHUserPermission, command []string, tty bool) (*url.URL, error) {
+func (e *KubernetesContainerExecutor) execURL(target *ContainerSSHUserPermission, command []string, stdin, tty bool) (*url.URL, error) {
 	base, err := url.Parse(e.restConfig.Host)
 	if err != nil || base.Scheme == "" || base.Host == "" || len(command) == 0 {
 		return nil, fmt.Errorf("invalid Kubernetes API server address")
@@ -125,7 +125,7 @@ func (e *KubernetesContainerExecutor) execURL(target *ContainerSSHUserPermission
 	for _, argument := range command {
 		query.Add("command", argument)
 	}
-	query.Set("stdin", "true")
+	query.Set("stdin", fmt.Sprint(stdin))
 	query.Set("stdout", "true")
 	query.Set("stderr", "true")
 	query.Set("tty", fmt.Sprint(tty))
