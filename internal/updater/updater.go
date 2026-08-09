@@ -128,7 +128,7 @@ func (m *Manager) Handle(directive Directive) {
 		return
 	}
 	m.mu.Lock()
-	if existing, ok := m.states[directive.TaskID]; ok && terminal(existing.Phase) {
+	if _, ok := m.states[directive.TaskID]; ok {
 		m.mu.Unlock()
 		return
 	}
@@ -241,9 +241,9 @@ func (m *Manager) downloadAndVerify(directive Directive) (string, error) {
 		return "", errors.New("update artifact URL must use HTTPS")
 	}
 
-	// Content-addressed artifact path: artifacts/<sha256>/signal_agent
+	// Content-addressed artifact path: artifacts/<sha256>/<artifact filename>
 	artifactDir := filepath.Join(m.cfg.StateDir, "artifacts", strings.ToLower(directive.SHA256))
-	finalPath := filepath.Join(artifactDir, "signal_agent")
+	finalPath := filepath.Join(artifactDir, directive.Filename)
 
 	// If already present, verify existing file SHA256
 	if fileInfo, err := os.Stat(finalPath); err == nil && !fileInfo.IsDir() {

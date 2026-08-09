@@ -54,19 +54,21 @@ type RuntimeNode struct {
 
 // RuntimeNodeDirtySnapshot 脏节点快照，包含落库所需字段与 snapshot 时的 Revision
 type RuntimeNodeDirtySnapshot struct {
-	NodeID          uint64
-	UserID          uint64
-	Name            string
-	Type            model.NodeType
-	HeadscaleNodeID uint64
-	IP              string
-	Version         string
-	CommitID        string
-	BinarySHA256    string
-	Hostname        string
-	SystemInfo      string
-	LastHeartbeat   time.Time
-	Revision        uint64
+	NodeID               uint64
+	UserID               uint64
+	Name                 string
+	Type                 model.NodeType
+	HeadscaleNodeID      uint64
+	IP                   string
+	Version              string
+	CommitID             string
+	BinarySHA256         string
+	UpdaterProtocol      string
+	ContainerSSHProtocol string
+	Hostname             string
+	SystemInfo           string
+	LastHeartbeat        time.Time
+	Revision             uint64
 }
 
 // NodeRuntimeStore 线程安全的节点运行态内存存储
@@ -315,19 +317,21 @@ func (s *NodeRuntimeStore) SnapshotDirty() map[uint64]RuntimeNodeDirtySnapshot {
 	for id, rn := range s.nodes {
 		if rn != nil && rn.Dirty {
 			result[id] = RuntimeNodeDirtySnapshot{
-				NodeID:          rn.ID,
-				UserID:          rn.UserID,
-				Name:            rn.Name,
-				Type:            rn.Type,
-				HeadscaleNodeID: rn.HeadscaleNodeID,
-				IP:              rn.IP,
-				Version:         rn.Version,
-				CommitID:        rn.CommitID,
-				BinarySHA256:    rn.BinarySHA256,
-				Hostname:        rn.Hostname,
-				SystemInfo:      rn.SystemInfo,
-				LastHeartbeat:   rn.LastHeartbeat,
-				Revision:        rn.Revision,
+				NodeID:               rn.ID,
+				UserID:               rn.UserID,
+				Name:                 rn.Name,
+				Type:                 rn.Type,
+				HeadscaleNodeID:      rn.HeadscaleNodeID,
+				IP:                   rn.IP,
+				Version:              rn.Version,
+				CommitID:             rn.CommitID,
+				BinarySHA256:         rn.BinarySHA256,
+				UpdaterProtocol:      rn.UpdaterProtocol,
+				ContainerSSHProtocol: rn.ContainerSSHProtocol,
+				Hostname:             rn.Hostname,
+				SystemInfo:           rn.SystemInfo,
+				LastHeartbeat:        rn.LastHeartbeat,
+				Revision:             rn.Revision,
 			}
 		}
 	}

@@ -60,6 +60,54 @@ func TestEndpointManagerRequiresCurrentBuildIdentity(t *testing.T) {
 	require.EqualError(t, err, "updater current build identity is invalid")
 }
 
+func TestHandleIgnoresRepeatedDirectiveForExistingTask(t *testing.T) {
+	manager, err := NewManager(Config{
+		Component:       "endpoint",
+		CurrentVersion:  "v1.0.2",
+		CurrentCommitID: strings.Repeat("a", 40),
+		CurrentSHA256:   strings.Repeat("b", 64),
+		StateDir:        t.TempDir(),
+		CurrentLink:     "/tmp/signal_endpoint",
+		ServiceName:     "signal-endpoint",
+	})
+	require.NoError(t, err)
+	manager.states["task-1"] = taskState{Status: Status{TaskID: "task-1", Phase: "restarting"}}
+
+	manager.Handle(Directive{TaskID: "task-1", Component: "endpoint", Version: "v1.0.2"})
+
+	require.NotContains(t, manager.processing, "task-1")
+	require.Equal(t, "restarting", manager.states["task-1"].Phase)
+}
+
+func TestEndpointArtifactUsesDirectiveFilename(t *testing.T) {
+	payload := []byte("endpoint artifact")
+	digest := sha256.Sum256(payload)
+	digestText := hex.EncodeToString(digest[:])
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	manager, err := NewManager(Config{
+		Component:       "endpoint",
+		CurrentVersion:  "v1.0.1",
+		CurrentCommitID: strings.Repeat("a", 40),
+		CurrentSHA256:   strings.Repeat("b", 64),
+		StateDir:        t.TempDir(),
+		CurrentLink:     "/tmp/signal_endpoint",
+		ServiceName:     "signal-endpoint",
+	})
+	require.NoError(t, err)
+	manager.client = server.Client()
+
+	staged, err := manager.downloadAndVerify(Directive{
+		TaskID: "task-1", Component: "endpoint", Version: "v1.0.2", DownloadURL: server.URL,
+		Filename: "signal_endpoint", Size: int64(len(payload)), SHA256: digestText,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "signal_endpoint", filepath.Base(staged))
+}
+
 func TestDownloadAndVerifyRejectsInvalidChecksum(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("x"))

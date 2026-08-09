@@ -118,14 +118,16 @@ func (p *NodeRuntimePersister) Flush(parentCtx context.Context) {
 	err := p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for id, snapshot := range dirtyMap {
 			updates := map[string]interface{}{
-				"ip":                snapshot.IP,
-				"hostname":          snapshot.Hostname,
-				"version":           snapshot.Version,
-				"commit_id":         snapshot.CommitID,
-				"binary_sha256":     snapshot.BinarySHA256,
-				"system_info":       snapshot.SystemInfo,
-				"headscale_node_id": snapshot.HeadscaleNodeID,
-				"updated_at":        start,
+				"ip":                     snapshot.IP,
+				"hostname":               snapshot.Hostname,
+				"version":                snapshot.Version,
+				"commit_id":              snapshot.CommitID,
+				"binary_sha256":          snapshot.BinarySHA256,
+				"system_info":            snapshot.SystemInfo,
+				"updater_protocol":       snapshot.UpdaterProtocol,
+				"container_ssh_protocol": snapshot.ContainerSSHProtocol,
+				"headscale_node_id":      snapshot.HeadscaleNodeID,
+				"updated_at":             start,
 			}
 			if !snapshot.LastHeartbeat.IsZero() {
 				updates["last_heartbeat"] = snapshot.LastHeartbeat
