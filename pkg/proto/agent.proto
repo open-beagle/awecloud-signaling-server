@@ -76,6 +76,8 @@ message AgentRegisterRequest {
   string secret = 2; // 认证密钥
   string version = 3; // Agent 版本号
   SystemInfo system_info = 4; // 系统信息
+  string commit_id = 5; // Agent Git SHA
+  string binary_sha256 = 6; // 可执行文件 SHA256 摘要
 }
 
 // AgentRegisterResponse Agent 注册响应
@@ -99,6 +101,8 @@ message AgentAuthenticateRequest {
   string secret = 2; // 认证密钥
   string version = 3; // Agent 版本号
   SystemInfo system_info = 4; // 系统信息
+  string commit_id = 5; // Agent Git SHA
+  string binary_sha256 = 6; // 可执行文件 SHA256 摘要
 }
 
 // AgentAuthenticateResponse Agent 认证响应
@@ -160,6 +164,17 @@ message AgentHeartbeatRequest {
   repeated ResourceSessionTerminationAckV2 session_termination_acks = 24;
   repeated ResourceSessionEventV2 resource_session_events_v2 = 25;
   repeated EndpointSessionAuthorizationReportV2 endpoint_session_authorization_reports_v2 = 26;
+  string commit_id = 27; // Agent 当前运行 Git SHA
+  string binary_sha256 = 28; // Agent 可执行文件 SHA256 摘要
+}
+
+// UpdateHealthConfirmation Server 签发的任务健康确认
+message UpdateHealthConfirmation {
+  string task_id = 1;
+  string version = 2;
+  string commit_id = 3;
+  string artifact_sha256 = 4;
+  int64 confirmed_at_unix = 5;
 }
 
 // ConnectedEndpoint Agent 上报的已连接 Endpoint 信息
@@ -245,6 +260,7 @@ message AgentHeartbeatResponse {
   ResourceSessionAuthorizationSnapshotV2 authorization_snapshot_v2 = 21;
   repeated ResourceSessionEventAckV2 resource_session_event_acks_v2 = 22;
   repeated EndpointSessionAuthorizationSnapshotV2 endpoint_authorization_snapshots_v2 = 23;
+  repeated UpdateHealthConfirmation update_health_confirmations = 24;
 }
 
 // EndpointCapabilityConfig Server 下发给 Agent 的 Endpoint 能力开关配置

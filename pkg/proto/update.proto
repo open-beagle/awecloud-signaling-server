@@ -22,6 +22,7 @@ message UpdateDirective {
   int64 deadline_unix = 15;
   string action = 16;
   string target_name = 17;
+  string commit_id = 18;
 }
 
 message UpdateStatus {
@@ -32,4 +33,6 @@ message UpdateStatus {
   int64 sequence = 5;
   string error_code = 6;
   string error_message = 7;
+  string current_commit_id = 8;
+  string current_sha256 = 9;
 }

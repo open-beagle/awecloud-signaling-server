@@ -20,6 +20,8 @@ type Node struct {
 	HeadscaleNodeID      uint64     `gorm:"index" json:"headscale_node_id"`                                                   // Headscale Node ID（外部系统 ID）
 	IP                   string     `gorm:"size:50" json:"ip"`                                                                // 隧道 IP
 	Version              string     `gorm:"size:50" json:"version"`                                                           // 版本号
+	CommitID             string     `gorm:"size:40" json:"commit_id"`                                                         // Git SHA
+	BinarySHA256         string     `gorm:"size:64" json:"binary_sha256"`                                                     // 可执行文件 SHA256 摘要
 	UpdaterProtocol      string     `gorm:"size:16" json:"updater_protocol"`                                                  // 支持的 updater 协议版本
 	ContainerSSHProtocol string     `gorm:"size:16" json:"container_ssh_protocol"`                                            // 支持的 ContainerSSH 协议版本
 	Hostname             string     `gorm:"size:100" json:"hostname"`                                                         // 主机名

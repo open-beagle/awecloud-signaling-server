@@ -362,6 +362,7 @@ StartLimitBurst=5
 Type=simple
 User=root
 Group=root
+Environment="SIGNAL_UPDATER_PUBLIC_KEY=${SIGNAL_UPDATER_PUBLIC_KEY}"
 
 # 工作目录
 WorkingDirectory=/etc/kubernetes

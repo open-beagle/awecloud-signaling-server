@@ -49,6 +49,7 @@ func NewUpdaterAPI() *UpdaterAPI {
 type ArtifactInput struct {
 	OS          string `json:"os" binding:"required"`
 	Arch        string `json:"arch" binding:"required"`
+	Role        string `json:"role"`
 	PackageType string `json:"package_type"`
 	Filename    string `json:"filename" binding:"required"`
 	DownloadURL string `json:"download_url" binding:"required"`
@@ -61,9 +62,11 @@ type ArtifactInput struct {
 type CreateReleaseRequest struct {
 	Component           string          `json:"component" binding:"required"`
 	Version             string          `json:"version" binding:"required"`
+	CommitID            string          `json:"commit_id"`
 	Channel             string          `json:"channel"`
 	ReleaseNotes        string          `json:"release_notes"`
 	MinSupportedVersion string          `json:"min_supported_version"`
+	MinLauncherVersion  string          `json:"min_launcher_version"`
 	Artifacts           []ArtifactInput `json:"artifacts" binding:"required,min=1"`
 }
 
@@ -92,6 +95,15 @@ func (a *UpdaterAPI) CreateRelease(c *gin.Context) {
 			return
 		}
 	}
+	minLauncherVersion := ""
+	if req.MinLauncherVersion != "" {
+		var valid bool
+		minLauncherVersion, valid = normalizeVersion(req.MinLauncherVersion)
+		if !valid {
+			c.JSON(http.StatusBadRequest, NewErrorResponse("最低 Launcher 版本必须符合语义化版本规范"))
+			return
+		}
+	}
 	if req.Channel == "" {
 		req.Channel = "stable"
 	}
@@ -111,10 +123,12 @@ func (a *UpdaterAPI) CreateRelease(c *gin.Context) {
 		ID:                  uuid.NewString(),
 		Component:           component,
 		Version:             version,
+		CommitID:            req.CommitID,
 		Channel:             req.Channel,
 		Status:              model.ReleaseStatusDraft,
 		ReleaseNotes:        req.ReleaseNotes,
 		MinSupportedVersion: minVersion,
+		MinLauncherVersion:  minLauncherVersion,
 		CreatedBy:           uint64(getAdminIDFromContext(c)),
 	}
 	if err := db.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -353,13 +367,18 @@ func buildArtifact(input ArtifactInput) (model.Artifact, error) {
 	if filename == "" || path.Base(filename) != filename || strings.Contains(filename, "\\") {
 		return model.Artifact{}, errors.New("制品文件名无效")
 	}
-	if input.PackageType == "" {
-		input.PackageType = "binary"
+	role := strings.ToLower(strings.TrimSpace(input.Role))
+	if role == "" {
+		role = "app"
+	}
+	if role != "app" && role != "launcher" {
+		return model.Artifact{}, errors.New("制品 role 必须为 app 或 launcher")
 	}
 	return model.Artifact{
 		ID:          uuid.NewString(),
 		OS:          osName,
 		Arch:        arch,
+		Role:        role,
 		PackageType: input.PackageType,
 		Filename:    filename,
 		DownloadURL: input.DownloadURL,

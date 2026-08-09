@@ -11,6 +11,10 @@ import (
 )
 
 func TestResolveAgentStartupConfigUsesStoredCredentialWithoutRegistering(t *testing.T) {
+	t.Setenv("SIGNAL_TOKEN", "")
+	t.Setenv("AGENT_TOKEN", "")
+	t.Setenv("SIGNAL_SERVER", "")
+	t.Setenv("AGENT_ADDRESS", "")
 	configPath := filepath.Join(t.TempDir(), "agent.toml")
 	require.NoError(t, os.WriteFile(configPath, []byte(`[agent]
 token = "runtime-secret"

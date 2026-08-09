@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -33,10 +36,12 @@ import (
 
 // Agent Agent进程
 type Agent struct {
-	config     *config.AgentConfig
-	version    string // Agent版本
-	userName   string // 用户名（从注册响应获取）
-	deviceName string // 设备名称（从注册响应获取，即 Node.Name）
+	config       *config.AgentConfig
+	version      string // Agent版本
+	gitCommit    string // Git SHA
+	binarySHA256 string // 二进制 SHA256
+	userName     string // 用户名（从注册响应获取）
+	deviceName   string // 设备名称（从注册响应获取，即 Node.Name）
 
 	// gRPC连接
 	grpcConn      *grpc.ClientConn
@@ -95,11 +100,16 @@ type Agent struct {
 }
 
 // NewAgent 创建Agent
-func NewAgent(cfg *config.AgentConfig, version, buildDate string) (*Agent, error) {
+func NewAgent(cfg *config.AgentConfig, version, gitCommit, buildDate string) (*Agent, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// 设置版本信息（供 Endpoint SSH 横幅使用）
 	SetVersionInfo(version, buildDate)
+
+	binSHA256, err := computeExecutableSHA256()
+	if err != nil {
+		logger.Warnf("计算 Agent 二进制 SHA256 失败: %v", err)
+	}
 
 	// 初始化网络检测器
 	lanDetector := NewLANDetector()
@@ -111,6 +121,8 @@ func NewAgent(cfg *config.AgentConfig, version, buildDate string) (*Agent, error
 	agent := &Agent{
 		config:         cfg,
 		version:        version,
+		gitCommit:      gitCommit,
+		binarySHA256:   binSHA256,
 		lanDetector:    lanDetector,
 		networkInfo:    networkInfo,
 		auditCollector: NewAuditCollector(),
@@ -124,6 +136,24 @@ func NewAgent(cfg *config.AgentConfig, version, buildDate string) (*Agent, error
 		agent.updater = updateManager
 	}
 	return agent, nil
+}
+
+func computeExecutableSHA256() (string, error) {
+	execPath, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	file, err := os.Open(execPath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // Run 运行Agent（Agent 模式：完整的 gRPC 注册 + 心跳 + ProxyManager + VisitorManager）
@@ -558,10 +588,12 @@ func (a *Agent) register() error {
 	}
 
 	resp, err := a.grpcClient.Register(a.ctx, &pb.AgentRegisterRequest{
-		Name:       "", // 不再传递 name,由 Server 从 Token 获取
-		Secret:     a.config.Agent.AgentToken,
-		Version:    a.version,
-		SystemInfo: systemInfo,
+		Name:         "", // 不再传递 name,由 Server 从 Token 获取
+		Secret:       a.config.Agent.AgentToken,
+		Version:      a.version,
+		CommitId:     a.gitCommit,
+		BinarySha256: a.binarySHA256,
+		SystemInfo:   systemInfo,
 	})
 
 	if err != nil {
@@ -796,7 +828,9 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 	req := &pb.AgentHeartbeatRequest{
 		AgentId:         a.agentID,
 		Version:         a.version,
-		UpdaterProtocol: "v1",
+		CommitId:        a.gitCommit,
+		BinarySha256:    a.binarySHA256,
+		UpdaterProtocol: "v2",
 		SystemInfo: &pb.SystemInfo{
 			Os:       runtime.GOOS,
 			Arch:     runtime.GOARCH,
@@ -993,6 +1027,9 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 		a.endpointServer.SetUpdateDirectives(resp.EndpointUpdateDirectives)
 	}
 	if a.updater != nil {
+		if len(resp.UpdateHealthConfirmations) > 0 {
+			a.updater.HandleHealthConfirmations(resp.UpdateHealthConfirmations)
+		}
 		for _, directive := range resp.UpdateDirectives {
 			a.updater.Handle(updateDirectiveFromProto(directive))
 		}

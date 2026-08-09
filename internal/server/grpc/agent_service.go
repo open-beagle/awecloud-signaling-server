@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -227,6 +228,12 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 	if req.Version != "" {
 		node.Version = req.Version
 	}
+	if req.CommitId != "" {
+		node.CommitID = req.CommitId
+	}
+	if req.BinarySha256 != "" {
+		node.BinarySHA256 = req.BinarySha256
+	}
 	if req.SystemInfo != nil {
 		systemInfo := model.NodeSystemInfo{
 			OS:        req.SystemInfo.Os,
@@ -367,6 +374,12 @@ func (s *AgentServiceServer) Authenticate(ctx context.Context, req *pb.AgentAuth
 	node.LastHeartbeat = &now
 	if req.Version != "" {
 		node.Version = req.Version
+	}
+	if req.CommitId != "" {
+		node.CommitID = req.CommitId
+	}
+	if req.BinarySha256 != "" {
+		node.BinarySHA256 = req.BinarySha256
 	}
 	if req.SystemInfo != nil {
 		systemInfo := model.NodeSystemInfo{
@@ -737,6 +750,12 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		}
 		if req.Version != "" {
 			updates["version"] = req.Version
+		}
+		if req.CommitId != "" {
+			updates["commit_id"] = req.CommitId
+		}
+		if req.BinarySha256 != "" {
+			updates["binary_sha256"] = req.BinarySha256
 		}
 		if sysInfoJSON != "" {
 			updates["system_info"] = sysInfoJSON
@@ -1308,6 +1327,30 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 				resp.EndpointUpdateDirectives = append(resp.EndpointUpdateDirectives, toProtoUpdateDirective(directive))
 			}
 		}
+
+		if nodeID > 0 {
+			var restartingTasks []model.UpdateTask
+			if err := db.DB.WithContext(ctx).
+				Where("target_type = ? AND target_id = ? AND component = ? AND status = ?", model.UpdateTargetNode, strconv.FormatUint(nodeID, 10), model.ComponentAgent, model.UpdateTaskRestarting).
+				Find(&restartingTasks).Error; err == nil && len(restartingTasks) > 0 {
+				var currentNode model.Node
+				if err := db.DB.WithContext(ctx).First(&currentNode, nodeID).Error; err == nil {
+					for _, task := range restartingTasks {
+						if currentNode.Version == task.DesiredVersion &&
+							(task.DesiredCommitID == "" || currentNode.CommitID == task.DesiredCommitID) &&
+							(task.DesiredSHA256 == "" || currentNode.BinarySHA256 == task.DesiredSHA256) {
+							resp.UpdateHealthConfirmations = append(resp.UpdateHealthConfirmations, &pb.UpdateHealthConfirmation{
+								TaskId:          task.ID,
+								Version:         currentNode.Version,
+								CommitId:        currentNode.CommitID,
+								ArtifactSha256:  currentNode.BinarySHA256,
+								ConfirmedAtUnix: time.Now().Unix(),
+							})
+						}
+					}
+				}
+			}
+		}
 	}
 	s.appendSessionAuthorizationResponse(ctx, conn, resp, sessionAcks)
 
@@ -1412,6 +1455,7 @@ func toProtoUpdateDirective(directive service.UpdateDirective) *pb.UpdateDirecti
 		DeadlineUnix:  directive.DeadlineUnix,
 		Action:        directive.Action,
 		TargetName:    directive.TargetName,
+		CommitId:      directive.CommitID,
 	}
 }
 

@@ -23,14 +23,17 @@ func updateDirectiveFromProto(directive *pb.UpdateDirective) updater.Directive {
 		TaskID:        directive.TaskId,
 		Component:     directive.Component,
 		Version:       directive.Version,
+		ArtifactID:    directive.ArtifactId,
 		DownloadURL:   directive.DownloadUrl,
 		Filename:      directive.Filename,
 		Size:          directive.Size,
 		SHA256:        directive.Sha256,
 		Signature:     directive.Signature,
 		KeyID:         directive.KeyId,
+		Force:         directive.Force,
 		NotBeforeUnix: directive.NotBeforeUnix,
 		DeadlineUnix:  directive.DeadlineUnix,
+		CommitID:      directive.CommitId,
 	}
 }
 
@@ -38,13 +41,15 @@ func updateStatusesToProto(statuses []updater.Status) []*pb.UpdateStatus {
 	result := make([]*pb.UpdateStatus, 0, len(statuses))
 	for _, status := range statuses {
 		result = append(result, &pb.UpdateStatus{
-			TaskId:         status.TaskID,
-			Phase:          status.Phase,
-			Progress:       int32(status.Progress),
-			CurrentVersion: status.CurrentVersion,
-			Sequence:       status.Sequence,
-			ErrorCode:      status.ErrorCode,
-			ErrorMessage:   status.ErrorMessage,
+			TaskId:          status.TaskID,
+			Phase:           status.Phase,
+			Progress:        int32(status.Progress),
+			CurrentVersion:  status.CurrentVersion,
+			Sequence:        status.Sequence,
+			ErrorCode:       status.ErrorCode,
+			ErrorMessage:    status.ErrorMessage,
+			CurrentCommitId: status.CurrentCommitID,
+			CurrentSha256:   status.CurrentSHA256,
 		})
 	}
 	return result

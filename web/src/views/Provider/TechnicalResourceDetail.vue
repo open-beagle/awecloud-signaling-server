@@ -5,7 +5,7 @@
         <el-button :icon="ArrowLeft" @click="returnFromDetail">{{ resource?.type === 'endpoint' ? '返回 Agent' : '返回列表' }}</el-button>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
 		<el-button v-if="resource && ['registered', 'disabled'].includes(resource.lifecycle_state)" :icon="Edit" :disabled="!canWrite || !hasBinding" @click="openCapabilities">编辑能力</el-button>
-		<el-button v-if="resource && ['registered', 'disabled'].includes(resource.lifecycle_state)" type="primary" :icon="Upload" :disabled="!canWrite || !hasBinding || resource.updater_protocol !== 'v1'" @click="openUpdate">更新</el-button>
+		<el-button v-if="resource && ['registered', 'disabled'].includes(resource.lifecycle_state)" type="primary" :icon="Upload" :disabled="!canWrite || !hasBinding || !['v1', 'v2'].includes(resource.updater_protocol)" @click="openUpdate">更新</el-button>
 		<el-dropdown v-if="resource && resource.lifecycle_state !== 'deleted'" trigger="click" @command="handleLifecycleCommand">
 			<el-button :icon="MoreFilled" :disabled="!canWrite">更多操作</el-button>
 			<template #dropdown><el-dropdown-menu>
@@ -90,7 +90,7 @@
           </section>
         </el-tab-pane>
 		<el-tab-pane label="更新记录" name="events"><section class="detail-surface">
-			<el-table v-if="updateTasks.length" :data="updateTasks" stripe><el-table-column label="目标版本" prop="desired_version" width="150" /><el-table-column label="状态" width="140"><template #default="{ row }"><el-tag size="small" :type="updateStatusTag(row.status)">{{ updateStatusLabel(row.status) }}</el-tag></template></el-table-column><el-table-column label="发起时间" width="190"><template #default="{ row }">{{ formatTime(row.created_at) }}</template></el-table-column><el-table-column label="结果"><template #default="{ row }">{{ row.last_error_message || '-' }}</template></el-table-column></el-table>
+			<el-table v-if="updateTasks.length" :data="updateTasks" stripe><el-table-column label="目标版本" width="200"><template #default="{ row }"><span>{{ row.desired_version }}</span><span v-if="row.desired_commit_id" class="secondary mono">@ {{ row.desired_commit_id.substring(0, 8) }}</span></template></el-table-column><el-table-column label="状态" width="140"><template #default="{ row }"><el-tag size="small" :type="updateStatusTag(row.status)">{{ updateStatusLabel(row.status) }}</el-tag></template></el-table-column><el-table-column label="发起时间" width="190"><template #default="{ row }">{{ formatTime(row.created_at) }}</template></el-table-column><el-table-column label="结果"><template #default="{ row }">{{ row.last_error_message || '-' }}</template></el-table-column></el-table>
 			<el-empty v-else description="暂无更新任务" />
 		</section></el-tab-pane>
         <el-tab-pane label="诊断" name="diagnostics">
@@ -129,7 +129,7 @@
 
 	<el-dialog v-model="updateDialog" title="创建更新任务" width="560px" destroy-on-close>
 		<el-form label-position="top">
-			<el-form-item label="目标版本" required><el-select v-model="updateForm.releaseId" style="width: 100%" placeholder="选择已发布版本"><el-option v-for="release in releases" :key="release.id" :label="`${release.version} · ${release.channel}`" :value="release.id" /></el-select></el-form-item>
+			<el-form-item label="目标版本" required><el-select v-model="updateForm.releaseId" style="width: 100%" placeholder="选择已发布版本"><el-option v-for="release in releases" :key="release.id" :label="`${release.version} · ${release.channel}${release.commit_id ? ' (@ ' + release.commit_id.substring(0, 8) + ')' : ''}`" :value="release.id" /></el-select></el-form-item>
 			<el-form-item label="更新原因" required><el-input v-model="updateForm.reason" type="textarea" :rows="3" maxlength="500" show-word-limit /></el-form-item>
 			<el-form-item><el-checkbox v-model="updateForm.force">忽略版本顺序并强制更新</el-checkbox></el-form-item>
 		</el-form>

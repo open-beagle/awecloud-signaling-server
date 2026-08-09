@@ -26,12 +26,14 @@ const (
 // to Artifact records so the release remains the single version source.
 type Release struct {
 	ID                  string        `gorm:"primaryKey;size:36" json:"id"`
-	Component           Component     `gorm:"size:20;not null;uniqueIndex:uk_release_component_version,priority:1;index" json:"component"`
-	Version             string        `gorm:"size:64;not null;uniqueIndex:uk_release_component_version,priority:2" json:"version"`
+	Component           Component     `gorm:"size:20;not null;uniqueIndex:uk_release_component_version_commit,priority:1;index" json:"component"`
+	Version             string        `gorm:"size:64;not null;uniqueIndex:uk_release_component_version_commit,priority:2" json:"version"`
+	CommitID            string        `gorm:"size:40;not null;default:'';uniqueIndex:uk_release_component_version_commit,priority:3" json:"commit_id"`
 	Channel             string        `gorm:"size:32;not null;default:'stable';index" json:"channel"`
 	Status              ReleaseStatus `gorm:"size:20;not null;default:'draft';index" json:"status"`
 	ReleaseNotes        string        `gorm:"type:text" json:"release_notes"`
 	MinSupportedVersion string        `gorm:"size:64" json:"min_supported_version"`
+	MinLauncherVersion  string        `gorm:"size:64;not null;default:''" json:"min_launcher_version"`
 	PublishedAt         *time.Time    `json:"published_at"`
 	CreatedBy           uint64        `json:"created_by"`
 	CreatedAt           time.Time     `json:"created_at"`
@@ -55,6 +57,7 @@ type Artifact struct {
 	ReleaseID   string         `gorm:"size:36;not null;uniqueIndex:uk_artifact_release_platform,priority:1;index" json:"release_id"`
 	OS          string         `gorm:"size:32;not null;uniqueIndex:uk_artifact_release_platform,priority:2" json:"os"`
 	Arch        string         `gorm:"size:32;not null;uniqueIndex:uk_artifact_release_platform,priority:3" json:"arch"`
+	Role        string         `gorm:"size:32;not null;default:'app';uniqueIndex:uk_artifact_release_platform,priority:4" json:"role"`
 	PackageType string         `gorm:"size:32;not null;default:'binary'" json:"package_type"`
 	Filename    string         `gorm:"size:255;not null" json:"filename"`
 	DownloadURL string         `gorm:"type:text;not null" json:"download_url"`

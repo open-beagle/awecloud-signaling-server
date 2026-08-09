@@ -43,7 +43,10 @@ type UpdateTask struct {
 	TargetID         string           `gorm:"size:100;not null;index" json:"target_id"`
 	TargetName       string           `gorm:"size:100" json:"target_name"`
 	ReleaseID        string           `gorm:"size:36;not null;index" json:"release_id"`
+	ArtifactID       string           `gorm:"size:36;not null;default:'';index" json:"artifact_id"`
 	DesiredVersion   string           `gorm:"size:64;not null" json:"desired_version"`
+	DesiredCommitID  string           `gorm:"size:40;not null;default:''" json:"desired_commit_id"`
+	DesiredSHA256    string           `gorm:"size:64;not null;default:''" json:"desired_sha256"`
 	Force            bool             `gorm:"not null;default:false" json:"force"`
 	ScheduledAt      *time.Time       `json:"scheduled_at"`
 	DeadlineAt       *time.Time       `json:"deadline_at"`
@@ -67,16 +70,18 @@ func (UpdateTask) TableName() string {
 }
 
 type UpdateEvent struct {
-	ID             int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	TaskID         string    `gorm:"size:36;not null;index" json:"task_id"`
-	Sequence       int64     `gorm:"not null" json:"sequence"`
-	Phase          string    `gorm:"size:32;not null" json:"phase"`
-	Progress       int       `gorm:"not null;default:0" json:"progress"`
-	RunningVersion string    `gorm:"size:64" json:"running_version"`
-	ErrorCode      string    `gorm:"size:100" json:"error_code"`
-	ErrorMessage   string    `gorm:"type:text" json:"error_message"`
-	Source         string    `gorm:"size:20;not null" json:"source"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID              int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	TaskID          string    `gorm:"size:36;not null;index" json:"task_id"`
+	Sequence        int64     `gorm:"not null" json:"sequence"`
+	Phase           string    `gorm:"size:32;not null" json:"phase"`
+	Progress        int       `gorm:"not null;default:0" json:"progress"`
+	RunningVersion  string    `gorm:"size:64" json:"running_version"`
+	RunningCommitID string    `gorm:"size:40" json:"running_commit_id"`
+	RunningSHA256   string    `gorm:"size:64" json:"running_sha256"`
+	ErrorCode       string    `gorm:"size:100" json:"error_code"`
+	ErrorMessage    string    `gorm:"type:text" json:"error_message"`
+	Source          string    `gorm:"size:20;not null" json:"source"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 func (UpdateEvent) TableName() string {

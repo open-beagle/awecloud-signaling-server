@@ -168,7 +168,7 @@ func main() {
 	}
 
 	// 创建并启动Agent
-	agt, err := agent.NewAgent(cfg, version, buildDate)
+	agt, err := agent.NewAgent(cfg, version, gitCommit, buildDate)
 	if err != nil {
 		logger.Fatalf("创建Agent失败: %v", err)
 	}

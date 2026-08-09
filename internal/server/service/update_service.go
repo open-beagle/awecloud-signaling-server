@@ -20,7 +20,7 @@ var (
 	ErrArtifactNotFound        = errors.New("matching artifact not found")
 	ErrActiveTaskExists        = errors.New("an active update task already exists for this target")
 	ErrInvalidUpdatePhase      = errors.New("invalid update phase")
-	ErrUpdaterUnsupported      = errors.New("target does not support updater protocol v1")
+	ErrUpdaterUnsupported      = errors.New("target does not support updater protocol v1 or v2")
 	ErrComponentNotSupported   = errors.New("component updater is not implemented")
 	ErrUpdateReporterMismatch  = errors.New("update status reporter does not match task target")
 	ErrInvalidUpdateTransition = errors.New("invalid update status transition")
@@ -44,16 +44,19 @@ type UpdateDirective struct {
 	DeadlineUnix  int64
 	Action        string
 	TargetName    string
+	CommitID      string
 }
 
 type UpdateStatusReport struct {
-	TaskID         string
-	Phase          string
-	Progress       int
-	CurrentVersion string
-	Sequence       int64
-	ErrorCode      string
-	ErrorMessage   string
+	TaskID          string
+	Phase           string
+	Progress        int
+	CurrentVersion  string
+	Sequence        int64
+	ErrorCode       string
+	ErrorMessage    string
+	CurrentCommitID string
+	CurrentSHA256   string
 }
 
 type UpdateStatusReporter struct {
@@ -117,10 +120,11 @@ func (s *UpdateService) CreateTask(ctx context.Context, input CreateUpdateTaskIn
 		if err != nil {
 			return err
 		}
-		if updaterProtocol != "v1" {
+		if updaterProtocol != "v1" && updaterProtocol != "v2" {
 			return ErrUpdaterUnsupported
 		}
-		if _, err := s.findArtifact(tx, release.ID, osName, arch); err != nil {
+		artifact, err := s.findArtifact(tx, release.ID, osName, arch)
+		if err != nil {
 			return err
 		}
 
@@ -136,24 +140,27 @@ func (s *UpdateService) CreateTask(ctx context.Context, input CreateUpdateTaskIn
 		}
 
 		result = model.UpdateTask{
-			ID:             uuid.NewString(),
-			Component:      input.Component,
-			TargetType:     input.TargetType,
-			TargetID:       input.TargetID,
-			TargetName:     name,
-			ReleaseID:      release.ID,
-			DesiredVersion: release.Version,
-			Force:          input.Force,
-			ScheduledAt:    input.ScheduledAt,
-			DeadlineAt:     input.DeadlineAt,
-			Status:         model.UpdateTaskPending,
-			MaxAttempts:    input.MaxAttempts,
-			CreatedBy:      input.CreatedBy,
+			ID:              uuid.NewString(),
+			Component:       input.Component,
+			TargetType:      input.TargetType,
+			TargetID:        input.TargetID,
+			TargetName:      name,
+			ReleaseID:       release.ID,
+			ArtifactID:      artifact.ID,
+			DesiredVersion:  release.Version,
+			DesiredCommitID: release.CommitID,
+			DesiredSHA256:   artifact.SHA256,
+			Force:           input.Force,
+			ScheduledAt:     input.ScheduledAt,
+			DeadlineAt:      input.DeadlineAt,
+			Status:          model.UpdateTaskPending,
+			MaxAttempts:     input.MaxAttempts,
+			CreatedBy:       input.CreatedBy,
 		}
 		if err := tx.Create(&result).Error; err != nil {
 			return err
 		}
-		return s.recordEvent(tx, result.ID, 0, string(model.UpdateTaskPending), 0, "", "", "", "server")
+		return s.recordEvent(tx, result.ID, 0, string(model.UpdateTaskPending), 0, "", "", "", "", "", "server")
 	})
 	if err != nil {
 		return nil, err
@@ -213,8 +220,8 @@ func (s *UpdateService) directivesForTarget(ctx context.Context, targetType mode
 		if err != nil {
 			continue
 		}
-		if updaterProtocol != "v1" {
-			_ = s.setTaskStatus(ctx, task.ID, model.UpdateTaskFailed, "updater_unsupported", "目标未报告 updater 协议 v1")
+		if updaterProtocol != "v1" && updaterProtocol != "v2" {
+			_ = s.setTaskStatus(ctx, task.ID, model.UpdateTaskFailed, "updater_unsupported", "目标未报告 updater 协议 v1 或 v2")
 			continue
 		}
 		artifact, err := s.findArtifact(s.db.WithContext(ctx), task.ReleaseID, osName, arch)
@@ -241,6 +248,7 @@ func (s *UpdateService) directivesForTarget(ctx context.Context, targetType mode
 			Force:       task.Force,
 			Action:      "install",
 			TargetName:  task.TargetName,
+			CommitID:    task.DesiredCommitID,
 		}
 		if task.ScheduledAt != nil {
 			directive.NotBeforeUnix = task.ScheduledAt.Unix()
@@ -276,11 +284,23 @@ func (s *UpdateService) Report(ctx context.Context, taskID string, reporter Upda
 		if task.Status.Terminal() {
 			return nil
 		}
-		if statusValue == model.UpdateTaskSucceeded && report.CurrentVersion != task.DesiredVersion {
-			statusValue = model.UpdateTaskFailed
-			report.Phase = string(model.UpdateTaskFailed)
-			report.ErrorCode = "version_mismatch"
-			report.ErrorMessage = fmt.Sprintf("expected version %s, got %s", task.DesiredVersion, report.CurrentVersion)
+		if statusValue == model.UpdateTaskSucceeded {
+			if report.CurrentVersion != task.DesiredVersion {
+				statusValue = model.UpdateTaskFailed
+				report.Phase = string(model.UpdateTaskFailed)
+				report.ErrorCode = "version_mismatch"
+				report.ErrorMessage = fmt.Sprintf("expected version %s, got %s", task.DesiredVersion, report.CurrentVersion)
+			} else if task.DesiredCommitID != "" && report.CurrentCommitID != task.DesiredCommitID {
+				statusValue = model.UpdateTaskFailed
+				report.Phase = string(model.UpdateTaskFailed)
+				report.ErrorCode = "commit_mismatch"
+				report.ErrorMessage = fmt.Sprintf("expected commit %s, got %s", task.DesiredCommitID, report.CurrentCommitID)
+			} else if task.DesiredSHA256 != "" && report.CurrentSHA256 != task.DesiredSHA256 {
+				statusValue = model.UpdateTaskFailed
+				report.Phase = string(model.UpdateTaskFailed)
+				report.ErrorCode = "artifact_mismatch"
+				report.ErrorMessage = fmt.Sprintf("expected sha256 %s, got %s", task.DesiredSHA256, report.CurrentSHA256)
+			}
 		}
 
 		var latest model.UpdateEvent
@@ -311,7 +331,7 @@ func (s *UpdateService) Report(ctx context.Context, taskID string, reporter Upda
 		if err := tx.Model(&task).Updates(updates).Error; err != nil {
 			return err
 		}
-		return s.recordEvent(tx, taskID, report.Sequence, report.Phase, report.Progress, report.CurrentVersion, report.ErrorCode, report.ErrorMessage, reporter.Source)
+		return s.recordEvent(tx, taskID, report.Sequence, report.Phase, report.Progress, report.CurrentVersion, report.CurrentCommitID, report.CurrentSHA256, report.ErrorCode, report.ErrorMessage, reporter.Source)
 	})
 }
 
@@ -352,24 +372,27 @@ func (s *UpdateService) Retry(ctx context.Context, taskID string) (*model.Update
 		}
 
 		retry = model.UpdateTask{
-			ID:             uuid.NewString(),
-			Component:      task.Component,
-			TargetType:     task.TargetType,
-			TargetID:       task.TargetID,
-			TargetName:     task.TargetName,
-			ReleaseID:      task.ReleaseID,
-			DesiredVersion: task.DesiredVersion,
-			Force:          task.Force,
-			Status:         model.UpdateTaskPending,
-			Attempt:        task.Attempt,
-			MaxAttempts:    task.MaxAttempts,
-			CreatedBy:      task.CreatedBy,
-			RetryOfTaskID:  task.ID,
+			ID:              uuid.NewString(),
+			Component:       task.Component,
+			TargetType:      task.TargetType,
+			TargetID:        task.TargetID,
+			TargetName:      task.TargetName,
+			ReleaseID:       task.ReleaseID,
+			ArtifactID:      task.ArtifactID,
+			DesiredVersion:  task.DesiredVersion,
+			DesiredCommitID: task.DesiredCommitID,
+			DesiredSHA256:   task.DesiredSHA256,
+			Force:           task.Force,
+			Status:          model.UpdateTaskPending,
+			Attempt:         task.Attempt,
+			MaxAttempts:     task.MaxAttempts,
+			CreatedBy:       task.CreatedBy,
+			RetryOfTaskID:   task.ID,
 		}
 		if err := tx.Create(&retry).Error; err != nil {
 			return err
 		}
-		return s.recordEvent(tx, retry.ID, 0, string(model.UpdateTaskPending), 0, "", "", "retry of "+task.ID, "server")
+		return s.recordEvent(tx, retry.ID, 0, string(model.UpdateTaskPending), 0, "", "", "", "", "retry of "+task.ID, "server")
 	})
 	if err != nil {
 		return nil, err
@@ -390,7 +413,7 @@ func (s *UpdateService) markDelivered(ctx context.Context, taskID string) error 
 		if err := tx.Model(&task).Updates(map[string]any{"status": model.UpdateTaskDelivered, "last_delivered_at": now}).Error; err != nil {
 			return err
 		}
-		return s.recordEvent(tx, taskID, 0, string(model.UpdateTaskDelivered), 0, "", "", "", "server")
+		return s.recordEvent(tx, taskID, 0, string(model.UpdateTaskDelivered), 0, "", "", "", "", "", "server")
 	})
 }
 
@@ -414,7 +437,7 @@ func (s *UpdateService) setTaskStatus(ctx context.Context, taskID string, next m
 		}).Error; err != nil {
 			return err
 		}
-		return s.recordEvent(tx, task.ID, 0, string(next), 0, "", errorCode, errorMessage, "server")
+		return s.recordEvent(tx, task.ID, 0, string(next), 0, "", "", "", errorCode, errorMessage, "server")
 	})
 }
 
@@ -465,16 +488,18 @@ func (s *UpdateService) findArtifact(tx *gorm.DB, releaseID, osName, arch string
 	return &artifact, nil
 }
 
-func (s *UpdateService) recordEvent(tx *gorm.DB, taskID string, sequence int64, phase string, progress int, version, errorCode, errorMessage, source string) error {
+func (s *UpdateService) recordEvent(tx *gorm.DB, taskID string, sequence int64, phase string, progress int, version, commitID, sha256, errorCode, errorMessage, source string) error {
 	return tx.Create(&model.UpdateEvent{
-		TaskID:         taskID,
-		Sequence:       sequence,
-		Phase:          phase,
-		Progress:       progress,
-		RunningVersion: version,
-		ErrorCode:      errorCode,
-		ErrorMessage:   errorMessage,
-		Source:         source,
+		TaskID:          taskID,
+		Sequence:        sequence,
+		Phase:           phase,
+		Progress:        progress,
+		RunningVersion:  version,
+		RunningCommitID: commitID,
+		RunningSHA256:   sha256,
+		ErrorCode:       errorCode,
+		ErrorMessage:    errorMessage,
+		Source:          source,
 	}).Error
 }
 

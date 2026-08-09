@@ -18,30 +18,37 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
 type Directive struct {
 	TaskID        string
 	Component     string
 	Version       string
+	ArtifactID    string
 	DownloadURL   string
 	Filename      string
 	Size          int64
 	SHA256        string
 	Signature     string
 	KeyID         string
+	Force         bool
 	NotBeforeUnix int64
 	DeadlineUnix  int64
+	CommitID      string
 }
 
 type Status struct {
-	TaskID         string
-	Phase          string
-	Progress       int
-	CurrentVersion string
-	Sequence       int64
-	ErrorCode      string
-	ErrorMessage   string
+	TaskID          string
+	Phase           string
+	Progress        int
+	CurrentVersion  string
+	Sequence        int64
+	ErrorCode       string
+	ErrorMessage    string
+	CurrentCommitID string
+	CurrentSHA256   string
 }
 
 type Config struct {
@@ -58,9 +65,21 @@ type taskState struct {
 	Status
 	Component      string    `json:"component"`
 	TargetVersion  string    `json:"target_version"`
+	TargetCommitID string    `json:"target_commit_id"`
+	TargetSHA256   string    `json:"target_sha256"`
 	StagedBinary   string    `json:"staged_binary"`
 	PreviousTarget string    `json:"previous_target"`
 	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type HealthFile struct {
+	SchemaVersion      int       `json:"schema_version"`
+	TaskID             string    `json:"task_id"`
+	Version            string    `json:"version"`
+	CommitID           string    `json:"commit_id"`
+	BinarySHA256       string    `json:"binary_sha256"`
+	RegisteredAt       time.Time `json:"registered_at"`
+	HeartbeatConfirmed time.Time `json:"heartbeat_confirmed_at"`
 }
 
 type Manager struct {
@@ -100,6 +119,11 @@ func NewManager(cfg Config) (*Manager, error) {
 	if err := os.MkdirAll(cfg.StateDir, 0700); err != nil {
 		return nil, fmt.Errorf("create updater state directory: %w", err)
 	}
+	_ = os.MkdirAll(filepath.Join(cfg.StateDir, "tasks"), 0700)
+	_ = os.MkdirAll(filepath.Join(cfg.StateDir, "downloads"), 0700)
+	_ = os.MkdirAll(filepath.Join(cfg.StateDir, "artifacts"), 0700)
+	_ = os.MkdirAll(filepath.Join(cfg.StateDir, "health"), 0700)
+
 	manager.loadStates()
 	return manager, nil
 }
@@ -128,6 +152,43 @@ func (m *Manager) Handle(directive Directive) {
 		}()
 		m.execute(directive)
 	}()
+}
+
+func (m *Manager) HandleHealthConfirmations(confirmations []*pb.UpdateHealthConfirmation) {
+	if len(confirmations) == 0 {
+		return
+	}
+	healthDir := filepath.Join(m.cfg.StateDir, "health")
+	_ = os.MkdirAll(healthDir, 0700)
+
+	for _, conf := range confirmations {
+		if conf == nil || conf.TaskId == "" {
+			continue
+		}
+		hf := HealthFile{
+			SchemaVersion:      2,
+			TaskID:             conf.TaskId,
+			Version:            conf.Version,
+			CommitID:           conf.CommitId,
+			BinarySHA256:       conf.ArtifactSha256,
+			RegisteredAt:       time.Now(),
+			HeartbeatConfirmed: time.Unix(conf.ConfirmedAtUnix, 0),
+		}
+		data, err := json.Marshal(hf)
+		if err != nil {
+			continue
+		}
+		temp, err := os.CreateTemp(healthDir, ".health-*")
+		if err != nil {
+			continue
+		}
+		tempPath := temp.Name()
+		_, _ = temp.Write(data)
+		_ = temp.Sync()
+		_ = temp.Close()
+		_ = os.Chmod(tempPath, 0600)
+		_ = os.Rename(tempPath, filepath.Join(healthDir, conf.TaskId+".json"))
+	}
 }
 
 func (m *Manager) Statuses() []Status {
@@ -181,6 +242,30 @@ func (m *Manager) downloadAndVerify(directive Directive) (string, error) {
 	if err != nil || parsedURL.Scheme != "https" || parsedURL.Host == "" {
 		return "", errors.New("update artifact URL must use HTTPS")
 	}
+
+	// Content-addressed artifact path: artifacts/<sha256>/signal_agent
+	artifactDir := filepath.Join(m.cfg.StateDir, "artifacts", strings.ToLower(directive.SHA256))
+	finalPath := filepath.Join(artifactDir, "signal_agent")
+
+	// If already present, verify existing file SHA256
+	if fileInfo, err := os.Stat(finalPath); err == nil && !fileInfo.IsDir() {
+		existingFile, openErr := os.Open(finalPath)
+		if openErr == nil {
+			h := sha256.New()
+			_, _ = io.Copy(h, existingFile)
+			existingFile.Close()
+			if strings.EqualFold(hex.EncodeToString(h.Sum(nil)), directive.SHA256) {
+				return finalPath, nil
+			}
+			return "", errors.New("artifact_identity_conflict")
+		}
+	}
+
+	downloadDir := filepath.Join(m.cfg.StateDir, "downloads")
+	if err := os.MkdirAll(downloadDir, 0700); err != nil {
+		return "", fmt.Errorf("create download directory: %w", err)
+	}
+
 	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, directive.DownloadURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("create download request: %w", err)
@@ -194,11 +279,7 @@ func (m *Manager) downloadAndVerify(directive Directive) (string, error) {
 		return "", fmt.Errorf("download artifact: unexpected HTTP status %d", response.StatusCode)
 	}
 
-	versionDir := filepath.Join(m.cfg.StateDir, "versions", directive.Version)
-	if err := os.MkdirAll(versionDir, 0700); err != nil {
-		return "", fmt.Errorf("create version directory: %w", err)
-	}
-	temporary, err := os.CreateTemp(versionDir, ".download-*")
+	temporary, err := os.CreateTemp(downloadDir, ".download-*")
 	if err != nil {
 		return "", fmt.Errorf("create temporary artifact: %w", err)
 	}
@@ -207,6 +288,8 @@ func (m *Manager) downloadAndVerify(directive Directive) (string, error) {
 		temporary.Close()
 		_ = os.Remove(temporaryPath)
 	}()
+
+	_ = os.Chmod(temporaryPath, 0600)
 
 	hash := sha256.New()
 	written, copyErr := io.Copy(io.MultiWriter(temporary, hash), io.LimitReader(response.Body, directive.Size+1))
@@ -231,7 +314,9 @@ func (m *Manager) downloadAndVerify(directive Directive) (string, error) {
 		return "", err
 	}
 
-	finalPath := filepath.Join(versionDir, directive.Filename)
+	if err := os.MkdirAll(artifactDir, 0700); err != nil {
+		return "", fmt.Errorf("create artifact directory: %w", err)
+	}
 	if err := os.Chmod(temporaryPath, 0755); err != nil {
 		return "", fmt.Errorf("make artifact executable: %w", err)
 	}
@@ -243,6 +328,7 @@ func (m *Manager) downloadAndVerify(directive Directive) (string, error) {
 
 func (m *Manager) startApplyHelper(directive Directive, stagedBinary string) error {
 	unit := fmt.Sprintf("signal-update-%s", directive.TaskID[:min(12, len(directive.TaskID))])
+	previousLink := m.cfg.CurrentLink + ".previous"
 	command := exec.Command(
 		"systemd-run",
 		"--unit", unit,
@@ -253,6 +339,7 @@ func (m *Manager) startApplyHelper(directive Directive, stagedBinary string) err
 		"--state-dir", m.cfg.StateDir,
 		"--binary", stagedBinary,
 		"--current-link", m.cfg.CurrentLink,
+		"--previous-link", previousLink,
 		"--service", m.cfg.ServiceName,
 	)
 	if output, err := command.CombinedOutput(); err != nil {
@@ -271,6 +358,8 @@ func (m *Manager) setStatusWithPath(directive Directive, phase string, progress 
 	state.TaskID = directive.TaskID
 	state.Component = directive.Component
 	state.TargetVersion = directive.Version
+	state.TargetCommitID = directive.CommitID
+	state.TargetSHA256 = directive.SHA256
 	state.Phase = phase
 	state.Progress = progress
 	state.CurrentVersion = m.cfg.CurrentVersion
@@ -287,16 +376,22 @@ func (m *Manager) setStatusWithPath(directive Directive, phase string, progress 
 }
 
 func (m *Manager) loadStates() {
-	entries, err := os.ReadDir(m.cfg.StateDir)
+	tasksDir := filepath.Join(m.cfg.StateDir, "tasks")
+	entries, err := os.ReadDir(tasksDir)
 	if err != nil {
-		return
+		// Fallback to StateDir root for backwards compatibility
+		entries, err = os.ReadDir(m.cfg.StateDir)
+		if err != nil {
+			return
+		}
+		tasksDir = m.cfg.StateDir
 	}
 	loaded := make(map[string]taskState)
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		state, err := readTaskState(filepath.Join(m.cfg.StateDir, entry.Name()))
+		state, err := readTaskState(filepath.Join(tasksDir, entry.Name()))
 		if err == nil && state.TaskID != "" {
 			loaded[state.TaskID] = state
 		}
@@ -311,26 +406,45 @@ func (m *Manager) loadStates() {
 }
 
 type ApplyConfig struct {
-	TaskID      string
-	StateDir    string
-	BinaryPath  string
-	CurrentLink string
-	ServiceName string
+	TaskID       string
+	StateDir     string
+	BinaryPath   string
+	CurrentLink  string
+	PreviousLink string
+	ServiceName  string
 }
 
 func Apply(ctx context.Context, cfg ApplyConfig) error {
 	if cfg.TaskID == "" || cfg.StateDir == "" || cfg.BinaryPath == "" || cfg.CurrentLink == "" || cfg.ServiceName == "" {
 		return errors.New("updater apply configuration is incomplete")
 	}
+	if cfg.PreviousLink == "" {
+		cfg.PreviousLink = cfg.CurrentLink + ".previous"
+	}
+
 	statePath := taskStatePath(cfg.StateDir, cfg.TaskID)
 	state, err := readTaskState(statePath)
 	if err != nil {
 		return fmt.Errorf("read updater task state: %w", err)
 	}
+
 	previous, err := os.Readlink(cfg.CurrentLink)
 	if err != nil {
-		return fmt.Errorf("read current binary link: %w", err)
+		// If current symlink read fails, default to current binary path
+		previous = cfg.BinaryPath
 	}
+
+	// Idempotency check: if current already points to binaryPath
+	if previous == cfg.BinaryPath {
+		state.Phase = "succeeded"
+		state.Progress = 100
+		state.Sequence++
+		state.ErrorCode = ""
+		state.ErrorMessage = "already_current"
+		state.UpdatedAt = time.Now()
+		return writeTaskState(cfg.StateDir, state)
+	}
+
 	state.PreviousTarget = previous
 	state.Phase = "installing"
 	state.Sequence++
@@ -338,6 +452,12 @@ func Apply(ctx context.Context, cfg ApplyConfig) error {
 	if err := writeTaskState(cfg.StateDir, state); err != nil {
 		return err
 	}
+
+	// Update previous symlink atomically
+	if err := switchSymlink(cfg.PreviousLink, previous); err != nil {
+		return failApply(cfg, state, "install_failed", err)
+	}
+	// Update current symlink atomically
 	if err := switchSymlink(cfg.CurrentLink, cfg.BinaryPath); err != nil {
 		return failApply(cfg, state, "install_failed", err)
 	}
@@ -348,21 +468,31 @@ func Apply(ctx context.Context, cfg ApplyConfig) error {
 	if err := writeTaskState(cfg.StateDir, state); err != nil {
 		return err
 	}
+
 	if err := restartAndCheck(ctx, cfg.ServiceName); err != nil {
-		rollbackErr := switchSymlink(cfg.CurrentLink, previous)
-		if rollbackErr == nil {
-			rollbackErr = restartAndCheck(ctx, cfg.ServiceName)
+		return rollback(ctx, cfg, state, "restart_failed", err)
+	}
+
+	// 90-second Health Confirmation Window Check
+	healthPath := filepath.Join(cfg.StateDir, "health", cfg.TaskID+".json")
+	deadline := time.Now().Add(90 * time.Second)
+	healthConfirmed := false
+
+	for time.Now().Before(deadline) {
+		if data, readErr := os.ReadFile(healthPath); readErr == nil {
+			var hf HealthFile
+			if jsonErr := json.Unmarshal(data, &hf); jsonErr == nil {
+				if hf.TaskID == cfg.TaskID && (state.TargetSHA256 == "" || strings.EqualFold(hf.BinarySHA256, state.TargetSHA256)) {
+					healthConfirmed = true
+					break
+				}
+			}
 		}
-		state.Phase = "rolled_back"
-		state.Sequence++
-		state.ErrorCode = "health_check_timeout"
-		state.ErrorMessage = err.Error()
-		if rollbackErr != nil {
-			state.ErrorCode = "rollback_failed"
-			state.ErrorMessage = fmt.Sprintf("restart failed: %v; rollback failed: %v", err, rollbackErr)
-		}
-		state.UpdatedAt = time.Now()
-		return writeTaskState(cfg.StateDir, state)
+		time.Sleep(2 * time.Second)
+	}
+
+	if !healthConfirmed {
+		return rollback(ctx, cfg, state, "heartbeat_timeout", errors.New("90s certified heartbeat health confirmation timeout"))
 	}
 
 	state.Phase = "succeeded"
@@ -374,20 +504,42 @@ func Apply(ctx context.Context, cfg ApplyConfig) error {
 	return writeTaskState(cfg.StateDir, state)
 }
 
-func RunApplyCLI(args []string) error {
-	if len(args) != 10 {
-		return errors.New("invalid updater-apply arguments")
+func rollback(ctx context.Context, cfg ApplyConfig, state taskState, errCode string, origErr error) error {
+	rollbackErr := switchSymlink(cfg.CurrentLink, state.PreviousTarget)
+	if rollbackErr == nil {
+		rollbackErr = restartAndCheck(ctx, cfg.ServiceName)
 	}
+	state.Phase = "rolled_back"
+	state.Sequence++
+	state.ErrorCode = errCode
+	state.ErrorMessage = origErr.Error()
+	if rollbackErr != nil {
+		state.ErrorCode = "rollback_failed"
+		state.ErrorMessage = fmt.Sprintf("original error: %v; rollback error: %v", origErr, rollbackErr)
+	}
+	state.UpdatedAt = time.Now()
+	return writeTaskState(cfg.StateDir, state)
+}
+
+func RunApplyCLI(args []string) error {
 	values := make(map[string]string)
 	for i := 0; i < len(args); i += 2 {
-		values[args[i]] = args[i+1]
+		if i+1 < len(args) {
+			values[args[i]] = args[i+1]
+		}
+	}
+	currentLink := values["--current-link"]
+	previousLink := values["--previous-link"]
+	if previousLink == "" && currentLink != "" {
+		previousLink = currentLink + ".previous"
 	}
 	return Apply(context.Background(), ApplyConfig{
-		TaskID:      values["--task-id"],
-		StateDir:    values["--state-dir"],
-		BinaryPath:  values["--binary"],
-		CurrentLink: values["--current-link"],
-		ServiceName: values["--service"],
+		TaskID:       values["--task-id"],
+		StateDir:     values["--state-dir"],
+		BinaryPath:   values["--binary"],
+		CurrentLink:  currentLink,
+		PreviousLink: previousLink,
+		ServiceName:  values["--service"],
 	})
 }
 
@@ -453,19 +605,21 @@ func failApply(cfg ApplyConfig, state taskState, code string, err error) error {
 }
 
 func writeTaskState(stateDir string, state taskState) error {
-	if err := os.MkdirAll(stateDir, 0700); err != nil {
-		return err
+	tasksDir := filepath.Join(stateDir, "tasks")
+	if err := os.MkdirAll(tasksDir, 0700); err != nil {
+		tasksDir = stateDir
 	}
 	data, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(stateDir, ".task-*")
+	temporary, err := os.CreateTemp(tasksDir, ".task-*")
 	if err != nil {
 		return err
 	}
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
+	_ = os.Chmod(temporaryPath, 0600)
 	if _, err := temporary.Write(data); err != nil {
 		temporary.Close()
 		return err
@@ -493,6 +647,10 @@ func readTaskState(path string) (taskState, error) {
 }
 
 func taskStatePath(stateDir, taskID string) string {
+	tasksDir := filepath.Join(stateDir, "tasks")
+	if _, err := os.Stat(tasksDir); err == nil {
+		return filepath.Join(tasksDir, taskID+".json")
+	}
 	return filepath.Join(stateDir, taskID+".json")
 }
 
@@ -525,3 +683,4 @@ func min(a, b int) int {
 	}
 	return b
 }
+

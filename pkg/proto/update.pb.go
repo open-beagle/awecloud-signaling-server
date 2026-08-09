@@ -40,6 +40,7 @@ type UpdateDirective struct {
 	DeadlineUnix  int64                  `protobuf:"varint,15,opt,name=deadline_unix,json=deadlineUnix,proto3" json:"deadline_unix,omitempty"`
 	Action        string                 `protobuf:"bytes,16,opt,name=action,proto3" json:"action,omitempty"`
 	TargetName    string                 `protobuf:"bytes,17,opt,name=target_name,json=targetName,proto3" json:"target_name,omitempty"`
+	CommitId      string                 `protobuf:"bytes,18,opt,name=commit_id,json=commitId,proto3" json:"commit_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -193,17 +194,26 @@ func (x *UpdateDirective) GetTargetName() string {
 	return ""
 }
 
+func (x *UpdateDirective) GetCommitId() string {
+	if x != nil {
+		return x.CommitId
+	}
+	return ""
+}
+
 type UpdateStatus struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	TaskId         string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	Phase          string                 `protobuf:"bytes,2,opt,name=phase,proto3" json:"phase,omitempty"`
-	Progress       int32                  `protobuf:"varint,3,opt,name=progress,proto3" json:"progress,omitempty"`
-	CurrentVersion string                 `protobuf:"bytes,4,opt,name=current_version,json=currentVersion,proto3" json:"current_version,omitempty"`
-	Sequence       int64                  `protobuf:"varint,5,opt,name=sequence,proto3" json:"sequence,omitempty"`
-	ErrorCode      string                 `protobuf:"bytes,6,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
-	ErrorMessage   string                 `protobuf:"bytes,7,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	TaskId          string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Phase           string                 `protobuf:"bytes,2,opt,name=phase,proto3" json:"phase,omitempty"`
+	Progress        int32                  `protobuf:"varint,3,opt,name=progress,proto3" json:"progress,omitempty"`
+	CurrentVersion  string                 `protobuf:"bytes,4,opt,name=current_version,json=currentVersion,proto3" json:"current_version,omitempty"`
+	Sequence        int64                  `protobuf:"varint,5,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	ErrorCode       string                 `protobuf:"bytes,6,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
+	ErrorMessage    string                 `protobuf:"bytes,7,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	CurrentCommitId string                 `protobuf:"bytes,8,opt,name=current_commit_id,json=currentCommitId,proto3" json:"current_commit_id,omitempty"`
+	CurrentSha256   string                 `protobuf:"bytes,9,opt,name=current_sha256,json=currentSha256,proto3" json:"current_sha256,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *UpdateStatus) Reset() {
@@ -285,11 +295,25 @@ func (x *UpdateStatus) GetErrorMessage() string {
 	return ""
 }
 
+func (x *UpdateStatus) GetCurrentCommitId() string {
+	if x != nil {
+		return x.CurrentCommitId
+	}
+	return ""
+}
+
+func (x *UpdateStatus) GetCurrentSha256() string {
+	if x != nil {
+		return x.CurrentSha256
+	}
+	return ""
+}
+
 var File_pkg_proto_update_proto protoreflect.FileDescriptor
 
 const file_pkg_proto_update_proto_rawDesc = "" +
 	"\n" +
-	"\x16pkg/proto/update.proto\x12\x12awecloud.signaling\"\xe3\x03\n" +
+	"\x16pkg/proto/update.proto\x12\x12awecloud.signaling\"\x80\x04\n" +
 	"\x0fUpdateDirective\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1c\n" +
 	"\tcomponent\x18\x02 \x01(\tR\tcomponent\x12\x18\n" +
@@ -310,7 +334,8 @@ const file_pkg_proto_update_proto_rawDesc = "" +
 	"\rdeadline_unix\x18\x0f \x01(\x03R\fdeadlineUnix\x12\x16\n" +
 	"\x06action\x18\x10 \x01(\tR\x06action\x12\x1f\n" +
 	"\vtarget_name\x18\x11 \x01(\tR\n" +
-	"targetName\"\xe2\x01\n" +
+	"targetName\x12\x1b\n" +
+	"\tcommit_id\x18\x12 \x01(\tR\bcommitId\"\xb5\x02\n" +
 	"\fUpdateStatus\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x14\n" +
 	"\x05phase\x18\x02 \x01(\tR\x05phase\x12\x1a\n" +
@@ -319,7 +344,9 @@ const file_pkg_proto_update_proto_rawDesc = "" +
 	"\bsequence\x18\x05 \x01(\x03R\bsequence\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x06 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\a \x01(\tR\ferrorMessageB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
+	"\rerror_message\x18\a \x01(\tR\ferrorMessage\x12*\n" +
+	"\x11current_commit_id\x18\b \x01(\tR\x0fcurrentCommitId\x12%\n" +
+	"\x0ecurrent_sha256\x18\t \x01(\tR\rcurrentSha256B<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
 
 var (
 	file_pkg_proto_update_proto_rawDescOnce sync.Once
