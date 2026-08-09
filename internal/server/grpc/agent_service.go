@@ -81,6 +81,22 @@ type AgentServiceServer struct {
 	containerSessionAcks        map[uint64][]string
 	authorizationSnapshotMutex  sync.Mutex
 	authorizationSnapshotStates map[string]*authorizationSnapshotState
+
+	runtimeStore      *cache.NodeRuntimeStore
+	runtimePersister  *cache.NodeRuntimePersister
+	snapshotRefresher *headscale.SnapshotRefresher
+}
+
+func (s *AgentServiceServer) SetRuntimeStore(store *cache.NodeRuntimeStore) {
+	s.runtimeStore = store
+}
+
+func (s *AgentServiceServer) SetRuntimePersister(persister *cache.NodeRuntimePersister) {
+	s.runtimePersister = persister
+}
+
+func (s *AgentServiceServer) SetSnapshotRefresher(refresher *headscale.SnapshotRefresher) {
+	s.snapshotRefresher = refresher
 }
 
 // NewAgentServiceServer 创建 Agent 服务
@@ -672,31 +688,19 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 			logger.Errorf("创建 Node 失败: user_id=%d, type=%s, name=%s, err=%v", agentID, nodeType, nodeName, err)
 		} else {
 			logger.Infof("心跳时创建 Node: user_id=%d, name=%s, type=%s", agentID, nodeName, nodeType)
+			if s.runtimeStore != nil {
+				s.runtimeStore.UpsertNode(&node)
+			}
 		}
 	}
 
 	// 更新 Node 信息
 	now := time.Now()
-	updates := map[string]any{
-		"last_heartbeat": now,
-		"ip":             req.TunnelIp,
-	}
-	// Old Agents do not know updater_protocol. Preserve the stored capability
-	// when the optional field is absent instead of downgrading it on heartbeat.
-	if req.UpdaterProtocol != "" {
-		updates["updater_protocol"] = req.UpdaterProtocol
-	}
-	// ContainerSSH is a strict per-heartbeat capability negotiation. An old or
-	// downgraded Agent omitting v1 must immediately lose permission snapshots
-	// and remote-disconnect directives; a stale stored v1 is not authoritative.
 	containerSSHProtocol := ""
 	if req.ContainerSshProtocol == "v1" {
 		containerSSHProtocol = "v1"
 	}
-	updates["container_ssh_protocol"] = containerSSHProtocol
-	if req.Version != "" {
-		updates["version"] = req.Version
-	}
+	sysInfoJSON := ""
 	if req.SystemInfo != nil {
 		systemInfo := model.NodeSystemInfo{
 			OS:        req.SystemInfo.Os,
@@ -708,12 +712,39 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 			MemoryGB:  int(req.SystemInfo.MemoryGb),
 		}
 		if data, err := json.Marshal(systemInfo); err == nil {
-			updates["system_info"] = string(data)
+			sysInfoJSON = string(data)
 		}
 	}
 
-	if req.Hostname != "" {
-		updates["hostname"] = req.Hostname
+	if s.runtimeStore != nil {
+		if _, err := s.runtimeStore.UpdateHeartbeat(node.ID, req.TunnelIp, req.Hostname, req.Version, sysInfoJSON, req.UpdaterProtocol, containerSSHProtocol, now); err != nil {
+			// 如果内存中缺失，重新从 DB 读并加载
+			var freshNode model.Node
+			if errDb := db.DB.WithContext(ctx).First(&freshNode, node.ID).Error; errDb == nil {
+				s.runtimeStore.UpsertNode(&freshNode)
+				s.runtimeStore.UpdateHeartbeat(node.ID, req.TunnelIp, req.Hostname, req.Version, sysInfoJSON, req.UpdaterProtocol, containerSSHProtocol, now)
+			}
+		}
+	} else {
+		// 兜底：未启用 runtimeStore 时写入 DB
+		updates := map[string]any{
+			"last_heartbeat":         now,
+			"ip":                     req.TunnelIp,
+			"container_ssh_protocol": containerSSHProtocol,
+		}
+		if req.UpdaterProtocol != "" {
+			updates["updater_protocol"] = req.UpdaterProtocol
+		}
+		if req.Version != "" {
+			updates["version"] = req.Version
+		}
+		if sysInfoJSON != "" {
+			updates["system_info"] = sysInfoJSON
+		}
+		if req.Hostname != "" {
+			updates["hostname"] = req.Hostname
+		}
+		db.DB.WithContext(ctx).Model(&model.Node{}).Where("id = ?", node.ID).Updates(updates)
 	}
 
 	// 更新 Node 内存缓存
@@ -723,60 +754,28 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		TunnelIP:      req.TunnelIp,
 		LastHeartbeat: now,
 	})
-	logger.Debugf("更新 Node 内存缓存: node_id=%d, tunnel_ip=%s", node.ID, req.TunnelIp)
 
-	// Resolve the current Headscale node by the authenticated Agent's reported
-	// tunnel IP. State loss can register a new node with an automatic name
-	// suffix, so a stale database HeadscaleNodeID or exact GivenName is not a
-	// trustworthy selector.
-	if s.headscaleClient != nil {
+	if s.snapshotRefresher != nil && s.runtimeStore != nil {
 		hsUserName := fmt.Sprintf("%s-%s", hsPrefix, user.Name)
 		tunnelIP := strings.TrimSpace(req.TunnelIp)
+		snapshot := s.snapshotRefresher.LoadSnapshot()
+
 		if tunnelIP != "" {
-			hsNode, err := s.headscaleClient.GetNodeByIP(ctx, tunnelIP)
-			if err != nil {
-				logger.Warnf("通过隧道 IP 查询 Agent Headscale 节点失败: ip=%s err=%v", tunnelIP, err)
-			} else if validDesktopHeadscaleNode(hsNode, hsUserName, tunnelIP) {
-				updates["headscale_node_id"] = hsNode.Id
-				if node.HeadscaleNodeID != hsNode.Id {
-					logger.Infof("Agent Node %d 更新 Headscale 节点: %d -> %d, ip=%s, user=%s", node.ID, node.HeadscaleNodeID, hsNode.Id, tunnelIP, hsUserName)
+			if hsView, found := snapshot.GetByIP(tunnelIP); found && hsView.User == hsUserName {
+				if s.runtimeStore.UpdateHeadscaleNodeID(node.ID, hsView.ID) && s.runtimePersister != nil {
+					s.runtimePersister.NotifyHighPriority()
 				}
-			} else if hsNode != nil {
-				logger.Warnf("拒绝绑定不匹配的 Agent Headscale 节点: node=%d headscale_node=%d ip=%s expected_user=%s", node.ID, hsNode.Id, tunnelIP, hsUserName)
 			}
 		} else if node.HeadscaleNodeID == 0 {
-			hsNode, err := s.headscaleClient.GetNodeByUserAndName(ctx, hsUserName, node.Name)
-			if err != nil {
-				logger.Warnf("通过 User+Name 查询 Headscale 节点失败: %v", err)
-			} else if hsNode != nil {
-				updates["headscale_node_id"] = hsNode.Id
-				logger.Infof("用户 %d 关联 Headscale 节点: id=%d, name=%s, ip=%v, user=%s", agentID, hsNode.Id, hsNode.GivenName, hsNode.IpAddresses, hsUserName)
-			} else {
-				// 精确匹配失败，回退到第一个节点（兼容单节点场景）
-				hsNodeFallback, err := s.headscaleClient.GetNodeByUser(ctx, hsUserName)
-				if err != nil {
-					logger.Warnf("通过 User 查询 Headscale 节点失败: %v", err)
-				} else if hsNodeFallback != nil {
-					updates["headscale_node_id"] = hsNodeFallback.Id
-					logger.Infof("用户 %d 关联 Headscale 节点(回退): id=%d, name=%s, ip=%v, user=%s", agentID, hsNodeFallback.Id, hsNodeFallback.GivenName, hsNodeFallback.IpAddresses, hsUserName)
+			if hsView, found := snapshot.GetByUserNameAndNodeName(hsUserName, node.Name); found {
+				if s.runtimeStore.UpdateHeadscaleNodeID(node.ID, hsView.ID) && s.runtimePersister != nil {
+					s.runtimePersister.NotifyHighPriority()
 				}
 			}
 		}
 	}
 
-	if err := db.DB.WithContext(ctx).Model(&model.Node{}).
-		Where("user_id = ? AND type = ? AND name = ?", agentID, nodeType, nodeName).
-		Updates(updates).Error; err != nil {
-		logger.Errorf("更新 Node 心跳失败: %v", err)
-	} else {
-		if req.TunnelIp != "" {
-			node.IP = req.TunnelIp
-		}
-		if req.Hostname != "" {
-			node.Hostname = req.Hostname
-		}
-		s.recordNodeTechnicalResourceHeartbeat(ctx, node.ID)
-	}
+	s.recordNodeTechnicalResourceHeartbeat(ctx, node.ID)
 	if len(req.DomainRegistrations) > 0 && nodeType == model.NodeTypeAgent {
 		s.handleNodeDomainRegistrations(ctx, &node, &user, req.TunnelIp, req.DomainRegistrations)
 	}

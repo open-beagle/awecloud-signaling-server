@@ -56,10 +56,14 @@ type DesktopServiceServer struct {
 	connMutex       sync.RWMutex
 	dataStreams     map[uint64]*DesktopDataStream // 数据流连接（key: nodeID）
 	dataStreamMutex sync.RWMutex
-	headscaleClient *headscale.Client
-	config          *config.ServerConfig
-	agentService    *AgentServiceServer
-	loginService    *service.DesktopLoginService
+	headscaleClient   *headscale.Client
+	config            *config.ServerConfig
+	agentService      *AgentServiceServer
+	loginService      *service.DesktopLoginService
+	runtimeStore      *cache.NodeRuntimeStore
+	runtimePersister  *cache.NodeRuntimePersister
+	snapshotRefresher *headscale.SnapshotRefresher
+	dataAssembler     *service.DesktopDataAssembler
 }
 
 type headscaleDeviceIPIndex struct {
@@ -86,6 +90,22 @@ func NewDesktopServiceServer(cfg *config.ServerConfig) *DesktopServiceServer {
 		}
 	}
 	return s
+}
+
+func (s *DesktopServiceServer) SetRuntimeStore(store *cache.NodeRuntimeStore) {
+	s.runtimeStore = store
+}
+
+func (s *DesktopServiceServer) SetRuntimePersister(persister *cache.NodeRuntimePersister) {
+	s.runtimePersister = persister
+}
+
+func (s *DesktopServiceServer) SetSnapshotRefresher(refresher *headscale.SnapshotRefresher) {
+	s.snapshotRefresher = refresher
+}
+
+func (s *DesktopServiceServer) SetDataAssembler(assembler *service.DesktopDataAssembler) {
+	s.dataAssembler = assembler
 }
 
 func buildHeadscaleDeviceIPIndex(nodes []*v1.Node) headscaleDeviceIPIndex {
@@ -371,55 +391,44 @@ func (s *DesktopServiceServer) Heartbeat(stream pb.DesktopService_HeartbeatServe
 
 func (s *DesktopServiceServer) handleDesktopHeartbeat(ctx context.Context, nodeID uint64, req *pb.DesktopHeartbeatRequest) {
 	now := time.Now()
-	// 通过 nodeID 查询 node，获取 user_id 和 name
-	var node model.Node
-	if err := db.DB.WithContext(ctx).First(&node, nodeID).Error; err != nil {
-		logger.Errorf("Desktop 心跳更新失败: nodeID=%d 不存在", nodeID)
-		return
-	}
 
-	updates := map[string]any{
-		"last_heartbeat": now,
-		"ip":             req.TunnelIp,
-	}
-
-	// Resolve the current Headscale node by the reported tunnel IP on every
-	// connected heartbeat. A Desktop can be reinstalled or moved between
-	// Headscale nodes while keeping the same database Node record.
-	if s.headscaleClient != nil {
-		var user model.User
-		if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err == nil {
-			hsUserName := fmt.Sprintf("client-%s", user.Name)
-			tunnelIP := strings.TrimSpace(req.TunnelIp)
-			if req.TunnelConnected && tunnelIP != "" {
-				hsNode, err := s.headscaleClient.GetNodeByIP(ctx, tunnelIP)
-				if err != nil {
-					logger.Warnf("通过隧道 IP 查询 Desktop Headscale 节点失败: ip=%s err=%v", tunnelIP, err)
-				} else if validDesktopHeadscaleNode(hsNode, hsUserName, tunnelIP) {
-					updates["headscale_node_id"] = hsNode.Id
-					if node.HeadscaleNodeID != hsNode.Id {
-						logger.Infof("Desktop %d 更新 Headscale 节点: %d -> %d, ip=%s, user=%s", nodeID, node.HeadscaleNodeID, hsNode.Id, tunnelIP, hsUserName)
-					}
-				} else if hsNode != nil {
-					logger.Warnf("拒绝绑定不匹配的 Desktop Headscale 节点: desktop=%d headscale_node=%d ip=%s expected_user=%s", nodeID, hsNode.Id, tunnelIP, hsUserName)
-				}
-			} else if node.HeadscaleNodeID == 0 {
-				hsNode, err := s.headscaleClient.GetNodeByUserAndName(ctx, hsUserName, node.Name)
-				if err != nil {
-					logger.Warnf("通过 User+Name 查询 Headscale 节点失败: %v", err)
-				} else if hsNode != nil && hsNode.User != nil && hsNode.User.Name == hsUserName {
-					updates["headscale_node_id"] = hsNode.Id
-				}
-			}
+	if s.runtimeStore != nil {
+		if _, err := s.runtimeStore.UpdateHeartbeat(nodeID, req.TunnelIp, "", "", "", "", "", now); err != nil {
+			logger.Warnf("Desktop 心跳 RuntimeStore 更新失败: nodeID=%d, err=%v", nodeID, err)
+		}
+	} else {
+		// 兜底：未初始化 runtimeStore 时落库
+		var node model.Node
+		if err := db.DB.WithContext(ctx).First(&node, nodeID).Error; err == nil {
+			db.DB.WithContext(ctx).Model(&model.Node{}).
+				Where("user_id = ? AND type = ? AND name = ?", node.UserID, model.NodeTypeDesktop, node.Name).
+				Updates(map[string]any{"last_heartbeat": now, "ip": req.TunnelIp})
 		}
 	}
 
-	// 使用 user_id + type + name 定位设备（稳定唯一标识）
-	result := db.DB.WithContext(ctx).Model(&model.Node{}).
-		Where("user_id = ? AND type = ? AND name = ?", node.UserID, model.NodeTypeDesktop, node.Name).
-		Updates(updates)
-	if result.Error != nil {
-		logger.Errorf("Desktop 心跳更新失败: %v", result.Error)
+	if s.snapshotRefresher != nil && s.runtimeStore != nil {
+		if rn, ok := s.runtimeStore.GetNode(nodeID); ok {
+			var user model.User
+			if err := db.DB.WithContext(ctx).First(&user, rn.UserID).Error; err == nil {
+				hsUserName := fmt.Sprintf("client-%s", user.Name)
+				tunnelIP := strings.TrimSpace(req.TunnelIp)
+				snapshot := s.snapshotRefresher.LoadSnapshot()
+
+				if req.TunnelConnected && tunnelIP != "" {
+					if hsView, found := snapshot.GetByIP(tunnelIP); found && hsView.User == hsUserName {
+						if s.runtimeStore.UpdateHeadscaleNodeID(nodeID, hsView.ID) && s.runtimePersister != nil {
+							s.runtimePersister.NotifyHighPriority()
+						}
+					}
+				} else if rn.HeadscaleNodeID == 0 {
+					if hsView, found := snapshot.GetByUserNameAndNodeName(hsUserName, rn.Name); found {
+						if s.runtimeStore.UpdateHeadscaleNodeID(nodeID, hsView.ID) && s.runtimePersister != nil {
+							s.runtimePersister.NotifyHighPriority()
+						}
+					}
+				}
+			}
+		}
 	}
 }
 

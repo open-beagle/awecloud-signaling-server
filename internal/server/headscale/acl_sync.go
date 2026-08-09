@@ -51,8 +51,9 @@ type unifiedHostSSHAccess struct {
 
 // ACLSyncService ACL 同步服务
 type ACLSyncService struct {
-	client *Client
-	mutex  sync.Mutex
+	client    *Client
+	refresher *SnapshotRefresher
+	mutex     sync.Mutex
 }
 
 // NewACLSyncService 创建 ACL 同步服务
@@ -60,6 +61,11 @@ func NewACLSyncService(client *Client) *ACLSyncService {
 	return &ACLSyncService{
 		client: client,
 	}
+}
+
+// SetRefresher 设置 SnapshotRefresher
+func (s *ACLSyncService) SetRefresher(refresher *SnapshotRefresher) {
+	s.refresher = refresher
 }
 
 // SyncACL 同步 ACL 规则到 Headscale
@@ -473,13 +479,6 @@ func (s *ACLSyncService) StartPeriodicSync(ctx context.Context) {
 func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 	logger.Info("开始同步所有 Node 的 Tag")
 
-	nodes, err := s.client.ListNodes(ctx)
-	if err != nil {
-		logger.Warnf("获取 Headscale Node 列表失败: %v", err)
-		return err
-	}
-
-	// 建立 Headscale User 名称 -> Node 列表的映射（一个 User 下可能有多个 Node）
 	type hsNodeInfo struct {
 		HeadscaleNodeID uint64
 		GivenName       string
@@ -488,19 +487,44 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 		Online          bool
 	}
 	userNodesMap := make(map[string][]hsNodeInfo)
-	for _, node := range nodes {
-		if node.User != nil {
-			ip := ""
-			if len(node.IpAddresses) > 0 {
-				ip = node.IpAddresses[0]
+
+	if s.refresher != nil {
+		snapshot := s.refresher.LoadSnapshot()
+		for _, view := range snapshot.ByID {
+			if view.User != "" {
+				ip := ""
+				if len(view.IPAddresses) > 0 {
+					ip = view.IPAddresses[0]
+				}
+				userNodesMap[view.User] = append(userNodesMap[view.User], hsNodeInfo{
+					HeadscaleNodeID: view.ID,
+					GivenName:       view.GivenName,
+					IP:              ip,
+					Tags:            view.ForcedTags,
+					Online:          view.Online,
+				})
 			}
-			userNodesMap[node.User.Name] = append(userNodesMap[node.User.Name], hsNodeInfo{
-				HeadscaleNodeID: node.Id,
-				GivenName:       node.GivenName,
-				IP:              ip,
-				Tags:            node.ForcedTags,
-				Online:          node.Online,
-			})
+		}
+	} else {
+		nodes, err := s.client.ListNodes(ctx)
+		if err != nil {
+			logger.Warnf("获取 Headscale Node 列表失败: %v", err)
+			return err
+		}
+		for _, node := range nodes {
+			if node.User != nil {
+				ip := ""
+				if len(node.IpAddresses) > 0 {
+					ip = node.IpAddresses[0]
+				}
+				userNodesMap[node.User.Name] = append(userNodesMap[node.User.Name], hsNodeInfo{
+					HeadscaleNodeID: node.Id,
+					GivenName:       node.GivenName,
+					IP:              ip,
+					Tags:            node.ForcedTags,
+					Online:          node.Online,
+				})
+			}
 		}
 	}
 

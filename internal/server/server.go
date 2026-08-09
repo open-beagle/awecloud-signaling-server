@@ -24,6 +24,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/telemetry"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/api"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/cache"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	grpcserver "github.com/open-beagle/awecloud-signaling-server/internal/server/grpc"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
@@ -52,6 +53,10 @@ type Server struct {
 	allocationExpiryService       *service.PlatformAllocationExpiryService
 	tenantAuthorizationService    *service.TenantAuthorizationMaintenanceService
 	workloadSnapshots             *service.WorkloadSnapshotStore
+	nodeRuntimeStore              *cache.NodeRuntimeStore
+	nodeRuntimePersister          *cache.NodeRuntimePersister
+	snapshotRefresher             *headscale.SnapshotRefresher
+	desktopDataAssembler          *service.DesktopDataAssembler
 	reconciliationCtx             context.Context
 	reconciliationCancel          context.CancelFunc
 }
@@ -114,6 +119,24 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 		logger.Warn("Headscale 配置未设置，ACL 同步服务未启动")
 	}
 
+	nodeRuntimeStore := cache.NewNodeRuntimeStore()
+	if err := nodeRuntimeStore.LoadFromDB(context.Background(), db.DB); err != nil {
+		logger.Warnf("加载 NodeRuntimeStore 失败: %v", err)
+	} else {
+		logger.Infof("NodeRuntimeStore 节点运行态完成初始全量加载: 节点数 %d", len(nodeRuntimeStore.ListNodes()))
+	}
+	nodeRuntimePersister := cache.NewNodeRuntimePersister(nodeRuntimeStore, db.DB)
+
+	var snapshotRefresher *headscale.SnapshotRefresher
+	if headscaleClient != nil {
+		snapshotRefresher = headscale.NewSnapshotRefresher(headscaleClient)
+		if aclSyncService != nil {
+			aclSyncService.SetRefresher(snapshotRefresher)
+		}
+	}
+
+	desktopDataAssembler := service.NewDesktopDataAssembler(db.DB, nodeRuntimeStore, snapshotRefresher)
+
 	workloadSnapshots := service.NewWorkloadSnapshotStore()
 	return &Server{
 		config:                        cfg,
@@ -121,6 +144,10 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 		aclSyncService:                aclSyncService,
 		aclSyncCtx:                    aclSyncCtx,
 		aclSyncCancel:                 aclSyncCancel,
+		nodeRuntimeStore:              nodeRuntimeStore,
+		nodeRuntimePersister:          nodeRuntimePersister,
+		snapshotRefresher:             snapshotRefresher,
+		desktopDataAssembler:          desktopDataAssembler,
 		reconciliationService:         service.NewResourceReconciliationService(db.DB),
 		providerReconciliationService: service.NewProviderSupplyReconciliationService(db.DB),
 		allocationExpiryService:       service.NewPlatformAllocationExpiryService(db.DB),
@@ -151,8 +178,16 @@ func (s *Server) Run() error {
 	}
 
 	s.agentService = grpcserver.NewAgentServiceServer(s.config, s.workloadSnapshots)
+	s.agentService.SetRuntimeStore(s.nodeRuntimeStore)
+	s.agentService.SetRuntimePersister(s.nodeRuntimePersister)
+	s.agentService.SetSnapshotRefresher(s.snapshotRefresher)
+
 	s.desktopService = grpcserver.NewDesktopServiceServer(s.config)
 	s.desktopService.SetAgentService(s.agentService)
+	s.desktopService.SetRuntimeStore(s.nodeRuntimeStore)
+	s.desktopService.SetRuntimePersister(s.nodeRuntimePersister)
+	s.desktopService.SetSnapshotRefresher(s.snapshotRefresher)
+	s.desktopService.SetDataAssembler(s.desktopDataAssembler)
 
 	// 创建 Desktop 登录服务和认证 API
 	s.loginService = service.NewDesktopLoginService(s.config)
@@ -257,6 +292,13 @@ func (s *Server) Run() error {
 		}
 	}()
 
+	if s.snapshotRefresher != nil {
+		s.snapshotRefresher.Start(s.aclSyncCtx)
+	}
+	if s.nodeRuntimePersister != nil {
+		s.nodeRuntimePersister.Start(s.reconciliationCtx)
+	}
+
 	if s.aclSyncService != nil {
 		if s.config.Tailscale.HeadscaleAutoSync {
 			go s.aclSyncService.StartPeriodicSync(s.aclSyncCtx)
@@ -291,6 +333,12 @@ func (s *Server) Run() error {
 
 	logger.Info("正在关闭服务器...")
 
+	if s.snapshotRefresher != nil {
+		s.snapshotRefresher.Stop()
+	}
+	if s.nodeRuntimePersister != nil {
+		s.nodeRuntimePersister.Stop()
+	}
 	if s.aclSyncCancel != nil {
 		s.aclSyncCancel()
 	}
@@ -633,6 +681,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					// 设备管理
 					nodeAPI := api.NewNodeAPI(s.config)
 					nodeAPI.SetAgentService(s.agentService)
+					nodeAPI.SetRuntimeStore(s.nodeRuntimeStore)
 					adminAuthGroup.GET("/nodes", nodeAPI.List)
 					adminAuthGroup.GET("/nodes/:id", nodeAPI.Get)
 					adminAuthGroup.PUT("/nodes/:id/domain-label", nodeAPI.UpdateHostDomainLabel)

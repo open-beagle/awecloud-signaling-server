@@ -14,13 +14,14 @@ concurrency:
 
 env:
   SERVER_IMAGE_REPOSITORY: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server
-  AGENT_IMAGE_REPOSITORY: registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent
 
 jobs:
-  release:
-    name: Build and Publish Signal Components
+  prepare:
+    name: Prepare Release
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -37,6 +38,15 @@ jobs:
 
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
+  server:
+    name: Build, Publish and Deploy Server
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
@@ -47,7 +57,7 @@ jobs:
       - name: Build frontend
         working-directory: web
         env:
-          BUILD_VERSION: ${{ steps.version.outputs.version }}
+          BUILD_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           npm ci --legacy-peer-deps
           npm run build
@@ -60,10 +70,10 @@ jobs:
 
       - name: Build Linux binaries
         env:
-          BUILD_VERSION: ${{ steps.version.outputs.version }}
+          BUILD_VERSION: ${{ needs.prepare.outputs.version }}
           GOOS: linux
           GOARCHS: amd64,arm64
-          BUILD_TARGETS: server,agent,endpoint
+          BUILD_TARGETS: server
         run: bash scripts/build.sh
 
       - name: Set up QEMU
@@ -88,11 +98,11 @@ jobs:
           file: ./.beagle/server.dockerfile
           platforms: linux/amd64
           push: true
-          tags: ${{ env.SERVER_IMAGE_REPOSITORY }}:${{ steps.version.outputs.version }}-amd64
+          tags: ${{ env.SERVER_IMAGE_REPOSITORY }}:${{ needs.prepare.outputs.version }}-amd64
           build-args: |
             BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-amd64
             AUTHOR=${{ github.repository_owner }}
-            VERSION=${{ steps.version.outputs.version }}
+            VERSION=${{ needs.prepare.outputs.version }}
 
       - name: Build and push Server ARM64 image
         uses: docker/build-push-action@v7
@@ -101,55 +111,94 @@ jobs:
           file: ./.beagle/server.dockerfile
           platforms: linux/arm64
           push: true
-          tags: ${{ env.SERVER_IMAGE_REPOSITORY }}:${{ steps.version.outputs.version }}-arm64
+          tags: ${{ env.SERVER_IMAGE_REPOSITORY }}:${{ needs.prepare.outputs.version }}-arm64
           build-args: |
             BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-arm64
             AUTHOR=${{ github.repository_owner }}
-            VERSION=${{ steps.version.outputs.version }}
+            VERSION=${{ needs.prepare.outputs.version }}
 
       - name: Create Server multi-arch manifest
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           docker buildx imagetools create \
             -t "${SERVER_IMAGE_REPOSITORY}:${VERSION}" \
             "${SERVER_IMAGE_REPOSITORY}:${VERSION}-amd64" \
             "${SERVER_IMAGE_REPOSITORY}:${VERSION}-arm64"
 
-      - name: Build and push Agent AMD64 image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./.beagle/agent.dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ env.AGENT_IMAGE_REPOSITORY }}:${{ steps.version.outputs.version }}-amd64
-          build-args: |
-            BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-amd64
-            AUTHOR=${{ github.repository_owner }}
-            VERSION=${{ steps.version.outputs.version }}
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
 
-      - name: Build and push Agent ARM64 image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./.beagle/agent.dockerfile
-          platforms: linux/arm64
-          push: true
-          tags: ${{ env.AGENT_IMAGE_REPOSITORY }}:${{ steps.version.outputs.version }}-arm64
-          build-args: |
-            BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-arm64
-            AUTHOR=${{ github.repository_owner }}
-            VERSION=${{ steps.version.outputs.version }}
-
-      - name: Create Agent multi-arch manifest
+      - name: Configure Kubernetes access
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          KUBERNETES_SERVER: ${{ secrets.KUBERNETES_ALIYUN_SERVER }}
+          KUBERNETES_TOKEN: ${{ secrets.KUBERNETES_ALIYUN_TOKEN }}
         run: |
-          docker buildx imagetools create \
-            -t "${AGENT_IMAGE_REPOSITORY}:${VERSION}" \
-            "${AGENT_IMAGE_REPOSITORY}:${VERSION}-amd64" \
-            "${AGENT_IMAGE_REPOSITORY}:${VERSION}-arm64"
+          set -eu
+          test -n "$KUBERNETES_SERVER"
+          test -n "$KUBERNETES_TOKEN"
+
+          kubectl config set-cluster aliyun.beagle \
+            --server="$KUBERNETES_SERVER" \
+            --insecure-skip-tls-verify=true
+
+          kubectl config set-credentials github-actions --token="$KUBERNETES_TOKEN"
+          kubectl config set-context aliyun.beagle \
+            --cluster=aliyun.beagle \
+            --user=github-actions \
+            --namespace=beagle-access
+          kubectl config use-context aliyun.beagle
+
+      - name: Update API deployment
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -eu
+          image="${SERVER_IMAGE_REPOSITORY}:${VERSION}"
+          current_image="$(kubectl get deployment/signal-server -o jsonpath='{.spec.template.spec.containers[?(@.name=="server")].image}')"
+          if [ "$current_image" = "$image" ]; then
+            kubectl rollout restart deployment/signal-server
+          else
+            kubectl set image deployment/signal-server server="$image"
+          fi
+          kubectl rollout status deployment/signal-server --timeout=5m
+          kubectl get deployment/signal-server -o jsonpath='{.spec.template.spec.containers[?(@.name=="server")].image}{"\n"}'
+
+      - name: Publish Server release summary
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          {
+            echo "### Signal Server release"
+            echo
+            echo "- Version: \`${VERSION}\`"
+            echo "- Source: \`${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}\`"
+            echo "- Image: \`${SERVER_IMAGE_REPOSITORY}:${VERSION}\`"
+            echo "- Deployment: \`beagle-access/signal-server\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  agent:
+    name: Publish Agent and Endpoint Binaries
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Build Agent and Endpoint binaries
+        env:
+          BUILD_VERSION: ${{ needs.prepare.outputs.version }}
+          GOOS: linux
+          GOARCHS: amd64,arm64
+          BUILD_TARGETS: agent,endpoint
+        run: bash scripts/build.sh
 
       - name: Setup MinIO Client
         run: |
@@ -159,7 +208,7 @@ jobs:
 
       - name: Publish Agent and Endpoint artifacts
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.prepare.outputs.version }}
           S3_ENDPOINT: ${{ secrets.S3_ENDPOINT_ALIYUN }}
           S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY_ALIYUN }}
           S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY_ALIYUN }}
@@ -204,16 +253,15 @@ jobs:
           mc cp signal_agent-version.json "${s3_bucket}/signal_agent-version.json"
           mc cp signal_endpoint-version.json "${s3_bucket}/signal_endpoint-version.json"
 
-      - name: Publish release summary
+      - name: Publish Agent release summary
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           {
-            echo "### Signal release"
+            echo "### Signal Agent and Endpoint release"
             echo
             echo "- Version: \`${VERSION}\`"
             echo "- Source: \`${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}\`"
-            echo "- Server image: \`${SERVER_IMAGE_REPOSITORY}:${VERSION}\`"
-            echo "- Agent image: \`${AGENT_IMAGE_REPOSITORY}:${VERSION}\`"
-            echo "- Agent/Endpoint artifacts: published to S3"
+            echo "- Agent binaries: published to S3"
+            echo "- Endpoint binaries: published to S3"
           } >> "$GITHUB_STEP_SUMMARY"

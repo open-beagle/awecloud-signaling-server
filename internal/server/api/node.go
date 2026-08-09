@@ -26,6 +26,7 @@ type NodeAPI struct {
 	hsClient      *headscale.Client
 	domainService *service.DomainService
 	agentService  *grpcserver.AgentServiceServer
+	runtimeStore  *cache.NodeRuntimeStore
 }
 
 // NewNodeAPI 创建 NodeAPI
@@ -53,6 +54,11 @@ func NewNodeAPI(cfg *config.ServerConfig) *NodeAPI {
 // SetAgentService 设置 AgentService，用于删除设备时清理在线连接
 func (a *NodeAPI) SetAgentService(service *grpcserver.AgentServiceServer) {
 	a.agentService = service
+}
+
+// SetRuntimeStore 设置 RuntimeStore
+func (a *NodeAPI) SetRuntimeStore(store *cache.NodeRuntimeStore) {
+	a.runtimeStore = store
 }
 
 // NodeUserInfo 设备关联的用户信息
@@ -292,6 +298,12 @@ func (a *NodeAPI) UpdateHostDomainLabel(c *gin.Context) {
 		}
 		c.JSON(status, NewErrorResponse(err.Error()))
 		return
+	}
+	if a.runtimeStore != nil {
+		var updatedNode model.Node
+		if err := db.DB.WithContext(c.Request.Context()).First(&updatedNode, id).Error; err == nil {
+			a.runtimeStore.UpsertNode(&updatedNode)
+		}
 	}
 	recordAuditLog(c.Request.Context(), c, model.ActionUpdateAgent, "node", strconv.FormatUint(id, 10), request.HostDomainLabel, gin.H{"host_domain_label": request.HostDomainLabel})
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("SSH 域名标识已更新", nil))
@@ -601,6 +613,9 @@ func (a *NodeAPI) Delete(c *gin.Context) {
 		}
 		cache.DeleteNodeStatus(node.ID)
 		cache.ClearK8SServiceDiscovery(node.UserID)
+	}
+	if a.runtimeStore != nil {
+		a.runtimeStore.DeleteNode(node.ID)
 	}
 
 	// 删除该 Node 的所有域名

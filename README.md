@@ -105,16 +105,15 @@ GitHub Actions 工作流位于 `.github/workflows/build.yml`，支持以下触�
 
 流水线使用 Go 1.26、Node.js 24，并执行：
 
-1. 构建 Web 管理界面。
-2. 交叉编译 Linux amd64/arm64 的 Server、Agent 和 Endpoint。
-3. 构建并推送 Server、Agent 双架构镜像及 multi-arch manifest。
-4. 上传 Agent、Endpoint 双架构二进制和安装脚本到 S3。
+1. 校验发布版本。
+2. Server job 构建 Web 管理界面和 Linux amd64/arm64 Server 二进制，发布双架构镜像并滚动部署。
+3. Agent job 交叉编译 Linux amd64/arm64 的 Agent 和 Endpoint。
+4. 上传 Agent、Endpoint 双架构二进制和安装脚本到 S3；Agent 不发布容器镜像。
 
 镜像标签读取根目录 `version` 文件：
 
 ```txt
 registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-server:<version>
-registry.cn-qingdao.aliyuncs.com/wod/awecloud-signaling-agent:<version>
 ```
 
 流水线地址：<https://github.com/open-beagle/awecloud-signaling-server/actions/workflows/build.yml>

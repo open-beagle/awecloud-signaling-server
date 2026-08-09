@@ -66,13 +66,13 @@ Vue 3 + Element Plus + TypeScript 管理界面
 
 ```bash
 cd web
-npm install
+pnpm install
 ```
 
 ## 开发
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 访问 http://localhost:3000
@@ -80,7 +80,7 @@ npm run dev
 ## 构建
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 构建产物在 `dist/` 目录
