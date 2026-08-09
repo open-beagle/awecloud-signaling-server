@@ -21,6 +21,42 @@ export interface UpdaterCatalogSyncResult {
   failed: number
 }
 
+export type UpdaterComponent = 'agent' | 'endpoint' | 'desktop'
+
+export interface UpdaterRelease {
+  id: string
+  component: UpdaterComponent
+  version: string
+  commit_id: string
+  channel: string
+  status: 'draft' | 'published' | 'revoked'
+  release_notes: string
+  min_supported_version: string
+  published_at?: string
+  created_at: string
+  updated_at: string
+  artifact_count: number
+}
+
+export interface UpdaterArtifact {
+  id: string
+  release_id: string
+  os: string
+  arch: string
+  role: string
+  package_type: string
+  filename: string
+  download_url: string
+  size: number
+  sha256: string
+  status: 'available' | 'revoked'
+}
+
+export interface UpdaterReleaseDetail {
+  release: UpdaterRelease
+  artifacts: UpdaterArtifact[]
+}
+
 // 获取系统配置
 export function getSystemConfig() {
   return request<{ success: boolean; data: SystemConfig }>({
@@ -51,6 +87,21 @@ export function syncUpdaterCatalog() {
     url: '/api/v1/admin/updater/sync',
     method: 'post',
     timeout: 120000
+  })
+}
+
+export function getUpdaterReleases(component?: UpdaterComponent) {
+  return request<{ success: boolean; data: UpdaterRelease[] }>({
+    url: '/api/v1/admin/updater/releases',
+    method: 'get',
+    params: component ? { component } : undefined
+  })
+}
+
+export function getUpdaterRelease(id: string) {
+  return request<{ success: boolean; data: UpdaterReleaseDetail }>({
+    url: `/api/v1/admin/updater/releases/${id}`,
+    method: 'get'
   })
 }
 

@@ -53,6 +53,31 @@ func TestPublishReleaseDoesNotRequireSigningKey(t *testing.T) {
 	require.Equal(t, model.ReleaseStatusPublished, release.Status)
 }
 
+func TestListReleasesIncludesArtifactCount(t *testing.T) {
+	database := setupTestDB(t)
+	release := model.Release{
+		ID: uuid.NewString(), Component: model.ComponentAgent, Version: "v1.0.2",
+		CommitID: "0123456789abcdef0123456789abcdef01234567", Channel: "stable", Status: model.ReleaseStatusPublished,
+	}
+	require.NoError(t, database.Create(&release).Error)
+	for _, arch := range []string{"amd64", "arm64"} {
+		require.NoError(t, database.Create(&model.Artifact{
+			ID: uuid.NewString(), ReleaseID: release.ID, OS: "linux", Arch: arch, Role: "app",
+			PackageType: "binary", Filename: "signal_agent_" + arch, DownloadURL: "https://artifacts.example/signal_agent_" + arch,
+			Size: 128, SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			Status: model.ArtifactStatusAvailable,
+		}).Error)
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/updater/releases?component=agent", nil)
+	NewUpdaterAPI().ListReleases(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `"artifact_count":2`)
+}
+
 func TestSyncCatalogRequiresConfiguration(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)

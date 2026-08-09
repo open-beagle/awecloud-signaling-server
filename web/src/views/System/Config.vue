@@ -120,40 +120,124 @@
           </el-form-item>
         </div>
 
-        <div class="config-section">
-          <div class="section-title">制品与版本</div>
-          <el-form-item label="HTTP 制品目录">
-            <div class="catalog-sync">
-              <el-button :icon="Refresh" :loading="syncingCatalog" :disabled="!canWrite" @click="handleCatalogSync">
-                同步制品与版本
-              </el-button>
-              <div v-if="catalogSyncResult" class="catalog-sync-result">
-                <el-tag size="small" type="success">新增 {{ catalogSyncResult.created }}</el-tag>
-                <el-tag size="small" type="info">已存在 {{ catalogSyncResult.existing }}</el-tag>
-                <el-tag v-if="catalogSyncResult.revoked" size="small" type="warning">已撤销 {{ catalogSyncResult.revoked }}</el-tag>
-                <el-tag v-if="catalogSyncResult.failed" size="small" type="danger">失败 {{ catalogSyncResult.failed }}</el-tag>
-              </div>
-            </div>
-          </el-form-item>
-        </div>
-
         <el-form-item>
           <el-button type="primary" :loading="saving" :disabled="!canWrite" @click="handleSave">
             保存
           </el-button>
         </el-form-item>
       </el-form>
+
+      <section class="catalog-section">
+        <div class="section-title">制品与版本</div>
+        <div class="catalog-toolbar">
+          <el-button :icon="Refresh" :loading="syncingCatalog" :disabled="!canWrite" @click="handleCatalogSync">
+            同步制品与版本
+          </el-button>
+          <div v-if="catalogSyncResult" class="catalog-sync-result">
+            <el-tag size="small" type="success">新增 {{ catalogSyncResult.created }}</el-tag>
+            <el-tag size="small" type="info">已存在 {{ catalogSyncResult.existing }}</el-tag>
+            <el-tag v-if="catalogSyncResult.revoked" size="small" type="warning">已撤销 {{ catalogSyncResult.revoked }}</el-tag>
+            <el-tag v-if="catalogSyncResult.failed" size="small" type="danger">失败 {{ catalogSyncResult.failed }}</el-tag>
+          </div>
+          <span class="catalog-toolbar-spacer" />
+          <el-radio-group v-model="releaseComponent" size="small" @change="loadReleases">
+            <el-radio-button value="">全部</el-radio-button>
+            <el-radio-button value="agent">Agent</el-radio-button>
+            <el-radio-button value="endpoint">Endpoint</el-radio-button>
+            <el-radio-button value="desktop">Desktop</el-radio-button>
+          </el-radio-group>
+        </div>
+
+        <el-table v-loading="loadingReleases" :data="releases" stripe class="release-table" empty-text="暂无已同步制品">
+          <el-table-column label="组件" width="120">
+            <template #default="{ row }">
+              <el-tag size="small" effect="plain" :type="componentTag(row.component)">{{ componentLabel(row.component) }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="版本 / Commit" min-width="280">
+            <template #default="{ row }">
+              <strong>{{ row.version }}</strong>
+              <code class="commit-id">{{ row.commit_id }}</code>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" :type="releaseStatusTag(row.status)">{{ releaseStatusLabel(row.status) }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="制品" width="90" align="center">
+            <template #default="{ row }"><strong>{{ row.artifact_count }}</strong></template>
+          </el-table-column>
+          <el-table-column label="发布时间" width="180">
+            <template #default="{ row }">{{ formatTime(row.published_at || row.created_at) }}</template>
+          </el-table-column>
+          <el-table-column label="" width="64" align="center" fixed="right">
+            <template #default="{ row }">
+              <el-tooltip content="查看制品详情" placement="top">
+                <el-button text :icon="View" :aria-label="`查看 ${row.component} ${row.version} 制品详情`" @click="showReleaseDetail(row)" />
+              </el-tooltip>
+            </template>
+          </el-table-column>
+        </el-table>
+      </section>
     </el-card>
+
+    <el-drawer v-model="releaseDrawerVisible" :title="releaseDrawerTitle" size="960px">
+      <div v-loading="loadingReleaseDetail" class="release-detail">
+        <el-descriptions v-if="releaseDetail" :column="3" border class="release-summary">
+          <el-descriptions-item label="组件">{{ componentLabel(releaseDetail.release.component) }}</el-descriptions-item>
+          <el-descriptions-item label="版本">{{ releaseDetail.release.version }}</el-descriptions-item>
+          <el-descriptions-item label="状态">{{ releaseStatusLabel(releaseDetail.release.status) }}</el-descriptions-item>
+          <el-descriptions-item label="Commit" :span="3">
+            <div class="copy-value"><code>{{ releaseDetail.release.commit_id }}</code><CopyButton :text="releaseDetail.release.commit_id" /></div>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <el-table v-if="releaseDetail" :data="releaseDetail.artifacts" stripe>
+          <el-table-column label="平台" width="150">
+            <template #default="{ row }"><strong>{{ row.os }} / {{ row.arch }}</strong><span class="artifact-meta">{{ row.role }} · {{ row.package_type }}</span></template>
+          </el-table-column>
+          <el-table-column label="文件" min-width="210">
+            <template #default="{ row }"><strong>{{ row.filename }}</strong><span class="artifact-meta">{{ formatBytes(row.size) }}</span></template>
+          </el-table-column>
+          <el-table-column label="SHA256" min-width="230">
+            <template #default="{ row }"><div class="hash-cell"><code>{{ row.sha256 }}</code><CopyButton :text="row.sha256" /></div></template>
+          </el-table-column>
+          <el-table-column label="下载" width="92" align="center">
+            <template #default="{ row }">
+              <el-tooltip content="打开公开下载地址" placement="top">
+                <el-button tag="a" text :icon="Download" :href="row.download_url" target="_blank" rel="noopener noreferrer" />
+              </el-tooltip>
+              <el-tooltip content="复制下载地址" placement="top">
+                <el-button text :icon="CopyDocument" @click="copyText(row.download_url)" />
+              </el-tooltip>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
-import { getSystemConfig, syncUpdaterCatalog, updateSystemConfig, type UpdaterCatalogSyncResult } from '@/api/system'
+import { CopyDocument, Download, Refresh, View } from '@element-plus/icons-vue'
+import {
+  getSystemConfig,
+  getUpdaterRelease,
+  getUpdaterReleases,
+  syncUpdaterCatalog,
+  updateSystemConfig,
+  type UpdaterCatalogSyncResult,
+  type UpdaterComponent,
+  type UpdaterRelease,
+  type UpdaterReleaseDetail
+} from '@/api/system'
 import { useWorkspaceStore } from '@/stores/workspace'
 import PageHeader from '@/components/Common/PageHeader.vue'
+import CopyButton from '@/components/Common/CopyButton.vue'
+import { formatTime } from '@/utils/time'
 
 const workspaceStore = useWorkspaceStore()
 const canWrite = computed(() => workspaceStore.can('platform.settings.write'))
@@ -161,6 +245,15 @@ const formRef = ref()
 const saving = ref(false)
 const syncingCatalog = ref(false)
 const catalogSyncResult = ref<UpdaterCatalogSyncResult | null>(null)
+const loadingReleases = ref(false)
+const releases = ref<UpdaterRelease[]>([])
+const releaseComponent = ref<UpdaterComponent | ''>('')
+const releaseDrawerVisible = ref(false)
+const loadingReleaseDetail = ref(false)
+const releaseDetail = ref<UpdaterReleaseDetail | null>(null)
+const releaseDrawerTitle = computed(() => releaseDetail.value
+  ? `${componentLabel(releaseDetail.value.release.component)} ${releaseDetail.value.release.version}`
+  : '制品详情')
 
 const form = ref({
   client_download_url: '',
@@ -189,8 +282,19 @@ const loadConfig = async () => {
   }
 }
 
+const loadReleases = async () => {
+  loadingReleases.value = true
+  try {
+    const response = await getUpdaterReleases(releaseComponent.value || undefined)
+    releases.value = response.data || []
+  } finally {
+    loadingReleases.value = false
+  }
+}
+
 onMounted(() => {
   loadConfig()
+  loadReleases()
 })
 
 const validateIPPrefix = (ipPrefix: string): boolean => {
@@ -272,8 +376,41 @@ const handleCatalogSync = async () => {
     const response = await syncUpdaterCatalog()
     catalogSyncResult.value = response.data
     ElMessage.success(`同步完成：新增 ${response.data.created}，已存在 ${response.data.existing}`)
+    await loadReleases()
   } finally {
     syncingCatalog.value = false
+  }
+}
+
+const showReleaseDetail = async (release: UpdaterRelease) => {
+  releaseDrawerVisible.value = true
+  loadingReleaseDetail.value = true
+  releaseDetail.value = null
+  try {
+    const response = await getUpdaterRelease(release.id)
+    releaseDetail.value = response.data
+  } finally {
+    loadingReleaseDetail.value = false
+  }
+}
+
+const componentLabel = (component: UpdaterComponent) => ({ agent: 'Agent', endpoint: 'Endpoint', desktop: 'Desktop' })[component]
+const componentTag = (component: UpdaterComponent) => ({ agent: 'success', endpoint: 'warning', desktop: 'primary' })[component] as 'success' | 'warning' | 'primary'
+const releaseStatusLabel = (status: UpdaterRelease['status']) => ({ draft: '草稿', published: '已发布', revoked: '已撤销' })[status]
+const releaseStatusTag = (status: UpdaterRelease['status']) => ({ draft: 'info', published: 'success', revoked: 'danger' })[status] as 'info' | 'success' | 'danger'
+
+const formatBytes = (bytes: number) => {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+const copyText = async (value: string) => {
+  try {
+    await navigator.clipboard.writeText(value)
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.error('复制失败')
   }
 }
 </script>
@@ -320,10 +457,66 @@ const handleCatalogSync = async () => {
   line-height: 1.5;
 }
 
-.catalog-sync,
+.catalog-section {
+  margin-top: 32px;
+}
+
+.catalog-toolbar,
 .catalog-sync-result {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.catalog-toolbar {
+  margin-bottom: 12px;
+}
+
+.catalog-toolbar-spacer {
+  flex: 1;
+}
+
+.release-table strong {
+  color: var(--el-text-color-primary);
+  font-weight: 600;
+}
+
+.commit-id,
+.artifact-meta {
+  display: block;
+  margin-top: 3px;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+}
+
+.commit-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.release-summary {
+  margin-bottom: 20px;
+}
+
+.copy-value,
+.hash-cell {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.hash-cell code {
+  overflow: hidden;
+  color: var(--el-text-color-regular);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-value :deep(.el-button),
+.hash-cell :deep(.el-button) {
+  flex: 0 0 auto;
 }
 </style>

@@ -156,15 +156,20 @@ func (a *UpdaterAPI) CreateRelease(c *gin.Context) {
 
 func (a *UpdaterAPI) ListReleases(c *gin.Context) {
 	ctx := c.Request.Context()
-	query := db.DB.WithContext(ctx).Model(&model.Release{})
+	type releaseListItem struct {
+		model.Release
+		ArtifactCount int64 `json:"artifact_count"`
+	}
+	query := db.DB.WithContext(ctx).Model(&model.Release{}).
+		Select("release.*, (SELECT COUNT(*) FROM artifact WHERE artifact.release_id = release.id) AS artifact_count")
 	if component := c.Query("component"); component != "" {
 		query = query.Where("component = ?", component)
 	}
 	if status := c.Query("status"); status != "" {
 		query = query.Where("status = ?", status)
 	}
-	var releases []model.Release
-	if err := query.Order("created_at DESC").Find(&releases).Error; err != nil {
+	var releases []releaseListItem
+	if err := query.Order("published_at DESC, created_at DESC").Scan(&releases).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询发布版本失败"))
 		return
 	}
