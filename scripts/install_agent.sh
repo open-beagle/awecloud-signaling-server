@@ -22,8 +22,6 @@ SSH_PORT_EXPLICIT="false"
 UPGRADE_MODE="false"
 UNINSTALL_MODE="false"
 DEPLOY_MODE="false"  # 部署模式：使用 Token 自动注册
-SIGNAL_UPDATER_PUBLIC_KEY="${SIGNAL_UPDATER_PUBLIC_KEY:-__SIGNAL_UPDATER_PUBLIC_KEY__}"
-SIGNAL_UPDATER_KEY_ID="${SIGNAL_UPDATER_KEY_ID:-__SIGNAL_UPDATER_KEY_ID__}"
 
 # 安装路径
 DOWNLOAD_DIR="/etc/kubernetes/downloads"
@@ -358,13 +356,7 @@ EOF
 # 安装 systemd 服务
 install_service() {
     info "安装 systemd 服务..."
-	if [[ -z "$SIGNAL_UPDATER_PUBLIC_KEY" || "$SIGNAL_UPDATER_PUBLIC_KEY" == __SIGNAL_UPDATER_PUBLIC_KEY__ ]]; then
-		error "安装脚本缺少 Updater Ed25519 公钥"
-	fi
-	if [[ -z "$SIGNAL_UPDATER_KEY_ID" || "$SIGNAL_UPDATER_KEY_ID" == __SIGNAL_UPDATER_KEY_ID__ ]]; then
-		error "安装脚本缺少 Updater key_id"
-	fi
-    
+
     cat > "$SERVICE_FILE" << EOF
 [Unit]
 Description=K8S Signaling Agent
@@ -379,9 +371,6 @@ StartLimitBurst=5
 Type=simple
 User=root
 Group=root
-Environment="SIGNAL_UPDATER_PUBLIC_KEY=${SIGNAL_UPDATER_PUBLIC_KEY}"
-Environment="SIGNAL_UPDATER_KEY_ID=${SIGNAL_UPDATER_KEY_ID}"
-
 # 工作目录
 WorkingDirectory=/etc/kubernetes
 

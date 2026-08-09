@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -64,20 +62,10 @@ func main() {
 	}
 	fmt.Printf("[Step 1] Initial Node registered: ID=%d, Version=%s, Commit=%s\n", node.ID, node.Version, node.CommitID)
 
-	// 2. Create Ed25519 keypair for artifact signing
-	pubKey, privKey, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		log.Fatalf("GenerateKey failed: %v", err)
-	}
-	pubKeyBase64 := base64.StdEncoding.EncodeToString(pubKey)
-
-	// 3. Create v1.0.2 Release and Artifact
+	// 2. Create v1.0.2 Release and Artifact
 	version := "v1.0.2"
 	targetCommit := "f77de3d30dc27481a72c113e22dd16f68471dedc"
 	targetSHA256 := "9d2d7f63bf0c0b865da7047502f9cb72845ee71fc5c0ab9f7f79299b604db7c1"
-
-	sigBytes := ed25519.Sign(privKey, []byte(targetSHA256))
-	sigBase64 := base64.StdEncoding.EncodeToString(sigBytes)
 
 	release := model.Release{
 		ID:        uuid.NewString(),
@@ -101,8 +89,6 @@ func main() {
 		DownloadURL: "https://signal.wodcloud.com/api/v1/download/agent?os=linux&arch=amd64&version=v1.0.2",
 		Size:        83169442,
 		SHA256:      targetSHA256,
-		Signature:   sigBase64,
-		KeyID:       "key-1",
 		Status:      model.ArtifactStatusAvailable,
 	}
 	if err := db.Create(&artifact).Error; err != nil {
@@ -145,7 +131,6 @@ func main() {
 		StateDir:        stateDir,
 		CurrentLink:     filepath.Join(tmpDir, "bin", "signal_agent"),
 		ServiceName:     "k8s-signaling",
-		PublicKeyBase64: pubKeyBase64,
 		Executable:      "/bin/true",
 	})
 	if err != nil {

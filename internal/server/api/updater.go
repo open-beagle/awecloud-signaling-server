@@ -1,12 +1,10 @@
 package api
 
 import (
-	"crypto/ed25519"
-	"encoding/base64"
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -17,48 +15,41 @@ import (
 	"golang.org/x/mod/semver"
 	"gorm.io/gorm"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 )
 
 type UpdaterAPI struct {
-	updates              *service.UpdateService
-	signingPublicKey     ed25519.PublicKey
-	signingPrivateKey    ed25519.PrivateKey
-	signingKeyID         string
-	signingPublicKeyErr  error
-	signingPrivateKeyErr error
+	updates *service.UpdateService
+	catalog *service.UpdaterCatalogService
+}
+
+func (a *UpdaterAPI) SetCatalog(catalog *service.UpdaterCatalogService) {
+	a.catalog = catalog
+}
+
+func (a *UpdaterAPI) SyncCatalog(c *gin.Context) {
+	if a.catalog == nil {
+		c.JSON(http.StatusServiceUnavailable, NewErrorResponse("HTTP 制品目录未配置"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Minute)
+	defer cancel()
+	result, err := a.catalog.Sync(ctx)
+	if err != nil {
+		logger.Errorf("同步 HTTP 制品与版本失败: %v", err)
+		recordAuditLog(c.Request.Context(), c, "updater_catalog_sync_failed", "updater_catalog", "http", "HTTP 制品目录", gin.H{"result": result, "error": err.Error()})
+		c.JSON(http.StatusConflict, Response{Success: false, Message: "HTTP 制品与版本同步存在失败项", Data: result})
+		return
+	}
+	recordAuditLog(c.Request.Context(), c, "updater_catalog_sync", "updater_catalog", "http", "HTTP 制品目录", result)
+	c.JSON(http.StatusOK, NewSuccessMessageResponse("同步完成", result))
 }
 
 func NewUpdaterAPI() *UpdaterAPI {
-	api := &UpdaterAPI{updates: service.NewUpdateService(db.DB)}
-	encodedPub := strings.TrimSpace(os.Getenv("SIGNAL_UPDATER_PUBLIC_KEY"))
-	if encodedPub == "" {
-		api.signingPublicKeyErr = errors.New("SIGNAL_UPDATER_PUBLIC_KEY is not configured")
-	} else {
-		decodedPub, err := base64.StdEncoding.DecodeString(encodedPub)
-		if err != nil || len(decodedPub) != ed25519.PublicKeySize {
-			api.signingPublicKeyErr = errors.New("SIGNAL_UPDATER_PUBLIC_KEY is invalid")
-		} else {
-			api.signingPublicKey = ed25519.PublicKey(decodedPub)
-		}
-	}
-
-	encodedPriv := strings.TrimSpace(os.Getenv("SIGNAL_UPDATER_PRIVATE_KEY"))
-	if encodedPriv == "" {
-		api.signingPrivateKeyErr = errors.New("SIGNAL_UPDATER_PRIVATE_KEY is not configured")
-	} else {
-		decodedPriv, err := base64.StdEncoding.DecodeString(encodedPriv)
-		if err != nil || len(decodedPriv) != ed25519.PrivateKeySize {
-			api.signingPrivateKeyErr = errors.New("SIGNAL_UPDATER_PRIVATE_KEY is invalid")
-		} else {
-			api.signingPrivateKey = ed25519.PrivateKey(decodedPriv)
-		}
-	}
-
-	api.signingKeyID = strings.TrimSpace(os.Getenv("SIGNAL_UPDATER_KEY_ID"))
-	return api
+	return &UpdaterAPI{updates: service.NewUpdateService(db.DB)}
 }
 
 type ArtifactInput struct {
@@ -70,8 +61,6 @@ type ArtifactInput struct {
 	DownloadURL string `json:"download_url" binding:"required"`
 	Size        int64  `json:"size" binding:"required"`
 	SHA256      string `json:"sha256" binding:"required"`
-	Signature   string `json:"signature" binding:"required"`
-	KeyID       string `json:"key_id" binding:"required"`
 }
 
 type CreateReleaseRequest struct {
@@ -208,24 +197,10 @@ func (a *UpdaterAPI) PublishRelease(c *gin.Context) {
 		c.JSON(http.StatusConflict, NewErrorResponse("已撤销的发布版本不能再次发布"))
 		return
 	}
-	if a.signingPublicKeyErr != nil {
-		c.JSON(http.StatusServiceUnavailable, NewErrorResponse("发布签名公钥未正确配置"))
-		return
-	}
 	var artifacts []model.Artifact
 	if err := db.DB.WithContext(ctx).Where("release_id = ? AND status = ?", release.ID, model.ArtifactStatusAvailable).Find(&artifacts).Error; err != nil || len(artifacts) == 0 {
 		c.JSON(http.StatusConflict, NewErrorResponse("发布版本缺少可用制品"))
 		return
-	}
-	for _, artifact := range artifacts {
-		if a.signingKeyID != "" && artifact.KeyID != a.signingKeyID {
-			c.JSON(http.StatusConflict, NewErrorResponse("制品签名 key_id 与当前发布公钥不匹配"))
-			return
-		}
-		if err := verifyArtifactSignature(a.signingPublicKey, artifact); err != nil {
-			c.JSON(http.StatusConflict, NewErrorResponse("制品签名校验失败"))
-			return
-		}
 	}
 	now := time.Now()
 	if err := db.DB.WithContext(ctx).Model(&release).Updates(map[string]any{"status": model.ReleaseStatusPublished, "published_at": now}).Error; err != nil {
@@ -397,18 +372,8 @@ func buildArtifact(input ArtifactInput) (model.Artifact, error) {
 		DownloadURL: input.DownloadURL,
 		Size:        input.Size,
 		SHA256:      strings.ToLower(input.SHA256),
-		Signature:   input.Signature,
-		KeyID:       input.KeyID,
 		Status:      model.ArtifactStatusAvailable,
 	}, nil
-}
-
-func verifyArtifactSignature(publicKey ed25519.PublicKey, artifact model.Artifact) error {
-	signature, err := base64.StdEncoding.DecodeString(artifact.Signature)
-	if err != nil || !ed25519.Verify(publicKey, []byte(artifact.SHA256), signature) {
-		return errors.New("artifact signature is invalid")
-	}
-	return nil
 }
 
 func normalizeVersion(value string) (string, bool) {

@@ -1,20 +1,11 @@
 package agent
 
 import (
-	"errors"
-	"os"
-	"strings"
-
 	"github.com/open-beagle/awecloud-signaling-server/internal/updater"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
 func newAgentUpdateManager(version, commitID, binarySHA256 string) (*updater.Manager, error) {
-	publicKey := strings.TrimSpace(os.Getenv("SIGNAL_UPDATER_PUBLIC_KEY"))
-	keyID := strings.TrimSpace(os.Getenv("SIGNAL_UPDATER_KEY_ID"))
-	if publicKey == "" || keyID == "" {
-		return nil, errors.New("Agent updater public key and key_id are required")
-	}
 	return updater.NewManager(updater.Config{
 		Component:       "agent",
 		CurrentVersion:  version,
@@ -23,8 +14,6 @@ func newAgentUpdateManager(version, commitID, binarySHA256 string) (*updater.Man
 		StateDir:        "/etc/kubernetes/data/signaling/updater/agent",
 		CurrentLink:     "/opt/bin/signal_agent",
 		ServiceName:     "k8s-signaling",
-		PublicKeyBase64: publicKey,
-		KeyID:           keyID,
 	})
 }
 
@@ -38,8 +27,6 @@ func updateDirectiveFromProto(directive *pb.UpdateDirective) updater.Directive {
 		Filename:      directive.Filename,
 		Size:          directive.Size,
 		SHA256:        directive.Sha256,
-		Signature:     directive.Signature,
-		KeyID:         directive.KeyId,
 		Force:         directive.Force,
 		NotBeforeUnix: directive.NotBeforeUnix,
 		DeadlineUnix:  directive.DeadlineUnix,

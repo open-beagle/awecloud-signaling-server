@@ -31,6 +31,11 @@ legacy_write_freeze = false
 type = "sqlite"
 path = "data/server.db"
 
+# Updater 制品目录由 Server 通过公开 HTTPS 索引同步，发布流水线不调用管理员 API。
+[updater]
+catalog_url = "https://minio-api.example.com/vscode/awecloud-signaling/updater/catalog.json"
+artifact_base_url = "https://minio-api.example.com/vscode/awecloud-signaling"
+
 # 日志配置
 [log]
 level = "info"

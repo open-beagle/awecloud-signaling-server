@@ -1,13 +1,9 @@
 package api
 
 import (
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -33,18 +29,8 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	return database
 }
 
-func TestGetPublicManifestSignedEnvelope(t *testing.T) {
+func TestGetPublicManifestPayload(t *testing.T) {
 	database := setupTestDB(t)
-
-	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
-
-	pubKeyBase64 := base64.StdEncoding.EncodeToString(pubKey)
-	privKeyBase64 := base64.StdEncoding.EncodeToString(privKey)
-
-	t.Setenv("SIGNAL_UPDATER_PUBLIC_KEY", pubKeyBase64)
-	t.Setenv("SIGNAL_UPDATER_PRIVATE_KEY", privKeyBase64)
-	t.Setenv("SIGNAL_UPDATER_KEY_ID", "desktop-key-2026")
 
 	updaterAPI := NewUpdaterAPI()
 
@@ -73,8 +59,6 @@ func TestGetPublicManifestSignedEnvelope(t *testing.T) {
 		DownloadURL: "https://signal.example.com/api/v1/public/updater/artifacts/app",
 		Size:        73400320,
 		SHA256:      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-		Signature:   "sig-app",
-		KeyID:       "desktop-key-2026",
 		Status:      model.ArtifactStatusAvailable,
 	}
 	require.NoError(t, database.Create(&appArt).Error)
@@ -90,8 +74,6 @@ func TestGetPublicManifestSignedEnvelope(t *testing.T) {
 		DownloadURL: "https://signal.example.com/api/v1/public/updater/artifacts/launcher",
 		Size:        15728640,
 		SHA256:      "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
-		Signature:   "sig-launcher",
-		KeyID:       "desktop-key-2026",
 		Status:      model.ArtifactStatusAvailable,
 	}
 	require.NoError(t, database.Create(&launcherArt).Error)
@@ -106,24 +88,8 @@ func TestGetPublicManifestSignedEnvelope(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 
-	var env PublicManifestEnvelope
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
-
-	require.Equal(t, 1, env.SchemaVersion)
-	require.Equal(t, "ed25519", env.Algorithm)
-	require.Equal(t, "desktop-key-2026", env.KeyID)
-
-	payloadBytes, err := base64.StdEncoding.DecodeString(env.Payload)
-	require.NoError(t, err)
-
-	sigBytes, err := base64.StdEncoding.DecodeString(env.Signature)
-	require.NoError(t, err)
-
-	// Verify Ed25519 signature against decoded payload bytes
-	require.True(t, ed25519.Verify(pubKey, payloadBytes, sigBytes))
-
 	var payload ManifestPayload
-	require.NoError(t, json.Unmarshal(payloadBytes, &payload))
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
 
 	require.Equal(t, 1, payload.SchemaVersion)
 	require.Equal(t, "1.1.1", payload.Release.Version)
@@ -156,5 +122,3 @@ func TestGetPublicManifestRejectsInvalidComponentOrOS(t *testing.T) {
 	r.ServeHTTP(w2, req2)
 	require.Equal(t, http.StatusBadRequest, w2.Code)
 }
-
-var _ = os.Getenv

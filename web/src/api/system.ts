@@ -13,6 +13,14 @@ export interface SystemConfig {
   updated_at: string
 }
 
+export interface UpdaterCatalogSyncResult {
+  scanned: number
+  created: number
+  existing: number
+  revoked: number
+  failed: number
+}
+
 // 获取系统配置
 export function getSystemConfig() {
   return request<{ success: boolean; data: SystemConfig }>({
@@ -35,6 +43,14 @@ export function updateSystemConfig(data: {
     url: '/api/v1/admin/system/config',
     method: 'put',
     data
+  })
+}
+
+export function syncUpdaterCatalog() {
+  return request<{ success: boolean; message: string; data: UpdaterCatalogSyncResult }>({
+    url: '/api/v1/admin/updater/sync',
+    method: 'post',
+    timeout: 120000
   })
 }
 

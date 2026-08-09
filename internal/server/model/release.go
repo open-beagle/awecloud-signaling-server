@@ -62,8 +62,6 @@ type Artifact struct {
 	DownloadURL string         `gorm:"type:text;not null" json:"download_url"`
 	Size        int64          `gorm:"not null" json:"size"`
 	SHA256      string         `gorm:"size:64;not null" json:"sha256"`
-	Signature   string         `gorm:"type:text" json:"signature"`
-	KeyID       string         `gorm:"size:100" json:"key_id"`
 	Status      ArtifactStatus `gorm:"size:20;not null;default:'available';index" json:"status"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`

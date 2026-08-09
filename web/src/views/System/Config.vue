@@ -120,6 +120,23 @@
           </el-form-item>
         </div>
 
+        <div class="config-section">
+          <div class="section-title">制品与版本</div>
+          <el-form-item label="HTTP 制品目录">
+            <div class="catalog-sync">
+              <el-button :icon="Refresh" :loading="syncingCatalog" :disabled="!canWrite" @click="handleCatalogSync">
+                同步制品与版本
+              </el-button>
+              <div v-if="catalogSyncResult" class="catalog-sync-result">
+                <el-tag size="small" type="success">新增 {{ catalogSyncResult.created }}</el-tag>
+                <el-tag size="small" type="info">已存在 {{ catalogSyncResult.existing }}</el-tag>
+                <el-tag v-if="catalogSyncResult.revoked" size="small" type="warning">已撤销 {{ catalogSyncResult.revoked }}</el-tag>
+                <el-tag v-if="catalogSyncResult.failed" size="small" type="danger">失败 {{ catalogSyncResult.failed }}</el-tag>
+              </div>
+            </div>
+          </el-form-item>
+        </div>
+
         <el-form-item>
           <el-button type="primary" :loading="saving" :disabled="!canWrite" @click="handleSave">
             保存
@@ -132,17 +149,18 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getSystemConfig, updateSystemConfig } from '@/api/system'
+import { Refresh } from '@element-plus/icons-vue'
+import { getSystemConfig, syncUpdaterCatalog, updateSystemConfig, type UpdaterCatalogSyncResult } from '@/api/system'
 import { useWorkspaceStore } from '@/stores/workspace'
 import PageHeader from '@/components/Common/PageHeader.vue'
 
-const router = useRouter()
 const workspaceStore = useWorkspaceStore()
 const canWrite = computed(() => workspaceStore.can('platform.settings.write'))
 const formRef = ref()
 const saving = ref(false)
+const syncingCatalog = ref(false)
+const catalogSyncResult = ref<UpdaterCatalogSyncResult | null>(null)
 
 const form = ref({
   client_download_url: '',
@@ -153,14 +171,6 @@ const form = ref({
   auth_key_expiry_hours: 24,
   domain_suffix: '.beagle'
 })
-
-const downloadPageUrl = computed(() => {
-  return window.location.origin + '/download'
-})
-
-const goToDownloadPage = () => {
-  window.open('/download', '_blank')
-}
 
 const loadConfig = async () => {
   try {
@@ -254,6 +264,18 @@ const handleSave = async () => {
     saving.value = false
   }
 }
+
+const handleCatalogSync = async () => {
+  if (!canWrite.value) return
+  syncingCatalog.value = true
+  try {
+    const response = await syncUpdaterCatalog()
+    catalogSyncResult.value = response.data
+    ElMessage.success(`同步完成：新增 ${response.data.created}，已存在 ${response.data.existing}`)
+  } finally {
+    syncingCatalog.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -296,5 +318,12 @@ const handleSave = async () => {
   color: var(--el-text-color-secondary);
   margin-top: 8px;
   line-height: 1.5;
+}
+
+.catalog-sync,
+.catalog-sync-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>

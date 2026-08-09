@@ -1,9 +1,6 @@
 package api
 
 import (
-	"crypto/ed25519"
-	"encoding/base64"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -14,14 +11,6 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
-
-type PublicManifestEnvelope struct {
-	SchemaVersion int    `json:"schema_version"`
-	Algorithm     string `json:"algorithm"`
-	KeyID         string `json:"key_id"`
-	Payload       string `json:"payload"`
-	Signature     string `json:"signature"`
-}
 
 type ManifestReleaseInfo struct {
 	ID                  string `json:"id"`
@@ -46,8 +35,6 @@ type ManifestArtifactInfo struct {
 	DownloadURL string `json:"download_url"`
 	Size        int64  `json:"size"`
 	SHA256      string `json:"sha256"`
-	Signature   string `json:"signature"`
-	KeyID       string `json:"key_id"`
 }
 
 type ManifestArtifactsMap struct {
@@ -123,8 +110,6 @@ func (a *UpdaterAPI) GetPublicManifest(c *gin.Context) {
 			DownloadURL: art.DownloadURL,
 			Size:        art.Size,
 			SHA256:      art.SHA256,
-			Signature:   art.Signature,
-			KeyID:       art.KeyID,
 		}
 		if art.Role == "app" {
 			appArtifact = info
@@ -187,25 +172,5 @@ func (a *UpdaterAPI) GetPublicManifest(c *gin.Context) {
 		},
 	}
 
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("序列化 Manifest 失败"))
-		return
-	}
-
-	if len(a.signingPrivateKey) == 0 {
-		c.JSON(http.StatusServiceUnavailable, NewErrorResponse("签名私钥未配置"))
-		return
-	}
-
-	signatureBytes := ed25519.Sign(a.signingPrivateKey, payloadBytes)
-	envelope := PublicManifestEnvelope{
-		SchemaVersion: 1,
-		Algorithm:     "ed25519",
-		KeyID:         a.signingKeyID,
-		Payload:       base64.StdEncoding.EncodeToString(payloadBytes),
-		Signature:     base64.StdEncoding.EncodeToString(signatureBytes),
-	}
-
-	c.JSON(http.StatusOK, envelope)
+	c.JSON(http.StatusOK, payload)
 }

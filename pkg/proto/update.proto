@@ -15,8 +15,7 @@ message UpdateDirective {
   string arch = 8;
   int64 size = 9;
   string sha256 = 10;
-  string signature = 11;
-  string key_id = 12;
+  reserved 11, 12;
   bool force = 13;
   int64 not_before_unix = 14;
   int64 deadline_unix = 15;

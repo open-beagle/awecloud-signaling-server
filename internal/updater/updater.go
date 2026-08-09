@@ -2,9 +2,7 @@ package updater
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -32,8 +30,6 @@ type Directive struct {
 	Filename      string
 	Size          int64
 	SHA256        string
-	Signature     string
-	KeyID         string
 	Force         bool
 	NotBeforeUnix int64
 	DeadlineUnix  int64
@@ -60,8 +56,6 @@ type Config struct {
 	StateDir        string
 	CurrentLink     string
 	ServiceName     string
-	PublicKeyBase64 string
-	KeyID           string
 	Executable      string
 }
 
@@ -88,9 +82,8 @@ type HealthFile struct {
 }
 
 type Manager struct {
-	cfg       Config
-	publicKey ed25519.PublicKey
-	client    *http.Client
+	cfg    Config
+	client *http.Client
 
 	mu         sync.Mutex
 	states     map[string]taskState
@@ -116,13 +109,6 @@ func NewManager(cfg Config) (*Manager, error) {
 		client:     secureHTTPClient(),
 		states:     make(map[string]taskState),
 		processing: make(map[string]bool),
-	}
-	if cfg.PublicKeyBase64 != "" {
-		key, err := decodePublicKey(cfg.PublicKeyBase64)
-		if err != nil {
-			return nil, err
-		}
-		manager.publicKey = key
 	}
 	if err := os.MkdirAll(cfg.StateDir, 0700); err != nil {
 		return nil, fmt.Errorf("create updater state directory: %w", err)
@@ -219,11 +205,6 @@ func (m *Manager) execute(directive Directive) {
 		m.setStatus(directive, "failed", 0, "task_expired", "更新任务已超过截止时间")
 		return
 	}
-	if len(m.publicKey) != ed25519.PublicKeySize {
-		m.setStatus(directive, "failed", 0, "signature_key_unavailable", "未配置 updater 签名公钥")
-		return
-	}
-
 	m.setStatus(directive, "accepted", 0, "", "")
 	m.setStatus(directive, "downloading", 0, "", "")
 	stagedBinary, err := m.downloadAndVerify(directive)
@@ -243,9 +224,6 @@ func (m *Manager) validateDirective(directive Directive) error {
 	if directive.TaskID == "" || directive.ArtifactID == "" || directive.Version == "" ||
 		!validCommitID(directive.CommitID) || !validSHA256(directive.SHA256) {
 		return errors.New("update directive build identity is incomplete")
-	}
-	if strings.TrimSpace(m.cfg.KeyID) == "" || directive.KeyID != m.cfg.KeyID {
-		return errors.New("update directive key_id does not match configured key")
 	}
 	return nil
 }
@@ -328,9 +306,6 @@ func (m *Manager) downloadAndVerify(directive Directive) (string, error) {
 	digest := hex.EncodeToString(hash.Sum(nil))
 	if !strings.EqualFold(digest, directive.SHA256) {
 		return "", errors.New("checksum_mismatch")
-	}
-	if err := verifySignature(m.publicKey, digest, directive.Signature); err != nil {
-		return "", err
 	}
 
 	if err := os.MkdirAll(artifactDir, 0700); err != nil {
@@ -639,22 +614,6 @@ func secureHTTPClient() *http.Client {
 	}
 }
 
-func decodePublicKey(encoded string) (ed25519.PublicKey, error) {
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil || len(decoded) != ed25519.PublicKeySize {
-		return nil, errors.New("invalid updater Ed25519 public key")
-	}
-	return ed25519.PublicKey(decoded), nil
-}
-
-func verifySignature(publicKey ed25519.PublicKey, digest, encodedSignature string) error {
-	signature, err := base64.StdEncoding.DecodeString(encodedSignature)
-	if err != nil || !ed25519.Verify(publicKey, []byte(digest), signature) {
-		return errors.New("signature_invalid")
-	}
-	return nil
-}
-
 func restartAndCheck(ctx context.Context, serviceName string) error {
 	if output, err := exec.CommandContext(ctx, "systemctl", "restart", serviceName).CombinedOutput(); err != nil {
 		return fmt.Errorf("restart %s: %w: %s", serviceName, err, strings.TrimSpace(string(output)))
@@ -752,8 +711,6 @@ func errorCode(err error) string {
 	switch {
 	case strings.Contains(message, "checksum_mismatch"):
 		return "checksum_mismatch"
-	case strings.Contains(message, "signature_invalid"):
-		return "signature_invalid"
 	case strings.Contains(message, "artifact_size_mismatch"):
 		return "artifact_size_mismatch"
 	default:

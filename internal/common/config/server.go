@@ -12,12 +12,18 @@ type ServerConfig struct {
 	Server       ServerSection       `toml:"server"`
 	Database     DatabaseSection     `toml:"database"`
 	Web          WebSection          `toml:"web"`
+	Updater      UpdaterSection      `toml:"updater"`
 	Security     SecuritySection     `toml:"security"`
 	FeatureFlags FeatureFlagsSection `toml:"feature_flags"`
 	Log          LogConfig           `toml:"log"`
 	Tailscale    TailscaleSection    `toml:"tailscale"`
 	Telemetry    TelemetrySection    `toml:"telemetry"`
 	Logto        LogtoSection        `toml:"logto"`
+}
+
+type UpdaterSection struct {
+	CatalogURL      string `toml:"catalog_url"`
+	ArtifactBaseURL string `toml:"artifact_base_url"`
 }
 
 type FeatureFlag string
@@ -220,6 +226,7 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	if value := strings.TrimSpace(os.Getenv("SIGNAL_ALLOW_LOCALHOST_ADMIN_DEBUG")); value != "" {
 		cfg.Security.AllowLocalhostAdminDebug = parseBool(value)
 	}
+	applyUpdaterEnv(&cfg.Updater)
 	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureResourceModelWrite, "SIGNAL_FEATURE_RESOURCE_MODEL_WRITE")
 	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureResourceReconciliation, "SIGNAL_FEATURE_RESOURCE_RECONCILIATION")
 	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureResourceAllocation, "SIGNAL_FEATURE_RESOURCE_ALLOCATION")
@@ -318,6 +325,17 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 
 	return &cfg, nil
+}
+
+func applyUpdaterEnv(updater *UpdaterSection) {
+	for key, target := range map[string]*string{
+		"SIGNAL_UPDATER_CATALOG_URL":       &updater.CatalogURL,
+		"SIGNAL_UPDATER_ARTIFACT_BASE_URL": &updater.ArtifactBaseURL,
+	} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			*target = value
+		}
+	}
 }
 
 func applyFeatureFlagEnv(flags *FeatureFlagsSection, flag FeatureFlag, key string) {

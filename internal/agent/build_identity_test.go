@@ -13,12 +13,3 @@ func TestValidGitCommit(t *testing.T) {
 		}
 	}
 }
-
-func TestAgentUpdaterRequiresSigningIdentity(t *testing.T) {
-	t.Setenv("SIGNAL_UPDATER_PUBLIC_KEY", "")
-	t.Setenv("SIGNAL_UPDATER_KEY_ID", "")
-	_, err := newAgentUpdateManager("v1.0.0", "0123456789abcdef0123456789abcdef01234567", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	if err == nil {
-		t.Fatal("expected missing updater signing identity to fail")
-	}
-}

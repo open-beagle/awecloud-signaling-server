@@ -33,8 +33,6 @@ type UpdateDirective struct {
 	Arch          string                 `protobuf:"bytes,8,opt,name=arch,proto3" json:"arch,omitempty"`
 	Size          int64                  `protobuf:"varint,9,opt,name=size,proto3" json:"size,omitempty"`
 	Sha256        string                 `protobuf:"bytes,10,opt,name=sha256,proto3" json:"sha256,omitempty"`
-	Signature     string                 `protobuf:"bytes,11,opt,name=signature,proto3" json:"signature,omitempty"`
-	KeyId         string                 `protobuf:"bytes,12,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
 	Force         bool                   `protobuf:"varint,13,opt,name=force,proto3" json:"force,omitempty"`
 	NotBeforeUnix int64                  `protobuf:"varint,14,opt,name=not_before_unix,json=notBeforeUnix,proto3" json:"not_before_unix,omitempty"`
 	DeadlineUnix  int64                  `protobuf:"varint,15,opt,name=deadline_unix,json=deadlineUnix,proto3" json:"deadline_unix,omitempty"`
@@ -141,20 +139,6 @@ func (x *UpdateDirective) GetSize() int64 {
 func (x *UpdateDirective) GetSha256() string {
 	if x != nil {
 		return x.Sha256
-	}
-	return ""
-}
-
-func (x *UpdateDirective) GetSignature() string {
-	if x != nil {
-		return x.Signature
-	}
-	return ""
-}
-
-func (x *UpdateDirective) GetKeyId() string {
-	if x != nil {
-		return x.KeyId
 	}
 	return ""
 }
@@ -313,7 +297,7 @@ var File_pkg_proto_update_proto protoreflect.FileDescriptor
 
 const file_pkg_proto_update_proto_rawDesc = "" +
 	"\n" +
-	"\x16pkg/proto/update.proto\x12\x12awecloud.signaling\"\x80\x04\n" +
+	"\x16pkg/proto/update.proto\x12\x12awecloud.signaling\"\xd7\x03\n" +
 	"\x0fUpdateDirective\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1c\n" +
 	"\tcomponent\x18\x02 \x01(\tR\tcomponent\x12\x18\n" +
@@ -326,16 +310,14 @@ const file_pkg_proto_update_proto_rawDesc = "" +
 	"\x04arch\x18\b \x01(\tR\x04arch\x12\x12\n" +
 	"\x04size\x18\t \x01(\x03R\x04size\x12\x16\n" +
 	"\x06sha256\x18\n" +
-	" \x01(\tR\x06sha256\x12\x1c\n" +
-	"\tsignature\x18\v \x01(\tR\tsignature\x12\x15\n" +
-	"\x06key_id\x18\f \x01(\tR\x05keyId\x12\x14\n" +
+	" \x01(\tR\x06sha256\x12\x14\n" +
 	"\x05force\x18\r \x01(\bR\x05force\x12&\n" +
 	"\x0fnot_before_unix\x18\x0e \x01(\x03R\rnotBeforeUnix\x12#\n" +
 	"\rdeadline_unix\x18\x0f \x01(\x03R\fdeadlineUnix\x12\x16\n" +
 	"\x06action\x18\x10 \x01(\tR\x06action\x12\x1f\n" +
 	"\vtarget_name\x18\x11 \x01(\tR\n" +
 	"targetName\x12\x1b\n" +
-	"\tcommit_id\x18\x12 \x01(\tR\bcommitId\"\xb5\x02\n" +
+	"\tcommit_id\x18\x12 \x01(\tR\bcommitIdJ\x04\b\v\x10\fJ\x04\b\f\x10\r\"\xb5\x02\n" +
 	"\fUpdateStatus\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x14\n" +
 	"\x05phase\x18\x02 \x01(\tR\x05phase\x12\x1a\n" +

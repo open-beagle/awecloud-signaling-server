@@ -57,6 +57,7 @@ type Server struct {
 	nodeRuntimePersister          *cache.NodeRuntimePersister
 	snapshotRefresher             *headscale.SnapshotRefresher
 	desktopDataAssembler          *service.DesktopDataAssembler
+	updaterCatalog                *service.UpdaterCatalogService
 	reconciliationCtx             context.Context
 	reconciliationCancel          context.CancelFunc
 }
@@ -136,6 +137,10 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 	}
 
 	desktopDataAssembler := service.NewDesktopDataAssembler(db.DB, nodeRuntimeStore, snapshotRefresher)
+	updaterCatalog, err := service.NewUpdaterCatalogService(db.DB, cfg.Updater)
+	if err != nil {
+		return nil, fmt.Errorf("初始化 HTTP 制品目录失败: %w", err)
+	}
 
 	workloadSnapshots := service.NewWorkloadSnapshotStore()
 	return &Server{
@@ -148,6 +153,7 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 		nodeRuntimePersister:          nodeRuntimePersister,
 		snapshotRefresher:             snapshotRefresher,
 		desktopDataAssembler:          desktopDataAssembler,
+		updaterCatalog:                updaterCatalog,
 		reconciliationService:         service.NewResourceReconciliationService(db.DB),
 		providerReconciliationService: service.NewProviderSupplyReconciliationService(db.DB),
 		allocationExpiryService:       service.NewPlatformAllocationExpiryService(db.DB),
@@ -890,6 +896,8 @@ func (s *Server) setupRouter() *gin.Engine {
 
 					// Updater 发布和更新任务管理
 					updaterAPI := api.NewUpdaterAPI()
+					updaterAPI.SetCatalog(s.updaterCatalog)
+					adminAuthGroup.POST("/updater/sync", api.RequireManagementPermission(service.PermissionPlatformSettingsWrite), updaterAPI.SyncCatalog)
 					adminAuthGroup.POST("/updater/releases", updaterAPI.CreateRelease)
 					adminAuthGroup.GET("/updater/releases", updaterAPI.ListReleases)
 					adminAuthGroup.GET("/updater/releases/:id", updaterAPI.GetRelease)

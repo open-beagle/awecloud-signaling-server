@@ -127,12 +127,11 @@ func main() {
 	logger.Infof("Agent 地址: %s", cfg.Agent.Address)
 
 	updateManager, err := updater.NewManager(updater.Config{
-		Component:       "endpoint",
-		CurrentVersion:  version,
-		StateDir:        "/etc/kubernetes/data/signaling/updater/endpoint",
-		CurrentLink:     "/opt/bin/signal_endpoint",
-		ServiceName:     "signal-endpoint",
-		PublicKeyBase64: os.Getenv("SIGNAL_UPDATER_PUBLIC_KEY"),
+		Component:      "endpoint",
+		CurrentVersion: version,
+		StateDir:       "/etc/kubernetes/data/signaling/updater/endpoint",
+		CurrentLink:    "/opt/bin/signal_endpoint",
+		ServiceName:    "signal-endpoint",
 	})
 	if err != nil {
 		logger.Fatalf("初始化 Endpoint updater 失败: %v", err)
@@ -204,8 +203,6 @@ func updateDirectiveFromProto(directive *pb.UpdateDirective) updater.Directive {
 		Filename:      directive.Filename,
 		Size:          directive.Size,
 		SHA256:        directive.Sha256,
-		Signature:     directive.Signature,
-		KeyID:         directive.KeyId,
 		NotBeforeUnix: directive.NotBeforeUnix,
 		DeadlineUnix:  directive.DeadlineUnix,
 	}
