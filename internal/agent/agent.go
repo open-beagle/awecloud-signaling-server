@@ -958,6 +958,8 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 				Name:               ep.Name,
 				Status:             "online",
 				Version:            ep.Version,
+				CommitId:           ep.CommitID,
+				BinarySha256:       ep.BinarySHA256,
 				Os:                 ep.OS,
 				Arch:               ep.Arch,
 				UpdaterProtocol:    ep.UpdaterProtocol,
@@ -1039,6 +1041,7 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 	if a.endpointServer != nil {
 		a.syncEndpointServerConfigs(resp)
 		a.endpointServer.SetUpdateDirectives(resp.EndpointUpdateDirectives)
+		a.endpointServer.SetUpdateHealthConfirmations(resp.UpdateHealthConfirmations)
 	}
 	if a.updater != nil {
 		if len(resp.UpdateHealthConfirmations) > 0 {

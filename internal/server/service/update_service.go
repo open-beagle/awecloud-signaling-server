@@ -111,7 +111,8 @@ func (s *UpdateService) CreateTask(ctx context.Context, input CreateUpdateTaskIn
 		if release.Component != input.Component || release.Status != model.ReleaseStatusPublished {
 			return ErrReleaseNotPublished
 		}
-		if input.Component == model.ComponentAgent && !validAgentCommitID(release.CommitID) {
+		requiresBuildIdentity := input.Component == model.ComponentAgent || input.Component == model.ComponentEndpoint
+		if requiresBuildIdentity && !validAgentCommitID(release.CommitID) {
 			return ErrInvalidBuildIdentity
 		}
 
@@ -119,17 +120,17 @@ func (s *UpdateService) CreateTask(ctx context.Context, input CreateUpdateTaskIn
 		if err != nil {
 			return err
 		}
-		if input.Component == model.ComponentAgent && updaterProtocol != "v2" {
+		if requiresBuildIdentity && updaterProtocol != "v2" {
 			return ErrUpdaterUnsupported
 		}
-		if input.Component != model.ComponentAgent && updaterProtocol != "v1" && updaterProtocol != "v2" {
+		if !requiresBuildIdentity && updaterProtocol != "v1" && updaterProtocol != "v2" {
 			return ErrUpdaterUnsupported
 		}
 		artifact, err := s.findArtifactRole(tx, release.ID, osName, arch, input.Component)
 		if err != nil {
 			return err
 		}
-		if input.Component == model.ComponentAgent && !validAgentSHA256(artifact.SHA256) {
+		if requiresBuildIdentity && !validAgentSHA256(artifact.SHA256) {
 			return ErrInvalidBuildIdentity
 		}
 

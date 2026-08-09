@@ -293,6 +293,92 @@ func (x *UpdateStatus) GetCurrentSha256() string {
 	return ""
 }
 
+// UpdateHealthConfirmation confirms that the restarted component reported the
+// exact release identity expected by Server.
+type UpdateHealthConfirmation struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	TaskId          string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Version         string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	CommitId        string                 `protobuf:"bytes,3,opt,name=commit_id,json=commitId,proto3" json:"commit_id,omitempty"`
+	ArtifactSha256  string                 `protobuf:"bytes,4,opt,name=artifact_sha256,json=artifactSha256,proto3" json:"artifact_sha256,omitempty"`
+	ConfirmedAtUnix int64                  `protobuf:"varint,5,opt,name=confirmed_at_unix,json=confirmedAtUnix,proto3" json:"confirmed_at_unix,omitempty"`
+	TargetName      string                 `protobuf:"bytes,6,opt,name=target_name,json=targetName,proto3" json:"target_name,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *UpdateHealthConfirmation) Reset() {
+	*x = UpdateHealthConfirmation{}
+	mi := &file_pkg_proto_update_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateHealthConfirmation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateHealthConfirmation) ProtoMessage() {}
+
+func (x *UpdateHealthConfirmation) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_update_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateHealthConfirmation.ProtoReflect.Descriptor instead.
+func (*UpdateHealthConfirmation) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_update_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *UpdateHealthConfirmation) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *UpdateHealthConfirmation) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *UpdateHealthConfirmation) GetCommitId() string {
+	if x != nil {
+		return x.CommitId
+	}
+	return ""
+}
+
+func (x *UpdateHealthConfirmation) GetArtifactSha256() string {
+	if x != nil {
+		return x.ArtifactSha256
+	}
+	return ""
+}
+
+func (x *UpdateHealthConfirmation) GetConfirmedAtUnix() int64 {
+	if x != nil {
+		return x.ConfirmedAtUnix
+	}
+	return 0
+}
+
+func (x *UpdateHealthConfirmation) GetTargetName() string {
+	if x != nil {
+		return x.TargetName
+	}
+	return ""
+}
+
 var File_pkg_proto_update_proto protoreflect.FileDescriptor
 
 const file_pkg_proto_update_proto_rawDesc = "" +
@@ -328,7 +414,15 @@ const file_pkg_proto_update_proto_rawDesc = "" +
 	"error_code\x18\x06 \x01(\tR\terrorCode\x12#\n" +
 	"\rerror_message\x18\a \x01(\tR\ferrorMessage\x12*\n" +
 	"\x11current_commit_id\x18\b \x01(\tR\x0fcurrentCommitId\x12%\n" +
-	"\x0ecurrent_sha256\x18\t \x01(\tR\rcurrentSha256B<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
+	"\x0ecurrent_sha256\x18\t \x01(\tR\rcurrentSha256\"\xe0\x01\n" +
+	"\x18UpdateHealthConfirmation\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12\x1b\n" +
+	"\tcommit_id\x18\x03 \x01(\tR\bcommitId\x12'\n" +
+	"\x0fartifact_sha256\x18\x04 \x01(\tR\x0eartifactSha256\x12*\n" +
+	"\x11confirmed_at_unix\x18\x05 \x01(\x03R\x0fconfirmedAtUnix\x12\x1f\n" +
+	"\vtarget_name\x18\x06 \x01(\tR\n" +
+	"targetNameB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
 
 var (
 	file_pkg_proto_update_proto_rawDescOnce sync.Once
@@ -342,10 +436,11 @@ func file_pkg_proto_update_proto_rawDescGZIP() []byte {
 	return file_pkg_proto_update_proto_rawDescData
 }
 
-var file_pkg_proto_update_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_pkg_proto_update_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_pkg_proto_update_proto_goTypes = []any{
-	(*UpdateDirective)(nil), // 0: awecloud.signaling.UpdateDirective
-	(*UpdateStatus)(nil),    // 1: awecloud.signaling.UpdateStatus
+	(*UpdateDirective)(nil),          // 0: awecloud.signaling.UpdateDirective
+	(*UpdateStatus)(nil),             // 1: awecloud.signaling.UpdateStatus
+	(*UpdateHealthConfirmation)(nil), // 2: awecloud.signaling.UpdateHealthConfirmation
 }
 var file_pkg_proto_update_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -366,7 +461,7 @@ func file_pkg_proto_update_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_update_proto_rawDesc), len(file_pkg_proto_update_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

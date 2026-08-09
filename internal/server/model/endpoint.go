@@ -13,6 +13,8 @@ type Endpoint struct {
 	HostDomainLabel string `gorm:"size:63;not null;default:'';index" json:"host_domain_label"` // SSH 主机域名标识
 	Alias           string `gorm:"size:100" json:"alias"`                                      // 别名（Server 可修改）
 	Version         string `gorm:"size:50" json:"version"`                                     // Endpoint 版本
+	CommitID        string `gorm:"size:40" json:"commit_id"`                                   // Endpoint Git SHA
+	BinarySHA256    string `gorm:"size:64" json:"binary_sha256"`                               // Endpoint 可执行文件 SHA256 摘要
 	UpdaterProtocol string `gorm:"size:16" json:"updater_protocol"`                            // Endpoint 支持的 updater 协议版本
 	OS              string `gorm:"size:32" json:"os"`                                          // Endpoint 操作系统
 	Arch            string `gorm:"size:32" json:"arch"`                                        // Endpoint CPU 架构

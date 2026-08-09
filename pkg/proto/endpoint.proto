@@ -86,6 +86,8 @@ message EndpointHeartbeatRequest {
   string authorization_snapshot_ack_hash = 16;
   repeated ResourceSessionTerminationAckV2 session_termination_acks = 17;
   repeated ResourceSessionEventV2 resource_session_events = 18;
+  string commit_id = 19; // Endpoint 当前运行 Git SHA
+  string binary_sha256 = 20; // Endpoint 可执行文件 SHA256 摘要
 }
 
 // EndpointCapabilityInfo Endpoint 单项能力信息
@@ -118,6 +120,7 @@ message EndpointHeartbeatResponse {
   WorkloadInventoryConfig workload_inventory_config = 19; // Server 授权的工作负载上报配置
   ResourceSessionAuthorizationSnapshotV2 authorization_snapshot_v2 = 20;
   repeated ResourceSessionEventAckV2 resource_session_event_acks = 21;
+  repeated UpdateHealthConfirmation update_health_confirmations = 22;
 }
 
 // ResourceSessionAuthorizationSnapshotV2 是一个 TechnicalResource 的完整替换快照。

@@ -113,6 +113,64 @@ func TestCreateTaskSupportsDesktop(t *testing.T) {
 	require.Equal(t, model.ComponentDesktop, task.Component)
 }
 
+func TestEndpointTaskSupportsSameVersionDifferentCommit(t *testing.T) {
+	updates, database := newUpdateServiceForTest(t)
+	ctx := context.Background()
+	endpoint := model.Endpoint{
+		ID: "endpoint-1", UserID: 1, Name: "endpoint-a", Version: "v1.0.2",
+		CommitID: "1111111111111111111111111111111111111111", BinarySHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		OS: "linux", Arch: "amd64", UpdaterProtocol: "v2", SSHUsers: "[]",
+	}
+	require.NoError(t, database.Create(&endpoint).Error)
+	release := model.Release{
+		ID: uuid.NewString(), Component: model.ComponentEndpoint, Version: endpoint.Version,
+		CommitID: "2222222222222222222222222222222222222222", Status: model.ReleaseStatusPublished,
+	}
+	require.NoError(t, database.Create(&release).Error)
+	artifact := model.Artifact{
+		ID: uuid.NewString(), ReleaseID: release.ID, OS: "linux", Arch: "amd64", PackageType: "binary",
+		Filename: "signal_endpoint", DownloadURL: "https://cache.example/signal_endpoint", Size: 128,
+		SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Status: model.ArtifactStatusAvailable,
+	}
+	require.NoError(t, database.Create(&artifact).Error)
+
+	task, err := updates.CreateTask(ctx, CreateUpdateTaskInput{
+		Component: model.ComponentEndpoint, TargetType: model.UpdateTargetEndpoint, TargetID: endpoint.ID, ReleaseID: release.ID,
+	})
+	require.NoError(t, err)
+	directives, err := updates.DirectivesForEndpoint(ctx, endpoint.ID)
+	require.NoError(t, err)
+	require.Len(t, directives, 1)
+	require.Equal(t, endpoint.Version, directives[0].Version)
+	require.Equal(t, release.CommitID, directives[0].CommitID)
+	require.Equal(t, artifact.SHA256, directives[0].SHA256)
+
+	require.NoError(t, updates.Report(ctx, task.ID, UpdateStatusReporter{
+		Source: "endpoint", Component: model.ComponentEndpoint, TargetType: model.UpdateTargetEndpoint, TargetID: endpoint.ID,
+	}, UpdateStatusReport{
+		Phase: string(model.UpdateTaskSucceeded), Sequence: 1, CurrentVersion: endpoint.Version,
+		CurrentCommitID: release.CommitID, CurrentSHA256: artifact.SHA256,
+	}))
+	require.NoError(t, database.First(task, "id = ?", task.ID).Error)
+	require.Equal(t, model.UpdateTaskSucceeded, task.Status)
+}
+
+func TestEndpointTaskRequiresUpdaterProtocolV2(t *testing.T) {
+	updates, database := newUpdateServiceForTest(t)
+	endpoint := model.Endpoint{ID: "endpoint-v1", UserID: 1, Name: "legacy-endpoint", OS: "linux", Arch: "amd64", UpdaterProtocol: "v1", SSHUsers: "[]"}
+	require.NoError(t, database.Create(&endpoint).Error)
+	release := model.Release{
+		ID: uuid.NewString(), Component: model.ComponentEndpoint, Version: "v1.0.2",
+		CommitID: "2222222222222222222222222222222222222222", Status: model.ReleaseStatusPublished,
+	}
+	require.NoError(t, database.Create(&release).Error)
+
+	_, err := updates.CreateTask(context.Background(), CreateUpdateTaskInput{
+		Component: model.ComponentEndpoint, TargetType: model.UpdateTargetEndpoint, TargetID: endpoint.ID, ReleaseID: release.ID,
+	})
+	require.ErrorIs(t, err, ErrUpdaterUnsupported)
+}
+
 func TestUpdateStatusSequenceIsMonotonic(t *testing.T) {
 	updates, database := newUpdateServiceForTest(t)
 	task := model.UpdateTask{ID: uuid.NewString(), Component: model.ComponentAgent, TargetType: model.UpdateTargetNode, TargetID: "1", ReleaseID: uuid.NewString(), DesiredVersion: "v1.2.3", Status: model.UpdateTaskDelivered, MaxAttempts: 3}

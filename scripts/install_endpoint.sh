@@ -160,10 +160,10 @@ download_endpoint() {
     
     info "获取最新版本..."
 
-    # 获取版本信息（复用 Agent 的版本接口，Endpoint 和 Agent 同版本）
-    local version_url="${SERVER_ADDRESS}/api/v1/download/agent/version"
+    local version_url="${SERVER_ADDRESS}/api/v1/download/endpoint/version"
     local version_response=""
     local version=""
+    local artifact_sha=""
 
     # 先获取完整响应，再解析，避免管道失败导致脚本退出
     if command -v curl &> /dev/null; then
@@ -174,17 +174,17 @@ download_endpoint() {
 
     if [[ -n "$version_response" ]]; then
         version=$(echo "$version_response" | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || true)
+        artifact_sha=$(echo "$version_response" | grep -o "\"linux-${arch}\":\"[0-9a-f]\{64\}\"" | head -1 | cut -d'"' -f4 || true)
     fi
 
-    if [[ -z "$version" ]]; then
-        error "无法获取版本信息（URL: ${version_url}，响应: ${version_response:-空}）"
+    if [[ -z "$version" || ! "$artifact_sha" =~ ^[0-9a-f]{64}$ ]]; then
+        error "Endpoint 版本信息缺少 version 或 linux-${arch} SHA256（URL: ${version_url}）"
     fi
 
     info "最新版本: ${version}"
 
-    # 下载 URL（和 Agent 同一个 S3 目录）
-    local download_url="${SERVER_ADDRESS}/api/v1/download/endpoint?os=linux&arch=${arch}&version=${version}"
-    local binary_filename="${BINARY_NAME}-${version}-linux-${arch}"
+    local download_url="${SERVER_ADDRESS}/api/v1/download/endpoint?os=linux&arch=${arch}"
+    local binary_filename="${BINARY_NAME}-${artifact_sha}"
     local binary_path="${DOWNLOAD_DIR}/${binary_filename}"
     local symlink_path="${INSTALL_DIR}/${BINARY_NAME}"
 
@@ -213,6 +213,13 @@ download_endpoint() {
     if [[ ! -f "$tmp_file" ]] || [[ ! -s "$tmp_file" ]]; then
         rm -f "$tmp_file"
         error "下载的文件无效"
+    fi
+
+    local downloaded_sha
+    downloaded_sha=$(sha256sum "$tmp_file" | awk '{print $1}')
+    if [[ "$downloaded_sha" != "$artifact_sha" ]]; then
+        rm -f "$tmp_file"
+        error "下载的 Endpoint SHA256 校验失败"
     fi
 
     mv "$tmp_file" "$binary_path"
@@ -307,10 +314,24 @@ upgrade_endpoint() {
          SERVER_ADDRESS="https://signal.wodcloud.com"
      fi
 
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        error "升级要求现有配置文件: ${CONFIG_FILE}"
+    fi
+    if [[ "$(stat -c %a "$CONFIG_FILE" 2>/dev/null)" != "600" ]]; then
+        error "升级要求配置文件权限为 0600: ${CONFIG_FILE}"
+    fi
+    local config_sha_before
+    config_sha_before=$(sha256sum "$CONFIG_FILE" | awk '{print $1}') || error "无法读取现有配置文件"
+
     info "升级 Endpoint..."
-    systemctl stop "$SERVICE_NAME" 2>/dev/null || true
     download_endpoint
-    systemctl start "$SERVICE_NAME"
+    systemctl restart "$SERVICE_NAME" || error "重启 Endpoint 失败"
+
+    local config_sha_after
+    config_sha_after=$(sha256sum "$CONFIG_FILE" | awk '{print $1}') || error "无法复核现有配置文件"
+    if [[ "$config_sha_before" != "$config_sha_after" ]]; then
+        error "升级过程中配置文件发生变化"
+    fi
     info "升级完成"
 }
 

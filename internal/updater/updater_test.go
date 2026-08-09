@@ -52,6 +52,14 @@ func TestAgentDownloadAndVerifyStagesUnsignedArtifact(t *testing.T) {
 	require.Equal(t, payload, content)
 }
 
+func TestEndpointManagerRequiresCurrentBuildIdentity(t *testing.T) {
+	_, err := NewManager(Config{
+		Component: "endpoint", CurrentVersion: "v1.0.2", StateDir: t.TempDir(),
+		CurrentLink: "/tmp/signal_endpoint", ServiceName: "signal-endpoint",
+	})
+	require.EqualError(t, err, "updater current build identity is invalid")
+}
+
 func TestDownloadAndVerifyRejectsInvalidChecksum(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("x"))

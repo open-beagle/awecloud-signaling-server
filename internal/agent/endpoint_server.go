@@ -29,6 +29,8 @@ type EndpointConnection struct {
 	Name               string
 	Token              string
 	Version            string
+	CommitID           string
+	BinarySHA256       string
 	OS                 string
 	Arch               string
 	UpdaterProtocol    string
@@ -152,17 +154,18 @@ type EndpointServer struct {
 	pendingMutex   sync.Mutex
 
 	// Server 下发的 Endpoint 更新任务（endpoint name → directives）
-	updateDirectives         map[string][]*pb.UpdateDirective
-	updateMutex              sync.RWMutex
-	supplyInventoryClient    pb.AgentServiceClient
-	supplyInventoryStreams   map[string]bool
-	supplyInventoryMutex     sync.Mutex
-	workloadInventoryStreams map[string]bool
-	workloadInventoryMutex   sync.Mutex
-	authorizationSnapshots   map[string]*pb.EndpointSessionAuthorizationSnapshotV2
-	authorizationCaches      map[string]*SessionAuthorizationCache
-	authorizationReports     map[string]*pb.EndpointSessionAuthorizationReportV2
-	authorizationMutex       sync.RWMutex
+	updateDirectives          map[string][]*pb.UpdateDirective
+	updateHealthConfirmations map[string][]*pb.UpdateHealthConfirmation
+	updateMutex               sync.RWMutex
+	supplyInventoryClient     pb.AgentServiceClient
+	supplyInventoryStreams    map[string]bool
+	supplyInventoryMutex      sync.Mutex
+	workloadInventoryStreams  map[string]bool
+	workloadInventoryMutex    sync.Mutex
+	authorizationSnapshots    map[string]*pb.EndpointSessionAuthorizationSnapshotV2
+	authorizationCaches       map[string]*SessionAuthorizationCache
+	authorizationReports      map[string]*pb.EndpointSessionAuthorizationReportV2
+	authorizationMutex        sync.RWMutex
 
 	// Endpoint 代理对象（用于端口分配）
 	sshProxy    *EndpointSSHProxy
@@ -178,25 +181,26 @@ type EndpointServer struct {
 func NewEndpointServer(listenPort int, token string, parentCtx context.Context) *EndpointServer {
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &EndpointServer{
-		listenPort:               listenPort,
-		token:                    token,
-		connections:              make(map[string]*EndpointConnection),
-		serverConfigs:            make(map[string]*EndpointServerConfig),
-		shellSessions:            make(map[string]*shellSession),
-		k8sapiSessions:           make(map[string]*k8sapiSession),
-		svcProxySessions:         make(map[string]*svcProxySession),
-		rawStreamSessions:        make(map[string]*rawStreamSession),
-		pendingShellReqs:         make(map[string][]*pb.ShellRequest),
-		pendingK8SAPIReqs:        make(map[string][]*pb.K8SAPIProxyRequest),
-		pendingSVCReqs:           make(map[string][]*pb.SVCProxyRequest),
-		updateDirectives:         make(map[string][]*pb.UpdateDirective),
-		supplyInventoryStreams:   make(map[string]bool),
-		workloadInventoryStreams: make(map[string]bool),
-		authorizationSnapshots:   make(map[string]*pb.EndpointSessionAuthorizationSnapshotV2),
-		authorizationCaches:      make(map[string]*SessionAuthorizationCache),
-		authorizationReports:     make(map[string]*pb.EndpointSessionAuthorizationReportV2),
-		ctx:                      ctx,
-		cancel:                   cancel,
+		listenPort:                listenPort,
+		token:                     token,
+		connections:               make(map[string]*EndpointConnection),
+		serverConfigs:             make(map[string]*EndpointServerConfig),
+		shellSessions:             make(map[string]*shellSession),
+		k8sapiSessions:            make(map[string]*k8sapiSession),
+		svcProxySessions:          make(map[string]*svcProxySession),
+		rawStreamSessions:         make(map[string]*rawStreamSession),
+		pendingShellReqs:          make(map[string][]*pb.ShellRequest),
+		pendingK8SAPIReqs:         make(map[string][]*pb.K8SAPIProxyRequest),
+		pendingSVCReqs:            make(map[string][]*pb.SVCProxyRequest),
+		updateDirectives:          make(map[string][]*pb.UpdateDirective),
+		updateHealthConfirmations: make(map[string][]*pb.UpdateHealthConfirmation),
+		supplyInventoryStreams:    make(map[string]bool),
+		workloadInventoryStreams:  make(map[string]bool),
+		authorizationSnapshots:    make(map[string]*pb.EndpointSessionAuthorizationSnapshotV2),
+		authorizationCaches:       make(map[string]*SessionAuthorizationCache),
+		authorizationReports:      make(map[string]*pb.EndpointSessionAuthorizationReportV2),
+		ctx:                       ctx,
+		cancel:                    cancel,
 	}
 }
 
@@ -371,6 +375,27 @@ func (s *EndpointServer) updateDirectivesFor(name string) []*pb.UpdateDirective 
 	s.updateMutex.RLock()
 	defer s.updateMutex.RUnlock()
 	return append([]*pb.UpdateDirective(nil), s.updateDirectives[name]...)
+}
+
+// SetUpdateHealthConfirmations replaces the confirmations that Server issued
+// for restarted Endpoints. target_name is the routing key across Agent.
+func (s *EndpointServer) SetUpdateHealthConfirmations(confirmations []*pb.UpdateHealthConfirmation) {
+	byName := make(map[string][]*pb.UpdateHealthConfirmation)
+	for _, confirmation := range confirmations {
+		if confirmation == nil || confirmation.TargetName == "" {
+			continue
+		}
+		byName[confirmation.TargetName] = append(byName[confirmation.TargetName], confirmation)
+	}
+	s.updateMutex.Lock()
+	s.updateHealthConfirmations = byName
+	s.updateMutex.Unlock()
+}
+
+func (s *EndpointServer) updateHealthConfirmationsFor(name string) []*pb.UpdateHealthConfirmation {
+	s.updateMutex.RLock()
+	defer s.updateMutex.RUnlock()
+	return append([]*pb.UpdateHealthConfirmation(nil), s.updateHealthConfirmations[name]...)
 }
 
 // UpdateServerConfig 更新 Server 下发的 Endpoint 能力配置
@@ -555,6 +580,8 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 		Name:               name,
 		Token:              firstReq.Token,
 		Version:            firstReq.Version,
+		CommitID:           firstReq.CommitId,
+		BinarySHA256:       firstReq.BinarySha256,
 		OS:                 firstReq.Os,
 		Arch:               firstReq.Arch,
 		UpdaterProtocol:    firstReq.UpdaterProtocol,
@@ -622,9 +649,10 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 
 	// 发送首次响应（携带 Server 下发的能力配置）
 	firstResp := &pb.EndpointHeartbeatResponse{
-		Success:          true,
-		Message:          "心跳已建立",
-		UpdateDirectives: s.updateDirectivesFor(name),
+		Success:                   true,
+		Message:                   "心跳已建立",
+		UpdateDirectives:          s.updateDirectivesFor(name),
+		UpdateHealthConfirmations: s.updateHealthConfirmationsFor(name),
 	}
 	if cfg := s.getServerConfig(name); cfg != nil {
 		firstResp.SshEnabled = cfg.SSHEnabled
@@ -657,6 +685,8 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 
 			conn.LastSeen = time.Now()
 			conn.Version = req.Version
+			conn.CommitID = req.CommitId
+			conn.BinarySHA256 = req.BinarySha256
 			conn.OS = req.Os
 			conn.Arch = req.Arch
 			conn.UpdaterProtocol = req.UpdaterProtocol
@@ -689,11 +719,12 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 
 			// 发送响应（携带各类请求通知和 Server 下发的能力配置）
 			resp := &pb.EndpointHeartbeatResponse{
-				Success:             true,
-				ShellRequests:       shellReqs,
-				K8SapiProxyRequests: k8sapiReqs,
-				SvcProxyRequests:    svcReqs,
-				UpdateDirectives:    s.updateDirectivesFor(name),
+				Success:                   true,
+				ShellRequests:             shellReqs,
+				K8SapiProxyRequests:       k8sapiReqs,
+				SvcProxyRequests:          svcReqs,
+				UpdateDirectives:          s.updateDirectivesFor(name),
+				UpdateHealthConfirmations: s.updateHealthConfirmationsFor(name),
 			}
 			if cfg := s.getServerConfig(name); cfg != nil {
 				resp.SshEnabled = cfg.SSHEnabled

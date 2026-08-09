@@ -313,10 +313,11 @@ jobs:
           endpoint_catalog_url="${ARTIFACT_BASE_URL}/updater/releases/endpoint/${GITHUB_SHA}.json"
           if mc stat "${catalog_object}" >/dev/null 2>&1; then
             mc cat "${catalog_object}" > updater_catalog_previous.json
-            jq -e --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            jq -e --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg artifact_base "${ARTIFACT_BASE_URL}" \
               --arg agent_url "${agent_catalog_url}" --arg endpoint_url "${endpoint_catalog_url}" \
               'select(.schema_version == 1 and (.manifests | type == "array")) |
-               {schema_version: 1, generated_at: $generated_at, manifests: ((.manifests + [$agent_url, $endpoint_url]) | unique)}' \
+               {schema_version: 1, generated_at: $generated_at,
+                manifests: (((.manifests | map(select(startswith($artifact_base + "/updater/releases/")))) + [$agent_url, $endpoint_url]) | unique)}' \
               updater_catalog_previous.json > updater_catalog.json
           else
             jq -n --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -341,11 +342,13 @@ jobs:
             '{version: $version, commit_id: $commit_id, build_date: $build_date, files: {"linux-amd64": $amd64_url, "linux-arm64": $arm64_url}, sha256: {"linux-amd64": $amd64_sha, "linux-arm64": $arm64_sha}}' \
             > signal_agent-version.json
           jq -n \
-            --arg version "${VERSION}" \
-            --arg build_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg version "${VERSION}" --arg commit_id "${GITHUB_SHA}" \
+            --arg build_date "$(date -u -d "@$(git show -s --format=%ct HEAD)" +%Y-%m-%dT%H:%M:%SZ)" \
             --arg amd64_sha "${endpoint_amd64_sha}" \
             --arg arm64_sha "${endpoint_arm64_sha}" \
-            '{version: $version, build_date: $build_date, files: {"linux-amd64": ("signal_endpoint-" + $version + "-linux-amd64"), "linux-arm64": ("signal_endpoint-" + $version + "-linux-arm64")}, sha256: {"linux-amd64": $amd64_sha, "linux-arm64": $arm64_sha}}' \
+            --arg amd64_url "${ARTIFACT_BASE_URL}/endpoint/artifacts/linux/amd64/${endpoint_amd64_sha}/signal_endpoint" \
+            --arg arm64_url "${ARTIFACT_BASE_URL}/endpoint/artifacts/linux/arm64/${endpoint_arm64_sha}/signal_endpoint" \
+            '{version: $version, commit_id: $commit_id, build_date: $build_date, files: {"linux-amd64": $amd64_url, "linux-arm64": $arm64_url}, sha256: {"linux-amd64": $amd64_sha, "linux-arm64": $arm64_sha}}' \
             > signal_endpoint-version.json
 
           # Update mutable pointers only after all immutable artifacts are available.

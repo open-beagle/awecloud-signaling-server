@@ -542,20 +542,27 @@ func (a *DownloadAPI) GetEndpointVersion(c *gin.Context) {
 		return
 	}
 
-	versionInfo := getEndpointVersionInfo(baseURL)
+	versionInfo, err := getEndpointVersionInfo(baseURL)
+	if err != nil {
+		logger.Warnf("[Download] 获取 Endpoint Manifest 失败: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "message": "Endpoint 下载清单不可用"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success":    true,
 		"version":    versionInfo.Version,
+		"commit_id":  versionInfo.CommitID,
 		"build_date": versionInfo.BuildDate,
+		"sha256":     versionInfo.SHA256,
 	})
 }
 
-func getEndpointVersionInfo(baseURL string) *VersionInfo {
+func getEndpointVersionInfo(baseURL string) (*VersionInfo, error) {
 	endpointVersionCacheMutex.RLock()
 	if cachedEndpointVersionInfo != nil && time.Since(endpointVersionCacheTime) < versionCacheTTL {
 		info := cachedEndpointVersionInfo
 		endpointVersionCacheMutex.RUnlock()
-		return info
+		return info, nil
 	}
 	endpointVersionCacheMutex.RUnlock()
 
@@ -563,30 +570,34 @@ func getEndpointVersionInfo(baseURL string) *VersionInfo {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(versionURL)
 	if err != nil {
-		logger.Warnf("[Download] 获取 Endpoint 版本信息失败: %v", err)
-		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+		return nil, fmt.Errorf("获取 Endpoint 版本信息失败: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		logger.Warnf("[Download] 获取 Endpoint 版本信息失败: HTTP %d", resp.StatusCode)
-		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+		return nil, fmt.Errorf("获取 Endpoint 版本信息失败: HTTP %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		logger.Warnf("[Download] 读取 Endpoint 版本信息失败: %v", err)
-		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+		return nil, fmt.Errorf("读取 Endpoint 版本信息失败: %w", err)
 	}
 	var versionInfo VersionInfo
 	if err := json.Unmarshal(body, &versionInfo); err != nil {
-		logger.Warnf("[Download] 解析 Endpoint 版本信息失败: %v", err)
-		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+		return nil, fmt.Errorf("解析 Endpoint 版本信息失败: %w", err)
+	}
+	if versionInfo.Version == "" || !validAgentCommitID(versionInfo.CommitID) || len(versionInfo.Files) == 0 || len(versionInfo.SHA256) == 0 {
+		return nil, fmt.Errorf("Endpoint 版本信息缺少构建身份")
+	}
+	for platform, digest := range versionInfo.SHA256 {
+		if platform == "" || len(digest) != 64 || digest != strings.ToLower(digest) || strings.Trim(digest, "0123456789abcdef") != "" {
+			return nil, fmt.Errorf("Endpoint 版本信息包含非法 SHA256")
+		}
 	}
 
 	endpointVersionCacheMutex.Lock()
 	cachedEndpointVersionInfo = &versionInfo
 	endpointVersionCacheTime = time.Now()
 	endpointVersionCacheMutex.Unlock()
-	return &versionInfo
+	return &versionInfo, nil
 }
 
 // ============================================
@@ -617,8 +628,6 @@ func (a *DownloadAPI) GetEndpointInstallScript(c *gin.Context) {
 func (a *DownloadAPI) GetEndpointDownload(c *gin.Context) {
 	osType := c.DefaultQuery("os", "linux")
 	arch := c.DefaultQuery("arch", "amd64")
-	version := c.Query("version")
-
 	baseURL, err := getAgentDownloadURL(c)
 	if err != nil || baseURL == "" {
 		logger.Warnf("[Download] 获取下载地址失败: %v", err)
@@ -629,17 +638,18 @@ func (a *DownloadAPI) GetEndpointDownload(c *gin.Context) {
 		return
 	}
 
-	// 如果没有指定版本，获取 Endpoint 专属最新版本
-	if version == "" {
-		versionInfo := getEndpointVersionInfo(baseURL)
-		version = versionInfo.Version
+	versionInfo, err := getEndpointVersionInfo(baseURL)
+	if err != nil {
+		logger.Warnf("[Download] 获取 Endpoint Manifest 失败: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "message": "Endpoint 下载清单不可用"})
+		return
 	}
-
-	// 格式: baseURL/signal_endpoint-v0.2.3-linux-amd64
-	filename := fmt.Sprintf("signal_endpoint-%s-%s-%s", version, osType, arch)
-	if !strings.HasSuffix(baseURL, "/") {
-		baseURL += "/"
+	platform := strings.ToLower(osType) + "-" + strings.ToLower(arch)
+	downloadURL := strings.TrimSpace(versionInfo.Files[platform])
+	parsedURL, parseErr := url.Parse(downloadURL)
+	if parseErr != nil || parsedURL.Scheme != "https" || parsedURL.Host == "" {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Endpoint 平台制品不存在"})
+		return
 	}
-
-	c.Redirect(http.StatusFound, baseURL+filename)
+	c.Redirect(http.StatusFound, downloadURL)
 }

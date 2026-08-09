@@ -1202,6 +1202,7 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 					}
 				}
 			}
+
 		}
 
 		resp.CapabilityConfig = capConfig
@@ -1272,6 +1273,7 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 					resp.ContainerSshDisconnectSessionIds = append(resp.ContainerSshDisconnectSessionIds, session.ID)
 				}
 			}
+
 		}
 	}
 
@@ -1350,6 +1352,25 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 								ConfirmedAtUnix: time.Now().Unix(),
 							})
 						}
+					}
+				}
+			}
+		}
+
+		if len(allEndpoints) > 0 {
+			endpointByID := make(map[string]model.Endpoint, len(allEndpoints))
+			endpointIDs := make([]string, 0, len(allEndpoints))
+			for _, endpoint := range allEndpoints {
+				endpointByID[endpoint.ID] = endpoint
+				endpointIDs = append(endpointIDs, endpoint.ID)
+			}
+			var restartingEndpointTasks []model.UpdateTask
+			if err := db.DB.WithContext(ctx).
+				Where("target_type = ? AND target_id IN ? AND component = ? AND status = ?", model.UpdateTargetEndpoint, endpointIDs, model.ComponentEndpoint, model.UpdateTaskRestarting).
+				Find(&restartingEndpointTasks).Error; err == nil {
+				for _, task := range restartingEndpointTasks {
+					if confirmation := endpointUpdateHealthConfirmation(task, endpointByID[task.TargetID], time.Now()); confirmation != nil {
+						resp.UpdateHealthConfirmations = append(resp.UpdateHealthConfirmations, confirmation)
 					}
 				}
 			}
@@ -1457,6 +1478,18 @@ func toProtoUpdateDirective(directive service.UpdateDirective) *pb.UpdateDirecti
 		Action:        directive.Action,
 		TargetName:    directive.TargetName,
 		CommitId:      directive.CommitID,
+	}
+}
+
+func endpointUpdateHealthConfirmation(task model.UpdateTask, endpoint model.Endpoint, confirmedAt time.Time) *pb.UpdateHealthConfirmation {
+	if task.DesiredCommitID == "" || task.DesiredSHA256 == "" || endpoint.ID == "" ||
+		endpoint.Version != task.DesiredVersion || endpoint.CommitID != task.DesiredCommitID ||
+		endpoint.BinarySHA256 != task.DesiredSHA256 {
+		return nil
+	}
+	return &pb.UpdateHealthConfirmation{
+		TaskId: task.ID, Version: endpoint.Version, CommitId: endpoint.CommitID,
+		ArtifactSha256: endpoint.BinarySHA256, ConfirmedAtUnix: confirmedAt.Unix(), TargetName: endpoint.Name,
 	}
 }
 
@@ -1949,6 +1982,8 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 				Hostname:                ep.Name,
 				HostDomainLabel:         service.SuggestedHostDomainLabel(ctx, db.DB, agentID, ep.Name),
 				Version:                 ep.Version,
+				CommitID:                ep.CommitId,
+				BinarySHA256:            ep.BinarySha256,
 				UpdaterProtocol:         ep.UpdaterProtocol,
 				OS:                      ep.Os,
 				Arch:                    ep.Arch,
@@ -2000,6 +2035,12 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 			endpointID = existing.ID
 			if ep.Version != "" {
 				updates["version"] = ep.Version
+			}
+			if ep.CommitId != "" {
+				updates["commit_id"] = ep.CommitId
+			}
+			if ep.BinarySha256 != "" {
+				updates["binary_sha256"] = ep.BinarySha256
 			}
 			if ep.Os != "" {
 				updates["os"] = ep.Os

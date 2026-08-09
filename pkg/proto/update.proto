@@ -35,3 +35,14 @@ message UpdateStatus {
   string current_commit_id = 8;
   string current_sha256 = 9;
 }
+
+// UpdateHealthConfirmation confirms that the restarted component reported the
+// exact release identity expected by Server.
+message UpdateHealthConfirmation {
+  string task_id = 1;
+  string version = 2;
+  string commit_id = 3;
+  string artifact_sha256 = 4;
+  int64 confirmed_at_unix = 5;
+  string target_name = 6;
+}

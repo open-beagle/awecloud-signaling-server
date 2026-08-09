@@ -168,15 +168,6 @@ message AgentHeartbeatRequest {
   string binary_sha256 = 28; // Agent 可执行文件 SHA256 摘要
 }
 
-// UpdateHealthConfirmation Server 签发的任务健康确认
-message UpdateHealthConfirmation {
-  string task_id = 1;
-  string version = 2;
-  string commit_id = 3;
-  string artifact_sha256 = 4;
-  int64 confirmed_at_unix = 5;
-}
-
 // ConnectedEndpoint Agent 上报的已连接 Endpoint 信息
 message ConnectedEndpoint {
   string name = 1; // Endpoint 名称
@@ -200,6 +191,8 @@ message ConnectedEndpoint {
   string arch = 13; // Endpoint CPU 架构
   repeated UpdateStatus update_statuses = 14; // Endpoint 更新状态
   string updater_protocol = 15; // Endpoint 支持的 updater 协议版本
+  string commit_id = 16; // Endpoint 当前运行 Git SHA
+  string binary_sha256 = 17; // Endpoint 可执行文件 SHA256 摘要
 }
 
 // DomainRegistration 域名注册信息（Agent 心跳上报）

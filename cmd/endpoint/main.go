@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -26,10 +29,11 @@ import (
 )
 
 var (
-	version   = "dev"
-	gitCommit = "unknown"
-	buildDate = "unknown"
-	goVersion = "unknown"
+	version      = "dev"
+	gitCommit    = "unknown"
+	buildDate    = "unknown"
+	goVersion    = "unknown"
+	binarySHA256 = "unknown"
 )
 
 // EndpointConfig Endpoint 配置
@@ -125,13 +129,19 @@ func main() {
 
 	logger.Infof("Endpoint 名称: %s", cfg.Agent.Name)
 	logger.Infof("Agent 地址: %s", cfg.Agent.Address)
+	binarySHA256, err = computeExecutableSHA256()
+	if err != nil {
+		logger.Fatalf("计算 Endpoint 二进制 SHA256 失败: %v", err)
+	}
 
 	updateManager, err := updater.NewManager(updater.Config{
-		Component:      "endpoint",
-		CurrentVersion: version,
-		StateDir:       "/etc/kubernetes/data/signaling/updater/endpoint",
-		CurrentLink:    "/opt/bin/signal_endpoint",
-		ServiceName:    "signal-endpoint",
+		Component:       "endpoint",
+		CurrentVersion:  version,
+		CurrentCommitID: gitCommit,
+		CurrentSHA256:   binarySHA256,
+		StateDir:        "/etc/kubernetes/data/signaling/updater/endpoint",
+		CurrentLink:     "/opt/bin/signal_endpoint",
+		ServiceName:     "signal-endpoint",
 	})
 	if err != nil {
 		logger.Fatalf("初始化 Endpoint updater 失败: %v", err)
@@ -203,8 +213,11 @@ func updateDirectiveFromProto(directive *pb.UpdateDirective) updater.Directive {
 		Filename:      directive.Filename,
 		Size:          directive.Size,
 		SHA256:        directive.Sha256,
+		ArtifactID:    directive.ArtifactId,
+		Force:         directive.Force,
 		NotBeforeUnix: directive.NotBeforeUnix,
 		DeadlineUnix:  directive.DeadlineUnix,
+		CommitID:      directive.CommitId,
 	}
 }
 
@@ -212,16 +225,35 @@ func toProtoUpdateStatuses(statuses []updater.Status) []*pb.UpdateStatus {
 	result := make([]*pb.UpdateStatus, 0, len(statuses))
 	for _, status := range statuses {
 		result = append(result, &pb.UpdateStatus{
-			TaskId:         status.TaskID,
-			Phase:          status.Phase,
-			Progress:       int32(status.Progress),
-			CurrentVersion: status.CurrentVersion,
-			Sequence:       status.Sequence,
-			ErrorCode:      status.ErrorCode,
-			ErrorMessage:   status.ErrorMessage,
+			TaskId:          status.TaskID,
+			Phase:           status.Phase,
+			Progress:        int32(status.Progress),
+			CurrentVersion:  status.CurrentVersion,
+			Sequence:        status.Sequence,
+			ErrorCode:       status.ErrorCode,
+			ErrorMessage:    status.ErrorMessage,
+			CurrentCommitId: status.CurrentCommitID,
+			CurrentSha256:   status.CurrentSHA256,
 		})
 	}
 	return result
+}
+
+func computeExecutableSHA256() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	file, err := os.Open(executable)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // buildConnectedEndpoint 根据配置构建 ConnectedEndpoint 消息（用于心跳上报）
@@ -230,7 +262,9 @@ func buildConnectedEndpoint(cfg *EndpointConfig, discovery *K8SServiceDiscovery)
 		Name:            cfg.Agent.Name,
 		Status:          "online",
 		Capabilities:    buildCapabilities(cfg),
-		UpdaterProtocol: "v1",
+		UpdaterProtocol: "v2",
+		CommitId:        gitCommit,
+		BinarySha256:    binarySHA256,
 	}
 
 	// SSH 用户列表
@@ -364,8 +398,10 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *upda
 		Version:         version,
 		Os:              runtime.GOOS,
 		Arch:            runtime.GOARCH,
-		UpdaterProtocol: "v1",
+		UpdaterProtocol: "v2",
 		UpdateStatuses:  toProtoUpdateStatuses(updateManager.Statuses()),
+		CommitId:        gitCommit,
+		BinarySha256:    binarySHA256,
 	}
 	if authorization != nil {
 		authorization.appendReport(heartbeatReq)
@@ -422,6 +458,7 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *upda
 		for _, directive := range resp.UpdateDirectives {
 			updateManager.Handle(updateDirectiveFromProto(directive))
 		}
+		updateManager.HandleHealthConfirmations(resp.UpdateHealthConfirmations)
 		if resp.SshEnabledSet {
 			cfg.SSH.Enabled = resp.SshEnabled
 		}
@@ -508,6 +545,7 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *upda
 			for _, directive := range resp.UpdateDirectives {
 				updateManager.Handle(updateDirectiveFromProto(directive))
 			}
+			updateManager.HandleHealthConfirmations(resp.UpdateHealthConfirmations)
 			if authorization != nil {
 				authorization.applyResponse(resp)
 			}
@@ -603,8 +641,10 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *upda
 				Version:         version,
 				Os:              runtime.GOOS,
 				Arch:            runtime.GOARCH,
-				UpdaterProtocol: "v1",
+				UpdaterProtocol: "v2",
 				UpdateStatuses:  toProtoUpdateStatuses(updateManager.Statuses()),
+				CommitId:        gitCommit,
+				BinarySha256:    binarySHA256,
 			}
 			if authorization != nil {
 				authorization.appendReport(heartbeatReq)

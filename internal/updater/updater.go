@@ -94,7 +94,8 @@ func NewManager(cfg Config) (*Manager, error) {
 	if cfg.Component == "" || cfg.StateDir == "" || cfg.CurrentLink == "" || cfg.ServiceName == "" {
 		return nil, errors.New("updater configuration is incomplete")
 	}
-	if cfg.Component == "agent" && (!validCommitID(cfg.CurrentCommitID) || !validSHA256(cfg.CurrentSHA256)) {
+	if (cfg.Component == "agent" || cfg.Component == "endpoint") &&
+		(!validCommitID(cfg.CurrentCommitID) || !validSHA256(cfg.CurrentSHA256)) {
 		return nil, errors.New("updater current build identity is invalid")
 	}
 	if cfg.Executable == "" {
