@@ -62,6 +62,27 @@ func TestUpdaterCatalogSyncCreatesPublishedReleaseAndIsIdempotent(t *testing.T) 
 	require.Equal(t, UpdaterCatalogSyncResult{Scanned: 1, Existing: 1}, result)
 }
 
+func TestUpdaterCatalogSyncCreatesSameVersionWithDifferentCommits(t *testing.T) {
+	database := updaterCatalogTestDB(t)
+	firstCommit := "0123456789abcdef0123456789abcdef01234567"
+	secondCommit := "abcdef0123456789abcdef0123456789abcdef01"
+	store := &updaterCatalogMemoryStore{objects: map[string][]byte{
+		"updater/releases/agent/" + firstCommit + ".json":  updaterCatalogTestManifestForCommit(t, updaterCatalogArtifactSHA, firstCommit),
+		"updater/releases/agent/" + secondCommit + ".json": updaterCatalogTestManifestForCommit(t, updaterCatalogArtifactSHA, secondCommit),
+	}}
+	syncer, err := NewUpdaterCatalogServiceWithStore(database, store, "https://minio.example/vscode/awecloud-signaling")
+	require.NoError(t, err)
+
+	result, err := syncer.Sync(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, UpdaterCatalogSyncResult{Scanned: 2, Created: 2}, result)
+
+	var releases []model.Release
+	require.NoError(t, database.Where("component = ? AND version = ?", model.ComponentAgent, "v1.0.0").Order("commit_id").Find(&releases).Error)
+	require.Len(t, releases, 2)
+	require.Equal(t, []string{firstCommit, secondCommit}, []string{releases[0].CommitID, releases[1].CommitID})
+}
+
 func TestUpdaterCatalogSyncRejectsArtifactMutation(t *testing.T) {
 	database := updaterCatalogTestDB(t)
 	store := &updaterCatalogMemoryStore{objects: map[string][]byte{
@@ -174,13 +195,17 @@ func mustParseUpdaterCatalogURL(t *testing.T, raw string) *url.URL {
 const updaterCatalogArtifactSHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 func updaterCatalogTestManifest(t *testing.T, sha256 string) []byte {
+	return updaterCatalogTestManifestForCommit(t, sha256, "0123456789abcdef0123456789abcdef01234567")
+}
+
+func updaterCatalogTestManifestForCommit(t *testing.T, sha256, commitID string) []byte {
 	t.Helper()
 	manifest := UpdaterCatalogManifest{
 		SchemaVersion: 1,
 		PublishedAt:   time.Date(2026, 8, 9, 8, 0, 0, 0, time.UTC),
 		Release: UpdaterCatalogRelease{
 			Component: model.ComponentAgent, Version: "v1.0.0",
-			CommitID: "0123456789abcdef0123456789abcdef01234567", Channel: "stable",
+			CommitID: commitID, Channel: "stable",
 			ReleaseNotes: "Agent build",
 		},
 		Artifacts: []UpdaterCatalogArtifact{{

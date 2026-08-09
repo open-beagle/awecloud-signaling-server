@@ -114,6 +114,9 @@ func autoMigrate() error {
 	if err := ensureDomainRegistrySchema(DB); err != nil {
 		return err
 	}
+	if err := ensureUpdaterReleaseSchema(DB); err != nil {
+		return err
+	}
 	err := DB.AutoMigrate(
 		// 基础模型
 		&model.Admin{},
@@ -257,6 +260,13 @@ func autoMigrate() error {
 		return err
 	}
 	return ensureTenantResourceConstraints(DB)
+}
+
+func ensureUpdaterReleaseSchema(database *gorm.DB) error {
+	if err := database.Exec(`DROP INDEX IF EXISTS uk_release_component_version`).Error; err != nil {
+		return fmt.Errorf("remove obsolete release component/version constraint: %w", err)
+	}
+	return nil
 }
 
 func ensureProviderDomainLabelSchema(database *gorm.DB) error {
