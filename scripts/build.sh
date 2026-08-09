@@ -12,8 +12,18 @@ GOOS="${GOOS:-linux}"
 
 # 版本信息
 BUILD_VERSION="${BUILD_VERSION:-dev}"
-GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
-BUILD_DATE=$(TZ=Asia/Shanghai date '+%Y-%m-%d_%H:%M:%S')
+GIT_COMMIT="${GIT_COMMIT:-$(git rev-parse HEAD 2>/dev/null || true)}"
+if [[ ! "$GIT_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "GIT_COMMIT must be a full 40-character lowercase Git SHA" >&2
+    exit 1
+fi
+SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git show -s --format=%ct "$GIT_COMMIT")}"
+if [[ ! "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]]; then
+    echo "SOURCE_DATE_EPOCH must be a Unix timestamp" >&2
+    exit 1
+fi
+export SOURCE_DATE_EPOCH
+BUILD_DATE=$(date -u -d "@${SOURCE_DATE_EPOCH}" '+%Y-%m-%dT%H:%M:%SZ')
 BUILD_GO=$(go version | awk '{print $3}')
 
 # Server 地址（可选，用于编译时注入）
@@ -51,7 +61,8 @@ build_server() {
     CGO_ENABLED=0 \
     GOOS=${GOOS} \
     GOARCH=${ARCH} \
-    go build \
+	go build \
+		-trimpath \
         -buildvcs=false \
         -ldflags="${LDFLAGS}" \
         -o ${OUTPUT} \
@@ -77,7 +88,8 @@ build_agent() {
     CGO_ENABLED=0 \
     GOOS=${GOOS} \
     GOARCH=${ARCH} \
-    go build \
+	go build \
+		-trimpath \
         -buildvcs=false \
         -ldflags="${AGENT_LDFLAGS}" \
         -o ${OUTPUT} \
@@ -103,7 +115,8 @@ build_endpoint() {
     CGO_ENABLED=0 \
     GOOS=${GOOS} \
     GOARCH=${ARCH} \
-    go build \
+	go build \
+		-trimpath \
         -buildvcs=false \
         -ldflags="${LDFLAGS}" \
         -o ${OUTPUT} \

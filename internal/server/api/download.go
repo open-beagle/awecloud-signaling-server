@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -34,8 +35,11 @@ type DownloadInfo struct {
 
 // VersionInfo version.json 的结构
 type VersionInfo struct {
-	Version   string `json:"version"`
-	BuildDate string `json:"build_date"`
+	Version   string            `json:"version"`
+	CommitID  string            `json:"commit_id,omitempty"`
+	BuildDate string            `json:"build_date"`
+	Files     map[string]string `json:"files,omitempty"`
+	SHA256    map[string]string `json:"sha256,omitempty"`
 }
 
 // AllDownloadsResponse 所有平台的下载信息
@@ -381,11 +385,10 @@ func (a *DownloadAPI) GetSignalInstallScript(c *gin.Context) {
 }
 
 // GetAgentDownload 获取 Agent 二进制下载（公开接口）
-// GET /api/v1/download/agent?os=linux&arch=amd64&version=v0.1.0
+// GET /api/v1/download/agent?os=linux&arch=amd64
 func (a *DownloadAPI) GetAgentDownload(c *gin.Context) {
 	osType := c.DefaultQuery("os", "linux")
 	arch := c.DefaultQuery("arch", "amd64")
-	version := c.Query("version")
 
 	// 获取系统配置中的 Agent 下载地址
 	baseURL, err := getAgentDownloadURL(c)
@@ -398,21 +401,20 @@ func (a *DownloadAPI) GetAgentDownload(c *gin.Context) {
 		return
 	}
 
-	// 如果没有指定版本，获取最新版本
-	if version == "" {
-		versionInfo := getAgentVersionInfo(baseURL)
-		version = versionInfo.Version
+	versionInfo, err := getAgentVersionInfo(baseURL)
+	if err != nil {
+		logger.Warnf("[Download] 获取 Agent Manifest 失败: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "message": "Agent 下载清单不可用"})
+		return
+	}
+	platform := strings.ToLower(osType) + "-" + strings.ToLower(arch)
+	downloadURL := strings.TrimSpace(versionInfo.Files[platform])
+	parsedURL, parseErr := url.Parse(downloadURL)
+	if parseErr != nil || parsedURL.Scheme != "https" || parsedURL.Host == "" {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Agent 平台制品不存在"})
+		return
 	}
 
-	// 构建下载 URL
-	// 格式: baseURL/signal_agent-v0.1.0-linux-amd64
-	filename := fmt.Sprintf("signal_agent-%s-%s-%s", version, osType, arch)
-	if !strings.HasSuffix(baseURL, "/") {
-		baseURL += "/"
-	}
-	downloadURL := baseURL + filename
-
-	// 重定向到实际下载地址
 	c.Redirect(http.StatusFound, downloadURL)
 }
 
@@ -431,12 +433,19 @@ func (a *DownloadAPI) GetAgentVersion(c *gin.Context) {
 	}
 
 	// 获取版本信息
-	versionInfo := getAgentVersionInfo(baseURL)
+	versionInfo, err := getAgentVersionInfo(baseURL)
+	if err != nil {
+		logger.Warnf("[Download] 获取 Agent Manifest 失败: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "message": "Agent 下载清单不可用"})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":    true,
 		"version":    versionInfo.Version,
+		"commit_id":  versionInfo.CommitID,
 		"build_date": versionInfo.BuildDate,
+		"sha256":     versionInfo.SHA256,
 	})
 }
 
@@ -454,13 +463,13 @@ var (
 )
 
 // getAgentVersionInfo 获取 Agent 版本信息
-func getAgentVersionInfo(baseURL string) *VersionInfo {
+func getAgentVersionInfo(baseURL string) (*VersionInfo, error) {
 	// 检查缓存
 	agentVersionCacheMutex.RLock()
 	if cachedAgentVersionInfo != nil && time.Since(agentVersionCacheTime) < versionCacheTTL {
 		info := cachedAgentVersionInfo
 		agentVersionCacheMutex.RUnlock()
-		return info
+		return info, nil
 	}
 	agentVersionCacheMutex.RUnlock()
 
@@ -477,28 +486,32 @@ func getAgentVersionInfo(baseURL string) *VersionInfo {
 	}
 	resp, err := client.Get(versionURL)
 	if err != nil {
-		logger.Warnf("[Download] 获取 Agent 版本信息失败: %v", err)
-		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+		return nil, fmt.Errorf("获取 Agent 版本信息失败: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		logger.Warnf("[Download] 获取 Agent 版本信息失败: HTTP %d", resp.StatusCode)
-		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+		return nil, fmt.Errorf("获取 Agent 版本信息失败: HTTP %d", resp.StatusCode)
 	}
 
 	// 读取响应
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		logger.Warnf("[Download] 读取 Agent 版本信息失败: %v", err)
-		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+		return nil, fmt.Errorf("读取 Agent 版本信息失败: %w", err)
 	}
 
 	// 解析 JSON
 	var versionInfo VersionInfo
 	if err := json.Unmarshal(body, &versionInfo); err != nil {
-		logger.Warnf("[Download] 解析 Agent 版本信息失败: %v", err)
-		return &VersionInfo{Version: "v0.1.0", BuildDate: time.Now().Format(time.RFC3339)}
+		return nil, fmt.Errorf("解析 Agent 版本信息失败: %w", err)
+	}
+	if versionInfo.Version == "" || !validAgentCommitID(versionInfo.CommitID) || len(versionInfo.Files) == 0 || len(versionInfo.SHA256) == 0 {
+		return nil, fmt.Errorf("Agent 版本信息缺少构建身份")
+	}
+	for platform, digest := range versionInfo.SHA256 {
+		if platform == "" || len(digest) != 64 || digest != strings.ToLower(digest) || strings.Trim(digest, "0123456789abcdef") != "" {
+			return nil, fmt.Errorf("Agent 版本信息包含非法 SHA256")
+		}
 	}
 
 	// 更新缓存
@@ -507,7 +520,7 @@ func getAgentVersionInfo(baseURL string) *VersionInfo {
 	agentVersionCacheTime = time.Now()
 	agentVersionCacheMutex.Unlock()
 
-	return &versionInfo
+	return &versionInfo, nil
 }
 
 // getAgentDownloadURL 从系统配置获取 Agent 下载地址

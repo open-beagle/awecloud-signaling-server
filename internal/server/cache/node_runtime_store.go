@@ -29,6 +29,8 @@ type RuntimeNode struct {
 	HeadscaleNodeID      uint64         `json:"headscale_node_id"`
 	IP                   string         `json:"ip"`
 	Version              string         `json:"version"`
+	CommitID             string         `json:"commit_id"`
+	BinarySHA256         string         `json:"binary_sha256"`
 	UpdaterProtocol      string         `json:"updater_protocol"`
 	ContainerSSHProtocol string         `json:"container_ssh_protocol"`
 	Hostname             string         `json:"hostname"`
@@ -59,6 +61,8 @@ type RuntimeNodeDirtySnapshot struct {
 	HeadscaleNodeID uint64
 	IP              string
 	Version         string
+	CommitID        string
+	BinarySHA256    string
 	Hostname        string
 	SystemInfo      string
 	LastHeartbeat   time.Time
@@ -67,8 +71,8 @@ type RuntimeNodeDirtySnapshot struct {
 
 // NodeRuntimeStore 线程安全的节点运行态内存存储
 type NodeRuntimeStore struct {
-	mu           sync.RWMutex
-	nodes        map[uint64]*RuntimeNode
+	mu            sync.RWMutex
+	nodes         map[uint64]*RuntimeNode
 	userTypeIndex map[UserTypeNodeKey]uint64
 }
 
@@ -120,6 +124,8 @@ func (s *NodeRuntimeStore) modelToRuntimeNode(node *model.Node) *RuntimeNode {
 		HeadscaleNodeID:      node.HeadscaleNodeID,
 		IP:                   node.IP,
 		Version:              node.Version,
+		CommitID:             node.CommitID,
+		BinarySHA256:         node.BinarySHA256,
 		UpdaterProtocol:      node.UpdaterProtocol,
 		ContainerSSHProtocol: node.ContainerSSHProtocol,
 		Hostname:             node.Hostname,
@@ -197,7 +203,7 @@ func (s *NodeRuntimeStore) ListNodesByUser(userID uint64) []RuntimeNode {
 }
 
 // UpdateHeartbeat 心跳热路径更新接口：只改内存，增加 Revision，标记 Dirty
-func (s *NodeRuntimeStore) UpdateHeartbeat(nodeID uint64, ip, hostname, version, systemInfo, updaterProto, sshProto string, now time.Time) (uint64, error) {
+func (s *NodeRuntimeStore) UpdateHeartbeat(nodeID uint64, ip, hostname, version, commitID, binarySHA256, systemInfo, updaterProto, sshProto string, now time.Time) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -214,6 +220,12 @@ func (s *NodeRuntimeStore) UpdateHeartbeat(nodeID uint64, ip, hostname, version,
 	}
 	if version != "" {
 		rn.Version = version
+	}
+	if commitID != "" {
+		rn.CommitID = commitID
+	}
+	if binarySHA256 != "" {
+		rn.BinarySHA256 = binarySHA256
 	}
 	if systemInfo != "" {
 		rn.SystemInfo = systemInfo
@@ -310,6 +322,8 @@ func (s *NodeRuntimeStore) SnapshotDirty() map[uint64]RuntimeNodeDirtySnapshot {
 				HeadscaleNodeID: rn.HeadscaleNodeID,
 				IP:              rn.IP,
 				Version:         rn.Version,
+				CommitID:        rn.CommitID,
+				BinarySHA256:    rn.BinarySHA256,
 				Hostname:        rn.Hostname,
 				SystemInfo:      rn.SystemInfo,
 				LastHeartbeat:   rn.LastHeartbeat,

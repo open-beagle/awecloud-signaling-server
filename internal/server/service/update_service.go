@@ -24,6 +24,7 @@ var (
 	ErrComponentNotSupported   = errors.New("component updater is not implemented")
 	ErrUpdateReporterMismatch  = errors.New("update status reporter does not match task target")
 	ErrInvalidUpdateTransition = errors.New("invalid update status transition")
+	ErrInvalidBuildIdentity    = errors.New("release or artifact build identity is invalid")
 )
 
 type UpdateDirective struct {
@@ -99,9 +100,6 @@ func (s *UpdateService) CreateTask(ctx context.Context, input CreateUpdateTaskIn
 	if input.TargetType == model.UpdateTargetNode && input.Component == model.ComponentEndpoint {
 		return nil, fmt.Errorf("endpoint component requires an endpoint target")
 	}
-	if input.Component == model.ComponentDesktop {
-		return nil, ErrComponentNotSupported
-	}
 	if input.MaxAttempts <= 0 {
 		input.MaxAttempts = 3
 	}
@@ -115,17 +113,26 @@ func (s *UpdateService) CreateTask(ctx context.Context, input CreateUpdateTaskIn
 		if release.Component != input.Component || release.Status != model.ReleaseStatusPublished {
 			return ErrReleaseNotPublished
 		}
+		if input.Component == model.ComponentAgent && !validAgentCommitID(release.CommitID) {
+			return ErrInvalidBuildIdentity
+		}
 
 		name, osName, arch, updaterProtocol, err := s.targetPlatform(tx, input.TargetType, input.TargetID)
 		if err != nil {
 			return err
 		}
-		if updaterProtocol != "v1" && updaterProtocol != "v2" {
+		if input.Component == model.ComponentAgent && updaterProtocol != "v2" {
 			return ErrUpdaterUnsupported
 		}
-		artifact, err := s.findArtifact(tx, release.ID, osName, arch)
+		if input.Component != model.ComponentAgent && updaterProtocol != "v1" && updaterProtocol != "v2" {
+			return ErrUpdaterUnsupported
+		}
+		artifact, err := s.findArtifactRole(tx, release.ID, osName, arch, input.Component)
 		if err != nil {
 			return err
+		}
+		if input.Component == model.ComponentAgent && !validAgentSHA256(artifact.SHA256) {
+			return ErrInvalidBuildIdentity
 		}
 
 		var activeCount int64
@@ -220,12 +227,21 @@ func (s *UpdateService) directivesForTarget(ctx context.Context, targetType mode
 		if err != nil {
 			continue
 		}
-		if updaterProtocol != "v1" && updaterProtocol != "v2" {
-			_ = s.setTaskStatus(ctx, task.ID, model.UpdateTaskFailed, "updater_unsupported", "目标未报告 updater 协议 v1 或 v2")
+		if component == model.ComponentAgent && updaterProtocol != "v2" {
+			_ = s.setTaskStatus(ctx, task.ID, model.UpdateTaskFailed, "updater_unsupported", "Agent 目标未报告 updater 协议 v2")
 			continue
 		}
-		artifact, err := s.findArtifact(s.db.WithContext(ctx), task.ReleaseID, osName, arch)
-		if err != nil {
+		if component != model.ComponentAgent && updaterProtocol != "v1" && updaterProtocol != "v2" {
+			_ = s.setTaskStatus(ctx, task.ID, model.UpdateTaskFailed, "updater_unsupported", "目标未报告支持的 updater 协议")
+			continue
+		}
+		var artifact model.Artifact
+		if err := s.db.WithContext(ctx).First(&artifact, "id = ? AND status = ?", task.ArtifactID, model.ArtifactStatusAvailable).Error; err != nil {
+			continue
+		}
+		if artifact.ReleaseID != task.ReleaseID || artifact.OS != osName || artifact.Arch != arch ||
+			artifact.SHA256 != task.DesiredSHA256 {
+			_ = s.setTaskStatus(ctx, task.ID, model.UpdateTaskFailed, "artifact_identity_conflict", "任务快照与固定 Artifact 不一致")
 			continue
 		}
 		if err := s.markDelivered(ctx, task.ID); err != nil {
@@ -290,12 +306,12 @@ func (s *UpdateService) Report(ctx context.Context, taskID string, reporter Upda
 				report.Phase = string(model.UpdateTaskFailed)
 				report.ErrorCode = "version_mismatch"
 				report.ErrorMessage = fmt.Sprintf("expected version %s, got %s", task.DesiredVersion, report.CurrentVersion)
-			} else if task.DesiredCommitID != "" && report.CurrentCommitID != task.DesiredCommitID {
+			} else if report.CurrentCommitID != task.DesiredCommitID {
 				statusValue = model.UpdateTaskFailed
 				report.Phase = string(model.UpdateTaskFailed)
 				report.ErrorCode = "commit_mismatch"
 				report.ErrorMessage = fmt.Sprintf("expected commit %s, got %s", task.DesiredCommitID, report.CurrentCommitID)
-			} else if task.DesiredSHA256 != "" && report.CurrentSHA256 != task.DesiredSHA256 {
+			} else if report.CurrentSHA256 != task.DesiredSHA256 {
 				statusValue = model.UpdateTaskFailed
 				report.Phase = string(model.UpdateTaskFailed)
 				report.ErrorCode = "artifact_mismatch"
@@ -333,6 +349,30 @@ func (s *UpdateService) Report(ctx context.Context, taskID string, reporter Upda
 		}
 		return s.recordEvent(tx, taskID, report.Sequence, report.Phase, report.Progress, report.CurrentVersion, report.CurrentCommitID, report.CurrentSHA256, report.ErrorCode, report.ErrorMessage, reporter.Source)
 	})
+}
+
+func validAgentCommitID(value string) bool {
+	if len(value) != 40 || value != strings.ToLower(value) {
+		return false
+	}
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func validAgentSHA256(value string) bool {
+	if len(value) != 64 || value != strings.ToLower(value) {
+		return false
+	}
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *UpdateService) Cancel(ctx context.Context, taskID string) error {
@@ -452,8 +492,8 @@ func (s *UpdateService) targetPlatform(tx *gorm.DB, targetType model.UpdateTarge
 		if err := tx.First(&node, id).Error; err != nil {
 			return "", "", "", "", err
 		}
-		if node.Type != model.NodeTypeAgent {
-			return "", "", "", "", fmt.Errorf("node %d is not an agent target", id)
+		if node.Type != model.NodeTypeAgent && node.Type != model.NodeTypeDesktop {
+			return "", "", "", "", fmt.Errorf("node %d is neither agent nor desktop target", id)
 		}
 		var info model.NodeSystemInfo
 		if node.SystemInfo != "" {
@@ -478,8 +518,16 @@ func (s *UpdateService) targetPlatform(tx *gorm.DB, targetType model.UpdateTarge
 }
 
 func (s *UpdateService) findArtifact(tx *gorm.DB, releaseID, osName, arch string) (*model.Artifact, error) {
+	return s.findArtifactRole(tx, releaseID, osName, arch, "")
+}
+
+func (s *UpdateService) findArtifactRole(tx *gorm.DB, releaseID, osName, arch string, comp model.Component) (*model.Artifact, error) {
 	var artifact model.Artifact
-	if err := tx.Where("release_id = ? AND os = ? AND arch = ? AND status = ?", releaseID, osName, arch, model.ArtifactStatusAvailable).First(&artifact).Error; err != nil {
+	query := tx.Where("release_id = ? AND os = ? AND arch = ? AND status = ?", releaseID, osName, arch, model.ArtifactStatusAvailable)
+	if comp == model.ComponentDesktop {
+		query = query.Where("role = ?", "app")
+	}
+	if err := query.First(&artifact).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrArtifactNotFound
 		}

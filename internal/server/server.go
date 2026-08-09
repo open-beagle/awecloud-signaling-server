@@ -481,6 +481,10 @@ func (s *Server) setupRouter() *gin.Engine {
 			// 公开 API
 			v1Group.GET("/public/system/config", api.GetPublicSystemConfig)
 
+			// Updater 公开 Manifest API
+			updaterPublicAPI := api.NewUpdaterAPI()
+			v1Group.GET("/public/updater/manifest", updaterPublicAPI.GetPublicManifest)
+
 			// 下载 API（公开）
 			downloadAPI := api.NewDownloadAPI()
 			v1Group.GET("/public/download/desktop", downloadAPI.GetDesktopDownload)

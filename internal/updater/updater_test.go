@@ -10,9 +10,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+
+	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
 func TestDownloadAndVerifyStagesSignedArtifact(t *testing.T) {
@@ -31,6 +35,8 @@ func TestDownloadAndVerifyStagesSignedArtifact(t *testing.T) {
 	manager, err := NewManager(Config{
 		Component:       "agent",
 		CurrentVersion:  "v1.0.0",
+		CurrentCommitID: strings.Repeat("a", 40),
+		CurrentSHA256:   strings.Repeat("b", 64),
 		StateDir:        t.TempDir(),
 		CurrentLink:     "/tmp/signal_agent",
 		ServiceName:     "signal-agent",
@@ -65,6 +71,8 @@ func TestDownloadAndVerifyRejectsInvalidChecksum(t *testing.T) {
 	manager, err := NewManager(Config{
 		Component:       "agent",
 		CurrentVersion:  "v1.0.0",
+		CurrentCommitID: strings.Repeat("a", 40),
+		CurrentSHA256:   strings.Repeat("b", 64),
 		StateDir:        t.TempDir(),
 		CurrentLink:     "/tmp/signal_agent",
 		ServiceName:     "signal-agent",
@@ -93,4 +101,57 @@ func TestSwitchSymlinkIsAtomicReplacement(t *testing.T) {
 	target, err := os.Readlink(linkPath)
 	require.NoError(t, err)
 	require.Equal(t, "new", target)
+}
+
+func TestHealthConfirmationMustMatchActiveTaskIdentity(t *testing.T) {
+	stateDir := t.TempDir()
+	manager, err := NewManager(Config{
+		Component:       "agent",
+		CurrentVersion:  "v1.0.0",
+		CurrentCommitID: strings.Repeat("a", 40),
+		CurrentSHA256:   strings.Repeat("b", 64),
+		StateDir:        stateDir,
+		CurrentLink:     "/tmp/signal_agent",
+		ServiceName:     "signal-agent",
+	})
+	require.NoError(t, err)
+	manager.states["task-1"] = taskState{
+		Status:         Status{TaskID: "task-1", Phase: "restarting"},
+		TargetVersion:  "v1.0.0",
+		TargetCommitID: strings.Repeat("c", 40),
+		TargetSHA256:   strings.Repeat("d", 64),
+	}
+
+	manager.HandleHealthConfirmations([]*pb.UpdateHealthConfirmation{{
+		TaskId: "task-1", Version: "v1.0.0", CommitId: strings.Repeat("e", 40),
+		ArtifactSha256: strings.Repeat("d", 64), ConfirmedAtUnix: time.Now().Unix(),
+	}})
+	healthPath := filepath.Join(stateDir, "health", "task-1.json")
+	_, err = os.Stat(healthPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	manager.HandleHealthConfirmations([]*pb.UpdateHealthConfirmation{{
+		TaskId: "task-1", Version: "v1.0.0", CommitId: strings.Repeat("c", 40),
+		ArtifactSha256: strings.Repeat("d", 64), ConfirmedAtUnix: time.Now().Unix(),
+	}})
+	require.True(t, validHealthFile(healthPath, manager.states["task-1"]))
+}
+
+func TestValidHealthFileRejectsLoosePermissions(t *testing.T) {
+	healthDir := t.TempDir()
+	state := taskState{
+		Status:         Status{TaskID: "task-1"},
+		TargetVersion:  "v1.0.0",
+		TargetCommitID: strings.Repeat("c", 40),
+		TargetSHA256:   strings.Repeat("d", 64),
+	}
+	health := HealthFile{
+		SchemaVersion: 2, TaskID: state.TaskID, Version: state.TargetVersion,
+		CommitID: state.TargetCommitID, BinarySHA256: state.TargetSHA256,
+		HeartbeatConfirmed: time.Now(),
+	}
+	require.NoError(t, writeHealthFile(healthDir, health))
+	path := filepath.Join(healthDir, "task-1.json")
+	require.NoError(t, os.Chmod(path, 0644))
+	require.False(t, validHealthFile(path, state))
 }

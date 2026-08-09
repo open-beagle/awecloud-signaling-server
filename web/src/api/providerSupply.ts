@@ -25,6 +25,8 @@ export interface TechnicalResource {
   hostname_source?: 'reported' | 'legacy_name'
   parent_hostname?: string
   version?: string
+	commit_id?: string
+	binary_sha256?: string
   updater_protocol?: string
   ssh_enabled: boolean
   container_ssh_enabled: boolean
@@ -84,6 +86,7 @@ export interface ProviderRelease {
   id: string
   component: 'agent' | 'endpoint'
   version: string
+	commit_id: string
   channel: string
   release_notes?: string
   published_at?: string
@@ -92,6 +95,8 @@ export interface ProviderRelease {
 export interface ProviderUpdateTask {
   id: string
   desired_version: string
+	desired_commit_id: string
+	desired_sha256: string
   status: string
   last_error_message?: string
   created_at: string

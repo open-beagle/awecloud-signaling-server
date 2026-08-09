@@ -33,7 +33,6 @@ type Release struct {
 	Status              ReleaseStatus `gorm:"size:20;not null;default:'draft';index" json:"status"`
 	ReleaseNotes        string        `gorm:"type:text" json:"release_notes"`
 	MinSupportedVersion string        `gorm:"size:64" json:"min_supported_version"`
-	MinLauncherVersion  string        `gorm:"size:64;not null;default:''" json:"min_launcher_version"`
 	PublishedAt         *time.Time    `json:"published_at"`
 	CreatedBy           uint64        `json:"created_by"`
 	CreatedAt           time.Time     `json:"created_at"`

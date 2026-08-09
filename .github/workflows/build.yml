@@ -217,34 +217,135 @@ jobs:
           S3_ENDPOINT: ${{ secrets.S3_ENDPOINT_ALIYUN }}
           S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY_ALIYUN }}
           S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY_ALIYUN }}
+          SIGNAL_UPDATER_PUBLIC_KEY: ${{ secrets.SIGNAL_UPDATER_PUBLIC_KEY }}
+          SIGNAL_UPDATER_PRIVATE_KEY: ${{ secrets.SIGNAL_UPDATER_PRIVATE_KEY }}
+          SIGNAL_UPDATER_KEY_ID: ${{ secrets.SIGNAL_UPDATER_KEY_ID }}
+          SIGNAL_ADMIN_USERNAME: ${{ secrets.SIGNAL_ADMIN_USERNAME }}
+          SIGNAL_ADMIN_PASSWORD: ${{ secrets.SIGNAL_ADMIN_PASSWORD }}
+          SIGNAL_API_URL: https://signal.wodcloud.com
+          ARTIFACT_BASE_URL: https://minio-api.wodcloud.com/vscode/awecloud-signaling
         run: |
+          set -euo pipefail
+          for name in S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY SIGNAL_UPDATER_PUBLIC_KEY SIGNAL_UPDATER_PRIVATE_KEY SIGNAL_UPDATER_KEY_ID SIGNAL_ADMIN_USERNAME SIGNAL_ADMIN_PASSWORD; do
+            test -n "${!name}" || { echo "Missing required secret: ${name}" >&2; exit 1; }
+          done
+          [[ "${SIGNAL_UPDATER_KEY_ID}" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "Invalid SIGNAL_UPDATER_KEY_ID" >&2; exit 1; }
+
           mc alias set aliyun --api=S3v4 "${S3_ENDPOINT}" "${S3_ACCESS_KEY}" "${S3_SECRET_KEY}"
           s3_bucket="aliyun/vscode/awecloud-signaling"
 
           agent_amd64_sha="$(sha256sum bin/signal_agent-linux-amd64 | awk '{print $1}')"
           agent_arm64_sha="$(sha256sum bin/signal_agent-linux-arm64 | awk '{print $1}')"
+          agent_amd64_size="$(stat -c %s bin/signal_agent-linux-amd64)"
+          agent_arm64_size="$(stat -c %s bin/signal_agent-linux-arm64)"
+          agent_amd64_signature="$(go run ./cmd/updater-sign "${agent_amd64_sha}")"
+          agent_arm64_signature="$(go run ./cmd/updater-sign "${agent_arm64_sha}")"
           endpoint_amd64_sha="$(sha256sum bin/signal_endpoint-linux-amd64 | awk '{print $1}')"
           endpoint_arm64_sha="$(sha256sum bin/signal_endpoint-linux-arm64 | awk '{print $1}')"
 
-          mc cp scripts/install_agent.sh "${s3_bucket}/install_agent.sh"
+          sed \
+            -e "s|__SIGNAL_UPDATER_PUBLIC_KEY__|${SIGNAL_UPDATER_PUBLIC_KEY}|g" \
+            -e "s|__SIGNAL_UPDATER_KEY_ID__|${SIGNAL_UPDATER_KEY_ID}|g" \
+            scripts/install_agent.sh > install_agent.sh
+          chmod 0755 install_agent.sh
+          mc cp install_agent.sh "${s3_bucket}/install_agent.sh"
           mc cp scripts/install_signal.sh "${s3_bucket}/install_signal.sh"
           mc cp scripts/install_endpoint.sh "${s3_bucket}/install_endpoint.sh"
-          mc cp bin/signal_agent-linux-amd64 "${s3_bucket}/signal_agent-${VERSION}-linux-amd64"
-          mc cp bin/signal_agent-linux-arm64 "${s3_bucket}/signal_agent-${VERSION}-linux-arm64"
+
+          upload_immutable() {
+            local source="$1" target="$2" expected_sha="$3" existing_sha
+            if mc stat "${target}" >/dev/null 2>&1; then
+              existing_sha="$(mc cat "${target}" | sha256sum | awk '{print $1}')"
+              test "${existing_sha}" = "${expected_sha}" || { echo "Immutable artifact conflict: ${target}" >&2; exit 1; }
+              return
+            fi
+            mc cp "${source}" "${target}"
+            existing_sha="$(mc cat "${target}" | sha256sum | awk '{print $1}')"
+            test "${existing_sha}" = "${expected_sha}" || { echo "Uploaded artifact verification failed: ${target}" >&2; exit 1; }
+          }
+
+          agent_amd64_object="${s3_bucket}/agent/artifacts/linux/amd64/${agent_amd64_sha}/signal_agent"
+          agent_arm64_object="${s3_bucket}/agent/artifacts/linux/arm64/${agent_arm64_sha}/signal_agent"
+          upload_immutable bin/signal_agent-linux-amd64 "${agent_amd64_object}" "${agent_amd64_sha}"
+          upload_immutable bin/signal_agent-linux-arm64 "${agent_arm64_object}" "${agent_arm64_sha}"
           mc cp bin/signal_endpoint-linux-amd64 "${s3_bucket}/signal_endpoint-${VERSION}-linux-amd64"
           mc cp bin/signal_endpoint-linux-arm64 "${s3_bucket}/signal_endpoint-${VERSION}-linux-arm64"
 
-          mc stat "${s3_bucket}/signal_agent-${VERSION}-linux-amd64"
-          mc stat "${s3_bucket}/signal_agent-${VERSION}-linux-arm64"
+          mc stat "${agent_amd64_object}"
+          mc stat "${agent_arm64_object}"
           mc stat "${s3_bucket}/signal_endpoint-${VERSION}-linux-amd64"
           mc stat "${s3_bucket}/signal_endpoint-${VERSION}-linux-arm64"
 
+          login_response="$(curl --fail-with-body --silent --show-error \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg username "${SIGNAL_ADMIN_USERNAME}" --arg password "${SIGNAL_ADMIN_PASSWORD}" '{username: $username, password: $password}')" \
+            "${SIGNAL_API_URL}/api/v1/admin/auth/login")"
+          admin_token="$(jq -er '.data.token' <<<"${login_response}")"
+
+          releases_response="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${admin_token}" \
+            "${SIGNAL_API_URL}/api/v1/admin/updater/releases?component=agent")"
+          release_entry="$(jq -c --arg version "${VERSION}" --arg commit "${GITHUB_SHA}" \
+            '.data[] | select(.version == $version and .commit_id == $commit)' <<<"${releases_response}" | head -1)"
+
+          if [ -z "${release_entry}" ]; then
+            release_payload="$(jq -n \
+              --arg version "${VERSION}" --arg commit "${GITHUB_SHA}" --arg key_id "${SIGNAL_UPDATER_KEY_ID}" \
+              --arg amd64_url "${ARTIFACT_BASE_URL}/agent/artifacts/linux/amd64/${agent_amd64_sha}/signal_agent" \
+              --arg arm64_url "${ARTIFACT_BASE_URL}/agent/artifacts/linux/arm64/${agent_arm64_sha}/signal_agent" \
+              --arg amd64_sha "${agent_amd64_sha}" --arg arm64_sha "${agent_arm64_sha}" \
+              --arg amd64_signature "${agent_amd64_signature}" --arg arm64_signature "${agent_arm64_signature}" \
+              --argjson amd64_size "${agent_amd64_size}" --argjson arm64_size "${agent_arm64_size}" \
+              '{component: "agent", version: $version, commit_id: $commit, channel: "stable", release_notes: ("Agent build " + $commit), artifacts: [
+                {os: "linux", arch: "amd64", role: "app", package_type: "binary", filename: "signal_agent", download_url: $amd64_url, size: $amd64_size, sha256: $amd64_sha, signature: $amd64_signature, key_id: $key_id},
+                {os: "linux", arch: "arm64", role: "app", package_type: "binary", filename: "signal_agent", download_url: $arm64_url, size: $arm64_size, sha256: $arm64_sha, signature: $arm64_signature, key_id: $key_id}
+              ]}')"
+            create_response="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${admin_token}" -H 'Content-Type: application/json' \
+              -d "${release_payload}" "${SIGNAL_API_URL}/api/v1/admin/updater/releases")"
+            release_id="$(jq -er '.data.release.id' <<<"${create_response}")"
+            release_status="draft"
+          else
+            release_id="$(jq -er '.id' <<<"${release_entry}")"
+            release_status="$(jq -er '.status' <<<"${release_entry}")"
+            release_detail="$(curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${admin_token}" "${SIGNAL_API_URL}/api/v1/admin/updater/releases/${release_id}")"
+            jq -e --arg amd64 "${agent_amd64_sha}" --arg arm64 "${agent_arm64_sha}" \
+              '(.data.artifacts | length) == 2 and
+               any(.data.artifacts[]; .os == "linux" and .arch == "amd64" and .sha256 == $amd64) and
+               any(.data.artifacts[]; .os == "linux" and .arch == "arm64" and .sha256 == $arm64)' \
+              <<<"${release_detail}" >/dev/null || { echo "Existing Release artifact identity conflict" >&2; exit 1; }
+          fi
+
+          if [ "${release_status}" = "draft" ]; then
+            curl --fail-with-body --silent --show-error -X POST \
+              -H "Authorization: Bearer ${admin_token}" \
+              "${SIGNAL_API_URL}/api/v1/admin/updater/releases/${release_id}/publish" >/dev/null
+          elif [ "${release_status}" != "published" ]; then
+            echo "Release ${release_id} is not publishable: ${release_status}" >&2
+            exit 1
+          fi
+
+          published_release="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${admin_token}" \
+            "${SIGNAL_API_URL}/api/v1/admin/updater/releases/${release_id}")"
+          agent_amd64_artifact_id="$(jq -er '.data.artifacts[] | select(.os == "linux" and .arch == "amd64") | .id' <<<"${published_release}")"
+          agent_arm64_artifact_id="$(jq -er '.data.artifacts[] | select(.os == "linux" and .arch == "arm64") | .id' <<<"${published_release}")"
+          {
+            echo "AGENT_RELEASE_ID=${release_id}"
+            echo "AGENT_AMD64_ARTIFACT_ID=${agent_amd64_artifact_id}"
+            echo "AGENT_ARM64_ARTIFACT_ID=${agent_arm64_artifact_id}"
+            echo "AGENT_AMD64_SHA256=${agent_amd64_sha}"
+            echo "AGENT_ARM64_SHA256=${agent_arm64_sha}"
+          } >> "$GITHUB_ENV"
+
           jq -n \
-            --arg version "${VERSION}" \
-            --arg build_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg amd64_sha "${agent_amd64_sha}" \
-            --arg arm64_sha "${agent_arm64_sha}" \
-            '{version: $version, build_date: $build_date, files: {"linux-amd64": ("signal_agent-" + $version + "-linux-amd64"), "linux-arm64": ("signal_agent-" + $version + "-linux-arm64")}, sha256: {"linux-amd64": $amd64_sha, "linux-arm64": $arm64_sha}}' \
+            --arg version "${VERSION}" --arg commit_id "${GITHUB_SHA}" \
+            --arg build_date "$(date -u -d "@$(git show -s --format=%ct HEAD)" +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg amd64_sha "${agent_amd64_sha}" --arg arm64_sha "${agent_arm64_sha}" \
+            --arg amd64_url "${ARTIFACT_BASE_URL}/agent/artifacts/linux/amd64/${agent_amd64_sha}/signal_agent" \
+            --arg arm64_url "${ARTIFACT_BASE_URL}/agent/artifacts/linux/arm64/${agent_arm64_sha}/signal_agent" \
+            '{version: $version, commit_id: $commit_id, build_date: $build_date, files: {"linux-amd64": $amd64_url, "linux-arm64": $arm64_url}, sha256: {"linux-amd64": $amd64_sha, "linux-arm64": $arm64_sha}}' \
             > signal_agent-version.json
           jq -n \
             --arg version "${VERSION}" \
@@ -266,7 +367,10 @@ jobs:
             echo "### Signal Agent and Endpoint release"
             echo
             echo "- Version: \`${VERSION}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
             echo "- Source: \`${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}\`"
-            echo "- Agent binaries: published to S3"
+            echo "- Release ID: \`${AGENT_RELEASE_ID}\`"
+            echo "- Agent linux/amd64: \`${AGENT_AMD64_ARTIFACT_ID}\` / \`${AGENT_AMD64_SHA256}\`"
+            echo "- Agent linux/arm64: \`${AGENT_ARM64_ARTIFACT_ID}\` / \`${AGENT_ARM64_SHA256}\`"
             echo "- Endpoint binaries: published to S3"
           } >> "$GITHUB_STEP_SUMMARY"

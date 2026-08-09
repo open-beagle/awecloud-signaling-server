@@ -22,6 +22,8 @@ SSH_PORT_EXPLICIT="false"
 UPGRADE_MODE="false"
 UNINSTALL_MODE="false"
 DEPLOY_MODE="false"  # 部署模式：使用 Token 自动注册
+SIGNAL_UPDATER_PUBLIC_KEY="${SIGNAL_UPDATER_PUBLIC_KEY:-__SIGNAL_UPDATER_PUBLIC_KEY__}"
+SIGNAL_UPDATER_KEY_ID="${SIGNAL_UPDATER_KEY_ID:-__SIGNAL_UPDATER_KEY_ID__}"
 
 # 安装路径
 DOWNLOAD_DIR="/etc/kubernetes/downloads"
@@ -231,6 +233,7 @@ download_agent() {
     local version_url="${SERVER_ADDRESS}/api/v1/download/agent/version"
     local version_response=""
     local version=""
+    local artifact_sha=""
     
     # 先获取完整响应，再解析，避免管道失败导致脚本退出
     if command -v curl &> /dev/null; then
@@ -241,19 +244,20 @@ download_agent() {
     
     if [[ -n "$version_response" ]]; then
         version=$(echo "$version_response" | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || true)
+        artifact_sha=$(echo "$version_response" | grep -o "\"linux-${arch}\":\"[0-9a-f]\{64\}\"" | head -1 | cut -d'"' -f4 || true)
     fi
     
-    if [[ -z "$version" ]]; then
-        error "无法获取 Agent 版本信息（URL: ${version_url}，响应: ${version_response:-空}）"
+    if [[ -z "$version" || ! "$artifact_sha" =~ ^[0-9a-f]{64}$ ]]; then
+        error "Agent 版本信息缺少 version 或 linux-${arch} SHA256（URL: ${version_url}）"
     fi
     
     info "最新版本: ${version}"
     
     # 构建下载 URL
-    local download_url="${SERVER_ADDRESS}/api/v1/download/agent?os=linux&arch=${arch}&version=${version}"
+    local download_url="${SERVER_ADDRESS}/api/v1/download/agent?os=linux&arch=${arch}"
     
-    # 二进制文件名（带版本和架构）
-    local binary_filename="${BINARY_NAME}-${version}-linux-${arch}"
+    # 二进制文件名使用不可变摘要，同版本不同 Commit 不会互相覆盖
+    local binary_filename="${BINARY_NAME}-${artifact_sha}"
     local binary_path="${DOWNLOAD_DIR}/${binary_filename}"
     local symlink_path="${INSTALL_DIR}/${BINARY_NAME}"
     
@@ -284,6 +288,13 @@ download_agent() {
     if [[ ! -f "$tmp_file" ]] || [[ ! -s "$tmp_file" ]]; then
         rm -f "$tmp_file"
         error "下载的文件无效"
+    fi
+
+    local downloaded_sha
+    downloaded_sha=$(sha256sum "$tmp_file" | awk '{print $1}')
+    if [[ "$downloaded_sha" != "$artifact_sha" ]]; then
+        rm -f "$tmp_file"
+        error "下载的 Agent SHA256 校验失败"
     fi
     
     # 移动到目标位置
@@ -347,6 +358,12 @@ EOF
 # 安装 systemd 服务
 install_service() {
     info "安装 systemd 服务..."
+	if [[ -z "$SIGNAL_UPDATER_PUBLIC_KEY" || "$SIGNAL_UPDATER_PUBLIC_KEY" == __SIGNAL_UPDATER_PUBLIC_KEY__ ]]; then
+		error "安装脚本缺少 Updater Ed25519 公钥"
+	fi
+	if [[ -z "$SIGNAL_UPDATER_KEY_ID" || "$SIGNAL_UPDATER_KEY_ID" == __SIGNAL_UPDATER_KEY_ID__ ]]; then
+		error "安装脚本缺少 Updater key_id"
+	fi
     
     cat > "$SERVICE_FILE" << EOF
 [Unit]
@@ -363,6 +380,7 @@ Type=simple
 User=root
 Group=root
 Environment="SIGNAL_UPDATER_PUBLIC_KEY=${SIGNAL_UPDATER_PUBLIC_KEY}"
+Environment="SIGNAL_UPDATER_KEY_ID=${SIGNAL_UPDATER_KEY_ID}"
 
 # 工作目录
 WorkingDirectory=/etc/kubernetes
@@ -413,20 +431,15 @@ prepare_redeploy_agent() {
 
 # 升级 Agent
 upgrade_agent() {
-    if [[ -z "$SERVER_ADDRESS" ]]; then
-        # 从现有配置读取 Server 地址（兼容新旧配置文件名）
-        for cfg in "$CONFIG_FILE" "${CONFIG_DIR}/k8s-signaling.toml"; do
-            if [[ -f "$cfg" ]]; then
-                SERVER_ADDRESS=$(grep -E '^address\s*=' "$cfg" | head -1 | sed 's/.*=\s*"\(.*\)"/\1/')
-                [[ -n "$SERVER_ADDRESS" ]] && break
-            fi
-        done
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        error "升级要求现有配置文件: ${CONFIG_FILE}"
     fi
-    
-    if [[ -z "$SERVER_ADDRESS" ]]; then
-        error "升级需要指定 Server 地址 (-s)"
+    if [[ "$(stat -c %a "$CONFIG_FILE" 2>/dev/null)" != "600" ]]; then
+        error "升级要求配置文件权限为 0600: ${CONFIG_FILE}"
     fi
-    
+    local config_sha_before
+    config_sha_before=$(sha256sum "$CONFIG_FILE" | awk '{print $1}') || error "无法读取现有配置文件"
+
     info "升级 Agent..."
     
     # 停止服务
@@ -437,6 +450,12 @@ upgrade_agent() {
     
     # 安装新的 systemd 服务（覆盖旧的）
     install_service
+
+    local config_sha_after
+    config_sha_after=$(sha256sum "$CONFIG_FILE" | awk '{print $1}') || error "无法复核现有配置文件"
+    if [[ "$config_sha_before" != "$config_sha_after" ]]; then
+        error "升级过程中配置文件发生变化"
+    fi
     
     info "升级完成"
 }

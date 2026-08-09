@@ -33,10 +33,10 @@ func TestCreateTaskAndDeliverDirective(t *testing.T) {
 	ctx := context.Background()
 	platform, err := json.Marshal(model.NodeSystemInfo{OS: "linux", Arch: "amd64"})
 	require.NoError(t, err)
-	node := model.Node{UserID: 1, Name: "beijing", Type: model.NodeTypeAgent, SystemInfo: string(platform), UpdaterProtocol: "v1"}
+	node := model.Node{UserID: 1, Name: "beijing", Type: model.NodeTypeAgent, SystemInfo: string(platform), UpdaterProtocol: "v2"}
 	require.NoError(t, database.Create(&node).Error)
 
-	release := model.Release{ID: uuid.NewString(), Component: model.ComponentAgent, Version: "v1.2.3", Channel: "stable", Status: model.ReleaseStatusPublished}
+	release := model.Release{ID: uuid.NewString(), Component: model.ComponentAgent, Version: "v1.2.3", CommitID: "1111111111111111111111111111111111111111", Channel: "stable", Status: model.ReleaseStatusPublished}
 	require.NoError(t, database.Create(&release).Error)
 	artifact := model.Artifact{
 		ID:          uuid.NewString(),
@@ -58,33 +58,59 @@ func TestCreateTaskAndDeliverDirective(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, directives, 1)
 	require.Equal(t, task.ID, directives[0].TaskID)
+	require.Equal(t, release.CommitID, directives[0].CommitID)
 	require.Equal(t, artifact.SHA256, directives[0].SHA256)
 
 	var persisted model.UpdateTask
 	require.NoError(t, database.First(&persisted, "id = ?", task.ID).Error)
 	require.Equal(t, model.UpdateTaskDelivered, persisted.Status)
+	require.Equal(t, artifact.ID, persisted.ArtifactID)
+	require.Equal(t, release.CommitID, persisted.DesiredCommitID)
+	require.Equal(t, artifact.SHA256, persisted.DesiredSHA256)
 	_, err = updates.CreateTask(ctx, CreateUpdateTaskInput{Component: model.ComponentAgent, TargetType: model.UpdateTargetNode, TargetID: "1", ReleaseID: release.ID})
 	require.ErrorIs(t, err, ErrActiveTaskExists)
 }
 
-func TestCreateTaskRequiresUpdaterProtocolV1(t *testing.T) {
+func TestCreateTaskRequiresUpdaterProtocolV2(t *testing.T) {
 	updates, database := newUpdateServiceForTest(t)
 	platform, err := json.Marshal(model.NodeSystemInfo{OS: "linux", Arch: "amd64"})
 	require.NoError(t, err)
 	node := model.Node{UserID: 1, Name: "legacy", Type: model.NodeTypeAgent, SystemInfo: string(platform)}
 	require.NoError(t, database.Create(&node).Error)
-	release := model.Release{ID: uuid.NewString(), Component: model.ComponentAgent, Version: "v1.2.3", Status: model.ReleaseStatusPublished}
+	release := model.Release{ID: uuid.NewString(), Component: model.ComponentAgent, Version: "v1.2.3", CommitID: "1111111111111111111111111111111111111111", Status: model.ReleaseStatusPublished}
 	require.NoError(t, database.Create(&release).Error)
 
 	_, err = updates.CreateTask(context.Background(), CreateUpdateTaskInput{Component: model.ComponentAgent, TargetType: model.UpdateTargetNode, TargetID: "1", ReleaseID: release.ID})
 	require.ErrorIs(t, err, ErrUpdaterUnsupported)
 }
 
-func TestCreateTaskRejectsDesktopUntilUpdaterIsImplemented(t *testing.T) {
-	updates, _ := newUpdateServiceForTest(t)
+func TestCreateTaskSupportsDesktop(t *testing.T) {
+	updates, database := newUpdateServiceForTest(t)
+	ctx := context.Background()
+	desktopNode := model.Node{UserID: 1, Name: "desktop-1", Type: model.NodeTypeDesktop, SystemInfo: `{"os":"linux","arch":"amd64"}`, UpdaterProtocol: "v2"}
+	require.NoError(t, database.Create(&desktopNode).Error)
 
-	_, err := updates.CreateTask(context.Background(), CreateUpdateTaskInput{Component: model.ComponentDesktop, TargetType: model.UpdateTargetNode})
-	require.ErrorIs(t, err, ErrComponentNotSupported)
+	release := model.Release{ID: uuid.NewString(), Component: model.ComponentDesktop, Version: "v1.2.3", CommitID: "1111111111111111111111111111111111111111", Status: model.ReleaseStatusPublished}
+	require.NoError(t, database.Create(&release).Error)
+
+	artifact := model.Artifact{
+		ID:          uuid.NewString(),
+		ReleaseID:   release.ID,
+		Role:        "app",
+		OS:          "linux",
+		Arch:        "amd64",
+		PackageType: "binary",
+		Filename:    "awecloud-signaling-desktop",
+		DownloadURL: "https://download.example.com/awecloud-signaling-desktop",
+		Size:        128,
+		SHA256:      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		Status:      model.ArtifactStatusAvailable,
+	}
+	require.NoError(t, database.Create(&artifact).Error)
+
+	task, err := updates.CreateTask(ctx, CreateUpdateTaskInput{Component: model.ComponentDesktop, TargetType: model.UpdateTargetNode, TargetID: "1", ReleaseID: release.ID})
+	require.NoError(t, err)
+	require.Equal(t, model.ComponentDesktop, task.Component)
 }
 
 func TestUpdateStatusSequenceIsMonotonic(t *testing.T) {
@@ -115,6 +141,27 @@ func TestSucceededStatusRequiresTargetVersion(t *testing.T) {
 	require.NoError(t, database.First(&persisted, "id = ?", task.ID).Error)
 	require.Equal(t, model.UpdateTaskFailed, persisted.Status)
 	require.Equal(t, "version_mismatch", persisted.LastErrorCode)
+}
+
+func TestSucceededStatusRequiresCommitAndArtifact(t *testing.T) {
+	updates, database := newUpdateServiceForTest(t)
+	task := model.UpdateTask{
+		ID: uuid.NewString(), Component: model.ComponentAgent, TargetType: model.UpdateTargetNode, TargetID: "1",
+		ReleaseID: uuid.NewString(), DesiredVersion: "v1.2.3", DesiredCommitID: "1111111111111111111111111111111111111111",
+		DesiredSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Status:        model.UpdateTaskRestarting, MaxAttempts: 3,
+	}
+	require.NoError(t, database.Create(&task).Error)
+	reporter := UpdateStatusReporter{Source: "agent", Component: model.ComponentAgent, TargetType: model.UpdateTargetNode, TargetID: "1"}
+	require.NoError(t, updates.Report(context.Background(), task.ID, reporter, UpdateStatusReport{
+		Phase: string(model.UpdateTaskSucceeded), CurrentVersion: task.DesiredVersion,
+		CurrentCommitID: "2222222222222222222222222222222222222222", CurrentSHA256: task.DesiredSHA256, Sequence: 1,
+	}))
+
+	var persisted model.UpdateTask
+	require.NoError(t, database.First(&persisted, "id = ?", task.ID).Error)
+	require.Equal(t, model.UpdateTaskFailed, persisted.Status)
+	require.Equal(t, "commit_mismatch", persisted.LastErrorCode)
 }
 
 func TestReportRejectsMismatchedReporter(t *testing.T) {

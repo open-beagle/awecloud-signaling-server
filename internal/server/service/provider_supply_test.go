@@ -106,14 +106,14 @@ func TestProviderTechnicalResourceCapabilitiesAndUpdaterUseScopedBinding(t *test
 	require.ErrorIs(t, err, ErrProviderSupplyObjectNotFound)
 
 	require.NoError(t, fixture.database.Model(&node).Updates(map[string]any{
-		"updater_protocol": "v1", "system_info": `{"os":"linux","arch":"amd64"}`,
+		"updater_protocol": "v2", "system_info": `{"os":"linux","arch":"amd64"}`,
 	}).Error)
 	now := fixture.now
-	release := model.Release{ID: uuid.NewString(), Component: model.ComponentAgent, Version: "2.0.0", Channel: "stable", Status: model.ReleaseStatusPublished, PublishedAt: &now}
+	release := model.Release{ID: uuid.NewString(), Component: model.ComponentAgent, Version: "2.0.0", CommitID: strings.Repeat("1", 40), Channel: "stable", Status: model.ReleaseStatusPublished, PublishedAt: &now}
 	require.NoError(t, fixture.database.Create(&release).Error)
 	require.NoError(t, fixture.database.Create(&model.Artifact{
 		ID: uuid.NewString(), ReleaseID: release.ID, OS: "linux", Arch: "amd64", Filename: "agent", DownloadURL: "https://example.invalid/agent",
-		SHA256: strings.Repeat("a", 64), Status: model.ArtifactStatusAvailable,
+		Size: 1, SHA256: strings.Repeat("a", 64), Status: model.ArtifactStatusAvailable,
 	}).Error)
 	task, err := fixture.service.CreateTechnicalResourceUpdateTask(ctx, fixture.authorization, agent.ID, release.ID, false)
 	require.NoError(t, err)

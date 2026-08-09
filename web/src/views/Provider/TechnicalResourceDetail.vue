@@ -5,7 +5,7 @@
         <el-button :icon="ArrowLeft" @click="returnFromDetail">{{ resource?.type === 'endpoint' ? '返回 Agent' : '返回列表' }}</el-button>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
 		<el-button v-if="resource && ['registered', 'disabled'].includes(resource.lifecycle_state)" :icon="Edit" :disabled="!canWrite || !hasBinding" @click="openCapabilities">编辑能力</el-button>
-		<el-button v-if="resource && ['registered', 'disabled'].includes(resource.lifecycle_state)" type="primary" :icon="Upload" :disabled="!canWrite || !hasBinding || !['v1', 'v2'].includes(resource.updater_protocol)" @click="openUpdate">更新</el-button>
+		<el-button v-if="resource && ['registered', 'disabled'].includes(resource.lifecycle_state)" type="primary" :icon="Upload" :disabled="!canWrite || !hasBinding || !updaterSupported" @click="openUpdate">更新</el-button>
 		<el-dropdown v-if="resource && resource.lifecycle_state !== 'deleted'" trigger="click" @command="handleLifecycleCommand">
 			<el-button :icon="MoreFilled" :disabled="!canWrite">更多操作</el-button>
 			<template #dropdown><el-dropdown-menu>
@@ -28,7 +28,7 @@
         </div>
         <div class="summary-item"><span>生命周期</span><el-tag size="small" :type="lifecycleTag(resource.lifecycle_state)">{{ lifecycleLabel(resource.lifecycle_state) }}</el-tag></div>
         <div class="summary-item"><span>健康</span><el-tag size="small" effect="plain" :type="healthTag(resource.health_state)">{{ healthLabel(resource.health_state) }}</el-tag></div>
-        <div class="summary-item"><span>当前版本</span><strong>{{ resource.version || '-' }}</strong></div>
+        <div class="summary-item"><span>当前构建</span><strong>{{ resource.version || '-' }}</strong><small v-if="resource.commit_id" class="mono">@ {{ shortValue(resource.commit_id, 8) }}</small></div>
       </section>
 
       <el-tabs v-model="activeTab" class="detail-tabs">
@@ -90,7 +90,7 @@
           </section>
         </el-tab-pane>
 		<el-tab-pane label="更新记录" name="events"><section class="detail-surface">
-			<el-table v-if="updateTasks.length" :data="updateTasks" stripe><el-table-column label="目标版本" width="200"><template #default="{ row }"><span>{{ row.desired_version }}</span><span v-if="row.desired_commit_id" class="secondary mono">@ {{ row.desired_commit_id.substring(0, 8) }}</span></template></el-table-column><el-table-column label="状态" width="140"><template #default="{ row }"><el-tag size="small" :type="updateStatusTag(row.status)">{{ updateStatusLabel(row.status) }}</el-tag></template></el-table-column><el-table-column label="发起时间" width="190"><template #default="{ row }">{{ formatTime(row.created_at) }}</template></el-table-column><el-table-column label="结果"><template #default="{ row }">{{ row.last_error_message || '-' }}</template></el-table-column></el-table>
+			<el-table v-if="updateTasks.length" :data="updateTasks" stripe><el-table-column label="目标构建" width="200"><template #default="{ row }"><span>{{ row.desired_version }}</span><span v-if="row.desired_commit_id" class="secondary mono">@ {{ shortValue(row.desired_commit_id, 8) }}</span><span v-if="row.desired_sha256" class="secondary mono">sha {{ shortValue(row.desired_sha256, 12) }}</span></template></el-table-column><el-table-column label="状态" width="140"><template #default="{ row }"><el-tag size="small" :type="updateStatusTag(row.status)">{{ updateStatusLabel(row.status) }}</el-tag></template></el-table-column><el-table-column label="发起时间" width="190"><template #default="{ row }">{{ formatTime(row.created_at) }}</template></el-table-column><el-table-column label="结果"><template #default="{ row }">{{ row.last_error_message || '-' }}</template></el-table-column></el-table>
 			<el-empty v-else description="暂无更新任务" />
 		</section></el-tab-pane>
         <el-tab-pane label="诊断" name="diagnostics">
@@ -103,6 +103,8 @@
               <el-descriptions-item label="上报名称来源">{{ hostnameSourceLabel(resource.hostname_source) }}</el-descriptions-item>
               <el-descriptions-item label="Credential Revision">{{ resource.credential_revision }}</el-descriptions-item>
               <el-descriptions-item label="Updater 协议">{{ resource.updater_protocol || '-' }}</el-descriptions-item>
+			  <el-descriptions-item v-if="resource.type === 'agent'" label="当前 Commit"><span class="mono">{{ resource.commit_id || '-' }}</span></el-descriptions-item>
+			  <el-descriptions-item v-if="resource.type === 'agent'" label="当前摘要"><span class="mono">{{ resource.binary_sha256 || '-' }}</span></el-descriptions-item>
               <el-descriptions-item label="Config Revision">{{ resource.config_revision }}</el-descriptions-item>
               <el-descriptions-item label="Row Version">{{ resource.row_version }}</el-descriptions-item>
             </el-descriptions>
@@ -129,9 +131,9 @@
 
 	<el-dialog v-model="updateDialog" title="创建更新任务" width="560px" destroy-on-close>
 		<el-form label-position="top">
-			<el-form-item label="目标版本" required><el-select v-model="updateForm.releaseId" style="width: 100%" placeholder="选择已发布版本"><el-option v-for="release in releases" :key="release.id" :label="`${release.version} · ${release.channel}${release.commit_id ? ' (@ ' + release.commit_id.substring(0, 8) + ')' : ''}`" :value="release.id" /></el-select></el-form-item>
+			<el-form-item label="目标构建" required><el-select v-model="updateForm.releaseId" style="width: 100%" placeholder="选择已发布构建"><el-option v-for="release in releases" :key="release.id" :label="`${release.version} @ ${shortValue(release.commit_id, 8)} · ${formatTime(release.published_at)}`" :value="release.id" /></el-select></el-form-item>
 			<el-form-item label="更新原因" required><el-input v-model="updateForm.reason" type="textarea" :rows="3" maxlength="500" show-word-limit /></el-form-item>
-			<el-form-item><el-checkbox v-model="updateForm.force">忽略版本顺序并强制更新</el-checkbox></el-form-item>
+			<el-form-item><el-checkbox v-model="updateForm.force">重新校验并重启同一构建</el-checkbox></el-form-item>
 		</el-form>
 		<el-alert v-if="releases.length === 0" title="当前组件没有可用的已发布版本" type="warning" :closable="false" show-icon />
 		<template #footer><el-button @click="updateDialog = false">取消</el-button><el-button type="primary" :disabled="!updateForm.releaseId || !updateForm.reason.trim()" :loading="submitting" @click="createUpdateTask">创建任务</el-button></template>
@@ -180,6 +182,9 @@ const deleteCheck = ref<TechnicalResourceDeleteCheck>()
 const updateForm = reactive({ releaseId: '', reason: '', force: false })
 const canWrite = computed(() => workspaceStore.can('provider.technical_resources.write'))
 const hasBinding = computed(() => !!resource.value && resource.value.lifecycle_state !== 'pending')
+const updaterSupported = computed(() => resource.value?.type === 'agent'
+	? resource.value.updater_protocol === 'v2'
+	: ['v1', 'v2'].includes(resource.value?.updater_protocol || ''))
 const resourceTitle = computed(() => resource.value?.display_name || resource.value?.domain_label || resource.value?.hostname || '等待主机注册')
 const sshHostname = computed(() => resource.value
 	? resource.value.type === 'agent' && resource.value.host_domain_label
@@ -367,6 +372,7 @@ const healthLabel = (state: string) => ({ unknown: '未知', online: '在线', d
 const healthTag = (state: string) => ({ online: 'success', degraded: 'warning', offline: 'danger', unknown: 'info' }[state] || 'info') as any
 const hostnameSourceLabel = (source?: string) => source === 'reported' ? '主机上报' : source === 'legacy_name' ? '存量名称（待升级确认）' : '等待首次注册'
 const formatTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
+const shortValue = (value: string | undefined, length: number) => value ? value.substring(0, length) : '-'
 const updateStatusLabel = (status: string) => ({ pending: '等待下发', delivered: '已下发', accepted: '已接受', downloading: '下载中', verifying: '校验中', installing: '安装中', restarting: '重启中', succeeded: '成功', failed: '失败', rolled_back: '已回滚', cancelled: '已取消', expired: '已过期' }[status] || status)
 const updateStatusTag = (status: string) => status === 'succeeded' ? 'success' : ['failed', 'expired'].includes(status) ? 'danger' : ['cancelled', 'rolled_back'].includes(status) ? 'info' : 'warning'
 
@@ -385,6 +391,7 @@ onMounted(load)
 .summary-identity p { margin: 3px 0 0; color: var(--text-secondary); font-size: 12px; }
 .summary-item { display: flex; flex-direction: column; justify-content: center; border-left: 1px solid var(--border-light); }
 .summary-item > span { margin-bottom: 7px; color: var(--text-secondary); font-size: 11px; }
+.summary-item > small { margin-top: 4px; color: var(--text-secondary); font-size: 11px; }
 .detail-tabs { border: 1px solid var(--border-light); border-radius: 6px; background: #fff; }
 .detail-tabs :deep(.el-tabs__header) { margin: 0; padding: 0 16px; }
 .detail-tabs :deep(.el-tabs__content) { padding: 16px; }

@@ -148,6 +148,24 @@ func TestInstallAgentScriptDeployRestartsServiceAndResetsTunnelState(t *testing.
 	}
 }
 
+func TestInstallAgentUpgradePreservesExistingCredentialConfig(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "..", "scripts", "install_agent.sh"))
+	require.NoError(t, err)
+	content := string(script)
+
+	require.Contains(t, content, `CONFIG_FILE="${CONFIG_DIR}/k8s-signaling.toml"`)
+	require.Contains(t, content, `stat -c %a "$CONFIG_FILE"`)
+	require.Contains(t, content, `config_sha_before=$(sha256sum "$CONFIG_FILE"`)
+	require.Contains(t, content, `config_sha_after=$(sha256sum "$CONFIG_FILE"`)
+	require.Contains(t, content, `binary_filename="${BINARY_NAME}-${artifact_sha}"`)
+	require.Contains(t, content, `if [[ "$downloaded_sha" != "$artifact_sha" ]]`)
+
+	upgrade := content[strings.Index(content, "upgrade_agent() {"):strings.Index(content, "# 卸载 Agent")]
+	require.NotContains(t, upgrade, "deploy_with_token")
+	require.NotContains(t, upgrade, "generate_config")
+	require.NotContains(t, upgrade, "AGENT_TOKEN")
+}
+
 func TestMergeLocalAgentConfigPreservesContainerSSHConfig(t *testing.T) {
 	registered := &config.AgentConfig{
 		Agent: config.AgentSection{AgentToken: "token", Server: "https://signal.example"},

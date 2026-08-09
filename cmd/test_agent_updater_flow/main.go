@@ -140,6 +140,8 @@ func main() {
 	updaterMgr, err := updater.NewManager(updater.Config{
 		Component:       "agent",
 		CurrentVersion:  "v1.0.1",
+		CurrentCommitID: "1111111111111111111111111111111111111111",
+		CurrentSHA256:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		StateDir:        stateDir,
 		CurrentLink:     filepath.Join(tmpDir, "bin", "signal_agent"),
 		ServiceName:     "k8s-signaling",
@@ -217,12 +219,12 @@ func main() {
 
 	// 9. Final report from Agent: succeeded
 	err = updateSvc.Report(ctx, task.ID, reporter, service.UpdateStatusReport{
-		Phase:          "succeeded",
-		Sequence:       5,
-		Progress:       100,
-		CurrentVersion: version,
+		Phase:           "succeeded",
+		Sequence:        5,
+		Progress:        100,
+		CurrentVersion:  version,
 		CurrentCommitID: targetCommit,
-		CurrentSHA256:  targetSHA256,
+		CurrentSHA256:   targetSHA256,
 	})
 	if err != nil {
 		log.Fatalf("Report succeeded failed: %v", err)

@@ -102,13 +102,19 @@ type Agent struct {
 // NewAgent 创建Agent
 func NewAgent(cfg *config.AgentConfig, version, gitCommit, buildDate string) (*Agent, error) {
 	ctx, cancel := context.WithCancel(context.Background())
+	gitCommit = strings.TrimSpace(gitCommit)
+	if !validGitCommit(gitCommit) {
+		cancel()
+		return nil, fmt.Errorf("Agent Git Commit 必须是完整的 40 位小写 SHA")
+	}
 
 	// 设置版本信息（供 Endpoint SSH 横幅使用）
 	SetVersionInfo(version, buildDate)
 
 	binSHA256, err := computeExecutableSHA256()
 	if err != nil {
-		logger.Warnf("计算 Agent 二进制 SHA256 失败: %v", err)
+		cancel()
+		return nil, fmt.Errorf("计算 Agent 二进制 SHA256: %w", err)
 	}
 
 	// 初始化网络检测器
@@ -129,13 +135,21 @@ func NewAgent(cfg *config.AgentConfig, version, gitCommit, buildDate string) (*A
 		ctx:            ctx,
 		cancel:         cancel,
 	}
-	updateManager, err := newAgentUpdateManager(version)
+	updateManager, err := newAgentUpdateManager(version, gitCommit, binSHA256)
 	if err != nil {
-		logger.Warnf("初始化 Agent updater 失败: %v", err)
-	} else {
-		agent.updater = updateManager
+		cancel()
+		return nil, fmt.Errorf("初始化 Agent updater: %w", err)
 	}
+	agent.updater = updateManager
 	return agent, nil
+}
+
+func validGitCommit(value string) bool {
+	if len(value) != 40 || value != strings.ToLower(value) {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func computeExecutableSHA256() (string, error) {

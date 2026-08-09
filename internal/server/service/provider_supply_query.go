@@ -43,6 +43,8 @@ type TechnicalResourceView struct {
 	HostnameSource        string `gorm:"column:hostname_source" json:"hostname_source,omitempty"`
 	ParentHostname        string `gorm:"column:parent_hostname" json:"parent_hostname,omitempty"`
 	Version               string `gorm:"column:version" json:"version,omitempty"`
+	CommitID              string `gorm:"column:commit_id" json:"commit_id,omitempty"`
+	BinarySHA256          string `gorm:"column:binary_sha256" json:"binary_sha256,omitempty"`
 	UpdaterProtocol       string `gorm:"column:updater_protocol" json:"updater_protocol,omitempty"`
 	SSHEnabled            bool   `gorm:"column:ssh_enabled" json:"ssh_enabled"`
 	ContainerSSHEnabled   bool   `gorm:"column:container_ssh_enabled" json:"container_ssh_enabled"`
@@ -217,6 +219,10 @@ func technicalResourceProjectionSelect() string {
 		COALESCE(NULLIF(parent_node.hostname, ''), parent_node.name, '') AS parent_hostname,
 		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.version, '')
 			ELSE COALESCE(bound_endpoint.version, '') END AS version,
+		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.commit_id, '')
+			ELSE '' END AS commit_id,
+		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.binary_sha256, '')
+			ELSE '' END AS binary_sha256,
 		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.updater_protocol, '')
 			ELSE COALESCE(bound_endpoint.updater_protocol, '') END AS updater_protocol,
 		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_user.ssh_enabled, false)

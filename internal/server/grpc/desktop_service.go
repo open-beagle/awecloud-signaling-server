@@ -52,10 +52,10 @@ type DesktopDataStream struct {
 // DesktopServiceServer Desktop 服务实现
 type DesktopServiceServer struct {
 	pb.UnimplementedDesktopServiceServer
-	connections     map[uint64]*DesktopConnection
-	connMutex       sync.RWMutex
-	dataStreams     map[uint64]*DesktopDataStream // 数据流连接（key: nodeID）
-	dataStreamMutex sync.RWMutex
+	connections       map[uint64]*DesktopConnection
+	connMutex         sync.RWMutex
+	dataStreams       map[uint64]*DesktopDataStream // 数据流连接（key: nodeID）
+	dataStreamMutex   sync.RWMutex
 	headscaleClient   *headscale.Client
 	config            *config.ServerConfig
 	agentService      *AgentServiceServer
@@ -64,6 +64,7 @@ type DesktopServiceServer struct {
 	runtimePersister  *cache.NodeRuntimePersister
 	snapshotRefresher *headscale.SnapshotRefresher
 	dataAssembler     *service.DesktopDataAssembler
+	updateService     *service.UpdateService
 }
 
 type headscaleDeviceIPIndex struct {
@@ -90,6 +91,10 @@ func NewDesktopServiceServer(cfg *config.ServerConfig) *DesktopServiceServer {
 		}
 	}
 	return s
+}
+
+func (s *DesktopServiceServer) SetUpdateService(updateService *service.UpdateService) {
+	s.updateService = updateService
 }
 
 func (s *DesktopServiceServer) SetRuntimeStore(store *cache.NodeRuntimeStore) {
@@ -393,7 +398,7 @@ func (s *DesktopServiceServer) handleDesktopHeartbeat(ctx context.Context, nodeI
 	now := time.Now()
 
 	if s.runtimeStore != nil {
-		if _, err := s.runtimeStore.UpdateHeartbeat(nodeID, req.TunnelIp, "", "", "", "", "", now); err != nil {
+		if _, err := s.runtimeStore.UpdateHeartbeat(nodeID, req.TunnelIp, "", "", "", "", "", "", "", now); err != nil {
 			logger.Warnf("Desktop 心跳 RuntimeStore 更新失败: nodeID=%d, err=%v", nodeID, err)
 		}
 	} else {

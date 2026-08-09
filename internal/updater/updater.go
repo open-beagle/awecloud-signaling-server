@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
@@ -54,10 +55,13 @@ type Status struct {
 type Config struct {
 	Component       string
 	CurrentVersion  string
+	CurrentCommitID string
+	CurrentSHA256   string
 	StateDir        string
 	CurrentLink     string
 	ServiceName     string
 	PublicKeyBase64 string
+	KeyID           string
 	Executable      string
 }
 
@@ -67,6 +71,7 @@ type taskState struct {
 	TargetVersion  string    `json:"target_version"`
 	TargetCommitID string    `json:"target_commit_id"`
 	TargetSHA256   string    `json:"target_sha256"`
+	Force          bool      `json:"force"`
 	StagedBinary   string    `json:"staged_binary"`
 	PreviousTarget string    `json:"previous_target"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -95,6 +100,9 @@ type Manager struct {
 func NewManager(cfg Config) (*Manager, error) {
 	if cfg.Component == "" || cfg.StateDir == "" || cfg.CurrentLink == "" || cfg.ServiceName == "" {
 		return nil, errors.New("updater configuration is incomplete")
+	}
+	if cfg.Component == "agent" && (!validCommitID(cfg.CurrentCommitID) || !validSHA256(cfg.CurrentSHA256)) {
+		return nil, errors.New("updater current build identity is invalid")
 	}
 	if cfg.Executable == "" {
 		executable, err := os.Executable()
@@ -165,6 +173,13 @@ func (m *Manager) HandleHealthConfirmations(confirmations []*pb.UpdateHealthConf
 		if conf == nil || conf.TaskId == "" {
 			continue
 		}
+		m.mu.Lock()
+		state, ok := m.states[conf.TaskId]
+		m.mu.Unlock()
+		if !ok || terminal(state.Phase) || conf.Version != state.TargetVersion ||
+			conf.CommitId != state.TargetCommitID || !strings.EqualFold(conf.ArtifactSha256, state.TargetSHA256) {
+			continue
+		}
 		hf := HealthFile{
 			SchemaVersion:      2,
 			TaskID:             conf.TaskId,
@@ -174,20 +189,7 @@ func (m *Manager) HandleHealthConfirmations(confirmations []*pb.UpdateHealthConf
 			RegisteredAt:       time.Now(),
 			HeartbeatConfirmed: time.Unix(conf.ConfirmedAtUnix, 0),
 		}
-		data, err := json.Marshal(hf)
-		if err != nil {
-			continue
-		}
-		temp, err := os.CreateTemp(healthDir, ".health-*")
-		if err != nil {
-			continue
-		}
-		tempPath := temp.Name()
-		_, _ = temp.Write(data)
-		_ = temp.Sync()
-		_ = temp.Close()
-		_ = os.Chmod(tempPath, 0600)
-		_ = os.Rename(tempPath, filepath.Join(healthDir, conf.TaskId+".json"))
+		_ = writeHealthFile(healthDir, hf)
 	}
 }
 
@@ -198,12 +200,18 @@ func (m *Manager) Statuses() []Status {
 	result := make([]Status, 0, len(m.states))
 	for _, state := range m.states {
 		state.CurrentVersion = m.cfg.CurrentVersion
+		state.CurrentCommitID = m.cfg.CurrentCommitID
+		state.CurrentSHA256 = m.cfg.CurrentSHA256
 		result = append(result, state.Status)
 	}
 	return result
 }
 
 func (m *Manager) execute(directive Directive) {
+	if err := m.validateDirective(directive); err != nil {
+		m.setStatus(directive, "failed", 0, "invalid_update_directive", err.Error())
+		return
+	}
 	if directive.NotBeforeUnix > 0 && time.Now().Before(time.Unix(directive.NotBeforeUnix, 0)) {
 		return
 	}
@@ -229,6 +237,17 @@ func (m *Manager) execute(directive Directive) {
 	if err := m.startApplyHelper(directive, stagedBinary); err != nil {
 		m.setStatusWithPath(directive, "failed", 100, stagedBinary, "helper_start_failed", err.Error())
 	}
+}
+
+func (m *Manager) validateDirective(directive Directive) error {
+	if directive.TaskID == "" || directive.ArtifactID == "" || directive.Version == "" ||
+		!validCommitID(directive.CommitID) || !validSHA256(directive.SHA256) {
+		return errors.New("update directive build identity is incomplete")
+	}
+	if strings.TrimSpace(m.cfg.KeyID) == "" || directive.KeyID != m.cfg.KeyID {
+		return errors.New("update directive key_id does not match configured key")
+	}
+	return nil
 }
 
 func (m *Manager) downloadAndVerify(directive Directive) (string, error) {
@@ -360,9 +379,12 @@ func (m *Manager) setStatusWithPath(directive Directive, phase string, progress 
 	state.TargetVersion = directive.Version
 	state.TargetCommitID = directive.CommitID
 	state.TargetSHA256 = directive.SHA256
+	state.Force = directive.Force
 	state.Phase = phase
 	state.Progress = progress
 	state.CurrentVersion = m.cfg.CurrentVersion
+	state.CurrentCommitID = m.cfg.CurrentCommitID
+	state.CurrentSHA256 = m.cfg.CurrentSHA256
 	state.Sequence++
 	state.ErrorCode = code
 	state.ErrorMessage = message
@@ -379,12 +401,7 @@ func (m *Manager) loadStates() {
 	tasksDir := filepath.Join(m.cfg.StateDir, "tasks")
 	entries, err := os.ReadDir(tasksDir)
 	if err != nil {
-		// Fallback to StateDir root for backwards compatibility
-		entries, err = os.ReadDir(m.cfg.StateDir)
-		if err != nil {
-			return
-		}
-		tasksDir = m.cfg.StateDir
+		return
 	}
 	loaded := make(map[string]taskState)
 	for _, entry := range entries {
@@ -430,12 +447,12 @@ func Apply(ctx context.Context, cfg ApplyConfig) error {
 
 	previous, err := os.Readlink(cfg.CurrentLink)
 	if err != nil {
-		// If current symlink read fails, default to current binary path
-		previous = cfg.BinaryPath
+		return failApply(cfg, state, "current_link_invalid", err)
 	}
 
 	// Idempotency check: if current already points to binaryPath
-	if previous == cfg.BinaryPath {
+	sameArtifact := previous == cfg.BinaryPath
+	if sameArtifact && !state.Force {
 		state.Phase = "succeeded"
 		state.Progress = 100
 		state.Sequence++
@@ -445,7 +462,9 @@ func Apply(ctx context.Context, cfg ApplyConfig) error {
 		return writeTaskState(cfg.StateDir, state)
 	}
 
-	state.PreviousTarget = previous
+	if !sameArtifact {
+		state.PreviousTarget = previous
+	}
 	state.Phase = "installing"
 	state.Sequence++
 	state.UpdatedAt = time.Now()
@@ -453,13 +472,13 @@ func Apply(ctx context.Context, cfg ApplyConfig) error {
 		return err
 	}
 
-	// Update previous symlink atomically
-	if err := switchSymlink(cfg.PreviousLink, previous); err != nil {
-		return failApply(cfg, state, "install_failed", err)
-	}
-	// Update current symlink atomically
-	if err := switchSymlink(cfg.CurrentLink, cfg.BinaryPath); err != nil {
-		return failApply(cfg, state, "install_failed", err)
+	if !sameArtifact {
+		if err := switchSymlink(cfg.PreviousLink, previous); err != nil {
+			return failApply(cfg, state, "install_failed", err)
+		}
+		if err := switchSymlink(cfg.CurrentLink, cfg.BinaryPath); err != nil {
+			return failApply(cfg, state, "install_failed", err)
+		}
 	}
 
 	state.Phase = "restarting"
@@ -469,24 +488,22 @@ func Apply(ctx context.Context, cfg ApplyConfig) error {
 		return err
 	}
 
+	healthPath := filepath.Join(cfg.StateDir, "health", cfg.TaskID+".json")
+	if err := os.Remove(healthPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return failApply(cfg, state, "health_file_cleanup_failed", err)
+	}
 	if err := restartAndCheck(ctx, cfg.ServiceName); err != nil {
 		return rollback(ctx, cfg, state, "restart_failed", err)
 	}
 
 	// 90-second Health Confirmation Window Check
-	healthPath := filepath.Join(cfg.StateDir, "health", cfg.TaskID+".json")
 	deadline := time.Now().Add(90 * time.Second)
 	healthConfirmed := false
 
 	for time.Now().Before(deadline) {
-		if data, readErr := os.ReadFile(healthPath); readErr == nil {
-			var hf HealthFile
-			if jsonErr := json.Unmarshal(data, &hf); jsonErr == nil {
-				if hf.TaskID == cfg.TaskID && (state.TargetSHA256 == "" || strings.EqualFold(hf.BinarySHA256, state.TargetSHA256)) {
-					healthConfirmed = true
-					break
-				}
-			}
+		if validHealthFile(healthPath, state) {
+			healthConfirmed = true
+			break
 		}
 		time.Sleep(2 * time.Second)
 	}
@@ -502,6 +519,73 @@ func Apply(ctx context.Context, cfg ApplyConfig) error {
 	state.ErrorMessage = ""
 	state.UpdatedAt = time.Now()
 	return writeTaskState(cfg.StateDir, state)
+}
+
+func writeHealthFile(healthDir string, health HealthFile) error {
+	data, err := json.Marshal(health)
+	if err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(healthDir, ".health-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0600); err != nil {
+		temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(data); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryPath, filepath.Join(healthDir, health.TaskID+".json"))
+}
+
+func validHealthFile(path string, state taskState) bool {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 {
+		return false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || stat.Uid != uint32(os.Geteuid()) {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var health HealthFile
+	if json.Unmarshal(data, &health) != nil {
+		return false
+	}
+	return health.SchemaVersion == 2 && health.TaskID == state.TaskID &&
+		health.Version == state.TargetVersion && health.CommitID == state.TargetCommitID &&
+		strings.EqualFold(health.BinarySHA256, state.TargetSHA256) && !health.HeartbeatConfirmed.IsZero()
+}
+
+func validCommitID(value string) bool {
+	if len(value) != 40 || value != strings.ToLower(value) {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func validSHA256(value string) bool {
+	if len(value) != sha256.Size*2 || value != strings.ToLower(value) {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func rollback(ctx context.Context, cfg ApplyConfig, state taskState, errCode string, origErr error) error {
@@ -683,4 +767,3 @@ func min(a, b int) int {
 	}
 	return b
 }
-

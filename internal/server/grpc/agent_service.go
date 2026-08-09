@@ -730,12 +730,12 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	}
 
 	if s.runtimeStore != nil {
-		if _, err := s.runtimeStore.UpdateHeartbeat(node.ID, req.TunnelIp, req.Hostname, req.Version, sysInfoJSON, req.UpdaterProtocol, containerSSHProtocol, now); err != nil {
+		if _, err := s.runtimeStore.UpdateHeartbeat(node.ID, req.TunnelIp, req.Hostname, req.Version, req.CommitId, req.BinarySha256, sysInfoJSON, req.UpdaterProtocol, containerSSHProtocol, now); err != nil {
 			// 如果内存中缺失，重新从 DB 读并加载
 			var freshNode model.Node
 			if errDb := db.DB.WithContext(ctx).First(&freshNode, node.ID).Error; errDb == nil {
 				s.runtimeStore.UpsertNode(&freshNode)
-				s.runtimeStore.UpdateHeartbeat(node.ID, req.TunnelIp, req.Hostname, req.Version, sysInfoJSON, req.UpdaterProtocol, containerSSHProtocol, now)
+				s.runtimeStore.UpdateHeartbeat(node.ID, req.TunnelIp, req.Hostname, req.Version, req.CommitId, req.BinarySha256, sysInfoJSON, req.UpdaterProtocol, containerSSHProtocol, now)
 			}
 		}
 	} else {
@@ -840,12 +840,14 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 				TargetType: model.UpdateTargetNode,
 				TargetID:   fmt.Sprintf("%d", node.ID),
 			}, service.UpdateStatusReport{
-				Phase:          report.Phase,
-				Progress:       int(report.Progress),
-				CurrentVersion: report.CurrentVersion,
-				Sequence:       report.Sequence,
-				ErrorCode:      report.ErrorCode,
-				ErrorMessage:   report.ErrorMessage,
+				Phase:           report.Phase,
+				Progress:        int(report.Progress),
+				CurrentVersion:  report.CurrentVersion,
+				CurrentCommitID: report.CurrentCommitId,
+				CurrentSHA256:   report.CurrentSha256,
+				Sequence:        report.Sequence,
+				ErrorCode:       report.ErrorCode,
+				ErrorMessage:    report.ErrorMessage,
 			}); err != nil {
 				logger.Warnf("处理 Agent 更新状态失败: task_id=%s, err=%v", report.TaskId, err)
 			}
@@ -1336,9 +1338,10 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 				var currentNode model.Node
 				if err := db.DB.WithContext(ctx).First(&currentNode, nodeID).Error; err == nil {
 					for _, task := range restartingTasks {
-						if currentNode.Version == task.DesiredVersion &&
-							(task.DesiredCommitID == "" || currentNode.CommitID == task.DesiredCommitID) &&
-							(task.DesiredSHA256 == "" || currentNode.BinarySHA256 == task.DesiredSHA256) {
+						if task.DesiredCommitID != "" && task.DesiredSHA256 != "" &&
+							currentNode.Version == task.DesiredVersion &&
+							currentNode.CommitID == task.DesiredCommitID &&
+							currentNode.BinarySHA256 == task.DesiredSHA256 {
 							resp.UpdateHealthConfirmations = append(resp.UpdateHealthConfirmations, &pb.UpdateHealthConfirmation{
 								TaskId:          task.ID,
 								Version:         currentNode.Version,
@@ -2092,12 +2095,14 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 					TargetType: model.UpdateTargetEndpoint,
 					TargetID:   endpointID,
 				}, service.UpdateStatusReport{
-					Phase:          report.Phase,
-					Progress:       int(report.Progress),
-					CurrentVersion: report.CurrentVersion,
-					Sequence:       report.Sequence,
-					ErrorCode:      report.ErrorCode,
-					ErrorMessage:   report.ErrorMessage,
+					Phase:           report.Phase,
+					Progress:        int(report.Progress),
+					CurrentVersion:  report.CurrentVersion,
+					CurrentCommitID: report.CurrentCommitId,
+					CurrentSHA256:   report.CurrentSha256,
+					Sequence:        report.Sequence,
+					ErrorCode:       report.ErrorCode,
+					ErrorMessage:    report.ErrorMessage,
 				}); err != nil {
 					logger.Warnf("处理 Endpoint 更新状态失败: endpoint=%s, task_id=%s, err=%v", ep.Name, report.TaskId, err)
 				}

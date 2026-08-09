@@ -23,25 +23,40 @@ import (
 )
 
 type UpdaterAPI struct {
-	updates             *service.UpdateService
-	signingPublicKey    ed25519.PublicKey
-	signingKeyID        string
-	signingPublicKeyErr error
+	updates              *service.UpdateService
+	signingPublicKey     ed25519.PublicKey
+	signingPrivateKey    ed25519.PrivateKey
+	signingKeyID         string
+	signingPublicKeyErr  error
+	signingPrivateKeyErr error
 }
 
 func NewUpdaterAPI() *UpdaterAPI {
 	api := &UpdaterAPI{updates: service.NewUpdateService(db.DB)}
-	encoded := strings.TrimSpace(os.Getenv("SIGNAL_UPDATER_PUBLIC_KEY"))
-	if encoded == "" {
+	encodedPub := strings.TrimSpace(os.Getenv("SIGNAL_UPDATER_PUBLIC_KEY"))
+	if encodedPub == "" {
 		api.signingPublicKeyErr = errors.New("SIGNAL_UPDATER_PUBLIC_KEY is not configured")
-		return api
+	} else {
+		decodedPub, err := base64.StdEncoding.DecodeString(encodedPub)
+		if err != nil || len(decodedPub) != ed25519.PublicKeySize {
+			api.signingPublicKeyErr = errors.New("SIGNAL_UPDATER_PUBLIC_KEY is invalid")
+		} else {
+			api.signingPublicKey = ed25519.PublicKey(decodedPub)
+		}
 	}
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil || len(decoded) != ed25519.PublicKeySize {
-		api.signingPublicKeyErr = errors.New("SIGNAL_UPDATER_PUBLIC_KEY is invalid")
-		return api
+
+	encodedPriv := strings.TrimSpace(os.Getenv("SIGNAL_UPDATER_PRIVATE_KEY"))
+	if encodedPriv == "" {
+		api.signingPrivateKeyErr = errors.New("SIGNAL_UPDATER_PRIVATE_KEY is not configured")
+	} else {
+		decodedPriv, err := base64.StdEncoding.DecodeString(encodedPriv)
+		if err != nil || len(decodedPriv) != ed25519.PrivateKeySize {
+			api.signingPrivateKeyErr = errors.New("SIGNAL_UPDATER_PRIVATE_KEY is invalid")
+		} else {
+			api.signingPrivateKey = ed25519.PrivateKey(decodedPriv)
+		}
 	}
-	api.signingPublicKey = ed25519.PublicKey(decoded)
+
 	api.signingKeyID = strings.TrimSpace(os.Getenv("SIGNAL_UPDATER_KEY_ID"))
 	return api
 }
@@ -66,7 +81,6 @@ type CreateReleaseRequest struct {
 	Channel             string          `json:"channel"`
 	ReleaseNotes        string          `json:"release_notes"`
 	MinSupportedVersion string          `json:"min_supported_version"`
-	MinLauncherVersion  string          `json:"min_launcher_version"`
 	Artifacts           []ArtifactInput `json:"artifacts" binding:"required,min=1"`
 }
 
@@ -81,6 +95,13 @@ func (a *UpdaterAPI) CreateRelease(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("不支持的组件类型"))
 		return
 	}
+	if component == model.ComponentAgent {
+		req.CommitID = strings.TrimSpace(req.CommitID)
+		if !validAgentCommitID(req.CommitID) {
+			c.JSON(http.StatusBadRequest, NewErrorResponse("Agent commit_id 必须是完整的 40 位小写 Git SHA"))
+			return
+		}
+	}
 	version, ok := normalizeVersion(req.Version)
 	if !ok {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("版本号必须符合语义化版本规范"))
@@ -92,15 +113,6 @@ func (a *UpdaterAPI) CreateRelease(c *gin.Context) {
 		minVersion, valid = normalizeVersion(req.MinSupportedVersion)
 		if !valid {
 			c.JSON(http.StatusBadRequest, NewErrorResponse("最低支持版本必须符合语义化版本规范"))
-			return
-		}
-	}
-	minLauncherVersion := ""
-	if req.MinLauncherVersion != "" {
-		var valid bool
-		minLauncherVersion, valid = normalizeVersion(req.MinLauncherVersion)
-		if !valid {
-			c.JSON(http.StatusBadRequest, NewErrorResponse("最低 Launcher 版本必须符合语义化版本规范"))
 			return
 		}
 	}
@@ -128,7 +140,6 @@ func (a *UpdaterAPI) CreateRelease(c *gin.Context) {
 		Status:              model.ReleaseStatusDraft,
 		ReleaseNotes:        req.ReleaseNotes,
 		MinSupportedVersion: minVersion,
-		MinLauncherVersion:  minLauncherVersion,
 		CreatedBy:           uint64(getAdminIDFromContext(c)),
 	}
 	if err := db.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -334,7 +345,9 @@ func (a *UpdaterAPI) writeTaskError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrActiveTaskExists):
 		c.JSON(http.StatusConflict, NewErrorResponse("该目标已有未完成更新任务"))
 	case errors.Is(err, service.ErrUpdaterUnsupported):
-		c.JSON(http.StatusConflict, NewErrorResponse("目标尚未报告支持 updater 协议 v1"))
+		c.JSON(http.StatusConflict, NewErrorResponse("Agent 目标尚未报告支持 updater 协议 v2"))
+	case errors.Is(err, service.ErrInvalidBuildIdentity):
+		c.JSON(http.StatusConflict, NewErrorResponse("目标 Release 或 Artifact 缺少有效构建身份"))
 	case errors.Is(err, service.ErrComponentNotSupported):
 		c.JSON(http.StatusConflict, NewErrorResponse("该组件的自动更新执行器尚未实现"))
 	case errors.Is(err, gorm.ErrRecordNotFound):
@@ -404,6 +417,18 @@ func normalizeVersion(value string) (string, bool) {
 		value = "v" + value
 	}
 	return value, semver.IsValid(value)
+}
+
+func validAgentCommitID(value string) bool {
+	if len(value) != 40 || value != strings.ToLower(value) {
+		return false
+	}
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func parseOptionalTime(value *string) (*time.Time, error) {
