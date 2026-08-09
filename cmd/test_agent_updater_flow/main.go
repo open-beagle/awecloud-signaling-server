@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
@@ -19,7 +20,7 @@ import (
 )
 
 func main() {
-	fmt.Println("=== Starting Real Environment Agent v1.0.2 Upgrade Test ===")
+	fmt.Println("=== Starting Agent Updater Control-Flow Simulation ===")
 
 	tmpDir, err := os.MkdirTemp("", "agent-upgrade-test-*")
 	if err != nil {
@@ -44,14 +45,14 @@ func main() {
 		log.Fatalf("AutoMigrate failed: %v", err)
 	}
 
-	// 1. Create running Node reporting v1.0.1
+	// 1. Create a running Node on the same version but an older commit.
 	sysInfo, _ := json.Marshal(model.NodeSystemInfo{OS: "linux", Arch: "amd64", Hostname: "agent-test-host"})
 	node := model.Node{
 		ID:              1001,
 		UserID:          10,
 		Name:            "agent-test-node",
 		Type:            model.NodeTypeAgent,
-		Version:         "v1.0.1",
+		Version:         "v1.0.2",
 		CommitID:        "1111111111111111111111111111111111111111",
 		BinarySHA256:    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		UpdaterProtocol: "v2",
@@ -62,7 +63,7 @@ func main() {
 	}
 	fmt.Printf("[Step 1] Initial Node registered: ID=%d, Version=%s, Commit=%s\n", node.ID, node.Version, node.CommitID)
 
-	// 2. Create v1.0.2 Release and Artifact
+	// 2. Create a v1.0.2 release with a different commit and binary digest.
 	version := "v1.0.2"
 	targetCommit := "f77de3d30dc27481a72c113e22dd16f68471dedc"
 	targetSHA256 := "9d2d7f63bf0c0b865da7047502f9cb72845ee71fc5c0ab9f7f79299b604db7c1"
@@ -123,9 +124,29 @@ func main() {
 
 	// 6. Agent receives directive and initializes updater Manager
 	stateDir := filepath.Join(tmpDir, "updater_agent_state")
+	tasksDir := filepath.Join(stateDir, "tasks")
+	if err := os.MkdirAll(tasksDir, 0700); err != nil {
+		log.Fatalf("Create updater task directory failed: %v", err)
+	}
+	persistedState, err := json.Marshal(map[string]any{
+		"TaskID":           task.ID,
+		"Phase":            "restarting",
+		"Sequence":         4,
+		"component":        "agent",
+		"target_version":   directive.Version,
+		"target_commit_id": directive.CommitID,
+		"target_sha256":    directive.SHA256,
+		"updated_at":       time.Now().UTC(),
+	})
+	if err != nil {
+		log.Fatalf("Marshal updater task state failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tasksDir, task.ID+".json"), persistedState, 0600); err != nil {
+		log.Fatalf("Persist updater task state failed: %v", err)
+	}
 	updaterMgr, err := updater.NewManager(updater.Config{
 		Component:       "agent",
-		CurrentVersion:  "v1.0.1",
+		CurrentVersion:  "v1.0.2",
 		CurrentCommitID: "1111111111111111111111111111111111111111",
 		CurrentSHA256:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		StateDir:        stateDir,
@@ -228,7 +249,7 @@ func main() {
 		finalNode.Version == version &&
 		finalNode.CommitID == targetCommit &&
 		finalNode.BinarySHA256 == targetSHA256 {
-		fmt.Println("=== SUCCESS: Real Environment Agent v1.0.2 Upgrade Test Passed! ===")
+		fmt.Println("=== SUCCESS: Agent Updater Control-Flow Simulation Passed! ===")
 	} else {
 		log.Fatalf("Test assertion failed!")
 	}
