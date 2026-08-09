@@ -47,20 +47,25 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
           node-version: "24"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Build frontend
         working-directory: web
         env:
           BUILD_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          npm ci --legacy-peer-deps
-          npm run build
+          pnpm install --frozen-lockfile
+          pnpm run build
 
       - name: Setup Go
         uses: actions/setup-go@v7
