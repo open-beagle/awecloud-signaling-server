@@ -897,7 +897,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					// Updater 发布和更新任务管理
 					updaterAPI := api.NewUpdaterAPI()
 					updaterAPI.SetCatalog(s.updaterCatalog)
-					adminAuthGroup.POST("/updater/sync", api.RequireManagementPermission(service.PermissionPlatformSettingsWrite), updaterAPI.SyncCatalog)
+					adminAuthGroup.POST("/updater/sync", updaterAPI.SyncCatalog)
 					adminAuthGroup.POST("/updater/releases", updaterAPI.CreateRelease)
 					adminAuthGroup.GET("/updater/releases", updaterAPI.ListReleases)
 					adminAuthGroup.GET("/updater/releases/:id", updaterAPI.GetRelease)
