@@ -132,11 +132,10 @@
 	<el-dialog v-model="updateDialog" title="创建更新任务" width="560px" destroy-on-close>
 		<el-form label-position="top">
 			<el-form-item label="目标构建" required><el-select v-model="updateForm.releaseId" style="width: 100%" placeholder="选择已发布构建"><el-option v-for="release in releases" :key="release.id" :label="`${release.version} @ ${shortValue(release.commit_id, 8)} · ${formatTime(release.published_at)}`" :value="release.id" /></el-select></el-form-item>
-			<el-form-item label="更新原因" required><el-input v-model="updateForm.reason" type="textarea" :rows="3" maxlength="500" show-word-limit /></el-form-item>
 			<el-form-item><el-checkbox v-model="updateForm.force">重新校验并重启同一构建</el-checkbox></el-form-item>
 		</el-form>
 		<el-alert v-if="releases.length === 0" title="当前组件没有可用的已发布版本" type="warning" :closable="false" show-icon />
-		<template #footer><el-button @click="updateDialog = false">取消</el-button><el-button type="primary" :disabled="!updateForm.releaseId || !updateForm.reason.trim()" :loading="submitting" @click="createUpdateTask">创建任务</el-button></template>
+		<template #footer><el-button @click="updateDialog = false">取消</el-button><el-button type="primary" :disabled="!updateForm.releaseId" :loading="submitting" @click="createUpdateTask">创建任务</el-button></template>
 	</el-dialog>
 
 	<el-dialog v-model="deleteCheckDialog" title="删除检查" width="600px">
@@ -179,7 +178,7 @@ const capabilityForm = ref<TechnicalResourceCapabilities>()
 const releases = ref<ProviderRelease[]>([])
 const updateTasks = ref<ProviderUpdateTask[]>([])
 const deleteCheck = ref<TechnicalResourceDeleteCheck>()
-const updateForm = reactive({ releaseId: '', reason: '', force: false })
+const updateForm = reactive({ releaseId: '', force: false })
 const canWrite = computed(() => workspaceStore.can('provider.technical_resources.write'))
 const hasBinding = computed(() => !!resource.value && resource.value.lifecycle_state !== 'pending')
 const updaterSupported = computed(() => resource.value?.type === 'agent'
@@ -309,16 +308,15 @@ const openUpdate = async () => {
 	const response = await getProviderTechnicalResourceReleases(workspaceStore.providerId, resource.value.id)
 	releases.value = response.success ? response.data : []
 	updateForm.releaseId = releases.value[0]?.id || ''
-	updateForm.reason = ''
 	updateForm.force = false
 	updateDialog.value = true
 }
 
 const createUpdateTask = async () => {
-	if (!resource.value || !workspaceStore.providerId || !updateForm.releaseId || !updateForm.reason.trim()) return
+	if (!resource.value || !workspaceStore.providerId || !updateForm.releaseId) return
 	submitting.value = true
 	try {
-		await createProviderTechnicalResourceUpdateTask(workspaceStore.providerId, resource.value.id, updateForm.releaseId, updateForm.force, updateForm.reason.trim())
+		await createProviderTechnicalResourceUpdateTask(workspaceStore.providerId, resource.value.id, updateForm.releaseId, updateForm.force)
 		ElMessage.success('更新任务已创建')
 		updateDialog.value = false
 		activeTab.value = 'events'

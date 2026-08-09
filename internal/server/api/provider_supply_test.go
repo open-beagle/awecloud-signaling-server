@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -17,6 +18,20 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 )
+
+func TestProviderTechnicalResourceUpdateRequestDoesNotAcceptReason(t *testing.T) {
+	validContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	validContext.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	var valid providerTechnicalResourceUpdateRequest
+	require.True(t, decodeSimulationJSON(validContext, []byte(`{"release_id":"release-id","force":false}`), &valid))
+
+	legacyRecorder := httptest.NewRecorder()
+	legacyContext, _ := gin.CreateTestContext(legacyRecorder)
+	legacyContext.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	var legacy providerTechnicalResourceUpdateRequest
+	require.False(t, decodeSimulationJSON(legacyContext, []byte(`{"release_id":"release-id","force":false,"reason":"legacy"}`), &legacy))
+	require.Equal(t, http.StatusBadRequest, legacyRecorder.Code)
+}
 
 func prepareProviderSupplyAPIFixture(t *testing.T, flags config.FeatureFlagsSection) (managementContextAPIFixture, LoginResponse) {
 	t.Helper()

@@ -86,7 +86,6 @@ type providerReasonRequest struct {
 type providerTechnicalResourceUpdateRequest struct {
 	ReleaseID string `json:"release_id"`
 	Force     bool   `json:"force"`
-	Reason    string `json:"reason"`
 }
 
 type providerAgentDomainLabelRequest struct {
@@ -422,12 +421,12 @@ func (a *ProviderSupplyAPI) CreateTechnicalResourceUpdateTask(c *gin.Context) {
 	if !ok {
 		return
 	}
-	request.ReleaseID, request.Reason = strings.TrimSpace(request.ReleaseID), strings.TrimSpace(request.Reason)
-	if request.ReleaseID == "" || request.Reason == "" || len(request.ReleaseID) > 36 || len(request.Reason) > 500 {
+	request.ReleaseID = strings.TrimSpace(request.ReleaseID)
+	if request.ReleaseID == "" || len(request.ReleaseID) > 36 {
 		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "更新任务参数无效")
 		return
 	}
-	executeProviderIdempotentMutation(c, authorization, body, http.StatusCreated, "create_technical_resource_update_task", request.Reason,
+	executeProviderIdempotentMutation(c, authorization, body, http.StatusCreated, "create_technical_resource_update_task", "",
 		func(supply *service.ProviderSupplyService) (any, string, string, int64, error) {
 			task, err := supply.CreateTechnicalResourceUpdateTask(c.Request.Context(), authorization, c.Param("id"), request.ReleaseID, request.Force)
 			if err != nil {
@@ -927,9 +926,11 @@ func appendProviderSupplyOutbox(tx *gorm.DB, c *gin.Context, authorization *serv
 }
 
 func recordProviderSupplyAudit(tx *gorm.DB, c *gin.Context, action, aggregateType, aggregateID, reason string, rowVersion int64) error {
-	return recordAuditLogStrictWithDB(c.Request.Context(), tx, c, action, aggregateType, aggregateID, aggregateID, gin.H{
-		"reason": reason, "row_version": rowVersion,
-	})
+	detail := gin.H{"row_version": rowVersion}
+	if reason != "" {
+		detail["reason"] = reason
+	}
+	return recordAuditLogStrictWithDB(c.Request.Context(), tx, c, action, aggregateType, aggregateID, aggregateID, detail)
 }
 
 func providerIdempotencyActorID(authorization *service.ManagementAuthorizationContext) string {

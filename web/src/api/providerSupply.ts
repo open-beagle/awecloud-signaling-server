@@ -299,9 +299,9 @@ export const getProviderTechnicalResourceUpdateTasks = (providerId: string, reso
     headers: providerHeaders(providerId),
   })
 
-export const createProviderTechnicalResourceUpdateTask = (providerId: string, resourceId: string, releaseId: string, force: boolean, reason: string) =>
+export const createProviderTechnicalResourceUpdateTask = (providerId: string, resourceId: string, releaseId: string, force: boolean) =>
   request.post<any, { success: boolean; data: ProviderUpdateTask }>(`/api/v1/management/provider/technical-resources/${resourceId}/update-tasks`, {
-    release_id: releaseId, force, reason,
+    release_id: releaseId, force,
   }, { headers: { ...providerHeaders(providerId), 'Idempotency-Key': crypto.randomUUID() } })
 
 export const checkProviderTechnicalResourceDelete = (providerId: string, resourceId: string) =>
