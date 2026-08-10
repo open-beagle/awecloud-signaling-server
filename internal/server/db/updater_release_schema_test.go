@@ -10,7 +10,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
-func TestEnsureUpdaterReleaseSchemaRemovesObsoleteVersionConstraint(t *testing.T) {
+func TestEnsureUpdaterReleaseSchemaKeepsLatestReleasePerComponentVersion(t *testing.T) {
 	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, database.Exec(`
@@ -18,20 +18,44 @@ func TestEnsureUpdaterReleaseSchemaRemovesObsoleteVersionConstraint(t *testing.T
 			id text PRIMARY KEY,
 			component text NOT NULL,
 			version text NOT NULL,
-			commit_id text NOT NULL DEFAULT ''
+			commit_id text NOT NULL DEFAULT '',
+			published_at datetime,
+			created_at datetime
 		);
-		CREATE UNIQUE INDEX uk_release_component_version ON release(component, version);
+		CREATE UNIQUE INDEX uk_release_component_version_commit ON release(component, version, commit_id);
+		INSERT INTO release (id, component, version, commit_id, published_at, created_at)
+		VALUES ('first', 'agent', 'v1.0.2', '0123456789abcdef0123456789abcdef01234567', '2026-08-10 10:00:00', '2026-08-10 10:00:00');
+		INSERT INTO release (id, component, version, commit_id, published_at, created_at)
+		VALUES ('second', 'agent', 'v1.0.2', 'abcdef0123456789abcdef0123456789abcdef01', '2026-08-10 11:00:00', '2026-08-10 11:00:00');
+		CREATE TABLE artifact (id text PRIMARY KEY, release_id text NOT NULL);
+		INSERT INTO artifact (id, release_id) VALUES ('first-artifact', 'first'), ('second-artifact', 'second');
+		CREATE TABLE update_task (id text PRIMARY KEY, release_id text NOT NULL);
+		INSERT INTO update_task (id, release_id) VALUES ('first-task', 'first'), ('second-task', 'second');
+		CREATE TABLE update_event (id integer PRIMARY KEY, task_id text NOT NULL);
+		INSERT INTO update_event (id, task_id) VALUES (1, 'first-task'), (2, 'second-task');
 	`).Error)
 
 	require.NoError(t, ensureUpdaterReleaseSchema(database))
-	require.NoError(t, database.AutoMigrate(&model.Release{}))
+	require.NoError(t, database.Exec(`CREATE UNIQUE INDEX uk_release_component_version ON release(component, version)`).Error)
 
-	first := model.Release{ID: "first", Component: model.ComponentAgent, Version: "v1.0.2", CommitID: "0123456789abcdef0123456789abcdef01234567"}
-	second := model.Release{ID: "second", Component: model.ComponentAgent, Version: "v1.0.2", CommitID: "abcdef0123456789abcdef0123456789abcdef01"}
-	require.NoError(t, database.Create(&first).Error)
-	require.NoError(t, database.Create(&second).Error)
-	require.False(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version"))
-	require.True(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version_commit"))
+	var releases []model.Release
+	require.NoError(t, database.Find(&releases).Error)
+	require.Len(t, releases, 1)
+	require.Equal(t, "second", releases[0].ID)
+	var artifactCount, taskCount, eventCount int64
+	require.NoError(t, database.Table("artifact").Count(&artifactCount).Error)
+	require.NoError(t, database.Table("update_task").Count(&taskCount).Error)
+	require.NoError(t, database.Table("update_event").Count(&eventCount).Error)
+	require.Equal(t, int64(1), artifactCount)
+	require.Equal(t, int64(1), taskCount)
+	require.Equal(t, int64(1), eventCount)
+	require.True(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version"))
+	require.False(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version_commit"))
+
+	require.Error(t, database.Exec(`
+		INSERT INTO release (id, component, version, commit_id)
+		VALUES ('duplicate', 'agent', 'v1.0.2', '1111111111111111111111111111111111111111')
+	`).Error)
 }
 
 func TestEnsureUpdaterReleaseSchemaRebuildsArtifactRoleConstraint(t *testing.T) {

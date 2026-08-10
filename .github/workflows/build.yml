@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - "release-v1.0"
+    paths:
+      - "version"
 
 permissions:
   contents: read
@@ -303,34 +305,49 @@ jobs:
 
           agent_release_sha="$(sha256sum signal_agent-release.json | awk '{print $1}')"
           endpoint_release_sha="$(sha256sum signal_endpoint-release.json | awk '{print $1}')"
-          agent_catalog_object="${s3_bucket}/updater/releases/agent/${GITHUB_SHA}.json"
-          endpoint_catalog_object="${s3_bucket}/updater/releases/endpoint/${GITHUB_SHA}.json"
+          agent_catalog_object="${s3_bucket}/updater/releases/agent/${VERSION}.json"
+          endpoint_catalog_object="${s3_bucket}/updater/releases/endpoint/${VERSION}.json"
           upload_immutable signal_agent-release.json "${agent_catalog_object}" "${agent_release_sha}"
           upload_immutable signal_endpoint-release.json "${endpoint_catalog_object}" "${endpoint_release_sha}"
 
-          agent_catalog_url="${ARTIFACT_BASE_URL}/updater/releases/agent/${GITHUB_SHA}.json"
-          endpoint_catalog_url="${ARTIFACT_BASE_URL}/updater/releases/endpoint/${GITHUB_SHA}.json"
+          agent_catalog_url="${ARTIFACT_BASE_URL}/updater/releases/agent/${VERSION}.json"
+          endpoint_catalog_url="${ARTIFACT_BASE_URL}/updater/releases/endpoint/${VERSION}.json"
           catalog_object="${s3_bucket}/updater/catalog.json"
           list_manifest_urls() {
-            local manifest_object manifest_relative
+            local manifest_object manifest_relative manifest_url
             {
               while IFS= read -r manifest_object; do
                 [ -n "${manifest_object}" ] || continue
-                if mc cat "${manifest_object}" | jq -e --arg artifact_base "${ARTIFACT_BASE_URL}/" '
+                manifest_relative="${manifest_object#${s3_bucket}/updater/releases/}"
+                manifest_url="${ARTIFACT_BASE_URL}/updater/releases/${manifest_relative}"
+                if mc cat "${manifest_object}" | jq -ce \
+                  --arg artifact_base "${ARTIFACT_BASE_URL}/" \
+                  --arg manifest_relative "${manifest_relative}" \
+                  --arg manifest_url "${manifest_url}" '
                   .schema_version == 1 and
+                  (.published_at | type) == "string" and
+                  (.release.component | type) == "string" and
+                  (.release.version | type) == "string" and
                   (.artifacts | type == "array" and length > 0) and
                   all(.artifacts[];
                     (.download_url | type) == "string" and
                     (.download_url | startswith($artifact_base))
-                  )
-                ' >/dev/null; then
-                  manifest_relative="${manifest_object#${s3_bucket}/updater/releases/}"
-                  printf '%s/updater/releases/%s\n' "${ARTIFACT_BASE_URL}" "${manifest_relative}"
+                  ) |
+                  select(.) |
+                  {component: .release.component, version: .release.version, published_at: .published_at,
+                   canonical: ($manifest_relative == (.release.component + "/" + .release.version + ".json")),
+                   url: $manifest_url}
+                '; then
+                  :
                 else
                   echo "Skip updater manifest outside current public artifact base: ${manifest_object}" >&2
                 fi
               done < <(mc find "${s3_bucket}/updater/releases" --name '*.json')
-            } | jq -Rsc 'split("\n") | map(select(length > 0)) | sort | unique'
+            } | jq -sc '
+              sort_by(.component, .version) |
+              group_by([.component, .version]) |
+              map(sort_by(.canonical, .published_at, .url) | last | .url) |
+              sort'
           }
           publish_catalog() {
             local attempt expected actual
@@ -356,9 +373,42 @@ jobs:
           mc cat "${catalog_object}" | jq -e \
             --arg agent_url "${agent_catalog_url}" --arg endpoint_url "${endpoint_catalog_url}" \
             '.schema_version == 1 and (.manifests | index($agent_url)) != null and (.manifests | index($endpoint_url)) != null' >/dev/null
+
+          prune_component_objects() {
+            local component="$1" selected_manifests referenced_urls manifest_object manifest_relative manifest_url
+            local artifact_object artifact_relative artifact_url
+            selected_manifests="$(mc cat "${catalog_object}" | jq -c '.manifests')"
+            while IFS= read -r manifest_object; do
+              [ -n "${manifest_object}" ] || continue
+              manifest_relative="${manifest_object#${s3_bucket}/updater/releases/}"
+              manifest_url="${ARTIFACT_BASE_URL}/updater/releases/${manifest_relative}"
+              if ! jq -e --arg url "${manifest_url}" 'index($url) != null' <<< "${selected_manifests}" >/dev/null; then
+                mc rm "${manifest_object}"
+              fi
+            done < <(mc find "${s3_bucket}/updater/releases/${component}" --name '*.json')
+
+            referenced_urls="$({
+              jq -r --arg prefix "${ARTIFACT_BASE_URL}/updater/releases/${component}/" \
+                '.[] | select(startswith($prefix))' <<< "${selected_manifests}" | while IFS= read -r manifest_url; do
+                manifest_relative="${manifest_url#${ARTIFACT_BASE_URL}/updater/releases/}"
+                mc cat "${s3_bucket}/updater/releases/${manifest_relative}" | jq -r \
+                  --arg component "${component}" 'select(.release.component == $component) | .artifacts[].download_url'
+              done
+            } | sort -u | jq -Rsc 'split("\n") | map(select(length > 0))')"
+            while IFS= read -r artifact_object; do
+              [ -n "${artifact_object}" ] || continue
+              artifact_relative="${artifact_object#${s3_bucket}/}"
+              artifact_url="${ARTIFACT_BASE_URL}/${artifact_relative}"
+              if ! jq -e --arg url "${artifact_url}" 'index($url) != null' <<< "${referenced_urls}" >/dev/null; then
+                mc rm "${artifact_object}"
+              fi
+            done < <(mc find "${s3_bucket}/${component}/artifacts")
+          }
+          prune_component_objects agent
+          prune_component_objects endpoint
           {
-            echo "AGENT_CATALOG_OBJECT=updater/releases/agent/${GITHUB_SHA}.json"
-            echo "ENDPOINT_CATALOG_OBJECT=updater/releases/endpoint/${GITHUB_SHA}.json"
+            echo "AGENT_CATALOG_OBJECT=updater/releases/agent/${VERSION}.json"
+            echo "ENDPOINT_CATALOG_OBJECT=updater/releases/endpoint/${VERSION}.json"
             echo "AGENT_AMD64_SHA256=${agent_amd64_sha}"
             echo "AGENT_ARM64_SHA256=${agent_arm64_sha}"
           } >> "$GITHUB_ENV"

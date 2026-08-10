@@ -62,7 +62,7 @@ func TestUpdaterCatalogSyncCreatesPublishedReleaseAndIsIdempotent(t *testing.T) 
 	require.Equal(t, UpdaterCatalogSyncResult{Scanned: 1, Existing: 1}, result)
 }
 
-func TestUpdaterCatalogSyncCreatesSameVersionWithDifferentCommits(t *testing.T) {
+func TestUpdaterCatalogSyncRejectsSameVersionWithDifferentCommit(t *testing.T) {
 	database := updaterCatalogTestDB(t)
 	firstCommit := "0123456789abcdef0123456789abcdef01234567"
 	secondCommit := "abcdef0123456789abcdef0123456789abcdef01"
@@ -74,13 +74,15 @@ func TestUpdaterCatalogSyncCreatesSameVersionWithDifferentCommits(t *testing.T) 
 	require.NoError(t, err)
 
 	result, err := syncer.Sync(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, UpdaterCatalogSyncResult{Scanned: 2, Created: 2}, result)
+	require.ErrorContains(t, err, "existing release commit_id conflicts")
+	require.Equal(t, 2, result.Scanned)
+	require.Equal(t, 1, result.Created)
+	require.Equal(t, 1, result.Failed)
 
 	var releases []model.Release
 	require.NoError(t, database.Where("component = ? AND version = ?", model.ComponentAgent, "v1.0.0").Order("commit_id").Find(&releases).Error)
-	require.Len(t, releases, 2)
-	require.Equal(t, []string{firstCommit, secondCommit}, []string{releases[0].CommitID, releases[1].CommitID})
+	require.Len(t, releases, 1)
+	require.Contains(t, []string{firstCommit, secondCommit}, releases[0].CommitID)
 }
 
 func TestUpdaterCatalogSyncRejectsArtifactMutation(t *testing.T) {

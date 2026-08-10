@@ -327,7 +327,7 @@ func (s *UpdaterCatalogService) syncManifest(ctx context.Context, manifest Updat
 	state := ""
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var release model.Release
-		err := tx.Where("component = ? AND version = ? AND commit_id = ?", manifest.Release.Component, manifest.Release.Version, manifest.Release.CommitID).First(&release).Error
+		err := tx.Where("component = ? AND version = ?", manifest.Release.Component, manifest.Release.Version).First(&release).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			release = model.Release{
 				ID: uuid.NewString(), Component: manifest.Release.Component, Version: manifest.Release.Version,
@@ -357,6 +357,9 @@ func (s *UpdaterCatalogService) syncManifest(ctx context.Context, manifest Updat
 		if release.Status == model.ReleaseStatusRevoked {
 			state = "revoked"
 			return nil
+		}
+		if release.CommitID != manifest.Release.CommitID {
+			return errors.New("existing release commit_id conflicts with HTTP manifest")
 		}
 		if release.Channel != manifest.Release.Channel {
 			return errors.New("existing release channel conflicts with HTTP manifest")
