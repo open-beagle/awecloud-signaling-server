@@ -312,9 +312,25 @@ jobs:
           endpoint_catalog_url="${ARTIFACT_BASE_URL}/updater/releases/endpoint/${GITHUB_SHA}.json"
           catalog_object="${s3_bucket}/updater/catalog.json"
           list_manifest_urls() {
-            mc find "${s3_bucket}/updater/releases" --name '*.json' \
-              | sed -n "s#^${s3_bucket}/updater/releases/#${ARTIFACT_BASE_URL}/updater/releases/#p" \
-              | jq -Rsc 'split("\n") | map(select(length > 0)) | sort | unique'
+            local manifest_object manifest_relative
+            {
+              while IFS= read -r manifest_object; do
+                [ -n "${manifest_object}" ] || continue
+                if mc cat "${manifest_object}" | jq -e --arg artifact_base "${ARTIFACT_BASE_URL}/" '
+                  .schema_version == 1 and
+                  (.artifacts | type == "array" and length > 0) and
+                  all(.artifacts[];
+                    (.download_url | type) == "string" and
+                    (.download_url | startswith($artifact_base))
+                  )
+                ' >/dev/null; then
+                  manifest_relative="${manifest_object#${s3_bucket}/updater/releases/}"
+                  printf '%s/updater/releases/%s\n' "${ARTIFACT_BASE_URL}" "${manifest_relative}"
+                else
+                  echo "Skip updater manifest outside current public artifact base: ${manifest_object}" >&2
+                fi
+              done < <(mc find "${s3_bucket}/updater/releases" --name '*.json')
+            } | jq -Rsc 'split("\n") | map(select(length > 0)) | sort | unique'
           }
           publish_catalog() {
             local attempt expected actual
