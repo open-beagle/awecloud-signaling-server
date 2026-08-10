@@ -114,6 +114,7 @@
 
 <script setup lang="ts">
 import { computed, markRaw, onMounted, ref } from 'vue'
+import axios from 'axios'
 import {
   Connection,
   Download,
@@ -228,7 +229,11 @@ async function loadDownloads() {
   } catch (reason) {
     downloads.value = []
     selectedKey.value = ''
-    error.value = reason instanceof Error ? reason.message : '下载服务暂时不可用，请稍后重试。'
+    if (axios.isAxiosError<{ message?: string }>(reason)) {
+      error.value = reason.response?.data?.message || '下载服务暂时不可用，请稍后重试。'
+    } else {
+      error.value = reason instanceof Error ? reason.message : '下载服务暂时不可用，请稍后重试。'
+    }
   } finally {
     loading.value = false
   }

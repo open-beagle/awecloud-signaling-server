@@ -39,7 +39,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
   server:
-    name: Build, Publish and Deploy Server
+    name: Build Server
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -187,7 +187,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   agent:
-    name: Publish Agent and Endpoint Binaries
+    name: Build Agent and Endpoint 
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -59,3 +59,5 @@ deployments/kubernetes/*.local.yaml
 
 # Kiro spec
 /.kiro/spec
+
+/web/test-results

@@ -1,4 +1,4 @@
-import request from '@/utils/request'
+import axios from 'axios'
 
 export interface DesktopLauncherDownload {
   os: string
@@ -15,9 +15,9 @@ export interface DesktopLauncherDownloadsResponse {
   downloads: DesktopLauncherDownload[]
 }
 
-export function getDesktopLaunchers() {
-  return request<DesktopLauncherDownloadsResponse>({
-    url: '/api/v1/public/download/desktop',
-    method: 'get'
+export async function getDesktopLaunchers() {
+  const response = await axios.get<DesktopLauncherDownloadsResponse>('/api/v1/public/download/desktop', {
+    timeout: 10000
   })
+  return response.data
 }
