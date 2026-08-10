@@ -308,24 +308,38 @@ jobs:
           upload_immutable signal_agent-release.json "${agent_catalog_object}" "${agent_release_sha}"
           upload_immutable signal_endpoint-release.json "${endpoint_catalog_object}" "${endpoint_release_sha}"
 
-          catalog_object="${s3_bucket}/updater/catalog.json"
           agent_catalog_url="${ARTIFACT_BASE_URL}/updater/releases/agent/${GITHUB_SHA}.json"
           endpoint_catalog_url="${ARTIFACT_BASE_URL}/updater/releases/endpoint/${GITHUB_SHA}.json"
-          if mc stat "${catalog_object}" >/dev/null 2>&1; then
-            mc cat "${catalog_object}" > updater_catalog_previous.json
-            jq -e --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg artifact_base "${ARTIFACT_BASE_URL}" \
-              --arg agent_url "${agent_catalog_url}" --arg endpoint_url "${endpoint_catalog_url}" \
-              'select(.schema_version == 1 and (.manifests | type == "array")) |
-               {schema_version: 1, generated_at: $generated_at,
-                manifests: (((.manifests | map(select(startswith($artifact_base + "/updater/releases/")))) + [$agent_url, $endpoint_url]) | unique)}' \
-              updater_catalog_previous.json > updater_catalog.json
-          else
-            jq -n --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-              --arg agent_url "${agent_catalog_url}" --arg endpoint_url "${endpoint_catalog_url}" \
-              '{schema_version: 1, generated_at: $generated_at, manifests: [$agent_url, $endpoint_url]}' > updater_catalog.json
-          fi
-          mc cp updater_catalog.json "${catalog_object}"
-          mc cat "${catalog_object}" | jq -e '.schema_version == 1 and (.manifests | length > 0)' >/dev/null
+          catalog_object="${s3_bucket}/updater/catalog.json"
+          list_manifest_urls() {
+            mc find "${s3_bucket}/updater/releases" --name '*.json' \
+              | sed -n "s#^${s3_bucket}/updater/releases/#${ARTIFACT_BASE_URL}/updater/releases/#p" \
+              | jq -Rsc 'split("\n") | map(select(length > 0)) | sort | unique'
+          }
+          publish_catalog() {
+            local attempt expected actual
+            for attempt in 1 2 3 4 5; do
+              expected="$(list_manifest_urls)"
+              jq -n --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson manifests "${expected}" \
+                '{schema_version: 1, generated_at: $generated_at, manifests: $manifests}' > updater_catalog.json
+              mc cp updater_catalog.json "${catalog_object}"
+
+              # S3 listings are the source of truth. Recheck after the write so
+              # concurrent component pipelines cannot silently drop a commit.
+              expected="$(list_manifest_urls)"
+              actual="$(mc cat "${catalog_object}" | jq -c '.manifests | sort | unique')"
+              if [ "${actual}" = "${expected}" ]; then
+                return 0
+              fi
+              sleep "${attempt}"
+            done
+            echo "Updater catalog changed concurrently after 5 attempts" >&2
+            return 1
+          }
+          publish_catalog
+          mc cat "${catalog_object}" | jq -e \
+            --arg agent_url "${agent_catalog_url}" --arg endpoint_url "${endpoint_catalog_url}" \
+            '.schema_version == 1 and (.manifests | index($agent_url)) != null and (.manifests | index($endpoint_url)) != null' >/dev/null
           {
             echo "AGENT_CATALOG_OBJECT=updater/releases/agent/${GITHUB_SHA}.json"
             echo "ENDPOINT_CATALOG_OBJECT=updater/releases/endpoint/${GITHUB_SHA}.json"
