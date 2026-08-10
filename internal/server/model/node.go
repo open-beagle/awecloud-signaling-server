@@ -43,9 +43,10 @@ type Node struct {
 	SVCListenPortBase *int   `gorm:"column:svc_listen_port_base" json:"svc_listen_port_base,omitempty"`      // K8S Service gRPC 监听端口
 
 	// Endpoint 功能配置（Server 远程控制）
-	EndpointEnabled    *bool  `gorm:"column:endpoint_enabled" json:"endpoint_enabled,omitempty"`         // Endpoint 功能开关
-	EndpointListenPort *int   `gorm:"column:endpoint_listen_port" json:"endpoint_listen_port,omitempty"` // Endpoint 内网 gRPC 监听端口（默认 50052）
-	EndpointToken      string `gorm:"column:endpoint_token;size:255" json:"-"`                           // Endpoint 注册令牌（不序列化到 JSON）
+	EndpointEnabled    *bool  `gorm:"column:endpoint_enabled" json:"endpoint_enabled,omitempty"`          // Endpoint 功能开关
+	EndpointAddress    string `gorm:"column:endpoint_address;size:255" json:"endpoint_address,omitempty"` // Endpoint 所在网络可达的 Agent 地址
+	EndpointListenPort *int   `gorm:"column:endpoint_listen_port" json:"endpoint_listen_port,omitempty"`  // Endpoint 内网 gRPC 监听端口（默认 50052）
+	EndpointToken      string `gorm:"column:endpoint_token;size:255" json:"-"`                            // Endpoint 注册令牌（不序列化到 JSON）
 
 	// 关联
 	User *User `gorm:"foreignKey:UserID" json:"user,omitempty"`

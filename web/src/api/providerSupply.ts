@@ -77,9 +77,21 @@ export interface TechnicalResourceCapabilities {
   svc_label_selector?: string
   svc_namespaces?: string[]
   endpoint_access_enabled: boolean
+  endpoint_address?: string
+  endpoint_token_exists?: boolean
   k8s_listen_port?: number
   svc_listen_port_base?: number
   endpoint_listen_port?: number
+}
+
+export interface TechnicalResourceEndpointAccess {
+  address: string
+  port: number
+  enabled: boolean
+  token_exists: boolean
+  config_revision: number
+  install_command: string
+  row_version?: number
 }
 
 export interface ProviderRelease {
@@ -284,6 +296,16 @@ export const updateProviderTechnicalResourceCapabilities = (providerId: string, 
     headers: { ...providerHeaders(providerId), 'If-Match': String(resource.row_version) },
   })
 
+export const getProviderTechnicalResourceEndpointAccess = (providerId: string, resourceId: string) =>
+  request.get<any, { success: boolean; data: TechnicalResourceEndpointAccess }>(`/api/v1/management/provider/technical-resources/${resourceId}/endpoint-access`, {
+    headers: providerHeaders(providerId),
+  })
+
+export const rotateProviderTechnicalResourceEndpointToken = (providerId: string, resource: TechnicalResource) =>
+  request.post<any, { success: boolean; data: TechnicalResourceEndpointAccess }>(`/api/v1/management/provider/technical-resources/${resource.id}/endpoint-access/rotate-token`, {}, {
+    headers: { ...providerHeaders(providerId), 'If-Match': String(resource.row_version) },
+  })
+
 export const setProviderTechnicalResourceLifecycle = (providerId: string, resource: TechnicalResource, action: 'maintenance' | 'resume' | 'retire', reason: string) =>
   request.post<any, { success: boolean; data: TechnicalResource }>(`/api/v1/management/provider/technical-resources/${resource.id}/${action}`, { reason }, {
     headers: { ...providerHeaders(providerId), 'If-Match': String(resource.row_version) },
@@ -330,6 +352,11 @@ export const getProviderPlatformResources = (providerId: string, params: Provide
 export const updateProviderPlatformHostDomainLabel = (providerId: string, resource: PlatformResource, hostDomainLabel: string) =>
   request.patch<any, { success: boolean; data: PlatformResource }>(`/api/v1/management/provider/resources/${resource.id}/host-domain-label`, {
     host_domain_label: hostDomainLabel,
+  }, { headers: { ...providerHeaders(providerId), 'If-Match': String(resource.row_version) } })
+
+export const deleteProviderPlatformResource = (providerId: string, resource: PlatformResource, reason: string) =>
+  request.post<any, ProviderMutationResponse<PlatformResource>>(`/api/v1/management/provider/resources/${resource.id}/retire`, {
+    reason,
   }, { headers: { ...providerHeaders(providerId), 'If-Match': String(resource.row_version) } })
 
 export const getProviderResourceScopes = (providerId: string, params: ProviderSupplyListParams) =>

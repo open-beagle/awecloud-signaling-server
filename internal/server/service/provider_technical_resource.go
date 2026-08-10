@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -94,6 +96,8 @@ type TechnicalResourceCapabilities struct {
 	SVCLabelSelector      string   `json:"svc_label_selector,omitempty"`
 	SVCNamespaces         []string `json:"svc_namespaces,omitempty"`
 	EndpointAccessEnabled bool     `json:"endpoint_access_enabled"`
+	EndpointAddress       string   `json:"endpoint_address,omitempty"`
+	EndpointTokenExists   bool     `json:"endpoint_token_exists"`
 	K8SListenPort         *int     `json:"k8s_listen_port,omitempty"`
 	SVCListenPortBase     *int     `json:"svc_listen_port_base,omitempty"`
 	EndpointListenPort    *int     `json:"endpoint_listen_port,omitempty"`
@@ -256,6 +260,8 @@ func (s *ProviderSupplyService) GetTechnicalResourceCapabilities(ctx context.Con
 		result.SVCLabelSelector = node.SVCLabelSelector
 		result.SVCNamespaces = decodeStringList(node.SVCNamespaces)
 		result.EndpointAccessEnabled = node.EndpointEnabled != nil && *node.EndpointEnabled
+		result.EndpointAddress = node.EndpointAddress
+		result.EndpointTokenExists = node.EndpointToken != ""
 		result.K8SListenPort = node.K8SListenPort
 		result.SVCListenPortBase = node.SVCListenPortBase
 		result.EndpointListenPort = node.EndpointListenPort
@@ -293,6 +299,16 @@ func (s *ProviderSupplyService) UpdateTechnicalResourceCapabilities(ctx context.
 	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		capability := input.Capabilities
+		capability.EndpointAddress = strings.TrimSpace(capability.EndpointAddress)
+		if capability.EndpointAccessEnabled && !validEndpointAddress(capability.EndpointAddress) {
+			return ErrProviderSupplyInvalidInput
+		}
+		if capability.EndpointListenPort != nil && (*capability.EndpointListenPort < 1 || *capability.EndpointListenPort > 65535) {
+			return ErrProviderSupplyInvalidInput
+		}
+		if capability.SVCEnabled && strings.TrimSpace(capability.SVCLabelSelector) == "" {
+			return ErrProviderSupplyInvalidInput
+		}
 		bindings := []model.TechnicalResourceBinding{*binding}
 		if resource.Type == model.TechnicalResourceAgent {
 			if err := tx.Where("technical_resource_id = ? AND enabled = ?", resource.ID, true).
@@ -319,6 +335,14 @@ func (s *ProviderSupplyService) UpdateTechnicalResourceCapabilities(ctx context.
 					"k8s_enabled": capability.K8SEnabled, "k8s_api_server": strings.TrimSpace(capability.K8SAPIAddress),
 					"svc_enabled": capability.SVCEnabled, "svc_label_selector": strings.TrimSpace(capability.SVCLabelSelector),
 					"svc_namespaces": encodeStringList(capability.SVCNamespaces), "endpoint_enabled": capability.EndpointAccessEnabled,
+					"endpoint_address": capability.EndpointAddress,
+				}
+				if capability.EndpointAccessEnabled && node.EndpointToken == "" {
+					token, err := GenerateEndpointToken()
+					if err != nil {
+						return err
+					}
+					updates["endpoint_token"] = token
 				}
 				if capability.K8SListenPort != nil {
 					updates["k8s_listen_port"] = *capability.K8SListenPort
@@ -455,6 +479,106 @@ func (s *ProviderSupplyService) ListTechnicalResourceUpdateTasks(ctx context.Con
 	var tasks []model.UpdateTask
 	err = s.db.WithContext(ctx).Where("target_type = ? AND target_id = ?", targetType, binding.SourceID).Order("created_at DESC").Find(&tasks).Error
 	return tasks, err
+}
+
+type TechnicalResourceEndpointAccess struct {
+	Address        string `json:"address"`
+	Port           int    `json:"port"`
+	Token          string `json:"-"`
+	Enabled        bool   `json:"enabled"`
+	TokenExists    bool   `json:"token_exists"`
+	ConfigRevision int64  `json:"config_revision"`
+}
+
+func GenerateEndpointToken() (string, error) {
+	value := make([]byte, 32)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
+	}
+	return "ep_" + hex.EncodeToString(value), nil
+}
+
+var endpointHostnamePattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,253}[A-Za-z0-9])?$`)
+
+func validEndpointAddress(value string) bool {
+	value = strings.TrimSpace(value)
+	return len(value) <= 255 && (net.ParseIP(value) != nil || endpointHostnamePattern.MatchString(value))
+}
+
+func (s *ProviderSupplyService) GetTechnicalResourceEndpointAccess(ctx context.Context, authorization *ManagementAuthorizationContext, resourceID string) (*TechnicalResourceEndpointAccess, error) {
+	resource, binding, err := s.activeTechnicalResourceBinding(ctx, authorization, resourceID, PermissionProviderTechnicalResourcesWrite)
+	if err != nil {
+		return nil, err
+	}
+	if resource.Type != model.TechnicalResourceAgent || binding.SourceType != model.TechnicalResourceBindingLegacyNode {
+		return nil, ErrProviderSupplyConflict
+	}
+	nodeID, err := strconv.ParseUint(binding.SourceID, 10, 64)
+	if err != nil {
+		return nil, ErrProviderSupplyConflict
+	}
+	var node model.Node
+	if err := s.db.WithContext(ctx).First(&node, nodeID).Error; err != nil {
+		return nil, ErrProviderSupplyObjectNotFound
+	}
+	port := 50052
+	if node.EndpointListenPort != nil && *node.EndpointListenPort > 0 {
+		port = *node.EndpointListenPort
+	}
+	return &TechnicalResourceEndpointAccess{
+		Address: strings.TrimSpace(node.EndpointAddress), Port: port, Token: node.EndpointToken,
+		Enabled: node.EndpointEnabled != nil && *node.EndpointEnabled, TokenExists: node.EndpointToken != "",
+		ConfigRevision: resource.ConfigRevision,
+	}, nil
+}
+
+func (s *ProviderSupplyService) RotateTechnicalResourceEndpointToken(ctx context.Context, authorization *ManagementAuthorizationContext, resourceID string, expectedRowVersion int64) (*TechnicalResourceEndpointAccess, *model.TechnicalResource, error) {
+	resource, binding, err := s.activeTechnicalResourceBinding(ctx, authorization, resourceID, PermissionProviderTechnicalResourcesWrite)
+	if err != nil {
+		return nil, nil, err
+	}
+	if resource.RowVersion != expectedRowVersion {
+		return nil, nil, ErrProviderSupplyVersionConflict
+	}
+	if resource.Type != model.TechnicalResourceAgent || binding.SourceType != model.TechnicalResourceBindingLegacyNode {
+		return nil, nil, ErrProviderSupplyConflict
+	}
+	token, err := GenerateEndpointToken()
+	if err != nil {
+		return nil, nil, err
+	}
+	nodeID, err := strconv.ParseUint(binding.SourceID, 10, 64)
+	if err != nil {
+		return nil, nil, ErrProviderSupplyConflict
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.Node{}).Where("id = ? AND type = ?", nodeID, model.NodeTypeAgent).Update("endpoint_token", token)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrProviderSupplyObjectNotFound
+		}
+		result = tx.Model(&model.TechnicalResource{}).
+			Where("id = ? AND provider_id = ? AND row_version = ?", resource.ID, authorization.ScopeID, expectedRowVersion).
+			Updates(map[string]any{
+				"credential_revision": gorm.Expr("credential_revision + 1"),
+				"config_revision":     gorm.Expr("config_revision + 1"),
+				"row_version":         gorm.Expr("row_version + 1"),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrProviderSupplyVersionConflict
+		}
+		return tx.First(resource, "id = ?", resource.ID).Error
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	access, err := s.GetTechnicalResourceEndpointAccess(ctx, authorization, resource.ID)
+	return access, resource, err
 }
 
 func (s *ProviderSupplyService) CheckTechnicalResourceDelete(ctx context.Context, authorization *ManagementAuthorizationContext, resourceID string) (*TechnicalResourceDeleteCheck, error) {

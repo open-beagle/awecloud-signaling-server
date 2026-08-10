@@ -69,6 +69,28 @@ func TestProviderSupplyQueriesAreProviderScoped(t *testing.T) {
 	require.ErrorIs(t, err, ErrProviderSupplyObjectNotFound)
 }
 
+func TestPlatformResourceListHidesRetiredResourcesByDefault(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	accepted := createLifecycleSupplyResource(t, fixture)
+	require.NoError(t, fixture.database.Model(&model.PlatformResource{}).
+		Where("provider_id = ? AND id = ?", fixture.provider.ID, accepted.Resource.ID).
+		Update("lifecycle_state", model.PlatformResourceRetired).Error)
+
+	current, err := fixture.service.ListPlatformResources(context.Background(), fixture.authorization, ProviderSupplyListInput{
+		Page: 1, PageSize: 10,
+	})
+	require.NoError(t, err)
+	require.Empty(t, current.Items)
+	require.Zero(t, current.Total)
+
+	retired, err := fixture.service.ListPlatformResources(context.Background(), fixture.authorization, ProviderSupplyListInput{
+		State: string(model.PlatformResourceRetired), Page: 1, PageSize: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, retired.Items, 1)
+	require.Equal(t, accepted.Resource.ID, retired.Items[0].ID)
+}
+
 func TestPlatformResourceQueriesProjectAccessDomain(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	accepted := createLifecycleSupplyResource(t, fixture)
@@ -267,7 +289,7 @@ func TestTechnicalResourceQueriesReturnOneAgentWithAllNodeBindings(t *testing.T)
 
 	_, err = fixture.service.UpdateTechnicalResourceCapabilities(context.Background(), fixture.authorization, UpdateTechnicalResourceCapabilitiesInput{
 		TechnicalResourceID: agent.ID, ExpectedRowVersion: bound.TechnicalResource.RowVersion,
-		Capabilities: TechnicalResourceCapabilities{SVCEnabled: true, SVCNamespaces: []string{"shared"}},
+		Capabilities: TechnicalResourceCapabilities{SVCEnabled: true, SVCLabelSelector: "signal.beagle.io/expose=true", SVCNamespaces: []string{"shared"}},
 	})
 	require.NoError(t, err)
 	var configuredNodes []model.Node

@@ -84,6 +84,7 @@ func TestProviderTechnicalResourceCapabilitiesAndUpdaterUseScopedBinding(t *test
 	require.False(t, capabilities.K8SEnabled)
 
 	capabilities.SVCEnabled = true
+	capabilities.SVCLabelSelector = "signal.beagle.io/expose=true"
 	capabilities.SVCNamespaces = []string{"team-a"}
 	updated, err := fixture.service.UpdateTechnicalResourceCapabilities(ctx, fixture.authorization, UpdateTechnicalResourceCapabilitiesInput{
 		TechnicalResourceID: agent.ID, ExpectedRowVersion: agent.RowVersion, Capabilities: *capabilities,
@@ -122,6 +123,41 @@ func TestProviderTechnicalResourceCapabilitiesAndUpdaterUseScopedBinding(t *test
 	tasks, err := fixture.service.ListTechnicalResourceUpdateTasks(ctx, fixture.authorization, agent.ID)
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
+}
+
+func TestProviderTechnicalResourceEndpointAccess(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	ctx := context.Background()
+	agent := fixture.createBoundAgent(t, "agent-endpoint-access", 1001)
+
+	capabilities, err := fixture.service.GetTechnicalResourceCapabilities(ctx, fixture.authorization, agent.ID)
+	require.NoError(t, err)
+	capabilities.EndpointAccessEnabled = true
+	capabilities.EndpointAddress = "agent.internal"
+	port := 51052
+	capabilities.EndpointListenPort = &port
+
+	updated, err := fixture.service.UpdateTechnicalResourceCapabilities(ctx, fixture.authorization, UpdateTechnicalResourceCapabilitiesInput{
+		TechnicalResourceID: agent.ID, ExpectedRowVersion: agent.RowVersion, Capabilities: *capabilities,
+	})
+	require.NoError(t, err)
+
+	access, err := fixture.service.GetTechnicalResourceEndpointAccess(ctx, fixture.authorization, agent.ID)
+	require.NoError(t, err)
+	require.True(t, access.Enabled)
+	require.True(t, access.TokenExists)
+	require.Equal(t, "agent.internal", access.Address)
+	require.Equal(t, 51052, access.Port)
+	require.NotEmpty(t, access.Token)
+
+	rotated, resource, err := fixture.service.RotateTechnicalResourceEndpointToken(ctx, fixture.authorization, agent.ID, updated.RowVersion)
+	require.NoError(t, err)
+	require.NotEqual(t, access.Token, rotated.Token)
+	require.Equal(t, updated.RowVersion+1, resource.RowVersion)
+	require.Equal(t, updated.CredentialRevision+1, resource.CredentialRevision)
+
+	_, _, err = fixture.service.RotateTechnicalResourceEndpointToken(ctx, fixture.authorization, agent.ID, updated.RowVersion)
+	require.ErrorIs(t, err, ErrProviderSupplyVersionConflict)
 }
 
 func TestProviderChangesBoundAgentHostDomainLabel(t *testing.T) {

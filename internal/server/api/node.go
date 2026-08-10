@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"net/http"
 	"strconv"
 	"time"
@@ -473,7 +471,7 @@ func (a *NodeAPI) UpdateCapabilities(c *gin.Context) {
 		updates["endpoint_enabled"] = *req.EndpointEnabled
 		// 首次开启 Endpoint 时自动生成 token
 		if *req.EndpointEnabled && node.EndpointToken == "" {
-			token, err := generateEndpointToken()
+			token, err := service.GenerateEndpointToken()
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, NewErrorResponse("生成 Endpoint Token 失败"))
 				return
@@ -650,15 +648,6 @@ func (a *NodeAPI) Delete(c *gin.Context) {
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
 }
 
-// generateEndpointToken 生成 Endpoint 注册令牌（ep_ 前缀 + 32 字节随机 hex）
-func generateEndpointToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return "ep_" + hex.EncodeToString(b), nil
-}
-
 // RegenerateEndpointToken 重新生成 Endpoint Token
 func (a *NodeAPI) RegenerateEndpointToken(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -679,7 +668,7 @@ func (a *NodeAPI) RegenerateEndpointToken(c *gin.Context) {
 		return
 	}
 
-	token, err := generateEndpointToken()
+	token, err := service.GenerateEndpointToken()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("生成 Token 失败"))
 		return

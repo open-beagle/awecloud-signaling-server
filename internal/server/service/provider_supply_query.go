@@ -316,6 +316,8 @@ func (s *ProviderSupplyService) ListPlatformResources(ctx context.Context, autho
 			return nil, ErrProviderSupplyInvalidInput
 		}
 		query = query.Where("lifecycle_state = ?", state)
+	} else {
+		query = query.Where("lifecycle_state <> ?", model.PlatformResourceRetired)
 	}
 	if input.Search != "" {
 		pattern := "%" + escapeProviderLike(input.Search) + "%"

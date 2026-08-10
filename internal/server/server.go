@@ -493,9 +493,7 @@ func (s *Server) setupRouter() *gin.Engine {
 
 			// 下载 API（公开）
 			downloadAPI := api.NewDownloadAPI()
-			v1Group.GET("/public/download/desktop", downloadAPI.GetDesktopDownload)
-			v1Group.GET("/public/download/desktop/direct", downloadAPI.GetDesktopDownloadDirect)
-			v1Group.GET("/public/download/desktop/versions", downloadAPI.ListDesktopVersions)
+			v1Group.GET("/public/download/desktop", downloadAPI.GetDesktopLaunchers)
 			v1Group.GET("/download/install_agent.sh", downloadAPI.GetAgentInstallScript)
 			v1Group.GET("/download/install_signal.sh", downloadAPI.GetSignalInstallScript) // 统一安装脚本
 			v1Group.GET("/download/agent", downloadAPI.GetAgentDownload)
@@ -570,6 +568,8 @@ func (s *Server) setupRouter() *gin.Engine {
 					providerGroup.PATCH("/technical-resources/:id/display-name", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.UpdateAgentDisplayName)
 					providerGroup.GET("/technical-resources/:id/capabilities", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.GetTechnicalResourceCapabilities)
 					providerGroup.PATCH("/technical-resources/:id/config", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.UpdateTechnicalResourceCapabilities)
+					providerGroup.GET("/technical-resources/:id/endpoint-access", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), providerSupplyAPI.GetTechnicalResourceEndpointAccess)
+					providerGroup.POST("/technical-resources/:id/endpoint-access/rotate-token", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIfMatch(), providerSupplyAPI.RotateTechnicalResourceEndpointToken)
 					providerGroup.GET("/technical-resources/:id/releases", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.ListTechnicalResourceReleases)
 					providerGroup.GET("/technical-resources/:id/update-tasks", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerSupplyAPI.ListTechnicalResourceUpdateTasks)
 					providerGroup.POST("/technical-resources/:id/update-tasks", api.RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureResourceModelWrite, true), api.RequireIdempotencyKey(), providerSupplyAPI.CreateTechnicalResourceUpdateTask)

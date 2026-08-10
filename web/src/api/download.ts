@@ -1,39 +1,22 @@
 import request from '@/utils/request'
 
-export interface DownloadItem {
-  version: string
-  download_url: string
-  filename: string
+export interface DesktopLauncherDownload {
   os: string
   arch: string
+  package_type: string
+  filename: string
+  download_url: string
+  size: number
 }
 
-export interface DownloadsResponse {
-  success: boolean
-  version?: string
-  downloads?: Record<string, DownloadItem>
-  message?: string
+export interface DesktopLauncherDownloadsResponse {
+  version: string
+  published_at: string | null
+  downloads: DesktopLauncherDownload[]
 }
 
-// 获取所有平台的下载列表
-export function getDownloads() {
-  return request<DownloadsResponse>({
-    url: '/api/v1/public/download/desktop/versions',
-    method: 'get'
-  })
-}
-
-// 获取当前系统推荐的下载信息
-export function getRecommendedDownload() {
-  return request<{
-    success: boolean
-    version?: string
-    download_url?: string
-    filename?: string
-    os?: string
-    arch?: string
-    message?: string
-  }>({
+export function getDesktopLaunchers() {
+  return request<DesktopLauncherDownloadsResponse>({
     url: '/api/v1/public/download/desktop',
     method: 'get'
   })

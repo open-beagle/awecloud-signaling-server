@@ -31,11 +31,12 @@
         <el-table-column label="能力 Revision" width="140"><template #default="{ row }">{{ row.capability_revision }}</template></el-table-column>
         <el-table-column label="对象 Revision" width="140"><template #default="{ row }">{{ row.row_version }}</template></el-table-column>
         <el-table-column label="更新时间" width="180"><template #default="{ row }">{{ formatTime(row.updated_at) }}</template></el-table-column>
-        <el-table-column v-if="resourceType === 'host'" label="操作" width="90" fixed="right" align="right">
+        <el-table-column v-if="resourceType === 'host'" label="操作" width="150" fixed="right" align="right">
           <template #default="{ row }">
             <el-tooltip :disabled="!!row.source_node_id" content="仅 legacy Agent 主机支持编辑 SSH 主机域名标识" placement="top">
               <span><el-button link type="primary" :icon="Edit" :disabled="!canWrite || !row.source_node_id" @click="editHostDomainLabel(row)">编辑</el-button></span>
             </el-tooltip>
+            <el-button link type="danger" :icon="Delete" :loading="deletingResourceId === row.id" :disabled="!canWrite || row.lifecycle_state === 'retired'" @click="deleteHost(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -49,14 +50,15 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Edit, Refresh, Search } from '@element-plus/icons-vue'
+import { Delete, Edit, Refresh, Search } from '@element-plus/icons-vue'
 import PageHeader from '@/components/Common/PageHeader.vue'
-import { getProviderPlatformResources, updateProviderPlatformHostDomainLabel, type PlatformResource, type PlatformResourceState, type SupplyResourceType } from '@/api/providerSupply'
+import { deleteProviderPlatformResource, getProviderPlatformResources, updateProviderPlatformHostDomainLabel, type PlatformResource, type PlatformResourceState, type SupplyResourceType } from '@/api/providerSupply'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const props = defineProps<{ resourceType: SupplyResourceType }>()
 const workspaceStore = useWorkspaceStore()
 const loading = ref(false)
+const deletingResourceId = ref('')
 const errorMessage = ref('')
 const items = ref<PlatformResource[]>([])
 const filters = reactive({ search: '', state: '' })
@@ -123,6 +125,23 @@ const editHostDomainLabel = async (resource: PlatformResource) => {
     await load()
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') throw error
+  }
+}
+
+const deleteHost = async (resource: PlatformResource) => {
+  if (!workspaceStore.providerId || resource.type !== 'host' || resource.lifecycle_state === 'retired') return
+  try {
+    const result = await ElMessageBox.prompt(`删除 ${resourcePrimaryName(resource)} 后将停止供给且不可恢复，请输入删除原因。`, '确认删除主机', {
+      confirmButtonText: '确认删除', cancelButtonText: '取消', inputPattern: /\S+/, inputErrorMessage: '请输入删除原因', type: 'warning',
+    })
+    deletingResourceId.value = resource.id
+    await deleteProviderPlatformResource(workspaceStore.providerId, resource, result.value.trim())
+    ElMessage.success('主机已删除')
+    await load()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') throw error
+  } finally {
+    deletingResourceId.value = ''
   }
 }
 

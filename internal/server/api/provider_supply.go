@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -380,6 +381,63 @@ func (a *ProviderSupplyAPI) UpdateTechnicalResourceCapabilities(c *gin.Context) 
 	}
 	SetRevisionETag(c, resource.RowVersion)
 	c.JSON(http.StatusOK, NewSuccessResponse(resource))
+}
+
+func (a *ProviderSupplyAPI) GetTechnicalResourceEndpointAccess(c *gin.Context) {
+	authorization, ok := currentManagementAuthorization(c)
+	if !ok {
+		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
+		return
+	}
+	access, err := service.NewProviderSupplyService(db.DB).GetTechnicalResourceEndpointAccess(c.Request.Context(), authorization, c.Param("id"))
+	if err != nil {
+		writeProviderSupplyError(c, err, false)
+		return
+	}
+	installCommand := ""
+	if access.Enabled && access.Address != "" && access.Token != "" {
+		serverAddr := serverAddrFromRequest(a.config, c)
+		target := net.JoinHostPort(access.Address, strconv.Itoa(access.Port))
+		installCommand = fmt.Sprintf("curl -fsSL %s/api/v1/download/install_endpoint.sh | sudo bash -s -- -a %s -t %s -s %s", serverAddr, target, access.Token, serverAddr)
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, NewSuccessResponse(gin.H{
+		"address": access.Address, "port": access.Port, "enabled": access.Enabled,
+		"token_exists": access.TokenExists, "config_revision": access.ConfigRevision,
+		"install_command": installCommand,
+	}))
+}
+
+func (a *ProviderSupplyAPI) RotateTechnicalResourceEndpointToken(c *gin.Context) {
+	authorization, ok := currentManagementAuthorization(c)
+	if !ok {
+		writeManagementRequestError(c, service.ErrManagementPermissionDenied)
+		return
+	}
+	rowVersion, ok := requiredRevision(c)
+	if !ok {
+		codedError(c, http.StatusPreconditionRequired, ErrorCodePreconditionRequired, "必须提供 If-Match revision")
+		return
+	}
+	access, resource, err := service.NewProviderSupplyService(db.DB).RotateTechnicalResourceEndpointToken(c.Request.Context(), authorization, c.Param("id"), rowVersion)
+	if err != nil {
+		writeProviderSupplyError(c, err, true)
+		return
+	}
+	serverAddr := serverAddrFromRequest(a.config, c)
+	target := net.JoinHostPort(access.Address, strconv.Itoa(access.Port))
+	installCommand := ""
+	if access.Enabled && access.Address != "" {
+		installCommand = fmt.Sprintf("curl -fsSL %s/api/v1/download/install_endpoint.sh | sudo bash -s -- -a %s -t %s -s %s", serverAddr, target, access.Token, serverAddr)
+	}
+	recordAuditLog(c.Request.Context(), c, "rotate_endpoint_access_token", "technical_resource", resource.ID, resource.DomainLabel, gin.H{"credential_revision": resource.CredentialRevision})
+	SetRevisionETag(c, resource.RowVersion)
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, NewSuccessResponse(gin.H{
+		"address": access.Address, "port": access.Port, "enabled": access.Enabled,
+		"token_exists": true, "config_revision": access.ConfigRevision,
+		"install_command": installCommand, "row_version": resource.RowVersion,
+	}))
 }
 
 func (a *ProviderSupplyAPI) ListTechnicalResourceReleases(c *gin.Context) {
