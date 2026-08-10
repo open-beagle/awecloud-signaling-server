@@ -569,17 +569,31 @@ func TestProviderSupplyTechnicalResourceBindingAndScopeIsolation(t *testing.T) {
 	require.Zero(t, foreignBindingCount)
 }
 
-func TestProviderSupplyLifecycleHeartbeatAndLease(t *testing.T) {
+func TestProviderSupplyConfigConfirmationAndLease(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	ctx := context.Background()
 	agent := fixture.createBoundAgent(t, "agent-heartbeat", 1001)
-	credential := TechnicalResourceCredential{SourceType: model.TechnicalResourceBindingLegacyNode, SourceID: "1001", CredentialRevision: 1}
 
-	heartbeat, err := fixture.service.RecordTechnicalResourceHeartbeat(ctx, credential, 2*time.Minute)
+	confirmed, err := fixture.service.ConfirmTechnicalResourceConfig(ctx, model.TechnicalResourceBindingLegacyNode, "1001", agent.ConfigRevision)
 	require.NoError(t, err)
-	require.Equal(t, model.ResourceHealthOnline, heartbeat.HealthState)
-	require.Equal(t, fixture.now.Add(2*time.Minute), *heartbeat.LeaseExpiresAt)
-	require.Equal(t, agent.RowVersion, heartbeat.RowVersion)
+	require.Equal(t, agent.ConfigRevision, confirmed.ObservedRevision)
+	require.Equal(t, agent.RowVersion, confirmed.RowVersion)
+
+	confirmed, err = fixture.service.ConfirmTechnicalResourceConfig(ctx, model.TechnicalResourceBindingLegacyNode, "1001", agent.ConfigRevision)
+	require.NoError(t, err)
+	require.Equal(t, agent.ConfigRevision, confirmed.ObservedRevision)
+	_, err = fixture.service.ConfirmTechnicalResourceConfig(ctx, model.TechnicalResourceBindingLegacyNode, "1001", agent.ConfigRevision+1)
+	require.ErrorIs(t, err, ErrTechnicalResourceConfigAhead)
+
+	require.NoError(t, fixture.database.Model(&model.TechnicalResource{}).Where("id = ?", agent.ID).Update("observed_revision", int64(17360)).Error)
+	confirmed, err = fixture.service.ConfirmTechnicalResourceConfig(ctx, model.TechnicalResourceBindingLegacyNode, "1001", agent.ConfigRevision)
+	require.NoError(t, err)
+	require.Equal(t, agent.ConfigRevision, confirmed.ObservedRevision)
+
+	leaseExpiresAt := fixture.now.Add(2 * time.Minute)
+	require.NoError(t, fixture.database.Model(&model.TechnicalResource{}).Where("id = ?", agent.ID).Updates(map[string]any{
+		"health_state": model.ResourceHealthOnline, "lease_expires_at": leaseExpiresAt,
+	}).Error)
 
 	count, err := fixture.service.ExpireTechnicalResourceLeases(ctx, fixture.now.Add(time.Minute))
 	require.NoError(t, err)
@@ -587,13 +601,16 @@ func TestProviderSupplyLifecycleHeartbeatAndLease(t *testing.T) {
 	count, err = fixture.service.ExpireTechnicalResourceLeases(ctx, fixture.now.Add(2*time.Minute))
 	require.NoError(t, err)
 	require.Equal(t, int64(1), count)
+	var expired model.TechnicalResource
+	require.NoError(t, fixture.database.First(&expired, "id = ?", agent.ID).Error)
+	require.Equal(t, agent.ConfigRevision, expired.ObservedRevision)
 
 	disabled, err := fixture.service.SetTechnicalResourceLifecycle(ctx, fixture.authorization, SetTechnicalResourceLifecycleInput{
 		TechnicalResourceID: agent.ID, TargetState: model.TechnicalResourceDisabled,
 		ExpectedRowVersion: agent.RowVersion, Reason: "maintenance",
 	})
 	require.NoError(t, err)
-	_, err = fixture.service.RecordTechnicalResourceHeartbeat(ctx, credential, time.Minute)
+	_, err = fixture.service.ConfirmTechnicalResourceConfig(ctx, model.TechnicalResourceBindingLegacyNode, "1001", agent.ConfigRevision)
 	require.ErrorIs(t, err, ErrTechnicalResourceDisabled)
 
 	_, err = fixture.service.SetTechnicalResourceLifecycle(ctx, fixture.authorization, SetTechnicalResourceLifecycleInput{
@@ -612,7 +629,7 @@ func TestProviderSupplyLifecycleHeartbeatAndLease(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, model.TechnicalResourceRetired, retired.LifecycleState)
-	_, err = fixture.service.RecordTechnicalResourceHeartbeat(ctx, credential, time.Minute)
+	_, err = fixture.service.ConfirmTechnicalResourceConfig(ctx, model.TechnicalResourceBindingLegacyNode, "1001", agent.ConfigRevision)
 	require.ErrorIs(t, err, ErrTechnicalResourceUnbound)
 	_, err = fixture.service.SetTechnicalResourceLifecycle(ctx, fixture.authorization, SetTechnicalResourceLifecycleInput{
 		TechnicalResourceID: agent.ID, TargetState: model.TechnicalResourceRegistered,
@@ -633,11 +650,6 @@ func TestProviderSupplyRejectsStaleAuthorizationAndCredential(t *testing.T) {
 		ExpectedRowVersion: agent.RowVersion, Reason: "stale permission revision",
 	})
 	require.ErrorIs(t, err, ErrManagementPermissionDenied)
-
-	_, err = fixture.service.RecordTechnicalResourceHeartbeat(ctx, TechnicalResourceCredential{
-		SourceType: model.TechnicalResourceBindingLegacyNode, SourceID: "1001", CredentialRevision: 2,
-	}, time.Minute)
-	require.ErrorIs(t, err, ErrCredentialRevisionStale)
 
 	require.NoError(t, fixture.database.Model(&model.ResourceProvider{}).Where("id = ?", fixture.provider.ID).Update("status", model.ProviderStatusSuspended).Error)
 	_, err = fixture.service.SetTechnicalResourceLifecycle(ctx, fixture.authorization, SetTechnicalResourceLifecycleInput{

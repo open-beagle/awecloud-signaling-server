@@ -266,6 +266,12 @@ func ensureUpdaterReleaseSchema(database *gorm.DB) error {
 	if err := database.Exec(`DROP INDEX IF EXISTS uk_release_component_version`).Error; err != nil {
 		return fmt.Errorf("remove obsolete release component/version constraint: %w", err)
 	}
+	// Recreate this index from the current Artifact model. Older databases used
+	// the same name for (release_id, os, arch), which rejects app and launcher
+	// artifacts for the same platform.
+	if err := database.Exec(`DROP INDEX IF EXISTS uk_artifact_release_platform`).Error; err != nil {
+		return fmt.Errorf("rebuild artifact release/platform/role constraint: %w", err)
+	}
 	return nil
 }
 

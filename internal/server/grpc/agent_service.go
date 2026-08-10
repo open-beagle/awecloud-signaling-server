@@ -27,8 +27,6 @@ import (
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
-const technicalResourceHeartbeatLeaseDuration = 2 * time.Minute
-
 // parseJSONStringArray 解析 JSON 字符串数组
 func parseJSONStringArray(jsonStr string) []string {
 	if jsonStr == "" || jsonStr == "[]" {
@@ -44,16 +42,17 @@ func parseJSONStringArray(jsonStr string) []string {
 // AgentConnection Agent 连接信息
 // 以 NodeID 为 key 存储，同一 AgentID（UserID）下可以有多个 Node 同时在线
 type AgentConnection struct {
-	AgentID                               uint64
-	NodeID                                uint64 // 当前心跳流对应的 Node ID（connections map 的 key）
-	Stream                                pb.AgentService_HeartbeatServer
-	TunnelIP                              string
-	Connected                             bool
-	LastSeen                              time.Time
-	Cancel                                context.CancelFunc
-	HeartbeatCount                        int // 心跳计数器，用于定期检查用户状态
-	SessionAuthorizationProtocol          string
-	EndpointSessionAuthorizationProtocols map[string]string
+	AgentID                                uint64
+	NodeID                                 uint64 // 当前心跳流对应的 Node ID（connections map 的 key）
+	Stream                                 pb.AgentService_HeartbeatServer
+	TunnelIP                               string
+	Connected                              bool
+	LastSeen                               time.Time
+	Cancel                                 context.CancelFunc
+	HeartbeatCount                         int // 心跳计数器，用于定期检查用户状态
+	AppliedTechnicalResourceConfigRevision int64
+	SessionAuthorizationProtocol           string
+	EndpointSessionAuthorizationProtocols  map[string]string
 }
 
 // AgentServiceServer Agent 服务实现
@@ -489,6 +488,7 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 		Cancel:                                cancel,
 		EndpointSessionAuthorizationProtocols: make(map[string]string),
 	}
+	s.confirmTechnicalResourceConfig(context.Background(), conn, firstReq.AppliedTechnicalResourceConfigRevision)
 
 	s.connMutex.Lock()
 	// 同一 NodeID 的旧连接才关闭（同一设备重连），不影响其他 Node
@@ -604,6 +604,7 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 				}
 			}
 			conn.HeartbeatCount++
+			s.confirmTechnicalResourceConfig(context.Background(), conn, req.AppliedTechnicalResourceConfigRevision)
 
 			// 处理心跳（使用独立 context）
 			newNodeID := s.handleHeartbeat(context.Background(), agentID, req)
@@ -794,7 +795,6 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		}
 	}
 
-	s.recordNodeTechnicalResourceHeartbeat(ctx, node.ID)
 	if len(req.DomainRegistrations) > 0 && nodeType == model.NodeTypeAgent {
 		s.handleNodeDomainRegistrations(ctx, &node, &user, req.TunnelIp, req.DomainRegistrations)
 	}
@@ -1002,29 +1002,30 @@ func (s *AgentServiceServer) syncNodeHostSSHResource(ctx context.Context, node *
 	return db.DB.WithContext(ctx).Model(&resource).Updates(updates).Error
 }
 
-func (s *AgentServiceServer) recordNodeTechnicalResourceHeartbeat(ctx context.Context, nodeID uint64) {
-	if s == nil || s.providerSupply == nil || nodeID == 0 {
+func (s *AgentServiceServer) confirmTechnicalResourceConfig(ctx context.Context, conn *AgentConnection, appliedRevision int64) {
+	if s == nil || s.providerSupply == nil || conn == nil || conn.NodeID == 0 || appliedRevision <= conn.AppliedTechnicalResourceConfigRevision {
 		return
 	}
-	var binding model.TechnicalResourceBinding
-	err := db.DB.WithContext(ctx).
-		Where("source_type = ? AND source_id = ? AND enabled = ?", model.TechnicalResourceBindingLegacyNode, fmt.Sprint(nodeID), true).
-		First(&binding).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return
-	}
+	_, err := s.providerSupply.ConfirmTechnicalResourceConfig(ctx, model.TechnicalResourceBindingLegacyNode, fmt.Sprint(conn.NodeID), appliedRevision)
 	if err != nil {
-		logger.Warnf("查询 Node 技术资源绑定失败: node_id=%d, err=%v", nodeID, err)
+		logger.Warnf("拒绝 Agent 配置 revision 确认: node_id=%d, applied_revision=%d, err=%v", conn.NodeID, appliedRevision, err)
 		return
 	}
-	_, err = s.providerSupply.RecordTechnicalResourceHeartbeat(ctx, service.TechnicalResourceCredential{
-		SourceType:         binding.SourceType,
-		SourceID:           binding.SourceID,
-		CredentialRevision: binding.CredentialRevision,
-	}, technicalResourceHeartbeatLeaseDuration)
-	if err != nil {
-		logger.Warnf("同步 Node 技术资源健康状态失败: node_id=%d, technical_resource_id=%s, err=%v", nodeID, binding.TechnicalResourceID, err)
+	conn.AppliedTechnicalResourceConfigRevision = appliedRevision
+}
+
+func technicalResourceConfigRevisionForNode(ctx context.Context, nodeID uint64) int64 {
+	if nodeID == 0 {
+		return 0
 	}
+	var revision int64
+	db.DB.WithContext(ctx).Table("technical_resource AS resource").
+		Select("resource.config_revision").
+		Joins("JOIN technical_resource_binding AS binding ON binding.technical_resource_id = resource.id").
+		Where("binding.source_type = ? AND binding.source_id = ? AND binding.enabled = ?", model.TechnicalResourceBindingLegacyNode, fmt.Sprint(nodeID), true).
+		Where("resource.lifecycle_state = ? AND resource.deleted_at IS NULL", model.TechnicalResourceRegistered).
+		Limit(1).Scan(&revision)
+	return revision
 }
 
 func (s *AgentServiceServer) handleContainerCandidates(ctx context.Context, nodeID uint64, reports []*pb.ContainerDiscoveryCandidate) {
@@ -1105,9 +1106,10 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 	}
 
 	resp := &pb.AgentHeartbeatResponse{
-		ConfigVersion:          configVersion,
-		DomainSuffix:           domainSuffix,
-		RequestImmediateReport: s.consumeImmediateReport(),
+		ConfigVersion:                   configVersion,
+		DomainSuffix:                    domainSuffix,
+		RequestImmediateReport:          s.consumeImmediateReport(),
+		TechnicalResourceConfigRevision: technicalResourceConfigRevisionForNode(ctx, nodeID),
 	}
 	supplyInventoryAuthorized := s.authorizeSupplyInventoryNegotiation(ctx, nodeID)
 	if supplyInventoryAuthorized {

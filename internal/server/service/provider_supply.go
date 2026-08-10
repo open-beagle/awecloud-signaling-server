@@ -26,6 +26,7 @@ var (
 	ErrTechnicalResourceUnbound         = errors.New("TECHNICAL_RESOURCE_UNBOUND")
 	ErrTechnicalResourceDisabled        = errors.New("TECHNICAL_RESOURCE_DISABLED")
 	ErrTechnicalResourceRetired         = errors.New("TECHNICAL_RESOURCE_RETIRED")
+	ErrTechnicalResourceConfigAhead     = errors.New("TECHNICAL_RESOURCE_CONFIG_REVISION_AHEAD")
 	ErrTechnicalResourceStateTransition = errors.New("invalid TechnicalResource state transition")
 	ErrCredentialRevisionStale          = errors.New("CREDENTIAL_REVISION_STALE")
 )
@@ -636,54 +637,48 @@ type TechnicalResourceCredential struct {
 	CredentialRevision int64
 }
 
-func (s *ProviderSupplyService) RecordTechnicalResourceHeartbeat(ctx context.Context, credential TechnicalResourceCredential, leaseDuration time.Duration) (*model.TechnicalResource, error) {
-	if s == nil || s.db == nil || leaseDuration <= 0 || leaseDuration > 24*time.Hour {
+func (s *ProviderSupplyService) ConfirmTechnicalResourceConfig(ctx context.Context, sourceType model.TechnicalResourceBindingSourceType, sourceID string, appliedRevision int64) (*model.TechnicalResource, error) {
+	sourceID = strings.TrimSpace(sourceID)
+	if s == nil || s.db == nil || sourceID == "" || appliedRevision <= 0 ||
+		(sourceType != model.TechnicalResourceBindingLegacyNode && sourceType != model.TechnicalResourceBindingLegacyEndpoint) {
 		return nil, ErrProviderSupplyInvalidInput
 	}
-	now := s.now().UTC()
 	var resource *model.TechnicalResource
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		resolved, err := resolveAuthenticatedTechnicalResource(tx, credential)
-		if err != nil {
+		var binding model.TechnicalResourceBinding
+		if err := tx.Where("source_type = ? AND source_id = ? AND enabled = ?", sourceType, sourceID, true).First(&binding).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrTechnicalResourceUnbound
+			}
 			return err
 		}
-		resource = resolved
+		resource = &model.TechnicalResource{}
+		if err := tx.First(resource, "id = ?", binding.TechnicalResourceID).Error; err != nil {
+			return err
+		}
 		if err := requireReportingLifecycle(resource); err != nil {
 			return err
 		}
+		if appliedRevision > resource.ConfigRevision {
+			return ErrTechnicalResourceConfigAhead
+		}
+		invalidObservedRevision := resource.ObservedRevision > resource.ConfigRevision
+		if !invalidObservedRevision && appliedRevision <= resource.ObservedRevision {
+			return nil
+		}
 		updated := tx.Model(&model.TechnicalResource{}).
-			Where("id = ? AND provider_id = ? AND credential_revision = ? AND lifecycle_state = ?",
-				resource.ID, resource.ProviderID, credential.CredentialRevision, model.TechnicalResourceRegistered).
-			Updates(map[string]any{
-				"health_state":      model.ResourceHealthOnline,
-				"last_received_at":  now,
-				"lease_expires_at":  now.Add(leaseDuration),
-				"observed_revision": gorm.Expr("observed_revision + 1"),
-			})
+			Where("id = ? AND config_revision >= ? AND (observed_revision < ? OR observed_revision > config_revision)", resource.ID, appliedRevision, appliedRevision).
+			Update("observed_revision", appliedRevision)
 		if updated.Error != nil {
 			return updated.Error
 		}
 		if updated.RowsAffected != 1 {
-			return ErrTechnicalResourceDisabled
+			return ErrProviderSupplyVersionConflict
 		}
-		if err := tx.First(resource, "id = ?", resource.ID).Error; err != nil {
-			return err
-		}
-		if credential.SourceType == model.TechnicalResourceBindingLegacyNode {
-			var node model.Node
-			if err := tx.First(&node, "id = ?", credential.SourceID).Error; err != nil {
-				return err
-			}
-			if err := EnsureLegacyHostPlatformResource(tx, resource, &node, 0, now); err != nil {
-				return err
-			}
-		}
+		resource.ObservedRevision = appliedRevision
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	return resource, nil
+	return resource, err
 }
 
 func (s *ProviderSupplyService) ExpireTechnicalResourceLeases(ctx context.Context, at time.Time) (int64, error) {
@@ -694,8 +689,7 @@ func (s *ProviderSupplyService) ExpireTechnicalResourceLeases(ctx context.Contex
 		Where("lifecycle_state <> ? AND lease_expires_at IS NOT NULL AND julianday(lease_expires_at) <= julianday(?) AND health_state <> ?",
 			model.TechnicalResourceRetired, at.UTC(), model.ResourceHealthOffline).
 		Updates(map[string]any{
-			"health_state":      model.ResourceHealthOffline,
-			"observed_revision": gorm.Expr("observed_revision + 1"),
+			"health_state": model.ResourceHealthOffline,
 		})
 	return result.RowsAffected, result.Error
 }

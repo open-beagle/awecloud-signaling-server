@@ -656,25 +656,26 @@ type AgentHeartbeatRequest struct {
 	// 已连接的 Endpoint 列表（Agent 上报）
 	ConnectedEndpoints []*ConnectedEndpoint `protobuf:"bytes,11,rep,name=connected_endpoints,json=connectedEndpoints,proto3" json:"connected_endpoints,omitempty"` // 已连接的 Endpoint 列表
 	// 操作审计记录（Agent 上报）
-	AuditRecords                          []*OperationAuditRecord                 `protobuf:"bytes,12,rep,name=audit_records,json=auditRecords,proto3" json:"audit_records,omitempty"`                                                   // 操作审计记录
-	DeviceName                            string                                  `protobuf:"bytes,13,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`                                                         // 设备名称（Node.Name，即 DeployToken.Name）
-	Version                               string                                  `protobuf:"bytes,14,opt,name=version,proto3" json:"version,omitempty"`                                                                                 // Agent 当前运行版本
-	SystemInfo                            *SystemInfo                             `protobuf:"bytes,15,opt,name=system_info,json=systemInfo,proto3" json:"system_info,omitempty"`                                                         // Agent 运行平台信息
-	UpdaterProtocol                       string                                  `protobuf:"bytes,16,opt,name=updater_protocol,json=updaterProtocol,proto3" json:"updater_protocol,omitempty"`                                          // 支持的 updater 协议版本
-	UpdateStatuses                        []*UpdateStatus                         `protobuf:"bytes,17,rep,name=update_statuses,json=updateStatuses,proto3" json:"update_statuses,omitempty"`                                             // Agent 自身更新状态
-	ContainerCandidates                   []*ContainerDiscoveryCandidate          `protobuf:"bytes,18,rep,name=container_candidates,json=containerCandidates,proto3" json:"container_candidates,omitempty"`                              // ContainerSSH 运行时候选（仅运行态证据）
-	ContainerSshProtocol                  string                                  `protobuf:"bytes,19,opt,name=container_ssh_protocol,json=containerSshProtocol,proto3" json:"container_ssh_protocol,omitempty"`                         // 支持的 ContainerSSH 协议版本；空表示不支持
-	ContainerSshSessionEvents             []*ContainerSSHSessionEvent             `protobuf:"bytes,20,rep,name=container_ssh_session_events,json=containerSshSessionEvents,proto3" json:"container_ssh_session_events,omitempty"`        // 幂等会话生命周期事件
-	SessionAuthorizationProtocol          string                                  `protobuf:"bytes,21,opt,name=session_authorization_protocol,json=sessionAuthorizationProtocol,proto3" json:"session_authorization_protocol,omitempty"` // 明确协商 resource_session_v2；空表示不支持
-	AuthorizationSnapshotAckRevision      int64                                   `protobuf:"varint,22,opt,name=authorization_snapshot_ack_revision,json=authorizationSnapshotAckRevision,proto3" json:"authorization_snapshot_ack_revision,omitempty"`
-	AuthorizationSnapshotAckHash          string                                  `protobuf:"bytes,23,opt,name=authorization_snapshot_ack_hash,json=authorizationSnapshotAckHash,proto3" json:"authorization_snapshot_ack_hash,omitempty"`
-	SessionTerminationAcks                []*ResourceSessionTerminationAckV2      `protobuf:"bytes,24,rep,name=session_termination_acks,json=sessionTerminationAcks,proto3" json:"session_termination_acks,omitempty"`
-	ResourceSessionEventsV2               []*ResourceSessionEventV2               `protobuf:"bytes,25,rep,name=resource_session_events_v2,json=resourceSessionEventsV2,proto3" json:"resource_session_events_v2,omitempty"`
-	EndpointSessionAuthorizationReportsV2 []*EndpointSessionAuthorizationReportV2 `protobuf:"bytes,26,rep,name=endpoint_session_authorization_reports_v2,json=endpointSessionAuthorizationReportsV2,proto3" json:"endpoint_session_authorization_reports_v2,omitempty"`
-	CommitId                              string                                  `protobuf:"bytes,27,opt,name=commit_id,json=commitId,proto3" json:"commit_id,omitempty"`             // Agent 当前运行 Git SHA
-	BinarySha256                          string                                  `protobuf:"bytes,28,opt,name=binary_sha256,json=binarySha256,proto3" json:"binary_sha256,omitempty"` // Agent 可执行文件 SHA256 摘要
-	unknownFields                         protoimpl.UnknownFields
-	sizeCache                             protoimpl.SizeCache
+	AuditRecords                           []*OperationAuditRecord                 `protobuf:"bytes,12,rep,name=audit_records,json=auditRecords,proto3" json:"audit_records,omitempty"`                                                   // 操作审计记录
+	DeviceName                             string                                  `protobuf:"bytes,13,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`                                                         // 设备名称（Node.Name，即 DeployToken.Name）
+	Version                                string                                  `protobuf:"bytes,14,opt,name=version,proto3" json:"version,omitempty"`                                                                                 // Agent 当前运行版本
+	SystemInfo                             *SystemInfo                             `protobuf:"bytes,15,opt,name=system_info,json=systemInfo,proto3" json:"system_info,omitempty"`                                                         // Agent 运行平台信息
+	UpdaterProtocol                        string                                  `protobuf:"bytes,16,opt,name=updater_protocol,json=updaterProtocol,proto3" json:"updater_protocol,omitempty"`                                          // 支持的 updater 协议版本
+	UpdateStatuses                         []*UpdateStatus                         `protobuf:"bytes,17,rep,name=update_statuses,json=updateStatuses,proto3" json:"update_statuses,omitempty"`                                             // Agent 自身更新状态
+	ContainerCandidates                    []*ContainerDiscoveryCandidate          `protobuf:"bytes,18,rep,name=container_candidates,json=containerCandidates,proto3" json:"container_candidates,omitempty"`                              // ContainerSSH 运行时候选（仅运行态证据）
+	ContainerSshProtocol                   string                                  `protobuf:"bytes,19,opt,name=container_ssh_protocol,json=containerSshProtocol,proto3" json:"container_ssh_protocol,omitempty"`                         // 支持的 ContainerSSH 协议版本；空表示不支持
+	ContainerSshSessionEvents              []*ContainerSSHSessionEvent             `protobuf:"bytes,20,rep,name=container_ssh_session_events,json=containerSshSessionEvents,proto3" json:"container_ssh_session_events,omitempty"`        // 幂等会话生命周期事件
+	SessionAuthorizationProtocol           string                                  `protobuf:"bytes,21,opt,name=session_authorization_protocol,json=sessionAuthorizationProtocol,proto3" json:"session_authorization_protocol,omitempty"` // 明确协商 resource_session_v2；空表示不支持
+	AuthorizationSnapshotAckRevision       int64                                   `protobuf:"varint,22,opt,name=authorization_snapshot_ack_revision,json=authorizationSnapshotAckRevision,proto3" json:"authorization_snapshot_ack_revision,omitempty"`
+	AuthorizationSnapshotAckHash           string                                  `protobuf:"bytes,23,opt,name=authorization_snapshot_ack_hash,json=authorizationSnapshotAckHash,proto3" json:"authorization_snapshot_ack_hash,omitempty"`
+	SessionTerminationAcks                 []*ResourceSessionTerminationAckV2      `protobuf:"bytes,24,rep,name=session_termination_acks,json=sessionTerminationAcks,proto3" json:"session_termination_acks,omitempty"`
+	ResourceSessionEventsV2                []*ResourceSessionEventV2               `protobuf:"bytes,25,rep,name=resource_session_events_v2,json=resourceSessionEventsV2,proto3" json:"resource_session_events_v2,omitempty"`
+	EndpointSessionAuthorizationReportsV2  []*EndpointSessionAuthorizationReportV2 `protobuf:"bytes,26,rep,name=endpoint_session_authorization_reports_v2,json=endpointSessionAuthorizationReportsV2,proto3" json:"endpoint_session_authorization_reports_v2,omitempty"`
+	CommitId                               string                                  `protobuf:"bytes,27,opt,name=commit_id,json=commitId,proto3" json:"commit_id,omitempty"`                                                                                                  // Agent 当前运行 Git SHA
+	BinarySha256                           string                                  `protobuf:"bytes,28,opt,name=binary_sha256,json=binarySha256,proto3" json:"binary_sha256,omitempty"`                                                                                      // Agent 可执行文件 SHA256 摘要
+	AppliedTechnicalResourceConfigRevision int64                                   `protobuf:"varint,29,opt,name=applied_technical_resource_config_revision,json=appliedTechnicalResourceConfigRevision,proto3" json:"applied_technical_resource_config_revision,omitempty"` // 已成功应用的 TechnicalResource 配置版本
+	unknownFields                          protoimpl.UnknownFields
+	sizeCache                              protoimpl.SizeCache
 }
 
 func (x *AgentHeartbeatRequest) Reset() {
@@ -901,6 +902,13 @@ func (x *AgentHeartbeatRequest) GetBinarySha256() string {
 		return x.BinarySha256
 	}
 	return ""
+}
+
+func (x *AgentHeartbeatRequest) GetAppliedTechnicalResourceConfigRevision() int64 {
+	if x != nil {
+		return x.AppliedTechnicalResourceConfigRevision
+	}
+	return 0
 }
 
 // ConnectedEndpoint Agent 上报的已连接 Endpoint 信息
@@ -1385,6 +1393,7 @@ type AgentHeartbeatResponse struct {
 	ResourceSessionEventAcksV2       []*ResourceSessionEventAckV2              `protobuf:"bytes,22,rep,name=resource_session_event_acks_v2,json=resourceSessionEventAcksV2,proto3" json:"resource_session_event_acks_v2,omitempty"`
 	EndpointAuthorizationSnapshotsV2 []*EndpointSessionAuthorizationSnapshotV2 `protobuf:"bytes,23,rep,name=endpoint_authorization_snapshots_v2,json=endpointAuthorizationSnapshotsV2,proto3" json:"endpoint_authorization_snapshots_v2,omitempty"`
 	UpdateHealthConfirmations        []*UpdateHealthConfirmation               `protobuf:"bytes,24,rep,name=update_health_confirmations,json=updateHealthConfirmations,proto3" json:"update_health_confirmations,omitempty"`
+	TechnicalResourceConfigRevision  int64                                     `protobuf:"varint,25,opt,name=technical_resource_config_revision,json=technicalResourceConfigRevision,proto3" json:"technical_resource_config_revision,omitempty"` // 当前 TechnicalResource 期望配置版本
 	unknownFields                    protoimpl.UnknownFields
 	sizeCache                        protoimpl.SizeCache
 }
@@ -1585,6 +1594,13 @@ func (x *AgentHeartbeatResponse) GetUpdateHealthConfirmations() []*UpdateHealthC
 		return x.UpdateHealthConfirmations
 	}
 	return nil
+}
+
+func (x *AgentHeartbeatResponse) GetTechnicalResourceConfigRevision() int64 {
+	if x != nil {
+		return x.TechnicalResourceConfigRevision
+	}
+	return 0
 }
 
 // EndpointCapabilityConfig Server 下发给 Agent 的 Endpoint 能力开关配置
@@ -3806,7 +3822,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\n" +
 	"forward_id\x18\x01 \x01(\tR\tforwardId\x12\x18\n" +
 	"\arunning\x18\x02 \x01(\bR\arunning\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\xe9\x0e\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xc5\x0f\n" +
 	"\x15AgentHeartbeatRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\x04R\aagentId\x12\x1b\n" +
 	"\ttunnel_ip\x18\x02 \x01(\tR\btunnelIp\x12)\n" +
@@ -3838,7 +3854,8 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\x1aresource_session_events_v2\x18\x19 \x03(\v2*.awecloud.signaling.ResourceSessionEventV2R\x17resourceSessionEventsV2\x12\x92\x01\n" +
 	")endpoint_session_authorization_reports_v2\x18\x1a \x03(\v28.awecloud.signaling.EndpointSessionAuthorizationReportV2R%endpointSessionAuthorizationReportsV2\x12\x1b\n" +
 	"\tcommit_id\x18\x1b \x01(\tR\bcommitId\x12#\n" +
-	"\rbinary_sha256\x18\x1c \x01(\tR\fbinarySha256\"\xd6\x05\n" +
+	"\rbinary_sha256\x18\x1c \x01(\tR\fbinarySha256\x12Z\n" +
+	"*applied_technical_resource_config_revision\x18\x1d \x01(\x03R&appliedTechnicalResourceConfigRevision\"\xd6\x05\n" +
 	"\x11ConnectedEndpoint\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12N\n" +
@@ -3890,7 +3907,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"sourceAddr\x12\x1f\n" +
 	"\vtarget_addr\x18\x05 \x01(\tR\n" +
 	"targetAddr\x12\x18\n" +
-	"\aenabled\x18\x06 \x01(\bR\aenabled\"\xfe\x10\n" +
+	"\aenabled\x18\x06 \x01(\bR\aenabled\"\xcb\x11\n" +
 	"\x16AgentHeartbeatResponse\x12%\n" +
 	"\x0econfig_version\x18\x01 \x01(\x03R\rconfigVersion\x12=\n" +
 	"\bservices\x18\x02 \x03(\v2!.awecloud.signaling.ServiceConfigR\bservices\x12=\n" +
@@ -3916,7 +3933,8 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\x19authorization_snapshot_v2\x18\x15 \x01(\v2:.awecloud.signaling.ResourceSessionAuthorizationSnapshotV2R\x17authorizationSnapshotV2\x12q\n" +
 	"\x1eresource_session_event_acks_v2\x18\x16 \x03(\v2-.awecloud.signaling.ResourceSessionEventAckV2R\x1aresourceSessionEventAcksV2\x12\x89\x01\n" +
 	"#endpoint_authorization_snapshots_v2\x18\x17 \x03(\v2:.awecloud.signaling.EndpointSessionAuthorizationSnapshotV2R endpointAuthorizationSnapshotsV2\x12l\n" +
-	"\x1bupdate_health_confirmations\x18\x18 \x03(\v2,.awecloud.signaling.UpdateHealthConfirmationR\x19updateHealthConfirmations\"\xea\x03\n" +
+	"\x1bupdate_health_confirmations\x18\x18 \x03(\v2,.awecloud.signaling.UpdateHealthConfirmationR\x19updateHealthConfirmations\x12K\n" +
+	"\"technical_resource_config_revision\x18\x19 \x01(\x03R\x1ftechnicalResourceConfigRevision\"\xea\x03\n" +
 	"\x18EndpointCapabilityConfig\x12#\n" +
 	"\rendpoint_name\x18\x01 \x01(\tR\fendpointName\x12\x1f\n" +
 	"\vssh_enabled\x18\x02 \x01(\bR\n" +

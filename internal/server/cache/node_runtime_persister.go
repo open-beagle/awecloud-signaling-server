@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 const (
 	defaultPersistInterval = 5 * time.Minute
 	highPriorityDelay      = 1 * time.Second
+	technicalResourceLease = 2*defaultPersistInterval + time.Minute
 )
 
 // NodeRuntimePersister 负责将 NodeRuntimeStore 中的脏节点合并批量落库
@@ -135,6 +137,29 @@ func (p *NodeRuntimePersister) Flush(parentCtx context.Context) {
 
 			if err := tx.Model(&model.Node{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 				return err
+			}
+			if !snapshot.LastHeartbeat.IsZero() {
+				sourceID := fmt.Sprint(id)
+				resourceIDs := tx.Model(&model.TechnicalResourceBinding{}).
+					Select("technical_resource_id").
+					Where("source_type = ? AND source_id = ? AND enabled = ?", model.TechnicalResourceBindingLegacyNode, sourceID, true)
+				if err := tx.Model(&model.TechnicalResource{}).
+					Where("id IN (?) AND lifecycle_state = ?", resourceIDs, model.TechnicalResourceRegistered).
+					Updates(map[string]any{
+						"health_state":     model.ResourceHealthOnline,
+						"last_received_at": snapshot.LastHeartbeat,
+						"lease_expires_at": start.Add(technicalResourceLease),
+					}).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&model.SupplyCandidate{}).
+					Where("technical_resource_id IN (?) AND resource_type = ? AND stable_key = ?", resourceIDs, model.SupplyResourceHost, "legacy-host-legacy_node:"+sourceID).
+					Updates(map[string]any{
+						"last_observed_at": start,
+						"lease_expires_at": start.Add(technicalResourceLease),
+					}).Error; err != nil {
+					return err
+				}
 			}
 			clearedRevisions[id] = snapshot.Revision
 		}

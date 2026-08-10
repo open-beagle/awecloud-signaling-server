@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -84,7 +86,8 @@ type Agent struct {
 	lanDetector *LANDetector
 
 	// 配置版本（用于增量同步）
-	configVersion int64
+	configVersion                          int64
+	appliedTechnicalResourceConfigRevision atomic.Int64
 
 	// 域名后缀（从 Server 心跳响应获取）
 	domainSuffix string
@@ -840,11 +843,12 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 	}
 
 	req := &pb.AgentHeartbeatRequest{
-		AgentId:         a.agentID,
-		Version:         a.version,
-		CommitId:        a.gitCommit,
-		BinarySha256:    a.binarySHA256,
-		UpdaterProtocol: "v2",
+		AgentId:                                a.agentID,
+		Version:                                a.version,
+		CommitId:                               a.gitCommit,
+		BinarySha256:                           a.binarySHA256,
+		UpdaterProtocol:                        "v2",
+		AppliedTechnicalResourceConfigRevision: a.appliedTechnicalResourceConfigRevision.Load(),
 		SystemInfo: &pb.SystemInfo{
 			Os:       runtime.GOOS,
 			Arch:     runtime.GOARCH,
@@ -1055,9 +1059,21 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 		logger.Infof("收到 %d 个 Agent 更新任务", len(resp.UpdateDirectives))
 	}
 
-	// 处理 Server 远程能力配置（每次心跳都检查，不受 configVersion 控制）
-	if resp.CapabilityConfig != nil {
-		a.applyCapabilityConfig(resp.CapabilityConfig)
+	// TechnicalResource 配置只有成功应用后才确认；同一 revision 不重复启停组件。
+	targetRevision := resp.TechnicalResourceConfigRevision
+	if targetRevision > a.appliedTechnicalResourceConfigRevision.Load() {
+		if resp.CapabilityConfig == nil {
+			logger.Warnf("TechnicalResource 配置缺少能力内容，不确认 revision: %d", targetRevision)
+		} else if err := a.applyCapabilityConfig(resp.CapabilityConfig); err != nil {
+			logger.Warnf("TechnicalResource 配置应用失败，不确认 revision: %d, err=%v", targetRevision, err)
+		} else {
+			a.appliedTechnicalResourceConfigRevision.Store(targetRevision)
+		}
+	} else if targetRevision == 0 && resp.CapabilityConfig != nil {
+		// 非 TechnicalResource Agent 仍消费现有能力配置，但不产生 revision ACK。
+		if err := a.applyCapabilityConfig(resp.CapabilityConfig); err != nil {
+			logger.Warnf("Agent 能力配置应用失败: %v", err)
+		}
 	}
 	a.syncInventoryReporter(resp)
 
@@ -1555,7 +1571,8 @@ func (a *Agent) startHealthServer() error {
 
 // applyCapabilityConfig 应用 Server 远程能力配置
 // 根据 xxx_set 标志位决定是否使用 Server 下发的值，否则使用本地配置
-func (a *Agent) applyCapabilityConfig(cap *pb.AgentCapabilityConfig) {
+func (a *Agent) applyCapabilityConfig(cap *pb.AgentCapabilityConfig) error {
+	var applyErr error
 	// === SSH ===
 	if cap.SshEnabledSet {
 		if a.isClientMode {
@@ -1570,10 +1587,14 @@ func (a *Agent) applyCapabilityConfig(cap *pb.AgentCapabilityConfig) {
 					if cap.SshEnabled {
 						if err := a.tsManager.EnableSSHRemote(); err != nil {
 							logger.Warnf("远程启用 SSH 失败: %v", err)
+							a.config.Tunnel.EnableSSH = oldSSH
+							applyErr = errors.Join(applyErr, err)
 						}
 					} else {
 						if err := a.tsManager.DisableSSHRemote(); err != nil {
 							logger.Warnf("远程禁用 SSH 失败: %v", err)
+							a.config.Tunnel.EnableSSH = oldSSH
+							applyErr = errors.Join(applyErr, err)
 						}
 					}
 				}
@@ -1606,9 +1627,12 @@ func (a *Agent) applyCapabilityConfig(cap *pb.AgentCapabilityConfig) {
 				needRestart = true
 			}
 		}
+		if cap.K8SEnabled && a.k8sAPIProxy == nil {
+			needRestart = true
+		}
 
 		if needRestart {
-			a.applyK8SAPIConfig()
+			applyErr = errors.Join(applyErr, a.applyK8SAPIConfig())
 		}
 	}
 
@@ -1645,20 +1669,24 @@ func (a *Agent) applyCapabilityConfig(cap *pb.AgentCapabilityConfig) {
 				needRestart = true
 			}
 		}
+		if cap.SvcEnabled && (a.svcProxy == nil || a.svcInformer == nil) {
+			needRestart = true
+		}
 
 		if needRestart {
-			a.applySVCConfig()
+			applyErr = errors.Join(applyErr, a.applySVCConfig())
 		}
 	}
 
 	// === Endpoint ===
 	if cap.EndpointEnabledSet {
-		a.applyEndpointConfig(cap)
+		applyErr = errors.Join(applyErr, a.applyEndpointConfig(cap))
 	}
+	return applyErr
 }
 
 // applyK8SAPIConfig 应用 K8S API 配置变更（启停模块）
-func (a *Agent) applyK8SAPIConfig() {
+func (a *Agent) applyK8SAPIConfig() error {
 	// 先停止现有模块
 	if a.k8sAPIProxy != nil {
 		a.k8sAPIProxy.Stop()
@@ -1669,14 +1697,16 @@ func (a *Agent) applyK8SAPIConfig() {
 	if a.config.K8S.Enabled {
 		if err := a.startK8SAPIProxy(); err != nil {
 			logger.Warnf("远程启动 K8S API 代理失败: %v", err)
+			return err
 		}
 	} else {
 		logger.Info("K8S API 代理已通过远程配置关闭")
 	}
+	return nil
 }
 
 // applySVCConfig 应用 K8S Service 配置变更（启停模块）
-func (a *Agent) applySVCConfig() {
+func (a *Agent) applySVCConfig() error {
 	// 先停止现有模块
 	if a.svcProxy != nil {
 		a.svcProxy.Stop()
@@ -1691,6 +1721,7 @@ func (a *Agent) applySVCConfig() {
 	if a.config.SVC.Enabled {
 		if err := a.startK8SServiceModules(); err != nil {
 			logger.Warnf("远程启动 K8S Service 模块失败: %v", err)
+			return err
 		} else if a.svcProxy != nil && a.endpointServer != nil {
 			// SVC 模块重启后，重新绑定 EndpointServer 引用（Endpoint 跳跃路径需要）
 			a.svcProxy.SetEndpointServer(a.endpointServer)
@@ -1699,10 +1730,12 @@ func (a *Agent) applySVCConfig() {
 	} else {
 		logger.Info("K8S Service 模块已通过远程配置关闭")
 	}
+	return nil
 }
 
 // applyEndpointConfig 应用 Endpoint 配置变更（启停 Endpoint gRPC Server）
-func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
+func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) error {
+	var applyErr error
 	enabled := cap.EndpointEnabled
 
 	// 确定监听端口
@@ -1726,14 +1759,17 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 			if err := a.endpointServer.Start(); err != nil {
 				logger.Warnf("启动 Endpoint gRPC Server 失败: %v", err)
 				a.endpointServer = nil
+				return err
 			} else {
 				// 启动 Endpoint SSH 代理（在 tsnet 上监听，接收 Desktop SSH 连接）
 				if a.tsManager != nil && a.tsManager.IsConnected() {
 					sshProxy, err := NewEndpointSSHProxy(a.endpointServer, a.tsManager, a.auditCollector, a.permCache, a.grpcClient, a.config.Tunnel.StateDir, a.ctx)
 					if err != nil {
 						logger.Warnf("创建 Endpoint SSH 代理失败: %v", err)
+						applyErr = errors.Join(applyErr, err)
 					} else if err := sshProxy.Start(); err != nil {
 						logger.Warnf("启动 Endpoint SSH 代理失败: %v", err)
+						applyErr = errors.Join(applyErr, err)
 					} else {
 						a.endpointSSHProxy = sshProxy
 					}
@@ -1742,6 +1778,7 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 					k8sapiProxy := NewEndpointK8SAPIProxy(a.endpointServer, a.tsManager, a.permCache, a.auditCollector, a.ctx)
 					if err := k8sapiProxy.Start(); err != nil {
 						logger.Warnf("启动 Endpoint K8SAPI 代理失败: %v", err)
+						applyErr = errors.Join(applyErr, err)
 					} else {
 						a.endpointK8SAPIProxy = k8sapiProxy
 					}
@@ -1781,6 +1818,24 @@ func (a *Agent) applyEndpointConfig(cap *pb.AgentCapabilityConfig) {
 			a.svcProxy.SetEndpointServer(nil)
 		}
 	}
+	if applyErr != nil && enabled {
+		if a.endpointK8SAPIProxy != nil {
+			a.endpointK8SAPIProxy.Stop()
+			a.endpointK8SAPIProxy = nil
+		}
+		if a.endpointSSHProxy != nil {
+			a.endpointSSHProxy.Stop()
+			a.endpointSSHProxy = nil
+		}
+		if a.endpointServer != nil {
+			a.endpointServer.Stop()
+			a.endpointServer = nil
+		}
+		if a.svcProxy != nil {
+			a.svcProxy.SetEndpointServer(nil)
+		}
+	}
+	return applyErr
 }
 
 // updateProxiesLoop 代理更新循环（Client 模式专用）

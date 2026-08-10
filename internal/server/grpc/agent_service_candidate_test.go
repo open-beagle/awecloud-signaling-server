@@ -92,7 +92,7 @@ func TestLegacyAgentHeartbeatWithoutContainerCandidatesRemainsCompatible(t *test
 	require.Equal(t, "", node.ContainerSSHProtocol)
 }
 
-func TestAgentHeartbeatRefreshesBoundTechnicalResourceHealth(t *testing.T) {
+func TestAgentHeartbeatDoesNotWriteBoundTechnicalResource(t *testing.T) {
 	oldDB := db.DB
 	t.Cleanup(func() { db.DB = oldDB })
 	testDB, err := gorm.Open(sqlite.Open("file:agent_technical_resource_heartbeat_test?mode=memory&cache=shared"), &gorm.Config{})
@@ -120,29 +120,23 @@ func TestAgentHeartbeatRefreshesBoundTechnicalResourceHealth(t *testing.T) {
 		SourceID: fmt.Sprint(node.ID), CredentialRevision: 1, Enabled: true, BoundByUserID: agent.ID, Reason: "test", RowVersion: 1,
 	}).Error)
 
-	before := time.Now().UTC()
-	server := &AgentServiceServer{providerSupply: service.NewProviderSupplyService(testDB)}
+	server := &AgentServiceServer{}
 	nodeID := server.handleHeartbeat(context.Background(), agent.ID, &pb.AgentHeartbeatRequest{
 		AgentId: agent.ID, DeviceName: node.Name, Hostname: "managed-host", Version: "v1.0.1",
 	})
 	require.Equal(t, node.ID, nodeID)
 	require.NoError(t, testDB.First(&resource, "id = ?", resource.ID).Error)
-	require.Equal(t, model.ResourceHealthOnline, resource.HealthState)
-	require.NotNil(t, resource.LastReceivedAt)
-	require.NotNil(t, resource.LeaseExpiresAt)
-	require.False(t, resource.LastReceivedAt.Before(before))
-	require.WithinDuration(t, resource.LastReceivedAt.Add(technicalResourceHeartbeatLeaseDuration), *resource.LeaseExpiresAt, time.Second)
+	require.Equal(t, model.ResourceHealthUnknown, resource.HealthState)
+	require.Nil(t, resource.LastReceivedAt)
+	require.Nil(t, resource.LeaseExpiresAt)
+	require.Zero(t, resource.ObservedRevision)
 
 	hostStableKey := "legacy-host-legacy_node:" + fmt.Sprint(node.ID)
-	var candidate model.SupplyCandidate
-	require.NoError(t, testDB.First(&candidate, "technical_resource_id = ? AND resource_type = ? AND stable_key = ?", resource.ID, model.SupplyResourceHost, hostStableKey).Error)
-	require.Equal(t, model.SupplyCandidateLinked, candidate.ReviewState)
-	var hostResource model.PlatformResource
-	require.NoError(t, testDB.First(&hostResource, "provider_id = ? AND type = ? AND stable_key = ?", provider.ID, model.SupplyResourceHost, hostStableKey).Error)
-	require.Equal(t, node.Name, hostResource.DisplayName)
-	require.Equal(t, model.PlatformResourceActive, hostResource.LifecycleState)
-	var source model.PlatformResourceSource
-	require.NoError(t, testDB.First(&source, "platform_resource_id = ? AND supply_candidate_id = ? AND is_primary = ?", hostResource.ID, candidate.ID, true).Error)
+	var candidateCount int64
+	require.NoError(t, testDB.Model(&model.SupplyCandidate{}).
+		Where("technical_resource_id = ? AND resource_type = ? AND stable_key = ?", resource.ID, model.SupplyResourceHost, hostStableKey).
+		Count(&candidateCount).Error)
+	require.Zero(t, candidateCount)
 }
 
 func TestAgentHeartbeatRefreshesNodeSSHDomainTargetIP(t *testing.T) {

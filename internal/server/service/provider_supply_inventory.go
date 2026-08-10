@@ -150,7 +150,6 @@ func (s *ProviderSupplyService) ReceiveSupplyInventoryBatch(ctx context.Context,
 				"last_sequence":     input.Sequence,
 				"last_payload_hash": input.PayloadHash,
 				"last_received_at":  now,
-				"observed_revision": gorm.Expr("observed_revision + 1"),
 			})
 		if updated.Error != nil {
 			return updated.Error

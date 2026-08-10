@@ -33,3 +33,44 @@ func TestEnsureUpdaterReleaseSchemaRemovesObsoleteVersionConstraint(t *testing.T
 	require.False(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version"))
 	require.True(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version_commit"))
 }
+
+func TestEnsureUpdaterReleaseSchemaRebuildsArtifactRoleConstraint(t *testing.T) {
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, database.Exec(`
+		CREATE TABLE artifact (
+			id text PRIMARY KEY,
+			release_id text NOT NULL,
+			os text NOT NULL,
+			arch text NOT NULL,
+			role text NOT NULL DEFAULT 'app',
+			package_type text NOT NULL DEFAULT 'binary',
+			filename text NOT NULL,
+			download_url text NOT NULL,
+			size integer NOT NULL,
+			sha256 text NOT NULL,
+			status text NOT NULL DEFAULT 'available',
+			created_at datetime,
+			updated_at datetime
+		);
+		CREATE UNIQUE INDEX uk_artifact_release_platform ON artifact(release_id, os, arch);
+	`).Error)
+
+	require.NoError(t, ensureUpdaterReleaseSchema(database))
+	require.NoError(t, database.AutoMigrate(&model.Artifact{}))
+
+	app := model.Artifact{
+		ID: "app", ReleaseID: "release", OS: "windows", Arch: "amd64", Role: "app",
+		Filename: "desktop.exe", DownloadURL: "https://artifacts.example/desktop.exe", Size: 1, SHA256: "app",
+	}
+	launcher := model.Artifact{
+		ID: "launcher", ReleaseID: "release", OS: "windows", Arch: "amd64", Role: "launcher",
+		Filename: "launcher.exe", DownloadURL: "https://artifacts.example/launcher.exe", Size: 1, SHA256: "launcher",
+	}
+	require.NoError(t, database.Create(&app).Error)
+	require.NoError(t, database.Create(&launcher).Error)
+
+	duplicateLauncher := launcher
+	duplicateLauncher.ID = "duplicate-launcher"
+	require.Error(t, database.Create(&duplicateLauncher).Error)
+}

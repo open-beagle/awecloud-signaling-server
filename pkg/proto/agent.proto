@@ -166,6 +166,7 @@ message AgentHeartbeatRequest {
   repeated EndpointSessionAuthorizationReportV2 endpoint_session_authorization_reports_v2 = 26;
   string commit_id = 27; // Agent 当前运行 Git SHA
   string binary_sha256 = 28; // Agent 可执行文件 SHA256 摘要
+  int64 applied_technical_resource_config_revision = 29; // 已成功应用的 TechnicalResource 配置版本
 }
 
 // ConnectedEndpoint Agent 上报的已连接 Endpoint 信息
@@ -254,6 +255,7 @@ message AgentHeartbeatResponse {
   repeated ResourceSessionEventAckV2 resource_session_event_acks_v2 = 22;
   repeated EndpointSessionAuthorizationSnapshotV2 endpoint_authorization_snapshots_v2 = 23;
   repeated UpdateHealthConfirmation update_health_confirmations = 24;
+  int64 technical_resource_config_revision = 25; // 当前 TechnicalResource 期望配置版本
 }
 
 // EndpointCapabilityConfig Server 下发给 Agent 的 Endpoint 能力开关配置

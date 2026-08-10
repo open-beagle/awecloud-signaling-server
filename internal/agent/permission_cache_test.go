@@ -3,6 +3,7 @@ package agent
 import (
 	"testing"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 	"github.com/stretchr/testify/require"
 )
@@ -25,6 +26,18 @@ func TestContainerSSHPermissionProtoSnapshotReplacesCache(t *testing.T) {
 	require.False(t, allowed)
 	_, routed = cache.ResolveContainerSSHRoute(50200)
 	require.False(t, routed)
+}
+
+func TestTechnicalResourceConfigRevisionAcknowledgedOnlyWithConfig(t *testing.T) {
+	agent := &Agent{config: &config.AgentConfig{}}
+	agent.handleHeartbeatResponse(&pb.AgentHeartbeatResponse{TechnicalResourceConfigRevision: 4})
+	require.Zero(t, agent.appliedTechnicalResourceConfigRevision.Load())
+
+	agent.handleHeartbeatResponse(&pb.AgentHeartbeatResponse{
+		TechnicalResourceConfigRevision: 4,
+		CapabilityConfig:                &pb.AgentCapabilityConfig{},
+	})
+	require.Equal(t, int64(4), agent.appliedTechnicalResourceConfigRevision.Load())
 }
 
 func TestContainerSSHPermissionSnapshotRejectsConflictingPortRoutes(t *testing.T) {
