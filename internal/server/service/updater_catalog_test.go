@@ -62,7 +62,7 @@ func TestUpdaterCatalogSyncCreatesPublishedReleaseAndIsIdempotent(t *testing.T) 
 	require.Equal(t, UpdaterCatalogSyncResult{Scanned: 1, Existing: 1}, result)
 }
 
-func TestUpdaterCatalogSyncRejectsSameVersionWithDifferentCommit(t *testing.T) {
+func TestUpdaterCatalogSyncOverwritesSameVersionWithDifferentCommit(t *testing.T) {
 	database := updaterCatalogTestDB(t)
 	firstCommit := "0123456789abcdef0123456789abcdef01234567"
 	secondCommit := "abcdef0123456789abcdef0123456789abcdef01"
@@ -74,10 +74,8 @@ func TestUpdaterCatalogSyncRejectsSameVersionWithDifferentCommit(t *testing.T) {
 	require.NoError(t, err)
 
 	result, err := syncer.Sync(context.Background())
-	require.ErrorContains(t, err, "existing release commit_id conflicts")
-	require.Equal(t, 2, result.Scanned)
-	require.Equal(t, 1, result.Created)
-	require.Equal(t, 1, result.Failed)
+	require.NoError(t, err)
+	require.Equal(t, UpdaterCatalogSyncResult{Scanned: 2, Created: 1, Existing: 1}, result)
 
 	var releases []model.Release
 	require.NoError(t, database.Where("component = ? AND version = ?", model.ComponentAgent, "v1.0.0").Order("commit_id").Find(&releases).Error)
@@ -85,7 +83,7 @@ func TestUpdaterCatalogSyncRejectsSameVersionWithDifferentCommit(t *testing.T) {
 	require.Contains(t, []string{firstCommit, secondCommit}, releases[0].CommitID)
 }
 
-func TestUpdaterCatalogSyncRejectsArtifactMutation(t *testing.T) {
+func TestUpdaterCatalogSyncOverwritesArtifacts(t *testing.T) {
 	database := updaterCatalogTestDB(t)
 	store := &updaterCatalogMemoryStore{objects: map[string][]byte{
 		"updater/releases/agent/release.json": updaterCatalogTestManifest(t, updaterCatalogArtifactSHA),
@@ -97,12 +95,12 @@ func TestUpdaterCatalogSyncRejectsArtifactMutation(t *testing.T) {
 
 	store.objects["updater/releases/agent/release.json"] = updaterCatalogTestManifest(t, "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
 	result, err := syncer.Sync(context.Background())
-	require.ErrorContains(t, err, "existing release artifacts conflict")
-	require.Equal(t, 1, result.Failed)
+	require.NoError(t, err)
+	require.Equal(t, UpdaterCatalogSyncResult{Scanned: 1, Existing: 1}, result)
 
 	var artifact model.Artifact
 	require.NoError(t, database.First(&artifact).Error)
-	require.Equal(t, updaterCatalogArtifactSHA, artifact.SHA256)
+	require.Equal(t, "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", artifact.SHA256)
 }
 
 func TestHTTPUpdaterCatalogStoreReadsPublicHTTPSCatalog(t *testing.T) {

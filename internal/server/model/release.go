@@ -26,8 +26,8 @@ const (
 // to Artifact records so the release remains the single version source.
 type Release struct {
 	ID                  string        `gorm:"primaryKey;size:36" json:"id"`
-	Component           Component     `gorm:"size:20;not null;uniqueIndex:uk_release_component_version,priority:1;index" json:"component"`
-	Version             string        `gorm:"size:64;not null;uniqueIndex:uk_release_component_version,priority:2" json:"version"`
+	Component           Component     `gorm:"size:20;not null;uniqueIndex:uk_release_component;index" json:"component"`
+	Version             string        `gorm:"size:64;not null" json:"version"`
 	CommitID            string        `gorm:"size:40;not null;default:''" json:"commit_id"`
 	Channel             string        `gorm:"size:32;not null;default:'stable';index" json:"channel"`
 	Status              ReleaseStatus `gorm:"size:20;not null;default:'draft';index" json:"status"`

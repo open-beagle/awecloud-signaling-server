@@ -177,3 +177,10 @@ fi
 echo ""
 echo "Build completed successfully!"
 echo "Binaries are in: ${BIN_DIR}/"
+
+if [ "${RELEASE_ARTIFACTS:-false}" = "true" ]; then
+    BUILD_VERSION="${BUILD_VERSION}" GIT_COMMIT="${GIT_COMMIT}" SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" \
+        ARTIFACT_BASE_URL="${ARTIFACT_BASE_URL:?ARTIFACT_BASE_URL is required}" \
+        bash "${BUILD_DIR}/scripts/package-release.sh"
+    echo "Release files are in: ${BIN_DIR}/publish/"
+fi

@@ -10,7 +10,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
-func TestEnsureUpdaterReleaseSchemaKeepsLatestReleasePerComponentVersion(t *testing.T) {
+func TestEnsureUpdaterReleaseSchemaKeepsLatestReleasePerComponent(t *testing.T) {
 	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, database.Exec(`
@@ -24,7 +24,7 @@ func TestEnsureUpdaterReleaseSchemaKeepsLatestReleasePerComponentVersion(t *test
 		);
 		CREATE UNIQUE INDEX uk_release_component_version_commit ON release(component, version, commit_id);
 		INSERT INTO release (id, component, version, commit_id, published_at, created_at)
-		VALUES ('first', 'agent', 'v1.0.2', '0123456789abcdef0123456789abcdef01234567', '2026-08-10 10:00:00', '2026-08-10 10:00:00');
+		VALUES ('first', 'agent', 'v1.0.1', '0123456789abcdef0123456789abcdef01234567', '2026-08-10 10:00:00', '2026-08-10 10:00:00');
 		INSERT INTO release (id, component, version, commit_id, published_at, created_at)
 		VALUES ('second', 'agent', 'v1.0.2', 'abcdef0123456789abcdef0123456789abcdef01', '2026-08-10 11:00:00', '2026-08-10 11:00:00');
 		CREATE TABLE artifact (id text PRIMARY KEY, release_id text NOT NULL);
@@ -36,7 +36,7 @@ func TestEnsureUpdaterReleaseSchemaKeepsLatestReleasePerComponentVersion(t *test
 	`).Error)
 
 	require.NoError(t, ensureUpdaterReleaseSchema(database))
-	require.NoError(t, database.Exec(`CREATE UNIQUE INDEX uk_release_component_version ON release(component, version)`).Error)
+	require.NoError(t, database.Exec(`CREATE UNIQUE INDEX uk_release_component ON release(component)`).Error)
 
 	var releases []model.Release
 	require.NoError(t, database.Find(&releases).Error)
@@ -49,12 +49,12 @@ func TestEnsureUpdaterReleaseSchemaKeepsLatestReleasePerComponentVersion(t *test
 	require.Equal(t, int64(1), artifactCount)
 	require.Equal(t, int64(1), taskCount)
 	require.Equal(t, int64(1), eventCount)
-	require.True(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version"))
+	require.True(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component"))
 	require.False(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version_commit"))
 
 	require.Error(t, database.Exec(`
 		INSERT INTO release (id, component, version, commit_id)
-		VALUES ('duplicate', 'agent', 'v1.0.2', '1111111111111111111111111111111111111111')
+		VALUES ('duplicate', 'agent', 'v1.0.3', '1111111111111111111111111111111111111111')
 	`).Error)
 }
 

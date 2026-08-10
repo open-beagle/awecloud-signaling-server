@@ -267,13 +267,16 @@ func ensureUpdaterReleaseSchema(database *gorm.DB) error {
 		if err := tx.Exec(`DROP INDEX IF EXISTS uk_release_component_version_commit`).Error; err != nil {
 			return fmt.Errorf("remove obsolete release component/version/commit constraint: %w", err)
 		}
+		if err := tx.Exec(`DROP INDEX IF EXISTS uk_release_component_version`).Error; err != nil {
+			return fmt.Errorf("remove obsolete release component/version constraint: %w", err)
+		}
 		if !tx.Migrator().HasTable(&model.Release{}) {
 			return nil
 		}
 		staleReleaseIDs := `
 			SELECT id FROM (
 				SELECT id, ROW_NUMBER() OVER (
-					PARTITION BY component, version
+					PARTITION BY component
 					ORDER BY (published_at IS NOT NULL) DESC, published_at DESC, created_at DESC, id DESC
 				) AS position
 				FROM release

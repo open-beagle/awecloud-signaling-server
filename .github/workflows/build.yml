@@ -201,12 +201,14 @@ jobs:
           go-version: "1.26"
           cache: true
 
-      - name: Build Agent and Endpoint binaries
+      - name: Build binaries
         env:
           BUILD_VERSION: ${{ needs.prepare.outputs.version }}
           GOOS: linux
           GOARCHS: amd64,arm64
           BUILD_TARGETS: agent,endpoint
+          RELEASE_ARTIFACTS: "true"
+          ARTIFACT_BASE_URL: https://cache.ali.wodcloud.com/vscode/awecloud-signaling
         run: bash scripts/build.sh
 
       - name: Setup MinIO Client
@@ -215,223 +217,18 @@ jobs:
           chmod +x mc
           sudo mv mc /usr/local/bin/mc
 
-      - name: Publish Agent and Endpoint artifacts
+      - name: Publish artifacts
         env:
-          VERSION: ${{ needs.prepare.outputs.version }}
           S3_ENDPOINT: ${{ secrets.S3_ENDPOINT_ALIYUN }}
           S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY_ALIYUN }}
           S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY_ALIYUN }}
-          ARTIFACT_BASE_URL: https://cache.ali.wodcloud.com/vscode/awecloud-signaling
         run: |
           set -euo pipefail
           for name in S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY; do
             test -n "${!name}" || { echo "Missing required secret: ${name}" >&2; exit 1; }
           done
           mc alias set aliyun --api=S3v4 "${S3_ENDPOINT}" "${S3_ACCESS_KEY}" "${S3_SECRET_KEY}"
-          s3_bucket="aliyun/vscode/awecloud-signaling"
-
-          agent_amd64_sha="$(sha256sum bin/signal_agent-linux-amd64 | awk '{print $1}')"
-          agent_arm64_sha="$(sha256sum bin/signal_agent-linux-arm64 | awk '{print $1}')"
-          agent_amd64_size="$(stat -c %s bin/signal_agent-linux-amd64)"
-          agent_arm64_size="$(stat -c %s bin/signal_agent-linux-arm64)"
-          endpoint_amd64_sha="$(sha256sum bin/signal_endpoint-linux-amd64 | awk '{print $1}')"
-          endpoint_arm64_sha="$(sha256sum bin/signal_endpoint-linux-arm64 | awk '{print $1}')"
-          endpoint_amd64_size="$(stat -c %s bin/signal_endpoint-linux-amd64)"
-          endpoint_arm64_size="$(stat -c %s bin/signal_endpoint-linux-arm64)"
-
-          mc cp scripts/install_agent.sh "${s3_bucket}/install_agent.sh"
-          mc cp scripts/install_signal.sh "${s3_bucket}/install_signal.sh"
-          mc cp scripts/install_endpoint.sh "${s3_bucket}/install_endpoint.sh"
-
-          upload_immutable() {
-            local source="$1" target="$2" expected_sha="$3" existing_sha
-            if mc stat "${target}" >/dev/null 2>&1; then
-              existing_sha="$(mc cat "${target}" | sha256sum | awk '{print $1}')"
-              test "${existing_sha}" = "${expected_sha}" || { echo "Immutable artifact conflict: ${target}" >&2; exit 1; }
-              return
-            fi
-            mc cp "${source}" "${target}"
-            existing_sha="$(mc cat "${target}" | sha256sum | awk '{print $1}')"
-            test "${existing_sha}" = "${expected_sha}" || { echo "Uploaded artifact verification failed: ${target}" >&2; exit 1; }
-          }
-
-          agent_amd64_object="${s3_bucket}/agent/artifacts/linux/amd64/${agent_amd64_sha}/signal_agent"
-          agent_arm64_object="${s3_bucket}/agent/artifacts/linux/arm64/${agent_arm64_sha}/signal_agent"
-          endpoint_amd64_object="${s3_bucket}/endpoint/artifacts/linux/amd64/${endpoint_amd64_sha}/signal_endpoint"
-          endpoint_arm64_object="${s3_bucket}/endpoint/artifacts/linux/arm64/${endpoint_arm64_sha}/signal_endpoint"
-          upload_immutable bin/signal_agent-linux-amd64 "${agent_amd64_object}" "${agent_amd64_sha}"
-          upload_immutable bin/signal_agent-linux-arm64 "${agent_arm64_object}" "${agent_arm64_sha}"
-          upload_immutable bin/signal_endpoint-linux-amd64 "${endpoint_amd64_object}" "${endpoint_amd64_sha}"
-          upload_immutable bin/signal_endpoint-linux-arm64 "${endpoint_arm64_object}" "${endpoint_arm64_sha}"
-          mc cp bin/signal_endpoint-linux-amd64 "${s3_bucket}/signal_endpoint-${VERSION}-linux-amd64"
-          mc cp bin/signal_endpoint-linux-arm64 "${s3_bucket}/signal_endpoint-${VERSION}-linux-arm64"
-
-          mc stat "${agent_amd64_object}"
-          mc stat "${agent_arm64_object}"
-          mc stat "${endpoint_amd64_object}"
-          mc stat "${endpoint_arm64_object}"
-          mc stat "${s3_bucket}/signal_endpoint-${VERSION}-linux-amd64"
-          mc stat "${s3_bucket}/signal_endpoint-${VERSION}-linux-arm64"
-
-          published_at="$(date -u -d "@$(git show -s --format=%ct HEAD)" +%Y-%m-%dT%H:%M:%SZ)"
-          write_release_manifest() {
-            local component="$1" filename="$2" amd64_url="$3" arm64_url="$4" amd64_size="$5" arm64_size="$6" amd64_sha="$7" arm64_sha="$8"
-            jq -n \
-              --arg published_at "${published_at}" --arg component "${component}" \
-              --arg version "${VERSION}" --arg commit "${GITHUB_SHA}" \
-              --arg filename "${filename}" \
-              --arg amd64_url "${amd64_url}" --arg arm64_url "${arm64_url}" \
-              --arg amd64_sha "${amd64_sha}" --arg arm64_sha "${arm64_sha}" \
-              --argjson amd64_size "${amd64_size}" --argjson arm64_size "${arm64_size}" \
-              '{schema_version: 1, published_at: $published_at, release: {
-                component: $component, version: $version, commit_id: $commit, channel: "stable",
-                release_notes: (($component | ascii_upcase) + " build " + $commit), min_supported_version: ""
-              }, artifacts: [
-                {os: "linux", arch: "amd64", role: "app", package_type: "binary", filename: $filename, download_url: $amd64_url, size: $amd64_size, sha256: $amd64_sha},
-                {os: "linux", arch: "arm64", role: "app", package_type: "binary", filename: $filename, download_url: $arm64_url, size: $arm64_size, sha256: $arm64_sha}
-              ]}'
-          }
-
-          write_release_manifest agent signal_agent \
-            "${ARTIFACT_BASE_URL}/agent/artifacts/linux/amd64/${agent_amd64_sha}/signal_agent" \
-            "${ARTIFACT_BASE_URL}/agent/artifacts/linux/arm64/${agent_arm64_sha}/signal_agent" \
-            "${agent_amd64_size}" "${agent_arm64_size}" "${agent_amd64_sha}" "${agent_arm64_sha}" > signal_agent-release.json
-          write_release_manifest endpoint signal_endpoint \
-            "${ARTIFACT_BASE_URL}/endpoint/artifacts/linux/amd64/${endpoint_amd64_sha}/signal_endpoint" \
-            "${ARTIFACT_BASE_URL}/endpoint/artifacts/linux/arm64/${endpoint_arm64_sha}/signal_endpoint" \
-            "${endpoint_amd64_size}" "${endpoint_arm64_size}" "${endpoint_amd64_sha}" "${endpoint_arm64_sha}" > signal_endpoint-release.json
-
-          agent_release_sha="$(sha256sum signal_agent-release.json | awk '{print $1}')"
-          endpoint_release_sha="$(sha256sum signal_endpoint-release.json | awk '{print $1}')"
-          agent_catalog_object="${s3_bucket}/updater/releases/agent/${VERSION}.json"
-          endpoint_catalog_object="${s3_bucket}/updater/releases/endpoint/${VERSION}.json"
-          upload_immutable signal_agent-release.json "${agent_catalog_object}" "${agent_release_sha}"
-          upload_immutable signal_endpoint-release.json "${endpoint_catalog_object}" "${endpoint_release_sha}"
-
-          agent_catalog_url="${ARTIFACT_BASE_URL}/updater/releases/agent/${VERSION}.json"
-          endpoint_catalog_url="${ARTIFACT_BASE_URL}/updater/releases/endpoint/${VERSION}.json"
-          catalog_object="${s3_bucket}/updater/catalog.json"
-          list_manifest_urls() {
-            local manifest_object manifest_relative manifest_url
-            {
-              while IFS= read -r manifest_object; do
-                [ -n "${manifest_object}" ] || continue
-                manifest_relative="${manifest_object#${s3_bucket}/updater/releases/}"
-                manifest_url="${ARTIFACT_BASE_URL}/updater/releases/${manifest_relative}"
-                if mc cat "${manifest_object}" | jq -ce \
-                  --arg artifact_base "${ARTIFACT_BASE_URL}/" \
-                  --arg manifest_relative "${manifest_relative}" \
-                  --arg manifest_url "${manifest_url}" '
-                  .schema_version == 1 and
-                  (.published_at | type) == "string" and
-                  (.release.component | type) == "string" and
-                  (.release.version | type) == "string" and
-                  (.artifacts | type == "array" and length > 0) and
-                  all(.artifacts[];
-                    (.download_url | type) == "string" and
-                    (.download_url | startswith($artifact_base))
-                  ) |
-                  select(.) |
-                  {component: .release.component, version: .release.version, published_at: .published_at,
-                   canonical: ($manifest_relative == (.release.component + "/" + .release.version + ".json")),
-                   url: $manifest_url}
-                '; then
-                  :
-                else
-                  echo "Skip updater manifest outside current public artifact base: ${manifest_object}" >&2
-                fi
-              done < <(mc find "${s3_bucket}/updater/releases" --name '*.json')
-            } | jq -sc '
-              sort_by(.component, .version) |
-              group_by([.component, .version]) |
-              map(sort_by(.canonical, .published_at, .url) | last | .url) |
-              sort'
-          }
-          publish_catalog() {
-            local attempt expected actual
-            for attempt in 1 2 3 4 5; do
-              expected="$(list_manifest_urls)"
-              jq -n --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson manifests "${expected}" \
-                '{schema_version: 1, generated_at: $generated_at, manifests: $manifests}' > updater_catalog.json
-              mc cp updater_catalog.json "${catalog_object}"
-
-              # S3 listings are the source of truth. Recheck after the write so
-              # concurrent component pipelines cannot silently drop a commit.
-              expected="$(list_manifest_urls)"
-              actual="$(mc cat "${catalog_object}" | jq -c '.manifests | sort | unique')"
-              if [ "${actual}" = "${expected}" ]; then
-                return 0
-              fi
-              sleep "${attempt}"
-            done
-            echo "Updater catalog changed concurrently after 5 attempts" >&2
-            return 1
-          }
-          publish_catalog
-          mc cat "${catalog_object}" | jq -e \
-            --arg agent_url "${agent_catalog_url}" --arg endpoint_url "${endpoint_catalog_url}" \
-            '.schema_version == 1 and (.manifests | index($agent_url)) != null and (.manifests | index($endpoint_url)) != null' >/dev/null
-
-          prune_component_objects() {
-            local component="$1" selected_manifests referenced_urls manifest_object manifest_relative manifest_url
-            local artifact_object artifact_relative artifact_url
-            selected_manifests="$(mc cat "${catalog_object}" | jq -c '.manifests')"
-            while IFS= read -r manifest_object; do
-              [ -n "${manifest_object}" ] || continue
-              manifest_relative="${manifest_object#${s3_bucket}/updater/releases/}"
-              manifest_url="${ARTIFACT_BASE_URL}/updater/releases/${manifest_relative}"
-              if ! jq -e --arg url "${manifest_url}" 'index($url) != null' <<< "${selected_manifests}" >/dev/null; then
-                mc rm "${manifest_object}"
-              fi
-            done < <(mc find "${s3_bucket}/updater/releases/${component}" --name '*.json')
-
-            referenced_urls="$({
-              jq -r --arg prefix "${ARTIFACT_BASE_URL}/updater/releases/${component}/" \
-                '.[] | select(startswith($prefix))' <<< "${selected_manifests}" | while IFS= read -r manifest_url; do
-                manifest_relative="${manifest_url#${ARTIFACT_BASE_URL}/updater/releases/}"
-                mc cat "${s3_bucket}/updater/releases/${manifest_relative}" | jq -r \
-                  --arg component "${component}" 'select(.release.component == $component) | .artifacts[].download_url'
-              done
-            } | sort -u | jq -Rsc 'split("\n") | map(select(length > 0))')"
-            while IFS= read -r artifact_object; do
-              [ -n "${artifact_object}" ] || continue
-              artifact_relative="${artifact_object#${s3_bucket}/}"
-              artifact_url="${ARTIFACT_BASE_URL}/${artifact_relative}"
-              if ! jq -e --arg url "${artifact_url}" 'index($url) != null' <<< "${referenced_urls}" >/dev/null; then
-                mc rm "${artifact_object}"
-              fi
-            done < <(mc find "${s3_bucket}/${component}/artifacts")
-          }
-          prune_component_objects agent
-          prune_component_objects endpoint
-          {
-            echo "AGENT_CATALOG_OBJECT=updater/releases/agent/${VERSION}.json"
-            echo "ENDPOINT_CATALOG_OBJECT=updater/releases/endpoint/${VERSION}.json"
-            echo "AGENT_AMD64_SHA256=${agent_amd64_sha}"
-            echo "AGENT_ARM64_SHA256=${agent_arm64_sha}"
-          } >> "$GITHUB_ENV"
-
-          jq -n \
-            --arg version "${VERSION}" --arg commit_id "${GITHUB_SHA}" \
-            --arg build_date "$(date -u -d "@$(git show -s --format=%ct HEAD)" +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg amd64_sha "${agent_amd64_sha}" --arg arm64_sha "${agent_arm64_sha}" \
-            --arg amd64_url "${ARTIFACT_BASE_URL}/agent/artifacts/linux/amd64/${agent_amd64_sha}/signal_agent" \
-            --arg arm64_url "${ARTIFACT_BASE_URL}/agent/artifacts/linux/arm64/${agent_arm64_sha}/signal_agent" \
-            '{version: $version, commit_id: $commit_id, build_date: $build_date, files: {"linux-amd64": $amd64_url, "linux-arm64": $arm64_url}, sha256: {"linux-amd64": $amd64_sha, "linux-arm64": $arm64_sha}}' \
-            > signal_agent-version.json
-          jq -n \
-            --arg version "${VERSION}" --arg commit_id "${GITHUB_SHA}" \
-            --arg build_date "$(date -u -d "@$(git show -s --format=%ct HEAD)" +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg amd64_sha "${endpoint_amd64_sha}" \
-            --arg arm64_sha "${endpoint_arm64_sha}" \
-            --arg amd64_url "${ARTIFACT_BASE_URL}/endpoint/artifacts/linux/amd64/${endpoint_amd64_sha}/signal_endpoint" \
-            --arg arm64_url "${ARTIFACT_BASE_URL}/endpoint/artifacts/linux/arm64/${endpoint_arm64_sha}/signal_endpoint" \
-            '{version: $version, commit_id: $commit_id, build_date: $build_date, files: {"linux-amd64": $amd64_url, "linux-arm64": $arm64_url}, sha256: {"linux-amd64": $amd64_sha, "linux-arm64": $arm64_sha}}' \
-            > signal_endpoint-version.json
-
-          # Update mutable pointers only after all immutable artifacts are available.
-          mc cp signal_agent-version.json "${s3_bucket}/signal_agent-version.json"
-          mc cp signal_endpoint-version.json "${s3_bucket}/signal_endpoint-version.json"
+          mc mirror --overwrite bin/publish/ aliyun/vscode/awecloud-signaling/
 
       - name: Publish Agent release summary
         env:
@@ -443,9 +240,6 @@ jobs:
             echo "- Version: \`${VERSION}\`"
             echo "- Commit: \`${GITHUB_SHA}\`"
             echo "- Source: \`${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}\`"
-            echo "- Agent catalog: \`${AGENT_CATALOG_OBJECT}\`"
-            echo "- Endpoint catalog: \`${ENDPOINT_CATALOG_OBJECT}\`"
-            echo "- Agent linux/amd64 SHA256: \`${AGENT_AMD64_SHA256}\`"
-            echo "- Agent linux/arm64 SHA256: \`${AGENT_ARM64_SHA256}\`"
+            echo "- Publish directory: \`bin/publish\`"
             echo "- Server registration: use Platform > System Configuration > Sync artifacts and versions"
           } >> "$GITHUB_STEP_SUMMARY"
