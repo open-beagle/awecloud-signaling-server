@@ -48,8 +48,6 @@ func TestCreateTaskAndDeliverDirective(t *testing.T) {
 		DownloadURL: "https://download.example.com/signal_agent-v1.2.3-linux-amd64",
 		Size:        128,
 		SHA256:      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-		Signature:   "signed-digest",
-		KeyID:       "release-key",
 		Status:      model.ArtifactStatusAvailable,
 	}
 	require.NoError(t, database.Create(&artifact).Error)
@@ -62,8 +60,6 @@ func TestCreateTaskAndDeliverDirective(t *testing.T) {
 	require.Equal(t, task.ID, directives[0].TaskID)
 	require.Equal(t, release.CommitID, directives[0].CommitID)
 	require.Equal(t, artifact.SHA256, directives[0].SHA256)
-	require.Equal(t, artifact.Signature, directives[0].Signature)
-	require.Equal(t, artifact.KeyID, directives[0].KeyID)
 
 	var persisted model.UpdateTask
 	require.NoError(t, database.First(&persisted, "id = ?", task.ID).Error)
@@ -87,8 +83,7 @@ func TestCreateTaskSupportsAgentWithoutVersionCapabilityMarker(t *testing.T) {
 	artifact := model.Artifact{
 		ID: uuid.NewString(), ReleaseID: release.ID, OS: "linux", Arch: "amd64", PackageType: "binary",
 		Filename: "signal_agent", DownloadURL: "https://download.example.com/signal_agent", Size: 128,
-		SHA256:    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-		Signature: "signed-digest", KeyID: "release-key", Status: model.ArtifactStatusAvailable,
+		SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Status: model.ArtifactStatusAvailable,
 	}
 	require.NoError(t, database.Create(&artifact).Error)
 
@@ -98,7 +93,6 @@ func TestCreateTaskSupportsAgentWithoutVersionCapabilityMarker(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, directives, 1)
 	require.Equal(t, task.ID, directives[0].TaskID)
-	require.Equal(t, artifact.Signature, directives[0].Signature)
 }
 
 func TestCreateTaskSupportsDesktop(t *testing.T) {
@@ -185,8 +179,7 @@ func TestEndpointTaskSupportsPreviousAgentVersion(t *testing.T) {
 	artifact := model.Artifact{
 		ID: uuid.NewString(), ReleaseID: release.ID, OS: "linux", Arch: "amd64", PackageType: "binary",
 		Filename: "signal_endpoint", DownloadURL: "https://download.example.com/signal_endpoint", Size: 128,
-		SHA256:    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-		Signature: "signed-digest", KeyID: "release-key", Status: model.ArtifactStatusAvailable,
+		SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Status: model.ArtifactStatusAvailable,
 	}
 	require.NoError(t, database.Create(&artifact).Error)
 
@@ -198,7 +191,6 @@ func TestEndpointTaskSupportsPreviousAgentVersion(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, directives, 1)
 	require.Equal(t, task.ID, directives[0].TaskID)
-	require.Equal(t, artifact.KeyID, directives[0].KeyID)
 }
 
 func TestUpdateStatusSequenceIsMonotonic(t *testing.T) {

@@ -1444,8 +1444,6 @@ func toProtoUpdateDirective(directive service.UpdateDirective) *pb.UpdateDirecti
 		Arch:          directive.Arch,
 		Size:          directive.Size,
 		Sha256:        directive.SHA256,
-		Signature:     directive.Signature,
-		KeyId:         directive.KeyID,
 		Force:         directive.Force,
 		NotBeforeUnix: directive.NotBeforeUnix,
 		DeadlineUnix:  directive.DeadlineUnix,

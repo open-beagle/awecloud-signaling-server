@@ -37,8 +37,6 @@ type UpdateDirective struct {
 	Arch          string
 	Size          int64
 	SHA256        string
-	Signature     string
-	KeyID         string
 	Force         bool
 	NotBeforeUnix int64
 	DeadlineUnix  int64
@@ -245,8 +243,6 @@ func (s *UpdateService) directivesForTarget(ctx context.Context, targetType mode
 			Arch:        artifact.Arch,
 			Size:        artifact.Size,
 			SHA256:      artifact.SHA256,
-			Signature:   artifact.Signature,
-			KeyID:       artifact.KeyID,
 			Force:       task.Force,
 			Action:      "install",
 			TargetName:  task.TargetName,

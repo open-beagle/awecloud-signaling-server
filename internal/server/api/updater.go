@@ -61,8 +61,6 @@ type ArtifactInput struct {
 	DownloadURL string `json:"download_url" binding:"required"`
 	Size        int64  `json:"size" binding:"required"`
 	SHA256      string `json:"sha256" binding:"required"`
-	Signature   string `json:"signature"`
-	KeyID       string `json:"key_id"`
 }
 
 type CreateReleaseRequest struct {
@@ -377,8 +375,6 @@ func buildArtifact(input ArtifactInput) (model.Artifact, error) {
 		DownloadURL: input.DownloadURL,
 		Size:        input.Size,
 		SHA256:      strings.ToLower(input.SHA256),
-		Signature:   strings.TrimSpace(input.Signature),
-		KeyID:       strings.TrimSpace(input.KeyID),
 		Status:      model.ArtifactStatusAvailable,
 	}, nil
 }

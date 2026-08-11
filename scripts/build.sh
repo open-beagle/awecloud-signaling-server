@@ -30,6 +30,10 @@ BUILD_GO=$(go version | awk '{print $3}')
 BUILD_URL="${BUILD_URL:-}"
 BUILD_DIR="$PWD"
 
+if [ "${RELEASE_ARTIFACTS:-false}" = "true" ]; then
+    : "${ARTIFACT_BASE_URL:?ARTIFACT_BASE_URL is required}"
+fi
+
 # 输出目录
 BIN_DIR="${BUILD_DIR}/bin"
 mkdir -p ${BIN_DIR}
@@ -174,15 +178,13 @@ if [ -f "${BIN_DIR}/signal_endpoint-${GOOS}-${CURRENT_ARCH}" ]; then
     echo "✓ Created symlink: bin/signal_endpoint -> signal_endpoint-${GOOS}-${CURRENT_ARCH}"
 fi
 
-echo ""
-echo "Build completed successfully!"
-echo "Binaries are in: ${BIN_DIR}/"
-
 if [ "${RELEASE_ARTIFACTS:-false}" = "true" ]; then
     BUILD_VERSION="${BUILD_VERSION}" GIT_COMMIT="${GIT_COMMIT}" SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" \
-        ARTIFACT_BASE_URL="${ARTIFACT_BASE_URL:?ARTIFACT_BASE_URL is required}" \
-        SIGNAL_UPDATER_PRIVATE_KEY="${SIGNAL_UPDATER_PRIVATE_KEY:?SIGNAL_UPDATER_PRIVATE_KEY is required}" \
-        SIGNAL_UPDATER_KEY_ID="${SIGNAL_UPDATER_KEY_ID:?SIGNAL_UPDATER_KEY_ID is required}" \
+        ARTIFACT_BASE_URL="${ARTIFACT_BASE_URL}" \
         bash "${BUILD_DIR}/scripts/package-release.sh"
     echo "Release files are in: ${BIN_DIR}/publish/"
 fi
+
+echo ""
+echo "Build completed successfully!"
+echo "Binaries are in: ${BIN_DIR}/"

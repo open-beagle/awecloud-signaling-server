@@ -56,8 +56,6 @@ func TestUpdaterCatalogSyncCreatesPublishedReleaseAndIsIdempotent(t *testing.T) 
 	require.NoError(t, database.Where("release_id = ?", release.ID).Find(&artifacts).Error)
 	require.Len(t, artifacts, 1)
 	require.Equal(t, updaterCatalogArtifactSHA, artifacts[0].SHA256)
-	require.Equal(t, "signed-digest", artifacts[0].Signature)
-	require.Equal(t, "release-key", artifacts[0].KeyID)
 
 	result, err = syncer.Sync(context.Background())
 	require.NoError(t, err)
@@ -263,7 +261,7 @@ func updaterCatalogTestManifestForCommit(t *testing.T, sha256, commitID string) 
 		Artifacts: []UpdaterCatalogArtifact{{
 			OS: "linux", Arch: "amd64", Role: "app", PackageType: "binary", Filename: "signal_agent",
 			DownloadURL: "https://minio.example/vscode/awecloud-signaling/agent/artifacts/linux/amd64/sha/signal_agent",
-			Size:        128, SHA256: sha256, Signature: "signed-digest", KeyID: "release-key",
+			Size:        128, SHA256: sha256,
 		}},
 	}
 	data, err := json.Marshal(manifest)
