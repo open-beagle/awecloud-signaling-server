@@ -323,7 +323,7 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 	require.NoError(t, database.Create(&sshGrant).Error)
 
 	server := &DesktopServiceServer{config: &config.ServerConfig{FeatureFlags: config.FeatureFlagsSection{
-		ResourceModelWrite: true, SessionAuthorizationV2: true,
+		ResourceModelWrite: true,
 	}}}
 	legacyResponse, err := server.GetResources(context.Background(), &pb.GetResourcesRequest{DesktopId: desktop.ID})
 	require.NoError(t, err)
@@ -339,9 +339,7 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 	require.Len(t, negotiatedResponse.ContainerSsh, 1)
 	require.Len(t, negotiatedResponse.ContainerService, 1)
 
-	readOnlyServer := &DesktopServiceServer{config: &config.ServerConfig{FeatureFlags: config.FeatureFlagsSection{
-		SessionAuthorizationV2: true,
-	}}}
+	readOnlyServer := &DesktopServiceServer{config: &config.ServerConfig{FeatureFlags: config.FeatureFlagsSection{}}}
 	readOnlyResponse, err := readOnlyServer.GetResources(context.Background(), &pb.GetResourcesRequest{
 		DesktopId: desktop.ID, ResourceProtocol: sessionAuthorizationProtocolV2,
 	})

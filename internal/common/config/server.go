@@ -35,7 +35,6 @@ const (
 	FeatureManagementContextV2    FeatureFlag = "management_context_v2"
 	FeatureManagementWebV2        FeatureFlag = "management_web_v2"
 	FeatureTenantResourceReadV2   FeatureFlag = "tenant_resource_read_v2"
-	FeatureSessionAuthorizationV2 FeatureFlag = "session_authorization_v2"
 	FeatureLegacyWriteFreeze      FeatureFlag = "legacy_write_freeze"
 )
 
@@ -46,7 +45,6 @@ type FeatureFlagsSection struct {
 	ManagementContextV2    bool `toml:"management_context_v2"`
 	ManagementWebV2        bool `toml:"management_web_v2"`
 	TenantResourceReadV2   bool `toml:"tenant_resource_read_v2"`
-	SessionAuthorizationV2 bool `toml:"session_authorization_v2"`
 	LegacyWriteFreeze      bool `toml:"legacy_write_freeze"`
 }
 
@@ -64,8 +62,6 @@ func (f FeatureFlagsSection) Enabled(flag FeatureFlag) bool {
 		return f.ManagementWebV2
 	case FeatureTenantResourceReadV2:
 		return f.TenantResourceReadV2
-	case FeatureSessionAuthorizationV2:
-		return f.SessionAuthorizationV2
 	case FeatureLegacyWriteFreeze:
 		return f.LegacyWriteFreeze
 	default:
@@ -233,7 +229,6 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureManagementContextV2, "SIGNAL_FEATURE_MANAGEMENT_CONTEXT_V2")
 	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureManagementWebV2, "SIGNAL_FEATURE_MANAGEMENT_WEB_V2")
 	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureTenantResourceReadV2, "SIGNAL_FEATURE_TENANT_RESOURCE_READ_V2")
-	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureSessionAuthorizationV2, "SIGNAL_FEATURE_SESSION_AUTHORIZATION_V2")
 	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureLegacyWriteFreeze, "SIGNAL_FEATURE_LEGACY_WRITE_FREEZE")
 	if token := os.Getenv("TOKEN"); token != "" {
 		cfg.Server.Token = token
@@ -357,8 +352,6 @@ func applyFeatureFlagEnv(flags *FeatureFlagsSection, flag FeatureFlag, key strin
 		flags.ManagementWebV2 = enabled
 	case FeatureTenantResourceReadV2:
 		flags.TenantResourceReadV2 = enabled
-	case FeatureSessionAuthorizationV2:
-		flags.SessionAuthorizationV2 = enabled
 	case FeatureLegacyWriteFreeze:
 		flags.LegacyWriteFreeze = enabled
 	}

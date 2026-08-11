@@ -74,7 +74,6 @@ func TestResourceFeatureFlagsDefaultOffAndEnvironmentOverrides(t *testing.T) {
 		"SIGNAL_FEATURE_MANAGEMENT_CONTEXT_V2",
 		"SIGNAL_FEATURE_MANAGEMENT_WEB_V2",
 		"SIGNAL_FEATURE_TENANT_RESOURCE_READ_V2",
-		"SIGNAL_FEATURE_SESSION_AUTHORIZATION_V2",
 		"SIGNAL_FEATURE_LEGACY_WRITE_FREEZE",
 	} {
 		t.Setenv(key, "")
@@ -98,7 +97,6 @@ func TestResourceFeatureFlagsDefaultOffAndEnvironmentOverrides(t *testing.T) {
 		FeatureManagementContextV2,
 		FeatureManagementWebV2,
 		FeatureTenantResourceReadV2,
-		FeatureSessionAuthorizationV2,
 		FeatureLegacyWriteFreeze,
 	} {
 		if cfg.FeatureFlags.Enabled(flag) {

@@ -162,7 +162,7 @@ func prepareTenantResourceAPIFixture(t *testing.T) tenantResourceAPIFixture {
 	other.StableKey = strings.Repeat("e", 64)
 	other.EntitlementLineageID = otherAllocation.ID
 	require.NoError(t, fixture.database.Create(&other).Error)
-	flags := config.FeatureFlagsSection{ManagementContextV2: true, TenantResourceReadV2: true, ResourceModelWrite: true, SessionAuthorizationV2: true}
+	flags := config.FeatureFlagsSection{ManagementContextV2: true, TenantResourceReadV2: true, ResourceModelWrite: true}
 	management := fixture.router.Group("/api/v1/management")
 	management.Use(AuthMiddleware(fixture.config.Security.JWTSecret, false))
 	management.Use(RequireFeatureFlag(flags, config.FeatureManagementContextV2, false))
@@ -187,8 +187,8 @@ func prepareTenantResourceAPIFixture(t *testing.T) tenantResourceAPIFixture {
 	tenant.POST("/grants/:id/revoke", RequireManagementPermission(service.PermissionTenantGrantsWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), RequireIdempotencyKey(), grantAPI.Revoke)
 	tenant.GET("/sessions", RequireManagementPermission(service.PermissionTenantSessionsRead), sessionAPI.List)
 	tenant.GET("/sessions/:id", RequireManagementPermission(service.PermissionTenantSessionsRead), sessionAPI.Get)
-	tenant.POST("/sessions", RequireManagementPermission(service.PermissionTenantSessionsRead), RequireFeatureFlag(flags, config.FeatureSessionAuthorizationV2, true), RequireIdempotencyKey(), sessionAPI.Create)
-	tenant.POST("/sessions/:id/terminate", RequireManagementPermission(service.PermissionTenantSessionsTerminate), RequireFeatureFlag(flags, config.FeatureSessionAuthorizationV2, true), RequireIfMatch(), RequireIdempotencyKey(), sessionAPI.Terminate)
+	tenant.POST("/sessions", RequireManagementPermission(service.PermissionTenantSessionsRead), RequireIdempotencyKey(), sessionAPI.Create)
+	tenant.POST("/sessions/:id/terminate", RequireManagementPermission(service.PermissionTenantSessionsTerminate), RequireIfMatch(), RequireIdempotencyKey(), sessionAPI.Terminate)
 
 	return tenantResourceAPIFixture{
 		managementContextAPIFixture: fixture, login: fixture.login(t, fixture.admin.Username),

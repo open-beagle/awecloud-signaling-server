@@ -1706,8 +1706,7 @@ func (s *DesktopServiceServer) GetResources(ctx context.Context, req *pb.GetReso
 		resp.K8SService = s.queryK8SServiceResourcesGRPC(ctx, clientID, groupIDs)
 	}
 	resp.Ssh = appendUniqueSSHResources(resp.Ssh, s.queryUnifiedHostSSHResourcesGRPC(ctx, clientID, groupIDs, req.TenantId)...)
-	if req.ResourceProtocol == sessionAuthorizationProtocolV2 && s.config != nil &&
-		s.config.FeatureFlags.Enabled(config.FeatureSessionAuthorizationV2) {
+	if req.ResourceProtocol == sessionAuthorizationProtocolV2 {
 		containerSSH, containerServices := s.queryTenantContainerResourcesGRPC(ctx, &node, groupIDs, req.TenantId)
 		resp.ContainerSsh = append(resp.ContainerSsh, containerSSH...)
 		resp.ContainerService = containerServices

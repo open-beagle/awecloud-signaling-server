@@ -202,7 +202,7 @@ func (s *AgentServiceServer) sessionAuthorizationPermissionsEnabled() bool {
 	}
 	flags := s.config.FeatureFlags
 	return flags.Enabled(config.FeatureManagementContextV2) && flags.Enabled(config.FeatureTenantResourceReadV2) &&
-		flags.Enabled(config.FeatureResourceModelWrite) && flags.Enabled(config.FeatureSessionAuthorizationV2)
+		flags.Enabled(config.FeatureResourceModelWrite)
 }
 
 func (s *AgentServiceServer) resolveEndpointTechnicalResource(ctx context.Context, agentID uint64, endpointName string) (*model.TechnicalResource, error) {
