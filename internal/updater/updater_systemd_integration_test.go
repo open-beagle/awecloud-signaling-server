@@ -33,13 +33,14 @@ func TestApplyWithRealSystemd(t *testing.T) {
 	require.NoError(t, os.MkdirAll(binDir, 0700))
 	buildA := filepath.Join(binDir, "agent-a.sh")
 	buildB := filepath.Join(binDir, "agent-b.sh")
-	serviceBody := []byte("#!/bin/sh\nwhile :; do sleep 1; done\n")
-	require.NoError(t, os.WriteFile(buildA, serviceBody, 0755))
-	require.NoError(t, os.WriteFile(buildB, append(serviceBody, []byte("# build-b\n")...), 0755))
+	buildABytes := []byte("#!/bin/sh\nexit 0\n")
+	buildBBytes := []byte("#!/bin/sh\nwhile :; do sleep 1; done\n# build-b\n")
+	require.NoError(t, os.WriteFile(buildA, buildABytes, 0755))
+	require.NoError(t, os.WriteFile(buildB, buildBBytes, 0755))
 	currentLink := filepath.Join(binDir, "signal_agent")
 	require.NoError(t, os.Symlink(buildA, currentLink))
 
-	digest := sha256.Sum256(append(serviceBody, []byte("# build-b\n")...))
+	digest := sha256.Sum256(buildBBytes)
 	targetSHA := hex.EncodeToString(digest[:])
 	state := taskState{
 		Status: Status{TaskID: "systemd-task", Phase: "staged", Sequence: 3}, Component: "agent",
@@ -50,7 +51,7 @@ func TestApplyWithRealSystemd(t *testing.T) {
 
 	unitName := fmt.Sprintf("signal-updater-integration-%d.service", time.Now().UnixNano())
 	unitPath := filepath.Join("/run/systemd/system", unitName)
-	unit := fmt.Sprintf("[Unit]\nDescription=Signal updater integration test\n[Service]\nExecStart=/bin/sh %s\nRestart=no\n", currentLink)
+	unit := fmt.Sprintf("[Unit]\nDescription=Signal updater integration test\nStartLimitIntervalSec=300\nStartLimitBurst=2\n[Service]\nExecStart=/bin/sh %s\nRestart=always\nRestartSec=10ms\n", currentLink)
 	require.NoError(t, os.WriteFile(unitPath, []byte(unit), 0600))
 	t.Cleanup(func() {
 		_ = exec.Command("systemctl", "stop", unitName).Run()
@@ -59,6 +60,9 @@ func TestApplyWithRealSystemd(t *testing.T) {
 	})
 	require.NoError(t, exec.Command("systemctl", "daemon-reload").Run())
 	require.NoError(t, exec.Command("systemctl", "start", unitName).Run())
+	require.Eventually(t, func() bool {
+		return exec.Command("systemctl", "is-failed", "--quiet", unitName).Run() == nil
+	}, 5*time.Second, 50*time.Millisecond, "test unit did not reach start-limit-hit")
 
 	stopHealth := make(chan struct{})
 	defer close(stopHealth)

@@ -222,6 +222,21 @@ func TestHelperUnitRunningIncludesSystemdTransitionStates(t *testing.T) {
 	}
 }
 
+func TestRestartAndCheckResetsSystemdFailureStateBeforeRestart(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(binDir, "calls")
+	systemctl := filepath.Join(binDir, "systemctl")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$SYSTEMCTL_CALLS\"\n"
+	require.NoError(t, os.WriteFile(systemctl, []byte(script), 0755))
+	t.Setenv("SYSTEMCTL_CALLS", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	require.NoError(t, restartAndCheck(context.Background(), "k8s-signaling"))
+	calls, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	require.Equal(t, "reset-failed k8s-signaling\nrestart k8s-signaling\nis-active --quiet k8s-signaling\n", string(calls))
+}
+
 func TestValidateDirectiveRejectsWrongPlatformAndAction(t *testing.T) {
 	manager, err := NewManager(Config{
 		Component: "agent", CurrentVersion: "v1.0.0", CurrentCommitID: strings.Repeat("a", 40),

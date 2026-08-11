@@ -790,6 +790,9 @@ func secureHTTPClient() *http.Client {
 }
 
 func restartAndCheck(ctx context.Context, serviceName string) error {
+	if output, err := exec.CommandContext(ctx, "systemctl", "reset-failed", serviceName).CombinedOutput(); err != nil {
+		return fmt.Errorf("reset failed state for %s: %w: %s", serviceName, err, strings.TrimSpace(string(output)))
+	}
 	if output, err := exec.CommandContext(ctx, "systemctl", "restart", serviceName).CombinedOutput(); err != nil {
 		return fmt.Errorf("restart %s: %w: %s", serviceName, err, strings.TrimSpace(string(output)))
 	}
