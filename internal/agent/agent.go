@@ -16,7 +16,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -86,8 +85,8 @@ type Agent struct {
 	lanDetector *LANDetector
 
 	// 配置版本（用于增量同步）
-	configVersion                          int64
-	appliedTechnicalResourceConfigRevision atomic.Int64
+	configVersion   int64
+	sshApplyPending bool
 
 	// 域名后缀（从 Server 心跳响应获取）
 	domainSuffix string
@@ -843,12 +842,11 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 	}
 
 	req := &pb.AgentHeartbeatRequest{
-		AgentId:                                a.agentID,
-		Version:                                a.version,
-		CommitId:                               a.gitCommit,
-		BinarySha256:                           a.binarySHA256,
-		UpdaterProtocol:                        "v2",
-		AppliedTechnicalResourceConfigRevision: a.appliedTechnicalResourceConfigRevision.Load(),
+		AgentId:         a.agentID,
+		Version:         a.version,
+		CommitId:        a.gitCommit,
+		BinarySha256:    a.binarySHA256,
+		UpdaterProtocol: "v2",
 		SystemInfo: &pb.SystemInfo{
 			Os:       runtime.GOOS,
 			Arch:     runtime.GOARCH,
@@ -1059,18 +1057,7 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 		logger.Infof("收到 %d 个 Agent 更新任务", len(resp.UpdateDirectives))
 	}
 
-	// TechnicalResource 配置只有成功应用后才确认；同一 revision 不重复启停组件。
-	targetRevision := resp.TechnicalResourceConfigRevision
-	if targetRevision > a.appliedTechnicalResourceConfigRevision.Load() {
-		if resp.CapabilityConfig == nil {
-			logger.Warnf("TechnicalResource 配置缺少能力内容，不确认 revision: %d", targetRevision)
-		} else if err := a.applyCapabilityConfig(resp.CapabilityConfig); err != nil {
-			logger.Warnf("TechnicalResource 配置应用失败，不确认 revision: %d, err=%v", targetRevision, err)
-		} else {
-			a.appliedTechnicalResourceConfigRevision.Store(targetRevision)
-		}
-	} else if targetRevision == 0 && resp.CapabilityConfig != nil {
-		// 非 TechnicalResource Agent 仍消费现有能力配置，但不产生 revision ACK。
+	if resp.CapabilityConfig != nil {
 		if err := a.applyCapabilityConfig(resp.CapabilityConfig); err != nil {
 			logger.Warnf("Agent 能力配置应用失败: %v", err)
 		}
@@ -1579,24 +1566,32 @@ func (a *Agent) applyCapabilityConfig(cap *pb.AgentCapabilityConfig) error {
 			logger.Debugf("Client 模式忽略远程 SSH 能力配置，保留本地配置")
 		} else {
 			oldSSH := a.config.Tunnel.EnableSSH
-			if cap.SshEnabled != oldSSH {
+			if cap.SshEnabled != oldSSH || a.sshApplyPending {
 				a.config.Tunnel.EnableSSH = cap.SshEnabled
-				logger.Infof("远程配置: SSH %s -> %s", boolStr(oldSSH), boolStr(cap.SshEnabled))
+				if cap.SshEnabled != oldSSH {
+					logger.Infof("远程配置: SSH %s -> %s", boolStr(oldSSH), boolStr(cap.SshEnabled))
+				}
 				// 动态开关 SSH
 				if a.tsManager != nil {
 					if cap.SshEnabled {
 						if err := a.tsManager.EnableSSHRemote(); err != nil {
 							logger.Warnf("远程启用 SSH 失败: %v", err)
-							a.config.Tunnel.EnableSSH = oldSSH
+							a.sshApplyPending = true
 							applyErr = errors.Join(applyErr, err)
+						} else {
+							a.sshApplyPending = false
 						}
 					} else {
 						if err := a.tsManager.DisableSSHRemote(); err != nil {
 							logger.Warnf("远程禁用 SSH 失败: %v", err)
-							a.config.Tunnel.EnableSSH = oldSSH
+							a.sshApplyPending = true
 							applyErr = errors.Join(applyErr, err)
+						} else {
+							a.sshApplyPending = false
 						}
 					}
+				} else {
+					a.sshApplyPending = false
 				}
 			}
 		}

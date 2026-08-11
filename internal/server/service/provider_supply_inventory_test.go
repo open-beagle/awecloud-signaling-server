@@ -81,7 +81,7 @@ func TestSupplyInventorySequenceReplayConflictAndSnapshotCommit(t *testing.T) {
 	require.NoError(t, fixture.database.First(&persisted, "id = ?", agent.ID).Error)
 	require.Equal(t, "epoch-b", persisted.SourceEpoch)
 	require.Equal(t, int64(1), persisted.LastSequence)
-	require.Zero(t, persisted.ObservedRevision)
+	require.Equal(t, agent.ConfigRevision, persisted.ConfigRevision)
 }
 
 func TestSupplyInventoryRejectsMetadataPayloadAndDisabledSource(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -85,9 +86,10 @@ type Manager struct {
 	cfg    Config
 	client *http.Client
 
-	mu         sync.Mutex
-	states     map[string]taskState
-	processing map[string]bool
+	mu          sync.Mutex
+	states      map[string]taskState
+	processing  map[string]bool
+	startHelper func(Directive, string) error
 }
 
 func NewManager(cfg Config) (*Manager, error) {
@@ -114,25 +116,106 @@ func NewManager(cfg Config) (*Manager, error) {
 	if err := os.MkdirAll(cfg.StateDir, 0700); err != nil {
 		return nil, fmt.Errorf("create updater state directory: %w", err)
 	}
-	_ = os.MkdirAll(filepath.Join(cfg.StateDir, "tasks"), 0700)
-	_ = os.MkdirAll(filepath.Join(cfg.StateDir, "downloads"), 0700)
-	_ = os.MkdirAll(filepath.Join(cfg.StateDir, "artifacts"), 0700)
-	_ = os.MkdirAll(filepath.Join(cfg.StateDir, "health"), 0700)
+	for _, name := range []string{"tasks", "downloads", "artifacts", "health"} {
+		if err := os.MkdirAll(filepath.Join(cfg.StateDir, name), 0700); err != nil {
+			return nil, fmt.Errorf("create updater %s directory: %w", name, err)
+		}
+	}
 
 	manager.loadStates()
+	if err := manager.cleanupLocalState(); err != nil {
+		log.Printf("updater: cleanup local state: %v", err)
+	}
+	manager.startHelper = manager.startApplyHelper
 	return manager, nil
 }
 
+func (m *Manager) cleanupLocalState() error {
+	if err := clearDirectory(filepath.Join(m.cfg.StateDir, "downloads")); err != nil {
+		return fmt.Errorf("clear incomplete downloads: %w", err)
+	}
+
+	protected := make(map[string]struct{})
+	for _, link := range []string{m.cfg.CurrentLink, m.cfg.CurrentLink + ".previous"} {
+		if target, err := resolvedLinkTarget(link); err == nil {
+			protected[target] = struct{}{}
+		}
+	}
+	m.mu.Lock()
+	for _, state := range m.states {
+		if !terminal(state.Phase) && state.StagedBinary != "" {
+			protected[filepath.Clean(state.StagedBinary)] = struct{}{}
+		}
+	}
+	m.mu.Unlock()
+
+	artifactsDir := filepath.Join(m.cfg.StateDir, "artifacts")
+	entries, err := os.ReadDir(artifactsDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !validSHA256(entry.Name()) {
+			continue
+		}
+		directory := filepath.Join(artifactsDir, entry.Name())
+		if pathProtected(directory, protected) {
+			continue
+		}
+		if err := os.RemoveAll(directory); err != nil {
+			return fmt.Errorf("remove unreferenced artifact %s: %w", entry.Name(), err)
+		}
+	}
+	return syncDirectory(artifactsDir)
+}
+
+func clearDirectory(path string) error {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := os.RemoveAll(filepath.Join(path, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return syncDirectory(path)
+}
+
+func resolvedLinkTarget(link string) (string, error) {
+	target, err := os.Readlink(link)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(link), target)
+	}
+	return filepath.Clean(target), nil
+}
+
+func pathProtected(directory string, protected map[string]struct{}) bool {
+	directory = filepath.Clean(directory)
+	prefix := directory + string(os.PathSeparator)
+	for path := range protected {
+		path = filepath.Clean(path)
+		if path == directory || strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Manager) Handle(directive Directive) {
-	if directive.TaskID == "" || directive.Component != m.cfg.Component || directive.Version == "" {
+	if !validTaskID(directive.TaskID) || directive.Component != m.cfg.Component || directive.Version == "" {
 		return
 	}
 	m.mu.Lock()
-	if _, ok := m.states[directive.TaskID]; ok {
+	state, exists := m.states[directive.TaskID]
+	if m.processing[directive.TaskID] {
 		m.mu.Unlock()
 		return
 	}
-	if m.processing[directive.TaskID] {
+	if exists && (terminal(state.Phase) || !stateMatchesDirective(state, directive)) {
 		m.mu.Unlock()
 		return
 	}
@@ -145,8 +228,29 @@ func (m *Manager) Handle(directive Directive) {
 			delete(m.processing, directive.TaskID)
 			m.mu.Unlock()
 		}()
-		m.execute(directive)
+		if exists {
+			m.resume(directive, state)
+		} else {
+			m.execute(directive)
+		}
 	}()
+}
+
+func (m *Manager) resume(directive Directive, state taskState) {
+	switch state.Phase {
+	case "staged", "installing", "restarting":
+		if state.StagedBinary != "" {
+			if err := writeTaskState(m.cfg.StateDir, state); err != nil {
+				log.Printf("updater: persist recovered task %s phase %s: %v", directive.TaskID, state.Phase, err)
+				return
+			}
+			if err := m.startHelper(directive, state.StagedBinary); err != nil {
+				_ = m.setStatusWithPath(directive, "failed", state.Progress, state.StagedBinary, "helper_start_failed", err.Error())
+			}
+			return
+		}
+	}
+	m.downloadAndStart(directive)
 }
 
 func (m *Manager) HandleHealthConfirmations(confirmations []*pb.UpdateHealthConfirmation) {
@@ -176,7 +280,9 @@ func (m *Manager) HandleHealthConfirmations(confirmations []*pb.UpdateHealthConf
 			RegisteredAt:       time.Now(),
 			HeartbeatConfirmed: time.Unix(conf.ConfirmedAtUnix, 0),
 		}
-		_ = writeHealthFile(healthDir, hf)
+		if err := writeHealthFile(healthDir, hf); err != nil {
+			log.Printf("updater: write health confirmation for task %s: %v", conf.TaskId, err)
+		}
 	}
 }
 
@@ -196,33 +302,42 @@ func (m *Manager) Statuses() []Status {
 
 func (m *Manager) execute(directive Directive) {
 	if err := m.validateDirective(directive); err != nil {
-		m.setStatus(directive, "failed", 0, "invalid_update_directive", err.Error())
+		_ = m.setStatus(directive, "failed", 0, "invalid_update_directive", err.Error())
 		return
 	}
 	if directive.NotBeforeUnix > 0 && time.Now().Before(time.Unix(directive.NotBeforeUnix, 0)) {
 		return
 	}
 	if directive.DeadlineUnix > 0 && time.Now().After(time.Unix(directive.DeadlineUnix, 0)) {
-		m.setStatus(directive, "failed", 0, "task_expired", "更新任务已超过截止时间")
+		_ = m.setStatus(directive, "failed", 0, "task_expired", "更新任务已超过截止时间")
 		return
 	}
-	m.setStatus(directive, "accepted", 0, "", "")
-	m.setStatus(directive, "downloading", 0, "", "")
+	if err := m.setStatus(directive, "accepted", 0, "", ""); err != nil {
+		return
+	}
+	m.downloadAndStart(directive)
+}
+
+func (m *Manager) downloadAndStart(directive Directive) {
+	if err := m.setStatus(directive, "downloading", 0, "", ""); err != nil {
+		return
+	}
 	stagedBinary, err := m.downloadAndVerify(directive)
 	if err != nil {
-		m.setStatus(directive, "failed", 0, errorCode(err), err.Error())
+		_ = m.setStatus(directive, "failed", 0, errorCode(err), err.Error())
 		return
 	}
-	m.setStatusWithPath(directive, "staged", 100, stagedBinary, "", "")
-	m.setStatusWithPath(directive, "restarting", 100, stagedBinary, "", "")
+	if err := m.setStatusWithPath(directive, "staged", 100, stagedBinary, "", ""); err != nil {
+		return
+	}
 
-	if err := m.startApplyHelper(directive, stagedBinary); err != nil {
-		m.setStatusWithPath(directive, "failed", 100, stagedBinary, "helper_start_failed", err.Error())
+	if err := m.startHelper(directive, stagedBinary); err != nil {
+		_ = m.setStatusWithPath(directive, "failed", 100, stagedBinary, "helper_start_failed", err.Error())
 	}
 }
 
 func (m *Manager) validateDirective(directive Directive) error {
-	if directive.TaskID == "" || directive.ArtifactID == "" || directive.Version == "" ||
+	if !validTaskID(directive.TaskID) || directive.ArtifactID == "" || directive.Version == "" ||
 		!validCommitID(directive.CommitID) || !validSHA256(directive.SHA256) {
 		return errors.New("update directive build identity is incomplete")
 	}
@@ -318,11 +433,17 @@ func (m *Manager) downloadAndVerify(directive Directive) (string, error) {
 	if err := os.Rename(temporaryPath, finalPath); err != nil {
 		return "", fmt.Errorf("stage artifact: %w", err)
 	}
+	if err := syncDirectory(artifactDir); err != nil {
+		return "", fmt.Errorf("sync artifact directory: %w", err)
+	}
 	return finalPath, nil
 }
 
 func (m *Manager) startApplyHelper(directive Directive, stagedBinary string) error {
 	unit := fmt.Sprintf("signal-update-%s", directive.TaskID[:min(12, len(directive.TaskID))])
+	if output, _ := exec.Command("systemctl", "is-active", unit).CombinedOutput(); helperUnitRunning(strings.TrimSpace(string(output))) {
+		return nil
+	}
 	previousLink := m.cfg.CurrentLink + ".previous"
 	command := exec.Command(
 		"systemd-run",
@@ -343,11 +464,20 @@ func (m *Manager) startApplyHelper(directive Directive, stagedBinary string) err
 	return nil
 }
 
-func (m *Manager) setStatus(directive Directive, phase string, progress int, code, message string) {
-	m.setStatusWithPath(directive, phase, progress, "", code, message)
+func helperUnitRunning(state string) bool {
+	switch state {
+	case "active", "activating", "reloading", "deactivating":
+		return true
+	default:
+		return false
+	}
 }
 
-func (m *Manager) setStatusWithPath(directive Directive, phase string, progress int, stagedPath, code, message string) {
+func (m *Manager) setStatus(directive Directive, phase string, progress int, code, message string) error {
+	return m.setStatusWithPath(directive, phase, progress, "", code, message)
+}
+
+func (m *Manager) setStatusWithPath(directive Directive, phase string, progress int, stagedPath, code, message string) error {
 	m.mu.Lock()
 	state := m.states[directive.TaskID]
 	state.TaskID = directive.TaskID
@@ -370,7 +500,11 @@ func (m *Manager) setStatusWithPath(directive Directive, phase string, progress 
 	state.UpdatedAt = time.Now()
 	m.states[directive.TaskID] = state
 	m.mu.Unlock()
-	_ = writeTaskState(m.cfg.StateDir, state)
+	if err := writeTaskState(m.cfg.StateDir, state); err != nil {
+		log.Printf("updater: persist task %s phase %s: %v", directive.TaskID, phase, err)
+		return err
+	}
+	return nil
 }
 
 func (m *Manager) loadStates() {
@@ -399,12 +533,15 @@ func (m *Manager) loadStates() {
 }
 
 type ApplyConfig struct {
-	TaskID       string
-	StateDir     string
-	BinaryPath   string
-	CurrentLink  string
-	PreviousLink string
-	ServiceName  string
+	TaskID        string
+	StateDir      string
+	BinaryPath    string
+	CurrentLink   string
+	PreviousLink  string
+	ServiceName   string
+	restart       func(context.Context, string) error
+	healthTimeout time.Duration
+	healthPoll    time.Duration
 }
 
 func Apply(ctx context.Context, cfg ApplyConfig) error {
@@ -414,11 +551,23 @@ func Apply(ctx context.Context, cfg ApplyConfig) error {
 	if cfg.PreviousLink == "" {
 		cfg.PreviousLink = cfg.CurrentLink + ".previous"
 	}
+	if cfg.restart == nil {
+		cfg.restart = restartAndCheck
+	}
+	if cfg.healthTimeout <= 0 {
+		cfg.healthTimeout = 90 * time.Second
+	}
+	if cfg.healthPoll <= 0 {
+		cfg.healthPoll = 2 * time.Second
+	}
 
 	statePath := taskStatePath(cfg.StateDir, cfg.TaskID)
 	state, err := readTaskState(statePath)
 	if err != nil {
 		return fmt.Errorf("read updater task state: %w", err)
+	}
+	if err := verifyFileSHA256(cfg.BinaryPath, state.TargetSHA256); err != nil {
+		return failApply(cfg, state, "artifact_mismatch", err)
 	}
 
 	previous, err := os.Readlink(cfg.CurrentLink)
@@ -426,9 +575,11 @@ func Apply(ctx context.Context, cfg ApplyConfig) error {
 		return failApply(cfg, state, "current_link_invalid", err)
 	}
 
-	// Idempotency check: if current already points to binaryPath
+	// A persisted installing/restarting state means a previous helper was
+	// interrupted. Re-enter the health window without changing previous.
 	sameArtifact := previous == cfg.BinaryPath
-	if sameArtifact && !state.Force {
+	recovering := sameArtifact && (state.Phase == "installing" || state.Phase == "restarting") && state.PreviousTarget != ""
+	if sameArtifact && !state.Force && !recovering {
 		state.Phase = "succeeded"
 		state.Progress = 100
 		state.Sequence++
@@ -468,12 +619,11 @@ func Apply(ctx context.Context, cfg ApplyConfig) error {
 	if err := os.Remove(healthPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return failApply(cfg, state, "health_file_cleanup_failed", err)
 	}
-	if err := restartAndCheck(ctx, cfg.ServiceName); err != nil {
+	if err := cfg.restart(ctx, cfg.ServiceName); err != nil {
 		return rollback(ctx, cfg, state, "restart_failed", err)
 	}
 
-	// 90-second Health Confirmation Window Check
-	deadline := time.Now().Add(90 * time.Second)
+	deadline := time.Now().Add(cfg.healthTimeout)
 	healthConfirmed := false
 
 	for time.Now().Before(deadline) {
@@ -481,7 +631,11 @@ func Apply(ctx context.Context, cfg ApplyConfig) error {
 			healthConfirmed = true
 			break
 		}
-		time.Sleep(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			return rollback(ctx, cfg, state, "heartbeat_timeout", ctx.Err())
+		case <-time.After(cfg.healthPoll):
+		}
 	}
 
 	if !healthConfirmed {
@@ -498,6 +652,9 @@ func Apply(ctx context.Context, cfg ApplyConfig) error {
 }
 
 func writeHealthFile(healthDir string, health HealthFile) error {
+	if err := os.MkdirAll(healthDir, 0700); err != nil {
+		return err
+	}
 	data, err := json.Marshal(health)
 	if err != nil {
 		return err
@@ -523,7 +680,10 @@ func writeHealthFile(healthDir string, health HealthFile) error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	return os.Rename(temporaryPath, filepath.Join(healthDir, health.TaskID+".json"))
+	if err := os.Rename(temporaryPath, filepath.Join(healthDir, health.TaskID+".json")); err != nil {
+		return err
+	}
+	return syncDirectory(healthDir)
 }
 
 func validHealthFile(path string, state taskState) bool {
@@ -567,7 +727,7 @@ func validSHA256(value string) bool {
 func rollback(ctx context.Context, cfg ApplyConfig, state taskState, errCode string, origErr error) error {
 	rollbackErr := switchSymlink(cfg.CurrentLink, state.PreviousTarget)
 	if rollbackErr == nil {
-		rollbackErr = restartAndCheck(ctx, cfg.ServiceName)
+		rollbackErr = cfg.restart(ctx, cfg.ServiceName)
 	}
 	state.Phase = "rolled_back"
 	state.Sequence++
@@ -631,12 +791,48 @@ func restartAndCheck(ctx context.Context, serviceName string) error {
 
 func switchSymlink(linkPath, target string) error {
 	directory := filepath.Dir(linkPath)
-	temporary := filepath.Join(directory, "."+filepath.Base(linkPath)+".new")
+	temporaryDir, err := os.MkdirTemp(directory, "."+filepath.Base(linkPath)+".new-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(temporaryDir)
+	temporary := filepath.Join(temporaryDir, filepath.Base(linkPath))
 	if err := os.Symlink(target, temporary); err != nil {
 		return err
 	}
-	defer os.Remove(temporary)
-	return os.Rename(temporary, linkPath)
+	if err := os.Rename(temporary, linkPath); err != nil {
+		return err
+	}
+	return syncDirectory(directory)
+}
+
+func syncDirectory(path string) error {
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
+}
+
+func verifyFileSHA256(path, expected string) error {
+	if !validSHA256(expected) {
+		return errors.New("invalid expected artifact SHA256")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open staged artifact: %w", err)
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return fmt.Errorf("hash staged artifact: %w", err)
+	}
+	actual := hex.EncodeToString(hash.Sum(nil))
+	if !strings.EqualFold(actual, expected) {
+		return fmt.Errorf("staged artifact SHA256 mismatch: expected %s, got %s", expected, actual)
+	}
+	return nil
 }
 
 func failApply(cfg ApplyConfig, state taskState, code string, err error) error {
@@ -675,7 +871,10 @@ func writeTaskState(stateDir string, state taskState) error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	return os.Rename(temporaryPath, taskStatePath(stateDir, state.TaskID))
+	if err := os.Rename(temporaryPath, taskStatePath(stateDir, state.TaskID)); err != nil {
+		return err
+	}
+	return syncDirectory(tasksDir)
 }
 
 func readTaskState(path string) (taskState, error) {
@@ -705,6 +904,24 @@ func terminal(phase string) bool {
 	default:
 		return false
 	}
+}
+
+func stateMatchesDirective(state taskState, directive Directive) bool {
+	return state.Component == directive.Component && state.TargetVersion == directive.Version &&
+		state.TargetCommitID == directive.CommitID && strings.EqualFold(state.TargetSHA256, directive.SHA256)
+}
+
+func validTaskID(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') &&
+			(char < '0' || char > '9') && char != '-' {
+			return false
+		}
+	}
+	return true
 }
 
 func errorCode(err error) string {

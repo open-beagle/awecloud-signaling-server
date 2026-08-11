@@ -43,7 +43,6 @@ export interface TechnicalResource {
   last_received_at?: string
   lease_expires_at?: string
   config_revision: number
-  observed_revision: number
   row_version: number
   created_at: string
   updated_at: string

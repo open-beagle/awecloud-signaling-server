@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -113,6 +115,7 @@ type providerCandidateAcceptRequest struct {
 
 type providerIdempotentMutation func(*service.ProviderSupplyService) (data any, aggregateType, aggregateID string, rowVersion int64, err error)
 type providerMutation func(*service.ProviderSupplyService) (data any, aggregateType, aggregateID string, rowVersion int64, err error)
+type providerConfigMutation func(*service.ProviderSupplyService) (data any, resource *model.TechnicalResource, before, after any, err error)
 
 func (a *ProviderSupplyAPI) ListTechnicalResources(c *gin.Context) {
 	authorization, ok := currentManagementAuthorization(c)
@@ -185,14 +188,18 @@ func (a *ProviderSupplyAPI) UpdateAgentDomainLabel(c *gin.Context) {
 		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "变更原因无效")
 		return
 	}
-	resource, err := service.NewProviderSupplyService(db.DB).ChangeAgentDomainLabel(c.Request.Context(), authorization, c.Param("id"), request.DomainLabel, rowVersion)
-	if err != nil {
-		writeProviderSupplyError(c, err, true)
-		return
-	}
-	recordAuditLog(c.Request.Context(), c, model.ActionUpdateAgent, "technical_resource", resource.ID, resource.DomainLabel, gin.H{"domain_label": resource.DomainLabel, "reason": request.Reason})
-	SetRevisionETag(c, resource.RowVersion)
-	c.JSON(http.StatusOK, NewSuccessResponse(resource))
+	executeProviderConfigMutation(c, authorization, model.ActionUpdateAgent, request.Reason,
+		func(supply *service.ProviderSupplyService) (any, *model.TechnicalResource, any, any, error) {
+			before, err := supply.GetTechnicalResource(c.Request.Context(), authorization, c.Param("id"))
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
+			resource, err := supply.ChangeAgentDomainLabel(c.Request.Context(), authorization, c.Param("id"), request.DomainLabel, rowVersion)
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
+			return resource, resource, gin.H{"domain_label": before.Resource.DomainLabel}, gin.H{"domain_label": resource.DomainLabel}, nil
+		})
 }
 
 func (a *ProviderSupplyAPI) UpdateAgentHostDomainLabel(c *gin.Context) {
@@ -211,14 +218,18 @@ func (a *ProviderSupplyAPI) UpdateAgentHostDomainLabel(c *gin.Context) {
 		return
 	}
 	request.HostDomainLabel = strings.TrimSpace(request.HostDomainLabel)
-	resource, err := service.NewProviderSupplyService(db.DB).ChangeAgentHostDomainLabel(c.Request.Context(), authorization, c.Param("id"), request.HostDomainLabel, rowVersion)
-	if err != nil {
-		writeProviderSupplyError(c, err, true)
-		return
-	}
-	recordAuditLog(c.Request.Context(), c, model.ActionUpdateAgent, "technical_resource", resource.ID, request.HostDomainLabel, gin.H{"host_domain_label": request.HostDomainLabel})
-	SetRevisionETag(c, resource.RowVersion)
-	c.JSON(http.StatusOK, NewSuccessResponse(resource))
+	executeProviderConfigMutation(c, authorization, model.ActionUpdateAgent, "",
+		func(supply *service.ProviderSupplyService) (any, *model.TechnicalResource, any, any, error) {
+			before, err := supply.GetTechnicalResource(c.Request.Context(), authorization, c.Param("id"))
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
+			resource, err := supply.ChangeAgentHostDomainLabel(c.Request.Context(), authorization, c.Param("id"), request.HostDomainLabel, rowVersion)
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
+			return resource, resource, gin.H{"host_domain_label": before.Resource.HostDomainLabel}, gin.H{"host_domain_label": request.HostDomainLabel}, nil
+		})
 }
 
 func (a *ProviderSupplyAPI) UpdateAgentDisplayName(c *gin.Context) {
@@ -372,15 +383,24 @@ func (a *ProviderSupplyAPI) UpdateTechnicalResourceCapabilities(c *gin.Context) 
 	if _, ok := decodeProviderSupplyRequest(c, &request); !ok {
 		return
 	}
-	resource, err := service.NewProviderSupplyService(db.DB).UpdateTechnicalResourceCapabilities(c.Request.Context(), authorization, service.UpdateTechnicalResourceCapabilitiesInput{
-		TechnicalResourceID: c.Param("id"), ExpectedRowVersion: rowVersion, Capabilities: request,
-	})
-	if err != nil {
-		writeProviderSupplyError(c, err, true)
-		return
-	}
-	SetRevisionETag(c, resource.RowVersion)
-	c.JSON(http.StatusOK, NewSuccessResponse(resource))
+	executeProviderConfigMutation(c, authorization, "update_technical_resource_capabilities", "",
+		func(supply *service.ProviderSupplyService) (any, *model.TechnicalResource, any, any, error) {
+			before, err := supply.GetTechnicalResourceCapabilities(c.Request.Context(), authorization, c.Param("id"))
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
+			resource, err := supply.UpdateTechnicalResourceCapabilities(c.Request.Context(), authorization, service.UpdateTechnicalResourceCapabilitiesInput{
+				TechnicalResourceID: c.Param("id"), ExpectedRowVersion: rowVersion, Capabilities: request,
+			})
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
+			after, err := supply.GetTechnicalResourceCapabilities(c.Request.Context(), authorization, c.Param("id"))
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
+			return resource, resource, before, after, nil
+		})
 }
 
 func (a *ProviderSupplyAPI) GetTechnicalResourceEndpointAccess(c *gin.Context) {
@@ -419,25 +439,32 @@ func (a *ProviderSupplyAPI) RotateTechnicalResourceEndpointToken(c *gin.Context)
 		codedError(c, http.StatusPreconditionRequired, ErrorCodePreconditionRequired, "必须提供 If-Match revision")
 		return
 	}
-	access, resource, err := service.NewProviderSupplyService(db.DB).RotateTechnicalResourceEndpointToken(c.Request.Context(), authorization, c.Param("id"), rowVersion)
-	if err != nil {
-		writeProviderSupplyError(c, err, true)
-		return
-	}
 	serverAddr := serverAddrFromRequest(a.config, c)
-	target := net.JoinHostPort(access.Address, strconv.Itoa(access.Port))
-	installCommand := ""
-	if access.Enabled && access.Address != "" {
-		installCommand = fmt.Sprintf("curl -fsSL %s/api/v1/download/install_endpoint.sh | sudo bash -s -- -a %s -t %s -s %s", serverAddr, target, access.Token, serverAddr)
-	}
-	recordAuditLog(c.Request.Context(), c, "rotate_endpoint_access_token", "technical_resource", resource.ID, resource.DomainLabel, gin.H{"credential_revision": resource.CredentialRevision})
-	SetRevisionETag(c, resource.RowVersion)
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, NewSuccessResponse(gin.H{
-		"address": access.Address, "port": access.Port, "enabled": access.Enabled,
-		"token_exists": true, "config_revision": access.ConfigRevision,
-		"install_command": installCommand, "row_version": resource.RowVersion,
-	}))
+	executeProviderConfigMutation(c, authorization, "rotate_endpoint_access_token", "",
+		func(supply *service.ProviderSupplyService) (any, *model.TechnicalResource, any, any, error) {
+			before, err := supply.GetTechnicalResource(c.Request.Context(), authorization, c.Param("id"))
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
+			access, resource, err := supply.RotateTechnicalResourceEndpointToken(c.Request.Context(), authorization, c.Param("id"), rowVersion)
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
+			installCommand := ""
+			if access.Enabled && access.Address != "" {
+				target := net.JoinHostPort(access.Address, strconv.Itoa(access.Port))
+				installCommand = fmt.Sprintf("curl -fsSL %s/api/v1/download/install_endpoint.sh | sudo bash -s -- -a %s -t %s -s %s", serverAddr, target, access.Token, serverAddr)
+			}
+			data := gin.H{
+				"address": access.Address, "port": access.Port, "enabled": access.Enabled,
+				"token_exists": true, "config_revision": access.ConfigRevision,
+				"install_command": installCommand, "row_version": resource.RowVersion,
+			}
+			return data, resource,
+				gin.H{"credential_revision": before.Resource.CredentialRevision},
+				gin.H{"credential_revision": resource.CredentialRevision}, nil
+		})
 }
 
 func (a *ProviderSupplyAPI) ListTechnicalResourceReleases(c *gin.Context) {
@@ -933,6 +960,85 @@ func executeProviderIdempotentMutation(c *gin.Context, authorization *service.Ma
 
 func executeProviderMutation(c *gin.Context, authorization *service.ManagementAuthorizationContext, action, reason string, mutation providerMutation) {
 	executeProviderMutationWithStatus(c, authorization, http.StatusOK, action, reason, mutation)
+}
+
+func executeProviderConfigMutation(c *gin.Context, authorization *service.ManagementAuthorizationContext, action, reason string, mutation providerConfigMutation) {
+	var data any
+	var resource *model.TechnicalResource
+	err := db.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		var before, after any
+		var mutationErr error
+		data, resource, before, after, mutationErr = mutation(service.NewProviderSupplyService(tx))
+		if mutationErr != nil {
+			return mutationErr
+		}
+		beforeMap, err := configAuditMap(before)
+		if err != nil {
+			return err
+		}
+		afterMap, err := configAuditMap(after)
+		if err != nil {
+			return err
+		}
+		changedFields := changedConfigFields(beforeMap, afterMap)
+		if len(changedFields) == 0 {
+			return nil
+		}
+		if err := appendProviderSupplyOutbox(tx, c, authorization, action, "technical_resource", resource.ID, resource.RowVersion); err != nil {
+			return fmt.Errorf("%w: %v", errProviderSupplyOutbox, err)
+		}
+		detail := gin.H{
+			"technical_resource_id": resource.ID,
+			"config_revision":       resource.ConfigRevision,
+			"changed_fields":        changedFields,
+			"before":                beforeMap,
+			"after":                 afterMap,
+			"row_version":           resource.RowVersion,
+		}
+		if reason != "" {
+			detail["reason"] = reason
+		}
+		if err := recordAuditLogStrictWithDB(c.Request.Context(), tx, c, action, "technical_resource", resource.ID, resource.DomainLabel, detail); err != nil {
+			return fmt.Errorf("%w: %v", errProviderSupplyAudit, err)
+		}
+		return nil
+	})
+	if err != nil {
+		writeProviderSupplyError(c, err, true)
+		return
+	}
+	SetRevisionETag(c, resource.RowVersion)
+	c.JSON(http.StatusOK, NewSuccessResponse(data))
+}
+
+func configAuditMap(value any) (map[string]any, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]any)
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func changedConfigFields(before, after map[string]any) []string {
+	fields := make(map[string]struct{}, len(before)+len(after))
+	for field := range before {
+		fields[field] = struct{}{}
+	}
+	for field := range after {
+		fields[field] = struct{}{}
+	}
+	changed := make([]string, 0, len(fields))
+	for field := range fields {
+		if !reflect.DeepEqual(before[field], after[field]) {
+			changed = append(changed, field)
+		}
+	}
+	sort.Strings(changed)
+	return changed
 }
 
 func executeProviderMutationWithStatus(c *gin.Context, authorization *service.ManagementAuthorizationContext, status int, action, reason string, mutation providerMutation) {

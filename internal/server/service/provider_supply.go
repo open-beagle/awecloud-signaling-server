@@ -26,7 +26,6 @@ var (
 	ErrTechnicalResourceUnbound         = errors.New("TECHNICAL_RESOURCE_UNBOUND")
 	ErrTechnicalResourceDisabled        = errors.New("TECHNICAL_RESOURCE_DISABLED")
 	ErrTechnicalResourceRetired         = errors.New("TECHNICAL_RESOURCE_RETIRED")
-	ErrTechnicalResourceConfigAhead     = errors.New("TECHNICAL_RESOURCE_CONFIG_REVISION_AHEAD")
 	ErrTechnicalResourceStateTransition = errors.New("invalid TechnicalResource state transition")
 	ErrCredentialRevisionStale          = errors.New("CREDENTIAL_REVISION_STALE")
 )
@@ -336,7 +335,7 @@ func (s *ProviderSupplyService) CreateTechnicalResource(ctx context.Context, aut
 	resource := &model.TechnicalResource{
 		ID: uuid.NewString(), Type: input.Type, StableKey: input.StableKey, DomainLabel: input.DomainLabel,
 		LifecycleState: model.TechnicalResourcePending, HealthState: model.ResourceHealthUnknown,
-		CredentialRevision: input.CredentialRevision, ConfigRevision: 1, ObservedRevision: 0, RowVersion: 1,
+		CredentialRevision: input.CredentialRevision, ConfigRevision: 1, RowVersion: 1,
 	}
 	if input.ParentID != "" {
 		resource.ParentID = &input.ParentID
@@ -635,50 +634,6 @@ type TechnicalResourceCredential struct {
 	SourceType         model.TechnicalResourceBindingSourceType
 	SourceID           string
 	CredentialRevision int64
-}
-
-func (s *ProviderSupplyService) ConfirmTechnicalResourceConfig(ctx context.Context, sourceType model.TechnicalResourceBindingSourceType, sourceID string, appliedRevision int64) (*model.TechnicalResource, error) {
-	sourceID = strings.TrimSpace(sourceID)
-	if s == nil || s.db == nil || sourceID == "" || appliedRevision <= 0 ||
-		(sourceType != model.TechnicalResourceBindingLegacyNode && sourceType != model.TechnicalResourceBindingLegacyEndpoint) {
-		return nil, ErrProviderSupplyInvalidInput
-	}
-	var resource *model.TechnicalResource
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var binding model.TechnicalResourceBinding
-		if err := tx.Where("source_type = ? AND source_id = ? AND enabled = ?", sourceType, sourceID, true).First(&binding).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrTechnicalResourceUnbound
-			}
-			return err
-		}
-		resource = &model.TechnicalResource{}
-		if err := tx.First(resource, "id = ?", binding.TechnicalResourceID).Error; err != nil {
-			return err
-		}
-		if err := requireReportingLifecycle(resource); err != nil {
-			return err
-		}
-		if appliedRevision > resource.ConfigRevision {
-			return ErrTechnicalResourceConfigAhead
-		}
-		invalidObservedRevision := resource.ObservedRevision > resource.ConfigRevision
-		if !invalidObservedRevision && appliedRevision <= resource.ObservedRevision {
-			return nil
-		}
-		updated := tx.Model(&model.TechnicalResource{}).
-			Where("id = ? AND config_revision >= ? AND (observed_revision < ? OR observed_revision > config_revision)", resource.ID, appliedRevision, appliedRevision).
-			Update("observed_revision", appliedRevision)
-		if updated.Error != nil {
-			return updated.Error
-		}
-		if updated.RowsAffected != 1 {
-			return ErrProviderSupplyVersionConflict
-		}
-		resource.ObservedRevision = appliedRevision
-		return nil
-	})
-	return resource, err
 }
 
 func (s *ProviderSupplyService) ExpireTechnicalResourceLeases(ctx context.Context, at time.Time) (int64, error) {

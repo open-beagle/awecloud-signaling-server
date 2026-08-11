@@ -32,15 +32,12 @@
         </div>
         <div class="summary-item"><span>生命周期</span><el-tag size="small" :type="lifecycleTag(resource.lifecycle_state)">{{ lifecycleLabel(resource.lifecycle_state) }}</el-tag></div>
         <div class="summary-item"><span>健康</span><el-tag size="small" effect="plain" :type="healthTag(resource.health_state)">{{ healthLabel(resource.health_state) }}</el-tag></div>
-        <div class="summary-item"><span>配置状态</span><el-tag size="small" :type="configStatus.type">{{ configStatus.label }}</el-tag></div>
         <div class="summary-item"><span>当前版本</span><strong>{{ resource.version || '-' }}</strong></div>
       </section>
 
       <el-tabs v-model="activeTab" class="detail-tabs">
         <el-tab-pane label="概览" name="overview">
           <div class="overview-stack">
-            <el-alert :type="configStatus.type" :title="configStatus.title" :description="configStatus.description" show-icon :closable="false" />
-
             <section class="detail-section">
               <div class="section-head"><div><h3>开放能力</h3><p>展示当前有效参数、配置来源和启用状态。</p></div><el-button v-if="canWrite" :icon="Operation" @click="openCapabilities">配置</el-button></div>
               <div class="capability-list">
@@ -80,7 +77,7 @@
                   <el-table-column label="状态" width="120"><template #default="{ row }"><el-tag size="small" :type="row.lifecycle_state === 'disabled' ? 'warning' : healthTag(row.health_state)">{{ row.lifecycle_state === 'disabled' ? '已停用' : healthLabel(row.health_state) }}</el-tag><span class="secondary">{{ relativeTime(row.last_received_at) }}</span></template></el-table-column>
                   <el-table-column label="开放能力" min-width="210"><template #default="{ row }"><div class="endpoint-capabilities"><el-tag v-for="capability in endpointCapabilityLabels(row)" :key="capability" size="small" effect="plain" type="info">{{ capability }}</el-tag><span v-if="endpointCapabilityLabels(row).length === 0" class="secondary inline">未开放</span></div></template></el-table-column>
                   <el-table-column label="接入信息" min-width="220"><template #default="{ row }"><span class="mono">{{ row.hostname || '-' }}</span><span class="secondary mono">{{ row.stable_key }}</span></template></el-table-column>
-                  <el-table-column label="版本" width="140"><template #default="{ row }"><strong>{{ row.version || '-' }}</strong><span class="secondary">{{ endpointConfigLabel(row) }}</span></template></el-table-column>
+                  <el-table-column label="版本" width="140"><template #default="{ row }"><strong>{{ row.version || '-' }}</strong><span class="secondary">{{ row.updater_protocol ? `Updater ${row.updater_protocol}` : '不支持远程更新' }}</span></template></el-table-column>
                   <el-table-column label="操作" width="112" fixed="right"><template #default="{ row }"><el-button link :icon="Upload" :disabled="!canWrite || !updaterSupported(row)" title="更新 Endpoint" @click="openUpdate(row)" /><el-button link type="danger" :icon="Delete" :disabled="!canWrite" title="删除 Endpoint" @click="openDeleteCheck(row)" /></template></el-table-column>
                 </el-table>
                 <el-empty v-else :description="endpoints.length ? '没有符合条件的 Endpoint' : '当前 Agent 没有 Endpoint'" />
@@ -93,9 +90,8 @@
 
         <el-tab-pane label="变更记录" name="events">
           <section class="detail-section">
-            <div class="section-head"><div><h3>配置与更新变更</h3><p>按时间倒序展示当前 Agent 的配置确认和组件更新任务。</p></div></div>
+            <div class="section-head"><div><h3>组件更新记录</h3><p>按时间倒序展示当前 Agent 的组件更新任务。</p></div></div>
             <el-timeline>
-              <el-timeline-item :timestamp="formatTime(resource.updated_at)" placement="top" :type="configStatus.type"><strong>{{ configStatus.title }}</strong><p>期望 revision {{ resource.config_revision }}，已应用 revision {{ resource.observed_revision }}</p></el-timeline-item>
               <el-timeline-item v-for="task in updateTasks" :key="task.id" :timestamp="formatTime(task.created_at)" placement="top" :type="updateStatusTag(task.status)"><strong>创建 {{ task.desired_version }} 更新任务</strong><p>{{ updateStatusLabel(task.status) }}{{ task.last_error_message ? ` · ${task.last_error_message}` : '' }}</p></el-timeline-item>
             </el-timeline>
             <el-empty v-if="updateTasks.length === 0" description="暂无组件更新记录" />
@@ -210,15 +206,6 @@ const filteredEndpoints = computed(() => endpoints.value.filter(item => {
   const query = endpointSearch.value.trim().toLowerCase()
   return matchesState && (!query || `${endpointName(item)} ${endpointDomain(item)} ${item.stable_key} ${item.hostname}`.toLowerCase().includes(query))
 }))
-const configStatus = computed(() => {
-  if (!resource.value) return { type: 'info' as const, label: '-', title: '', description: '' }
-  const expected = resource.value.config_revision
-  const observed = resource.value.observed_revision
-  if (observed > expected) return { type: 'error' as const, label: '异常', title: '配置 revision 异常', description: `已应用 revision ${observed} 超过期望 revision ${expected}，请检查上报协议。` }
-  if (observed === expected) return { type: 'success' as const, label: `已生效 · r${expected}`, title: '配置已全部生效', description: `期望配置 revision ${expected} 与 Agent 已应用 revision ${observed} 一致。` }
-  if (resource.value.health_state === 'online') return { type: 'warning' as const, label: `应用中 · r${observed}/${expected}`, title: '配置正在应用', description: `Agent 在线，等待确认期望配置 revision ${expected}。当前已应用 revision ${observed}。` }
-  return { type: 'warning' as const, label: `等待上线 · r${observed}/${expected}`, title: '等待 Agent 上线应用配置', description: `Agent 当前离线，期望配置 revision ${expected} 尚未生效。` }
-})
 const endpointAccessAddress = computed(() => endpointAccess.value?.address ? `${endpointAccess.value.address}:${endpointAccess.value.port}` : capabilities.value?.endpoint_address ? `${capabilities.value.endpoint_address}:${capabilities.value.endpoint_listen_port || 50052}` : '待配置')
 const endpointAccessReady = computed(() => capabilities.value?.endpoint_access_enabled && !!(endpointAccess.value?.address || capabilities.value?.endpoint_address))
 const capabilityRows = computed(() => resource.value && capabilities.value ? [
@@ -231,8 +218,7 @@ const capabilityRows = computed(() => resource.value && capabilities.value ? [
 const diagnosticRows = computed(() => resource.value ? [
   { label: 'TechnicalResource ID', value: resource.value.id }, { label: 'Stable key', value: resource.value.stable_key },
   { label: 'Agent 上报主机名', value: resource.value.hostname || '-' }, { label: 'Endpoint 内网地址', value: capabilities.value?.endpoint_address || '-' },
-  { label: 'Credential Revision', value: String(resource.value.credential_revision) }, { label: 'Config Revision', value: String(resource.value.config_revision) },
-  { label: 'Observed Revision', value: String(resource.value.observed_revision) }, { label: 'Updater 协议', value: resource.value.updater_protocol || '-' },
+  { label: 'Credential Revision', value: String(resource.value.credential_revision) }, { label: 'Updater 协议', value: resource.value.updater_protocol || '-' },
   { label: 'Inventory Sequence', value: String(resource.value.last_sequence) }, { label: 'Source Epoch', value: resource.value.source_epoch || '-' },
 ] : [])
 const capabilityChanged = computed(() => !!capabilityForm.value && JSON.stringify(capabilityForm.value) !== capabilitySnapshot.value)
@@ -294,7 +280,7 @@ const saveCapabilities = async () => {
   submitting.value = true
   try {
     await updateProviderTechnicalResourceCapabilities(workspaceStore.providerId, resource.value, capabilityForm.value)
-    ElMessage.success('期望配置已保存，等待 Agent 确认生效')
+    ElMessage.success('配置已保存')
     capabilityDrawer.value = false
     await load()
   } finally { submitting.value = false }
@@ -332,7 +318,7 @@ const saveEndpointCapabilities = async () => {
   if (!selectedEndpoint.value || !endpointCapabilityForm.value || !workspaceStore.providerId) return
   if (endpointCapabilityForm.value.svc_enabled && !endpointCapabilityForm.value.svc_label_selector?.trim()) { ElMessage.warning('启用 Kubernetes Service 时必须填写标签选择器'); return }
   submitting.value = true
-  try { await updateProviderTechnicalResourceCapabilities(workspaceStore.providerId, selectedEndpoint.value, endpointCapabilityForm.value); ElMessage.success('Endpoint 期望配置已保存'); endpointDialog.value = false; await load() } finally { submitting.value = false }
+  try { await updateProviderTechnicalResourceCapabilities(workspaceStore.providerId, selectedEndpoint.value, endpointCapabilityForm.value); ElMessage.success('配置已保存'); endpointDialog.value = false; await load() } finally { submitting.value = false }
 }
 const setEndpointLifecycle = async (action: 'maintenance' | 'resume') => {
   if (!selectedEndpoint.value) return
@@ -389,7 +375,6 @@ const deleteResource = async () => {
 const copyText = async (value: string) => { await navigator.clipboard.writeText(value); ElMessage.success('已复制到剪贴板') }
 const copyInstallCommand = () => endpointAccess.value?.install_command && copyText(endpointAccess.value.install_command)
 const returnToList = () => router.push('/provider-technical-resources')
-const endpointConfigLabel = (item: TechnicalResource) => item.config_revision === item.observed_revision ? `配置 r${item.config_revision} 已生效` : `配置 r${item.observed_revision}/${item.config_revision}`
 const lifecycleLabel = (state: TechnicalResourceState) => ({ pending: '待部署', registered: '已注册', disabled: '已停用', retired: '已退役', deleted: '已删除' }[state])
 const lifecycleTag = (state: TechnicalResourceState) => ({ pending: 'warning', registered: 'success', disabled: 'warning', retired: 'info', deleted: 'info' }[state] as any)
 const healthLabel = (state: string) => ({ unknown: '未知', online: '在线', degraded: '异常', offline: '离线' }[state] || state)
@@ -407,7 +392,7 @@ onBeforeUnmount(clearSensitiveAccess)
 <style scoped>
 .provider-page { width: 100%; }
 .state-alert { margin-bottom: 14px; }
-.summary-surface { display: grid; grid-template-columns: minmax(280px, 1.45fr) repeat(4, minmax(125px, .65fr)); margin-bottom: 14px; border: 1px solid var(--border-light); border-radius: 6px; background: #fff; }
+.summary-surface { display: grid; grid-template-columns: minmax(280px, 1.45fr) repeat(3, minmax(125px, .65fr)); margin-bottom: 14px; border: 1px solid var(--border-light); border-radius: 6px; background: #fff; }
 .summary-identity, .summary-item { min-height: 76px; padding: 12px 14px; }
 .summary-identity { display: flex; align-items: center; gap: 11px; }
 .resource-icon { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--primary-color); background: var(--primary-lighter); font-size: 20px; }

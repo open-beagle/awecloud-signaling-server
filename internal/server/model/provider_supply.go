@@ -45,7 +45,6 @@ type TechnicalResource struct {
 	LastReceivedAt     *time.Time                      `gorm:"index" json:"last_received_at,omitempty"`
 	LeaseExpiresAt     *time.Time                      `gorm:"index" json:"lease_expires_at,omitempty"`
 	ConfigRevision     int64                           `gorm:"not null;default:1;check:chk_technical_resource_config_revision,config_revision > 0" json:"config_revision"`
-	ObservedRevision   int64                           `gorm:"not null;default:0;check:chk_technical_resource_observed_revision,observed_revision >= 0" json:"observed_revision"`
 	RowVersion         int64                           `gorm:"not null;default:1;check:chk_technical_resource_row_version,row_version > 0" json:"row_version"`
 	CreatedAt          time.Time                       `json:"created_at"`
 	UpdatedAt          time.Time                       `json:"updated_at"`

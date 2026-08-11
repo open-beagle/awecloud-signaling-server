@@ -22,7 +22,7 @@ func TestEnsureProviderDomainSchemaUpgradesTriggeredSQLiteTablesAdditively(t *te
 		id TEXT PRIMARY KEY, provider_id TEXT NOT NULL, type TEXT NOT NULL, stable_key TEXT NOT NULL, parent_id TEXT,
 		lifecycle_state TEXT NOT NULL DEFAULT 'pending', health_state TEXT NOT NULL DEFAULT 'unknown', credential_revision INTEGER NOT NULL DEFAULT 1,
 		source_epoch TEXT, last_sequence INTEGER NOT NULL DEFAULT 0, last_payload_hash TEXT, last_received_at DATETIME, lease_expires_at DATETIME,
-		config_revision INTEGER NOT NULL DEFAULT 1, observed_revision INTEGER NOT NULL DEFAULT 0, row_version INTEGER NOT NULL DEFAULT 1,
+		config_revision INTEGER NOT NULL DEFAULT 1, row_version INTEGER NOT NULL DEFAULT 1,
 		runtime_user_id INTEGER NOT NULL DEFAULT 0, deleted_at DATETIME, created_at DATETIME, updated_at DATETIME
 	)`).Error)
 	require.NoError(t, database.Exec(`CREATE TABLE user (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`).Error)

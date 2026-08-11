@@ -50,7 +50,7 @@ func TestProviderSupplyTechnicalResourceAndBindingConstraints(t *testing.T) {
 		ID: "agent-a", ProviderID: "provider-a", Type: TechnicalResourceAgent, StableKey: "agent-stable-a",
 		DomainLabel:    "agent-stable-a",
 		LifecycleState: TechnicalResourceRegistered, HealthState: ResourceHealthOnline, CredentialRevision: 1,
-		ConfigRevision: 1, ObservedRevision: 1, RowVersion: 1,
+		ConfigRevision: 1, RowVersion: 1,
 	}
 	require.NoError(t, database.Create(&agentA).Error)
 
@@ -66,7 +66,7 @@ func TestProviderSupplyTechnicalResourceAndBindingConstraints(t *testing.T) {
 	endpointA := TechnicalResource{
 		ID: endpointAID, ProviderID: "provider-a", Type: TechnicalResourceEndpoint, StableKey: "endpoint-stable-a", ParentID: &agentA.ID,
 		LifecycleState: TechnicalResourceRegistered, HealthState: ResourceHealthOnline, CredentialRevision: 1,
-		ConfigRevision: 1, ObservedRevision: 1, RowVersion: 1,
+		ConfigRevision: 1, RowVersion: 1,
 	}
 	require.NoError(t, database.Create(&endpointA).Error)
 

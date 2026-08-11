@@ -44,7 +44,7 @@ func TestNodeRuntimePersisterRefreshesTechnicalResourceLeaseWithoutChangingConfi
 	resource := model.TechnicalResource{
 		ID: "resource-a", ProviderID: "provider-a", Type: model.TechnicalResourceAgent, StableKey: "agent-a", DomainLabel: "agent-a",
 		LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthOffline,
-		CredentialRevision: 1, ConfigRevision: 4, ObservedRevision: 3, RowVersion: 1,
+		CredentialRevision: 1, ConfigRevision: 4, RowVersion: 1,
 	}
 	require.NoError(t, database.Create(&resource).Error)
 	require.NoError(t, database.Create(&model.TechnicalResourceBinding{
@@ -69,7 +69,7 @@ func TestNodeRuntimePersisterRefreshesTechnicalResourceLeaseWithoutChangingConfi
 
 	require.NoError(t, database.First(&resource, "id = ?", resource.ID).Error)
 	require.Equal(t, model.ResourceHealthOnline, resource.HealthState)
-	require.Equal(t, int64(3), resource.ObservedRevision)
+	require.Equal(t, int64(4), resource.ConfigRevision)
 	require.NotNil(t, resource.LeaseExpiresAt)
 	require.True(t, resource.LeaseExpiresAt.After(reportedAt))
 	require.NoError(t, database.First(&candidate, "id = ?", candidate.ID).Error)

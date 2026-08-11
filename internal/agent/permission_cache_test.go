@@ -28,16 +28,12 @@ func TestContainerSSHPermissionProtoSnapshotReplacesCache(t *testing.T) {
 	require.False(t, routed)
 }
 
-func TestTechnicalResourceConfigRevisionAcknowledgedOnlyWithConfig(t *testing.T) {
+func TestTechnicalResourceConfigAppliedWithoutRevision(t *testing.T) {
 	agent := &Agent{config: &config.AgentConfig{}}
-	agent.handleHeartbeatResponse(&pb.AgentHeartbeatResponse{TechnicalResourceConfigRevision: 4})
-	require.Zero(t, agent.appliedTechnicalResourceConfigRevision.Load())
-
 	agent.handleHeartbeatResponse(&pb.AgentHeartbeatResponse{
-		TechnicalResourceConfigRevision: 4,
-		CapabilityConfig:                &pb.AgentCapabilityConfig{},
+		CapabilityConfig: &pb.AgentCapabilityConfig{SshEnabledSet: true, SshEnabled: true},
 	})
-	require.Equal(t, int64(4), agent.appliedTechnicalResourceConfigRevision.Load())
+	require.True(t, agent.config.Tunnel.EnableSSH)
 }
 
 func TestContainerSSHPermissionSnapshotRejectsConflictingPortRoutes(t *testing.T) {

@@ -66,6 +66,8 @@ func prepareProviderSupplyAPIFixture(t *testing.T, flags config.FeatureFlagsSect
 	provider.GET("/memberships", RequireManagementPermission(service.PermissionProviderMembershipsRead), providerGovernanceAPI.ListMemberships)
 	provider.GET("/audit-logs", RequireManagementPermission(service.PermissionProviderAuditRead), providerGovernanceAPI.ListAuditLogs)
 	provider.GET("/technical-resources/:id", RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerAPI.GetTechnicalResource)
+	provider.GET("/technical-resources/:id/capabilities", RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerAPI.GetTechnicalResourceCapabilities)
+	provider.PATCH("/technical-resources/:id/config", RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), providerAPI.UpdateTechnicalResourceCapabilities)
 	provider.PATCH("/technical-resources/:id/display-name", RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), providerAPI.UpdateAgentDisplayName)
 	provider.GET("/resources", RequireManagementPermission(service.PermissionProviderResourcesRead), providerAPI.ListPlatformResources)
 	provider.GET("/resources/:id", RequireManagementPermission(service.PermissionProviderResourcesRead), providerAPI.GetPlatformResource)
@@ -77,6 +79,67 @@ func prepareProviderSupplyAPIFixture(t *testing.T, flags config.FeatureFlagsSect
 	provider.POST("/technical-resources/:id/deployment-credentials", RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), providerAPI.CreateDeploymentCredential)
 	provider.POST("/supply-candidates/:id/accept", RequireManagementPermission(service.PermissionProviderResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), RequireIdempotencyKey(), providerAPI.AcceptSupplyCandidate)
 	return fixture, fixture.login(t, fixture.admin.Username)
+}
+
+func TestProviderTechnicalResourceConfigAuditIsAtomicAndSkipsNoop(t *testing.T) {
+	fixture, login := prepareProviderSupplyAPIFixture(t, config.FeatureFlagsSection{ResourceModelWrite: true})
+	node := model.Node{UserID: fixture.user.ID, Name: "config-audit-agent", Type: model.NodeTypeAgent}
+	require.NoError(t, fixture.database.Create(&node).Error)
+	resource := model.TechnicalResource{
+		ID: uuid.NewString(), ProviderID: fixture.provider.ID, Type: model.TechnicalResourceAgent,
+		StableKey: "config-audit-agent", DomainLabel: "config-audit-agent", LifecycleState: model.TechnicalResourceRegistered,
+		HealthState: model.ResourceHealthUnknown, CredentialRevision: 1, RuntimeUserID: fixture.user.ID, ConfigRevision: 1, RowVersion: 1,
+	}
+	require.NoError(t, fixture.database.Create(&resource).Error)
+	require.NoError(t, fixture.database.Create(&model.TechnicalResourceBinding{
+		ID: uuid.NewString(), TechnicalResourceID: resource.ID, SourceType: model.TechnicalResourceBindingLegacyNode,
+		SourceID: fmt.Sprint(node.ID), CredentialRevision: 1, Enabled: true, BoundByUserID: fixture.user.ID,
+		Reason: "config audit test", RowVersion: 1,
+	}).Error)
+
+	path := "/api/v1/management/provider/technical-resources/" + resource.ID + "/config"
+	body := `{"ssh_enabled":false,"k8s_enabled":false,"svc_enabled":true,"svc_label_selector":"signal.beagle.io/expose=true","svc_namespaces":["team-a"],"endpoint_access_enabled":false,"endpoint_token_exists":false}`
+	updated := providerAPIRequest(fixture, login, http.MethodPatch, path, fixture.provider.ID, body, map[string]string{HeaderIfMatch: `"1"`})
+	require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+	require.Equal(t, `"2"`, updated.Header().Get("ETag"))
+
+	var audit model.AuditLog
+	require.NoError(t, fixture.database.First(&audit, "action_type = ? AND target_id = ?", "update_technical_resource_capabilities", resource.ID).Error)
+	var detail struct {
+		TechnicalResourceID string         `json:"technical_resource_id"`
+		ConfigRevision      int64          `json:"config_revision"`
+		ChangedFields       []string       `json:"changed_fields"`
+		Before              map[string]any `json:"before"`
+		After               map[string]any `json:"after"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(audit.Detail), &detail))
+	require.Equal(t, resource.ID, detail.TechnicalResourceID)
+	require.Equal(t, int64(2), detail.ConfigRevision)
+	require.ElementsMatch(t, []string{"svc_enabled", "svc_label_selector", "svc_namespaces"}, detail.ChangedFields)
+	require.Equal(t, false, detail.Before["svc_enabled"])
+	require.Equal(t, true, detail.After["svc_enabled"])
+	require.NotEmpty(t, audit.RequestID)
+
+	noop := providerAPIRequest(fixture, login, http.MethodPatch, path, fixture.provider.ID, body, map[string]string{HeaderIfMatch: `"2"`})
+	require.Equal(t, http.StatusOK, noop.Code, noop.Body.String())
+	require.Equal(t, `"2"`, noop.Header().Get("ETag"))
+	var auditCount, outboxCount int64
+	require.NoError(t, fixture.database.Model(&model.AuditLog{}).Where("action_type = ? AND target_id = ?", "update_technical_resource_capabilities", resource.ID).Count(&auditCount).Error)
+	require.NoError(t, fixture.database.Model(&model.OutboxEvent{}).Where("aggregate_id = ?", resource.ID).Count(&outboxCount).Error)
+	require.Equal(t, int64(1), auditCount)
+	require.Equal(t, int64(1), outboxCount)
+
+	require.NoError(t, fixture.database.Migrator().DropTable(&model.AuditLog{}))
+	failedBody := `{"ssh_enabled":false,"k8s_enabled":false,"svc_enabled":true,"svc_label_selector":"signal.beagle.io/changed=true","svc_namespaces":["team-a"],"endpoint_access_enabled":false,"endpoint_token_exists":false}`
+	failed := providerAPIRequest(fixture, login, http.MethodPatch, path, fixture.provider.ID, failedBody, map[string]string{HeaderIfMatch: `"2"`})
+	require.Equal(t, http.StatusServiceUnavailable, failed.Code, failed.Body.String())
+	assertResponseErrorCode(t, failed, ErrorCodeProviderSupplyAuditFailed)
+	require.NoError(t, fixture.database.First(&resource, "id = ?", resource.ID).Error)
+	require.Equal(t, int64(2), resource.ConfigRevision)
+	require.Equal(t, int64(2), resource.RowVersion)
+	var persistedNode model.Node
+	require.NoError(t, fixture.database.First(&persistedNode, node.ID).Error)
+	require.Equal(t, "signal.beagle.io/expose=true", persistedNode.SVCLabelSelector)
 }
 
 func TestProviderGovernanceAPIReadsOnlyCurrentProvider(t *testing.T) {

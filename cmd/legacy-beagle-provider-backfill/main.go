@@ -189,7 +189,7 @@ func ensureTechnical(tx *gorm.DB, providerID string, resourceType model.Technica
 	}
 	current = model.TechnicalResource{
 		ID: stableUUID(providerID, "technical", string(resourceType), stableKey), ProviderID: providerID, Type: resourceType, StableKey: stableKey, ParentID: parentID,
-		LifecycleState: state, HealthState: health, CredentialRevision: 1, LastReceivedAt: receivedAt, ConfigRevision: 1, ObservedRevision: 1, RowVersion: 1,
+		LifecycleState: state, HealthState: health, CredentialRevision: 1, LastReceivedAt: receivedAt, ConfigRevision: 1, RowVersion: 1,
 		CreatedAt: createdAt.UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	if err := tx.Create(&current).Error; err != nil {

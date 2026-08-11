@@ -129,7 +129,6 @@ func TestAgentHeartbeatDoesNotWriteBoundTechnicalResource(t *testing.T) {
 	require.Equal(t, model.ResourceHealthUnknown, resource.HealthState)
 	require.Nil(t, resource.LastReceivedAt)
 	require.Nil(t, resource.LeaseExpiresAt)
-	require.Zero(t, resource.ObservedRevision)
 
 	hostStableKey := "legacy-host-legacy_node:" + fmt.Sprint(node.ID)
 	var candidateCount int64

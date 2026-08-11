@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -239,6 +240,10 @@ func (s *ProviderSupplyService) GetTechnicalResourceCapabilities(ctx context.Con
 	if err != nil {
 		return nil, err
 	}
+	return s.technicalResourceCapabilitiesForBinding(ctx, resource, binding)
+}
+
+func (s *ProviderSupplyService) technicalResourceCapabilitiesForBinding(ctx context.Context, resource *model.TechnicalResource, binding *model.TechnicalResourceBinding) (*TechnicalResourceCapabilities, error) {
 	result := &TechnicalResourceCapabilities{}
 	switch binding.SourceType {
 	case model.TechnicalResourceBindingLegacyNode:
@@ -297,9 +302,19 @@ func (s *ProviderSupplyService) UpdateTechnicalResourceCapabilities(ctx context.
 		}
 		return nil, ErrTechnicalResourceStateTransition
 	}
+	capability := input.Capabilities
+	capability.EndpointAddress = strings.TrimSpace(capability.EndpointAddress)
+	capability.K8SAPIAddress = strings.TrimSpace(capability.K8SAPIAddress)
+	capability.SVCLabelSelector = strings.TrimSpace(capability.SVCLabelSelector)
+	current, err := s.technicalResourceCapabilitiesForBinding(ctx, resource, binding)
+	if err != nil {
+		return nil, err
+	}
+	capability.EndpointTokenExists = current.EndpointTokenExists
+	if technicalResourceCapabilitiesEqual(*current, capability) {
+		return resource, nil
+	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		capability := input.Capabilities
-		capability.EndpointAddress = strings.TrimSpace(capability.EndpointAddress)
 		if capability.EndpointAccessEnabled && !validEndpointAddress(capability.EndpointAddress) {
 			return ErrProviderSupplyInvalidInput
 		}
@@ -433,6 +448,19 @@ func (s *ProviderSupplyService) UpdateTechnicalResourceCapabilities(ctx context.
 		return nil, err
 	}
 	return resource, nil
+}
+
+func technicalResourceCapabilitiesEqual(a, b TechnicalResourceCapabilities) bool {
+	return a.SSHEnabled == b.SSHEnabled && slices.Equal(a.SSHUsers, b.SSHUsers) &&
+		a.K8SEnabled == b.K8SEnabled && a.K8SAPIAddress == b.K8SAPIAddress &&
+		a.SVCEnabled == b.SVCEnabled && a.SVCLabelSelector == b.SVCLabelSelector && slices.Equal(a.SVCNamespaces, b.SVCNamespaces) &&
+		a.EndpointAccessEnabled == b.EndpointAccessEnabled && a.EndpointAddress == b.EndpointAddress &&
+		a.EndpointTokenExists == b.EndpointTokenExists && equalOptionalInt(a.K8SListenPort, b.K8SListenPort) &&
+		equalOptionalInt(a.SVCListenPortBase, b.SVCListenPortBase) && equalOptionalInt(a.EndpointListenPort, b.EndpointListenPort)
+}
+
+func equalOptionalInt(a, b *int) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
 }
 
 func (s *ProviderSupplyService) ListTechnicalResourceReleases(ctx context.Context, authorization *ManagementAuthorizationContext, resourceID string) ([]model.Release, error) {

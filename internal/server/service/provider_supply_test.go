@@ -98,6 +98,15 @@ func TestProviderTechnicalResourceCapabilitiesAndUpdaterUseScopedBinding(t *test
 	require.True(t, *node.SVCEnabled)
 	require.Equal(t, `["team-a"]`, node.SVCNamespaces)
 
+	unchangedCapabilities, err := fixture.service.GetTechnicalResourceCapabilities(ctx, fixture.authorization, agent.ID)
+	require.NoError(t, err)
+	unchanged, err := fixture.service.UpdateTechnicalResourceCapabilities(ctx, fixture.authorization, UpdateTechnicalResourceCapabilitiesInput{
+		TechnicalResourceID: agent.ID, ExpectedRowVersion: updated.RowVersion, Capabilities: *unchangedCapabilities,
+	})
+	require.NoError(t, err)
+	require.Equal(t, updated.ConfigRevision, unchanged.ConfigRevision)
+	require.Equal(t, updated.RowVersion, unchanged.RowVersion)
+
 	foreign := model.TechnicalResource{
 		ID: uuid.NewString(), ProviderID: fixture.otherProvider.ID, Type: model.TechnicalResourceAgent, StableKey: "foreign-operations", DomainLabel: "foreign-operations",
 		LifecycleState: model.TechnicalResourceRegistered, HealthState: model.ResourceHealthUnknown, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1,
@@ -569,26 +578,10 @@ func TestProviderSupplyTechnicalResourceBindingAndScopeIsolation(t *testing.T) {
 	require.Zero(t, foreignBindingCount)
 }
 
-func TestProviderSupplyConfigConfirmationAndLease(t *testing.T) {
+func TestProviderSupplyLeaseDoesNotChangeConfigRevision(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	ctx := context.Background()
 	agent := fixture.createBoundAgent(t, "agent-heartbeat", 1001)
-
-	confirmed, err := fixture.service.ConfirmTechnicalResourceConfig(ctx, model.TechnicalResourceBindingLegacyNode, "1001", agent.ConfigRevision)
-	require.NoError(t, err)
-	require.Equal(t, agent.ConfigRevision, confirmed.ObservedRevision)
-	require.Equal(t, agent.RowVersion, confirmed.RowVersion)
-
-	confirmed, err = fixture.service.ConfirmTechnicalResourceConfig(ctx, model.TechnicalResourceBindingLegacyNode, "1001", agent.ConfigRevision)
-	require.NoError(t, err)
-	require.Equal(t, agent.ConfigRevision, confirmed.ObservedRevision)
-	_, err = fixture.service.ConfirmTechnicalResourceConfig(ctx, model.TechnicalResourceBindingLegacyNode, "1001", agent.ConfigRevision+1)
-	require.ErrorIs(t, err, ErrTechnicalResourceConfigAhead)
-
-	require.NoError(t, fixture.database.Model(&model.TechnicalResource{}).Where("id = ?", agent.ID).Update("observed_revision", int64(17360)).Error)
-	confirmed, err = fixture.service.ConfirmTechnicalResourceConfig(ctx, model.TechnicalResourceBindingLegacyNode, "1001", agent.ConfigRevision)
-	require.NoError(t, err)
-	require.Equal(t, agent.ConfigRevision, confirmed.ObservedRevision)
 
 	leaseExpiresAt := fixture.now.Add(2 * time.Minute)
 	require.NoError(t, fixture.database.Model(&model.TechnicalResource{}).Where("id = ?", agent.ID).Updates(map[string]any{
@@ -603,16 +596,13 @@ func TestProviderSupplyConfigConfirmationAndLease(t *testing.T) {
 	require.Equal(t, int64(1), count)
 	var expired model.TechnicalResource
 	require.NoError(t, fixture.database.First(&expired, "id = ?", agent.ID).Error)
-	require.Equal(t, agent.ConfigRevision, expired.ObservedRevision)
+	require.Equal(t, agent.ConfigRevision, expired.ConfigRevision)
 
 	disabled, err := fixture.service.SetTechnicalResourceLifecycle(ctx, fixture.authorization, SetTechnicalResourceLifecycleInput{
 		TechnicalResourceID: agent.ID, TargetState: model.TechnicalResourceDisabled,
 		ExpectedRowVersion: agent.RowVersion, Reason: "maintenance",
 	})
 	require.NoError(t, err)
-	_, err = fixture.service.ConfirmTechnicalResourceConfig(ctx, model.TechnicalResourceBindingLegacyNode, "1001", agent.ConfigRevision)
-	require.ErrorIs(t, err, ErrTechnicalResourceDisabled)
-
 	_, err = fixture.service.SetTechnicalResourceLifecycle(ctx, fixture.authorization, SetTechnicalResourceLifecycleInput{
 		TechnicalResourceID: agent.ID, TargetState: model.TechnicalResourceRegistered,
 		ExpectedRowVersion: agent.RowVersion, Reason: "stale version",
@@ -629,8 +619,6 @@ func TestProviderSupplyConfigConfirmationAndLease(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, model.TechnicalResourceRetired, retired.LifecycleState)
-	_, err = fixture.service.ConfirmTechnicalResourceConfig(ctx, model.TechnicalResourceBindingLegacyNode, "1001", agent.ConfigRevision)
-	require.ErrorIs(t, err, ErrTechnicalResourceUnbound)
 	_, err = fixture.service.SetTechnicalResourceLifecycle(ctx, fixture.authorization, SetTechnicalResourceLifecycleInput{
 		TechnicalResourceID: agent.ID, TargetState: model.TechnicalResourceRegistered,
 		ExpectedRowVersion: retired.RowVersion, Reason: "must not restore terminal state",
