@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
@@ -181,6 +182,9 @@ func (s *WorkloadInventoryService) ReceiveBatch(ctx context.Context, input Recei
 	if err != nil {
 		return nil, err
 	}
+	if err := s.refreshPublishedResources(ctx, snapshot); err != nil {
+		return nil, err
+	}
 	resultCode := WorkloadInventoryResultAccepted
 	if replayed {
 		resultCode = WorkloadInventoryResultReplayed
@@ -190,6 +194,124 @@ func (s *WorkloadInventoryService) ReceiveBatch(ctx context.Context, input Recei
 		SnapshotID: input.SnapshotID, BatchIndex: input.BatchIndex, ResultCode: resultCode,
 		Replayed: replayed, Committed: true, Retryable: false, ServerReceivedAt: now,
 	}, nil
+}
+
+// refreshPublishedResources keeps reviewed resources attached to the current
+// Agent snapshot. New objects remain memory-only candidates until reviewed.
+func (s *WorkloadInventoryService) refreshPublishedResources(ctx context.Context, snapshot workloadSnapshot) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for i := range snapshot.Projections {
+			projection := &snapshot.Projections[i]
+			var observation model.WorkloadObservation
+			if err := tx.Where("namespace_scope_id = ? AND kind = ? AND stable_key = ?",
+				snapshot.NamespaceScopeID, snapshot.Kind, projection.StableKey).First(&observation).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					continue
+				}
+				return err
+			}
+
+			var evidence model.WorkloadObservationSource
+			if err := tx.Where("workload_observation_id = ? AND source_technical_resource_id = ?",
+				observation.ID, snapshot.SourceTechnicalResourceID).First(&evidence).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					continue
+				}
+				return err
+			}
+			var sources []model.TenantResourceSource
+			if err := tx.Where("workload_observation_id = ?", observation.ID).Find(&sources).Error; err != nil {
+				return err
+			}
+			sourceChanged := false
+			for j := range sources {
+				if !sources[j].Enabled {
+					sourceChanged = true
+					break
+				}
+			}
+			if evidence.SourceEpoch == snapshot.SourceEpoch && evidence.Sequence == snapshot.Sequence &&
+				evidence.State == model.WorkloadObservationSourceObserved && observation.State == model.WorkloadObservationEligible && !sourceChanged {
+				continue
+			}
+
+			changed := observation.IdentityQuality != projection.IdentityQuality || observation.Ready != projection.Ready ||
+				observation.LabelSnapshot != projection.Labels || observation.State != model.WorkloadObservationEligible ||
+				evidence.PayloadHash != projection.PayloadHash || evidence.Ready != projection.Ready ||
+				evidence.TargetSnapshot != projection.Target || evidence.State != model.WorkloadObservationSourceObserved || sourceChanged
+			observationRevision := observation.ObservedRevision
+			evidenceRevision := evidence.SourceRevision
+			if changed {
+				observationRevision++
+				evidenceRevision++
+			}
+
+			if err := tx.Model(&model.WorkloadObservation{}).Where("id = ? AND row_version = ?", observation.ID, observation.RowVersion).
+				Updates(map[string]any{
+					"identity_quality": projection.IdentityQuality, "state": model.WorkloadObservationEligible,
+					"ready": projection.Ready, "observed_revision": observationRevision, "label_snapshot": projection.Labels,
+					"last_observed_at": snapshot.ObservedAt, "lease_expires_at": snapshot.LeaseExpiresAt,
+					"row_version": gorm.Expr("row_version + 1"),
+				}).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&model.WorkloadObservationSource{}).Where("id = ? AND row_version = ?", evidence.ID, evidence.RowVersion).
+				Updates(map[string]any{
+					"source_epoch": snapshot.SourceEpoch, "sequence": snapshot.Sequence, "payload_hash": projection.PayloadHash,
+					"state": model.WorkloadObservationSourceObserved, "ready": projection.Ready, "target_snapshot": projection.Target,
+					"observed_at": snapshot.ObservedAt, "received_at": snapshot.ReceivedAt, "lease_expires_at": snapshot.LeaseExpiresAt,
+					"source_revision": evidenceRevision, "row_version": gorm.Expr("row_version + 1"),
+				}).Error; err != nil {
+				return err
+			}
+			if !changed {
+				continue
+			}
+
+			availability := model.TenantResourceUnavailable
+			if projection.Ready {
+				availability = model.TenantResourceAvailable
+			}
+			for j := range sources {
+				sourceRevision := sources[j].SourceRevision + 1
+				if err := tx.Model(&model.TenantResourceSource{}).Where("id = ? AND row_version = ?", sources[j].ID, sources[j].RowVersion).
+					Updates(map[string]any{
+						"enabled": true, "enabled_at": snapshot.ReceivedAt, "disabled_at": nil, "disabled_reason": "",
+						"source_revision": sourceRevision, "row_version": gorm.Expr("row_version + 1"),
+					}).Error; err != nil {
+					return err
+				}
+				var current model.TenantResourceTargetRevision
+				if err := tx.Where("tenant_resource_source_id = ? AND superseded_at IS NULL", sources[j].ID).
+					Order("revision DESC").First(&current).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&model.TenantResourceTargetRevision{}).Where("id = ? AND superseded_at IS NULL", current.ID).
+					Update("superseded_at", snapshot.ReceivedAt).Error; err != nil {
+					return err
+				}
+				next := model.TenantResourceTargetRevision{
+					ID: uuid.NewString(), TenantResourceSourceID: sources[j].ID, Revision: current.Revision + 1,
+					TargetType: snapshot.Kind, TargetSnapshot: projection.Target,
+					SourceTechnicalResourceID: snapshot.SourceTechnicalResourceID,
+					AccessTechnicalResourceID: snapshot.SourceTechnicalResourceID,
+					Ready:                     projection.Ready, ObservedAt: snapshot.ObservedAt,
+					ObservationRevision: observationRevision, SourceRevision: sourceRevision, CreatedAt: snapshot.ReceivedAt,
+				}
+				if err := tx.Create(&next).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&model.TenantResource{}).Where("id = ?", sources[j].TenantResourceID).
+					Updates(map[string]any{
+						"availability_state": availability, "revision": gorm.Expr("revision + 1"),
+						"row_version": gorm.Expr("row_version + 1"),
+					}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 func normalizeWorkloadInventoryInput(input *ReceiveWorkloadInventoryBatchInput) error {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
@@ -157,7 +158,7 @@ func TestWorkloadInventoryBuildsTenantCandidatesFromMemory(t *testing.T) {
 	require.Equal(t, 443, result.Items[0].PortNumber)
 }
 
-func TestPublishingCandidatePersistsStaticResourceOnlyOnce(t *testing.T) {
+func TestPublishingCandidateRefreshesPersistedResource(t *testing.T) {
 	fixture := newWorkloadInventoryFixture(t)
 	payload, hash := fixture.servicePayload(t, "10.96.0.10", true)
 	_, err := fixture.workload.ReceiveBatch(context.Background(), fixture.input(payload, hash, "epoch-a", 1, "snapshot-a"))
@@ -174,20 +175,48 @@ func TestPublishingCandidatePersistsStaticResourceOnlyOnce(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, model.TenantResourceVisible, published.VisibilityState)
+	var staleObservation model.WorkloadObservation
+	require.NoError(t, fixture.database.First(&staleObservation).Error)
+	require.NoError(t, fixture.database.Model(&model.WorkloadObservation{}).Where("id = ?", staleObservation.ID).
+		Updates(map[string]any{"state": model.WorkloadObservationStale, "ready": false, "row_version": gorm.Expr("row_version + 1")}).Error)
+	var staleEvidence model.WorkloadObservationSource
+	require.NoError(t, fixture.database.First(&staleEvidence).Error)
+	require.NoError(t, fixture.database.Model(&model.WorkloadObservationSource{}).Where("id = ?", staleEvidence.ID).
+		Updates(map[string]any{"state": model.WorkloadObservationSourceStale, "ready": false, "row_version": gorm.Expr("row_version + 1")}).Error)
+	var staleSource model.TenantResourceSource
+	require.NoError(t, fixture.database.First(&staleSource).Error)
+	disabledAt := fixture.now
+	require.NoError(t, fixture.database.Model(&model.TenantResourceSource{}).Where("id = ?", staleSource.ID).
+		Updates(map[string]any{"enabled": false, "disabled_at": &disabledAt, "disabled_reason": "lease expired", "row_version": gorm.Expr("row_version + 1")}).Error)
+	require.NoError(t, fixture.database.Model(&model.TenantResource{}).Where("id = ?", published.ID).
+		Update("availability_state", model.TenantResourceUnavailable).Error)
 
 	changed, changedHash := fixture.servicePayload(t, "10.96.0.11", true)
 	fixture.now = fixture.now.Add(time.Minute)
 	fixture.workload.now = func() time.Time { return fixture.now }
 	_, err = fixture.workload.ReceiveBatch(context.Background(), fixture.input(changed, changedHash, "epoch-a", 2, "snapshot-b"))
 	require.NoError(t, err)
-	for _, table := range []any{&model.WorkloadObservation{}, &model.WorkloadObservationSource{}, &model.TenantResource{}, &model.TenantResourceSource{}, &model.TenantResourceTargetRevision{}} {
+	for _, table := range []any{&model.WorkloadObservation{}, &model.WorkloadObservationSource{}, &model.TenantResource{}, &model.TenantResourceSource{}} {
 		var count int64
 		require.NoError(t, fixture.database.Model(table).Count(&count).Error)
 		require.EqualValues(t, 1, count)
 	}
+	var targetCount int64
+	require.NoError(t, fixture.database.Model(&model.TenantResourceTargetRevision{}).Count(&targetCount).Error)
+	require.EqualValues(t, 2, targetCount)
 	var target model.TenantResourceTargetRevision
-	require.NoError(t, fixture.database.First(&target).Error)
-	require.Contains(t, target.TargetSnapshot, `"cluster_ip":"10.96.0.10"`)
+	require.NoError(t, fixture.database.Where("superseded_at IS NULL").First(&target).Error)
+	require.Contains(t, target.TargetSnapshot, `"cluster_ip":"10.96.0.11"`)
+	var refreshedSource model.TenantResourceSource
+	require.NoError(t, fixture.database.First(&refreshedSource, "id = ?", staleSource.ID).Error)
+	require.True(t, refreshedSource.Enabled)
+	require.Nil(t, refreshedSource.DisabledAt)
+	var refreshedObservation model.WorkloadObservation
+	require.NoError(t, fixture.database.First(&refreshedObservation, "id = ?", staleObservation.ID).Error)
+	require.Equal(t, model.WorkloadObservationEligible, refreshedObservation.State)
+	var refreshedResource model.TenantResource
+	require.NoError(t, fixture.database.First(&refreshedResource, "id = ?", published.ID).Error)
+	require.Equal(t, model.TenantResourceAvailable, refreshedResource.AvailabilityState)
 	restarted := NewTenantResourceService(fixture.database, NewWorkloadSnapshotStore())
 	restarted.now = func() time.Time { return fixture.now }
 	view, err := restarted.Get(context.Background(), fixture.tenantAuth, fixture.tenantA.ID, published.ID, false)

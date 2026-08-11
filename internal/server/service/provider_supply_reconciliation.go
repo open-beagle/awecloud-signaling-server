@@ -27,7 +27,6 @@ var providerSupplyReconciliationOutboxPolicies = map[string]JSONFieldPolicy{
 type ProviderSupplyReconciliationResult struct {
 	ExpiredTechnicalResources int64
 	StaleObservations         int64
-	SuspendedScopes           int64
 	UpdatedResources          int64
 }
 
@@ -41,8 +40,7 @@ func NewProviderSupplyReconciliationService(database *gorm.DB) *ProviderSupplyRe
 }
 
 // ReconcileExpiredEvidence applies lease expiry without deleting historical
-// candidates, observations, or scopes. A later valid snapshot may refresh the
-// evidence, but suspended scopes still require an explicit Provider resume.
+// candidates, observations, or changing the Provider's desired scope state.
 func (s *ProviderSupplyReconciliationService) ReconcileExpiredEvidence(ctx context.Context, at time.Time) (*ProviderSupplyReconciliationResult, error) {
 	if s == nil || s.db == nil || at.IsZero() {
 		return nil, ErrProviderSupplyInvalidInput
@@ -149,10 +147,6 @@ func (s *ProviderSupplyReconciliationService) ReconcileExpiredEvidence(ctx conte
 					"evidence_revision": observation.Revision,
 					"row_version":       gorm.Expr("row_version + 1"),
 				}
-				if scope.LifecycleState == model.ResourceScopeActive || scope.LifecycleState == model.ResourceScopeAllocatable {
-					updates["lifecycle_state"] = model.ResourceScopeSuspended
-					result.SuspendedScopes++
-				}
 				if err := tx.Model(&model.ResourceScope{}).Where("provider_id = ? AND id = ? AND row_version = ?", scope.ProviderID, scope.ID, scope.RowVersion).
 					Updates(updates).Error; err != nil {
 					return err
@@ -208,9 +202,9 @@ func (s *ProviderSupplyReconciliationService) StartPeriodicMaintenance(ctx conte
 				logger.Warnf("Provider Supply 租约对账失败: %v", err)
 				continue
 			}
-			if result.ExpiredTechnicalResources > 0 || result.StaleObservations > 0 || result.SuspendedScopes > 0 || result.UpdatedResources > 0 {
-				logger.Infof("Provider Supply 租约对账完成: expired_technical_resources=%d stale_observations=%d suspended_scopes=%d updated_resources=%d",
-					result.ExpiredTechnicalResources, result.StaleObservations, result.SuspendedScopes, result.UpdatedResources)
+			if result.ExpiredTechnicalResources > 0 || result.StaleObservations > 0 || result.UpdatedResources > 0 {
+				logger.Infof("Provider Supply 租约对账完成: expired_technical_resources=%d stale_observations=%d updated_resources=%d",
+					result.ExpiredTechnicalResources, result.StaleObservations, result.UpdatedResources)
 			}
 		}
 	}
