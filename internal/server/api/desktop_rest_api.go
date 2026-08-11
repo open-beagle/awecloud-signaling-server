@@ -404,16 +404,9 @@ func (a *DesktopRESTAPI) ResolveDomain(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success":        resp.Success,
-		"message":        resp.Message,
-		"domain":         resp.Domain,
-		"agent_ip":       resp.AgentIp,
-		"target_port":    resp.TargetPort,
-		"agent_name":     resp.AgentName,
-		"domain_type":    resp.DomainType,
-		"namespace":      resp.Namespace,
-		"service_name":   resp.ServiceName,
-		"svc_proxy_port": resp.SvcProxyPort,
+		"success": resp.Success, "message": resp.Message, "domain": resp.Domain,
+		"agent_ip": resp.AgentIp, "target_port": resp.TargetPort,
+		"agent_name": resp.AgentName, "domain_type": resp.DomainType,
 	})
 }
 
@@ -426,7 +419,7 @@ func (a *DesktopRESTAPI) GetResources(c *gin.Context) {
 	}
 
 	resp, err := a.desktopService.GetResources(c.Request.Context(), &pb.GetResourcesRequest{
-		DesktopId: desktopID,
+		DesktopId: desktopID, ResourceProtocol: "resource_session_v2", TenantId: c.Query("tenant_id"),
 	})
 	if err != nil {
 		logger.Errorf("[DesktopREST] GetResources 错误: %v", err)
@@ -435,11 +428,8 @@ func (a *DesktopRESTAPI) GetResources(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success":       true,
-		"ssh":           resp.Ssh,
-		"k8s_api":       resp.K8SApi,
-		"k8s_service":   resp.K8SService,
-		"container_ssh": resp.ContainerSsh,
+		"success": true, "ssh": resp.Ssh, "k8s_api": resp.K8SApi,
+		"container_ssh": resp.ContainerSsh, "container_service": resp.ContainerService,
 	})
 }
 

@@ -511,14 +511,23 @@ func materializeMemoryCandidate(tx *gorm.DB, candidate *memoryTenantResourceCand
 	if err := tx.Create(&source).Error; err != nil {
 		return err
 	}
-	target := model.TenantResourceTargetRevision{
-		ID: uuid.NewString(), TenantResourceSourceID: source.ID, Revision: 1, TargetType: candidate.snapshot.Kind,
-		TargetSnapshot: candidate.projection.Target, SourceTechnicalResourceID: candidate.snapshot.SourceTechnicalResourceID,
-		AccessTechnicalResourceID: candidate.snapshot.SourceTechnicalResourceID, Ready: candidate.projection.Ready,
-		ObservedAt: candidate.snapshot.ObservedAt, ObservationRevision: candidate.snapshot.Sequence,
-		SourceRevision: source.SourceRevision, CreatedAt: now,
+	targets := candidate.targets
+	if len(targets) == 0 {
+		targets = []workloadProjection{candidate.projection}
 	}
-	return tx.Create(&target).Error
+	for i, projection := range targets {
+		target := model.TenantResourceTargetRevision{
+			ID: uuid.NewString(), TenantResourceSourceID: source.ID, Revision: int64(i + 1), TargetType: candidate.snapshot.Kind,
+			TargetSnapshot: projection.Target, SourceTechnicalResourceID: candidate.snapshot.SourceTechnicalResourceID,
+			AccessTechnicalResourceID: candidate.snapshot.SourceTechnicalResourceID, Ready: projection.Ready,
+			ObservedAt: candidate.snapshot.ObservedAt, ObservationRevision: candidate.snapshot.Sequence,
+			SourceRevision: source.SourceRevision, CreatedAt: now,
+		}
+		if err := tx.Create(&target).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type UpdateTenantResourceInput struct {
@@ -683,6 +692,10 @@ func reauthorizeTenantPermission(tx *gorm.DB, authorization *ManagementAuthoriza
 }
 
 func loadTenantResourceChain(tx *gorm.DB, tenantID, resourceID string, now time.Time, requireTrusted bool) (*tenantResourceChain, error) {
+	return loadTenantResourceChainForTarget(tx, tenantID, resourceID, "", now, requireTrusted)
+}
+
+func loadTenantResourceChainForTarget(tx *gorm.DB, tenantID, resourceID, targetRevisionID string, now time.Time, requireTrusted bool) (*tenantResourceChain, error) {
 	var chain tenantResourceChain
 	targetUntrusted := false
 	if err := tx.Where("tenant_id = ? AND id = ?", tenantID, resourceID).First(&chain.Resource).Error; err != nil {
@@ -716,7 +729,11 @@ func loadTenantResourceChain(tx *gorm.DB, tenantID, resourceID string, now time.
 		if candidate.Scope.NamespaceObservationID != nil {
 			_ = tx.First(&candidate.Namespace, "id = ?", *candidate.Scope.NamespaceObservationID).Error
 		}
-		targetQuery := tx.Where("tenant_resource_source_id = ? AND superseded_at IS NULL", sources[i].ID).Order("revision DESC")
+		targetQuery := tx.Where("tenant_resource_source_id = ? AND superseded_at IS NULL", sources[i].ID)
+		if targetRevisionID != "" {
+			targetQuery = targetQuery.Where("id = ?", targetRevisionID)
+		}
+		targetQuery = targetQuery.Order("revision DESC")
 		if err := targetQuery.First(&candidate.Target).Error; err != nil {
 			if requireTrusted {
 				continue

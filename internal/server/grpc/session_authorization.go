@@ -232,7 +232,7 @@ func (s *AgentServiceServer) toProtoAuthorizationSnapshot(snapshot *service.Sess
 			AllocationId: permission.AllocationID, GrantId: permission.GrantID, GrantRevision: permission.GrantRevision,
 			AuthorizationRevision: permission.AuthorizationRevision, ValidUntil: timestamppb.New(permission.ValidUntil),
 			SshUsers:   permission.SSHUsers,
-			ListenPort: uint32(listenPorts[permission.ResourceID]),
+			ListenPort: uint32(listenPorts[permission.TargetRevisionID]),
 			Target: &pb.ResourceSessionTargetV2{
 				NamespaceUid: permission.Target.NamespaceUID, NamespaceName: permission.Target.NamespaceName,
 				ServiceUid: permission.Target.ServiceUID, ServiceName: permission.Target.ServiceName,
@@ -279,26 +279,25 @@ func (s *AgentServiceServer) toProtoAuthorizationSnapshot(snapshot *service.Sess
 	}
 }
 
-// allocateSessionAuthorizationListenPorts gives each active ContainerSSH
-// Resource a deterministic Agent-local port. Open addressing removes hash
-// collisions while every session for the same Resource keeps one route.
+// allocateSessionAuthorizationListenPorts gives each active ContainerSSH Pod
+// target a deterministic Agent-local port.
 func allocateSessionAuthorizationListenPorts(permissions []service.SessionAuthorizationPermission) map[string]uint16 {
-	resourceSet := make(map[string]struct{})
+	targetSet := make(map[string]struct{})
 	for _, permission := range permissions {
-		if permission.ResourceType == model.TenantResourceContainerSSH && permission.ResourceID != "" {
-			resourceSet[permission.ResourceID] = struct{}{}
+		if permission.ResourceType == model.TenantResourceContainerSSH && permission.TargetRevisionID != "" {
+			targetSet[permission.TargetRevisionID] = struct{}{}
 		}
 	}
-	resourceIDs := make([]string, 0, len(resourceSet))
-	for resourceID := range resourceSet {
-		resourceIDs = append(resourceIDs, resourceID)
+	targetIDs := make([]string, 0, len(targetSet))
+	for targetID := range targetSet {
+		targetIDs = append(targetIDs, targetID)
 	}
-	sort.Strings(resourceIDs)
-	result := make(map[string]uint16, len(resourceIDs))
-	occupied := make(map[uint16]struct{}, len(resourceIDs))
+	sort.Strings(targetIDs)
+	result := make(map[string]uint16, len(targetIDs))
+	occupied := make(map[uint16]struct{}, len(targetIDs))
 	rangeSize := int(service.ContainerSSHPortEnd-service.ContainerSSHPortBase) + 1
-	for _, resourceID := range resourceIDs {
-		digest := sha256.Sum256([]byte("resource-session-listen-port\x00" + resourceID))
+	for _, targetID := range targetIDs {
+		digest := sha256.Sum256([]byte("resource-session-listen-port\x00" + targetID))
 		start := int(binary.BigEndian.Uint16(digest[:2])) % rangeSize
 		for offset := 0; offset < rangeSize; offset++ {
 			port := service.ContainerSSHPortBase + uint16((start+offset)%rangeSize)
@@ -306,7 +305,7 @@ func allocateSessionAuthorizationListenPorts(permissions []service.SessionAuthor
 				continue
 			}
 			occupied[port] = struct{}{}
-			result[resourceID] = port
+			result[targetID] = port
 			break
 		}
 	}

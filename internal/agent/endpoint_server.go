@@ -26,20 +26,19 @@ type EndpointCapability struct {
 
 // EndpointConnection Endpoint 连接信息
 type EndpointConnection struct {
-	Name               string
-	Token              string
-	Version            string
-	CommitID           string
-	BinarySHA256       string
-	OS                 string
-	Arch               string
-	UpdaterProtocol    string
-	UpdateStatuses     []*pb.UpdateStatus
-	Capabilities       []EndpointCapability       // 多能力列表
-	DiscoveredServices []*pb.DiscoveredK8SService // Endpoint 发现的 K8S Service
-	RemoteIP           string
-	LastSeen           time.Time
-	Cancel             context.CancelFunc
+	Name            string
+	Token           string
+	Version         string
+	CommitID        string
+	BinarySHA256    string
+	OS              string
+	Arch            string
+	UpdaterProtocol string
+	UpdateStatuses  []*pb.UpdateStatus
+	Capabilities    []EndpointCapability // 多能力列表
+	RemoteIP        string
+	LastSeen        time.Time
+	Cancel          context.CancelFunc
 
 	// SSH 能力配置（从 Endpoint 上报）
 	SSHUsers []string // 允许的 SSH 用户列表
@@ -577,19 +576,18 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 
 	// 注册连接（解析能力信息和配置）
 	conn := &EndpointConnection{
-		Name:               name,
-		Token:              firstReq.Token,
-		Version:            firstReq.Version,
-		CommitID:           firstReq.CommitId,
-		BinarySHA256:       firstReq.BinarySha256,
-		OS:                 firstReq.Os,
-		Arch:               firstReq.Arch,
-		UpdaterProtocol:    firstReq.UpdaterProtocol,
-		UpdateStatuses:     firstReq.UpdateStatuses,
-		Capabilities:       parseCapabilities(firstReq.Capabilities),
-		DiscoveredServices: firstReq.DiscoveredServices,
-		LastSeen:           time.Now(),
-		Cancel:             cancel,
+		Name:            name,
+		Token:           firstReq.Token,
+		Version:         firstReq.Version,
+		CommitID:        firstReq.CommitId,
+		BinarySHA256:    firstReq.BinarySha256,
+		OS:              firstReq.Os,
+		Arch:            firstReq.Arch,
+		UpdaterProtocol: firstReq.UpdaterProtocol,
+		UpdateStatuses:  firstReq.UpdateStatuses,
+		Capabilities:    parseCapabilities(firstReq.Capabilities),
+		LastSeen:        time.Now(),
+		Cancel:          cancel,
 		// SSH 配置
 		SSHUsers: firstReq.SshUsers,
 		// K8S API 配置
@@ -696,7 +694,6 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 				conn.Capabilities = parseCapabilities(req.Capabilities)
 			}
 			// 更新 K8S Service 发现数据
-			conn.DiscoveredServices = req.DiscoveredServices
 			// 更新 SSH 配置
 			conn.SSHUsers = req.SshUsers
 			logger.Debugf("Endpoint 心跳更新: name=%s, ssh_users=%v (len=%d)", name, req.SshUsers, len(req.SshUsers))
@@ -883,23 +880,6 @@ func (s *EndpointServer) IsEndpointConnected(name string) bool {
 	defer s.connMutex.RUnlock()
 	_, exists := s.connections[name]
 	return exists
-}
-
-// FindEndpointServiceClusterIP 从 Endpoint 上报的发现数据中查找 ClusterIP
-// 用于物理主机 Agent（无本地 Informer）通过 Endpoint 的发现数据获取 ClusterIP
-func (s *EndpointServer) FindEndpointServiceClusterIP(endpointName, namespace, serviceName string) string {
-	s.connMutex.RLock()
-	defer s.connMutex.RUnlock()
-	conn, exists := s.connections[endpointName]
-	if !exists {
-		return ""
-	}
-	for _, svc := range conn.DiscoveredServices {
-		if svc.Namespace == namespace && svc.ServiceName == serviceName {
-			return svc.ClusterIp
-		}
-	}
-	return ""
 }
 
 // OpenK8SAPIProxy Endpoint 回调的 K8S API 代理会话（gRPC 双向流）

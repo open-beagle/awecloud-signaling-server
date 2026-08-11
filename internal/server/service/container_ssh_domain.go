@@ -20,6 +20,29 @@ var (
 type containerSSHBusinessTarget struct {
 	NamespaceName string `json:"namespace_name"`
 	WorkloadName  string `json:"workload_name"`
+	PodName       string `json:"pod_name"`
+}
+
+// ContainerSSHRuntimeDomain identifies one current Pod route while the
+// TenantResource and its AccessGrant remain bound to Workload + Container.
+func ContainerSSHRuntimeDomain(ctx context.Context, database *gorm.DB, accessTechnicalResourceID, targetSnapshot string) (string, error) {
+	var target containerSSHBusinessTarget
+	if json.Unmarshal([]byte(targetSnapshot), &target) != nil {
+		return "", ErrContainerSSHBusinessDomainInvalid
+	}
+	podName := strings.ToLower(strings.TrimSpace(target.PodName))
+	if validation.IsDNS1123Subdomain(podName) != nil {
+		return "", ErrContainerSSHBusinessDomainInvalid
+	}
+	domain, err := ContainerSSHBusinessDomain(ctx, database, accessTechnicalResourceID, targetSnapshot)
+	if err != nil {
+		return "", err
+	}
+	domain = podName + "." + domain
+	if len(domain) > 253 || validation.IsDNS1123Subdomain(domain) != nil {
+		return "", ErrContainerSSHBusinessDomainInvalid
+	}
+	return domain, nil
 }
 
 // ContainerSSHBusinessDomain returns the stable user-facing address for a

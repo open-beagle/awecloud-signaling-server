@@ -14,9 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
@@ -82,10 +79,9 @@ func (m *LocalProxyManager) UpdateProxies() error {
 	domains := m.domainCache.List()
 	logger.Infof("[LocalProxy] 更新代理列表，共 %d 个域名", len(domains))
 
-	// 调试：打印所有域名的类型和 service_ports
+	// 调试：打印所有域名类型
 	for _, domain := range domains {
-		logger.Infof("[LocalProxy] 域名 %s type='%s' service_ports=%v (len=%d)",
-			domain.Domain, domain.Type, domain.ServicePorts, len(domain.ServicePorts))
+		logger.Infof("[LocalProxy] 域名 %s type='%s'", domain.Domain, domain.Type)
 	}
 
 	// 构建新的代理映射（VIP:port -> 域名信息）
@@ -110,30 +106,6 @@ func (m *LocalProxyManager) UpdateProxies() error {
 			// K8S API Server 标准端口
 			listenAddr := fmt.Sprintf("%s:6443", vip)
 			newProxies[listenAddr] = domain
-		case "k8ssvc":
-			// K8SSVC 需要为每个 service_port 创建监听
-			logger.Debugf("[LocalProxy] K8SSVC 域名 %s service_ports=%v", domain.Domain, domain.ServicePorts)
-			if len(domain.ServicePorts) == 0 {
-				logger.Warnf("[LocalProxy] K8SSVC 域名 %s 没有 service_ports，跳过", domain.Domain)
-				continue
-			}
-			// 为每个 service_port 创建独立的监听
-			for _, port := range domain.ServicePorts {
-				listenAddr := fmt.Sprintf("%s:%d", vip, port)
-				// 创建域名副本，并设置当前端口（用于连接时识别）
-				domainCopy := &pb.DomainInfo{
-					Domain:       domain.Domain,
-					Type:         domain.Type,
-					TargetIp:     domain.TargetIp,
-					TargetPort:   port, // 临时存储当前服务端口，用于 handleConn 识别
-					ClusterName:  domain.ClusterName,
-					Namespace:    domain.Namespace,
-					ServiceName:  domain.ServiceName,
-					Status:       domain.Status,
-					ServicePorts: domain.ServicePorts,
-				}
-				newProxies[listenAddr] = domainCopy
-			}
 		default:
 			// 其他类型使用 target_port
 			listenAddr := fmt.Sprintf("%s:%d", vip, domain.TargetPort)
@@ -173,15 +145,8 @@ func (m *LocalProxyManager) startProxy(listenAddr string, domain *pb.DomainInfo)
 	m.listeners[listenAddr] = listener
 	m.proxyInfo[listenAddr] = domain
 
-	// 根据类型输出不同的日志
-	if domain.Type == "k8ssvc" {
-		// K8SSVC 类型：显示服务名称和端口
-		logger.Infof("[LocalProxy] 启动代理: %s -> %s:%d (%s, %s.%s:%d)",
-			listenAddr, domain.TargetIp, 50051, domain.Type, domain.ServiceName, domain.Namespace, domain.TargetPort)
-	} else {
-		logger.Infof("[LocalProxy] 启动代理: %s -> %s:%d (%s)",
-			listenAddr, domain.TargetIp, domain.TargetPort, domain.Type)
-	}
+	logger.Infof("[LocalProxy] 启动代理: %s -> %s:%d (%s)",
+		listenAddr, domain.TargetIp, domain.TargetPort, domain.Type)
 
 	// 启动接受连接的协程
 	m.wg.Add(1)
@@ -236,11 +201,6 @@ func (m *LocalProxyManager) handleConn(clientConn net.Conn, domain *pb.DomainInf
 	case "k8sapi":
 		// K8SAPI：连接到 Agent K8SAPI 代理端口（如 100.64.0.19:50050）
 		targetAddr = fmt.Sprintf("%s:%d", domain.TargetIp, domain.TargetPort)
-
-	case "k8ssvc":
-		// K8SSVC：需要 gRPC 协议包装
-		m.handleK8SSVCConn(clientConn, domain)
-		return
 
 	default:
 		logger.Warnf("[LocalProxy] 未知的域名类型: %s", domain.Type)
@@ -350,151 +310,6 @@ func (m *LocalProxyManager) handleK8SAPIConn(clientConn net.Conn, targetConn net
 
 	// 双向桥接：TLS 客户端 <-> HTTP 后端
 	m.bridgeConns(tlsConn, targetConn, domain)
-}
-
-// handleK8SSVCConn 处理 K8S Service 连接（gRPC 包装）
-// Desktop.Pod 本地代理通过 gRPC 连接到 Agent SVCProxy 服务
-func (m *LocalProxyManager) handleK8SSVCConn(clientConn net.Conn, domain *pb.DomainInfo) {
-	defer clientConn.Close()
-
-	// 1. 建立到 Agent SVCProxy 的 TCP 连接
-	targetAddr := fmt.Sprintf("%s:50051", domain.TargetIp)
-	ctx, cancel := context.WithTimeout(m.ctx, 30*time.Second)
-	defer cancel()
-
-	targetConn, err := m.tsManager.Dial(ctx, "tcp", targetAddr)
-	if err != nil {
-		logger.Warnf("[LocalProxy] K8SSVC 拨号失败: %s -> %s, %v", domain.Domain, targetAddr, err)
-		return
-	}
-	defer targetConn.Close()
-
-	logger.Infof("[LocalProxy] K8SSVC 连接建立: %s -> %s (%s.%s:%d)",
-		clientConn.RemoteAddr(), targetAddr, domain.ServiceName, domain.Namespace, domain.TargetPort)
-
-	// 2. 创建 gRPC 客户端（使用已建立的 TCP 连接）
-	grpcConn, err := newGRPCClientConn(targetConn)
-	if err != nil {
-		logger.Errorf("[LocalProxy] K8SSVC 创建 gRPC 客户端失败: %v", err)
-		return
-	}
-	defer grpcConn.Close()
-
-	client := pb.NewAgentServiceClient(grpcConn)
-
-	// 3. 调用 SVCProxy 方法，获取双向流
-	stream, err := client.SVCProxy(ctx)
-	if err != nil {
-		logger.Errorf("[LocalProxy] K8SSVC 调用 SVCProxy 失败: %v", err)
-		return
-	}
-
-	// 4. 发送首包（连接参数）
-	// P10 重构：不再发送 endpoint_name，由 neimeng Agent 自动选择实现路径
-	err = stream.Send(&pb.SVCProxyData{
-		Namespace:   domain.Namespace,
-		ServiceName: domain.ServiceName,
-		Port:        domain.TargetPort,
-		IsConnect:   true,
-	})
-	if err != nil {
-		logger.Errorf("[LocalProxy] K8SSVC 发送首包失败: %v", err)
-		return
-	}
-
-	logger.Debugf("[LocalProxy] K8SSVC 首包已发送: %s.%s:%d", domain.ServiceName, domain.Namespace, domain.TargetPort)
-
-	// 5. 桥接客户端连接和 gRPC 流
-	m.bridgeK8SSVCStream(clientConn, stream, domain)
-}
-
-// bridgeK8SSVCStream 桥接客户端连接和 gRPC 流
-func (m *LocalProxyManager) bridgeK8SSVCStream(clientConn net.Conn, stream pb.AgentService_SVCProxyClient, domain *pb.DomainInfo) {
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	// 客户端 -> gRPC 流
-	go func() {
-		defer wg.Done()
-		buffer := make([]byte, 32*1024)
-		totalBytes := int64(0)
-		for {
-			n, err := clientConn.Read(buffer)
-			if n > 0 {
-				totalBytes += int64(n)
-				sendErr := stream.Send(&pb.SVCProxyData{
-					Data: buffer[:n],
-				})
-				if sendErr != nil {
-					logger.Debugf("[LocalProxy] K8SSVC %s: 发送数据失败: %v", domain.Domain, sendErr)
-					return
-				}
-			}
-			if err != nil {
-				if err != io.EOF {
-					logger.Debugf("[LocalProxy] K8SSVC %s: 客户端读取失败: %v", domain.Domain, err)
-				}
-				// 发送关闭通知
-				stream.Send(&pb.SVCProxyData{IsClose: true})
-				logger.Debugf("[LocalProxy] K8SSVC %s: 客户端->gRPC 传输完成: %d 字节", domain.Domain, totalBytes)
-				return
-			}
-		}
-	}()
-
-	// gRPC 流 -> 客户端
-	go func() {
-		defer wg.Done()
-		totalBytes := int64(0)
-		for {
-			resp, err := stream.Recv()
-			if err != nil {
-				if err != io.EOF {
-					logger.Debugf("[LocalProxy] K8SSVC %s: gRPC 接收失败: %v", domain.Domain, err)
-				}
-				logger.Debugf("[LocalProxy] K8SSVC %s: gRPC->客户端 传输完成: %d 字节", domain.Domain, totalBytes)
-				return
-			}
-
-			// 检查错误
-			if resp.Error != "" {
-				logger.Warnf("[LocalProxy] K8SSVC %s: 收到错误: %s", domain.Domain, resp.Error)
-				return
-			}
-
-			// 检查关闭通知
-			if resp.IsClose {
-				logger.Debugf("[LocalProxy] K8SSVC %s: 收到关闭通知", domain.Domain)
-				return
-			}
-
-			// 写入数据到客户端
-			if len(resp.Data) > 0 {
-				totalBytes += int64(len(resp.Data))
-				_, writeErr := clientConn.Write(resp.Data)
-				if writeErr != nil {
-					logger.Debugf("[LocalProxy] K8SSVC %s: 客户端写入失败: %v", domain.Domain, writeErr)
-					return
-				}
-			}
-		}
-	}()
-
-	// 等待双向传输完成
-	wg.Wait()
-	logger.Debugf("[LocalProxy] K8SSVC %s: 连接关闭", domain.Domain)
-}
-
-// newGRPCClientConn 基于已建立的 TCP 连接创建 gRPC 客户端连接
-func newGRPCClientConn(conn net.Conn) (*grpc.ClientConn, error) {
-	// 使用 grpc.WithContextDialer 将已建立的连接包装为 gRPC 连接
-	return grpc.NewClient(
-		"passthrough:///agent", // 目标地址（实际不使用，因为连接已建立）
-		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
-			return conn, nil
-		}),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
 }
 
 // generateSelfSignedCert 生成自签名证书

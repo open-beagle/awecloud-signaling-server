@@ -16,6 +16,7 @@ import (
 type memoryTenantResourceCandidate struct {
 	view       TenantResourceView
 	projection workloadProjection
+	targets    []workloadProjection
 	snapshot   workloadSnapshot
 	allocation model.ResourceAllocation
 	item       model.ResourceAllocationItem
@@ -87,7 +88,6 @@ func (s *TenantResourceService) memoryCandidates(ctx context.Context, tenantID s
 	}
 
 	candidatesByID := make(map[string]memoryTenantResourceCandidate)
-	conflicted := make(map[string]struct{})
 	for _, snapshot := range s.snapshots.current(at) {
 		for _, entitlement := range entitlements[snapshot.NamespaceScopeID] {
 			for _, projection := range snapshot.Projections {
@@ -103,11 +103,9 @@ func (s *TenantResourceService) memoryCandidates(ctx context.Context, tenantID s
 					continue
 				}
 				id := memoryCandidateID(tenantID, resourceType, projection.StableKey, entitlement.lineage.ID)
-				if _, found := conflicted[id]; found {
-					continue
-				}
 				candidate := memoryTenantResourceCandidate{
 					projection: projection, snapshot: snapshot, allocation: entitlement.allocation, item: entitlement.item,
+					targets: []workloadProjection{projection},
 					lineage: entitlement.lineage, scope: entitlement.scope, namespace: entitlement.namespace,
 					view: TenantResourceView{
 						ResourceID: id, Type: string(resourceType), DisplayName: workloadDisplayName(snapshot.Kind, projection.Target),
@@ -125,9 +123,21 @@ func (s *TenantResourceService) memoryCandidates(ctx context.Context, tenantID s
 					continue
 				}
 				prior, found := candidatesByID[id]
-				if found && prior.projection.Target != projection.Target {
-					delete(candidatesByID, id)
-					conflicted[id] = struct{}{}
+				if found && prior.snapshot.SourceTechnicalResourceID == snapshot.SourceTechnicalResourceID &&
+					prior.snapshot.NamespaceScopeID == snapshot.NamespaceScopeID && prior.snapshot.Kind == snapshot.Kind &&
+					prior.snapshot.Sequence == snapshot.Sequence {
+					duplicate := false
+					for _, target := range prior.targets {
+						if target.Target == projection.Target {
+							duplicate = true
+							break
+						}
+					}
+					if !duplicate {
+						prior.targets = append(prior.targets, projection)
+						sort.Slice(prior.targets, func(i, j int) bool { return prior.targets[i].Target < prior.targets[j].Target })
+						candidatesByID[id] = prior
+					}
 					continue
 				}
 				if !found || snapshot.ReceivedAt.After(prior.snapshot.ReceivedAt) {

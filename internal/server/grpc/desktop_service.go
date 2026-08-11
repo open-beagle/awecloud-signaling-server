@@ -1618,6 +1618,24 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 		First(&record).Error; err != nil {
 		return &pb.ResolveDomainResponse{Success: false, Message: "域名未注册或已离线"}, nil
 	}
+	if record.Type != model.DomainTypeSSH && record.Type != model.DomainTypeK8SAPI {
+		return &pb.ResolveDomainResponse{Success: false, Message: "域名类型不支持"}, nil
+	}
+	var groupIDs []int64
+	db.DB.WithContext(ctx).Model(&model.GroupMember{}).Where("user_id = ?", node.UserID).Pluck("group_id", &groupIDs)
+	allowed := false
+	for _, item := range appendUniqueDomainItems(
+		s.queryAccessibleDomains(ctx, node.UserID, groupIDs),
+		s.queryUnifiedHostSSHDomainItems(ctx, node.UserID, groupIDs),
+	) {
+		if item.Domain == record.Domain {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return &pb.ResolveDomainResponse{Success: false, Message: "无权访问该域名"}, nil
+	}
 
 	// 确定 Agent IP：优先使用域名记录的 target_ip，再查 Node 表
 	agentIP := record.TargetIP
@@ -1630,17 +1648,6 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 		}
 	}
 	if agentIP == "" {
-		// 回退：按 UserID 查有 IP 的 Agent 节点（兼容旧数据）
-		var agentNode model.Node
-		if err := db.DB.WithContext(ctx).
-			Where("user_id = ? AND type = ? AND ip != ''", record.UserID, model.NodeTypeAgent).
-			Order("last_heartbeat DESC").
-			First(&agentNode).Error; err == nil {
-			agentIP = agentNode.IP
-		}
-	}
-
-	if agentIP == "" {
 		return &pb.ResolveDomainResponse{Success: false, Message: "Agent 节点未找到或无 IP"}, nil
 	}
 
@@ -1651,18 +1658,14 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 
 	logger.Infof("Desktop %d 解析域名: %s → %s:%d (user=%s, target_ip=%s)", req.DesktopId, req.Domain, agentIP, record.TargetPort, userName, record.TargetIP)
 
-	// P10 重构：删除 endpoint_name 字段，Agent 自动选择实现路径
 	return &pb.ResolveDomainResponse{
-		Success:      true,
-		Message:      "解析成功",
-		Domain:       record.Domain,
-		AgentIp:      agentIP,
-		TargetPort:   int32(record.TargetPort),
-		AgentName:    userName,
-		DomainType:   string(record.Type),
-		Namespace:    record.Namespace,
-		ServiceName:  record.ServiceName,
-		SvcProxyPort: 50051, // Agent SVCProxy 默认端口
+		Success:    true,
+		Message:    "解析成功",
+		Domain:     record.Domain,
+		AgentIp:    agentIP,
+		TargetPort: int32(record.TargetPort),
+		AgentName:  userName,
+		DomainType: string(record.Type),
 	}, nil
 }
 
@@ -1698,12 +1701,10 @@ func (s *DesktopServiceServer) GetResources(ctx context.Context, req *pb.GetReso
 
 	resp := &pb.GetResourcesResponse{}
 
-	// 旧资源没有 Tenant 强身份，只能在未选择 Tenant 的兼容请求中返回。
-	// 显式 Tenant 请求必须失败关闭，避免把旧 Agent 级 ACL 混入当前作用域。
+	// SSH 和 Kubernetes 仍由现行资源查询提供；Service 和 Pod 只走 TenantResource。
 	if req.TenantId == "" {
 		resp.Ssh = s.querySSHResourcesGRPC(ctx, clientID, groupIDs)
 		resp.K8SApi = s.queryK8SAPIResourcesGRPC(ctx, clientID, groupIDs)
-		resp.K8SService = s.queryK8SServiceResourcesGRPC(ctx, clientID, groupIDs)
 	}
 	resp.Ssh = appendUniqueSSHResources(resp.Ssh, s.queryUnifiedHostSSHResourcesGRPC(ctx, clientID, groupIDs, req.TenantId)...)
 	if req.ResourceProtocol == sessionAuthorizationProtocolV2 {
@@ -1712,8 +1713,8 @@ func (s *DesktopServiceServer) GetResources(ctx context.Context, req *pb.GetReso
 		resp.ContainerService = containerServices
 	}
 
-	logger.Infof("Desktop %d 资源发现: SSH=%d, K8SAPI=%d, K8SService=%d, ContainerSSH=%d, ContainerService=%d",
-		req.DesktopId, len(resp.Ssh), len(resp.K8SApi), len(resp.K8SService), len(resp.ContainerSsh), len(resp.ContainerService))
+	logger.Infof("Desktop %d 资源发现: SSH=%d, K8SAPI=%d, ContainerSSH=%d, ContainerService=%d",
+		req.DesktopId, len(resp.Ssh), len(resp.K8SApi), len(resp.ContainerSsh), len(resp.ContainerService))
 
 	return resp, nil
 }
@@ -1752,6 +1753,7 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 		membershipQuery = membershipQuery.Where("tenant_id = ?", tenantID)
 	}
 	if err := membershipQuery.Find(&memberships).Error; err != nil {
+		logger.Warnf("Desktop 资源发现查询 Tenant 成员关系失败: desktop_id=%d tenant_id=%s err=%v", desktop.ID, tenantID, err)
 		return nil, nil
 	}
 	tenantIDs := make([]string, 0, len(memberships))
@@ -1759,10 +1761,12 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 		tenantIDs = append(tenantIDs, membership.TenantID)
 	}
 	if len(tenantIDs) == 0 {
+		logger.Debugf("Desktop 资源发现无有效 Tenant 成员关系: desktop_id=%d user_id=%d tenant_id=%s", desktop.ID, desktop.UserID, tenantID)
 		return nil, nil
 	}
 	var tenants []model.Tenant
 	if err := db.DB.WithContext(ctx).Where("id IN ? AND status = ?", tenantIDs, model.TenantStatusActive).Find(&tenants).Error; err != nil {
+		logger.Warnf("Desktop 资源发现查询 Tenant 失败: desktop_id=%d tenant_id=%s err=%v", desktop.ID, tenantID, err)
 		return nil, nil
 	}
 	tenantByID := make(map[string]model.Tenant, len(tenants))
@@ -1772,6 +1776,7 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 		activeTenantIDs = append(activeTenantIDs, tenant.ID)
 	}
 	if len(activeTenantIDs) == 0 {
+		logger.Debugf("Desktop 资源发现无启用 Tenant: desktop_id=%d tenant_id=%s", desktop.ID, tenantID)
 		return nil, nil
 	}
 	grantQuery := db.DB.WithContext(ctx).Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND (expires_at IS NULL OR expires_at > ?)", activeTenantIDs, model.TenantAccessGrantEnabled, now, now).
@@ -1783,6 +1788,7 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 	}
 	var grants []model.TenantAccessGrant
 	if err := grantQuery.Order("tenant_resource_id ASC, revision DESC").Find(&grants).Error; err != nil {
+		logger.Warnf("Desktop 资源发现查询授权失败: desktop_id=%d tenant_id=%s err=%v", desktop.ID, tenantID, err)
 		return nil, nil
 	}
 	actionByResource := make(map[string]string)
@@ -1802,12 +1808,18 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 		resourceIDs = append(resourceIDs, resourceID)
 	}
 	if len(resourceIDs) == 0 {
+		logger.Debugf("Desktop 资源发现无有效 Shell/Connect 授权: desktop_id=%d user_id=%d tenant_id=%s", desktop.ID, desktop.UserID, tenantID)
 		return nil, nil
 	}
 	var resources []model.TenantResource
 	if err := db.DB.WithContext(ctx).Where("id IN ? AND tenant_id IN ? AND visibility_state = ? AND availability_state IN ?", resourceIDs, activeTenantIDs,
 		model.TenantResourceVisible, []model.TenantResourceAvailabilityState{model.TenantResourceAvailable, model.TenantResourceDegraded}).
 		Order("display_name ASC, id ASC").Find(&resources).Error; err != nil {
+		logger.Warnf("Desktop 资源发现查询已发布资源失败: desktop_id=%d tenant_id=%s err=%v", desktop.ID, tenantID, err)
+		return nil, nil
+	}
+	if len(resources) == 0 {
+		logger.Debugf("Desktop 资源发现无可用的已发布资源: desktop_id=%d tenant_id=%s grant_count=%d", desktop.ID, tenantID, len(grants))
 		return nil, nil
 	}
 
@@ -1819,29 +1831,38 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 			(resource.Type == model.TenantResourceContainerService && action != "connect") {
 			continue
 		}
-		session, err := sessionService.EnsureForDesktop(ctx, desktop.UserID, service.CreateResourceSessionInput{
-			TenantID: resource.TenantID, ResourceID: resource.ID, Action: action, DeviceID: desktop.ID,
-			ClientCapability: "resource_session_v2", RequestID: "desktop-resource:" + uuid.NewString(),
-		})
-		if err != nil {
-			logger.Warnf("Desktop ResourceSession 授权失败: desktop_id=%d resource_id=%s err=%v", desktop.ID, resource.ID, err)
+		var targets []model.TenantResourceTargetRevision
+		if err := db.DB.WithContext(ctx).Table("resource_target_revision_v2 AS target").Select("target.*").
+			Joins("JOIN tenant_resource_source AS source ON source.id = target.tenant_resource_source_id").
+			Where("source.tenant_resource_id = ? AND source.enabled = ? AND target.superseded_at IS NULL AND target.ready = ?", resource.ID, true, true).
+			Order("target.target_snapshot ASC, target.id ASC").Find(&targets).Error; err != nil {
+			logger.Warnf("Desktop 资源发现查询当前目标失败: desktop_id=%d resource_id=%s err=%v", desktop.ID, resource.ID, err)
 			continue
 		}
-		var target model.TenantResourceTargetRevision
-		if err := db.DB.WithContext(ctx).Where("id = ? AND tenant_resource_source_id = ? AND superseded_at IS NULL", session.TargetRevisionID, session.TenantResourceSourceID).First(&target).Error; err != nil {
-			continue
+		for _, target := range targets {
+			session, err := sessionService.EnsureForDesktop(ctx, desktop.UserID, service.CreateResourceSessionInput{
+				TenantID: resource.TenantID, ResourceID: resource.ID, TargetRevisionID: target.ID, Action: action, DeviceID: desktop.ID,
+				ClientCapability: "resource_session_v2", RequestID: "desktop-resource:" + uuid.NewString(),
+			})
+			if err != nil {
+				logger.Warnf("Desktop ResourceSession 授权失败: desktop_id=%d resource_id=%s target_revision_id=%s err=%v", desktop.ID, resource.ID, target.ID, err)
+				continue
+			}
+			var targetV2 service.SessionAuthorizationTarget
+			if err := json.Unmarshal([]byte(target.TargetSnapshot), &targetV2); err != nil {
+				logger.Warnf("Desktop 资源发现目标快照无效: desktop_id=%d resource_id=%s err=%v", desktop.ID, resource.ID, err)
+				continue
+			}
+			agentNode, err := desktopAccessAgentNode(ctx, target.AccessTechnicalResourceID)
+			if err != nil {
+				logger.Warnf("Desktop 资源发现访问 Agent 不可用: desktop_id=%d resource_id=%s technical_resource_id=%s err=%v",
+					desktop.ID, resource.ID, target.AccessTechnicalResourceID, err)
+				continue
+			}
+			projections = append(projections, desktopTenantResourceProjection{
+				resource: resource, tenant: tenantByID[resource.TenantID], session: session, target: target, agent: agentNode, targetV2: targetV2,
+			})
 		}
-		var targetV2 service.SessionAuthorizationTarget
-		if json.Unmarshal([]byte(target.TargetSnapshot), &targetV2) != nil {
-			continue
-		}
-		agentNode, err := desktopAccessAgentNode(ctx, target.AccessTechnicalResourceID)
-		if err != nil {
-			continue
-		}
-		projections = append(projections, desktopTenantResourceProjection{
-			resource: resource, tenant: tenantByID[resource.TenantID], session: session, target: target, agent: agentNode, targetV2: targetV2,
-		})
 	}
 
 	permissions := make(map[string]service.SessionAuthorizationPermission)
@@ -1853,6 +1874,7 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 	for technicalID := range technicalIDs {
 		snapshot, err := service.NewSessionAuthorizationService(db.DB).BuildSnapshot(ctx, technicalID, true)
 		if err != nil {
+			logger.Warnf("Desktop 资源发现构建授权快照失败: desktop_id=%d technical_resource_id=%s err=%v", desktop.ID, technicalID, err)
 			continue
 		}
 		for _, permission := range snapshot.Permissions {
@@ -1871,11 +1893,11 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 		}
 		state := string(projection.resource.AvailabilityState)
 		if projection.resource.Type == model.TenantResourceContainerSSH {
-			listenPort := listenPorts[projection.session.AccessTechnicalResourceID][projection.resource.ID]
+			listenPort := listenPorts[projection.session.AccessTechnicalResourceID][projection.session.TargetRevisionID]
 			if listenPort == 0 {
 				continue
 			}
-			domain, err := service.ContainerSSHBusinessDomain(ctx, db.DB, projection.session.AccessTechnicalResourceID, projection.target.TargetSnapshot)
+			domain, err := service.ContainerSSHRuntimeDomain(ctx, db.DB, projection.session.AccessTechnicalResourceID, projection.target.TargetSnapshot)
 			if err != nil {
 				logger.Warnf("Desktop ContainerSSH 业务域名无效: resource_id=%s err=%v", projection.resource.ID, err)
 				continue
@@ -1887,6 +1909,9 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 				Domain: domain, AgentIp: projection.agent.IP, SshUsers: permission.SSHUsers,
 				SessionId: projection.session.ID, SourceId: projection.session.TenantResourceSourceID,
 				TargetRevisionId: projection.session.TargetRevisionID, AuthorizationRevision: permission.AuthorizationRevision,
+				Namespace: projection.targetV2.NamespaceName, WorkloadKind: projection.targetV2.WorkloadKind,
+				WorkloadName: projection.targetV2.WorkloadName, PodUid: projection.targetV2.PodUID,
+				PodName: projection.targetV2.PodName, ContainerName: projection.targetV2.ContainerName,
 			})
 			continue
 		}
@@ -2115,59 +2140,6 @@ func (s *DesktopServiceServer) queryK8SAPIResourcesGRPC(ctx context.Context, cli
 	return resources
 }
 
-// queryK8SServiceResourcesGRPC 查询 K8S Service 资源（gRPC 版本）
-func (s *DesktopServiceServer) queryK8SServiceResourcesGRPC(ctx context.Context, clientID uint64, groupIDs []int64) []*pb.K8SServiceResource {
-	var resources []*pb.K8SServiceResource
-	agentIDs := make(map[uint64]*model.User)
-
-	var userPerms []model.AclK8SServiceUserPermission
-	db.DB.WithContext(ctx).Preload("TargetUser").Where("user_id = ? AND enabled = ?", clientID, true).Find(&userPerms)
-	for _, p := range userPerms {
-		if p.TargetUser != nil {
-			agentIDs[p.TargetUserID] = p.TargetUser
-		}
-	}
-
-	if len(groupIDs) > 0 {
-		var groupPerms []model.AclK8SServiceGroupPermission
-		db.DB.WithContext(ctx).Preload("TargetUser").Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&groupPerms)
-		for _, p := range groupPerms {
-			if p.TargetUser != nil {
-				agentIDs[p.TargetUserID] = p.TargetUser
-			}
-		}
-	}
-
-	for agentID, agentUser := range agentIDs {
-		discoveredServices := cache.GetK8SServiceDiscovery(agentID)
-		for _, ds := range discoveredServices {
-			var domainReg model.DomainRegistry
-			domain := ""
-			if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ? AND namespace = ? AND service_name = ?",
-				agentID, model.DomainTypeK8SSVC, ds.Namespace, ds.ServiceName).
-				First(&domainReg).Error; err == nil {
-				domain = domainReg.Domain
-			}
-
-			var port int32
-			if len(ds.Ports) > 0 {
-				port = ds.Ports[0].Port
-			}
-
-			resources = append(resources, &pb.K8SServiceResource{
-				AgentId:     agentID,
-				AgentName:   agentUser.Name,
-				Namespace:   ds.Namespace,
-				ServiceName: ds.ServiceName,
-				Domain:      domain,
-				Port:        port,
-			})
-		}
-	}
-
-	return resources
-}
-
 // findDomainForResource 查找指定 Agent 和类型的域名
 func (s *DesktopServiceServer) findDomainForResource(ctx context.Context, agentUserID uint64, domainType model.DomainType) string {
 	var domainReg model.DomainRegistry
@@ -2232,9 +2204,8 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 	var domains []*pb.DomainItem
 
 	// 按类型分别收集有权限的 Agent User ID
-	sshAgentIDs := make(map[uint64]bool)    // SSH 权限
-	k8sAgentIDs := make(map[uint64]bool)    // K8S API 权限
-	k8sSvcAgentIDs := make(map[uint64]bool) // K8S Service 权限
+	sshAgentIDs := make(map[uint64]bool) // SSH 权限
+	k8sAgentIDs := make(map[uint64]bool) // K8S API 权限
 
 	// SSH 权限的授权用户列表（agent_user_id → 授权的 SSH 用户名列表）
 	sshAuthorizedUsers := make(map[uint64][]string)
@@ -2242,7 +2213,6 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 	// Endpoint 权限：endpoint_id(UUID) → 是否有权限
 	endpointSSHIDs := make(map[string]bool)    // Endpoint SSH 权限（key 为 UUID）
 	endpointK8SAPIIDs := make(map[string]bool) // Endpoint K8S API 权限（key 为 UUID）
-	endpointK8SSvcIDs := make(map[string]bool) // Endpoint K8S Service 权限（key 为 UUID）
 
 	// Endpoint SSH 权限的授权用户列表（endpoint_id(UUID) → 授权的 SSH 用户名列表）
 	endpointSSHAuthorizedUsers := make(map[string][]string)
@@ -2251,7 +2221,6 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 	// DomainRegistry.endpoint_id 存的是 Endpoint.Name，而 ACL 表存的是 Endpoint.ID(UUID)
 	endpointSSHNames := make(map[string]bool)    // Endpoint SSH 权限（key 为 Name）
 	endpointK8SAPINames := make(map[string]bool) // Endpoint K8S API 权限（key 为 Name）
-	endpointK8SSvcNames := make(map[string]bool) // Endpoint K8S Service 权限（key 为 Name）
 
 	// Endpoint SSH 权限的授权用户列表（endpoint_name → 授权的 SSH 用户名列表）
 	endpointSSHAuthorizedUsersByName := make(map[string][]string)
@@ -2294,39 +2263,18 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 		}
 	}
 
-	// 3. 收集 K8S Service 权限
-	var k8sSvcUserPerms []model.AclK8SServiceUserPermission
-	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", clientID, true).Find(&k8sSvcUserPerms)
-	for _, p := range k8sSvcUserPerms {
-		k8sSvcAgentIDs[p.TargetUserID] = true
-	}
-
-	if len(groupIDs) > 0 {
-		var k8sSvcGroupPerms []model.AclK8SServiceGroupPermission
-		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&k8sSvcGroupPerms)
-		for _, p := range k8sSvcGroupPerms {
-			k8sSvcAgentIDs[p.TargetUserID] = true
-		}
-	}
-
-	// 4. 收集 Endpoint SSH 权限
+	// 3. 收集 Endpoint SSH 权限
 	// P12 重构：已废弃，Endpoint SSH 复用 Agent SSH 授权
 
-	// 5. 收集 Endpoint K8S API 权限
+	// 4. 收集 Endpoint K8S API 权限
 	// P11 重构：已废弃，不再查询 Endpoint K8SAPI 权限
 
-	// 6. 收集 Endpoint K8S Service 权限
-	// P10 重构：已废弃，不再查询 Endpoint K8SService 权限
-
-	// 7. 合并所有有权限的 Agent User ID（用于一次性查询域名）
+	// 5. 合并所有有权限的 Agent User ID（用于一次性查询域名）
 	allAgentIDs := make(map[uint64]bool)
 	for uid := range sshAgentIDs {
 		allAgentIDs[uid] = true
 	}
 	for uid := range k8sAgentIDs {
-		allAgentIDs[uid] = true
-	}
-	for uid := range k8sSvcAgentIDs {
 		allAgentIDs[uid] = true
 	}
 
@@ -2336,11 +2284,6 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 		endpointIDs = append(endpointIDs, eid)
 	}
 	for eid := range endpointK8SAPIIDs {
-		if !contains(endpointIDs, eid) {
-			endpointIDs = append(endpointIDs, eid)
-		}
-	}
-	for eid := range endpointK8SSvcIDs {
 		if !contains(endpointIDs, eid) {
 			endpointIDs = append(endpointIDs, eid)
 		}
@@ -2363,9 +2306,6 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 			if endpointK8SAPIIDs[ep.ID] {
 				endpointK8SAPINames[ep.Name] = true
 			}
-			if endpointK8SSvcIDs[ep.ID] {
-				endpointK8SSvcNames[ep.Name] = true
-			}
 		}
 	}
 
@@ -2379,7 +2319,7 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 	}
 
 	var domainRegs []model.DomainRegistry
-	db.DB.WithContext(ctx).Where("user_id IN ?", userIDList).Find(&domainRegs)
+	db.DB.WithContext(ctx).Where("user_id IN ? AND type IN ?", userIDList, []model.DomainType{model.DomainTypeSSH, model.DomainTypeK8SAPI}).Find(&domainRegs)
 
 	// 8. 按类型过滤域名，只返回用户有对应类型权限的域名
 	// 注意：dr.EndpointID 是 Endpoint.Name（如 beagle-002），需要用 endpointXxxNames 匹配
@@ -2402,13 +2342,6 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 			} else if dr.EndpointID != "" && endpointK8SAPINames[dr.EndpointID] {
 				hasPermission = true
 			}
-		case model.DomainTypeK8SSVC:
-			// 检查 Agent 级别权限或 Endpoint 级别权限
-			if k8sSvcAgentIDs[dr.UserID] {
-				hasPermission = true
-			} else if dr.EndpointID != "" && endpointK8SSvcNames[dr.EndpointID] {
-				hasPermission = true
-			}
 		default:
 			continue
 		}
@@ -2419,22 +2352,12 @@ func (s *DesktopServiceServer) queryAccessibleDomains(ctx context.Context, clien
 
 		// P10 重构：删除 endpoint_id 字段
 		item := &pb.DomainItem{
-			Domain:      dr.Domain,
-			Type:        string(dr.Type),
-			Namespace:   dr.Namespace,
-			ServiceName: dr.ServiceName,
+			Domain: dr.Domain,
+			Type:   string(dr.Type),
 		}
 
 		// 解析 region（从 domain 中提取）
 		item.Region = s.extractRegionFromDomain(dr.Domain)
-
-		// 解析 service_ports（k8ssvc 类型）
-		if dr.Type == model.DomainTypeK8SSVC && dr.ServicePorts != "" {
-			var ports []int32
-			if err := json.Unmarshal([]byte(dr.ServicePorts), &ports); err == nil {
-				item.ServicePorts = ports
-			}
-		}
 
 		// SSH 类型：做用户列表交集（ACL 授权的用户 ∩ Agent 实际可用的用户）
 		if dr.Type == model.DomainTypeSSH {
@@ -2472,7 +2395,7 @@ func (s *DesktopServiceServer) queryUnifiedHostSSHDomainItems(ctx context.Contex
 	for _, record := range records {
 		item := &pb.DomainItem{
 			Domain: record.Domain, Type: string(record.Type), Status: s.getDomainStatus(ctx, &record),
-			Namespace: record.Namespace, ServiceName: record.ServiceName, Region: s.extractRegionFromDomain(record.Domain),
+			Region: s.extractRegionFromDomain(record.Domain),
 		}
 		if record.Type == model.DomainTypeSSH && record.SshUsers != "" {
 			var users []string
@@ -2657,29 +2580,11 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 		}
 	}
 
-	// K8S Service 权限
-	var k8sSvcUserPerms []model.AclK8SServiceUserPermission
-	db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ?", userID, true).Find(&k8sSvcUserPerms)
-	for _, p := range k8sSvcUserPerms {
-		agentUserIDs[p.TargetUserID] = true
-	}
-
-	if len(groupIDs) > 0 {
-		var k8sSvcGroupPerms []model.AclK8SServiceGroupPermission
-		db.DB.WithContext(ctx).Where("group_id IN ? AND enabled = ?", groupIDs, true).Find(&k8sSvcGroupPerms)
-		for _, p := range k8sSvcGroupPerms {
-			agentUserIDs[p.TargetUserID] = true
-		}
-	}
-
 	// Endpoint SSH 权限
 	// P12 重构：已废弃，Endpoint SSH 复用 Agent SSH 授权
 
 	// Endpoint K8S API 权限
 	// P11 重构：已废弃，不再查询 Endpoint K8SAPI 权限
-
-	// Endpoint K8S Service 权限
-	// P10 重构：已废弃，不再查询 Endpoint K8SService 权限
 
 	// 转换为 ID 列表
 	var allowedAgentIDs []uint64
@@ -2698,29 +2603,21 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 
 	// 查询域名记录（Preload Endpoint 关联，用于填充 endpoint_name）
 	if len(allowedAgentIDs) > 0 {
-		query.Preload("Endpoint").Where("user_id IN ?", allowedAgentIDs).Find(&domainRecords)
+		query.Preload("Endpoint").Where("user_id IN ? AND type IN ?", allowedAgentIDs, []model.DomainType{model.DomainTypeSSH, model.DomainTypeK8SAPI}).Find(&domainRecords)
 	}
 	domainRecords = appendUniqueDomainRecords(domainRecords, unifiedHostDomains)
 
 	// 构建响应
 	var domains []*pb.DomainInfo
 	for _, record := range domainRecords {
-		// 调试：打印原始数据库记录
-		if record.Type == model.DomainTypeK8SSVC {
-			logger.Infof("ListDomains: 处理 K8SSVC 域名 %s, DB service_ports='%s', len=%d",
-				record.Domain, record.ServicePorts, len(record.ServicePorts))
-		}
-
 		// 使用 DomainRegistry 中的 target_ip（已经是正确的 Tailscale IP）
 		// 不再查询 Node 表，避免多节点时选择错误
 		domainInfo := &pb.DomainInfo{
-			Domain:      record.Domain,
-			Type:        string(record.Type),
-			TargetIp:    record.TargetIP, // 直接使用 DomainRegistry.target_ip
-			TargetPort:  int32(record.TargetPort),
-			Namespace:   record.Namespace,
-			ServiceName: record.ServiceName,
-			Status:      s.getDomainStatus(ctx, &record), // 使用统一的状态判断逻辑
+			Domain:     record.Domain,
+			Type:       string(record.Type),
+			TargetIp:   record.TargetIP, // 直接使用 DomainRegistry.target_ip
+			TargetPort: int32(record.TargetPort),
+			Status:     s.getDomainStatus(ctx, &record), // 使用统一的状态判断逻辑
 		}
 
 		// 填充 cluster_name（从 domain 中提取 region）
@@ -2728,19 +2625,6 @@ func (s *DesktopServiceServer) ListDomains(ctx context.Context, req *pb.ListDoma
 
 		// P10 重构：删除 endpoint_id 和 endpoint_name 字段
 		// 客户端不需要知道底层实现细节
-
-		// 解析 service_ports（仅 k8ssvc 类型）
-		if record.Type == model.DomainTypeK8SSVC && record.ServicePorts != "" {
-			var ports []int32
-			if err := json.Unmarshal([]byte(record.ServicePorts), &ports); err == nil {
-				domainInfo.ServicePorts = ports
-				logger.Infof("ListDomains: domain=%s service_ports=%v", record.Domain, ports)
-			} else {
-				logger.Warnf("解析 service_ports 失败: domain=%s, err=%v", record.Domain, err)
-			}
-		} else if record.Type == model.DomainTypeK8SSVC {
-			logger.Warnf("ListDomains: K8SSVC 域名 %s service_ports 为空（DB值='%s'）", record.Domain, record.ServicePorts)
-		}
 
 		// 解析 ssh_users（仅 ssh 类型）
 		if record.Type == model.DomainTypeSSH && record.SshUsers != "" {

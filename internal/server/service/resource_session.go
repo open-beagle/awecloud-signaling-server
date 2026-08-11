@@ -147,6 +147,7 @@ func (s *ResourceSessionService) Get(ctx context.Context, authorization *Managem
 type CreateResourceSessionInput struct {
 	TenantID         string
 	ResourceID       string
+	TargetRevisionID string
 	Action           string
 	DeviceID         uint64
 	ClientCapability string
@@ -162,10 +163,10 @@ func (s *ResourceSessionService) create(ctx context.Context, authorization *Mana
 	if s == nil || s.db == nil {
 		return nil, ErrResourceSessionInvalidInput
 	}
-	input.TenantID, input.ResourceID, input.Action = strings.TrimSpace(input.TenantID), strings.TrimSpace(input.ResourceID), strings.TrimSpace(input.Action)
+	input.TenantID, input.ResourceID, input.TargetRevisionID, input.Action = strings.TrimSpace(input.TenantID), strings.TrimSpace(input.ResourceID), strings.TrimSpace(input.TargetRevisionID), strings.TrimSpace(input.Action)
 	input.ClientCapability, input.RequestID, input.TraceID = strings.TrimSpace(input.ClientCapability), strings.TrimSpace(input.RequestID), strings.TrimSpace(input.TraceID)
 	if validateRequired("tenant_id", input.TenantID, 36) != nil || validateRequired("resource_id", input.ResourceID, 36) != nil ||
-		validateRequired("action", input.Action, 30) != nil || input.DeviceID == 0 || input.ClientCapability != "resource_session_v2" ||
+		len(input.TargetRevisionID) > 36 || validateRequired("action", input.Action, 30) != nil || input.DeviceID == 0 || input.ClientCapability != "resource_session_v2" ||
 		validateRequired("request_id", input.RequestID, 100) != nil || len(input.TraceID) > 100 {
 		return nil, ErrResourceSessionInvalidInput
 	}
@@ -204,7 +205,7 @@ func (s *ResourceSessionService) create(ctx context.Context, authorization *Mana
 		if device.LastHeartbeat == nil || device.LastHeartbeat.Before(now.Add(-resourceSessionDeviceHeartbeatTTL)) {
 			return ErrResourceSessionDeviceUnauthorized
 		}
-		chain, err := loadTenantResourceChain(tx, input.TenantID, input.ResourceID, now, true)
+		chain, err := loadTenantResourceChainForTarget(tx, input.TenantID, input.ResourceID, input.TargetRevisionID, now, true)
 		if err != nil {
 			if errors.Is(err, ErrTenantResourceNotFound) {
 				return ErrResourceSessionNotFound
@@ -286,10 +287,13 @@ func (s *ResourceSessionService) EnsureForDesktop(ctx context.Context, userID ui
 	var existing model.ResourceSession
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var candidates []model.ResourceSession
-		if err := tx.Where("tenant_id = ? AND tenant_resource_id = ? AND user_id = ? AND device_id = ? AND action = ? AND status IN ?",
+		query := tx.Where("tenant_id = ? AND tenant_resource_id = ? AND user_id = ? AND device_id = ? AND action = ? AND status IN ?",
 			strings.TrimSpace(input.TenantID), strings.TrimSpace(input.ResourceID), userID, input.DeviceID, strings.TrimSpace(input.Action),
-			[]model.ResourceSessionStatus{model.ResourceSessionAuthorizing, model.ResourceSessionActive}).
-			Order("started_at DESC, id ASC").Find(&candidates).Error; err != nil {
+			[]model.ResourceSessionStatus{model.ResourceSessionAuthorizing, model.ResourceSessionActive})
+		if targetRevisionID := strings.TrimSpace(input.TargetRevisionID); targetRevisionID != "" {
+			query = query.Where("target_revision_id = ?", targetRevisionID)
+		}
+		if err := query.Order("started_at DESC, id ASC").Find(&candidates).Error; err != nil {
 			return err
 		}
 		authorizer := NewSessionAuthorizationService(tx)

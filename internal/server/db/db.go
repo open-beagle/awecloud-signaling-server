@@ -226,8 +226,6 @@ func autoMigrate() error {
 		&model.AclK8SGroupPermission{},
 
 		// ACL K8S Service 授权模型
-		&model.AclK8SServiceUserPermission{},
-		&model.AclK8SServiceGroupPermission{},
 
 		// Endpoint 模型（统一表）
 		&model.Endpoint{},

@@ -67,7 +67,7 @@ func TestTerminationCommandsRequestImmediateAgentReport(t *testing.T) {
 
 func testSessionAuthorizationPermission(now time.Time, sessionID, resourceID, userName string, nodeID uint64) service.SessionAuthorizationPermission {
 	return service.SessionAuthorizationPermission{
-		SessionID: sessionID, TenantID: "tenant-a", ResourceID: resourceID, SourceID: "source-a", TargetRevisionID: "target-a",
+		SessionID: sessionID, TenantID: "tenant-a", ResourceID: resourceID, SourceID: "source-a", TargetRevisionID: "target-" + resourceID,
 		UserID: 10, UserName: userName, DeviceID: 20, DeviceHeadscaleNodeID: nodeID,
 		ResourceType: model.TenantResourceContainerSSH, Action: "shell", AllocationID: "allocation-a", GrantID: "grant-a",
 		GrantRevision: 3, AuthorizationRevision: 4, ValidUntil: now.Add(time.Minute),

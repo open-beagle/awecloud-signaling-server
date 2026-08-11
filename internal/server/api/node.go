@@ -610,7 +610,6 @@ func (a *NodeAPI) Delete(c *gin.Context) {
 			a.agentService.DisconnectNode(node.ID)
 		}
 		cache.DeleteNodeStatus(node.ID)
-		cache.ClearK8SServiceDiscovery(node.UserID)
 	}
 	if a.runtimeStore != nil {
 		a.runtimeStore.DeleteNode(node.ID)

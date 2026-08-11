@@ -629,34 +629,6 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 
 // handleHeartbeat 处理心跳请求，返回对应的 Node ID
 func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64, req *pb.AgentHeartbeatRequest) uint64 {
-	// 处理 K8S Service 发现数据上报
-	if len(req.DiscoveredServices) > 0 {
-		discoveredServices := make([]cache.DiscoveredService, 0, len(req.DiscoveredServices))
-		for _, ds := range req.DiscoveredServices {
-			ports := make([]cache.DiscoveredServicePort, 0, len(ds.Ports))
-			for _, p := range ds.Ports {
-				ports = append(ports, cache.DiscoveredServicePort{
-					Name:     p.Name,
-					Port:     p.Port,
-					Protocol: p.Protocol,
-				})
-			}
-			discoveredServices = append(discoveredServices, cache.DiscoveredService{
-				Namespace:   ds.Namespace,
-				ServiceName: ds.ServiceName,
-				ClusterIP:   ds.ClusterIp,
-				Ports:       ports,
-				Labels:      ds.Labels,
-			})
-		}
-		cache.UpdateK8SServiceDiscovery(agentID, discoveredServices)
-		logger.Infof("Agent K8S Service 发现数据已更新: agent_id=%d, count=%d", agentID, len(discoveredServices))
-
-		// 为发现的 K8S Service 创建域名（需要先获取 Node 和 User 信息）
-		// 注意：这里需要在 Node 创建/查询之后才能调用，所以将逻辑移到后面
-		// 暂存发现的 Service 列表，稍后处理
-	}
-
 	// 查询用户角色，确定 Node 类型
 	var user model.User
 	nodeType := model.NodeTypeAgent
@@ -855,9 +827,6 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 	if len(req.AuditRecords) > 0 {
 		s.handleAuditRecords(ctx, agentID, req.AuditRecords)
 	}
-
-	// 注意：K8S Service 域名现在通过 DomainRegistrations 上报（Agent 统一上报所有域名）
-	// 旧的 DiscoveredServices 字段已废弃，不再处理
 
 	return node.ID
 }
@@ -1216,12 +1185,6 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 		resp.K8SPermissions = k8sPerms
 	}
 
-	// 查询该 Agent 的 K8S Service 授权信息
-	k8sSvcPerms := s.queryK8SServicePermissions(ctx, agentID)
-	if len(k8sSvcPerms) > 0 {
-		resp.K8SServicePermissions = k8sSvcPerms
-	}
-
 	// 查询该 Agent 下所有 Endpoint 的 SSH 授权信息（P12 简化：复用 Agent SSH 授权）
 	endpointSSHPerms := s.queryEndpointSSHPermissions(ctx, agentID)
 	if len(endpointSSHPerms) > 0 {
@@ -1253,10 +1216,6 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 	// P11 重构：Endpoint K8SAPI 权限已废弃，统一使用 Agent 级别权限
 	// 保留字段以兼容旧版本 Agent，但不再填充数据
 	resp.EndpointK8SapiPermissions = nil
-
-	// P10 重构：Endpoint K8SService 权限已废弃，统一使用 Agent 级别权限
-	// 保留字段以兼容旧版本 Agent，但不再填充数据
-	resp.EndpointK8SservicePermissions = nil
 
 	// 查询该 Agent 关联的所有 Endpoint 能力开关配置（直接从数据库读取，不依赖权限列表）
 	var allEndpoints []model.Endpoint
@@ -1530,70 +1489,6 @@ func (s *AgentServiceServer) queryK8SPermissions(ctx context.Context, agentID ui
 				K8SGroups:  k8sGroups,
 				Namespaces: namespaces,
 				IsGroup:    true,
-			})
-		}
-	}
-
-	return result
-}
-
-// queryK8SServicePermissions 查询 Agent 的 K8S Service 授权列表
-func (s *AgentServiceServer) queryK8SServicePermissions(ctx context.Context, agentID uint64) []*pb.K8SServicePermission {
-	var result []*pb.K8SServicePermission
-
-	// 1. 查询直接用户授权
-	var userPerms []model.AclK8SServiceUserPermission
-	if err := db.DB.WithContext(ctx).Preload("User").
-		Where("target_user_id = ? AND enabled = ?", agentID, true).
-		Find(&userPerms).Error; err != nil {
-		logger.Errorf("查询 K8SService 用户授权失败: %v", err)
-		return nil
-	}
-
-	for _, p := range userPerms {
-		if p.User == nil {
-			continue
-		}
-		result = append(result, &pb.K8SServicePermission{
-			UserId:       p.UserID,
-			UserName:     p.User.Name,
-			Namespaces:   parseJSONStringArray(p.Namespaces),
-			ServiceNames: parseJSONStringArray(p.ServiceNames),
-			IsGroup:      false,
-		})
-	}
-
-	// 2. 查询分组授权，展开分组成员
-	var groupPerms []model.AclK8SServiceGroupPermission
-	if err := db.DB.WithContext(ctx).
-		Where("target_user_id = ? AND enabled = ?", agentID, true).
-		Find(&groupPerms).Error; err != nil {
-		logger.Errorf("查询 K8SService 分组授权失败: %v", err)
-		return result
-	}
-
-	for _, gp := range groupPerms {
-		namespaces := parseJSONStringArray(gp.Namespaces)
-		serviceNames := parseJSONStringArray(gp.ServiceNames)
-
-		var members []model.GroupMember
-		if err := db.DB.WithContext(ctx).Preload("User").
-			Where("group_id = ?", gp.GroupID).
-			Find(&members).Error; err != nil {
-			logger.Errorf("查询分组成员失败: group_id=%d, err=%v", gp.GroupID, err)
-			continue
-		}
-
-		for _, m := range members {
-			if m.User == nil {
-				continue
-			}
-			result = append(result, &pb.K8SServicePermission{
-				UserId:       m.UserID,
-				UserName:     m.User.Name,
-				Namespaces:   namespaces,
-				ServiceNames: serviceNames,
-				IsGroup:      true,
 			})
 		}
 	}
@@ -2120,99 +2015,6 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 			}
 		}
 
-		// 更新 Endpoint K8S Service 发现缓存（复用 Agent 的缓存结构）
-		logger.Debugf("处理 Endpoint %s 的 K8S Service 发现数据: discovered_services=%d", ep.Name, len(ep.DiscoveredServices))
-		if len(ep.DiscoveredServices) > 0 {
-			// 转换为 Agent 的 DiscoveredService 结构，添加 EndpointName 字段
-			discoveredServices := make([]cache.DiscoveredService, 0, len(ep.DiscoveredServices))
-			for _, ds := range ep.DiscoveredServices {
-				ports := make([]cache.DiscoveredServicePort, 0, len(ds.Ports))
-				for _, p := range ds.Ports {
-					ports = append(ports, cache.DiscoveredServicePort{
-						Name:     p.Name,
-						Port:     p.Port,
-						Protocol: p.Protocol,
-					})
-				}
-				discoveredServices = append(discoveredServices, cache.DiscoveredService{
-					Namespace:    ds.Namespace,
-					ServiceName:  ds.ServiceName,
-					ClusterIP:    ds.ClusterIp,
-					Ports:        ports,
-					EndpointName: ep.Name, // 标记来源为 Endpoint
-				})
-			}
-
-			// 获取当前 Agent 的所有发现数据
-			currentServices := cache.GetK8SServiceDiscovery(agentID)
-
-			// 过滤掉该 Endpoint 的旧数据
-			filteredServices := make([]cache.DiscoveredService, 0)
-			for _, svc := range currentServices {
-				if svc.EndpointName != ep.Name {
-					filteredServices = append(filteredServices, svc)
-				}
-			}
-
-			// 合并新数据
-			allServices := append(filteredServices, discoveredServices...)
-
-			// 更新到 Agent 的缓存中（复用 Agent 的资源发现逻辑）
-			cache.UpdateK8SServiceDiscovery(agentID, allServices)
-			logger.Infof("Endpoint K8S Service 发现数据已合并到 Agent 缓存: agent_id=%d, endpoint=%s, count=%d",
-				agentID, ep.Name, len(discoveredServices))
-
-			// 为发现的 K8S Service 创建域名
-			// 查询 Endpoint 记录
-			var endpoint model.Endpoint
-			if err := db.DB.WithContext(ctx).Where("user_id = ? AND name = ? AND revoked = ?", agentID, ep.Name, false).First(&endpoint).Error; err == nil {
-				// 查询 Agent Node 和 User 信息
-				var agentNode model.Node
-				var user model.User
-				if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", agentID, model.NodeTypeAgent).First(&agentNode).Error; err == nil {
-					if err := db.DB.WithContext(ctx).First(&user, agentID).Error; err == nil {
-						// 处理每个发现的 Service
-						for _, ds := range ep.DiscoveredServices {
-							// 提取端口列表
-							ports := make([]int32, 0, len(ds.Ports))
-							for _, p := range ds.Ports {
-								ports = append(ports, p.Port)
-							}
-
-							// 创建或更新域名记录
-							if err := s.domainService.CreateEndpointK8SSVCDomain(ctx, &endpoint, &agentNode, &user, ds.Namespace, ds.ServiceName, ports); err != nil {
-								logger.Errorf("创建 Endpoint K8S Service 域名失败: endpoint=%s, service=%s.%s, err=%v",
-									ep.Name, ds.ServiceName, ds.Namespace, err)
-							}
-						}
-
-						// 清理不再存在的 Service 域名
-						// 查询数据库中该 Endpoint 的所有 k8ssvc 域名
-						var existingDomains []model.DomainRegistry
-						if err := db.DB.WithContext(ctx).Where("endpoint_id = ? AND type = ?", ep.Name, model.DomainTypeK8SSVC).Find(&existingDomains).Error; err == nil {
-							// 构建上报的 Service 列表（namespace.service_name）
-							reportedServices := make(map[string]bool)
-							for _, ds := range ep.DiscoveredServices {
-								key := fmt.Sprintf("%s.%s", ds.Namespace, ds.ServiceName)
-								reportedServices[key] = true
-							}
-
-							// 删除不再存在的 Service 域名
-							for _, domain := range existingDomains {
-								key := fmt.Sprintf("%s.%s", domain.Namespace, domain.ServiceName)
-								if !reportedServices[key] {
-									if err := db.DB.WithContext(ctx).Delete(&domain).Error; err != nil {
-										logger.Errorf("删除 Endpoint K8S Service 域名失败: domain=%s, err=%v", domain.Domain, err)
-									} else {
-										logger.Infof("删除 Endpoint K8S Service 域名: domain=%s, endpoint=%s", domain.Domain, ep.Name)
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
 	}
 
 	// 清理不在列表中的 Endpoint 缓存
@@ -2251,14 +2053,6 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 // queryEndpointK8SAPIPermissions 查询 Agent 关联的 Endpoint K8SAPI 授权列表
 // P11 重构：已废弃，Endpoint K8SAPI 权限统一使用 Agent 级别权限
 func (s *AgentServiceServer) queryEndpointK8SAPIPermissions(ctx context.Context, agentID uint64) []*pb.EndpointK8SAPIPermission {
-	// 返回空列表，保留方法以兼容旧代码
-	return nil
-}
-
-// queryEndpointK8SServicePermissions 查询 Agent 关联的 Endpoint K8SService 授权列表
-// queryEndpointK8SServicePermissions 查询 Agent 关联的 Endpoint K8SService 授权列表
-// P10 重构：已废弃，Endpoint K8SService 权限统一使用 Agent 级别权限
-func (s *AgentServiceServer) queryEndpointK8SServicePermissions(ctx context.Context, agentID uint64) []*pb.EndpointK8SServicePermission {
 	// 返回空列表，保留方法以兼容旧代码
 	return nil
 }
@@ -2302,70 +2096,6 @@ func (s *AgentServiceServer) handleAuditRecords(ctx context.Context, agentID uin
 	}
 
 	logger.Infof("保存操作审计记录: agent_id=%d, count=%d", agentID, len(records))
-}
-
-// handleK8SServiceDiscovery 处理 K8S Service 自动发现，创建域名
-func (s *AgentServiceServer) handleK8SServiceDiscovery(ctx context.Context, agentID uint64, nodeID uint64, services []*pb.DiscoveredK8SService) {
-	// 查询 User 信息
-	var user model.User
-	if err := db.DB.WithContext(ctx).First(&user, agentID).Error; err != nil {
-		logger.Errorf("查询 User 失败: agent_id=%d, err=%v", agentID, err)
-		return
-	}
-
-	// 查询 Node 信息
-	var node model.Node
-	if err := db.DB.WithContext(ctx).First(&node, nodeID).Error; err != nil {
-		logger.Errorf("查询 Node 失败: node_id=%d, err=%v", nodeID, err)
-		return
-	}
-
-	// 收集本次上报的 Service 域名
-	reportedDomains := make(map[string]bool)
-
-	// 为每个发现的 Service 创建域名
-	for _, svc := range services {
-		// 跳过没有端口的 Service
-		if len(svc.Ports) == 0 {
-			continue
-		}
-
-		// 使用第一个端口创建域名
-		port := svc.Ports[0].Port
-
-		// 生成域名
-		domain := fmt.Sprintf("%s.%s.%s.beagle", svc.ServiceName, svc.Namespace, user.Name)
-		reportedDomains[domain] = true
-
-		// 创建或更新域名
-		if err := s.domainService.CreateNodeK8SSVCDomain(ctx, &node, &user, svc.Namespace, svc.ServiceName, svc.ClusterIp, int(port)); err != nil {
-			logger.Errorf("创建 K8S Service 域名失败: service=%s.%s, err=%v", svc.ServiceName, svc.Namespace, err)
-		}
-	}
-
-	// 清理不再存在的 K8S Service 域名
-	// 查询该 Node 的所有 K8SSVC 域名
-	var existingDomains []model.DomainRegistry
-	if err := db.DB.WithContext(ctx).Where("node_id = ? AND type = ?", nodeID, model.DomainTypeK8SSVC).Find(&existingDomains).Error; err != nil {
-		logger.Errorf("查询 K8S Service 域名失败: node_id=%d, err=%v", nodeID, err)
-		return
-	}
-
-	// 删除不在上报列表中的域名
-	deletedCount := 0
-	for _, existing := range existingDomains {
-		if !reportedDomains[existing.Domain] {
-			if err := db.DB.WithContext(ctx).Delete(&existing).Error; err != nil {
-				logger.Errorf("删除过期 K8S Service 域名失败: domain=%s, err=%v", existing.Domain, err)
-			} else {
-				logger.Infof("删除过期 K8S Service 域名: domain=%s", existing.Domain)
-				deletedCount++
-			}
-		}
-	}
-
-	logger.Infof("K8S Service 域名处理完成: agent_id=%d, node_id=%d, created/updated=%d, deleted=%d",
-		agentID, nodeID, len(reportedDomains), deletedCount)
 }
 
 // GetUserDeviceInfo 获取用户设备信息（用于 SSH 横幅显示）

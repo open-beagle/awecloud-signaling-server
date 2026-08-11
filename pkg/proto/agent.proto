@@ -144,8 +144,8 @@ message AgentHeartbeatRequest {
   repeated NetworkInterface networks = 8; // 网络接口列表
   // ZTNA 域名注册（首次心跳或变更时上报）
   repeated DomainRegistration domain_registrations = 9; // 域名注册列表
-  // K8S Service 发现数据（Agent 上报）
-  repeated DiscoveredK8SService discovered_services = 10; // 发现的 K8S Service 列表
+	reserved 10;
+	reserved "discovered_services";
   // 已连接的 Endpoint 列表（Agent 上报）
   repeated ConnectedEndpoint connected_endpoints = 11; // 已连接的 Endpoint 列表
   // 操作审计记录（Agent 上报）
@@ -173,7 +173,8 @@ message ConnectedEndpoint {
   string name = 1; // Endpoint 名称
   string status = 2; // 状态：online
   repeated EndpointCapabilityInfo capabilities = 3; // 启用的能力列表
-  repeated DiscoveredK8SService discovered_services = 4; // Endpoint 发现的 K8S Service（K8SService 能力时上报）
+	reserved 4;
+	reserved "discovered_services";
   string version = 5; // Endpoint 当前运行版本
   string os = 6; // Endpoint 操作系统
   
@@ -198,14 +199,13 @@ message ConnectedEndpoint {
 // DomainRegistration 域名注册信息（Agent 心跳上报）
 message DomainRegistration {
   string domain = 1; // 完整域名（如 beagle-242.beijing.beagle）
-  string type = 2; // 能力类型：ssh / k8sapi / k8ssvc
+	string type = 2; // 能力类型：ssh / k8sapi
   string target_ip = 3; // 目标 IP（Node 的 Tailscale IP 或 ClusterIP）
   int32 target_port = 4; // 目标端口
-  string namespace = 5; // K8S 命名空间（k8ssvc 类型时）
-  string service_name = 6; // K8S Service 名称（k8ssvc 类型时）
+	reserved 5, 6, 9;
+	reserved "namespace", "service_name", "service_ports";
   string endpoint_id = 7; // 关联的 Endpoint ID（Endpoint 类型时）
   uint64 node_id = 8; // 关联的 Node ID（Node 注册时）
-  repeated int32 service_ports = 9; // K8S Service 端口列表（k8ssvc 类型时）
   repeated string ssh_users = 10; // SSH 用户列表（ssh 类型时）
 }
 
@@ -235,12 +235,14 @@ message AgentHeartbeatResponse {
   repeated ForwardConfig forwards = 3; // 端口访问配置（如有变更）
   string domain_suffix = 4; // 域名后缀（如 .beagle），由 Server 下发
   repeated K8SPermission k8s_permissions = 5; // K8S API 授权列表
-  repeated K8SServicePermission k8s_service_permissions = 6; // K8S Service 授权列表
+  reserved 6;
+  reserved "k8s_service_permissions";
   bool request_immediate_report = 7; // Server 请求 Agent 立即上报一次心跳数据
   AgentCapabilityConfig capability_config = 8; // Agent 能力配置（Server 远程控制）
   repeated EndpointSSHPermission endpoint_ssh_permissions = 9; // Endpoint SSH 授权列表
   repeated EndpointK8SAPIPermission endpoint_k8sapi_permissions = 10; // Endpoint K8SAPI 授权列表
-  repeated EndpointK8SServicePermission endpoint_k8sservice_permissions = 11; // Endpoint K8SService 授权列表
+  reserved 11;
+  reserved "endpoint_k8sservice_permissions";
   repeated EndpointCapabilityConfig endpoint_capability_configs = 12; // Endpoint 能力开关配置（Server 下发）
   repeated UpdateDirective update_directives = 13; // Agent 自身更新任务
   repeated UpdateDirective endpoint_update_directives = 14; // 由 Agent 转发给 Endpoint 的更新任务
@@ -310,15 +312,6 @@ message K8SPermission {
   bool is_group = 5; // 是否来自分组授权
 }
 
-// K8SServicePermission K8S Service 授权信息（心跳响应下发给 Agent）
-message K8SServicePermission {
-  uint64 user_id = 1; // 被授权用户 ID
-  string user_name = 2; // 被授权用户名
-  repeated string namespaces = 3; // 允许的命名空间（空表示全部）
-  repeated string service_names = 4; // 允许的 Service 名称（空表示全部）
-  bool is_group = 5; // 是否来自分组授权
-}
-
 // EndpointK8SAPIPermission Endpoint K8SAPI 授权信息（心跳响应下发给 Agent）
 message EndpointK8SAPIPermission {
   string endpoint_id = 1; // Endpoint ID
@@ -329,17 +322,6 @@ message EndpointK8SAPIPermission {
   repeated string namespaces = 6; // 允许的命名空间（空表示全部）
   bool is_group = 7; // 是否来自分组授权
   string api_server = 8; // K8S API Server 地址（从 Endpoint 配置读取）
-}
-
-// EndpointK8SServicePermission Endpoint K8SService 授权信息（心跳响应下发给 Agent）
-message EndpointK8SServicePermission {
-  string endpoint_id = 1; // Endpoint ID
-  string endpoint_name = 2; // Endpoint 名称
-  uint64 user_id = 3; // 被授权用户 ID
-  string user_name = 4; // 被授权用户名
-  repeated string namespaces = 5; // 允许的命名空间（空表示全部）
-  repeated string service_names = 6; // 允许的 Service 名称（空表示全部）
-  bool is_group = 7; // 是否来自分组授权
 }
 
 // EndpointSSHPermission Endpoint SSH 授权信息（心跳响应下发给 Agent）

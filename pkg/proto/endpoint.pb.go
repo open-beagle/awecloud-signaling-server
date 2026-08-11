@@ -146,13 +146,12 @@ func (x *EndpointRegisterResponse) GetEndpointId() string {
 
 // EndpointHeartbeatRequest Endpoint 心跳请求
 type EndpointHeartbeatRequest struct {
-	state              protoimpl.MessageState    `protogen:"open.v1"`
-	Token              string                    `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`                                                     // 注册令牌（用于身份验证）
-	Name               string                    `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                                                       // Endpoint 名称
-	Capabilities       []*EndpointCapabilityInfo `protobuf:"bytes,3,rep,name=capabilities,proto3" json:"capabilities,omitempty"`                                       // 启用的能力列表
-	DiscoveredServices []*DiscoveredK8SService   `protobuf:"bytes,4,rep,name=discovered_services,json=discoveredServices,proto3" json:"discovered_services,omitempty"` // Endpoint 发现的 K8S Service
-	Version            string                    `protobuf:"bytes,5,opt,name=version,proto3" json:"version,omitempty"`                                                 // Endpoint 当前运行版本
-	Os                 string                    `protobuf:"bytes,6,opt,name=os,proto3" json:"os,omitempty"`                                                           // Endpoint 操作系统
+	state        protoimpl.MessageState    `protogen:"open.v1"`
+	Token        string                    `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`               // 注册令牌（用于身份验证）
+	Name         string                    `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                 // Endpoint 名称
+	Capabilities []*EndpointCapabilityInfo `protobuf:"bytes,3,rep,name=capabilities,proto3" json:"capabilities,omitempty"` // 启用的能力列表
+	Version      string                    `protobuf:"bytes,5,opt,name=version,proto3" json:"version,omitempty"`           // Endpoint 当前运行版本
+	Os           string                    `protobuf:"bytes,6,opt,name=os,proto3" json:"os,omitempty"`                     // Endpoint 操作系统
 	// SSH 能力配置（从 Endpoint 自动检测）
 	SshUsers []string `protobuf:"bytes,7,rep,name=ssh_users,json=sshUsers,proto3" json:"ssh_users,omitempty"` // 允许的 SSH 用户列表
 	// K8S API 能力配置
@@ -221,13 +220,6 @@ func (x *EndpointHeartbeatRequest) GetName() string {
 func (x *EndpointHeartbeatRequest) GetCapabilities() []*EndpointCapabilityInfo {
 	if x != nil {
 		return x.Capabilities
-	}
-	return nil
-}
-
-func (x *EndpointHeartbeatRequest) GetDiscoveredServices() []*DiscoveredK8SService {
-	if x != nil {
-		return x.DiscoveredServices
 	}
 	return nil
 }
@@ -3481,12 +3473,11 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1f\n" +
 	"\vendpoint_id\x18\x03 \x01(\tR\n" +
-	"endpointId\"\xce\b\n" +
+	"endpointId\"\x8e\b\n" +
 	"\x18EndpointHeartbeatRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12N\n" +
-	"\fcapabilities\x18\x03 \x03(\v2*.awecloud.signaling.EndpointCapabilityInfoR\fcapabilities\x12Y\n" +
-	"\x13discovered_services\x18\x04 \x03(\v2(.awecloud.signaling.DiscoveredK8SServiceR\x12discoveredServices\x12\x18\n" +
+	"\fcapabilities\x18\x03 \x03(\v2*.awecloud.signaling.EndpointCapabilityInfoR\fcapabilities\x12\x18\n" +
 	"\aversion\x18\x05 \x01(\tR\aversion\x12\x0e\n" +
 	"\x02os\x18\x06 \x01(\tR\x02os\x12\x1b\n" +
 	"\tssh_users\x18\a \x03(\tR\bsshUsers\x12*\n" +
@@ -3503,7 +3494,7 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	"\x18session_termination_acks\x18\x11 \x03(\v23.awecloud.signaling.ResourceSessionTerminationAckV2R\x16sessionTerminationAcks\x12b\n" +
 	"\x17resource_session_events\x18\x12 \x03(\v2*.awecloud.signaling.ResourceSessionEventV2R\x15resourceSessionEvents\x12\x1b\n" +
 	"\tcommit_id\x18\x13 \x01(\tR\bcommitId\x12#\n" +
-	"\rbinary_sha256\x18\x14 \x01(\tR\fbinarySha256\"s\n" +
+	"\rbinary_sha256\x18\x14 \x01(\tR\fbinarySha256J\x04\b\x04\x10\x05R\x13discovered_services\"s\n" +
 	"\x16EndpointCapabilityInfo\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x12\n" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x12\n" +
@@ -3936,70 +3927,69 @@ var file_pkg_proto_endpoint_proto_goTypes = []any{
 }
 var file_pkg_proto_endpoint_proto_depIdxs = []int32{
 	3,  // 0: awecloud.signaling.EndpointHeartbeatRequest.capabilities:type_name -> awecloud.signaling.EndpointCapabilityInfo
-	24, // 1: awecloud.signaling.EndpointHeartbeatRequest.discovered_services:type_name -> awecloud.signaling.DiscoveredK8SService
-	42, // 2: awecloud.signaling.EndpointHeartbeatRequest.update_statuses:type_name -> awecloud.signaling.UpdateStatus
-	9,  // 3: awecloud.signaling.EndpointHeartbeatRequest.session_termination_acks:type_name -> awecloud.signaling.ResourceSessionTerminationAckV2
-	10, // 4: awecloud.signaling.EndpointHeartbeatRequest.resource_session_events:type_name -> awecloud.signaling.ResourceSessionEventV2
-	26, // 5: awecloud.signaling.EndpointHeartbeatResponse.shell_requests:type_name -> awecloud.signaling.ShellRequest
-	28, // 6: awecloud.signaling.EndpointHeartbeatResponse.k8sapi_proxy_requests:type_name -> awecloud.signaling.K8SAPIProxyRequest
-	32, // 7: awecloud.signaling.EndpointHeartbeatResponse.svc_proxy_requests:type_name -> awecloud.signaling.SVCProxyRequest
-	34, // 8: awecloud.signaling.EndpointHeartbeatResponse.raw_stream_requests:type_name -> awecloud.signaling.RawStreamRequest
-	43, // 9: awecloud.signaling.EndpointHeartbeatResponse.update_directives:type_name -> awecloud.signaling.UpdateDirective
-	14, // 10: awecloud.signaling.EndpointHeartbeatResponse.supply_inventory_config:type_name -> awecloud.signaling.SupplyInventoryConfig
-	19, // 11: awecloud.signaling.EndpointHeartbeatResponse.workload_inventory_config:type_name -> awecloud.signaling.WorkloadInventoryConfig
-	5,  // 12: awecloud.signaling.EndpointHeartbeatResponse.authorization_snapshot_v2:type_name -> awecloud.signaling.ResourceSessionAuthorizationSnapshotV2
-	11, // 13: awecloud.signaling.EndpointHeartbeatResponse.resource_session_event_acks:type_name -> awecloud.signaling.ResourceSessionEventAckV2
-	44, // 14: awecloud.signaling.EndpointHeartbeatResponse.update_health_confirmations:type_name -> awecloud.signaling.UpdateHealthConfirmation
-	45, // 15: awecloud.signaling.ResourceSessionAuthorizationSnapshotV2.issued_at:type_name -> google.protobuf.Timestamp
-	45, // 16: awecloud.signaling.ResourceSessionAuthorizationSnapshotV2.valid_until:type_name -> google.protobuf.Timestamp
-	6,  // 17: awecloud.signaling.ResourceSessionAuthorizationSnapshotV2.permissions:type_name -> awecloud.signaling.ResourceSessionPermissionV2
-	8,  // 18: awecloud.signaling.ResourceSessionAuthorizationSnapshotV2.termination_commands:type_name -> awecloud.signaling.ResourceSessionTerminationCommandV2
-	45, // 19: awecloud.signaling.ResourceSessionPermissionV2.valid_until:type_name -> google.protobuf.Timestamp
-	7,  // 20: awecloud.signaling.ResourceSessionPermissionV2.target:type_name -> awecloud.signaling.ResourceSessionTargetV2
-	45, // 21: awecloud.signaling.ResourceSessionEventV2.occurred_at:type_name -> google.protobuf.Timestamp
-	9,  // 22: awecloud.signaling.EndpointSessionAuthorizationReportV2.termination_acks:type_name -> awecloud.signaling.ResourceSessionTerminationAckV2
-	10, // 23: awecloud.signaling.EndpointSessionAuthorizationReportV2.events:type_name -> awecloud.signaling.ResourceSessionEventV2
-	5,  // 24: awecloud.signaling.EndpointSessionAuthorizationSnapshotV2.snapshot:type_name -> awecloud.signaling.ResourceSessionAuthorizationSnapshotV2
-	11, // 25: awecloud.signaling.EndpointSessionAuthorizationSnapshotV2.event_acks:type_name -> awecloud.signaling.ResourceSessionEventAckV2
-	45, // 26: awecloud.signaling.SupplyInventoryEnvelope.observed_at:type_name -> google.protobuf.Timestamp
-	45, // 27: awecloud.signaling.SupplyInventoryEnvelope.sent_at:type_name -> google.protobuf.Timestamp
-	16, // 28: awecloud.signaling.SupplyInventoryEnvelope.kubernetes_clusters:type_name -> awecloud.signaling.KubernetesClusterInventory
-	17, // 29: awecloud.signaling.KubernetesClusterInventory.namespaces:type_name -> awecloud.signaling.KubernetesNamespaceInventory
-	36, // 30: awecloud.signaling.KubernetesNamespaceInventory.labels:type_name -> awecloud.signaling.KubernetesNamespaceInventory.LabelsEntry
-	45, // 31: awecloud.signaling.WorkloadInventoryEnvelope.observed_at:type_name -> google.protobuf.Timestamp
-	45, // 32: awecloud.signaling.WorkloadInventoryEnvelope.sent_at:type_name -> google.protobuf.Timestamp
-	21, // 33: awecloud.signaling.WorkloadInventoryEnvelope.service_ports:type_name -> awecloud.signaling.WorkloadServicePort
-	22, // 34: awecloud.signaling.WorkloadInventoryEnvelope.containers:type_name -> awecloud.signaling.WorkloadContainer
-	37, // 35: awecloud.signaling.WorkloadServicePort.labels_allowlist:type_name -> awecloud.signaling.WorkloadServicePort.LabelsAllowlistEntry
-	38, // 36: awecloud.signaling.WorkloadContainer.labels_allowlist:type_name -> awecloud.signaling.WorkloadContainer.LabelsAllowlistEntry
-	45, // 37: awecloud.signaling.WorkloadInventoryAck.server_received_at:type_name -> google.protobuf.Timestamp
-	25, // 38: awecloud.signaling.DiscoveredK8SService.ports:type_name -> awecloud.signaling.ServicePort
-	39, // 39: awecloud.signaling.DiscoveredK8SService.labels:type_name -> awecloud.signaling.DiscoveredK8SService.LabelsEntry
-	30, // 40: awecloud.signaling.K8SAPIProxyData.http_request:type_name -> awecloud.signaling.K8SAPIHTTPRequest
-	31, // 41: awecloud.signaling.K8SAPIProxyData.http_response:type_name -> awecloud.signaling.K8SAPIHTTPResponse
-	40, // 42: awecloud.signaling.K8SAPIHTTPRequest.headers:type_name -> awecloud.signaling.K8SAPIHTTPRequest.HeadersEntry
-	41, // 43: awecloud.signaling.K8SAPIHTTPResponse.headers:type_name -> awecloud.signaling.K8SAPIHTTPResponse.HeadersEntry
-	0,  // 44: awecloud.signaling.EndpointService.Register:input_type -> awecloud.signaling.EndpointRegisterRequest
-	2,  // 45: awecloud.signaling.EndpointService.Heartbeat:input_type -> awecloud.signaling.EndpointHeartbeatRequest
-	15, // 46: awecloud.signaling.EndpointService.ReportSupplyInventory:input_type -> awecloud.signaling.SupplyInventoryEnvelope
-	20, // 47: awecloud.signaling.EndpointService.ReportWorkloadInventory:input_type -> awecloud.signaling.WorkloadInventoryEnvelope
-	27, // 48: awecloud.signaling.EndpointService.OpenShell:input_type -> awecloud.signaling.ShellData
-	29, // 49: awecloud.signaling.EndpointService.OpenK8SAPIProxy:input_type -> awecloud.signaling.K8SAPIProxyData
-	33, // 50: awecloud.signaling.EndpointService.OpenSVCProxy:input_type -> awecloud.signaling.EndpointSVCProxyData
-	35, // 51: awecloud.signaling.EndpointService.OpenRawStream:input_type -> awecloud.signaling.RawStreamData
-	1,  // 52: awecloud.signaling.EndpointService.Register:output_type -> awecloud.signaling.EndpointRegisterResponse
-	4,  // 53: awecloud.signaling.EndpointService.Heartbeat:output_type -> awecloud.signaling.EndpointHeartbeatResponse
-	18, // 54: awecloud.signaling.EndpointService.ReportSupplyInventory:output_type -> awecloud.signaling.SupplyInventoryAck
-	23, // 55: awecloud.signaling.EndpointService.ReportWorkloadInventory:output_type -> awecloud.signaling.WorkloadInventoryAck
-	27, // 56: awecloud.signaling.EndpointService.OpenShell:output_type -> awecloud.signaling.ShellData
-	29, // 57: awecloud.signaling.EndpointService.OpenK8SAPIProxy:output_type -> awecloud.signaling.K8SAPIProxyData
-	33, // 58: awecloud.signaling.EndpointService.OpenSVCProxy:output_type -> awecloud.signaling.EndpointSVCProxyData
-	35, // 59: awecloud.signaling.EndpointService.OpenRawStream:output_type -> awecloud.signaling.RawStreamData
-	52, // [52:60] is the sub-list for method output_type
-	44, // [44:52] is the sub-list for method input_type
-	44, // [44:44] is the sub-list for extension type_name
-	44, // [44:44] is the sub-list for extension extendee
-	0,  // [0:44] is the sub-list for field type_name
+	42, // 1: awecloud.signaling.EndpointHeartbeatRequest.update_statuses:type_name -> awecloud.signaling.UpdateStatus
+	9,  // 2: awecloud.signaling.EndpointHeartbeatRequest.session_termination_acks:type_name -> awecloud.signaling.ResourceSessionTerminationAckV2
+	10, // 3: awecloud.signaling.EndpointHeartbeatRequest.resource_session_events:type_name -> awecloud.signaling.ResourceSessionEventV2
+	26, // 4: awecloud.signaling.EndpointHeartbeatResponse.shell_requests:type_name -> awecloud.signaling.ShellRequest
+	28, // 5: awecloud.signaling.EndpointHeartbeatResponse.k8sapi_proxy_requests:type_name -> awecloud.signaling.K8SAPIProxyRequest
+	32, // 6: awecloud.signaling.EndpointHeartbeatResponse.svc_proxy_requests:type_name -> awecloud.signaling.SVCProxyRequest
+	34, // 7: awecloud.signaling.EndpointHeartbeatResponse.raw_stream_requests:type_name -> awecloud.signaling.RawStreamRequest
+	43, // 8: awecloud.signaling.EndpointHeartbeatResponse.update_directives:type_name -> awecloud.signaling.UpdateDirective
+	14, // 9: awecloud.signaling.EndpointHeartbeatResponse.supply_inventory_config:type_name -> awecloud.signaling.SupplyInventoryConfig
+	19, // 10: awecloud.signaling.EndpointHeartbeatResponse.workload_inventory_config:type_name -> awecloud.signaling.WorkloadInventoryConfig
+	5,  // 11: awecloud.signaling.EndpointHeartbeatResponse.authorization_snapshot_v2:type_name -> awecloud.signaling.ResourceSessionAuthorizationSnapshotV2
+	11, // 12: awecloud.signaling.EndpointHeartbeatResponse.resource_session_event_acks:type_name -> awecloud.signaling.ResourceSessionEventAckV2
+	44, // 13: awecloud.signaling.EndpointHeartbeatResponse.update_health_confirmations:type_name -> awecloud.signaling.UpdateHealthConfirmation
+	45, // 14: awecloud.signaling.ResourceSessionAuthorizationSnapshotV2.issued_at:type_name -> google.protobuf.Timestamp
+	45, // 15: awecloud.signaling.ResourceSessionAuthorizationSnapshotV2.valid_until:type_name -> google.protobuf.Timestamp
+	6,  // 16: awecloud.signaling.ResourceSessionAuthorizationSnapshotV2.permissions:type_name -> awecloud.signaling.ResourceSessionPermissionV2
+	8,  // 17: awecloud.signaling.ResourceSessionAuthorizationSnapshotV2.termination_commands:type_name -> awecloud.signaling.ResourceSessionTerminationCommandV2
+	45, // 18: awecloud.signaling.ResourceSessionPermissionV2.valid_until:type_name -> google.protobuf.Timestamp
+	7,  // 19: awecloud.signaling.ResourceSessionPermissionV2.target:type_name -> awecloud.signaling.ResourceSessionTargetV2
+	45, // 20: awecloud.signaling.ResourceSessionEventV2.occurred_at:type_name -> google.protobuf.Timestamp
+	9,  // 21: awecloud.signaling.EndpointSessionAuthorizationReportV2.termination_acks:type_name -> awecloud.signaling.ResourceSessionTerminationAckV2
+	10, // 22: awecloud.signaling.EndpointSessionAuthorizationReportV2.events:type_name -> awecloud.signaling.ResourceSessionEventV2
+	5,  // 23: awecloud.signaling.EndpointSessionAuthorizationSnapshotV2.snapshot:type_name -> awecloud.signaling.ResourceSessionAuthorizationSnapshotV2
+	11, // 24: awecloud.signaling.EndpointSessionAuthorizationSnapshotV2.event_acks:type_name -> awecloud.signaling.ResourceSessionEventAckV2
+	45, // 25: awecloud.signaling.SupplyInventoryEnvelope.observed_at:type_name -> google.protobuf.Timestamp
+	45, // 26: awecloud.signaling.SupplyInventoryEnvelope.sent_at:type_name -> google.protobuf.Timestamp
+	16, // 27: awecloud.signaling.SupplyInventoryEnvelope.kubernetes_clusters:type_name -> awecloud.signaling.KubernetesClusterInventory
+	17, // 28: awecloud.signaling.KubernetesClusterInventory.namespaces:type_name -> awecloud.signaling.KubernetesNamespaceInventory
+	36, // 29: awecloud.signaling.KubernetesNamespaceInventory.labels:type_name -> awecloud.signaling.KubernetesNamespaceInventory.LabelsEntry
+	45, // 30: awecloud.signaling.WorkloadInventoryEnvelope.observed_at:type_name -> google.protobuf.Timestamp
+	45, // 31: awecloud.signaling.WorkloadInventoryEnvelope.sent_at:type_name -> google.protobuf.Timestamp
+	21, // 32: awecloud.signaling.WorkloadInventoryEnvelope.service_ports:type_name -> awecloud.signaling.WorkloadServicePort
+	22, // 33: awecloud.signaling.WorkloadInventoryEnvelope.containers:type_name -> awecloud.signaling.WorkloadContainer
+	37, // 34: awecloud.signaling.WorkloadServicePort.labels_allowlist:type_name -> awecloud.signaling.WorkloadServicePort.LabelsAllowlistEntry
+	38, // 35: awecloud.signaling.WorkloadContainer.labels_allowlist:type_name -> awecloud.signaling.WorkloadContainer.LabelsAllowlistEntry
+	45, // 36: awecloud.signaling.WorkloadInventoryAck.server_received_at:type_name -> google.protobuf.Timestamp
+	25, // 37: awecloud.signaling.DiscoveredK8SService.ports:type_name -> awecloud.signaling.ServicePort
+	39, // 38: awecloud.signaling.DiscoveredK8SService.labels:type_name -> awecloud.signaling.DiscoveredK8SService.LabelsEntry
+	30, // 39: awecloud.signaling.K8SAPIProxyData.http_request:type_name -> awecloud.signaling.K8SAPIHTTPRequest
+	31, // 40: awecloud.signaling.K8SAPIProxyData.http_response:type_name -> awecloud.signaling.K8SAPIHTTPResponse
+	40, // 41: awecloud.signaling.K8SAPIHTTPRequest.headers:type_name -> awecloud.signaling.K8SAPIHTTPRequest.HeadersEntry
+	41, // 42: awecloud.signaling.K8SAPIHTTPResponse.headers:type_name -> awecloud.signaling.K8SAPIHTTPResponse.HeadersEntry
+	0,  // 43: awecloud.signaling.EndpointService.Register:input_type -> awecloud.signaling.EndpointRegisterRequest
+	2,  // 44: awecloud.signaling.EndpointService.Heartbeat:input_type -> awecloud.signaling.EndpointHeartbeatRequest
+	15, // 45: awecloud.signaling.EndpointService.ReportSupplyInventory:input_type -> awecloud.signaling.SupplyInventoryEnvelope
+	20, // 46: awecloud.signaling.EndpointService.ReportWorkloadInventory:input_type -> awecloud.signaling.WorkloadInventoryEnvelope
+	27, // 47: awecloud.signaling.EndpointService.OpenShell:input_type -> awecloud.signaling.ShellData
+	29, // 48: awecloud.signaling.EndpointService.OpenK8SAPIProxy:input_type -> awecloud.signaling.K8SAPIProxyData
+	33, // 49: awecloud.signaling.EndpointService.OpenSVCProxy:input_type -> awecloud.signaling.EndpointSVCProxyData
+	35, // 50: awecloud.signaling.EndpointService.OpenRawStream:input_type -> awecloud.signaling.RawStreamData
+	1,  // 51: awecloud.signaling.EndpointService.Register:output_type -> awecloud.signaling.EndpointRegisterResponse
+	4,  // 52: awecloud.signaling.EndpointService.Heartbeat:output_type -> awecloud.signaling.EndpointHeartbeatResponse
+	18, // 53: awecloud.signaling.EndpointService.ReportSupplyInventory:output_type -> awecloud.signaling.SupplyInventoryAck
+	23, // 54: awecloud.signaling.EndpointService.ReportWorkloadInventory:output_type -> awecloud.signaling.WorkloadInventoryAck
+	27, // 55: awecloud.signaling.EndpointService.OpenShell:output_type -> awecloud.signaling.ShellData
+	29, // 56: awecloud.signaling.EndpointService.OpenK8SAPIProxy:output_type -> awecloud.signaling.K8SAPIProxyData
+	33, // 57: awecloud.signaling.EndpointService.OpenSVCProxy:output_type -> awecloud.signaling.EndpointSVCProxyData
+	35, // 58: awecloud.signaling.EndpointService.OpenRawStream:output_type -> awecloud.signaling.RawStreamData
+	51, // [51:59] is the sub-list for method output_type
+	43, // [43:51] is the sub-list for method input_type
+	43, // [43:43] is the sub-list for extension type_name
+	43, // [43:43] is the sub-list for extension extendee
+	0,  // [0:43] is the sub-list for field type_name
 }
 
 func init() { file_pkg_proto_endpoint_proto_init() }

@@ -184,7 +184,7 @@ func (s *DialSocketServer) resolveDialAddr(targetAddr string) string {
 	// 对于 SSH 类型：
 	//   - 如果 target_port 是 22，说明是 Agent 自身的 Tailscale SSH，保持用户请求的端口（22）
 	//   - 如果 target_port 不是 22，说明是 Agent/Endpoint SSH 代理端口，使用 target_port
-	// 对于其他类型，使用 target_port（如 K8SAPI 的 50153、K8SSVC 的 50051）
+	// 对于其他类型，使用 target_port（如 K8SAPI 的 50153）
 	resolvedPort := port
 	if domainInfo.TargetPort > 0 {
 		// SSH 类型且 target_port 是 22，保持用户请求的端口（Tailscale SSH）

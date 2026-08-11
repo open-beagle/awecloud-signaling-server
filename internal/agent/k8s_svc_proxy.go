@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
-	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -150,61 +149,26 @@ func (p *K8SSVCProxy) SVCProxy(stream pb.AgentService_SVCProxyServer) error {
 		return err
 	}
 	now := time.Now().UTC()
-	requireV2 := hasV2SVCProxyFields(firstMsg) || (p.authorizations != nil && p.authorizations.EnforceV2()) ||
-		(p.endpointServer != nil && p.endpointServer.SessionAuthorizationEnforced())
-	if requireV2 {
-		if p.endpointServer != nil {
-			if endpointName, endpointPermission, ok := p.endpointServer.ResolveSessionAuthorization(firstMsg.SessionId, now); ok {
-				if !v2SVCRequestMatchesPermission(firstMsg, peerIdentity, endpointPermission) {
-					_ = stream.Send(&pb.SVCProxyData{Error: "权限不足"})
-					return fmt.Errorf("resource_session_v2 Endpoint SVCProxy request does not match the trusted snapshot")
-				}
-				return p.handleEndpointProxyV2(stream, peerIdentity, endpointName, endpointPermission)
+	if p.endpointServer != nil {
+		if endpointName, endpointPermission, ok := p.endpointServer.ResolveSessionAuthorization(firstMsg.SessionId, now); ok {
+			if !v2SVCRequestMatchesPermission(firstMsg, peerIdentity, endpointPermission) {
+				_ = stream.Send(&pb.SVCProxyData{Error: "权限不足"})
+				return fmt.Errorf("resource_session_v2 Endpoint SVCProxy request does not match the trusted snapshot")
 			}
+			return p.handleEndpointProxyV2(stream, peerIdentity, endpointName, endpointPermission)
 		}
-		permission, authorizeErr := p.authorizeV2Request(firstMsg, peerIdentity, now)
-		if authorizeErr != nil {
-			logger.Warnf("SVCProxy v2 权限拒绝: user=%s node_id=%d err=%v", peerIdentity.UserName, peerIdentity.NodeID, authorizeErr)
-			_ = stream.Send(&pb.SVCProxyData{Error: "权限不足"})
-			return authorizeErr
-		}
-		if p.informer == nil {
-			_ = stream.Send(&pb.SVCProxyData{Error: "无可用的 v2 K8S 访问路径"})
-			return fmt.Errorf("无可用的 v2 K8S 访问路径")
-		}
-		return p.handleDirectConnectionV2(stream, peerIdentity, permission)
 	}
-
-	namespace := firstMsg.Namespace
-	serviceName := firstMsg.ServiceName
-	port := firstMsg.Port
-
-	// 3. 统一权限检查（Agent 级别）
-	if !p.permCache.CheckK8SServiceAccess(peerIdentity.UserName, namespace, serviceName) {
-		logger.Warnf("SVCProxy 权限拒绝: user=%s, ns=%s, svc=%s",
-			peerIdentity.UserName, namespace, serviceName)
+	permission, authorizeErr := p.authorizeV2Request(firstMsg, peerIdentity, now)
+	if authorizeErr != nil {
+		logger.Warnf("SVCProxy v2 权限拒绝: user=%s node_id=%d err=%v", peerIdentity.UserName, peerIdentity.NodeID, authorizeErr)
 		_ = stream.Send(&pb.SVCProxyData{Error: "权限不足"})
-		return fmt.Errorf("权限不足")
+		return authorizeErr
 	}
-
-	// 4. 判断实现方式
-	if p.informer != nil {
-		// 路径 A：Agent 有 K8S 访问能力，直接连接
-		return p.handleDirectConnection(stream, peerIdentity, namespace, serviceName, port)
-	} else if p.endpointServer != nil {
-		// 路径 B：Agent 无 K8S 访问能力，自动选择 Endpoint
-		return p.handleEndpointProxyAuto(stream, peerIdentity, namespace, serviceName, port)
-	} else {
-		logger.Warnf("SVCProxy 无可用的 K8S 访问路径")
-		_ = stream.Send(&pb.SVCProxyData{Error: "无可用的 K8S 访问路径"})
-		return fmt.Errorf("无可用的 K8S 访问路径")
+	if p.informer == nil {
+		_ = stream.Send(&pb.SVCProxyData{Error: "无可用的 v2 K8S 访问路径"})
+		return fmt.Errorf("无可用的 v2 K8S 访问路径")
 	}
-}
-
-func hasV2SVCProxyFields(message *pb.SVCProxyData) bool {
-	return message != nil && (message.SessionId != "" || message.ResourceId != "" || message.SourceId != "" ||
-		message.TargetRevisionId != "" || message.ServiceUid != "" || message.PortName != "" ||
-		message.Protocol != "" || message.AuthorizationRevision != 0)
+	return p.handleDirectConnectionV2(stream, peerIdentity, permission)
 }
 
 func (p *K8SSVCProxy) authorizeV2Request(firstMsg *pb.SVCProxyData, identity *PeerIdentity, now time.Time) (*pb.ResourceSessionPermissionV2, error) {
@@ -404,350 +368,14 @@ func serviceMatchesV2Permission(svc *DiscoveredService, target *pb.ResourceSessi
 	return false
 }
 
-// handleEndpointSVCProxy 处理 Endpoint 跳跃路径的 SVCProxy
-// Desktop → Agent SVCProxy(endpoint_name=xxx) → Agent RequestSVCProxy → Endpoint OpenSVCProxy → K8S ClusterIP
-func (p *K8SSVCProxy) handleEndpointSVCProxy(stream pb.AgentService_SVCProxyServer, peerIdentity *PeerIdentity, endpointName, namespace, serviceName, clusterIP string, port int32) error {
-	// P10 重构：直接使用 Agent 级别权限检查（不再区分 Endpoint）
-	if !p.permCache.CheckK8SServiceAccess(peerIdentity.UserName, namespace, serviceName) {
-		logger.Warnf("SVCProxy Endpoint 权限拒绝: user=%s, endpoint=%s, ns=%s, svc=%s",
-			peerIdentity.UserName, endpointName, namespace, serviceName)
-		_ = stream.Send(&pb.SVCProxyData{Error: "权限不足"})
-		return fmt.Errorf("权限不足")
-	}
-
-	// 检查 EndpointServer 是否可用
-	if p.endpointServer == nil {
-		_ = stream.Send(&pb.SVCProxyData{Error: "Endpoint 功能未启用"})
-		return fmt.Errorf("Endpoint 功能未启用")
-	}
-
-	// 请求 Endpoint 开启 SVC 代理
-	epStream, err := p.endpointServer.RequestSVCProxy(stream.Context(), endpointName, namespace, serviceName, clusterIP, port)
-	if err != nil {
-		logger.Warnf("SVCProxy Endpoint 请求失败: %v", err)
-		_ = stream.Send(&pb.SVCProxyData{Error: fmt.Sprintf("Endpoint 连接失败: %v", err)})
-		return err
-	}
-
-	logger.Infof("SVCProxy Endpoint 跳跃: user=%s, endpoint=%s, %s/%s:%d",
-		peerIdentity.UserName, endpointName, namespace, serviceName, port)
-
-	startedAt := time.Now()
-
-	// 发送连接确认
-	if err := stream.Send(&pb.SVCProxyData{}); err != nil {
-		return err
-	}
-
-	// 双向桥接：Desktop gRPC stream ↔ Endpoint gRPC stream
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	// Desktop → Endpoint
-	go func() {
-		defer wg.Done()
-		for {
-			msg, err := stream.Recv()
-			if err != nil {
-				_ = epStream.Send(&pb.EndpointSVCProxyData{IsClose: true})
-				return
-			}
-			if msg.IsClose {
-				_ = epStream.Send(&pb.EndpointSVCProxyData{IsClose: true})
-				return
-			}
-			if len(msg.Data) > 0 {
-				if sendErr := epStream.Send(&pb.EndpointSVCProxyData{Data: msg.Data}); sendErr != nil {
-					return
-				}
-			}
-		}
-	}()
-
-	// Endpoint → Desktop
-	go func() {
-		defer wg.Done()
-		for {
-			msg, err := epStream.Recv()
-			if err != nil {
-				_ = stream.Send(&pb.SVCProxyData{IsClose: true})
-				return
-			}
-			if msg.IsClose {
-				_ = stream.Send(&pb.SVCProxyData{IsClose: true})
-				return
-			}
-			if msg.Error != "" {
-				_ = stream.Send(&pb.SVCProxyData{Error: msg.Error})
-				return
-			}
-			if len(msg.Data) > 0 {
-				if sendErr := stream.Send(&pb.SVCProxyData{Data: msg.Data}); sendErr != nil {
-					return
-				}
-			}
-		}
-	}()
-
-	wg.Wait()
-
-	// 记录审计
-	if p.auditCollector != nil {
-		target := fmt.Sprintf("%s.%s:%d@%s", serviceName, namespace, port, endpointName)
-		p.auditCollector.Record(peerIdentity.UserName, endpointName, "k8s_service_connect", target, "", startedAt, time.Now())
-	}
-
-	return nil
-}
-
-// SetEndpointServer 设置 EndpointServer 引用（用于 Endpoint 跳跃路径）
 func (p *K8SSVCProxy) SetEndpointServer(es *EndpointServer) {
 	p.endpointServer = es
 }
 
-// extractIdentityFromStream 从 gRPC stream 中提取对端身份
 func (p *K8SSVCProxy) extractIdentityFromStream(stream pb.AgentService_SVCProxyServer) (*PeerIdentity, error) {
-	// 从 gRPC peer 获取远程地址
 	peer, ok := grpcpeer.FromContext(stream.Context())
 	if !ok {
 		return nil, fmt.Errorf("无法获取 gRPC peer 信息")
 	}
-
-	// 通过 IdentityExtractor 从 tsnet 连接提取身份
 	return p.identity.ExtractFromConn(stream.Context(), peer.Addr)
-}
-
-// handleDirectConnection 处理 Agent 直连路径
-// Agent 有 K8S 访问能力，直接连接 ClusterIP
-func (p *K8SSVCProxy) handleDirectConnection(stream pb.AgentService_SVCProxyServer, peerIdentity *PeerIdentity, namespace, serviceName string, port int32) error {
-	// 查找 Service 的 ClusterIP
-	svc := p.informer.FindService(namespace, serviceName)
-	if svc == nil {
-		logger.Warnf("SVCProxy Service 未找到: %s/%s", namespace, serviceName)
-		_ = stream.Send(&pb.SVCProxyData{Error: "Service 未找到"})
-		return fmt.Errorf("Service 未找到: %s/%s", namespace, serviceName)
-	}
-
-	targetAddr := net.JoinHostPort(svc.ClusterIP, strconv.Itoa(int(port)))
-
-	// 建立到 ClusterIP 的 TCP 连接
-	targetConn, err := net.Dial("tcp", targetAddr)
-	if err != nil {
-		logger.Errorf("SVCProxy 连接目标失败: %s, err=%v", targetAddr, err)
-		_ = stream.Send(&pb.SVCProxyData{Error: fmt.Sprintf("连接失败: %v", err)})
-		return err
-	}
-	defer targetConn.Close()
-
-	logger.Infof("SVCProxy 直连: user=%s, %s/%s:%d -> %s",
-		peerIdentity.UserName, namespace, serviceName, port, targetAddr)
-
-	startedAt := time.Now()
-
-	// 发送连接确认
-	if err := stream.Send(&pb.SVCProxyData{}); err != nil {
-		logger.Errorf("SVCProxy 发送连接确认失败: %v", err)
-		return err
-	}
-
-	// 双向流桥接
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	// gRPC → TCP
-	go func() {
-		defer wg.Done()
-		for {
-			msg, err := stream.Recv()
-			if err != nil {
-				if err != io.EOF {
-					logger.Debugf("SVCProxy gRPC 接收结束: %v", err)
-				}
-				targetConn.Close()
-				return
-			}
-			if msg.IsClose {
-				targetConn.Close()
-				return
-			}
-			if len(msg.Data) > 0 {
-				if _, err := targetConn.Write(msg.Data); err != nil {
-					logger.Debugf("SVCProxy TCP 写入失败: %v", err)
-					return
-				}
-			}
-		}
-	}()
-
-	// TCP → gRPC
-	go func() {
-		defer wg.Done()
-		buf := make([]byte, 32*1024)
-		for {
-			n, err := targetConn.Read(buf)
-			if n > 0 {
-				if sendErr := stream.Send(&pb.SVCProxyData{Data: buf[:n]}); sendErr != nil {
-					logger.Debugf("SVCProxy gRPC 发送失败: %v", sendErr)
-					return
-				}
-			}
-			if err != nil {
-				if err != io.EOF {
-					logger.Debugf("SVCProxy TCP 读取结束: %v", err)
-				}
-				_ = stream.Send(&pb.SVCProxyData{IsClose: true})
-				return
-			}
-		}
-	}()
-
-	wg.Wait()
-
-	// 记录审计
-	if p.auditCollector != nil {
-		target := fmt.Sprintf("%s.%s:%d", serviceName, namespace, port)
-		p.auditCollector.Record(peerIdentity.UserName, "", "k8s_service_connect", target, "", startedAt, time.Now())
-	}
-
-	return nil
-}
-
-// handleEndpointProxyAuto 处理 Endpoint 自动选择路径
-// Agent 无 K8S 访问能力，自动选择可用的 Endpoint 代理
-func (p *K8SSVCProxy) handleEndpointProxyAuto(stream pb.AgentService_SVCProxyServer, peerIdentity *PeerIdentity, namespace, serviceName string, port int32) error {
-	// 自动选择可用的 Endpoint
-	endpointName, clusterIP := p.selectAvailableEndpoint(namespace, serviceName)
-	if endpointName == "" {
-		logger.Warnf("SVCProxy 无可用的 Endpoint: %s/%s", namespace, serviceName)
-		_ = stream.Send(&pb.SVCProxyData{Error: "无可用的 Endpoint"})
-		return fmt.Errorf("无可用的 Endpoint")
-	}
-
-	logger.Infof("SVCProxy 自动选择 Endpoint: %s/%s -> endpoint=%s", namespace, serviceName, endpointName)
-
-	// 请求 Endpoint 开启 SVC 代理
-	epStream, err := p.endpointServer.RequestSVCProxy(stream.Context(), endpointName, namespace, serviceName, clusterIP, port)
-	if err != nil {
-		logger.Warnf("SVCProxy Endpoint 请求失败: %v", err)
-		_ = stream.Send(&pb.SVCProxyData{Error: fmt.Sprintf("Endpoint 连接失败: %v", err)})
-		return err
-	}
-
-	logger.Infof("SVCProxy Endpoint 跳跃: user=%s, endpoint=%s, %s/%s:%d",
-		peerIdentity.UserName, endpointName, namespace, serviceName, port)
-
-	startedAt := time.Now()
-
-	// 发送连接确认
-	if err := stream.Send(&pb.SVCProxyData{}); err != nil {
-		return err
-	}
-
-	// 双向桥接：Desktop gRPC stream ↔ Endpoint gRPC stream
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	// Desktop → Endpoint
-	go func() {
-		defer wg.Done()
-		for {
-			msg, err := stream.Recv()
-			if err != nil {
-				_ = epStream.Send(&pb.EndpointSVCProxyData{IsClose: true})
-				return
-			}
-			if msg.IsClose {
-				_ = epStream.Send(&pb.EndpointSVCProxyData{IsClose: true})
-				return
-			}
-			if len(msg.Data) > 0 {
-				if sendErr := epStream.Send(&pb.EndpointSVCProxyData{Data: msg.Data}); sendErr != nil {
-					return
-				}
-			}
-		}
-	}()
-
-	// Endpoint → Desktop
-	go func() {
-		defer wg.Done()
-		for {
-			msg, err := epStream.Recv()
-			if err != nil {
-				_ = stream.Send(&pb.SVCProxyData{IsClose: true})
-				return
-			}
-			if msg.IsClose {
-				_ = stream.Send(&pb.SVCProxyData{IsClose: true})
-				return
-			}
-			if msg.Error != "" {
-				_ = stream.Send(&pb.SVCProxyData{Error: msg.Error})
-				return
-			}
-			if len(msg.Data) > 0 {
-				if sendErr := stream.Send(&pb.SVCProxyData{Data: msg.Data}); sendErr != nil {
-					return
-				}
-			}
-		}
-	}()
-
-	wg.Wait()
-
-	// 记录审计
-	if p.auditCollector != nil {
-		target := fmt.Sprintf("%s.%s:%d@%s", serviceName, namespace, port, endpointName)
-		p.auditCollector.Record(peerIdentity.UserName, endpointName, "k8s_service_connect", target, "", startedAt, time.Now())
-	}
-
-	return nil
-}
-
-// selectAvailableEndpoint 自动选择可用的 Endpoint
-// 返回: endpointName, clusterIP
-func (p *K8SSVCProxy) selectAvailableEndpoint(namespace, serviceName string) (string, string) {
-	if p.endpointServer == nil {
-		return "", ""
-	}
-
-	// 从已连接的 Endpoint 中选择
-	// 优先选择：
-	// 1. 有该 Service 发现数据的 Endpoint
-	// 2. K8SService 能力已启用的 Endpoint
-	// 3. 状态为 online 的 Endpoint
-
-	endpoints := p.endpointServer.GetConnectedEndpointDetails()
-	for _, ep := range endpoints {
-		// 检查是否有 K8SService 能力
-		hasK8SSvcCapability := false
-		for _, cap := range ep.Capabilities {
-			if cap.Type == "k8sservice" {
-				hasK8SSvcCapability = true
-				break
-			}
-		}
-		if !hasK8SSvcCapability {
-			continue
-		}
-
-		// 检查是否有该 Service 的发现数据
-		clusterIP := p.endpointServer.FindEndpointServiceClusterIP(ep.Name, namespace, serviceName)
-		if clusterIP != "" {
-			logger.Debugf("选择 Endpoint: %s (有 Service 发现数据)", ep.Name)
-			return ep.Name, clusterIP
-		}
-	}
-
-	// 如果没有找到有发现数据的 Endpoint，选择第一个有 K8SService 能力的
-	for _, ep := range endpoints {
-		for _, cap := range ep.Capabilities {
-			if cap.Type == "k8sservice" {
-				logger.Debugf("选择 Endpoint: %s (无 Service 发现数据，但有 K8SService 能力)", ep.Name)
-				return ep.Name, ""
-			}
-		}
-	}
-
-	return "", ""
 }

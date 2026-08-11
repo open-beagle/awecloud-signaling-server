@@ -33,7 +33,6 @@ func TestDesktopListDomainsIncludesUnifiedHostSSHGrant(t *testing.T) {
 		&model.Resource{}, &model.AccessGrant{}, &model.DomainRegistry{},
 		&model.AclSSHUserPermission{}, &model.AclSSHGroupPermission{},
 		&model.AclK8SUserPermission{}, &model.AclK8SGroupPermission{},
-		&model.AclK8SServiceUserPermission{}, &model.AclK8SServiceGroupPermission{},
 	))
 
 	now := time.Now().UTC()
@@ -80,7 +79,6 @@ func TestDesktopListDomainsIncludesUnifiedHostSSHGrantCreatedInLocalTimezone(t *
 		&model.Resource{}, &model.AccessGrant{}, &model.DomainRegistry{},
 		&model.AclSSHUserPermission{}, &model.AclSSHGroupPermission{},
 		&model.AclK8SUserPermission{}, &model.AclK8SGroupPermission{},
-		&model.AclK8SServiceUserPermission{}, &model.AclK8SServiceGroupPermission{},
 	))
 
 	now := time.Now().UTC()
@@ -314,6 +312,14 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 		Ready: true, ObservedAt: now, ObservationRevision: 1, SourceRevision: 1,
 	}
 	require.NoError(t, database.Create(&sshTarget).Error)
+	sshReplicaSnapshot := strings.ReplaceAll(strings.ReplaceAll(sshTargetSnapshot, "projection-shell-0", "projection-shell-1"), "projection-shell-pod-uid", "projection-shell-pod-uid-1")
+	sshReplicaTarget := model.TenantResourceTargetRevision{
+		ID: uuid.NewString(), TenantResourceSourceID: sshSource.ID, Revision: 2,
+		TargetType: model.WorkloadObservationContainer, TargetSnapshot: sshReplicaSnapshot,
+		SourceTechnicalResourceID: technical.ID, AccessTechnicalResourceID: technical.ID,
+		Ready: true, ObservedAt: now, ObservationRevision: 1, SourceRevision: 1,
+	}
+	require.NoError(t, database.Create(&sshReplicaTarget).Error)
 	sshGrant := model.TenantAccessGrant{
 		ID: uuid.NewString(), TenantID: tenant.ID, TenantResourceID: sshResource.ID,
 		SubjectType: model.TenantAccessGrantSubjectUser, SubjectKey: fmt.Sprint(member.ID), SubjectUserID: &member.ID,
@@ -336,7 +342,7 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 		DesktopId: desktop.ID, ResourceProtocol: sessionAuthorizationProtocolV2,
 	})
 	require.NoError(t, err)
-	require.Len(t, negotiatedResponse.ContainerSsh, 1)
+	require.Len(t, negotiatedResponse.ContainerSsh, 2)
 	require.Len(t, negotiatedResponse.ContainerService, 1)
 
 	readOnlyServer := &DesktopServiceServer{config: &config.ServerConfig{FeatureFlags: config.FeatureFlagsSection{}}}
@@ -344,7 +350,7 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 		DesktopId: desktop.ID, ResourceProtocol: sessionAuthorizationProtocolV2,
 	})
 	require.NoError(t, err)
-	require.Len(t, readOnlyResponse.ContainerSsh, 1, "resource_model_write must not hide existing Pod resources")
+	require.Len(t, readOnlyResponse.ContainerSsh, 2, "resource_model_write must not hide existing Pod resources")
 	require.Len(t, readOnlyResponse.ContainerService, 1, "resource_model_write must not hide existing Service resources")
 
 	scopedResponse, err := server.GetResources(context.Background(), &pb.GetResourcesRequest{
@@ -353,8 +359,7 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 	require.NoError(t, err)
 	require.Empty(t, scopedResponse.Ssh)
 	require.Empty(t, scopedResponse.K8SApi)
-	require.Empty(t, scopedResponse.K8SService)
-	require.Len(t, scopedResponse.ContainerSsh, 1)
+	require.Len(t, scopedResponse.ContainerSsh, 2)
 	require.Len(t, scopedResponse.ContainerService, 1)
 	otherScopedResponse, err := server.GetResources(context.Background(), &pb.GetResourcesRequest{
 		DesktopId: desktop.ID, ResourceProtocol: sessionAuthorizationProtocolV2, TenantId: otherTenant.ID,
@@ -368,10 +373,10 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 
 	sshResources, services := server.queryTenantContainerResourcesGRPC(context.Background(), &desktop, nil, "")
-	require.Len(t, sshResources, 1)
+	require.Len(t, sshResources, 2)
 	projectedSSH := sshResources[0]
 	require.Equal(t, sshResource.ID, projectedSSH.ResourceId)
-	require.Equal(t, "projection-shell.projection-workloads.projection-agent.projection-provider.beagle", projectedSSH.Domain)
+	require.Equal(t, "projection-shell-0.projection-shell.projection-workloads.projection-agent.projection-provider.beagle", projectedSSH.Domain)
 	require.Equal(t, agentNode.IP, projectedSSH.AgentIp)
 	require.Equal(t, []string{"code"}, projectedSSH.SshUsers)
 	require.Greater(t, projectedSSH.ListenPort, uint32(0))
@@ -379,6 +384,22 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 	require.Equal(t, sshSource.ID, projectedSSH.SourceId)
 	require.Equal(t, sshTarget.ID, projectedSSH.TargetRevisionId)
 	require.Greater(t, projectedSSH.AuthorizationRevision, int64(0))
+	require.Equal(t, "projection-shell-1", sshResources[1].PodName)
+	require.Equal(t, sshReplicaTarget.ID, sshResources[1].TargetRevisionId)
+	require.NotEqual(t, projectedSSH.ListenPort, sshResources[1].ListenPort)
+	require.NotEqual(t, projectedSSH.Domain, sshResources[1].Domain)
+	var sshSessions []model.ResourceSession
+	require.NoError(t, database.Where("tenant_resource_id = ?", sshResource.ID).Order("target_revision_id ASC").Find(&sshSessions).Error)
+	require.Len(t, sshSessions, 2)
+	require.Equal(t, sshGrant.ID, sshSessions[0].GrantID)
+	require.Equal(t, sshGrant.ID, sshSessions[1].GrantID)
+	require.NotEqual(t, sshSessions[0].TargetRevisionID, sshSessions[1].TargetRevisionID)
+	require.Equal(t, "projection-workloads", projectedSSH.Namespace)
+	require.Equal(t, "Deployment", projectedSSH.WorkloadKind)
+	require.Equal(t, "projection-shell", projectedSSH.WorkloadName)
+	require.Equal(t, "projection-shell-pod-uid", projectedSSH.PodUid)
+	require.Equal(t, "projection-shell-0", projectedSSH.PodName)
+	require.Equal(t, "shell", projectedSSH.ContainerName)
 	require.Len(t, services, 1)
 	projected := services[0]
 	require.Equal(t, resource.ID, projected.ResourceId)
@@ -399,17 +420,17 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 	require.Greater(t, projected.AuthorizationRevision, int64(0))
 
 	sshResources, services = server.queryTenantContainerResourcesGRPC(context.Background(), &desktop, nil, "")
-	require.Len(t, sshResources, 1)
+	require.Len(t, sshResources, 2)
 	require.Equal(t, projectedSSH.SessionId, sshResources[0].SessionId)
 	require.Len(t, services, 1)
 	require.Equal(t, projected.SessionId, services[0].SessionId)
 	require.NoError(t, database.Model(&model.ResourceSession{}).Where("user_id = ? AND device_id = ?", member.ID, desktop.ID).Count(&sessionCount).Error)
-	require.Equal(t, int64(2), sessionCount)
+	require.Equal(t, int64(3), sessionCount)
 
 	require.NoError(t, database.Model(&model.TenantAccessGrant{}).Where("id = ?", grant.ID).Updates(map[string]any{
 		"status": model.TenantAccessGrantSuspended, "revision": int64(2), "row_version": int64(2),
 	}).Error)
 	sshResources, services = server.queryTenantContainerResourcesGRPC(context.Background(), &desktop, nil, "")
-	require.Len(t, sshResources, 1)
+	require.Len(t, sshResources, 2)
 	require.Empty(t, services)
 }

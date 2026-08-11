@@ -200,11 +200,26 @@ func (s *WorkloadInventoryService) ReceiveBatch(ctx context.Context, input Recei
 // Agent snapshot. New objects remain memory-only candidates until reviewed.
 func (s *WorkloadInventoryService) refreshPublishedResources(ctx context.Context, snapshot workloadSnapshot) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for i := range snapshot.Projections {
-			projection := &snapshot.Projections[i]
+		groups := make(map[string][]workloadProjection)
+		for _, projection := range snapshot.Projections {
+			groups[projection.StableKey] = append(groups[projection.StableKey], projection)
+		}
+		stableKeys := make([]string, 0, len(groups))
+		for stableKey := range groups {
+			stableKeys = append(stableKeys, stableKey)
+		}
+		sort.Strings(stableKeys)
+		for _, stableKey := range stableKeys {
+			projections := groups[stableKey]
+			sort.Slice(projections, func(i, j int) bool { return projections[i].Target < projections[j].Target })
+			projection := &projections[0]
+			ready := false
+			for _, target := range projections {
+				ready = ready || target.Ready
+			}
 			var observation model.WorkloadObservation
 			if err := tx.Where("namespace_scope_id = ? AND kind = ? AND stable_key = ?",
-				snapshot.NamespaceScopeID, snapshot.Kind, projection.StableKey).First(&observation).Error; err != nil {
+				snapshot.NamespaceScopeID, snapshot.Kind, stableKey).First(&observation).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					continue
 				}
@@ -230,15 +245,33 @@ func (s *WorkloadInventoryService) refreshPublishedResources(ctx context.Context
 					break
 				}
 			}
+			targetSetChanged := false
+			if len(sources) > 0 {
+				var currentTargets []model.TenantResourceTargetRevision
+				if err := tx.Where("tenant_resource_source_id = ? AND superseded_at IS NULL", sources[0].ID).
+					Order("target_snapshot ASC").Find(&currentTargets).Error; err != nil {
+					return err
+				}
+				if len(currentTargets) != len(projections) {
+					targetSetChanged = true
+				} else {
+					for i := range projections {
+						if currentTargets[i].TargetSnapshot != projections[i].Target || currentTargets[i].Ready != projections[i].Ready {
+							targetSetChanged = true
+							break
+						}
+					}
+				}
+			}
 			if evidence.SourceEpoch == snapshot.SourceEpoch && evidence.Sequence == snapshot.Sequence &&
 				evidence.State == model.WorkloadObservationSourceObserved && observation.State == model.WorkloadObservationEligible && !sourceChanged {
 				continue
 			}
 
-			changed := observation.IdentityQuality != projection.IdentityQuality || observation.Ready != projection.Ready ||
+			changed := observation.IdentityQuality != projection.IdentityQuality || observation.Ready != ready ||
 				observation.LabelSnapshot != projection.Labels || observation.State != model.WorkloadObservationEligible ||
 				evidence.PayloadHash != projection.PayloadHash || evidence.Ready != projection.Ready ||
-				evidence.TargetSnapshot != projection.Target || evidence.State != model.WorkloadObservationSourceObserved || sourceChanged
+				evidence.TargetSnapshot != projection.Target || evidence.State != model.WorkloadObservationSourceObserved || sourceChanged || targetSetChanged
 			observationRevision := observation.ObservedRevision
 			evidenceRevision := evidence.SourceRevision
 			if changed {
@@ -249,7 +282,7 @@ func (s *WorkloadInventoryService) refreshPublishedResources(ctx context.Context
 			if err := tx.Model(&model.WorkloadObservation{}).Where("id = ? AND row_version = ?", observation.ID, observation.RowVersion).
 				Updates(map[string]any{
 					"identity_quality": projection.IdentityQuality, "state": model.WorkloadObservationEligible,
-					"ready": projection.Ready, "observed_revision": observationRevision, "label_snapshot": projection.Labels,
+					"ready": ready, "observed_revision": observationRevision, "label_snapshot": projection.Labels,
 					"last_observed_at": snapshot.ObservedAt, "lease_expires_at": snapshot.LeaseExpiresAt,
 					"row_version": gorm.Expr("row_version + 1"),
 				}).Error; err != nil {
@@ -269,7 +302,7 @@ func (s *WorkloadInventoryService) refreshPublishedResources(ctx context.Context
 			}
 
 			availability := model.TenantResourceUnavailable
-			if projection.Ready {
+			if ready {
 				availability = model.TenantResourceAvailable
 			}
 			for j := range sources {
@@ -281,31 +314,84 @@ func (s *WorkloadInventoryService) refreshPublishedResources(ctx context.Context
 					}).Error; err != nil {
 					return err
 				}
-				var current model.TenantResourceTargetRevision
-				if err := tx.Where("tenant_resource_source_id = ? AND superseded_at IS NULL", sources[j].ID).
-					Order("revision DESC").First(&current).Error; err != nil {
-					return err
-				}
-				if err := tx.Model(&model.TenantResourceTargetRevision{}).Where("id = ? AND superseded_at IS NULL", current.ID).
+				if err := tx.Model(&model.TenantResourceTargetRevision{}).Where("tenant_resource_source_id = ? AND superseded_at IS NULL", sources[j].ID).
 					Update("superseded_at", snapshot.ReceivedAt).Error; err != nil {
 					return err
 				}
-				next := model.TenantResourceTargetRevision{
-					ID: uuid.NewString(), TenantResourceSourceID: sources[j].ID, Revision: current.Revision + 1,
-					TargetType: snapshot.Kind, TargetSnapshot: projection.Target,
-					SourceTechnicalResourceID: snapshot.SourceTechnicalResourceID,
-					AccessTechnicalResourceID: snapshot.SourceTechnicalResourceID,
-					Ready:                     projection.Ready, ObservedAt: snapshot.ObservedAt,
-					ObservationRevision: observationRevision, SourceRevision: sourceRevision, CreatedAt: snapshot.ReceivedAt,
-				}
-				if err := tx.Create(&next).Error; err != nil {
+				revision := int64(0)
+				if err := tx.Model(&model.TenantResourceTargetRevision{}).Where("tenant_resource_source_id = ?", sources[j].ID).
+					Select("COALESCE(MAX(revision), 0)").Scan(&revision).Error; err != nil {
 					return err
+				}
+				for _, target := range projections {
+					revision++
+					next := model.TenantResourceTargetRevision{
+						ID: uuid.NewString(), TenantResourceSourceID: sources[j].ID, Revision: revision,
+						TargetType: snapshot.Kind, TargetSnapshot: target.Target,
+						SourceTechnicalResourceID: snapshot.SourceTechnicalResourceID,
+						AccessTechnicalResourceID: snapshot.SourceTechnicalResourceID,
+						Ready:                     target.Ready, ObservedAt: snapshot.ObservedAt,
+						ObservationRevision: observationRevision, SourceRevision: sourceRevision, CreatedAt: snapshot.ReceivedAt,
+					}
+					if err := tx.Create(&next).Error; err != nil {
+						return err
+					}
 				}
 				if err := tx.Model(&model.TenantResource{}).Where("id = ?", sources[j].TenantResourceID).
 					Updates(map[string]any{
 						"availability_state": availability, "revision": gorm.Expr("revision + 1"),
 						"row_version": gorm.Expr("row_version + 1"),
 					}).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		var observations []model.WorkloadObservation
+		if err := tx.Where("namespace_scope_id = ? AND kind = ?", snapshot.NamespaceScopeID, snapshot.Kind).Find(&observations).Error; err != nil {
+			return err
+		}
+		for i := range observations {
+			if _, observed := groups[observations[i].StableKey]; observed {
+				continue
+			}
+			var evidence model.WorkloadObservationSource
+			if err := tx.Where("workload_observation_id = ? AND source_technical_resource_id = ?",
+				observations[i].ID, snapshot.SourceTechnicalResourceID).First(&evidence).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					continue
+				}
+				return err
+			}
+			observationRevision := observations[i].ObservedRevision + 1
+			if err := tx.Model(&model.WorkloadObservation{}).Where("id = ? AND row_version = ?", observations[i].ID, observations[i].RowVersion).
+				Updates(map[string]any{"state": model.WorkloadObservationStale, "ready": false, "observed_revision": observationRevision,
+					"last_observed_at": snapshot.ObservedAt, "lease_expires_at": snapshot.LeaseExpiresAt, "row_version": gorm.Expr("row_version + 1")}).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&model.WorkloadObservationSource{}).Where("id = ? AND row_version = ?", evidence.ID, evidence.RowVersion).
+				Updates(map[string]any{"source_epoch": snapshot.SourceEpoch, "sequence": snapshot.Sequence, "state": model.WorkloadObservationSourceStale,
+					"ready": false, "observed_at": snapshot.ObservedAt, "received_at": snapshot.ReceivedAt, "lease_expires_at": snapshot.LeaseExpiresAt,
+					"source_revision": evidence.SourceRevision + 1, "row_version": gorm.Expr("row_version + 1")}).Error; err != nil {
+				return err
+			}
+			var sources []model.TenantResourceSource
+			if err := tx.Where("workload_observation_id = ? AND enabled = ?", observations[i].ID, true).Find(&sources).Error; err != nil {
+				return err
+			}
+			for j := range sources {
+				if err := tx.Model(&model.TenantResourceSource{}).Where("id = ? AND row_version = ?", sources[j].ID, sources[j].RowVersion).
+					Updates(map[string]any{"enabled": false, "disabled_at": snapshot.ReceivedAt, "disabled_reason": "not observed in current snapshot",
+						"source_revision": sources[j].SourceRevision + 1, "row_version": gorm.Expr("row_version + 1")}).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&model.TenantResourceTargetRevision{}).Where("tenant_resource_source_id = ? AND superseded_at IS NULL", sources[j].ID).
+					Update("superseded_at", snapshot.ReceivedAt).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&model.TenantResource{}).Where("id = ?", sources[j].TenantResourceID).
+					Updates(map[string]any{"availability_state": model.TenantResourceUnavailable, "revision": gorm.Expr("revision + 1"),
+						"row_version": gorm.Expr("row_version + 1")}).Error; err != nil {
 					return err
 				}
 			}

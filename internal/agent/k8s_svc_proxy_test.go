@@ -66,29 +66,14 @@ func TestK8SSVCProxyV2EnforcementIsExplicit(t *testing.T) {
 	require.False(t, cache.EnforceV2())
 }
 
-func TestK8SSVCProxyV2FieldsCannotFallBackToLegacyAuthorization(t *testing.T) {
-	require.False(t, hasV2SVCProxyFields(&pb.SVCProxyData{IsConnect: true, Namespace: "dev", ServiceName: "api", Port: 443}))
-	for name, request := range map[string]*pb.SVCProxyData{
-		"session":                {SessionId: "session-a"},
-		"resource":               {ResourceId: "resource-a"},
-		"source":                 {SourceId: "source-a"},
-		"target revision":        {TargetRevisionId: "target-a"},
-		"service uid":            {ServiceUid: "service-a"},
-		"port name":              {PortName: "https"},
-		"protocol":               {Protocol: "TCP"},
-		"authorization revision": {AuthorizationRevision: 1},
-	} {
-		t.Run(name, func(t *testing.T) {
-			require.True(t, hasV2SVCProxyFields(request))
-		})
-	}
-
+func TestK8SSVCProxyRejectsLegacyRequestWithoutResourceSession(t *testing.T) {
 	now := time.Now().UTC()
 	cache := NewSessionAuthorizationCache()
 	require.NoError(t, cache.Apply(signedSessionSnapshot(t, 1, now, serviceSessionPermission(now)), now))
-	require.True(t, cache.EnforceV2())
-	require.False(t, cache.Enabled(now.Add(time.Minute)))
-	require.True(t, cache.EnforceV2(), "expired v2 policy must still block legacy fallback")
+	proxy := &K8SSVCProxy{authorizations: cache}
+	legacy := &pb.SVCProxyData{IsConnect: true, Namespace: "dev", ServiceName: "api", Port: 443}
+	_, err := proxy.authorizeV2Request(legacy, &PeerIdentity{UserName: "alice", NodeID: 7001, Role: "client"}, now)
+	require.Error(t, err)
 }
 
 func serviceSessionPermission(now time.Time) *pb.ResourceSessionPermissionV2 {

@@ -84,6 +84,18 @@ func (f workloadInventoryFixture) servicePayload(t *testing.T, clusterIP string,
 	return canonical, sha256Hex(canonical)
 }
 
+func (f workloadInventoryFixture) containerPayload(t *testing.T, pods ...string) ([]byte, string) {
+	t.Helper()
+	items := make([]string, 0, len(pods))
+	for _, pod := range pods {
+		items = append(items, `{"workload_uid":"deployment-uid","workload_kind":"Deployment","workload_name":"shell","pod_uid":"`+pod+`-uid","pod_name":"`+pod+`","container_name":"workspace","ready":true,"labels_allowlist":{"signal.beagle.io/expose":"true"},"ssh_users":["code"]}`)
+	}
+	payload := []byte(`{"containers":[` + strings.Join(items, ",") + `]}`)
+	canonical, err := canonicalizeWorkloadInventoryPayload(model.WorkloadObservationContainer, payload)
+	require.NoError(t, err)
+	return canonical, sha256Hex(canonical)
+}
+
 func boolJSON(value bool) string {
 	if value {
 		return "true"
@@ -224,4 +236,77 @@ func TestPublishingCandidateRefreshesPersistedResource(t *testing.T) {
 	require.Equal(t, published.ID, view.ResourceID)
 	_, err = loadTenantResourceChain(fixture.database, fixture.tenantA.ID, published.ID, fixture.now, true)
 	require.NoError(t, err)
+}
+
+func TestPublishedContainerResourceTracksReplicaSetAcrossRollingReplacement(t *testing.T) {
+	fixture := newWorkloadInventoryFixture(t)
+	payload, hash := fixture.containerPayload(t, "shell-0", "shell-1")
+	input := fixture.input(payload, hash, "epoch-a", 1, "snapshot-a")
+	input.Kind = model.WorkloadObservationContainer
+	_, err := fixture.workload.ReceiveBatch(context.Background(), input)
+	require.NoError(t, err)
+
+	resources := NewTenantResourceService(fixture.database, fixture.snapshots)
+	resources.now = func() time.Time { return fixture.now }
+	list, err := resources.List(context.Background(), fixture.tenantAuth, fixture.tenantA.ID, TenantResourceListInput{Candidates: true, Limit: 100})
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1)
+	published, err := resources.Review(context.Background(), fixture.tenantAuth, ReviewTenantResourceInput{
+		TenantID: fixture.tenantA.ID, ResourceID: list.Items[0].ResourceID, ExpectedRowVersion: list.Items[0].RowVersion,
+		ObservationRevision: list.Items[0].ObservationRevision, Reason: "publish workload", Publish: true,
+	})
+	require.NoError(t, err)
+
+	var initial []model.TenantResourceTargetRevision
+	require.NoError(t, fixture.database.Where("superseded_at IS NULL").Order("target_snapshot ASC").Find(&initial).Error)
+	require.Len(t, initial, 2)
+	require.Contains(t, initial[0].TargetSnapshot+initial[1].TargetSnapshot, `"pod_name":"shell-0"`)
+	require.Contains(t, initial[0].TargetSnapshot+initial[1].TargetSnapshot, `"pod_name":"shell-1"`)
+
+	fixture.now = fixture.now.Add(time.Minute)
+	fixture.workload.now = func() time.Time { return fixture.now }
+	replacement, replacementHash := fixture.containerPayload(t, "shell-1", "shell-2")
+	replacementInput := fixture.input(replacement, replacementHash, "epoch-a", 2, "snapshot-b")
+	replacementInput.Kind = model.WorkloadObservationContainer
+	_, err = fixture.workload.ReceiveBatch(context.Background(), replacementInput)
+	require.NoError(t, err)
+
+	var current []model.TenantResourceTargetRevision
+	require.NoError(t, fixture.database.Where("superseded_at IS NULL").Order("target_snapshot ASC").Find(&current).Error)
+	require.Len(t, current, 2)
+	currentSnapshots := current[0].TargetSnapshot + current[1].TargetSnapshot
+	require.NotContains(t, currentSnapshots, `"pod_name":"shell-0"`)
+	require.Contains(t, currentSnapshots, `"pod_name":"shell-1"`)
+	require.Contains(t, currentSnapshots, `"pod_name":"shell-2"`)
+	var persisted model.TenantResource
+	require.NoError(t, fixture.database.First(&persisted, "id = ?", published.ID).Error)
+	require.Equal(t, published.ID, persisted.ID)
+
+	fixture.now = fixture.now.Add(time.Minute)
+	fixture.workload.now = func() time.Time { return fixture.now }
+	empty, emptyHash := fixture.containerPayload(t)
+	emptyInput := fixture.input(empty, emptyHash, "epoch-a", 3, "snapshot-c")
+	emptyInput.Kind = model.WorkloadObservationContainer
+	_, err = fixture.workload.ReceiveBatch(context.Background(), emptyInput)
+	require.NoError(t, err)
+	var activeCount int64
+	require.NoError(t, fixture.database.Model(&model.TenantResourceTargetRevision{}).Where("superseded_at IS NULL").Count(&activeCount).Error)
+	require.Zero(t, activeCount)
+	require.NoError(t, fixture.database.First(&persisted, "id = ?", published.ID).Error)
+	require.Equal(t, model.TenantResourceUnavailable, persisted.AvailabilityState)
+
+	fixture.now = fixture.now.Add(time.Minute)
+	fixture.workload.now = func() time.Time { return fixture.now }
+	reappeared, reappearedHash := fixture.containerPayload(t, "shell-3")
+	reappearedInput := fixture.input(reappeared, reappearedHash, "epoch-a", 4, "snapshot-d")
+	reappearedInput.Kind = model.WorkloadObservationContainer
+	_, err = fixture.workload.ReceiveBatch(context.Background(), reappearedInput)
+	require.NoError(t, err)
+	var reappearedTargets []model.TenantResourceTargetRevision
+	require.NoError(t, fixture.database.Where("superseded_at IS NULL").Find(&reappearedTargets).Error)
+	require.Len(t, reappearedTargets, 1)
+	require.Contains(t, reappearedTargets[0].TargetSnapshot, `"pod_name":"shell-3"`)
+	require.NoError(t, fixture.database.First(&persisted, "id = ?", published.ID).Error)
+	require.Equal(t, published.ID, persisted.ID)
+	require.Equal(t, model.TenantResourceAvailable, persisted.AvailabilityState)
 }

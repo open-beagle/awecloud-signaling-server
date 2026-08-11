@@ -41,10 +41,7 @@ type DomainListItem struct {
 	AgentName    string             `json:"agent_name,omitempty"`    // Agent 名称（Node 名称）
 	TargetIP     string             `json:"target_ip,omitempty"`
 	TargetPort   int                `json:"target_port,omitempty"`
-	Namespace    string             `json:"namespace,omitempty"`
-	ServiceName  string             `json:"service_name,omitempty"`
-	SSHUsers     []string           `json:"ssh_users,omitempty"`      // SSH 用户列表（仅 ssh 类型）
-	ServicePorts []int32            `json:"service_ports,omitempty"`  // Service 端口列表（仅 k8ssvc 类型）
+	SSHUsers     []string           `json:"ssh_users,omitempty"` // SSH 用户列表（仅 ssh 类型）
 	Status       model.DomainStatus `json:"status"`
 	CreatedAt    string             `json:"created_at"`
 	UpdatedAt    string             `json:"updated_at"`
@@ -138,10 +135,7 @@ func (a *DomainAPI) List(c *gin.Context) {
 			AgentName:    agentName,
 			TargetIP:     d.TargetIP,
 			TargetPort:   d.TargetPort,
-			Namespace:    d.Namespace,
-			ServiceName:  d.ServiceName,
-			SSHUsers:     d.GetSSHUsers(),      // 解析 SSH 用户列表
-			ServicePorts: d.GetServicePorts(),  // 解析 Service 端口列表
+			SSHUsers:     d.GetSSHUsers(),
 			Status:       status,
 			CreatedAt:    d.CreatedAt.Format("2006-01-02 15:04:05"),
 			UpdatedAt:    d.UpdatedAt.Format("2006-01-02 15:04:05"),
@@ -191,16 +185,14 @@ func (a *DomainAPI) Resolve(c *gin.Context) {
 			userName = record.User.Name
 		}
 		results = append(results, gin.H{
-			"domain":       record.Domain,
-			"type":         record.Type,
-			"user_id":      record.UserID,
-			"user_name":    userName,
-			"node_id":      record.NodeID,
-			"target_ip":    record.TargetIP,
-			"target_port":  record.TargetPort,
-			"endpoint_id":  record.EndpointID,
-			"namespace":    record.Namespace,
-			"service_name": record.ServiceName,
+			"domain":      record.Domain,
+			"type":        record.Type,
+			"user_id":     record.UserID,
+			"user_name":   userName,
+			"node_id":     record.NodeID,
+			"target_ip":   record.TargetIP,
+			"target_port": record.TargetPort,
+			"endpoint_id": record.EndpointID,
 		})
 	}
 

@@ -915,26 +915,6 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 		}
 	}
 
-	// 添加 K8S Service 发现数据
-	if a.svcInformer != nil {
-		for _, svc := range a.svcInformer.GetDiscoveredServices() {
-			ds := &pb.DiscoveredK8SService{
-				Namespace:   svc.Namespace,
-				ServiceName: svc.Name,
-				ClusterIp:   svc.ClusterIP,
-				Labels:      svc.Labels,
-			}
-			for _, p := range svc.Ports {
-				ds.Ports = append(ds.Ports, &pb.ServicePort{
-					Name:     p.Name,
-					Port:     p.Port,
-					Protocol: p.Protocol,
-				})
-			}
-			req.DiscoveredServices = append(req.DiscoveredServices, ds)
-		}
-	}
-
 	// ContainerSSH 候选只携带运行时事实，Server 负责与可信 Workspace
 	// Binding reconciliation；Agent 不提交 Tenant ID，也不直接发布 Resource。
 	if a.containerDiscovery != nil {
@@ -957,16 +937,15 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 	if a.endpointServer != nil {
 		for _, ep := range a.endpointServer.GetConnectedEndpointDetails() {
 			connEp := &pb.ConnectedEndpoint{
-				Name:               ep.Name,
-				Status:             "online",
-				Version:            ep.Version,
-				CommitId:           ep.CommitID,
-				BinarySha256:       ep.BinarySHA256,
-				Os:                 ep.OS,
-				Arch:               ep.Arch,
-				UpdaterProtocol:    ep.UpdaterProtocol,
-				UpdateStatuses:     ep.UpdateStatuses,
-				DiscoveredServices: ep.DiscoveredServices,
+				Name:            ep.Name,
+				Status:          "online",
+				Version:         ep.Version,
+				CommitId:        ep.CommitID,
+				BinarySha256:    ep.BinarySHA256,
+				Os:              ep.OS,
+				Arch:            ep.Arch,
+				UpdaterProtocol: ep.UpdaterProtocol,
+				UpdateStatuses:  ep.UpdateStatuses,
 				// SSH 配置
 				SshUsers: ep.SSHUsers,
 				// 注意：不再上报端口，端口由 Server 预分配并存储在 endpoint 表
@@ -1024,7 +1003,6 @@ func (a *Agent) handleHeartbeatResponse(resp *pb.AgentHeartbeatResponse) {
 	// 注意：必须无条件调用 Update，空列表表示权限已全部撤销，需要清空缓存
 	if a.permCache != nil {
 		a.permCache.UpdateK8SPermissions(resp.K8SPermissions)
-		a.permCache.UpdateK8SServicePermissions(resp.K8SServicePermissions)
 		a.permCache.UpdateEndpointSSHPermissions(resp.EndpointSshPermissions)
 		if resp.ContainerSshProtocol == "v1" {
 			a.permCache.UpdateContainerSSHPermissionsFromProto(resp.ContainerSshPermissions)
@@ -1148,7 +1126,7 @@ func (a *Agent) syncEndpointServerConfigs(resp *pb.AgentHeartbeatResponse) {
 		}
 
 		a.endpointServer.UpdateServerConfig(cfg.EndpointName, serverCfg)
-		logger.Infof("同步 Endpoint 配置: name=%s, ssh=%v(port=%d), k8sapi=%v(port=%d), api_server=%s, k8ssvc=%v",
+		logger.Infof("同步 Endpoint 配置: name=%s, ssh=%v(port=%d), k8sapi=%v(port=%d), api_server=%s, container_service=%v",
 			cfg.EndpointName, serverCfg.SSHEnabled, serverCfg.SSHPort,
 			serverCfg.K8SAPIEnabled, serverCfg.K8SAPIPort,
 			serverCfg.K8SAPIApiServer, serverCfg.K8SSvcEnabled)
@@ -1314,23 +1292,7 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		})
 	}
 
-	// 2. Agent 端口映射服务域名：从 ProxyManager 获取运行中的服务
-	// 注意：这部分代码已废弃，Agent 端口映射服务已被 K8S Service 发现机制替代
-	// 保留此代码仅为兼容旧配置，新部署应使用 K8S Service 发现（第 4 部分）
-	if a.proxyManager != nil {
-		for name, running := range a.proxyManager.GetStatus() {
-			if running {
-				registrations = append(registrations, &pb.DomainRegistration{
-					Domain:     name + "." + a.userName + a.domainSuffix,
-					Type:       "k8ssvc",
-					TargetIp:   agentIP,
-					TargetPort: int32(a.config.SVC.ListenPortBase), // Agent SVCProxy gRPC 端口（默认 50051）
-				})
-			}
-		}
-	}
-
-	// 3. K8S API 域名：kubernetes.{agent_name}{domain_suffix}
+	// 2. K8S API 域名：kubernetes.{agent_name}{domain_suffix}
 	// target_port 是 Agent 的 K8SAPI 代理端口（50050）
 	// Desktop/CloudIDE 通过本地代理访问 6443 端口，本地代理转发到 target_port
 	if a.config.K8S.Enabled && a.k8sAPIProxy != nil && a.tsManager != nil && a.tsManager.IsConnected() {
@@ -1342,39 +1304,7 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 		})
 	}
 
-	// 4. K8S Service 域名：{service}.{namespace}.{agent_name}{domain_suffix}
-	if a.config.SVC.Enabled && a.svcInformer != nil && a.tsManager != nil && a.tsManager.IsConnected() {
-		for _, svc := range a.svcInformer.GetDiscoveredServices() {
-			// 使用 alias 或 service name 作为域名前缀
-			prefix := svc.Name
-			if svc.Alias != "" {
-				prefix = svc.Alias
-			}
-			domain := prefix + "." + svc.Namespace + "." + a.userName + a.domainSuffix
-
-			// 注册域名，包含 Service 的所有端口
-			// TargetPort 使用 Agent SVCProxy gRPC 端口（50051），Service 端口存储在 ServicePorts 字段
-			if len(svc.Ports) > 0 {
-				// 提取所有端口号
-				servicePorts := make([]int32, 0, len(svc.Ports))
-				for _, port := range svc.Ports {
-					servicePorts = append(servicePorts, port.Port)
-				}
-
-				registrations = append(registrations, &pb.DomainRegistration{
-					Domain:       domain,
-					Type:         "k8ssvc",
-					TargetIp:     agentIP,
-					TargetPort:   int32(a.config.SVC.ListenPortBase), // Agent SVCProxy gRPC 端口（默认 50051）
-					Namespace:    svc.Namespace,
-					ServiceName:  svc.Name,
-					ServicePorts: servicePorts, // Service 的所有端口
-				})
-			}
-		}
-	}
-
-	// 5. Endpoint SSH 域名：{endpoint-name}.{agent-name}{domain_suffix}:分配端口
+	// 3. Endpoint SSH 域名：{endpoint-name}.{agent-name}{domain_suffix}:分配端口
 	if a.endpointServer != nil && a.endpointSSHProxy != nil && a.tsManager != nil && a.tsManager.IsConnected() {
 		for _, ep := range a.endpointServer.GetConnectedEndpointDetails() {
 			// 检查 Endpoint 是否有 SSH 能力
@@ -1402,10 +1332,6 @@ func (a *Agent) buildDomainRegistrations() []*pb.DomainRegistration {
 			})
 		}
 	}
-
-	// 7. Endpoint K8SService 域名：由 Server 端统一管理
-	// Agent 不再生成 Endpoint K8S Service 域名，避免与 Server 端的域名创建逻辑冲突
-	// Server 端会在处理 Endpoint 心跳时，通过 CreateEndpointK8SSVCDomain 函数创建域名
 
 	return registrations
 }

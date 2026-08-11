@@ -13,12 +13,6 @@ type K8SUserPermission struct {
 	Namespaces []string // 允许的命名空间（空表示全部）
 }
 
-// K8SServiceUserPermission 单个用户的 K8S Service 权限
-type K8SServiceUserPermission struct {
-	Namespaces   []string // 允许的命名空间（空表示全部）
-	ServiceNames []string // 允许的 Service 名称（空表示全部）
-}
-
 // EndpointSSHUserPermission 单个用户对某 Endpoint 的 SSH 权限
 type EndpointSSHUserPermission struct {
 	EndpointID   string   // Endpoint ID
@@ -50,10 +44,6 @@ type PermissionCache struct {
 	k8sPermissions map[string]*K8SUserPermission
 	k8sMutex       sync.RWMutex
 
-	// K8S Service 权限：key = user_name
-	k8sSvcPermissions map[string]*K8SServiceUserPermission
-	k8sSvcMutex       sync.RWMutex
-
 	// Endpoint SSH 权限：key = user_name, value = 按 endpoint_name 索引的权限列表
 	epSSHPermissions map[string][]*EndpointSSHUserPermission
 	epSSHMutex       sync.RWMutex
@@ -70,7 +60,6 @@ type PermissionCache struct {
 func NewPermissionCache() *PermissionCache {
 	return &PermissionCache{
 		k8sPermissions:          make(map[string]*K8SUserPermission),
-		k8sSvcPermissions:       make(map[string]*K8SServiceUserPermission),
 		epSSHPermissions:        make(map[string][]*EndpointSSHUserPermission),
 		containerSSHPermissions: make(map[string]map[string]*ContainerSSHUserPermission),
 		containerSSHRoutes:      make(map[uint16]string),
@@ -221,70 +210,6 @@ func (c *PermissionCache) CheckK8SAccess(userName, namespace string) ([]string, 
 	}
 
 	return perm.K8SGroups, true
-}
-
-// UpdateK8SServicePermissions 从心跳响应更新 K8S Service 权限
-func (c *PermissionCache) UpdateK8SServicePermissions(perms []*pb.K8SServicePermission) {
-	c.k8sSvcMutex.Lock()
-	defer c.k8sSvcMutex.Unlock()
-
-	newPerms := make(map[string]*K8SServiceUserPermission)
-	for _, p := range perms {
-		existing, ok := newPerms[p.UserName]
-		if ok {
-			existing.Namespaces = mergeStringSlice(existing.Namespaces, p.Namespaces)
-			existing.ServiceNames = mergeStringSlice(existing.ServiceNames, p.ServiceNames)
-		} else {
-			newPerms[p.UserName] = &K8SServiceUserPermission{
-				Namespaces:   p.Namespaces,
-				ServiceNames: p.ServiceNames,
-			}
-		}
-	}
-
-	c.k8sSvcPermissions = newPerms
-	logger.Debugf("K8SService 权限缓存已更新: %d 个用户", len(newPerms))
-}
-
-// CheckK8SServiceAccess 检查用户的 K8S Service 访问权限
-func (c *PermissionCache) CheckK8SServiceAccess(userName, namespace, serviceName string) bool {
-	c.k8sSvcMutex.RLock()
-	defer c.k8sSvcMutex.RUnlock()
-
-	perm, ok := c.k8sSvcPermissions[userName]
-	if !ok {
-		return false
-	}
-
-	// 检查命名空间
-	if len(perm.Namespaces) > 0 {
-		nsAllowed := false
-		for _, ns := range perm.Namespaces {
-			if ns == "*" || ns == namespace {
-				nsAllowed = true
-				break
-			}
-		}
-		if !nsAllowed {
-			return false
-		}
-	}
-
-	// 检查 Service 名称
-	if len(perm.ServiceNames) > 0 {
-		svcAllowed := false
-		for _, sn := range perm.ServiceNames {
-			if sn == "*" || sn == serviceName {
-				svcAllowed = true
-				break
-			}
-		}
-		if !svcAllowed {
-			return false
-		}
-	}
-
-	return true
 }
 
 // UpdateEndpointSSHPermissions 从心跳响应更新 Endpoint SSH 权限

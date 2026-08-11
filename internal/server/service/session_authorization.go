@@ -36,6 +36,8 @@ type SessionAuthorizationTarget struct {
 	PortNumber    int32  `json:"port_number,omitempty"`
 	Protocol      string `json:"protocol,omitempty"`
 	WorkloadUID   string `json:"workload_uid,omitempty"`
+	WorkloadKind  string `json:"workload_kind,omitempty"`
+	WorkloadName  string `json:"workload_name,omitempty"`
 	PodName       string `json:"pod_name,omitempty"`
 	PodUID        string `json:"pod_uid,omitempty"`
 	ContainerName string `json:"container_name,omitempty"`
@@ -195,7 +197,7 @@ func (s *SessionAuthorizationService) revalidateSession(tx *gorm.DB, session *mo
 	if !session.ValidUntil.After(now) {
 		return nil, sessionAuthorizationExpiredCode, nil
 	}
-	chain, err := loadTenantResourceChain(tx, session.TenantID, session.TenantResourceID, now, true)
+	chain, err := loadTenantResourceChainForTarget(tx, session.TenantID, session.TenantResourceID, session.TargetRevisionID, now, true)
 	if err != nil {
 		return nil, sessionAuthorizationInvalidCode, nil
 	}

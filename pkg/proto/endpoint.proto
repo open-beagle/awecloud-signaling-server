@@ -65,7 +65,8 @@ message EndpointHeartbeatRequest {
   string token = 1; // 注册令牌（用于身份验证）
   string name = 2; // Endpoint 名称
   repeated EndpointCapabilityInfo capabilities = 3; // 启用的能力列表
-  repeated DiscoveredK8SService discovered_services = 4; // Endpoint 发现的 K8S Service
+  reserved 4;
+  reserved "discovered_services";
   string version = 5; // Endpoint 当前运行版本
   string os = 6; // Endpoint 操作系统
   

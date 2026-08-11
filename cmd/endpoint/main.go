@@ -283,10 +283,6 @@ func buildConnectedEndpoint(cfg *EndpointConfig, discovery *K8SServiceDiscovery)
 	// K8S Service 配置
 	if cfg.SVC.Enabled {
 		ep.K8SserviceLabelSelector = cfg.SVC.LabelSelector
-		// 添加发现的 Service 列表
-		if discovery != nil {
-			ep.DiscoveredServices = discovery.GetDiscoveredServices()
-		}
 	}
 
 	return ep
@@ -659,15 +655,9 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *upda
 			// 添加 K8S Service 配置
 			if cfg.SVC.Enabled {
 				heartbeatReq.K8SserviceLabelSelector = cfg.SVC.LabelSelector
-				// 添加发现的 Service 列表（加锁保护 discovery 并发访问）
-				discoveryMu.Lock()
-				if discovery != nil {
-					heartbeatReq.DiscoveredServices = discovery.GetDiscoveredServices()
-				}
-				discoveryMu.Unlock()
 			}
 
-			logger.Debugf("发送心跳: ssh_users=%v, discovered_services=%d", sshUsers, len(heartbeatReq.DiscoveredServices))
+			logger.Debugf("发送心跳: ssh_users=%v", sshUsers)
 			if err := stream.Send(heartbeatReq); err != nil {
 				return fmt.Errorf("发送心跳失败: %w", err)
 			}

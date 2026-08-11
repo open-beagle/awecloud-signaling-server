@@ -391,9 +391,8 @@ message ResolveDomainResponse {
   int32 target_port = 5; // 目标端口
   string agent_name = 6; // Agent 名称
   string domain_type = 7; // 域名类型
-  string namespace = 8; // K8S 命名空间（k8ssvc 类型时）
-  string service_name = 9; // K8S Service 名称（k8ssvc 类型时）
-  int32 svc_proxy_port = 10; // Agent SVCProxy gRPC 端口（k8ssvc 类型时，默认 9090）
+	reserved 8, 9, 10;
+	reserved "namespace", "service_name", "svc_proxy_port";
   // 删除 endpoint_name 字段（P10 重构）
 }
 
@@ -425,21 +424,12 @@ message K8SAPIResource {
   repeated string namespaces = 5;
 }
 
-// K8SServiceResource K8S Service 资源
-message K8SServiceResource {
-  uint64 agent_id = 1;
-  string agent_name = 2;
-  string namespace = 3;
-  string service_name = 4;
-  string domain = 5;
-  int32 port = 6;
-}
-
 // GetResourcesResponse 资源发现响应
 message GetResourcesResponse {
   repeated SSHResource ssh = 1;
   repeated K8SAPIResource k8s_api = 2;
-  repeated K8SServiceResource k8s_service = 3;
+  reserved 3;
+  reserved "k8s_service";
   repeated ContainerSSHResource container_ssh = 4;
   repeated ContainerServiceResource container_service = 5;
 }
@@ -456,12 +446,11 @@ message GetDomainListRequest {
 // DomainItem 域名记录
 message DomainItem {
   string domain = 1; // 域名（如 beagle-242.beijing.beagle）
-  string type = 2; // 类型：ssh / k8sapi / k8ssvc
-  string status = 3; // 状态：online / offline
-  repeated int32 service_ports = 4; // K8S Service 端口列表（k8ssvc 类型时）
-  repeated string ssh_users = 5; // SSH 用户列表（ssh 类型时）
-  string namespace = 6; // K8S 命名空间（k8ssvc 类型时）
-  string service_name = 7; // K8S Service 名称（k8ssvc 类型时）
+	string type = 2; // 类型：ssh / k8sapi
+	string status = 3; // 状态：online / offline
+	reserved 4, 6, 7;
+	reserved "service_ports", "namespace", "service_name";
+	repeated string ssh_users = 5; // SSH 用户列表（ssh 类型时）
   string region = 8; // 区域名称（从 domain 解析，如 beijing）
   // 删除 endpoint_id 字段（P10 重构）
 }
@@ -483,14 +472,13 @@ message ListDomainsRequest {
 // DomainInfo 域名信息（包含目标 IP 和端口）
 message DomainInfo {
   string domain = 1; // 域名，如 kubernetes.beijing.beagle
-  string type = 2; // 类型：ssh/k8sapi/k8ssvc
+	string type = 2; // 类型：ssh/k8sapi
   string target_ip = 3; // 目标 Tailscale IP
   int32 target_port = 4; // 目标端口
-  string cluster_name = 5; // 集群名称（仅 k8sapi/k8ssvc）
-  string namespace = 6; // 命名空间（仅 k8ssvc）
-  string service_name = 7; // 服务名称（仅 k8ssvc）
-  string status = 8; // 状态：online/offline
-  repeated int32 service_ports = 9; // K8S Service 端口列表（仅 k8ssvc，JSON 数组解析后的值）
+	string cluster_name = 5; // 集群名称（仅 k8sapi）
+	reserved 6, 7, 9;
+	reserved "namespace", "service_name", "service_ports";
+	string status = 8; // 状态：online/offline
   repeated string ssh_users = 10; // SSH 用户列表（仅 ssh 类型）
   // 删除 endpoint_id 和 endpoint_name 字段（P10 重构）
 }
@@ -500,9 +488,8 @@ message ListDomainsResponse {
   repeated DomainInfo domains = 1; // 域名列表
 }
 
-// ContainerSSHResource is the user-visible projection of a unified resource.
-// It intentionally omits Pod UID, Pod IP, Kubernetes credentials and other
-// runtime internals; the connection broker receives those from Server.
+// ContainerSSHResource is the user-visible Kubernetes Pod projection.
+// It contains the selected Pod identity but omits Pod IP and credentials.
 message ContainerSSHResource {
   string resource_id = 1;
   string tenant_id = 2;
@@ -523,10 +510,15 @@ message ContainerSSHResource {
   string source_id = 17;
   string target_revision_id = 18;
   int64 authorization_revision = 19;
+  string namespace = 20;
+  string workload_kind = 21;
+  string workload_name = 22;
+  string pod_uid = 23;
+  string pod_name = 24;
+  string container_name = 25;
 }
 
-// ContainerServiceResource is an additive v2 projection. Legacy k8ssvc
-// fields remain unchanged for old Desktop clients.
+// ContainerServiceResource is the user-visible Kubernetes Service projection.
 message ContainerServiceResource {
   string resource_id = 1;
   string tenant_id = 2;
