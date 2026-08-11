@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -29,12 +30,15 @@ type Directive struct {
 	ArtifactID    string
 	DownloadURL   string
 	Filename      string
+	OS            string
+	Arch          string
 	Size          int64
 	SHA256        string
 	Force         bool
 	NotBeforeUnix int64
 	DeadlineUnix  int64
 	CommitID      string
+	Action        string
 }
 
 type Status struct {
@@ -237,6 +241,10 @@ func (m *Manager) Handle(directive Directive) {
 }
 
 func (m *Manager) resume(directive Directive, state taskState) {
+	if err := m.validateDirective(directive); err != nil {
+		_ = m.setStatusWithPath(directive, "failed", state.Progress, state.StagedBinary, "invalid_update_directive", err.Error())
+		return
+	}
 	switch state.Phase {
 	case "staged", "installing", "restarting":
 		if state.StagedBinary != "" {
@@ -340,6 +348,12 @@ func (m *Manager) validateDirective(directive Directive) error {
 	if !validTaskID(directive.TaskID) || directive.ArtifactID == "" || directive.Version == "" ||
 		!validCommitID(directive.CommitID) || !validSHA256(directive.SHA256) {
 		return errors.New("update directive build identity is incomplete")
+	}
+	if directive.OS != runtime.GOOS || directive.Arch != runtime.GOARCH {
+		return fmt.Errorf("update artifact platform mismatch: expected %s/%s, got %s/%s", runtime.GOOS, runtime.GOARCH, directive.OS, directive.Arch)
+	}
+	if directive.Action != "install" {
+		return fmt.Errorf("unsupported update action %q", directive.Action)
 	}
 	return nil
 }

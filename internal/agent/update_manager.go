@@ -25,12 +25,15 @@ func updateDirectiveFromProto(directive *pb.UpdateDirective) updater.Directive {
 		ArtifactID:    directive.ArtifactId,
 		DownloadURL:   directive.DownloadUrl,
 		Filename:      directive.Filename,
+		OS:            directive.Os,
+		Arch:          directive.Arch,
 		Size:          directive.Size,
 		SHA256:        directive.Sha256,
 		Force:         directive.Force,
 		NotBeforeUnix: directive.NotBeforeUnix,
 		DeadlineUnix:  directive.DeadlineUnix,
 		CommitID:      directive.CommitId,
+		Action:        directive.Action,
 	}
 }
 

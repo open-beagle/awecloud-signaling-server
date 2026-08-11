@@ -10,7 +10,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
-func TestEnsureUpdaterReleaseSchemaKeepsLatestReleasePerComponent(t *testing.T) {
+func TestEnsureUpdaterReleaseSchemaPreservesReleaseHistory(t *testing.T) {
 	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, database.Exec(`
@@ -36,26 +36,53 @@ func TestEnsureUpdaterReleaseSchemaKeepsLatestReleasePerComponent(t *testing.T) 
 	`).Error)
 
 	require.NoError(t, ensureUpdaterReleaseSchema(database))
-	require.NoError(t, database.Exec(`CREATE UNIQUE INDEX uk_release_component ON release(component)`).Error)
 
 	var releases []model.Release
 	require.NoError(t, database.Find(&releases).Error)
-	require.Len(t, releases, 1)
-	require.Equal(t, "second", releases[0].ID)
+	require.Len(t, releases, 2)
 	var artifactCount, taskCount, eventCount int64
 	require.NoError(t, database.Table("artifact").Count(&artifactCount).Error)
 	require.NoError(t, database.Table("update_task").Count(&taskCount).Error)
 	require.NoError(t, database.Table("update_event").Count(&eventCount).Error)
-	require.Equal(t, int64(1), artifactCount)
-	require.Equal(t, int64(1), taskCount)
-	require.Equal(t, int64(1), eventCount)
-	require.True(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component"))
-	require.False(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version_commit"))
+	require.Equal(t, int64(2), artifactCount)
+	require.Equal(t, int64(2), taskCount)
+	require.Equal(t, int64(2), eventCount)
+	require.False(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component"))
+	require.True(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version_commit"))
 
-	require.Error(t, database.Exec(`
+	require.NoError(t, database.Exec(`
 		INSERT INTO release (id, component, version, commit_id)
 		VALUES ('duplicate', 'agent', 'v1.0.3', '1111111111111111111111111111111111111111')
 	`).Error)
+	require.Error(t, database.Exec(`
+		INSERT INTO release (id, component, version, commit_id)
+		VALUES ('same-identity', 'agent', 'v1.0.3', '1111111111111111111111111111111111111111')
+	`).Error)
+}
+
+func TestEnsureUpdaterReleaseSchemaReplacesSingleComponentConstraint(t *testing.T) {
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, database.AutoMigrate(&model.Release{}))
+	require.NoError(t, database.Exec(`DROP INDEX uk_release_component_version_commit`).Error)
+	require.NoError(t, database.Exec(`CREATE UNIQUE INDEX uk_release_component ON release(component)`).Error)
+	require.NoError(t, database.Create(&model.Release{
+		ID: "first", Component: model.ComponentAgent, Version: "v1.0.0",
+		CommitID: "0123456789abcdef0123456789abcdef01234567",
+	}).Error)
+
+	require.NoError(t, ensureUpdaterReleaseSchema(database))
+	require.NoError(t, database.AutoMigrate(&model.Release{}))
+	require.False(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component"))
+	require.True(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version_commit"))
+	require.NoError(t, database.Create(&model.Release{
+		ID: "second", Component: model.ComponentAgent, Version: "v1.0.0",
+		CommitID: "abcdef0123456789abcdef0123456789abcdef01",
+	}).Error)
+	require.Error(t, database.Create(&model.Release{
+		ID: "duplicate", Component: model.ComponentAgent, Version: "v1.0.0",
+		CommitID: "abcdef0123456789abcdef0123456789abcdef01",
+	}).Error)
 }
 
 func TestEnsureUpdaterReleaseSchemaRebuildsArtifactRoleConstraint(t *testing.T) {

@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -17,11 +18,15 @@ func TestEndpointUpdateDirectivePreservesBuildIdentity(t *testing.T) {
 		DownloadUrl: "https://cache.example/endpoint", Filename: "signal_endpoint", Size: 128,
 		Sha256:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		CommitId: "1111111111111111111111111111111111111111", Force: true,
+		Os: runtime.GOOS, Arch: runtime.GOARCH, Action: "install",
 	})
 
 	require.Equal(t, "artifact-1", directive.ArtifactID)
 	require.Equal(t, "1111111111111111111111111111111111111111", directive.CommitID)
 	require.Equal(t, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", directive.SHA256)
+	require.Equal(t, runtime.GOOS, directive.OS)
+	require.Equal(t, runtime.GOARCH, directive.Arch)
+	require.Equal(t, "install", directive.Action)
 	require.True(t, directive.Force)
 }
 

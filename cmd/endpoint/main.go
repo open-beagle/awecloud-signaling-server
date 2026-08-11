@@ -211,6 +211,8 @@ func updateDirectiveFromProto(directive *pb.UpdateDirective) updater.Directive {
 		Version:       directive.Version,
 		DownloadURL:   directive.DownloadUrl,
 		Filename:      directive.Filename,
+		OS:            directive.Os,
+		Arch:          directive.Arch,
 		Size:          directive.Size,
 		SHA256:        directive.Sha256,
 		ArtifactID:    directive.ArtifactId,
@@ -218,6 +220,7 @@ func updateDirectiveFromProto(directive *pb.UpdateDirective) updater.Directive {
 		NotBeforeUnix: directive.NotBeforeUnix,
 		DeadlineUnix:  directive.DeadlineUnix,
 		CommitID:      directive.CommitId,
+		Action:        directive.Action,
 	}
 }
 

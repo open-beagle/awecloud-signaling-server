@@ -327,7 +327,7 @@ func (s *UpdaterCatalogService) syncManifest(ctx context.Context, manifest Updat
 	state := ""
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var release model.Release
-		err := tx.Where("component = ?", manifest.Release.Component).First(&release).Error
+		err := tx.Where("component = ? AND version = ? AND commit_id = ?", manifest.Release.Component, manifest.Release.Version, manifest.Release.CommitID).First(&release).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			release = model.Release{
 				ID: uuid.NewString(), Component: manifest.Release.Component, Version: manifest.Release.Version,
@@ -354,29 +354,45 @@ func (s *UpdaterCatalogService) syncManifest(ctx context.Context, manifest Updat
 		if err != nil {
 			return err
 		}
-		if err := tx.Model(&release).Updates(map[string]any{
-			"version": manifest.Release.Version, "commit_id": manifest.Release.CommitID,
-			"channel": manifest.Release.Channel, "status": model.ReleaseStatusPublished,
-			"release_notes": manifest.Release.ReleaseNotes, "min_supported_version": manifest.Release.MinSupportedVersion,
-			"published_at": manifest.PublishedAt,
-		}).Error; err != nil {
+		if release.Status == model.ReleaseStatusRevoked {
+			state = "revoked"
+			return nil
+		}
+		if release.Status != model.ReleaseStatusPublished || release.Channel != manifest.Release.Channel ||
+			release.ReleaseNotes != manifest.Release.ReleaseNotes || release.MinSupportedVersion != manifest.Release.MinSupportedVersion ||
+			release.PublishedAt == nil || !release.PublishedAt.Equal(manifest.PublishedAt) {
+			return errors.New("published release identity is immutable")
+		}
+		var artifacts []model.Artifact
+		if err := tx.Where("release_id = ?", release.ID).Find(&artifacts).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("release_id = ?", release.ID).Delete(&model.Artifact{}).Error; err != nil {
-			return err
-		}
-		for _, input := range manifest.Artifacts {
-			artifact := model.Artifact{
-				ID: uuid.NewString(), ReleaseID: release.ID, OS: input.OS, Arch: input.Arch, Role: input.Role,
-				PackageType: input.PackageType, Filename: input.Filename, DownloadURL: input.DownloadURL,
-				Size: input.Size, SHA256: input.SHA256, Status: model.ArtifactStatusAvailable,
-			}
-			if err := tx.Create(&artifact).Error; err != nil {
-				return err
-			}
+		if !catalogArtifactsMatch(artifacts, manifest.Artifacts) {
+			return errors.New("published release artifacts are immutable")
 		}
 		state = "existing"
 		return nil
 	})
 	return state, err
+}
+
+func catalogArtifactsMatch(existing []model.Artifact, expected []UpdaterCatalogArtifact) bool {
+	if len(existing) != len(expected) {
+		return false
+	}
+	byPlatform := make(map[string]model.Artifact, len(existing))
+	for _, artifact := range existing {
+		key := artifact.OS + "\x00" + artifact.Arch + "\x00" + artifact.Role
+		byPlatform[key] = artifact
+	}
+	for _, input := range expected {
+		key := input.OS + "\x00" + input.Arch + "\x00" + input.Role
+		artifact, ok := byPlatform[key]
+		if !ok || artifact.PackageType != input.PackageType || artifact.Filename != input.Filename ||
+			artifact.DownloadURL != input.DownloadURL || artifact.Size != input.Size || artifact.SHA256 != input.SHA256 ||
+			artifact.Status != model.ArtifactStatusAvailable {
+			return false
+		}
+	}
+	return true
 }

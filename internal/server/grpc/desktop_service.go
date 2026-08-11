@@ -1707,7 +1707,7 @@ func (s *DesktopServiceServer) GetResources(ctx context.Context, req *pb.GetReso
 	}
 	resp.Ssh = appendUniqueSSHResources(resp.Ssh, s.queryUnifiedHostSSHResourcesGRPC(ctx, clientID, groupIDs, req.TenantId)...)
 	if req.ResourceProtocol == sessionAuthorizationProtocolV2 && s.config != nil &&
-		s.config.FeatureFlags.Enabled(config.FeatureResourceModelWrite) && s.config.FeatureFlags.Enabled(config.FeatureSessionAuthorizationV2) {
+		s.config.FeatureFlags.Enabled(config.FeatureSessionAuthorizationV2) {
 		containerSSH, containerServices := s.queryTenantContainerResourcesGRPC(ctx, &node, groupIDs, req.TenantId)
 		resp.ContainerSsh = append(resp.ContainerSsh, containerSSH...)
 		resp.ContainerService = containerServices

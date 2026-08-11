@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -131,6 +132,7 @@ func TestHandleResumesRestartingTaskWithPersistedArtifact(t *testing.T) {
 	directive := Directive{
 		TaskID: "task-1", Component: "agent", Version: "v1.0.1", ArtifactID: "artifact-1",
 		CommitID: strings.Repeat("c", 40), SHA256: strings.Repeat("d", 64),
+		OS: runtime.GOOS, Arch: runtime.GOARCH, Action: "install",
 	}
 	require.NoError(t, writeTaskState(stateDir, taskState{
 		Status:    Status{TaskID: directive.TaskID, Phase: "restarting", Progress: 100},
@@ -187,6 +189,7 @@ func TestHandleResumesInterruptedDownload(t *testing.T) {
 		TaskID: "task-1", Component: "agent", Version: "v1.0.1", ArtifactID: "artifact-1",
 		DownloadURL: server.URL, Filename: "signal_agent", Size: int64(len(payload)),
 		CommitID: strings.Repeat("c", 40), SHA256: digestText,
+		OS: runtime.GOOS, Arch: runtime.GOARCH, Action: "install",
 	}
 	manager.states[directive.TaskID] = taskState{
 		Status: Status{TaskID: directive.TaskID, Phase: "downloading"}, Component: "agent",
@@ -217,6 +220,27 @@ func TestHelperUnitRunningIncludesSystemdTransitionStates(t *testing.T) {
 	for _, state := range []string{"inactive", "failed", "unknown", ""} {
 		require.False(t, helperUnitRunning(state), state)
 	}
+}
+
+func TestValidateDirectiveRejectsWrongPlatformAndAction(t *testing.T) {
+	manager, err := NewManager(Config{
+		Component: "agent", CurrentVersion: "v1.0.0", CurrentCommitID: strings.Repeat("a", 40),
+		CurrentSHA256: strings.Repeat("b", 64), StateDir: t.TempDir(),
+		CurrentLink: "/tmp/signal_agent", ServiceName: "signal-agent",
+	})
+	require.NoError(t, err)
+	directive := Directive{
+		TaskID: "task-1", Component: "agent", Version: "v1.0.1", ArtifactID: "artifact-1",
+		CommitID: strings.Repeat("c", 40), SHA256: strings.Repeat("d", 64),
+		OS: runtime.GOOS, Arch: runtime.GOARCH, Action: "install",
+	}
+	require.NoError(t, manager.validateDirective(directive))
+
+	directive.Arch = "wrong-arch"
+	require.ErrorContains(t, manager.validateDirective(directive), "platform mismatch")
+	directive.Arch = runtime.GOARCH
+	directive.Action = "delete"
+	require.ErrorContains(t, manager.validateDirective(directive), "unsupported update action")
 }
 
 func TestEndpointArtifactUsesDirectiveFilename(t *testing.T) {

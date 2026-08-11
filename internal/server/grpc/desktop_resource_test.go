@@ -339,6 +339,16 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 	require.Len(t, negotiatedResponse.ContainerSsh, 1)
 	require.Len(t, negotiatedResponse.ContainerService, 1)
 
+	readOnlyServer := &DesktopServiceServer{config: &config.ServerConfig{FeatureFlags: config.FeatureFlagsSection{
+		SessionAuthorizationV2: true,
+	}}}
+	readOnlyResponse, err := readOnlyServer.GetResources(context.Background(), &pb.GetResourcesRequest{
+		DesktopId: desktop.ID, ResourceProtocol: sessionAuthorizationProtocolV2,
+	})
+	require.NoError(t, err)
+	require.Len(t, readOnlyResponse.ContainerSsh, 1, "resource_model_write must not hide existing Pod resources")
+	require.Len(t, readOnlyResponse.ContainerService, 1, "resource_model_write must not hide existing Service resources")
+
 	scopedResponse, err := server.GetResources(context.Background(), &pb.GetResourcesRequest{
 		DesktopId: desktop.ID, ResourceProtocol: sessionAuthorizationProtocolV2, TenantId: tenant.ID,
 	})

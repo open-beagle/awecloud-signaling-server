@@ -62,7 +62,7 @@ func TestUpdaterCatalogSyncCreatesPublishedReleaseAndIsIdempotent(t *testing.T) 
 	require.Equal(t, UpdaterCatalogSyncResult{Scanned: 1, Existing: 1}, result)
 }
 
-func TestUpdaterCatalogSyncOverwritesSameVersionWithDifferentCommit(t *testing.T) {
+func TestUpdaterCatalogSyncPreservesSameVersionWithDifferentCommit(t *testing.T) {
 	database := updaterCatalogTestDB(t)
 	firstCommit := "0123456789abcdef0123456789abcdef01234567"
 	secondCommit := "abcdef0123456789abcdef0123456789abcdef01"
@@ -75,15 +75,15 @@ func TestUpdaterCatalogSyncOverwritesSameVersionWithDifferentCommit(t *testing.T
 
 	result, err := syncer.Sync(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, UpdaterCatalogSyncResult{Scanned: 2, Created: 1, Existing: 1}, result)
+	require.Equal(t, UpdaterCatalogSyncResult{Scanned: 2, Created: 2}, result)
 
 	var releases []model.Release
 	require.NoError(t, database.Where("component = ? AND version = ?", model.ComponentAgent, "v1.0.0").Order("commit_id").Find(&releases).Error)
-	require.Len(t, releases, 1)
-	require.Contains(t, []string{firstCommit, secondCommit}, releases[0].CommitID)
+	require.Len(t, releases, 2)
+	require.Equal(t, []string{firstCommit, secondCommit}, []string{releases[0].CommitID, releases[1].CommitID})
 }
 
-func TestUpdaterCatalogSyncOverwritesArtifacts(t *testing.T) {
+func TestUpdaterCatalogSyncRejectsArtifactMutation(t *testing.T) {
 	database := updaterCatalogTestDB(t)
 	store := &updaterCatalogMemoryStore{objects: map[string][]byte{
 		"updater/releases/agent/release.json": updaterCatalogTestManifest(t, updaterCatalogArtifactSHA),
@@ -95,12 +95,52 @@ func TestUpdaterCatalogSyncOverwritesArtifacts(t *testing.T) {
 
 	store.objects["updater/releases/agent/release.json"] = updaterCatalogTestManifest(t, "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
 	result, err := syncer.Sync(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, UpdaterCatalogSyncResult{Scanned: 1, Existing: 1}, result)
+	require.ErrorContains(t, err, "published release artifacts are immutable")
+	require.Equal(t, UpdaterCatalogSyncResult{Scanned: 1, Failed: 1}, result)
 
 	var artifact model.Artifact
 	require.NoError(t, database.First(&artifact).Error)
-	require.Equal(t, "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", artifact.SHA256)
+	require.Equal(t, updaterCatalogArtifactSHA, artifact.SHA256)
+}
+
+func TestUpdaterCatalogSyncPreservesArtifactPinnedByActiveAgentTask(t *testing.T) {
+	database := updaterCatalogTestDB(t)
+	require.NoError(t, database.AutoMigrate(&model.Node{}, &model.UpdateTask{}, &model.UpdateEvent{}))
+	firstCommit := "0123456789abcdef0123456789abcdef01234567"
+	secondCommit := "abcdef0123456789abcdef0123456789abcdef01"
+	store := &updaterCatalogMemoryStore{objects: map[string][]byte{
+		"updater/releases/agent/" + firstCommit + ".json": updaterCatalogTestManifestForCommit(t, updaterCatalogArtifactSHA, firstCommit),
+	}}
+	syncer, err := NewUpdaterCatalogServiceWithStore(database, store, "https://minio.example/vscode/awecloud-signaling")
+	require.NoError(t, err)
+	_, err = syncer.Sync(context.Background())
+	require.NoError(t, err)
+
+	var firstRelease model.Release
+	require.NoError(t, database.Where("component = ? AND commit_id = ?", model.ComponentAgent, firstCommit).First(&firstRelease).Error)
+	node := model.Node{
+		ID: 1, UserID: 1, Name: "agent-1", Type: model.NodeTypeAgent,
+		UpdaterProtocol: "v2", SystemInfo: `{"os":"linux","arch":"amd64"}`,
+	}
+	require.NoError(t, database.Create(&node).Error)
+	updateService := NewUpdateService(database)
+	task, err := updateService.CreateTask(context.Background(), CreateUpdateTaskInput{
+		Component: model.ComponentAgent, TargetType: model.UpdateTargetNode,
+		TargetID: "1", ReleaseID: firstRelease.ID,
+	})
+	require.NoError(t, err)
+
+	store.objects["updater/releases/agent/"+secondCommit+".json"] = updaterCatalogTestManifestForCommit(t, strings.Repeat("a", 64), secondCommit)
+	result, err := syncer.Sync(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, UpdaterCatalogSyncResult{Scanned: 2, Created: 1, Existing: 1}, result)
+
+	directives, err := updateService.DirectivesForNode(context.Background(), node.ID, model.ComponentAgent)
+	require.NoError(t, err)
+	require.Len(t, directives, 1)
+	require.Equal(t, task.ID, directives[0].TaskID)
+	require.Equal(t, firstCommit, directives[0].CommitID)
+	require.Equal(t, updaterCatalogArtifactSHA, directives[0].SHA256)
 }
 
 func TestHTTPUpdaterCatalogStoreReadsPublicHTTPSCatalog(t *testing.T) {

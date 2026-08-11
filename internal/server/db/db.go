@@ -264,44 +264,11 @@ func autoMigrate() error {
 
 func ensureUpdaterReleaseSchema(database *gorm.DB) error {
 	if err := database.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(`DROP INDEX IF EXISTS uk_release_component_version_commit`).Error; err != nil {
-			return fmt.Errorf("remove obsolete release component/version/commit constraint: %w", err)
+		if err := tx.Exec(`DROP INDEX IF EXISTS uk_release_component`).Error; err != nil {
+			return fmt.Errorf("remove obsolete single release per component constraint: %w", err)
 		}
 		if err := tx.Exec(`DROP INDEX IF EXISTS uk_release_component_version`).Error; err != nil {
 			return fmt.Errorf("remove obsolete release component/version constraint: %w", err)
-		}
-		if !tx.Migrator().HasTable(&model.Release{}) {
-			return nil
-		}
-		staleReleaseIDs := `
-			SELECT id FROM (
-				SELECT id, ROW_NUMBER() OVER (
-					PARTITION BY component
-					ORDER BY (published_at IS NOT NULL) DESC, published_at DESC, created_at DESC, id DESC
-				) AS position
-				FROM release
-			) ranked_releases
-			WHERE position > 1`
-		if tx.Migrator().HasTable(&model.UpdateEvent{}) && tx.Migrator().HasTable(&model.UpdateTask{}) {
-			statement := `DELETE FROM update_event WHERE task_id IN (SELECT id FROM update_task WHERE release_id IN (` + staleReleaseIDs + `))`
-			if err := tx.Exec(statement).Error; err != nil {
-				return fmt.Errorf("remove update events for duplicate releases: %w", err)
-			}
-		}
-		if tx.Migrator().HasTable(&model.UpdateTask{}) {
-			statement := `DELETE FROM update_task WHERE release_id IN (` + staleReleaseIDs + `)`
-			if err := tx.Exec(statement).Error; err != nil {
-				return fmt.Errorf("remove update tasks for duplicate releases: %w", err)
-			}
-		}
-		if tx.Migrator().HasTable(&model.Artifact{}) {
-			statement := `DELETE FROM artifact WHERE release_id IN (` + staleReleaseIDs + `)`
-			if err := tx.Exec(statement).Error; err != nil {
-				return fmt.Errorf("remove artifacts for duplicate releases: %w", err)
-			}
-		}
-		if err := tx.Exec(`DELETE FROM release WHERE id IN (` + staleReleaseIDs + `)`).Error; err != nil {
-			return fmt.Errorf("remove duplicate releases: %w", err)
 		}
 		return nil
 	}); err != nil {
