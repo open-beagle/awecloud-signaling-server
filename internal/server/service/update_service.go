@@ -20,7 +20,6 @@ var (
 	ErrArtifactNotFound        = errors.New("matching artifact not found")
 	ErrActiveTaskExists        = errors.New("an active update task already exists for this target")
 	ErrInvalidUpdatePhase      = errors.New("invalid update phase")
-	ErrUpdaterUnsupported      = errors.New("target does not support updater protocol v1 or v2")
 	ErrComponentNotSupported   = errors.New("component updater is not implemented")
 	ErrUpdateReporterMismatch  = errors.New("update status reporter does not match task target")
 	ErrInvalidUpdateTransition = errors.New("invalid update status transition")
@@ -38,6 +37,8 @@ type UpdateDirective struct {
 	Arch          string
 	Size          int64
 	SHA256        string
+	Signature     string
+	KeyID         string
 	Force         bool
 	NotBeforeUnix int64
 	DeadlineUnix  int64
@@ -116,15 +117,9 @@ func (s *UpdateService) CreateTask(ctx context.Context, input CreateUpdateTaskIn
 			return ErrInvalidBuildIdentity
 		}
 
-		name, osName, arch, updaterProtocol, err := s.targetPlatform(tx, input.TargetType, input.TargetID)
+		name, osName, arch, err := s.targetPlatform(tx, input.TargetType, input.TargetID)
 		if err != nil {
 			return err
-		}
-		if requiresBuildIdentity && updaterProtocol != "v2" {
-			return ErrUpdaterUnsupported
-		}
-		if !requiresBuildIdentity && updaterProtocol != "v1" && updaterProtocol != "v2" {
-			return ErrUpdaterUnsupported
 		}
 		artifact, err := s.findArtifactRole(tx, release.ID, osName, arch, input.Component)
 		if err != nil {
@@ -222,16 +217,8 @@ func (s *UpdateService) directivesForTarget(ctx context.Context, targetType mode
 			continue
 		}
 
-		_, osName, arch, updaterProtocol, err := s.targetPlatform(s.db.WithContext(ctx), task.TargetType, task.TargetID)
+		_, osName, arch, err := s.targetPlatform(s.db.WithContext(ctx), task.TargetType, task.TargetID)
 		if err != nil {
-			continue
-		}
-		if component == model.ComponentAgent && updaterProtocol != "v2" {
-			_ = s.setTaskStatus(ctx, task.ID, model.UpdateTaskFailed, "updater_unsupported", "Agent 目标未报告 updater 协议 v2")
-			continue
-		}
-		if component != model.ComponentAgent && updaterProtocol != "v1" && updaterProtocol != "v2" {
-			_ = s.setTaskStatus(ctx, task.ID, model.UpdateTaskFailed, "updater_unsupported", "目标未报告支持的 updater 协议")
 			continue
 		}
 		var artifact model.Artifact
@@ -258,6 +245,8 @@ func (s *UpdateService) directivesForTarget(ctx context.Context, targetType mode
 			Arch:        artifact.Arch,
 			Size:        artifact.Size,
 			SHA256:      artifact.SHA256,
+			Signature:   artifact.Signature,
+			KeyID:       artifact.KeyID,
 			Force:       task.Force,
 			Action:      "install",
 			TargetName:  task.TargetName,
@@ -478,39 +467,39 @@ func (s *UpdateService) setTaskStatus(ctx context.Context, taskID string, next m
 	})
 }
 
-func (s *UpdateService) targetPlatform(tx *gorm.DB, targetType model.UpdateTargetType, targetID string) (name, osName, arch, updaterProtocol string, err error) {
+func (s *UpdateService) targetPlatform(tx *gorm.DB, targetType model.UpdateTargetType, targetID string) (name, osName, arch string, err error) {
 	switch targetType {
 	case model.UpdateTargetNode:
 		id, parseErr := strconv.ParseUint(targetID, 10, 64)
 		if parseErr != nil {
-			return "", "", "", "", fmt.Errorf("invalid node target id: %w", parseErr)
+			return "", "", "", fmt.Errorf("invalid node target id: %w", parseErr)
 		}
 		var node model.Node
 		if err := tx.First(&node, id).Error; err != nil {
-			return "", "", "", "", err
+			return "", "", "", err
 		}
 		if node.Type != model.NodeTypeAgent && node.Type != model.NodeTypeDesktop {
-			return "", "", "", "", fmt.Errorf("node %d is neither agent nor desktop target", id)
+			return "", "", "", fmt.Errorf("node %d is neither agent nor desktop target", id)
 		}
 		var info model.NodeSystemInfo
 		if node.SystemInfo != "" {
 			_ = json.Unmarshal([]byte(node.SystemInfo), &info)
 		}
 		if info.OS == "" || info.Arch == "" {
-			return "", "", "", "", fmt.Errorf("node %d has no reported os/arch", id)
+			return "", "", "", fmt.Errorf("node %d has no reported os/arch", id)
 		}
-		return node.Name, strings.ToLower(info.OS), strings.ToLower(info.Arch), strings.ToLower(node.UpdaterProtocol), nil
+		return node.Name, strings.ToLower(info.OS), strings.ToLower(info.Arch), nil
 	case model.UpdateTargetEndpoint:
 		var endpoint model.Endpoint
 		if err := tx.First(&endpoint, "id = ?", targetID).Error; err != nil {
-			return "", "", "", "", err
+			return "", "", "", err
 		}
 		if endpoint.OS == "" || endpoint.Arch == "" {
-			return "", "", "", "", fmt.Errorf("endpoint %s has no reported os/arch", targetID)
+			return "", "", "", fmt.Errorf("endpoint %s has no reported os/arch", targetID)
 		}
-		return endpoint.Name, strings.ToLower(endpoint.OS), strings.ToLower(endpoint.Arch), strings.ToLower(endpoint.UpdaterProtocol), nil
+		return endpoint.Name, strings.ToLower(endpoint.OS), strings.ToLower(endpoint.Arch), nil
 	default:
-		return "", "", "", "", fmt.Errorf("unsupported target type %q", targetType)
+		return "", "", "", fmt.Errorf("unsupported target type %q", targetType)
 	}
 }
 

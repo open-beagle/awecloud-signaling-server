@@ -48,6 +48,8 @@ func TestCreateTaskAndDeliverDirective(t *testing.T) {
 		DownloadURL: "https://download.example.com/signal_agent-v1.2.3-linux-amd64",
 		Size:        128,
 		SHA256:      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		Signature:   "signed-digest",
+		KeyID:       "release-key",
 		Status:      model.ArtifactStatusAvailable,
 	}
 	require.NoError(t, database.Create(&artifact).Error)
@@ -60,6 +62,8 @@ func TestCreateTaskAndDeliverDirective(t *testing.T) {
 	require.Equal(t, task.ID, directives[0].TaskID)
 	require.Equal(t, release.CommitID, directives[0].CommitID)
 	require.Equal(t, artifact.SHA256, directives[0].SHA256)
+	require.Equal(t, artifact.Signature, directives[0].Signature)
+	require.Equal(t, artifact.KeyID, directives[0].KeyID)
 
 	var persisted model.UpdateTask
 	require.NoError(t, database.First(&persisted, "id = ?", task.ID).Error)
@@ -71,17 +75,30 @@ func TestCreateTaskAndDeliverDirective(t *testing.T) {
 	require.ErrorIs(t, err, ErrActiveTaskExists)
 }
 
-func TestCreateTaskRequiresUpdaterProtocolV2(t *testing.T) {
+func TestCreateTaskSupportsAgentWithoutVersionCapabilityMarker(t *testing.T) {
 	updates, database := newUpdateServiceForTest(t)
+	ctx := context.Background()
 	platform, err := json.Marshal(model.NodeSystemInfo{OS: "linux", Arch: "amd64"})
 	require.NoError(t, err)
 	node := model.Node{UserID: 1, Name: "legacy", Type: model.NodeTypeAgent, SystemInfo: string(platform)}
 	require.NoError(t, database.Create(&node).Error)
 	release := model.Release{ID: uuid.NewString(), Component: model.ComponentAgent, Version: "v1.2.3", CommitID: "1111111111111111111111111111111111111111", Status: model.ReleaseStatusPublished}
 	require.NoError(t, database.Create(&release).Error)
+	artifact := model.Artifact{
+		ID: uuid.NewString(), ReleaseID: release.ID, OS: "linux", Arch: "amd64", PackageType: "binary",
+		Filename: "signal_agent", DownloadURL: "https://download.example.com/signal_agent", Size: 128,
+		SHA256:    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		Signature: "signed-digest", KeyID: "release-key", Status: model.ArtifactStatusAvailable,
+	}
+	require.NoError(t, database.Create(&artifact).Error)
 
-	_, err = updates.CreateTask(context.Background(), CreateUpdateTaskInput{Component: model.ComponentAgent, TargetType: model.UpdateTargetNode, TargetID: "1", ReleaseID: release.ID})
-	require.ErrorIs(t, err, ErrUpdaterUnsupported)
+	task, err := updates.CreateTask(ctx, CreateUpdateTaskInput{Component: model.ComponentAgent, TargetType: model.UpdateTargetNode, TargetID: "1", ReleaseID: release.ID})
+	require.NoError(t, err)
+	directives, err := updates.DirectivesForNode(ctx, node.ID, model.ComponentAgent)
+	require.NoError(t, err)
+	require.Len(t, directives, 1)
+	require.Equal(t, task.ID, directives[0].TaskID)
+	require.Equal(t, artifact.Signature, directives[0].Signature)
 }
 
 func TestCreateTaskSupportsDesktop(t *testing.T) {
@@ -155,8 +172,9 @@ func TestEndpointTaskSupportsSameVersionDifferentCommit(t *testing.T) {
 	require.Equal(t, model.UpdateTaskSucceeded, task.Status)
 }
 
-func TestEndpointTaskRequiresUpdaterProtocolV2(t *testing.T) {
+func TestEndpointTaskSupportsPreviousAgentVersion(t *testing.T) {
 	updates, database := newUpdateServiceForTest(t)
+	ctx := context.Background()
 	endpoint := model.Endpoint{ID: "endpoint-v1", UserID: 1, Name: "legacy-endpoint", OS: "linux", Arch: "amd64", UpdaterProtocol: "v1", SSHUsers: "[]"}
 	require.NoError(t, database.Create(&endpoint).Error)
 	release := model.Release{
@@ -164,11 +182,23 @@ func TestEndpointTaskRequiresUpdaterProtocolV2(t *testing.T) {
 		CommitID: "2222222222222222222222222222222222222222", Status: model.ReleaseStatusPublished,
 	}
 	require.NoError(t, database.Create(&release).Error)
+	artifact := model.Artifact{
+		ID: uuid.NewString(), ReleaseID: release.ID, OS: "linux", Arch: "amd64", PackageType: "binary",
+		Filename: "signal_endpoint", DownloadURL: "https://download.example.com/signal_endpoint", Size: 128,
+		SHA256:    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		Signature: "signed-digest", KeyID: "release-key", Status: model.ArtifactStatusAvailable,
+	}
+	require.NoError(t, database.Create(&artifact).Error)
 
-	_, err := updates.CreateTask(context.Background(), CreateUpdateTaskInput{
+	task, err := updates.CreateTask(ctx, CreateUpdateTaskInput{
 		Component: model.ComponentEndpoint, TargetType: model.UpdateTargetEndpoint, TargetID: endpoint.ID, ReleaseID: release.ID,
 	})
-	require.ErrorIs(t, err, ErrUpdaterUnsupported)
+	require.NoError(t, err)
+	directives, err := updates.DirectivesForEndpoint(ctx, endpoint.ID)
+	require.NoError(t, err)
+	require.Len(t, directives, 1)
+	require.Equal(t, task.ID, directives[0].TaskID)
+	require.Equal(t, artifact.KeyID, directives[0].KeyID)
 }
 
 func TestUpdateStatusSequenceIsMonotonic(t *testing.T) {

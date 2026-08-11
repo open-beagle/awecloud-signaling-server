@@ -1143,7 +1143,7 @@ func writeProviderSupplyError(c *gin.Context, err error, write bool) {
 	case errors.Is(err, service.ErrProviderSupplyConflict), errors.Is(err, service.ErrTechnicalResourceUnbound), errors.Is(err, service.ErrAgentDomainLabelExists), errors.Is(err, service.ErrHostDomainLabelExists):
 		codedError(c, http.StatusConflict, ErrorCodeProviderSupplyConflict, "Provider 资源存在冲突或缺少前置条件")
 	case errors.Is(err, service.ErrActiveTaskExists), errors.Is(err, service.ErrReleaseNotPublished),
-		errors.Is(err, service.ErrArtifactNotFound), errors.Is(err, service.ErrUpdaterUnsupported):
+		errors.Is(err, service.ErrArtifactNotFound):
 		codedError(c, http.StatusConflict, ErrorCodeProviderSupplyConflict, "当前资源不满足更新前置条件")
 	case errors.Is(err, service.ErrTechnicalResourceDeleteBlocked):
 		codedError(c, http.StatusConflict, ErrorCodeProviderSupplyConflict, "资源仍有业务依赖，请重新执行删除检查")

@@ -45,6 +45,19 @@ export interface TenantResourceListResult {
   next_cursor?: string
 }
 
+export interface TenantGrantCreateInput {
+  resource_id: string
+  subject: {
+    type: 'user' | 'group'
+    user_id?: number
+    group_id?: number
+  }
+  actions: Array<'shell' | 'connect'>
+  valid_from?: string
+  expires_at?: string
+  max_session_seconds?: number
+}
+
 export type TenantGrantStatus = 'enabled' | 'suspended' | 'revoked' | 'expired'
 export interface TenantGrantV2 {
   id: string
@@ -97,11 +110,28 @@ const tenantHeaders = (tenantId: string) => ({
 export const getTenantResourcesV2 = (tenantId: string, params: { type?: string; visibility?: string; availability?: string; namespace?: string; query?: string; cursor?: string; limit?: number }) =>
   request.get<any, ApiResponse<TenantResourceListResult>>(`/api/v1/management/tenants/${tenantId}/resources`, { params, headers: tenantHeaders(tenantId) })
 
+export const getTenantResourceCandidatesV2 = (tenantId: string, params: { type?: string; availability?: string; namespace?: string; query?: string; cursor?: string; limit?: number }) =>
+  request.get<any, ApiResponse<TenantResourceListResult>>(`/api/v1/management/tenants/${tenantId}/resource-candidates`, { params, headers: tenantHeaders(tenantId) })
+
+export const publishTenantResourceCandidateV2 = (tenantId: string, resource: TenantResourceV2, reason: string) =>
+  request.post<any, ApiResponse<{ result: TenantResourceV2; row_version: number }>>(
+    `/api/v1/management/tenants/${tenantId}/resource-candidates/${resource.resource_id}/publish`,
+    { observation_revision: resource.observation_revision, reason },
+    { headers: { ...tenantHeaders(tenantId), 'If-Match': String(resource.row_version), 'Idempotency-Key': crypto.randomUUID() } },
+  )
+
 export const getTenantResourceV2 = (tenantId: string, resourceId: string) =>
   request.get<any, ApiResponse<TenantResourceV2>>(`/api/v1/management/tenants/${tenantId}/resources/${resourceId}`, { headers: tenantHeaders(tenantId) })
 
 export const getTenantGrantsV2 = (tenantId: string, params: { resource_id?: string; subject_type?: string; status?: string; page: number; size: number }) =>
   request.get<any, PagedResponse<TenantGrantV2[]>>(`/api/v1/management/tenants/${tenantId}/grants`, { params, headers: tenantHeaders(tenantId) })
+
+export const createTenantGrantV2 = (tenantId: string, data: TenantGrantCreateInput) =>
+  request.post<any, ApiResponse<{ result: TenantGrantV2; row_version: number }>>(
+    `/api/v1/management/tenants/${tenantId}/grants`,
+    data,
+    { headers: { ...tenantHeaders(tenantId), 'Idempotency-Key': crypto.randomUUID() } },
+  )
 
 export const getTenantSessionsV2 = (tenantId: string, params: { resource_id?: string; user_id?: number; status?: string; page: number; size: number }) =>
   request.get<any, PagedResponse<ResourceSessionV2[]>>(`/api/v1/management/tenants/${tenantId}/sessions`, { params, headers: tenantHeaders(tenantId) })

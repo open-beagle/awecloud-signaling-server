@@ -5,7 +5,7 @@
         <el-button :icon="ArrowLeft" @click="returnToList">返回列表</el-button>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
         <el-button v-if="resource?.type === 'agent'" :icon="Operation" :disabled="!canWrite || !hasBinding" @click="openCapabilities">编辑能力</el-button>
-        <el-button v-if="resource" type="primary" :icon="Upload" :disabled="!canWrite || !hasBinding || !updaterSupported(resource)" @click="openUpdate(resource)">更新</el-button>
+        <el-button v-if="resource" type="primary" :icon="Upload" :disabled="!canWrite || !hasBinding" @click="openUpdate(resource)">更新</el-button>
         <el-dropdown v-if="resource && resource.lifecycle_state !== 'deleted'" trigger="click" @command="handleLifecycleCommand">
           <el-button :icon="MoreFilled" :disabled="!canWrite" aria-label="更多操作" />
           <template #dropdown>
@@ -77,14 +77,14 @@
                   <el-table-column label="状态" width="120"><template #default="{ row }"><el-tag size="small" :type="row.lifecycle_state === 'disabled' ? 'warning' : healthTag(row.health_state)">{{ row.lifecycle_state === 'disabled' ? '已停用' : healthLabel(row.health_state) }}</el-tag><span class="secondary">{{ relativeTime(row.last_received_at) }}</span></template></el-table-column>
                   <el-table-column label="开放能力" min-width="210"><template #default="{ row }"><div class="endpoint-capabilities"><el-tag v-for="capability in endpointCapabilityLabels(row)" :key="capability" size="small" effect="plain" type="info">{{ capability }}</el-tag><span v-if="endpointCapabilityLabels(row).length === 0" class="secondary inline">未开放</span></div></template></el-table-column>
                   <el-table-column label="接入信息" min-width="220"><template #default="{ row }"><span class="mono">{{ row.hostname || '-' }}</span><span class="secondary mono">{{ row.stable_key }}</span></template></el-table-column>
-                  <el-table-column label="版本" width="140"><template #default="{ row }"><strong>{{ row.version || '-' }}</strong><span class="secondary">{{ row.updater_protocol ? `Updater ${row.updater_protocol}` : '不支持远程更新' }}</span></template></el-table-column>
-                  <el-table-column label="操作" width="112" fixed="right"><template #default="{ row }"><el-button link :icon="Upload" :disabled="!canWrite || !updaterSupported(row)" title="更新 Endpoint" @click="openUpdate(row)" /><el-button link type="danger" :icon="Delete" :disabled="!canWrite" title="删除 Endpoint" @click="openDeleteCheck(row)" /></template></el-table-column>
+                  <el-table-column label="版本" width="140"><template #default="{ row }"><strong>{{ row.version || '-' }}</strong></template></el-table-column>
+                  <el-table-column label="操作" width="112" fixed="right"><template #default="{ row }"><el-button link :icon="Upload" :disabled="!canWrite" title="更新 Endpoint" @click="openUpdate(row)" /><el-button link type="danger" :icon="Delete" :disabled="!canWrite" title="删除 Endpoint" @click="openDeleteCheck(row)" /></template></el-table-column>
                 </el-table>
                 <el-empty v-else :description="endpoints.length ? '没有符合条件的 Endpoint' : '当前 Agent 没有 Endpoint'" />
               </div>
             </section>
 
-            <section class="detail-section"><div class="section-head"><div><h3>运行概况</h3><p>最近一次 Agent 上报的运行事实。</p></div></div><div class="metric-grid"><div><span>最后上报</span><strong>{{ formatTime(resource.last_received_at) }}</strong></div><div><span>租约到期</span><strong>{{ formatTime(resource.lease_expires_at) }}</strong></div><div><span>库存进度</span><strong>sequence {{ resource.last_sequence }}</strong></div><div><span>域名命名空间</span><strong class="mono">*.{{ resource.domain_namespace }}.beagle</strong></div></div></section>
+            <section class="detail-section"><div class="section-head"><div><h3>运行概况</h3><p>最近一次 Agent 上报的运行事实。</p></div></div><div class="metric-grid"><div><span>最后上报</span><strong>{{ formatTime(resource.last_received_at) }}</strong></div><div><span>租约到期</span><strong>{{ formatTime(resource.lease_expires_at) }}</strong></div><div><span>域名命名空间</span><strong class="mono">*.{{ resource.domain_namespace }}.beagle</strong></div></div></section>
           </div>
         </el-tab-pane>
 
@@ -199,7 +199,6 @@ const resourceDescription = computed(() => 'Agent 部署位置、开放能力、
 const endpointName = (item: TechnicalResource) => item.display_name || item.host_domain_label || item.domain_label || item.hostname || '等待主机注册'
 const endpointDomain = (item: TechnicalResource) => item.host_domain_label && item.domain_namespace ? `${item.host_domain_label}.${item.domain_namespace}.beagle` : '-'
 const endpointCapabilityLabels = (item: TechnicalResource) => [item.ssh_enabled ? 'SSH' : '', item.k8s_enabled ? 'Kubernetes API' : '', item.svc_enabled ? 'Kubernetes Service' : ''].filter(Boolean)
-const updaterSupported = (item: TechnicalResource) => item.type === 'agent' ? item.updater_protocol === 'v2' : ['v1', 'v2'].includes(item.updater_protocol || '')
 const filteredEndpoints = computed(() => endpoints.value.filter(item => {
   const state = item.lifecycle_state === 'disabled' ? '已停用' : item.health_state === 'online' ? '在线' : '离线'
   const matchesState = endpointFilter.value === '全部' || endpointFilter.value === state
@@ -218,8 +217,8 @@ const capabilityRows = computed(() => resource.value && capabilities.value ? [
 const diagnosticRows = computed(() => resource.value ? [
   { label: 'TechnicalResource ID', value: resource.value.id }, { label: 'Stable key', value: resource.value.stable_key },
   { label: 'Agent 上报主机名', value: resource.value.hostname || '-' }, { label: 'Endpoint 内网地址', value: capabilities.value?.endpoint_address || '-' },
-  { label: 'Credential Revision', value: String(resource.value.credential_revision) }, { label: 'Updater 协议', value: resource.value.updater_protocol || '-' },
-  { label: 'Inventory Sequence', value: String(resource.value.last_sequence) }, { label: 'Source Epoch', value: resource.value.source_epoch || '-' },
+  { label: 'Credential Revision', value: String(resource.value.credential_revision) },
+  { label: 'Source Epoch', value: resource.value.source_epoch || '-' },
 ] : [])
 const capabilityChanged = computed(() => !!capabilityForm.value && JSON.stringify(capabilityForm.value) !== capabilitySnapshot.value)
 const deleteReady = computed(() => !!deleteTarget.value && !!deleteReason.value.trim() && deleteConfirmName.value.trim() === endpointName(deleteTarget.value))

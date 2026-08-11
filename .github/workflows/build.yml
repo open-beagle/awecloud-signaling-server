@@ -209,6 +209,8 @@ jobs:
           BUILD_TARGETS: agent,endpoint
           RELEASE_ARTIFACTS: "true"
           ARTIFACT_BASE_URL: https://cache.ali.wodcloud.com/vscode/awecloud-signaling
+          SIGNAL_UPDATER_PRIVATE_KEY: ${{ secrets.SIGNAL_UPDATER_PRIVATE_KEY }}
+          SIGNAL_UPDATER_KEY_ID: ${{ secrets.SIGNAL_UPDATER_KEY_ID }}
         run: bash scripts/build.sh
 
       - name: Setup MinIO Client

@@ -15,12 +15,16 @@ mkdir -p "${PUBLISH_DIR}/updater/releases/agent" "${PUBLISH_DIR}/updater/release
 artifact_json() {
     local component="$1" arch="$2" filename="$3" source="$4" role="app"
     local target="${PUBLISH_DIR}/${component}/artifacts/linux/${arch}/${VERSION}/${filename}"
+    local sha signature
     mkdir -p "$(dirname "${target}")"
     cp "${source}" "${target}"
+    sha="$(sha256sum "${source}" | awk '{print $1}')"
+    signature="$(go run ./cmd/updater-sign "${sha}")"
     jq -n --arg arch "${arch}" --arg filename "${filename}" \
         --arg url "${BASE_URL}/${component}/artifacts/linux/${arch}/${VERSION}/${filename}" \
-        --arg sha "$(sha256sum "${source}" | awk '{print $1}')" --argjson size "$(stat -c %s "${source}")" \
-        '{os:"linux",arch:$arch,role:"app",package_type:"binary",filename:$filename,download_url:$url,size:$size,sha256:$sha}'
+        --arg sha "${sha}" --arg signature "${signature}" --arg key_id "${SIGNAL_UPDATER_KEY_ID}" \
+        --argjson size "$(stat -c %s "${source}")" \
+        '{os:"linux",arch:$arch,role:"app",package_type:"binary",filename:$filename,download_url:$url,size:$size,sha256:$sha,signature:$signature,key_id:$key_id}'
 }
 
 write_manifest() {

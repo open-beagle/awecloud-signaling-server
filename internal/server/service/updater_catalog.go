@@ -63,6 +63,8 @@ type UpdaterCatalogArtifact struct {
 	DownloadURL string `json:"download_url"`
 	Size        int64  `json:"size"`
 	SHA256      string `json:"sha256"`
+	Signature   string `json:"signature"`
+	KeyID       string `json:"key_id"`
 }
 
 type UpdaterCatalogSyncResult struct {
@@ -345,7 +347,8 @@ func (s *UpdaterCatalogService) syncManifest(ctx context.Context, manifest Updat
 				artifact := model.Artifact{
 					ID: uuid.NewString(), ReleaseID: release.ID, OS: input.OS, Arch: input.Arch, Role: input.Role,
 					PackageType: input.PackageType, Filename: input.Filename, DownloadURL: input.DownloadURL,
-					Size: input.Size, SHA256: input.SHA256, Status: model.ArtifactStatusAvailable,
+					Size: input.Size, SHA256: input.SHA256, Signature: input.Signature, KeyID: input.KeyID,
+					Status: model.ArtifactStatusAvailable,
 				}
 				if err := tx.Create(&artifact).Error; err != nil {
 					return err
@@ -429,6 +432,7 @@ func replaceCatalogRelease(tx *gorm.DB, release *model.Release, existing []model
 			if err := tx.Model(artifact).Updates(map[string]any{
 				"package_type": input.PackageType, "filename": input.Filename,
 				"download_url": input.DownloadURL, "size": input.Size, "sha256": input.SHA256,
+				"signature": input.Signature, "key_id": input.KeyID,
 				"status": model.ArtifactStatusAvailable,
 			}).Error; err != nil {
 				return err
@@ -439,7 +443,8 @@ func replaceCatalogRelease(tx *gorm.DB, release *model.Release, existing []model
 		artifact := model.Artifact{
 			ID: uuid.NewString(), ReleaseID: release.ID, OS: input.OS, Arch: input.Arch, Role: input.Role,
 			PackageType: input.PackageType, Filename: input.Filename, DownloadURL: input.DownloadURL,
-			Size: input.Size, SHA256: input.SHA256, Status: model.ArtifactStatusAvailable,
+			Size: input.Size, SHA256: input.SHA256, Signature: input.Signature, KeyID: input.KeyID,
+			Status: model.ArtifactStatusAvailable,
 		}
 		if err := tx.Create(&artifact).Error; err != nil {
 			return err
@@ -467,6 +472,7 @@ func catalogArtifactsMatch(existing []model.Artifact, expected []UpdaterCatalogA
 		artifact, ok := byPlatform[key]
 		if !ok || artifact.PackageType != input.PackageType || artifact.Filename != input.Filename ||
 			artifact.DownloadURL != input.DownloadURL || artifact.Size != input.Size || artifact.SHA256 != input.SHA256 ||
+			artifact.Signature != input.Signature || artifact.KeyID != input.KeyID ||
 			artifact.Status != model.ArtifactStatusAvailable {
 			return false
 		}

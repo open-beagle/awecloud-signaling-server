@@ -16,15 +16,18 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 )
 
-func TestBuildArtifactUsesSizeAndSHA256WithoutSignature(t *testing.T) {
+func TestBuildArtifactPreservesReleaseSignature(t *testing.T) {
 	artifact, err := buildArtifact(ArtifactInput{
 		OS: "linux", Arch: "amd64", Role: "app", PackageType: "binary",
 		Filename: "signal_app", DownloadURL: "https://artifacts.example/signal_app", Size: 128,
-		SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		SHA256:    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		Signature: "signed-digest", KeyID: "release-key",
 	})
 	require.NoError(t, err)
 	require.Equal(t, int64(128), artifact.Size)
 	require.Equal(t, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", artifact.SHA256)
+	require.Equal(t, "signed-digest", artifact.Signature)
+	require.Equal(t, "release-key", artifact.KeyID)
 }
 
 func TestPublishReleaseDoesNotRequireSigningKey(t *testing.T) {
