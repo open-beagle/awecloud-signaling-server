@@ -16,6 +16,7 @@ export interface SystemConfig {
 export interface UpdaterCatalogSyncResult {
   scanned: number
   created: number
+  updated: number
   existing: number
   revoked: number
   failed: number

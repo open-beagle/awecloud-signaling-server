@@ -19,8 +19,14 @@ func TestEnsureUpdaterReleaseSchemaPreservesReleaseHistory(t *testing.T) {
 			component text NOT NULL,
 			version text NOT NULL,
 			commit_id text NOT NULL DEFAULT '',
+			channel text NOT NULL DEFAULT 'stable',
+			status text NOT NULL DEFAULT 'draft',
+			release_notes text,
+			min_supported_version text,
 			published_at datetime,
-			created_at datetime
+			created_by integer,
+			created_at datetime,
+			updated_at datetime
 		);
 		CREATE UNIQUE INDEX uk_release_component_version_commit ON release(component, version, commit_id);
 		INSERT INTO release (id, component, version, commit_id, published_at, created_at)
@@ -36,6 +42,7 @@ func TestEnsureUpdaterReleaseSchemaPreservesReleaseHistory(t *testing.T) {
 	`).Error)
 
 	require.NoError(t, ensureUpdaterReleaseSchema(database))
+	require.NoError(t, database.Exec(`CREATE UNIQUE INDEX uk_release_component_version ON release(component, version)`).Error)
 
 	var releases []model.Release
 	require.NoError(t, database.Find(&releases).Error)
@@ -48,7 +55,8 @@ func TestEnsureUpdaterReleaseSchemaPreservesReleaseHistory(t *testing.T) {
 	require.Equal(t, int64(2), taskCount)
 	require.Equal(t, int64(2), eventCount)
 	require.False(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component"))
-	require.True(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version_commit"))
+	require.False(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version_commit"))
+	require.True(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version"))
 
 	require.NoError(t, database.Exec(`
 		INSERT INTO release (id, component, version, commit_id)
@@ -56,7 +64,7 @@ func TestEnsureUpdaterReleaseSchemaPreservesReleaseHistory(t *testing.T) {
 	`).Error)
 	require.Error(t, database.Exec(`
 		INSERT INTO release (id, component, version, commit_id)
-		VALUES ('same-identity', 'agent', 'v1.0.3', '1111111111111111111111111111111111111111')
+		VALUES ('same-version', 'agent', 'v1.0.3', '2222222222222222222222222222222222222222')
 	`).Error)
 }
 
@@ -64,7 +72,7 @@ func TestEnsureUpdaterReleaseSchemaReplacesSingleComponentConstraint(t *testing.
 	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, database.AutoMigrate(&model.Release{}))
-	require.NoError(t, database.Exec(`DROP INDEX uk_release_component_version_commit`).Error)
+	require.NoError(t, database.Exec(`DROP INDEX uk_release_component_version`).Error)
 	require.NoError(t, database.Exec(`CREATE UNIQUE INDEX uk_release_component ON release(component)`).Error)
 	require.NoError(t, database.Create(&model.Release{
 		ID: "first", Component: model.ComponentAgent, Version: "v1.0.0",
@@ -74,13 +82,13 @@ func TestEnsureUpdaterReleaseSchemaReplacesSingleComponentConstraint(t *testing.
 	require.NoError(t, ensureUpdaterReleaseSchema(database))
 	require.NoError(t, database.AutoMigrate(&model.Release{}))
 	require.False(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component"))
-	require.True(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version_commit"))
-	require.NoError(t, database.Create(&model.Release{
+	require.True(t, database.Migrator().HasIndex(&model.Release{}, "uk_release_component_version"))
+	require.Error(t, database.Create(&model.Release{
 		ID: "second", Component: model.ComponentAgent, Version: "v1.0.0",
 		CommitID: "abcdef0123456789abcdef0123456789abcdef01",
 	}).Error)
-	require.Error(t, database.Create(&model.Release{
-		ID: "duplicate", Component: model.ComponentAgent, Version: "v1.0.0",
+	require.NoError(t, database.Create(&model.Release{
+		ID: "third", Component: model.ComponentAgent, Version: "v1.0.1",
 		CommitID: "abcdef0123456789abcdef0123456789abcdef01",
 	}).Error)
 }

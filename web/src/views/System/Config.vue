@@ -135,6 +135,7 @@
           </el-button>
           <div v-if="catalogSyncResult" class="catalog-sync-result">
             <el-tag size="small" type="success">新增 {{ catalogSyncResult.created }}</el-tag>
+            <el-tag size="small" type="warning">更新 {{ catalogSyncResult.updated }}</el-tag>
             <el-tag size="small" type="info">已存在 {{ catalogSyncResult.existing }}</el-tag>
             <el-tag v-if="catalogSyncResult.revoked" size="small" type="warning">已撤销 {{ catalogSyncResult.revoked }}</el-tag>
             <el-tag v-if="catalogSyncResult.failed" size="small" type="danger">失败 {{ catalogSyncResult.failed }}</el-tag>
@@ -375,7 +376,7 @@ const handleCatalogSync = async () => {
   try {
     const response = await syncUpdaterCatalog()
     catalogSyncResult.value = response.data
-    ElMessage.success(`同步完成：新增 ${response.data.created}，已存在 ${response.data.existing}`)
+    ElMessage.success(`同步完成：新增 ${response.data.created}，更新 ${response.data.updated}，已存在 ${response.data.existing}`)
     await loadReleases()
   } finally {
     syncingCatalog.value = false

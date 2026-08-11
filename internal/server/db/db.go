@@ -267,8 +267,8 @@ func ensureUpdaterReleaseSchema(database *gorm.DB) error {
 		if err := tx.Exec(`DROP INDEX IF EXISTS uk_release_component`).Error; err != nil {
 			return fmt.Errorf("remove obsolete single release per component constraint: %w", err)
 		}
-		if err := tx.Exec(`DROP INDEX IF EXISTS uk_release_component_version`).Error; err != nil {
-			return fmt.Errorf("remove obsolete release component/version constraint: %w", err)
+		if err := tx.Exec(`DROP INDEX IF EXISTS uk_release_component_version_commit`).Error; err != nil {
+			return fmt.Errorf("remove obsolete release component/version/commit constraint: %w", err)
 		}
 		return nil
 	}); err != nil {

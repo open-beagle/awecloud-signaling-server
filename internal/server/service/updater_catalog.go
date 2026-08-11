@@ -68,6 +68,7 @@ type UpdaterCatalogArtifact struct {
 type UpdaterCatalogSyncResult struct {
 	Scanned  int `json:"scanned"`
 	Created  int `json:"created"`
+	Updated  int `json:"updated"`
 	Existing int `json:"existing"`
 	Revoked  int `json:"revoked"`
 	Failed   int `json:"failed"`
@@ -264,6 +265,8 @@ func (s *UpdaterCatalogService) Sync(ctx context.Context) (UpdaterCatalogSyncRes
 		switch state {
 		case "created":
 			result.Created++
+		case "updated":
+			result.Updated++
 		case "existing":
 			result.Existing++
 		case "revoked":
@@ -327,7 +330,7 @@ func (s *UpdaterCatalogService) syncManifest(ctx context.Context, manifest Updat
 	state := ""
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var release model.Release
-		err := tx.Where("component = ? AND version = ? AND commit_id = ?", manifest.Release.Component, manifest.Release.Version, manifest.Release.CommitID).First(&release).Error
+		err := tx.Where("component = ? AND version = ?", manifest.Release.Component, manifest.Release.Version).First(&release).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			release = model.Release{
 				ID: uuid.NewString(), Component: manifest.Release.Component, Version: manifest.Release.Version,
@@ -358,22 +361,96 @@ func (s *UpdaterCatalogService) syncManifest(ctx context.Context, manifest Updat
 			state = "revoked"
 			return nil
 		}
-		if release.Status != model.ReleaseStatusPublished || release.Channel != manifest.Release.Channel ||
-			release.ReleaseNotes != manifest.Release.ReleaseNotes || release.MinSupportedVersion != manifest.Release.MinSupportedVersion ||
-			release.PublishedAt == nil || !release.PublishedAt.Equal(manifest.PublishedAt) {
-			return errors.New("published release identity is immutable")
-		}
 		var artifacts []model.Artifact
 		if err := tx.Where("release_id = ?", release.ID).Find(&artifacts).Error; err != nil {
 			return err
 		}
-		if !catalogArtifactsMatch(artifacts, manifest.Artifacts) {
-			return errors.New("published release artifacts are immutable")
+		matches := release.Status == model.ReleaseStatusPublished &&
+			release.CommitID == manifest.Release.CommitID &&
+			release.Channel == manifest.Release.Channel &&
+			release.ReleaseNotes == manifest.Release.ReleaseNotes &&
+			release.MinSupportedVersion == manifest.Release.MinSupportedVersion &&
+			release.PublishedAt != nil && release.PublishedAt.Equal(manifest.PublishedAt) &&
+			catalogArtifactsMatch(artifacts, manifest.Artifacts)
+		if !matches {
+			if err := replaceCatalogRelease(tx, &release, artifacts, manifest); err != nil {
+				return err
+			}
+			state = "updated"
+			return nil
 		}
 		state = "existing"
 		return nil
 	})
 	return state, err
+}
+
+func replaceCatalogRelease(tx *gorm.DB, release *model.Release, existing []model.Artifact, manifest UpdaterCatalogManifest) error {
+	terminalStatuses := []model.UpdateTaskStatus{
+		model.UpdateTaskSucceeded, model.UpdateTaskFailed, model.UpdateTaskRolledBack,
+		model.UpdateTaskCancelled, model.UpdateTaskExpired,
+	}
+	var tasks []model.UpdateTask
+	if err := tx.Where("release_id = ? AND status NOT IN ?", release.ID, terminalStatuses).Find(&tasks).Error; err != nil {
+		return err
+	}
+	for i := range tasks {
+		if err := tx.Model(&tasks[i]).Updates(map[string]any{
+			"status":             model.UpdateTaskCancelled,
+			"last_error_code":    "release_republished",
+			"last_error_message": "目标版本已重新发布",
+		}).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&model.UpdateEvent{
+			TaskID: tasks[i].ID, Phase: string(model.UpdateTaskCancelled),
+			ErrorCode: "release_republished", ErrorMessage: "目标版本已重新发布", Source: "server",
+		}).Error; err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Model(release).Updates(map[string]any{
+		"commit_id": manifest.Release.CommitID, "channel": manifest.Release.Channel,
+		"status": model.ReleaseStatusPublished, "release_notes": manifest.Release.ReleaseNotes,
+		"min_supported_version": manifest.Release.MinSupportedVersion, "published_at": manifest.PublishedAt,
+	}).Error; err != nil {
+		return err
+	}
+
+	byPlatform := make(map[string]*model.Artifact, len(existing))
+	for i := range existing {
+		key := existing[i].OS + "\x00" + existing[i].Arch + "\x00" + existing[i].Role
+		byPlatform[key] = &existing[i]
+	}
+	for _, input := range manifest.Artifacts {
+		key := input.OS + "\x00" + input.Arch + "\x00" + input.Role
+		if artifact, ok := byPlatform[key]; ok {
+			if err := tx.Model(artifact).Updates(map[string]any{
+				"package_type": input.PackageType, "filename": input.Filename,
+				"download_url": input.DownloadURL, "size": input.Size, "sha256": input.SHA256,
+				"status": model.ArtifactStatusAvailable,
+			}).Error; err != nil {
+				return err
+			}
+			delete(byPlatform, key)
+			continue
+		}
+		artifact := model.Artifact{
+			ID: uuid.NewString(), ReleaseID: release.ID, OS: input.OS, Arch: input.Arch, Role: input.Role,
+			PackageType: input.PackageType, Filename: input.Filename, DownloadURL: input.DownloadURL,
+			Size: input.Size, SHA256: input.SHA256, Status: model.ArtifactStatusAvailable,
+		}
+		if err := tx.Create(&artifact).Error; err != nil {
+			return err
+		}
+	}
+	for _, artifact := range byPlatform {
+		if err := tx.Delete(artifact).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func catalogArtifactsMatch(existing []model.Artifact, expected []UpdaterCatalogArtifact) bool {
