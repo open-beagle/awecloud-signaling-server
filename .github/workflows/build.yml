@@ -3,7 +3,7 @@ name: Release Signal Components
 on:
   push:
     branches:
-      - "release-v1.0"
+      - "release-v*"
 
 permissions:
   contents: read
