@@ -140,9 +140,9 @@ api_server = ""
 # tsnet 监听端口（默认 50050）
 listen_port = 50050
 
-# K8S Service 发现配置
-# 启用后，Agent 使用 Informer 机制 Watch 带指定标签的 K8S Service，
-# 并通过心跳上报给 Server，Desktop 用户可通过 gRPC 代理访问这些 Service
+# Kubernetes Service 清单配置
+# 启用后，Agent 采集显式 Namespace 中的 Service Port，并通过
+# workload_inventory_v1 上报 Server。
 # 环境变量：SIGNAL_SVC_ENABLED, SIGNAL_SVC_KUBECONFIG, SIGNAL_SVC_LABEL_SELECTOR, SIGNAL_SVC_NAMESPACES, SIGNAL_SVC_LISTEN_PORT_BASE
 [svc]
 # 是否启用 K8S Service 发现
@@ -151,22 +151,24 @@ enabled = false
 # kubeconfig 路径（空则使用 InCluster 配置）
 kubeconfig = ""
 
-# Service 标签选择器（只发现带此标签的 Service）
-label_selector = "signal.beagle.io/expose=true"
+# 可选标签选择器；空值采集显式 Namespace 中的全部 Service
+label_selector = ""
 
-# 监听的命名空间列表（空表示全部命名空间）
+# 必须显式配置；空值不采集，禁止隐式扫描整个集群
 # 环境变量 SIGNAL_SVC_NAMESPACES 使用逗号分隔
 namespaces = []
 
 # tsnet gRPC 监听端口（默认 50051）
 listen_port_base = 50051
 
-# ContainerSSH Pod 候选发现（默认关闭）
-# 只有带此 Label 的 Pod 才会作为运行时候选上报，不会自动发布为资源。
+# Kubernetes Pod 清单配置（默认关闭）
+# 启用后采集显式 Namespace 中当前 Running、Ready 的 Pod/Container。
 [container]
 enabled = false
 kubeconfig = ""
-label_selector = "signal.beagle.io/container-ssh=true"
+# 可选标签选择器；空值采集显式 Namespace 中的全部 Pod
+label_selector = ""
+# 必须显式配置；空值不采集
 namespaces = []
 provider_label = "beagle.io/provider"
 workspace_label = "beagle.io/workspace"

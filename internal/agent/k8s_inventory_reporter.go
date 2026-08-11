@@ -172,6 +172,10 @@ func (r *KubernetesInventoryReporter) Update(supply *pb.SupplyInventoryConfig, w
 	r.options = options
 	r.mu.Unlock()
 	if changed {
+		logger.Infof("Kubernetes Inventory 配置已更新: supply=%t workload=%t service=%t service_namespaces=%v service_selector=%q pod=%t pod_namespaces=%v pod_selector=%q",
+			validSupplyInventoryConfig(supply), validWorkloadInventoryConfig(workload), options.ServiceEnabled,
+			options.ServiceNamespaces, options.ServiceLabelSelector, options.ContainerEnabled,
+			options.ContainerNamespaces, options.ContainerLabelSelector)
 		select {
 		case r.wake <- struct{}{}:
 		default:
@@ -704,6 +708,8 @@ func (r *KubernetesInventoryReporter) reportWorkload(cfg *pb.WorkloadInventoryCo
 		r.workSequence = sequence
 	}
 	r.mu.Unlock()
+	logger.Infof("Kubernetes Workload Inventory 已上报: namespace=%s kind=%s service_ports=%d containers=%d sequence=%d replayed=%t",
+		namespace.Name, kind, len(ports), len(containers), sequence, ack.Replayed)
 	return nil
 }
 

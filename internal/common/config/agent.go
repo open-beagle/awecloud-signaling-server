@@ -59,18 +59,17 @@ type K8SSection struct {
 	ListenPort int    `toml:"listen_port"` // tsnet 监听端口，默认 50050
 }
 
-// SVCSection K8S Service 发现配置
+// SVCSection controls Kubernetes Service inventory collection.
 type SVCSection struct {
 	Enabled        bool     `toml:"enabled"`          // 是否启用 K8S Service 发现
 	Kubeconfig     string   `toml:"kubeconfig"`       // kubeconfig 路径（空则使用 InCluster）
-	LabelSelector  string   `toml:"label_selector"`   // Service 标签选择器（如 "signal.beagle.io/expose=true"）
-	Namespaces     []string `toml:"namespaces"`       // 监听的命名空间列表（空表示全部）
+	LabelSelector  string   `toml:"label_selector"`   // 可选；空值采集显式 Namespace 中的全部 Service
+	Namespaces     []string `toml:"namespaces"`       // 必须显式配置，不允许隐式采集整个集群
 	ListenPortBase int      `toml:"listen_port_base"` // tsnet gRPC 监听端口，默认 50051
 }
 
-// ContainerSection controls the opt-in Pod discovery used for ContainerSSH.
-// A restrictive label selector is required so ordinary cluster Pods are not
-// treated as SSH candidates.
+// ContainerSection controls the opt-in Pod inventory used for Kubernetes Pod.
+// Namespace is the required collection boundary; label selector is optional.
 type ContainerSection struct {
 	Enabled            bool     `toml:"enabled"`
 	Kubeconfig         string   `toml:"kubeconfig"`
@@ -317,17 +316,11 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	}
 
 	// SVC 默认值
-	if cfg.SVC.LabelSelector == "" {
-		cfg.SVC.LabelSelector = "signal.beagle.io/expose=true"
-	}
 	if cfg.SVC.ListenPortBase == 0 {
 		cfg.SVC.ListenPortBase = 50051
 	}
 
-	// ContainerSSH discovery defaults are deliberately opt-in and restrictive.
-	if cfg.Container.LabelSelector == "" {
-		cfg.Container.LabelSelector = "signal.beagle.io/container-ssh=true"
-	}
+	// Kubernetes Pod inventory remains opt-in and requires explicit namespaces.
 	// Keep an omitted kubeconfig empty. The shared Kubernetes loader first
 	// tries the Pod service account and only falls back to ~/.kube/config when
 	// in-cluster configuration is unavailable. Expanding the fallback here

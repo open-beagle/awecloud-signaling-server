@@ -14,7 +14,8 @@ func TestAgentContainerKubeconfigPreservesInClusterFallback(t *testing.T) {
 	cfg, err := LoadAgentConfig(filepath.Join(t.TempDir(), "missing-agent.toml"))
 	require.NoError(t, err)
 	require.Empty(t, cfg.Container.Kubeconfig)
-	require.Equal(t, "signal.beagle.io/container-ssh=true", cfg.Container.LabelSelector)
+	require.Empty(t, cfg.SVC.LabelSelector)
+	require.Empty(t, cfg.Container.LabelSelector)
 }
 
 func TestAgentTunnelSSHPortFromConfigAndEnv(t *testing.T) {
