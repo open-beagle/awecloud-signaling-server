@@ -50,6 +50,8 @@ func TestGetDesktopLaunchersReturnsPublishedLauncherArtifacts(t *testing.T) {
 	var payload DesktopLauncherDownloadsResponse
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
 	require.Equal(t, "v1.2.3", payload.Version)
+	require.Equal(t, release.CommitID, payload.CommitID)
+	require.Equal(t, now, payload.PublishedAt.UTC())
 	require.Len(t, payload.Downloads, 1)
 	require.Equal(t, launcher.Filename, payload.Downloads[0].Filename)
 	require.Equal(t, "windows", payload.Downloads[0].OS)
@@ -72,4 +74,22 @@ func TestGetDesktopLaunchersRejectsReleaseWithoutLauncher(t *testing.T) {
 
 	require.Equal(t, http.StatusNotFound, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "尚未发布 Launcher")
+}
+
+func TestGetDesktopLaunchersRejectsIncompleteReleaseMetadata(t *testing.T) {
+	database := setupTestDB(t)
+	now := time.Now().UTC()
+	release := model.Release{
+		ID: uuid.NewString(), Component: model.ComponentDesktop, Version: "v1.2.3",
+		Channel: "stable", Status: model.ReleaseStatusPublished, PublishedAt: &now,
+	}
+	require.NoError(t, database.Create(&release).Error)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/v1/public/download/desktop", nil)
+	NewDownloadAPI().GetDesktopLaunchers(context)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "发布信息不完整")
 }

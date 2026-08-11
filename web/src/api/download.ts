@@ -11,7 +11,8 @@ export interface DesktopLauncherDownload {
 
 export interface DesktopLauncherDownloadsResponse {
   version: string
-  published_at: string | null
+  commit_id: string
+  published_at: string
   downloads: DesktopLauncherDownload[]
 }
 

@@ -49,6 +49,20 @@
                 <span>· {{ archName(selectedDownload) }}</span>
               </div>
               <div class="filename">{{ selectedDownload.filename }}</div>
+              <div class="build-meta" aria-label="构建信息">
+                <span
+                  class="build-meta-item"
+                  :title="`完整 Commit ID：${commitId}`"
+                  :aria-label="`完整 Commit ID：${commitId}`"
+                >
+                  <el-icon><Connection /></el-icon>
+                  <span>Commit <code>{{ shortCommitId }}</code></span>
+                </span>
+                <span class="build-meta-item">
+                  <el-icon><Clock /></el-icon>
+                  <span>更新于 {{ formattedPublishedAt }}（UTC+8）</span>
+                </span>
+              </div>
 
               <div v-if="showMacArchitecture" class="architecture" aria-label="macOS 架构">
                 <button
@@ -116,6 +130,7 @@
 import { computed, markRaw, onMounted, ref } from 'vue'
 import axios from 'axios'
 import {
+  Clock,
   Connection,
   Download,
   Grid,
@@ -134,6 +149,8 @@ import type { DesktopLauncherDownload } from '@/api/download'
 const loading = ref(true)
 const error = ref('')
 const version = ref('')
+const commitId = ref('')
+const publishedAt = ref('')
 const downloads = ref<DesktopLauncherDownload[]>([])
 const selectedKey = ref('')
 
@@ -142,6 +159,23 @@ const platformOrder = ['windows-amd64', 'darwin-arm64', 'darwin-amd64', 'linux-a
 const displayVersion = computed(() => {
   const value = version.value.trim()
   return value.startsWith('v') ? value : `v${value}`
+})
+
+const shortCommitId = computed(() => commitId.value.slice(0, 8))
+
+const formattedPublishedAt = computed(() => {
+  const date = new Date(publishedAt.value)
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(date)
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}`
 })
 
 const selectedDownload = computed(() =>
@@ -224,9 +258,13 @@ async function loadDownloads() {
       throw new Error('当前版本尚未发布可用的 Desktop Launcher')
     }
     version.value = response.version
+    commitId.value = response.commit_id
+    publishedAt.value = response.published_at
     downloads.value = launchers
     selectedKey.value = chooseDownload(launchers)
   } catch (reason) {
+    commitId.value = ''
+    publishedAt.value = ''
     downloads.value = []
     selectedKey.value = ''
     if (axios.isAxiosError<{ message?: string }>(reason)) {
@@ -382,6 +420,34 @@ onMounted(loadDownloads)
   font: 11px/1.4 "SFMono-Regular", Consolas, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.build-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin-top: 9px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.build-meta-item {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.build-meta-item .el-icon {
+  color: var(--primary-color);
+  font-size: 14px;
+}
+
+.build-meta code {
+  color: var(--text-regular);
+  font: inherit;
+  font-family: "SFMono-Regular", Consolas, monospace;
 }
 
 .architecture {

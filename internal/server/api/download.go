@@ -45,7 +45,8 @@ type DesktopLauncherDownload struct {
 
 type DesktopLauncherDownloadsResponse struct {
 	Version     string                    `json:"version"`
-	PublishedAt *time.Time                `json:"published_at"`
+	CommitID    string                    `json:"commit_id"`
+	PublishedAt time.Time                 `json:"published_at"`
 	Downloads   []DesktopLauncherDownload `json:"downloads"`
 }
 
@@ -66,6 +67,10 @@ func (a *DownloadAPI) GetDesktopLaunchers(c *gin.Context) {
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("读取 Desktop 版本失败"))
+		return
+	}
+	if release.CommitID == "" || release.PublishedAt == nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("Desktop 发布信息不完整"))
 		return
 	}
 
@@ -96,7 +101,8 @@ func (a *DownloadAPI) GetDesktopLaunchers(c *gin.Context) {
 
 	c.JSON(http.StatusOK, DesktopLauncherDownloadsResponse{
 		Version:     release.Version,
-		PublishedAt: release.PublishedAt,
+		CommitID:    release.CommitID,
+		PublishedAt: *release.PublishedAt,
 		Downloads:   downloads,
 	})
 }
