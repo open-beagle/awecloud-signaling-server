@@ -138,6 +138,9 @@ func (s *SessionAuthorizationService) BuildSnapshot(ctx context.Context, technic
 			return err
 		}
 		for i := range sessions {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			permission, reasonCode, err := s.revalidateSession(tx, &sessions[i], now, includePermissions)
 			if err != nil {
 				return err
@@ -165,6 +168,9 @@ func (s *SessionAuthorizationService) BuildSnapshot(ctx context.Context, technic
 			return err
 		}
 		for i := range terminations {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			updates := map[string]any{
 				"status":          model.ResourceSessionTerminationDelivered,
 				"next_attempt_at": now.Add(sessionAuthorizationRetryInterval),

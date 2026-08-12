@@ -75,6 +75,17 @@ func TestSessionAuthorizationBuildsTrustedSnapshotAndReliableTermination(t *test
 	require.NotNil(t, stored.DisconnectAcknowledgedAt)
 }
 
+func TestSessionAuthorizationBuildSnapshotStopsOnCanceledContext(t *testing.T) {
+	fixture := newTenantManagementConstraintFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	snapshot, err := NewSessionAuthorizationService(serverdb.DB).BuildSnapshot(ctx, fixture.technical.ID, true)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Empty(t, snapshot.Permissions)
+	require.Empty(t, snapshot.Terminations)
+}
+
 func TestSessionAuthorizationLimitsDueTerminationBatch(t *testing.T) {
 	fixture := newTenantManagementConstraintFixture(t)
 	database := serverdb.DB

@@ -1709,6 +1709,9 @@ func (s *DesktopServiceServer) GetResources(ctx context.Context, req *pb.GetReso
 	resp.Ssh = appendUniqueSSHResources(resp.Ssh, s.queryUnifiedHostSSHResourcesGRPC(ctx, clientID, groupIDs, req.TenantId)...)
 	if req.ResourceProtocol == sessionAuthorizationProtocolV2 {
 		containerSSH, containerServices := s.queryTenantContainerResourcesGRPC(ctx, &node, groupIDs, req.TenantId)
+		if err := ctx.Err(); err != nil {
+			return nil, status.FromContextError(err).Err()
+		}
 		resp.ContainerSsh = append(resp.ContainerSsh, containerSSH...)
 		resp.ContainerService = containerServices
 	}
@@ -1850,9 +1853,9 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 		resource model.TenantResource
 		target   model.TenantResourceTargetRevision
 		targetV2 service.SessionAuthorizationTarget
+		action   string
 	}
 	candidates := make([]desktopSessionCandidate, 0, len(targets))
-	inputs := make([]service.CreateResourceSessionInput, 0, len(targets))
 	for i := range targets {
 		if err := ctx.Err(); err != nil {
 			return nil, nil
@@ -1871,63 +1874,132 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 			logger.Warnf("Desktop 资源发现目标快照无效: desktop_id=%d resource_id=%s err=%v", desktop.ID, resource.ID, err)
 			continue
 		}
-		candidates = append(candidates, desktopSessionCandidate{resource: resource, target: targets[i].TenantResourceTargetRevision, targetV2: targetV2})
-		inputs = append(inputs, service.CreateResourceSessionInput{
-			TenantID: resource.TenantID, ResourceID: resource.ID, TargetRevisionID: targets[i].TenantResourceTargetRevision.ID, Action: action, DeviceID: desktop.ID,
-			ClientCapability: "resource_session_v2", RequestID: "desktop-resource:" + uuid.NewString(),
+		candidates = append(candidates, desktopSessionCandidate{
+			resource: resource, target: targets[i].TenantResourceTargetRevision, targetV2: targetV2, action: action,
 		})
 	}
-	if len(inputs) == 0 {
+	if len(candidates) == 0 {
 		return nil, nil
-	}
-	ensured, err := sessionService.EnsureManyForDesktop(ctx, desktop.UserID, inputs)
-	if err != nil {
-		logger.Warnf("Desktop ResourceSession 批量授权失败: desktop_id=%d tenant_id=%s err=%v", desktop.ID, tenantID, err)
-		return nil, nil
-	}
-	projections := make([]desktopTenantResourceProjection, 0, len(candidates))
-	for i := range candidates {
-		if ensured[i].Err != nil {
-			logger.Warnf("Desktop ResourceSession 授权失败: desktop_id=%d resource_id=%s target_revision_id=%s err=%v",
-				desktop.ID, candidates[i].resource.ID, candidates[i].target.ID, ensured[i].Err)
-			continue
-		}
-		agentNode, err := desktopAccessAgentNode(ctx, candidates[i].target.AccessTechnicalResourceID)
-		if err != nil {
-			logger.Warnf("Desktop 资源发现访问 Agent 不可用: desktop_id=%d resource_id=%s technical_resource_id=%s err=%v",
-				desktop.ID, candidates[i].resource.ID, candidates[i].target.AccessTechnicalResourceID, err)
-			continue
-		}
-		projections = append(projections, desktopTenantResourceProjection{
-			resource: candidates[i].resource, tenant: tenantByID[candidates[i].resource.TenantID], session: ensured[i].Session,
-			target: candidates[i].target, agent: agentNode, targetV2: candidates[i].targetV2,
-		})
 	}
 
+	technicalIDs := make(map[string]struct{})
+	for i := range candidates {
+		technicalIDs[candidates[i].target.AccessTechnicalResourceID] = struct{}{}
+	}
+	agentByTechnicalID := make(map[string]model.Node, len(technicalIDs))
+	for technicalID := range technicalIDs {
+		if err := ctx.Err(); err != nil {
+			return nil, nil
+		}
+		agentNode, err := desktopAccessAgentNode(ctx, technicalID)
+		if err != nil {
+			logger.Warnf("Desktop 资源发现访问 Agent 不可用: desktop_id=%d technical_resource_id=%s err=%v", desktop.ID, technicalID, err)
+			continue
+		}
+		agentByTechnicalID[technicalID] = agentNode
+	}
+
+	authorizationService := service.NewSessionAuthorizationService(db.DB)
 	permissions := make(map[string]service.SessionAuthorizationPermission)
 	listenPorts := make(map[string]map[string]uint16)
-	technicalIDs := make(map[string]struct{})
-	for _, projection := range projections {
-		technicalIDs[projection.session.AccessTechnicalResourceID] = struct{}{}
-	}
-	for technicalID := range technicalIDs {
-		snapshot, err := service.NewSessionAuthorizationService(db.DB).BuildSnapshot(ctx, technicalID, true)
+	for technicalID := range agentByTechnicalID {
+		if err := ctx.Err(); err != nil {
+			return nil, nil
+		}
+		snapshot, err := authorizationService.BuildSnapshot(ctx, technicalID, true)
 		if err != nil {
 			logger.Warnf("Desktop 资源发现构建授权快照失败: desktop_id=%d technical_resource_id=%s err=%v", desktop.ID, technicalID, err)
 			continue
 		}
 		for _, permission := range snapshot.Permissions {
-			permissions[permission.SessionID] = permission
+			permissions[desktopSessionPermissionKey(permission.DeviceID, permission.ResourceID, permission.TargetRevisionID, permission.Action)] = permission
 		}
 		listenPorts[technicalID] = allocateSessionAuthorizationListenPorts(snapshot.Permissions)
+	}
+
+	sessions := make([]*model.ResourceSession, len(candidates))
+	missingCandidateIndexes := make([]int, 0, len(candidates))
+	inputs := make([]service.CreateResourceSessionInput, 0, len(candidates))
+	for i := range candidates {
+		technicalID := candidates[i].target.AccessTechnicalResourceID
+		if _, available := agentByTechnicalID[technicalID]; !available {
+			continue
+		}
+		key := desktopSessionPermissionKey(desktop.ID, candidates[i].resource.ID, candidates[i].target.ID, candidates[i].action)
+		if permission, found := permissions[key]; found && permission.UserID == desktop.UserID {
+			sessions[i] = &model.ResourceSession{
+				ID: permission.SessionID, TenantID: permission.TenantID, TenantResourceID: permission.ResourceID,
+				TenantResourceSourceID: permission.SourceID, TargetRevisionID: permission.TargetRevisionID,
+				AccessTechnicalResourceID: technicalID, AuthorizationRevision: permission.AuthorizationRevision,
+			}
+			continue
+		}
+		missingCandidateIndexes = append(missingCandidateIndexes, i)
+		inputs = append(inputs, service.CreateResourceSessionInput{
+			TenantID: candidates[i].resource.TenantID, ResourceID: candidates[i].resource.ID,
+			TargetRevisionID: candidates[i].target.ID, Action: candidates[i].action, DeviceID: desktop.ID,
+			ClientCapability: sessionAuthorizationProtocolV2, RequestID: "desktop-resource:" + uuid.NewString(),
+		})
+	}
+
+	refreshedTechnicalIDs := make(map[string]struct{})
+	if len(inputs) > 0 {
+		ensured, err := sessionService.EnsureManyForDesktop(ctx, desktop.UserID, inputs)
+		if err != nil {
+			logger.Warnf("Desktop ResourceSession 批量授权失败: desktop_id=%d tenant_id=%s err=%v", desktop.ID, tenantID, err)
+			return nil, nil
+		}
+		for i := range ensured {
+			candidateIndex := missingCandidateIndexes[i]
+			if ensured[i].Err != nil {
+				logger.Warnf("Desktop ResourceSession 授权失败: desktop_id=%d resource_id=%s target_revision_id=%s err=%v",
+					desktop.ID, candidates[candidateIndex].resource.ID, candidates[candidateIndex].target.ID, ensured[i].Err)
+				continue
+			}
+			sessions[candidateIndex] = ensured[i].Session
+			refreshedTechnicalIDs[ensured[i].Session.AccessTechnicalResourceID] = struct{}{}
+		}
+	}
+	for technicalID := range refreshedTechnicalIDs {
+		if err := ctx.Err(); err != nil {
+			return nil, nil
+		}
+		snapshot, err := authorizationService.BuildSnapshot(ctx, technicalID, true)
+		if err != nil {
+			logger.Warnf("Desktop 资源发现刷新授权快照失败: desktop_id=%d technical_resource_id=%s err=%v", desktop.ID, technicalID, err)
+			continue
+		}
+		for i := range candidates {
+			if candidates[i].target.AccessTechnicalResourceID == technicalID {
+				delete(permissions, desktopSessionPermissionKey(desktop.ID, candidates[i].resource.ID, candidates[i].target.ID, candidates[i].action))
+			}
+		}
+		for _, permission := range snapshot.Permissions {
+			permissions[desktopSessionPermissionKey(permission.DeviceID, permission.ResourceID, permission.TargetRevisionID, permission.Action)] = permission
+		}
+		listenPorts[technicalID] = allocateSessionAuthorizationListenPorts(snapshot.Permissions)
+	}
+
+	projections := make([]desktopTenantResourceProjection, 0, len(candidates))
+	for i := range candidates {
+		if sessions[i] == nil {
+			continue
+		}
+		projections = append(projections, desktopTenantResourceProjection{
+			resource: candidates[i].resource, tenant: tenantByID[candidates[i].resource.TenantID], session: sessions[i],
+			target: candidates[i].target, agent: agentByTechnicalID[candidates[i].target.AccessTechnicalResourceID], targetV2: candidates[i].targetV2,
+		})
 	}
 
 	domainSuffix := desktopResourceDomainSuffix(ctx)
 	sshResources := make([]*pb.ContainerSSHResource, 0)
 	serviceResources := make([]*pb.ContainerServiceResource, 0)
 	for _, projection := range projections {
-		permission, allowed := permissions[projection.session.ID]
-		if !allowed {
+		if err := ctx.Err(); err != nil {
+			return nil, nil
+		}
+		permission, allowed := permissions[desktopSessionPermissionKey(desktop.ID, projection.resource.ID, projection.target.ID, actionByResource[projection.resource.ID])]
+		if !allowed || permission.SessionID != projection.session.ID {
 			continue
 		}
 		state := string(projection.resource.AvailabilityState)
@@ -1966,6 +2038,10 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 		})
 	}
 	return sshResources, serviceResources
+}
+
+func desktopSessionPermissionKey(deviceID uint64, resourceID, targetRevisionID, action string) string {
+	return strconv.FormatUint(deviceID, 10) + "\x00" + resourceID + "\x00" + targetRevisionID + "\x00" + action
 }
 
 func grpcTenantGroupGrantMatches(ctx context.Context, grant model.TenantAccessGrant) bool {

@@ -65,6 +65,27 @@ func TestDesktopRESTResourcesReturnsKubernetesServiceAndPodWithinDeadline(t *tes
 		firstDuration, secondDuration, len(second.ContainerService), len(second.ContainerSSH), secondSessionCount)
 }
 
+func TestDesktopRESTResourcesHandlesProductionScaleWithinDeadline(t *testing.T) {
+	const resourcesPerType = 41
+	router, desktopID, secret, tenantID := newDesktopRESTResourcesFixtureWithCounts(t, resourcesPerType, resourcesPerType)
+
+	first, firstDuration := requestDesktopRESTResources(t, router, desktopID, secret, tenantID)
+	require.Len(t, first.ContainerService, resourcesPerType)
+	require.Len(t, first.ContainerSSH, resourcesPerType)
+	require.Less(t, firstDuration, desktopRESTResourcesDeadline)
+
+	second, secondDuration := requestDesktopRESTResources(t, router, desktopID, secret, tenantID)
+	require.Len(t, second.ContainerService, resourcesPerType)
+	require.Len(t, second.ContainerSSH, resourcesPerType)
+	require.Less(t, secondDuration, desktopRESTResourcesDeadline)
+
+	var sessionCount int64
+	require.NoError(t, db.DB.Model(&model.ResourceSession{}).Count(&sessionCount).Error)
+	require.Equal(t, int64(resourcesPerType*2), sessionCount)
+	t.Logf("desktop REST production scale: cold=%s warm=%s service=%d pod=%d sessions=%d",
+		firstDuration, secondDuration, len(second.ContainerService), len(second.ContainerSSH), sessionCount)
+}
+
 func requestDesktopRESTResources(t *testing.T, router http.Handler, desktopID uint64, secret, tenantID string) (desktopRESTResourcesResponse, time.Duration) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), desktopRESTResourcesDeadline)
@@ -84,6 +105,10 @@ func requestDesktopRESTResources(t *testing.T, router http.Handler, desktopID ui
 }
 
 func newDesktopRESTResourcesFixture(t *testing.T) (*gin.Engine, uint64, string, string) {
+	return newDesktopRESTResourcesFixtureWithCounts(t, 1, 1)
+}
+
+func newDesktopRESTResourcesFixtureWithCounts(t *testing.T, serviceCount, sshCount int) (*gin.Engine, uint64, string, string) {
 	t.Helper()
 	originalDB := db.DB
 	t.Cleanup(func() { db.DB = originalDB })
@@ -141,8 +166,12 @@ func newDesktopRESTResourcesFixture(t *testing.T) (*gin.Engine, uint64, string, 
 	require.NoError(t, database.Create(&item).Error)
 	require.NoError(t, database.Model(&model.ResourceAllocation{}).Where("id = ?", allocation.ID).Updates(map[string]any{"state": model.ResourceAllocationActive, "row_version": int64(2)}).Error)
 
-	seedDesktopRESTResource(t, database, now, owner.ID, member.ID, tenant.ID, allocation.ID, item.ID, namespaceScope.ID, technical.ID, model.TenantResourceContainerService, 1)
-	seedDesktopRESTResource(t, database, now, owner.ID, member.ID, tenant.ID, allocation.ID, item.ID, namespaceScope.ID, technical.ID, model.TenantResourceContainerSSH, 2)
+	for i := 0; i < serviceCount; i++ {
+		seedDesktopRESTResource(t, database, now, owner.ID, member.ID, tenant.ID, allocation.ID, item.ID, namespaceScope.ID, technical.ID, model.TenantResourceContainerService, i+1)
+	}
+	for i := 0; i < sshCount; i++ {
+		seedDesktopRESTResource(t, database, now, owner.ID, member.ID, tenant.ID, allocation.ID, item.ID, namespaceScope.ID, technical.ID, model.TenantResourceContainerSSH, serviceCount+i+1)
+	}
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
