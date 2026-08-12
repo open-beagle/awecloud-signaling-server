@@ -243,12 +243,19 @@ func (s *SessionAuthorizationService) revalidateSession(tx *gorm.DB, session *mo
 	}
 	var device model.Node
 	if err := tx.Where("id = ? AND user_id = ? AND type = ?", session.DeviceID, session.UserID, model.NodeTypeDesktop).First(&device).Error; err != nil ||
-		device.LastHeartbeat == nil || device.LastHeartbeat.Before(now.Add(-resourceSessionDeviceHeartbeatTTL)) || device.HeadscaleNodeID == 0 {
+		device.HeadscaleNodeID == 0 {
 		return nil, sessionAuthorizationInvalidCode, nil
 	}
-	deviceValidUntil := device.LastHeartbeat.UTC().Add(resourceSessionDeviceHeartbeatTTL)
-	validUntil := calculateResourceSessionValidUntil(now, session.StartedAt, grant.MaxSessionSeconds,
-		membership.ExpiresAt, chain.Allocation.ExpiresAt, grant.ExpiresAt, &deviceValidUntil, namespaceLeaseDeadline(chain))
+	deadlines := []*time.Time{membership.ExpiresAt, chain.Allocation.ExpiresAt, grant.ExpiresAt, namespaceLeaseDeadline(chain)}
+	if device.LastHeartbeat != nil && !device.LastHeartbeat.Before(now.Add(-resourceSessionDeviceHeartbeatTTL)) {
+		deviceValidUntil := device.LastHeartbeat.UTC().Add(resourceSessionDeviceHeartbeatTTL)
+		deadlines = append(deadlines, &deviceValidUntil)
+	} else {
+		// A stale persisted heartbeat cannot prove the authenticated Desktop stream
+		// offline, but it also must not extend an existing authorization snapshot.
+		deadlines = append(deadlines, &session.ValidUntil)
+	}
+	validUntil := calculateResourceSessionValidUntil(now, session.StartedAt, grant.MaxSessionSeconds, deadlines...)
 	if !validUntil.After(now) {
 		return nil, sessionAuthorizationExpiredCode, nil
 	}

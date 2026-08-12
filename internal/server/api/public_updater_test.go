@@ -82,7 +82,7 @@ func TestGetPublicManifestPayload(t *testing.T) {
 	r := gin.New()
 	r.GET("/api/v1/public/updater/manifest", updaterAPI.GetPublicManifest)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/public/updater/manifest?component=desktop&os=windows&arch=amd64&channel=stable&current_version=1.0.1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/public/updater/manifest?component=desktop&os=windows&arch=amd64&channel=stable&current_version=1.0.1&current_artifact_sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -121,4 +121,27 @@ func TestGetPublicManifestRejectsInvalidComponentOrOS(t *testing.T) {
 	w2 := httptest.NewRecorder()
 	r.ServeHTTP(w2, req2)
 	require.Equal(t, http.StatusBadRequest, w2.Code)
+}
+
+func TestGetPublicManifestDetectsRepublishedDesktopArtifact(t *testing.T) {
+	database := setupTestDB(t)
+	now := time.Now().UTC()
+	release := model.Release{ID: uuid.NewString(), Component: model.ComponentDesktop, Version: "1.0.2", Channel: "stable", Status: model.ReleaseStatusPublished, PublishedAt: &now}
+	require.NoError(t, database.Create(&release).Error)
+	targetSHA := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	require.NoError(t, database.Create(&model.Artifact{ID: uuid.NewString(), ReleaseID: release.ID, OS: "windows", Arch: "amd64", Role: "app", PackageType: "binary", Filename: "desktop.exe", DownloadURL: "https://signal.example.com/desktop.exe", Size: 1, SHA256: targetSHA, Status: model.ArtifactStatusAvailable}).Error)
+
+	router := gin.New()
+	router.GET("/api/v1/public/updater/manifest", NewUpdaterAPI().GetPublicManifest)
+	request := func(sha string) ManifestPayload {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/public/updater/manifest?component=desktop&os=windows&arch=amd64&channel=stable&current_version=1.0.2&current_artifact_sha256="+sha, nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var payload ManifestPayload
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+		return payload
+	}
+	require.False(t, request(targetSHA).Update.Available)
+	require.True(t, request("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789").Update.Available)
 }

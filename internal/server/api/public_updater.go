@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/hex"
 	"net/http"
 	"strings"
 	"time"
@@ -57,6 +58,18 @@ func (a *UpdaterAPI) GetPublicManifest(c *gin.Context) {
 	archStr := strings.ToLower(strings.TrimSpace(c.Query("arch")))
 	channelStr := strings.ToLower(strings.TrimSpace(c.Query("channel")))
 	currentVersionStr := strings.TrimSpace(c.Query("current_version"))
+	currentArtifactSHA256 := strings.ToLower(strings.TrimSpace(c.Query("current_artifact_sha256")))
+	if (currentVersionStr == "") != (currentArtifactSHA256 == "") {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("current_version 与 current_artifact_sha256 必须同时提供"))
+		return
+	}
+	if currentArtifactSHA256 != "" {
+		decoded, err := hex.DecodeString(currentArtifactSHA256)
+		if err != nil || len(decoded) != 32 {
+			c.JSON(http.StatusBadRequest, NewErrorResponse("current_artifact_sha256 必须为 64 位十六进制 SHA256"))
+			return
+		}
+	}
 
 	if componentStr != "desktop" {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("component 必须为 desktop"))
@@ -135,7 +148,8 @@ func (a *UpdaterAPI) GetPublicManifest(c *gin.Context) {
 			relVer = "v" + relVer
 		}
 		if semver.IsValid(currentVersionStr) && semver.IsValid(relVer) {
-			available = semver.Compare(relVer, currentVersionStr) > 0
+			comparison := semver.Compare(relVer, currentVersionStr)
+			available = comparison > 0 || comparison == 0 && currentArtifactSHA256 != "" && !strings.EqualFold(currentArtifactSHA256, appArtifact.SHA256)
 		}
 		if release.MinSupportedVersion != "" {
 			minVer := release.MinSupportedVersion

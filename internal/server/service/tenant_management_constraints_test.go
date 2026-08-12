@@ -280,7 +280,10 @@ func TestTenantManagementServicesRespectS4Triggers(t *testing.T) {
 
 func TestResourceSessionEnsureForDesktopUsesMemberGrantAndReusesLiveSession(t *testing.T) {
 	fixture := newTenantManagementConstraintFixture(t)
-	require.NoError(t, serverdb.DB.Model(&model.Node{}).Where("id = ?", fixture.desktop.ID).Update("headscale_node_id", uint64(8201)).Error)
+	staleDatabaseHeartbeat := time.Now().UTC().Add(-10 * time.Minute)
+	require.NoError(t, serverdb.DB.Model(&model.Node{}).Where("id = ?", fixture.desktop.ID).Updates(map[string]any{
+		"headscale_node_id": uint64(8201), "last_heartbeat": staleDatabaseHeartbeat,
+	}).Error)
 	sessions := NewResourceSessionService(serverdb.DB)
 	input := CreateResourceSessionInput{
 		TenantID: fixture.tenant.ID, ResourceID: fixture.resource.ID, Action: "connect", DeviceID: fixture.desktop.ID,

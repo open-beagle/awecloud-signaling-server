@@ -202,7 +202,7 @@ func (s *ResourceSessionService) create(ctx context.Context, authorization *Mana
 		if err := tx.Where("id = ? AND user_id = ? AND type = ?", input.DeviceID, authorization.EffectiveUserID, model.NodeTypeDesktop).First(&device).Error; err != nil {
 			return ErrResourceSessionDeviceUnauthorized
 		}
-		if device.LastHeartbeat == nil || device.LastHeartbeat.Before(now.Add(-resourceSessionDeviceHeartbeatTTL)) {
+		if !desktopMember && (device.LastHeartbeat == nil || device.LastHeartbeat.Before(now.Add(-resourceSessionDeviceHeartbeatTTL))) {
 			return ErrResourceSessionDeviceUnauthorized
 		}
 		chain, err := loadTenantResourceChainForTarget(tx, input.TenantID, input.ResourceID, input.TargetRevisionID, now, true)
@@ -222,9 +222,12 @@ func (s *ResourceSessionService) create(ctx context.Context, authorization *Mana
 		if err != nil {
 			return err
 		}
-		deviceValidUntil := device.LastHeartbeat.UTC().Add(resourceSessionDeviceHeartbeatTTL)
-		validUntil := calculateResourceSessionValidUntil(now, now, grant.MaxSessionSeconds,
-			membership.ExpiresAt, chain.Allocation.ExpiresAt, grant.ExpiresAt, &deviceValidUntil, namespaceLeaseDeadline(chain))
+		deadlines := []*time.Time{membership.ExpiresAt, chain.Allocation.ExpiresAt, grant.ExpiresAt, namespaceLeaseDeadline(chain)}
+		if !desktopMember {
+			deviceValidUntil := device.LastHeartbeat.UTC().Add(resourceSessionDeviceHeartbeatTTL)
+			deadlines = append(deadlines, &deviceValidUntil)
+		}
+		validUntil := calculateResourceSessionValidUntil(now, now, grant.MaxSessionSeconds, deadlines...)
 		if !validUntil.After(now) {
 			return ErrResourceSessionAuthorizationDenied
 		}

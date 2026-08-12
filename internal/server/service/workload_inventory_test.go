@@ -103,6 +103,34 @@ func boolJSON(value bool) string {
 	return "false"
 }
 
+func TestPublishedResourceChainUsesCurrentWorkloadLease(t *testing.T) {
+	fixture := newWorkloadInventoryFixture(t)
+	payload, hash := fixture.servicePayload(t, "10.96.0.10", true)
+	_, err := fixture.workload.ReceiveBatch(context.Background(), fixture.input(payload, hash, "epoch-a", 1, "snapshot-a"))
+	require.NoError(t, err)
+	resources := NewTenantResourceService(fixture.database, fixture.snapshots)
+	resources.now = func() time.Time { return fixture.now }
+	list, err := resources.List(context.Background(), fixture.tenantAuth, fixture.tenantA.ID, TenantResourceListInput{Candidates: true, Limit: 100})
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1)
+	published, err := resources.Review(context.Background(), fixture.tenantAuth, ReviewTenantResourceInput{
+		TenantID: fixture.tenantA.ID, ResourceID: list.Items[0].ResourceID, ExpectedRowVersion: list.Items[0].RowVersion,
+		ObservationRevision: list.Items[0].ObservationRevision, Reason: "publish runtime lease fixture", Publish: true,
+	})
+	require.NoError(t, err)
+
+	// Catalog eligibility is a provisioning-time decision. A current workload
+	// observation remains usable after its original supply candidate lease ages out.
+	require.NoError(t, fixture.database.Model(&model.SupplyCandidate{}).Where("technical_resource_id = ?", fixture.technical.ID).
+		Updates(map[string]any{
+			"first_observed_at": fixture.now.Add(-2 * time.Second),
+			"last_observed_at":  fixture.now.Add(-2 * time.Second),
+			"lease_expires_at":  fixture.now.Add(-time.Second),
+		}).Error)
+	_, err = loadTenantResourceChain(fixture.database, fixture.tenantA.ID, published.ID, fixture.now, true)
+	require.NoError(t, err)
+}
+
 func (f workloadInventoryFixture) input(payload []byte, hash, epoch string, sequence int64, snapshot string) ReceiveWorkloadInventoryBatchInput {
 	return ReceiveWorkloadInventoryBatchInput{
 		AuthenticatedSource: f.credential, SourceCredentialRevision: f.technical.CredentialRevision,

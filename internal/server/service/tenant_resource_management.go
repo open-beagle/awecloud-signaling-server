@@ -752,11 +752,22 @@ func loadTenantResourceChainForTarget(tx *gorm.DB, tenantID, resourceID, targetR
 			!candidate.Target.Ready || candidate.Target.ObservationRevision != candidate.Observation.ObservedRevision || candidate.Target.SourceRevision != sources[i].SourceRevision {
 			continue
 		}
-		if _, err := loadAllocatableNamespaceScope(tx, candidate.Scope.ID, now); err != nil {
+		if candidate.Scope.Type != model.ResourceScopeNamespace || candidate.Scope.NamespaceObservationID == nil ||
+			(candidate.Scope.LifecycleState != model.ResourceScopeActive && candidate.Scope.LifecycleState != model.ResourceScopeAllocatable) {
+			continue
+		}
+		if candidate.Namespace.ID == "" || candidate.Namespace.State != model.NamespaceObservationObserved || !candidate.Namespace.LeaseExpiresAt.After(now) {
+			continue
+		}
+		if candidate.Observation.State != model.WorkloadObservationEligible || !candidate.Observation.Ready || !candidate.Observation.LeaseExpiresAt.After(now) {
 			continue
 		}
 		if err := tx.Where("workload_observation_id = ? AND source_technical_resource_id = ?",
 			candidate.Observation.ID, candidate.Target.SourceTechnicalResourceID).First(&candidate.Evidence).Error; err != nil {
+			continue
+		}
+		if candidate.Evidence.State != model.WorkloadObservationSourceObserved || !candidate.Evidence.Ready ||
+			!candidate.Evidence.LeaseExpiresAt.After(now) || candidate.Evidence.SourceRevision != candidate.Target.SourceRevision {
 			continue
 		}
 		var technical model.TechnicalResource
@@ -768,13 +779,6 @@ func loadTenantResourceChainForTarget(tx *gorm.DB, tenantID, resourceID, targetR
 			return nil, err
 		}
 		if !valid {
-			continue
-		}
-		capable, err := workloadSourceHasCapability(tx, &technical, candidate.Scope.PlatformResourceID, now)
-		if err != nil {
-			return nil, err
-		}
-		if !capable {
 			continue
 		}
 		return &candidate, nil
