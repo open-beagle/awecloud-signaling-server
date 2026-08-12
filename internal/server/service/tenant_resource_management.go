@@ -753,7 +753,8 @@ func loadTenantResourceChainForTarget(tx *gorm.DB, tenantID, resourceID, targetR
 			continue
 		}
 		if candidate.Scope.Type != model.ResourceScopeNamespace || candidate.Scope.NamespaceObservationID == nil ||
-			(candidate.Scope.LifecycleState != model.ResourceScopeActive && candidate.Scope.LifecycleState != model.ResourceScopeAllocatable) {
+			(candidate.Scope.LifecycleState != model.ResourceScopeActive && candidate.Scope.LifecycleState != model.ResourceScopeAllocatable &&
+				candidate.Scope.LifecycleState != model.ResourceScopeSuspended) {
 			continue
 		}
 		if candidate.Namespace.ID == "" || candidate.Namespace.State != model.NamespaceObservationObserved || !candidate.Namespace.LeaseExpiresAt.After(now) {

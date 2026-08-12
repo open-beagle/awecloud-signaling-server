@@ -71,6 +71,9 @@ func (s *ProviderSupplyService) SetPlatformResourceLifecycle(ctx context.Context
 		}
 		switch input.TargetState {
 		case model.PlatformResourceSuspended:
+			if err := suspendActiveAllocationsForResource(tx, providerID, resource.ID); err != nil {
+				return err
+			}
 			if err := cascadeResourceScopes(tx, providerID, resource.ID, model.ResourceScopeSuspended); err != nil {
 				return err
 			}
@@ -153,6 +156,9 @@ func (s *ProviderSupplyService) SetResourceScopeLifecycle(ctx context.Context, a
 		if scope.Type == model.ResourceScopeCluster {
 			switch input.TargetState {
 			case model.ResourceScopeSuspended:
+				if err := suspendActiveAllocationsForScope(tx, providerID, resource.ID, scope.ID, true); err != nil {
+					return err
+				}
 				if err := cascadeChildScopes(tx, providerID, resource.ID, scope.ID, model.ResourceScopeSuspended); err != nil {
 					return err
 				}
@@ -160,6 +166,10 @@ func (s *ProviderSupplyService) SetResourceScopeLifecycle(ctx context.Context, a
 				if err := cascadeChildScopes(tx, providerID, resource.ID, scope.ID, model.ResourceScopeRetired); err != nil {
 					return err
 				}
+			}
+		} else if input.TargetState == model.ResourceScopeSuspended {
+			if err := suspendActiveAllocationsForScope(tx, providerID, resource.ID, scope.ID, false); err != nil {
+				return err
 			}
 		}
 		updated := tx.Model(&model.ResourceScope{}).
@@ -349,6 +359,29 @@ func cascadeChildScopes(tx *gorm.DB, providerID, resourceID, parentID string, ta
 		return ErrProviderSupplyInvalidInput
 	}
 	return query.Updates(map[string]any{"lifecycle_state": target, "row_version": gorm.Expr("row_version + 1")}).Error
+}
+
+func suspendActiveAllocationsForResource(tx *gorm.DB, providerID, resourceID string) error {
+	return tx.Model(&model.ResourceAllocation{}).
+		Where("state = ? AND id IN (?)", model.ResourceAllocationActive,
+			tx.Table("resource_allocation_item AS item").Select("item.allocation_id").
+				Joins("JOIN resource_scope AS scope ON scope.id = item.scope_id").
+				Where("scope.provider_id = ? AND scope.platform_resource_id = ?", providerID, resourceID)).
+		Updates(map[string]any{"state": model.ResourceAllocationSuspended, "row_version": gorm.Expr("row_version + 1")}).Error
+}
+
+func suspendActiveAllocationsForScope(tx *gorm.DB, providerID, resourceID, scopeID string, includeChildren bool) error {
+	scopes := tx.Model(&model.ResourceScope{}).Select("id").
+		Where("provider_id = ? AND platform_resource_id = ?", providerID, resourceID)
+	if includeChildren {
+		scopes = scopes.Where("id = ? OR parent_id = ?", scopeID, scopeID)
+	} else {
+		scopes = scopes.Where("id = ?", scopeID)
+	}
+	return tx.Model(&model.ResourceAllocation{}).
+		Where("state = ? AND id IN (?)", model.ResourceAllocationActive,
+			tx.Table("resource_allocation_item").Select("allocation_id").Where("scope_id IN (?)", scopes)).
+		Updates(map[string]any{"state": model.ResourceAllocationSuspended, "row_version": gorm.Expr("row_version + 1")}).Error
 }
 
 func scopeParentAvailable(tx *gorm.DB, scope *model.ResourceScope) bool {

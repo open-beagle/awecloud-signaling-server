@@ -237,6 +237,11 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 	require.NoError(t, database.Model(&model.ResourceAllocation{}).Where("id = ?", allocation.ID).Updates(map[string]any{
 		"state": model.ResourceAllocationActive, "row_version": int64(2),
 	}).Error)
+	// Production allocations historically changed their occupied Scope to suspended.
+	// An active Allocation remains the consumption authority for that existing assignment.
+	require.NoError(t, database.Model(&model.ResourceScope{}).Where("id = ?", namespaceScope.ID).Updates(map[string]any{
+		"lifecycle_state": model.ResourceScopeSuspended, "row_version": gorm.Expr("row_version + 1"),
+	}).Error)
 
 	targetSnapshot := `{"namespace_uid":"projection-namespace-uid","namespace_name":"projection-workloads","service_uid":"projection-service-uid","service_name":"projection-api","cluster_ip":"10.0.0.42","port_name":"https","port_number":443,"protocol":"TCP","labels_allowlist":{}}`
 	observation := model.WorkloadObservation{

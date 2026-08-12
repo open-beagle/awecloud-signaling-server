@@ -40,6 +40,7 @@ func prepareProviderSupplyAPIFixture(t *testing.T, flags config.FeatureFlagsSect
 		&model.TechnicalResource{}, &model.TechnicalResourceBinding{}, &model.SupplyInventoryReceipt{},
 		&model.SupplyCandidate{}, &model.PlatformResource{}, &model.PlatformResourceSource{},
 		&model.NamespaceObservation{}, &model.ResourceScope{}, &model.OutboxEvent{}, &model.TechnicalResourceDeployToken{},
+		&model.ResourceAllocation{}, &model.ResourceAllocationItem{},
 		&model.Node{}, &model.Endpoint{}, &model.DomainRegistry{},
 	))
 	var providerMemberships int64

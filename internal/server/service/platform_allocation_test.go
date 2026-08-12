@@ -118,6 +118,57 @@ func TestPlatformAllocationLifecycleAndScopeReservation(t *testing.T) {
 	require.ErrorIs(t, err, ErrPlatformAllocationStateTransition)
 }
 
+func TestScopeGovernanceSuspensionSuspendsActiveAllocation(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		suspend func(t *testing.T, fixture platformAllocationFixture)
+	}{
+		{name: "namespace", suspend: func(t *testing.T, fixture platformAllocationFixture) {
+			_, err := fixture.providerSupplyFixture.service.SetResourceScopeLifecycle(context.Background(), fixture.providerSupplyFixture.authorization, SetResourceScopeLifecycleInput{
+				ScopeID: fixture.scopeA.ID, TargetState: model.ResourceScopeSuspended,
+				ExpectedRowVersion: fixture.scopeA.RowVersion, Reason: "stop assigned namespace",
+			})
+			require.NoError(t, err)
+		}},
+		{name: "cluster", suspend: func(t *testing.T, fixture platformAllocationFixture) {
+			_, err := fixture.providerSupplyFixture.service.SetResourceScopeLifecycle(context.Background(), fixture.providerSupplyFixture.authorization, SetResourceScopeLifecycleInput{
+				ScopeID: fixture.clusterScope.ID, TargetState: model.ResourceScopeSuspended,
+				ExpectedRowVersion: fixture.clusterScope.RowVersion, Reason: "stop assigned cluster",
+			})
+			require.NoError(t, err)
+		}},
+		{name: "platform resource", suspend: func(t *testing.T, fixture platformAllocationFixture) {
+			var resource model.PlatformResource
+			require.NoError(t, fixture.database.First(&resource, "id = ?", fixture.scopeA.PlatformResourceID).Error)
+			_, err := fixture.providerSupplyFixture.service.SetPlatformResourceLifecycle(context.Background(), fixture.providerSupplyFixture.authorization, SetPlatformResourceLifecycleInput{
+				ResourceID: resource.ID, TargetState: model.PlatformResourceSuspended,
+				ExpectedRowVersion: resource.RowVersion, Reason: "stop assigned resource",
+			})
+			require.NoError(t, err)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newPlatformAllocationFixture(t)
+			ctx := context.Background()
+			allocation, err := fixture.service.CreateDraft(ctx, fixture.authorization, CreatePlatformAllocationInput{
+				TenantID: fixture.tenantA.ID, Mode: model.ResourceAllocationAssigned, ScopeID: fixture.scopeA.ID,
+				ValidFrom: fixture.now.Add(-time.Minute), ContractRef: "governance-suspension",
+			})
+			require.NoError(t, err)
+			active, err := fixture.service.Activate(ctx, fixture.authorization, PlatformAllocationActionInput{
+				AllocationID: allocation.ID, ExpectedRowVersion: allocation.RowVersion, Reason: "activate governed allocation",
+			})
+			require.NoError(t, err)
+
+			test.suspend(t, fixture)
+			var persisted model.ResourceAllocation
+			require.NoError(t, fixture.database.First(&persisted, "id = ?", active.ID).Error)
+			require.Equal(t, model.ResourceAllocationSuspended, persisted.State)
+			require.Equal(t, active.RowVersion+1, persisted.RowVersion)
+		})
+	}
+}
+
 func TestPlatformAllocationDraftPolicyRenewAndQuery(t *testing.T) {
 	fixture := newPlatformAllocationFixture(t)
 	ctx := context.Background()
