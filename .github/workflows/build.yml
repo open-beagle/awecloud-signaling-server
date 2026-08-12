@@ -103,6 +103,7 @@ jobs:
           file: ./.beagle/server.dockerfile
           platforms: linux/amd64
           push: true
+          provenance: false
           tags: ${{ env.SERVER_IMAGE_REPOSITORY }}:${{ needs.prepare.outputs.version }}-amd64
           build-args: |
             BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-amd64
@@ -116,6 +117,7 @@ jobs:
           file: ./.beagle/server.dockerfile
           platforms: linux/arm64
           push: true
+          provenance: false
           tags: ${{ env.SERVER_IMAGE_REPOSITORY }}:${{ needs.prepare.outputs.version }}-arm64
           build-args: |
             BASE=registry.cn-qingdao.aliyuncs.com/wod/alpine:3-arm64
