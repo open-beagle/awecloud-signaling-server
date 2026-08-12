@@ -357,6 +357,47 @@ func TestResourceSessionEnsureForDesktopRejectsUnavailableEvidence(t *testing.T)
 	}
 }
 
+func TestResourceSessionEnsureManyForDesktopCommitsValidInputsAndIsolatesFailures(t *testing.T) {
+	fixture := newTenantManagementConstraintFixture(t)
+	service := NewResourceSessionService(serverdb.DB)
+	base := CreateResourceSessionInput{
+		TenantID: fixture.tenant.ID, ResourceID: fixture.resource.ID, Action: "connect", DeviceID: fixture.desktop.ID,
+		ClientCapability: "resource_session_v2",
+	}
+	valid := base
+	valid.TargetRevisionID = fixture.target.ID
+	valid.RequestID = "desktop-batch-valid"
+	invalid := base
+	invalid.TargetRevisionID = uuid.NewString()
+	invalid.RequestID = "desktop-batch-invalid"
+
+	results, err := service.EnsureManyForDesktop(context.Background(), fixture.member.ID, []CreateResourceSessionInput{valid, invalid})
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	require.NotNil(t, results[0].Session)
+	require.NoError(t, results[0].Err)
+	require.Nil(t, results[1].Session)
+	require.ErrorIs(t, results[1].Err, ErrResourceSessionTargetUnavailable)
+	var count int64
+	require.NoError(t, serverdb.DB.Model(&model.ResourceSession{}).Where("request_id = ?", valid.RequestID).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+}
+
+func TestResourceSessionEnsureManyForDesktopStopsOnCanceledContext(t *testing.T) {
+	fixture := newTenantManagementConstraintFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	results, err := NewResourceSessionService(serverdb.DB).EnsureManyForDesktop(ctx, fixture.member.ID, []CreateResourceSessionInput{{
+		TenantID: fixture.tenant.ID, ResourceID: fixture.resource.ID, TargetRevisionID: fixture.target.ID,
+		Action: "connect", DeviceID: fixture.desktop.ID, ClientCapability: "resource_session_v2", RequestID: "desktop-batch-canceled",
+	}})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, results)
+	var count int64
+	require.NoError(t, serverdb.DB.Model(&model.ResourceSession{}).Where("request_id = ?", "desktop-batch-canceled").Count(&count).Error)
+	require.Zero(t, count)
+}
+
 func TestTenantGrantMutationRollsBackWhenTerminationOutboxFails(t *testing.T) {
 	fixture := newTenantManagementConstraintFixture(t)
 	database := serverdb.DB

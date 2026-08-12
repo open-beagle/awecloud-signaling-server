@@ -155,6 +155,11 @@ type CreateResourceSessionInput struct {
 	TraceID          string
 }
 
+type EnsureDesktopResourceSessionResult struct {
+	Session *model.ResourceSession
+	Err     error
+}
+
 func (s *ResourceSessionService) Create(ctx context.Context, authorization *ManagementAuthorizationContext, input CreateResourceSessionInput) (*model.ResourceSession, error) {
 	return s.create(ctx, authorization, input, false)
 }
@@ -320,6 +325,34 @@ func (s *ResourceSessionService) EnsureForDesktop(ctx context.Context, userID ui
 		return &existing, nil
 	}
 	return s.create(ctx, authorization, input, true)
+}
+
+// EnsureManyForDesktop runs one Desktop resource refresh under a single
+// SQLite write-lock acquisition. Individual resources remain isolated by the
+// nested savepoints used by EnsureForDesktop.
+func (s *ResourceSessionService) EnsureManyForDesktop(ctx context.Context, userID uint64, inputs []CreateResourceSessionInput) ([]EnsureDesktopResourceSessionResult, error) {
+	if s == nil || s.db == nil || userID == 0 || len(inputs) == 0 {
+		return nil, ErrResourceSessionInvalidInput
+	}
+	results := make([]EnsureDesktopResourceSessionResult, len(inputs))
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		batch := NewResourceSessionService(tx)
+		batch.now = s.now
+		for i := range inputs {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			results[i].Session, results[i].Err = batch.EnsureForDesktop(ctx, userID, inputs[i])
+			if results[i].Err != nil {
+				results[i].Session = nil
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 func reauthorizeDesktopSessionMember(tx *gorm.DB, authorization *ManagementAuthorizationContext, tenantID string, at time.Time) error {

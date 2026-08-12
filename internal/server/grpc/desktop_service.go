@@ -1824,45 +1824,80 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 	}
 
 	sessionService := service.NewResourceSessionService(db.DB)
-	projections := make([]desktopTenantResourceProjection, 0, len(resources))
-	for _, resource := range resources {
+	resourceByID := make(map[string]model.TenantResource, len(resources))
+	availableResourceIDs := make([]string, 0, len(resources))
+	for i := range resources {
+		resourceByID[resources[i].ID] = resources[i]
+		availableResourceIDs = append(availableResourceIDs, resources[i].ID)
+	}
+	type desktopTargetRow struct {
+		model.TenantResourceTargetRevision
+		TenantResourceID string `gorm:"column:tenant_resource_id"`
+	}
+	var targets []desktopTargetRow
+	if err := db.DB.WithContext(ctx).Table("resource_target_revision_v2 AS target").Select("target.*, source.tenant_resource_id AS tenant_resource_id").
+		Joins("JOIN tenant_resource_source AS source ON source.id = target.tenant_resource_source_id").
+		Where("source.tenant_resource_id IN ? AND source.enabled = ? AND target.superseded_at IS NULL AND target.ready = ?", availableResourceIDs, true, true).
+		Order("source.tenant_resource_id ASC, target.target_snapshot ASC, target.id ASC").Find(&targets).Error; err != nil {
+		logger.Warnf("Desktop 资源发现批量查询当前目标失败: desktop_id=%d tenant_id=%s err=%v", desktop.ID, tenantID, err)
+		return nil, nil
+	}
+	type desktopSessionCandidate struct {
+		resource model.TenantResource
+		target   model.TenantResourceTargetRevision
+		targetV2 service.SessionAuthorizationTarget
+	}
+	candidates := make([]desktopSessionCandidate, 0, len(targets))
+	inputs := make([]service.CreateResourceSessionInput, 0, len(targets))
+	for i := range targets {
+		if err := ctx.Err(); err != nil {
+			return nil, nil
+		}
+		resource, found := resourceByID[targets[i].TenantResourceID]
+		if !found {
+			continue
+		}
 		action := actionByResource[resource.ID]
 		if (resource.Type == model.TenantResourceContainerSSH && action != "shell") ||
 			(resource.Type == model.TenantResourceContainerService && action != "connect") {
 			continue
 		}
-		var targets []model.TenantResourceTargetRevision
-		if err := db.DB.WithContext(ctx).Table("resource_target_revision_v2 AS target").Select("target.*").
-			Joins("JOIN tenant_resource_source AS source ON source.id = target.tenant_resource_source_id").
-			Where("source.tenant_resource_id = ? AND source.enabled = ? AND target.superseded_at IS NULL AND target.ready = ?", resource.ID, true, true).
-			Order("target.target_snapshot ASC, target.id ASC").Find(&targets).Error; err != nil {
-			logger.Warnf("Desktop 资源发现查询当前目标失败: desktop_id=%d resource_id=%s err=%v", desktop.ID, resource.ID, err)
+		var targetV2 service.SessionAuthorizationTarget
+		if err := json.Unmarshal([]byte(targets[i].TenantResourceTargetRevision.TargetSnapshot), &targetV2); err != nil {
+			logger.Warnf("Desktop 资源发现目标快照无效: desktop_id=%d resource_id=%s err=%v", desktop.ID, resource.ID, err)
 			continue
 		}
-		for _, target := range targets {
-			session, err := sessionService.EnsureForDesktop(ctx, desktop.UserID, service.CreateResourceSessionInput{
-				TenantID: resource.TenantID, ResourceID: resource.ID, TargetRevisionID: target.ID, Action: action, DeviceID: desktop.ID,
-				ClientCapability: "resource_session_v2", RequestID: "desktop-resource:" + uuid.NewString(),
-			})
-			if err != nil {
-				logger.Warnf("Desktop ResourceSession 授权失败: desktop_id=%d resource_id=%s target_revision_id=%s err=%v", desktop.ID, resource.ID, target.ID, err)
-				continue
-			}
-			var targetV2 service.SessionAuthorizationTarget
-			if err := json.Unmarshal([]byte(target.TargetSnapshot), &targetV2); err != nil {
-				logger.Warnf("Desktop 资源发现目标快照无效: desktop_id=%d resource_id=%s err=%v", desktop.ID, resource.ID, err)
-				continue
-			}
-			agentNode, err := desktopAccessAgentNode(ctx, target.AccessTechnicalResourceID)
-			if err != nil {
-				logger.Warnf("Desktop 资源发现访问 Agent 不可用: desktop_id=%d resource_id=%s technical_resource_id=%s err=%v",
-					desktop.ID, resource.ID, target.AccessTechnicalResourceID, err)
-				continue
-			}
-			projections = append(projections, desktopTenantResourceProjection{
-				resource: resource, tenant: tenantByID[resource.TenantID], session: session, target: target, agent: agentNode, targetV2: targetV2,
-			})
+		candidates = append(candidates, desktopSessionCandidate{resource: resource, target: targets[i].TenantResourceTargetRevision, targetV2: targetV2})
+		inputs = append(inputs, service.CreateResourceSessionInput{
+			TenantID: resource.TenantID, ResourceID: resource.ID, TargetRevisionID: targets[i].TenantResourceTargetRevision.ID, Action: action, DeviceID: desktop.ID,
+			ClientCapability: "resource_session_v2", RequestID: "desktop-resource:" + uuid.NewString(),
+		})
+	}
+	if len(inputs) == 0 {
+		return nil, nil
+	}
+	ensured, err := sessionService.EnsureManyForDesktop(ctx, desktop.UserID, inputs)
+	if err != nil {
+		logger.Warnf("Desktop ResourceSession 批量授权失败: desktop_id=%d tenant_id=%s err=%v", desktop.ID, tenantID, err)
+		return nil, nil
+	}
+	projections := make([]desktopTenantResourceProjection, 0, len(candidates))
+	for i := range candidates {
+		if ensured[i].Err != nil {
+			logger.Warnf("Desktop ResourceSession 授权失败: desktop_id=%d resource_id=%s target_revision_id=%s err=%v",
+				desktop.ID, candidates[i].resource.ID, candidates[i].target.ID, ensured[i].Err)
+			continue
 		}
+		agentNode, err := desktopAccessAgentNode(ctx, candidates[i].target.AccessTechnicalResourceID)
+		if err != nil {
+			logger.Warnf("Desktop 资源发现访问 Agent 不可用: desktop_id=%d resource_id=%s technical_resource_id=%s err=%v",
+				desktop.ID, candidates[i].resource.ID, candidates[i].target.AccessTechnicalResourceID, err)
+			continue
+		}
+		projections = append(projections, desktopTenantResourceProjection{
+			resource: candidates[i].resource, tenant: tenantByID[candidates[i].resource.TenantID], session: ensured[i].Session,
+			target: candidates[i].target, agent: agentNode, targetV2: candidates[i].targetV2,
+		})
 	}
 
 	permissions := make(map[string]service.SessionAuthorizationPermission)
