@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -246,15 +247,9 @@ func (s *DesktopServiceServer) createOrGetDesktopNode(ctx context.Context, userI
 
 // Authenticate Desktop 认证
 func (s *DesktopServiceServer) Authenticate(ctx context.Context, req *pb.DesktopAuthenticateRequest) (*pb.DesktopAuthenticateResponse, error) {
-	var node model.Node
-	if err := db.DB.WithContext(ctx).First(&node, req.DesktopId).Error; err != nil {
-		return &pb.DesktopAuthenticateResponse{Success: false, Message: "设备不存在"}, nil
-	}
-	if node.Type != model.NodeTypeDesktop {
-		return &pb.DesktopAuthenticateResponse{Success: false, Message: "设备类型错误"}, nil
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(node.SecretHash), []byte(req.Secret)); err != nil {
-		return &pb.DesktopAuthenticateResponse{Success: false, Message: "认证失败"}, nil
+	node, user, message, ok := s.VerifyCredential(ctx, req.DesktopId, req.Secret)
+	if !ok {
+		return &pb.DesktopAuthenticateResponse{Success: false, Message: message}, nil
 	}
 
 	now := time.Now()
@@ -270,17 +265,8 @@ func (s *DesktopServiceServer) Authenticate(ctx context.Context, req *pb.Desktop
 		}
 		node.Hostname = req.SystemInfo.Hostname
 	}
-	db.DB.WithContext(ctx).Save(&node)
-
-	var user model.User
-	if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err != nil {
-		return &pb.DesktopAuthenticateResponse{Success: false, Message: "用户不存在"}, nil
-	}
-
-	// 检查用户是否启用
-	if !user.Enabled {
-		logger.Warnf("Desktop 认证失败: 用户已禁用, desktopId=%d, userId=%d, userName=%s", req.DesktopId, user.ID, user.Name)
-		return &pb.DesktopAuthenticateResponse{Success: false, Message: "您的账号已被禁用"}, nil
+	if err := db.DB.WithContext(ctx).Save(&node).Error; err != nil {
+		return nil, err
 	}
 
 	resp := &pb.DesktopAuthenticateResponse{Success: true, Message: "认证成功"}
@@ -291,6 +277,30 @@ func (s *DesktopServiceServer) Authenticate(ctx context.Context, req *pb.Desktop
 		}
 	}
 	return resp, nil
+}
+
+// VerifyCredential verifies a Desktop request without mutating heartbeat state
+// or provisioning Headscale credentials.
+func (s *DesktopServiceServer) VerifyCredential(ctx context.Context, desktopID uint64, secret string) (model.Node, model.User, string, bool) {
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, desktopID).Error; err != nil {
+		return model.Node{}, model.User{}, "设备不存在", false
+	}
+	if node.Type != model.NodeTypeDesktop {
+		return model.Node{}, model.User{}, "设备类型错误", false
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(node.SecretHash), []byte(secret)); err != nil {
+		return model.Node{}, model.User{}, "认证失败", false
+	}
+	var user model.User
+	if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err != nil {
+		return model.Node{}, model.User{}, "用户不存在", false
+	}
+	if !user.Enabled {
+		logger.Warnf("Desktop 凭据验证失败: 用户已禁用, desktopId=%d, userId=%d, userName=%s", desktopID, user.ID, user.Name)
+		return model.Node{}, model.User{}, "您的账号已被禁用", false
+	}
+	return node, user, "", true
 }
 
 // Heartbeat Desktop 心跳（双向流）
@@ -2893,16 +2903,8 @@ func (s *DesktopServiceServer) HandleDesktopHeartbeatREST(ctx context.Context, d
 
 // GetDataSnapshotREST REST 数据快照（替代双向流 DataStream）
 func (s *DesktopServiceServer) GetDataSnapshotREST(ctx context.Context, desktopID uint64) (map[string]any, error) {
-	// 查找 node 获取 userID
-	var node model.Node
-	if err := db.DB.WithContext(ctx).First(&node, desktopID).Error; err != nil {
-		return nil, fmt.Errorf("desktop_id=%d 不存在", desktopID)
+	if s.dataAssembler == nil {
+		return nil, errors.New("DesktopDataAssembler 未初始化")
 	}
-
-	return map[string]any{
-		"services":             s.buildServicesData(ctx),
-		"hosts":                s.buildHostsData(ctx, node.UserID),
-		"devices":              s.buildDevicesData(ctx, node.UserID, node.ID),
-		"favorite_service_ids": s.buildFavoritesData(ctx, node.UserID),
-	}, nil
+	return s.dataAssembler.BuildDataSnapshotREST(ctx, desktopID)
 }

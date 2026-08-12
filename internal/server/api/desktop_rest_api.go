@@ -41,12 +41,8 @@ func (a *DesktopRESTAPI) desktopAuth(c *gin.Context) uint64 {
 		return 0
 	}
 
-	// 调用 gRPC 服务层验证凭证
-	resp, err := a.desktopService.Authenticate(c.Request.Context(), &pb.DesktopAuthenticateRequest{
-		DesktopId: desktopID,
-		Secret:    secret,
-	})
-	if err != nil || !resp.Success {
+	_, _, _, ok := a.desktopService.VerifyCredential(c.Request.Context(), desktopID, secret)
+	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "认证失败"})
 		return 0
 	}

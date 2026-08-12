@@ -17,9 +17,11 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/cache"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	grpcserver "github.com/open-beagle/awecloud-signaling-server/internal/server/grpc"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 )
 
 const desktopRESTResourcesDeadline = 10 * time.Second
@@ -84,6 +86,31 @@ func TestDesktopRESTResourcesHandlesProductionScaleWithinDeadline(t *testing.T) 
 	require.Equal(t, int64(resourcesPerType*2), sessionCount)
 	t.Logf("desktop REST production scale: cold=%s warm=%s service=%d pod=%d sessions=%d",
 		firstDuration, secondDuration, len(second.ContainerService), len(second.ContainerSSH), sessionCount)
+}
+
+func TestDesktopRESTDataUsesReadOnlyCredentialVerificationAndBatchAssembler(t *testing.T) {
+	router, desktopID, secret, _ := newDesktopRESTResourcesFixture(t)
+	originalHeartbeat := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	require.NoError(t, db.DB.Model(&model.Node{}).Where("id = ?", desktopID).Update("last_heartbeat", originalHeartbeat).Error)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/desktop/data", nil)
+	req.Header.Set("X-Desktop-ID", fmt.Sprint(desktopID))
+	req.Header.Set("X-Desktop-Secret", secret)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var response map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Contains(t, response, "services")
+	require.Contains(t, response, "hosts")
+	require.Contains(t, response, "devices")
+	require.Contains(t, response, "favorite_service_ids")
+
+	var stored model.Node
+	require.NoError(t, db.DB.First(&stored, desktopID).Error)
+	require.NotNil(t, stored.LastHeartbeat)
+	require.WithinDuration(t, originalHeartbeat, *stored.LastHeartbeat, time.Millisecond)
 }
 
 func requestDesktopRESTResources(t *testing.T, router http.Handler, desktopID uint64, secret, tenantID string) (desktopRESTResourcesResponse, time.Duration) {
@@ -176,7 +203,12 @@ func newDesktopRESTResourcesFixtureWithCounts(t *testing.T, serviceCount, sshCou
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	desktopService := grpcserver.NewDesktopServiceServer(&config.ServerConfig{FeatureFlags: config.FeatureFlagsSection{ResourceModelWrite: true}})
+	runtimeStore := cache.NewNodeRuntimeStore()
+	require.NoError(t, runtimeStore.LoadFromDB(context.Background(), database))
+	desktopService.SetRuntimeStore(runtimeStore)
+	desktopService.SetDataAssembler(service.NewDesktopDataAssembler(database, runtimeStore, nil))
 	desktopAPI := NewDesktopRESTAPI(desktopService, nil)
+	router.GET("/api/v1/desktop/data", desktopAPI.GetData)
 	router.GET("/api/v1/desktop/resources", desktopAPI.GetResources)
 	return router, desktop.ID, secret, tenant.ID
 }

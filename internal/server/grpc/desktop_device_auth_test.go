@@ -11,6 +11,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
@@ -70,4 +71,45 @@ func TestDesktopDeviceMutationsRequireCurrentDeviceSecret(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, deleted.Success)
 	require.ErrorIs(t, database.First(&model.Node{}, target.ID).Error, gorm.ErrRecordNotFound)
+}
+
+func TestDesktopDataSnapshotRequiresAssembler(t *testing.T) {
+	server := NewDesktopServiceServer(&config.ServerConfig{})
+	data, err := server.GetDataSnapshotREST(context.Background(), 1)
+	require.EqualError(t, err, "DesktopDataAssembler 未初始化")
+	require.Nil(t, data)
+}
+
+func TestDesktopCredentialVerificationIsReadOnlyAndAuthenticateUpdatesHeartbeat(t *testing.T) {
+	original := db.DB
+	t.Cleanup(func() { db.DB = original })
+	database, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:desktop-credential-%d?mode=memory&cache=shared", time.Now().UnixNano())), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, database.AutoMigrate(&model.User{}, &model.Node{}))
+	db.DB = database
+
+	user := model.User{Name: "credential-member", Role: model.UserRoleClient, SecretHash: "user", Enabled: true}
+	require.NoError(t, database.Create(&user).Error)
+	hash, err := bcrypt.GenerateFromPassword([]byte("current-secret"), bcrypt.MinCost)
+	require.NoError(t, err)
+	originalHeartbeat := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	node := model.Node{UserID: user.ID, Name: "credential-desktop", Type: model.NodeTypeDesktop, SecretHash: string(hash), LastHeartbeat: &originalHeartbeat}
+	require.NoError(t, database.Create(&node).Error)
+	server := NewDesktopServiceServer(&config.ServerConfig{})
+
+	verifiedNode, verifiedUser, _, ok := server.VerifyCredential(context.Background(), node.ID, "current-secret")
+	require.True(t, ok)
+	require.Equal(t, node.ID, verifiedNode.ID)
+	require.Equal(t, user.ID, verifiedUser.ID)
+	var stored model.Node
+	require.NoError(t, database.First(&stored, node.ID).Error)
+	require.WithinDuration(t, originalHeartbeat, *stored.LastHeartbeat, time.Millisecond)
+
+	_, _, _, ok = server.VerifyCredential(context.Background(), node.ID, "wrong-secret")
+	require.False(t, ok)
+	response, err := server.Authenticate(context.Background(), &pb.DesktopAuthenticateRequest{DesktopId: node.ID, Secret: "current-secret"})
+	require.NoError(t, err)
+	require.True(t, response.Success)
+	require.NoError(t, database.First(&stored, node.ID).Error)
+	require.True(t, stored.LastHeartbeat.After(originalHeartbeat))
 }
