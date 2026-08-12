@@ -768,7 +768,7 @@ func loadTenantResourceChainForTarget(tx *gorm.DB, tenantID, resourceID, targetR
 			continue
 		}
 		if candidate.Evidence.State != model.WorkloadObservationSourceObserved || !candidate.Evidence.Ready ||
-			!candidate.Evidence.LeaseExpiresAt.After(now) || candidate.Evidence.SourceRevision != candidate.Target.SourceRevision {
+			!candidate.Evidence.LeaseExpiresAt.After(now) {
 			continue
 		}
 		var technical model.TechnicalResource

@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	serverdb "github.com/open-beagle/awecloud-signaling-server/internal/server/db"
@@ -310,6 +311,50 @@ func TestResourceSessionEnsureForDesktopUsesMemberGrantAndReusesLiveSession(t *t
 	}
 	_, err = sessions.List(context.Background(), memberAuthorization, fixture.tenant.ID, ResourceSessionListInput{})
 	require.ErrorIs(t, err, ErrManagementPermissionDenied)
+}
+
+func TestResourceSessionEnsureForDesktopAcceptsCurrentEvidenceWithIndependentRevision(t *testing.T) {
+	fixture := newTenantManagementConstraintFixture(t)
+	for revision := int64(2); revision <= 11; revision++ {
+		require.NoError(t, serverdb.DB.Model(&model.WorkloadObservationSource{}).
+			Where("workload_observation_id = ? AND source_technical_resource_id = ?", fixture.source.WorkloadObservationID, fixture.technical.ID).
+			Updates(map[string]any{"source_revision": revision, "row_version": gorm.Expr("row_version + 1")}).Error)
+	}
+
+	session, err := NewResourceSessionService(serverdb.DB).EnsureForDesktop(context.Background(), fixture.member.ID, CreateResourceSessionInput{
+		TenantID: fixture.tenant.ID, ResourceID: fixture.resource.ID, Action: "connect", DeviceID: fixture.desktop.ID,
+		ClientCapability: "resource_session_v2", RequestID: "desktop-independent-evidence-revision",
+	})
+	require.NoError(t, err)
+	require.Equal(t, fixture.target.ID, session.TargetRevisionID)
+}
+
+func TestResourceSessionEnsureForDesktopRejectsUnavailableEvidence(t *testing.T) {
+	tests := []struct {
+		name    string
+		updates map[string]any
+	}{
+		{name: "not ready", updates: map[string]any{"ready": false}},
+		{name: "stale", updates: map[string]any{"state": model.WorkloadObservationSourceStale}},
+		{name: "expired", updates: map[string]any{
+			"received_at": time.Now().UTC().Add(-2 * time.Minute), "lease_expires_at": time.Now().UTC().Add(-time.Minute),
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newTenantManagementConstraintFixture(t)
+			tt.updates["row_version"] = gorm.Expr("row_version + 1")
+			require.NoError(t, serverdb.DB.Model(&model.WorkloadObservationSource{}).
+				Where("workload_observation_id = ? AND source_technical_resource_id = ?", fixture.source.WorkloadObservationID, fixture.technical.ID).
+				Updates(tt.updates).Error)
+
+			_, err := NewResourceSessionService(serverdb.DB).EnsureForDesktop(context.Background(), fixture.member.ID, CreateResourceSessionInput{
+				TenantID: fixture.tenant.ID, ResourceID: fixture.resource.ID, Action: "connect", DeviceID: fixture.desktop.ID,
+				ClientCapability: "resource_session_v2", RequestID: "desktop-unavailable-evidence-" + tt.name,
+			})
+			require.ErrorIs(t, err, ErrResourceSessionTargetUnavailable)
+		})
+	}
 }
 
 func TestTenantGrantMutationRollsBackWhenTerminationOutboxFails(t *testing.T) {
