@@ -327,30 +327,21 @@ func (s *ResourceSessionService) EnsureForDesktop(ctx context.Context, userID ui
 	return s.create(ctx, authorization, input, true)
 }
 
-// EnsureManyForDesktop runs one Desktop resource refresh under a single
-// SQLite write-lock acquisition. Individual resources remain isolated by the
-// nested savepoints used by EnsureForDesktop.
+// EnsureManyForDesktop isolates each resource in its own transaction so one
+// refresh cannot hold a SQLite connection and write lock across the full list.
 func (s *ResourceSessionService) EnsureManyForDesktop(ctx context.Context, userID uint64, inputs []CreateResourceSessionInput) ([]EnsureDesktopResourceSessionResult, error) {
 	if s == nil || s.db == nil || userID == 0 || len(inputs) == 0 {
 		return nil, ErrResourceSessionInvalidInput
 	}
 	results := make([]EnsureDesktopResourceSessionResult, len(inputs))
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		batch := NewResourceSessionService(tx)
-		batch.now = s.now
-		for i := range inputs {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			results[i].Session, results[i].Err = batch.EnsureForDesktop(ctx, userID, inputs[i])
-			if results[i].Err != nil {
-				results[i].Session = nil
-			}
+	for i := range inputs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+		results[i].Session, results[i].Err = s.EnsureForDesktop(ctx, userID, inputs[i])
+		if results[i].Err != nil {
+			results[i].Session = nil
+		}
 	}
 	return results, nil
 }
@@ -377,15 +368,11 @@ func reauthorizeDesktopSessionMember(tx *gorm.DB, authorization *ManagementAutho
 }
 
 func calculateResourceSessionValidUntil(now, startedAt time.Time, maxSessionSeconds int, deadlines ...*time.Time) time.Time {
-	validUntil := now.UTC().Add(resourceSessionSnapshotTTL)
+	validUntil := startedAt.UTC().Add(time.Duration(maxSessionSeconds) * time.Second)
 	for _, deadline := range deadlines {
 		if deadline != nil && !deadline.IsZero() && deadline.UTC().Before(validUntil) {
 			validUntil = deadline.UTC()
 		}
-	}
-	maxSessionUntil := startedAt.UTC().Add(time.Duration(maxSessionSeconds) * time.Second)
-	if maxSessionUntil.Before(validUntil) {
-		validUntil = maxSessionUntil
 	}
 	return validUntil
 }

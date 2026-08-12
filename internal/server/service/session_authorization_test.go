@@ -39,7 +39,7 @@ func TestSessionAuthorizationBuildsTrustedSnapshotAndReliableTermination(t *test
 	require.Equal(t, fixture.now.Add(31*time.Second), permission.ValidUntil)
 	var renewed model.ResourceSession
 	require.NoError(t, database.First(&renewed, "id = ?", session.ID).Error)
-	require.Equal(t, permission.ValidUntil, renewed.ValidUntil)
+	require.Equal(t, session.StartedAt.Add(time.Hour), renewed.ValidUntil)
 	require.Equal(t, int64(2), renewed.RowVersion)
 
 	require.NoError(t, database.Model(&model.TenantAccessGrant{}).Where("id = ?", fixture.grant.ID).Updates(map[string]any{
@@ -73,6 +73,46 @@ func TestSessionAuthorizationBuildsTrustedSnapshotAndReliableTermination(t *test
 	require.NotNil(t, termination.AcknowledgedAt)
 	require.NoError(t, database.First(&stored, "id = ?", session.ID).Error)
 	require.NotNil(t, stored.DisconnectAcknowledgedAt)
+}
+
+func TestSessionAuthorizationLimitsDueTerminationBatch(t *testing.T) {
+	fixture := newTenantManagementConstraintFixture(t)
+	database := serverdb.DB
+	service := NewSessionAuthorizationService(database)
+	service.now = func() time.Time { return fixture.now.Add(time.Second) }
+	for i := 0; i < sessionAuthorizationReportMaxItems+5; i++ {
+		session := fixture.session(uuid.NewString())
+		session.Status = model.ResourceSessionEnding
+		require.NoError(t, database.Create(&session).Error)
+		require.NoError(t, database.Create(&model.ResourceSessionTermination{
+			ID: uuid.NewString(), SessionID: session.ID, CommandRevision: 1,
+			ReasonCode: sessionAuthorizationExpiredCode, Reason: "expired", Status: model.ResourceSessionTerminationPending,
+		}).Error)
+	}
+
+	snapshot, err := service.BuildSnapshot(context.Background(), fixture.technical.ID, true)
+	require.NoError(t, err)
+	require.Len(t, snapshot.Terminations, sessionAuthorizationReportMaxItems)
+}
+
+func TestSessionAuthorizationSkipsTerminationUntilRetryIsDue(t *testing.T) {
+	fixture := newTenantManagementConstraintFixture(t)
+	database := serverdb.DB
+	session := fixture.session(uuid.NewString())
+	session.Status = model.ResourceSessionEnding
+	require.NoError(t, database.Create(&session).Error)
+	nextAttempt := fixture.now.Add(time.Minute)
+	require.NoError(t, database.Create(&model.ResourceSessionTermination{
+		ID: uuid.NewString(), SessionID: session.ID, CommandRevision: 1,
+		ReasonCode: sessionAuthorizationExpiredCode, Reason: "expired", Status: model.ResourceSessionTerminationDelivered,
+		DeliveredAt: &fixture.now, NextAttemptAt: &nextAttempt,
+	}).Error)
+
+	service := NewSessionAuthorizationService(database)
+	service.now = func() time.Time { return fixture.now.Add(time.Second) }
+	snapshot, err := service.BuildSnapshot(context.Background(), fixture.technical.ID, true)
+	require.NoError(t, err)
+	require.Empty(t, snapshot.Terminations)
 }
 
 func TestSessionAuthorizationRenewalKeepsOriginalMaximumSessionDeadline(t *testing.T) {

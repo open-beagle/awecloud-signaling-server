@@ -313,6 +313,34 @@ func TestResourceSessionEnsureForDesktopUsesMemberGrantAndReusesLiveSession(t *t
 	require.ErrorIs(t, err, ErrManagementPermissionDenied)
 }
 
+func TestResourceSessionEnsureForDesktopReusesSessionAfterSnapshotExpires(t *testing.T) {
+	fixture := newTenantManagementConstraintFixture(t)
+	require.NoError(t, serverdb.DB.Model(&model.Node{}).Where("id = ?", fixture.desktop.ID).
+		Update("headscale_node_id", uint64(8202)).Error)
+	service := NewResourceSessionService(serverdb.DB)
+	service.now = func() time.Time { return fixture.now }
+	input := CreateResourceSessionInput{
+		TenantID: fixture.tenant.ID, ResourceID: fixture.resource.ID, Action: "connect", DeviceID: fixture.desktop.ID,
+		ClientCapability: "resource_session_v2", RequestID: "desktop-session-before-snapshot-expiry",
+	}
+	first, err := service.EnsureForDesktop(context.Background(), fixture.member.ID, input)
+	require.NoError(t, err)
+	require.Equal(t, fixture.now.Add(time.Hour), first.ValidUntil)
+
+	service.now = func() time.Time { return fixture.now.Add(resourceSessionSnapshotTTL + time.Second) }
+	input.RequestID = "desktop-session-after-snapshot-expiry"
+	second, err := service.EnsureForDesktop(context.Background(), fixture.member.ID, input)
+	require.NoError(t, err)
+	require.Equal(t, first.ID, second.ID)
+	require.Equal(t, model.ResourceSessionAuthorizing, second.Status)
+
+	var count int64
+	require.NoError(t, serverdb.DB.Model(&model.ResourceSession{}).
+		Where("tenant_resource_id = ? AND user_id = ? AND device_id = ?", fixture.resource.ID, fixture.member.ID, fixture.desktop.ID).
+		Count(&count).Error)
+	require.Equal(t, int64(1), count)
+}
+
 func TestResourceSessionEnsureForDesktopAcceptsCurrentEvidenceWithIndependentRevision(t *testing.T) {
 	fixture := newTenantManagementConstraintFixture(t)
 	for revision := int64(2); revision <= 11; revision++ {

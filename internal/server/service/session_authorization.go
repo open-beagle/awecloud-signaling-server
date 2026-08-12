@@ -158,27 +158,25 @@ func (s *SessionAuthorizationService) BuildSnapshot(ctx context.Context, technic
 		if err := tx.Table("resource_session_termination AS termination").
 			Select("termination.*").
 			Joins("JOIN resource_session AS session ON session.id = termination.session_id").
-			Where("session.access_technical_resource_id = ? AND termination.status IN ?",
-				technicalResourceID, []model.ResourceSessionTerminationStatus{model.ResourceSessionTerminationPending, model.ResourceSessionTerminationDelivered}).
-			Order("termination.session_id ASC, termination.command_revision ASC").Find(&terminations).Error; err != nil {
+			Where("session.access_technical_resource_id = ? AND termination.status IN ? AND (termination.next_attempt_at IS NULL OR termination.next_attempt_at <= ?)",
+				technicalResourceID, []model.ResourceSessionTerminationStatus{model.ResourceSessionTerminationPending, model.ResourceSessionTerminationDelivered}, now).
+			Order("termination.next_attempt_at ASC, termination.session_id ASC, termination.command_revision ASC").
+			Limit(sessionAuthorizationReportMaxItems).Find(&terminations).Error; err != nil {
 			return err
 		}
 		for i := range terminations {
-			due := terminations[i].NextAttemptAt == nil || !terminations[i].NextAttemptAt.After(now)
-			if due {
-				updates := map[string]any{
-					"status":          model.ResourceSessionTerminationDelivered,
-					"next_attempt_at": now.Add(sessionAuthorizationRetryInterval),
-				}
-				if terminations[i].DeliveredAt == nil {
-					updates["delivered_at"] = now
-				} else {
-					updates["retry_count"] = gorm.Expr("retry_count + 1")
-				}
-				if err := tx.Model(&model.ResourceSessionTermination{}).Where("id = ? AND status IN ?", terminations[i].ID,
-					[]model.ResourceSessionTerminationStatus{model.ResourceSessionTerminationPending, model.ResourceSessionTerminationDelivered}).Updates(updates).Error; err != nil {
-					return err
-				}
+			updates := map[string]any{
+				"status":          model.ResourceSessionTerminationDelivered,
+				"next_attempt_at": now.Add(sessionAuthorizationRetryInterval),
+			}
+			if terminations[i].DeliveredAt == nil {
+				updates["delivered_at"] = now
+			} else {
+				updates["retry_count"] = gorm.Expr("retry_count + 1")
+			}
+			if err := tx.Model(&model.ResourceSessionTermination{}).Where("id = ? AND status IN ?", terminations[i].ID,
+				[]model.ResourceSessionTerminationStatus{model.ResourceSessionTerminationPending, model.ResourceSessionTerminationDelivered}).Updates(updates).Error; err != nil {
+				return err
 			}
 			result.Terminations = append(result.Terminations, SessionTerminationCommand{
 				SessionID: terminations[i].SessionID, CommandRevision: terminations[i].CommandRevision,
@@ -193,9 +191,6 @@ func (s *SessionAuthorizationService) BuildSnapshot(ctx context.Context, technic
 func (s *SessionAuthorizationService) revalidateSession(tx *gorm.DB, session *model.ResourceSession, now time.Time, includePermissions bool) (*SessionAuthorizationPermission, string, error) {
 	if !includePermissions {
 		return nil, sessionAuthorizationDisabledReasonCode, nil
-	}
-	if !session.ValidUntil.After(now) {
-		return nil, sessionAuthorizationExpiredCode, nil
 	}
 	chain, err := loadTenantResourceChainForTarget(tx, session.TenantID, session.TenantResourceID, session.TargetRevisionID, now, true)
 	if err != nil {
@@ -247,31 +242,27 @@ func (s *SessionAuthorizationService) revalidateSession(tx *gorm.DB, session *mo
 		return nil, sessionAuthorizationInvalidCode, nil
 	}
 	deadlines := []*time.Time{membership.ExpiresAt, chain.Allocation.ExpiresAt, grant.ExpiresAt, namespaceLeaseDeadline(chain)}
-	if device.LastHeartbeat != nil && !device.LastHeartbeat.Before(now.Add(-resourceSessionDeviceHeartbeatTTL)) {
-		deviceValidUntil := device.LastHeartbeat.UTC().Add(resourceSessionDeviceHeartbeatTTL)
-		deadlines = append(deadlines, &deviceValidUntil)
-	} else {
-		// A stale persisted heartbeat cannot prove the authenticated Desktop stream
-		// offline, but it also must not extend an existing authorization snapshot.
-		deadlines = append(deadlines, &session.ValidUntil)
-	}
-	validUntil := calculateResourceSessionValidUntil(now, session.StartedAt, grant.MaxSessionSeconds, deadlines...)
-	if !validUntil.After(now) {
+	sessionValidUntil := calculateResourceSessionValidUntil(now, session.StartedAt, grant.MaxSessionSeconds, deadlines...)
+	if !sessionValidUntil.After(now) {
 		return nil, sessionAuthorizationExpiredCode, nil
 	}
-	if !validUntil.Equal(session.ValidUntil.UTC()) {
+	if !sessionValidUntil.Equal(session.ValidUntil.UTC()) {
 		updated := tx.Model(&model.ResourceSession{}).
 			Where("id = ? AND row_version = ? AND status IN ?", session.ID, session.RowVersion,
 				[]model.ResourceSessionStatus{model.ResourceSessionAuthorizing, model.ResourceSessionActive}).
-			Updates(map[string]any{"valid_until": validUntil, "row_version": gorm.Expr("row_version + 1")})
+			Updates(map[string]any{"valid_until": sessionValidUntil, "row_version": gorm.Expr("row_version + 1")})
 		if updated.Error != nil {
 			return nil, "", mapResourceSessionConstraint(updated.Error)
 		}
 		if updated.RowsAffected != 1 {
 			return nil, "", ErrResourceSessionVersionConflict
 		}
-		session.ValidUntil = validUntil
+		session.ValidUntil = sessionValidUntil
 		session.RowVersion++
+	}
+	permissionValidUntil := now.Add(resourceSessionSnapshotTTL)
+	if sessionValidUntil.Before(permissionValidUntil) {
+		permissionValidUntil = sessionValidUntil
 	}
 	var target SessionAuthorizationTarget
 	if err := json.Unmarshal([]byte(chain.Target.TargetSnapshot), &target); err != nil {
@@ -290,7 +281,7 @@ func (s *SessionAuthorizationService) revalidateSession(tx *gorm.DB, session *mo
 		UserID: session.UserID, UserName: user.Name, DeviceID: session.DeviceID, DeviceHeadscaleNodeID: device.HeadscaleNodeID,
 		ResourceType: chain.Resource.Type, Action: session.Action, AllocationID: session.AllocationID,
 		GrantID: session.GrantID, GrantRevision: session.GrantRevision,
-		AuthorizationRevision: session.AuthorizationRevision, ValidUntil: validUntil, SSHUsers: sshUsers, Target: target,
+		AuthorizationRevision: session.AuthorizationRevision, ValidUntil: permissionValidUntil, SSHUsers: sshUsers, Target: target,
 	}, "", nil
 }
 

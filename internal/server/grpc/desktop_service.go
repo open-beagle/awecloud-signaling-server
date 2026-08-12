@@ -1837,7 +1837,11 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 	var targets []desktopTargetRow
 	if err := db.DB.WithContext(ctx).Table("resource_target_revision_v2 AS target").Select("target.*, source.tenant_resource_id AS tenant_resource_id").
 		Joins("JOIN tenant_resource_source AS source ON source.id = target.tenant_resource_source_id").
+		Joins("JOIN workload_observation AS observation ON observation.id = source.workload_observation_id").
+		Joins("JOIN workload_observation_source AS evidence ON evidence.workload_observation_id = observation.id AND evidence.source_technical_resource_id = target.source_technical_resource_id").
 		Where("source.tenant_resource_id IN ? AND source.enabled = ? AND target.superseded_at IS NULL AND target.ready = ?", availableResourceIDs, true, true).
+		Where("observation.state = ? AND observation.ready = ? AND observation.lease_expires_at > ?", model.WorkloadObservationEligible, true, now).
+		Where("evidence.state = ? AND evidence.ready = ? AND evidence.lease_expires_at > ?", model.WorkloadObservationSourceObserved, true, now).
 		Order("source.tenant_resource_id ASC, target.target_snapshot ASC, target.id ASC").Find(&targets).Error; err != nil {
 		logger.Warnf("Desktop 资源发现批量查询当前目标失败: desktop_id=%d tenant_id=%s err=%v", desktop.ID, tenantID, err)
 		return nil, nil
