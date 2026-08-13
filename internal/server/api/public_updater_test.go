@@ -82,7 +82,7 @@ func TestGetPublicManifestPayload(t *testing.T) {
 	r := gin.New()
 	r.GET("/api/v1/public/updater/manifest", updaterAPI.GetPublicManifest)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/public/updater/manifest?component=desktop&os=windows&arch=amd64&channel=stable&current_version=1.0.1&current_artifact_sha256=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/public/updater/manifest?component=desktop&os=windows&arch=amd64&channel=stable", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -90,12 +90,15 @@ func TestGetPublicManifestPayload(t *testing.T) {
 
 	var payload ManifestPayload
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	var document map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &document))
 
 	require.Equal(t, 1, payload.SchemaVersion)
 	require.Equal(t, "1.1.1", payload.Release.Version)
+	require.Equal(t, release.CommitID, payload.Release.CommitID)
+	require.NotEmpty(t, payload.Release.PublishedAt)
 	require.Equal(t, "1.0.0", payload.Release.MinSupportedVersion)
-	require.True(t, payload.Update.Available)
-	require.False(t, payload.Update.Required)
+	require.NotContains(t, document, "update")
 	require.NotNil(t, payload.Artifacts.App)
 	require.Equal(t, "app", payload.Artifacts.App.Role)
 	require.Equal(t, appArt.SHA256, payload.Artifacts.App.SHA256)
@@ -121,27 +124,4 @@ func TestGetPublicManifestRejectsInvalidComponentOrOS(t *testing.T) {
 	w2 := httptest.NewRecorder()
 	r.ServeHTTP(w2, req2)
 	require.Equal(t, http.StatusBadRequest, w2.Code)
-}
-
-func TestGetPublicManifestDetectsRepublishedDesktopArtifact(t *testing.T) {
-	database := setupTestDB(t)
-	now := time.Now().UTC()
-	release := model.Release{ID: uuid.NewString(), Component: model.ComponentDesktop, Version: "1.0.2", Channel: "stable", Status: model.ReleaseStatusPublished, PublishedAt: &now}
-	require.NoError(t, database.Create(&release).Error)
-	targetSHA := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	require.NoError(t, database.Create(&model.Artifact{ID: uuid.NewString(), ReleaseID: release.ID, OS: "windows", Arch: "amd64", Role: "app", PackageType: "binary", Filename: "desktop.exe", DownloadURL: "https://signal.example.com/desktop.exe", Size: 1, SHA256: targetSHA, Status: model.ArtifactStatusAvailable}).Error)
-
-	router := gin.New()
-	router.GET("/api/v1/public/updater/manifest", NewUpdaterAPI().GetPublicManifest)
-	request := func(sha string) ManifestPayload {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/public/updater/manifest?component=desktop&os=windows&arch=amd64&channel=stable&current_version=1.0.2&current_artifact_sha256="+sha, nil)
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code)
-		var payload ManifestPayload
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
-		return payload
-	}
-	require.False(t, request(targetSHA).Update.Available)
-	require.True(t, request("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789").Update.Available)
 }

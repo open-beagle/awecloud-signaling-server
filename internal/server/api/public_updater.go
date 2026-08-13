@@ -1,13 +1,11 @@
 package api
 
 import (
-	"encoding/hex"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"golang.org/x/mod/semver"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
@@ -16,14 +14,11 @@ import (
 type ManifestReleaseInfo struct {
 	ID                  string `json:"id"`
 	Version             string `json:"version"`
+	CommitID            string `json:"commit_id"`
 	Channel             string `json:"channel"`
 	ReleaseNotes        string `json:"release_notes"`
 	MinSupportedVersion string `json:"min_supported_version"`
-}
-
-type ManifestUpdateFlags struct {
-	Available bool `json:"available"`
-	Required  bool `json:"required"`
+	PublishedAt         string `json:"published_at"`
 }
 
 type ManifestArtifactInfo struct {
@@ -48,7 +43,6 @@ type ManifestPayload struct {
 	GeneratedAt   string               `json:"generated_at"`
 	ExpiresAt     string               `json:"expires_at"`
 	Release       ManifestReleaseInfo  `json:"release"`
-	Update        ManifestUpdateFlags  `json:"update"`
 	Artifacts     ManifestArtifactsMap `json:"artifacts"`
 }
 
@@ -57,19 +51,6 @@ func (a *UpdaterAPI) GetPublicManifest(c *gin.Context) {
 	osStr := strings.ToLower(strings.TrimSpace(c.Query("os")))
 	archStr := strings.ToLower(strings.TrimSpace(c.Query("arch")))
 	channelStr := strings.ToLower(strings.TrimSpace(c.Query("channel")))
-	currentVersionStr := strings.TrimSpace(c.Query("current_version"))
-	currentArtifactSHA256 := strings.ToLower(strings.TrimSpace(c.Query("current_artifact_sha256")))
-	if (currentVersionStr == "") != (currentArtifactSHA256 == "") {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("current_version 与 current_artifact_sha256 必须同时提供"))
-		return
-	}
-	if currentArtifactSHA256 != "" {
-		decoded, err := hex.DecodeString(currentArtifactSHA256)
-		if err != nil || len(decoded) != 32 {
-			c.JSON(http.StatusBadRequest, NewErrorResponse("current_artifact_sha256 必须为 64 位十六进制 SHA256"))
-			return
-		}
-	}
 
 	if componentStr != "desktop" {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("component 必须为 desktop"))
@@ -136,34 +117,12 @@ func (a *UpdaterAPI) GetPublicManifest(c *gin.Context) {
 		return
 	}
 
-	available := true
-	required := false
-
-	if currentVersionStr != "" {
-		if !strings.HasPrefix(currentVersionStr, "v") {
-			currentVersionStr = "v" + currentVersionStr
-		}
-		relVer := release.Version
-		if !strings.HasPrefix(relVer, "v") {
-			relVer = "v" + relVer
-		}
-		if semver.IsValid(currentVersionStr) && semver.IsValid(relVer) {
-			comparison := semver.Compare(relVer, currentVersionStr)
-			available = comparison > 0 || comparison == 0 && currentArtifactSHA256 != "" && !strings.EqualFold(currentArtifactSHA256, appArtifact.SHA256)
-		}
-		if release.MinSupportedVersion != "" {
-			minVer := release.MinSupportedVersion
-			if !strings.HasPrefix(minVer, "v") {
-				minVer = "v" + minVer
-			}
-			if semver.IsValid(currentVersionStr) && semver.IsValid(minVer) {
-				required = semver.Compare(currentVersionStr, minVer) < 0
-			}
-		}
-	}
-
 	now := time.Now().UTC()
 	expiresAt := now.Add(10 * time.Minute)
+	publishedAt := release.CreatedAt.UTC()
+	if release.PublishedAt != nil {
+		publishedAt = release.PublishedAt.UTC()
+	}
 
 	payload := ManifestPayload{
 		SchemaVersion: 1,
@@ -172,13 +131,11 @@ func (a *UpdaterAPI) GetPublicManifest(c *gin.Context) {
 		Release: ManifestReleaseInfo{
 			ID:                  release.ID,
 			Version:             strings.TrimPrefix(release.Version, "v"),
+			CommitID:            release.CommitID,
 			Channel:             release.Channel,
 			ReleaseNotes:        release.ReleaseNotes,
 			MinSupportedVersion: strings.TrimPrefix(release.MinSupportedVersion, "v"),
-		},
-		Update: ManifestUpdateFlags{
-			Available: available,
-			Required:  required,
+			PublishedAt:         publishedAt.Format(time.RFC3339),
 		},
 		Artifacts: ManifestArtifactsMap{
 			App:      appArtifact,
