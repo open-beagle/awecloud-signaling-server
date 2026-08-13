@@ -68,6 +68,7 @@ type Agent struct {
 	containerDiscovery    *K8SContainerDiscovery // ContainerSSH Pod 候选发现
 	containerExecBroker   *ContainerExecBroker   // ContainerSSH Kubernetes Exec 数据面
 	containerSSHProxy     *ContainerSSHProxy     // ContainerSSH tsnet SSH 入口
+	sshBannerServer       *SSHBannerServer       // Agent 自身 PTY SSH 详细横幅
 	containerSessions     *ContainerSessionManager
 	sessionAuthorizations *SessionAuthorizationCache
 	inventoryReporter     *KubernetesInventoryReporter
@@ -188,6 +189,9 @@ func (a *Agent) Run() error {
 	// 注册Agent
 	if err := a.register(); err != nil {
 		return fmt.Errorf("注册失败: %w", err)
+	}
+	if a.sshBannerServer != nil {
+		defer a.sshBannerServer.Stop()
 	}
 
 	// 初始化权限缓存（K8S 模块共用）
@@ -362,6 +366,10 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 		// 启动域名同步（定期从 Server 获取可访问的域名列表）
 		a.wg.Add(1)
 		go a.syncDomainsLoop(domainCache)
+	}
+	a.startSSHBannerServer()
+	if a.sshBannerServer != nil {
+		defer a.sshBannerServer.Stop()
 	}
 
 	// P7-1: 启动 DNS 管理（CloudIDE 模式默认启用）
@@ -649,6 +657,7 @@ func (a *Agent) register() error {
 
 		a.tailscaleIP = a.tsManager.GetIP()
 		logger.Infof("Tailscale 已连接，IP: %s", a.tailscaleIP)
+		a.startSSHBannerServer()
 
 		// 初始化 ProxyManager
 		if a.proxyManager == nil {
@@ -673,6 +682,19 @@ func (a *Agent) register() error {
 	}
 
 	return nil
+}
+
+func (a *Agent) startSSHBannerServer() {
+	if a.sshBannerServer != nil || a.tsManager == nil {
+		return
+	}
+	server := NewSSHBannerServer(a.tsManager, a.grpcClient)
+	if err := server.Start(); err != nil {
+		logger.Warnf("启动 SSH 横幅服务失败: %v", err)
+		return
+	}
+	a.sshBannerServer = server
+	logger.Infof("SSH 详细横幅服务已启动: %s", SSHBannerSocketPath)
 }
 
 // heartbeatLoop 心跳循环（双向流，支持自动重连）

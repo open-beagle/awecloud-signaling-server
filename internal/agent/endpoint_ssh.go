@@ -16,11 +16,11 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -337,6 +337,7 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 
 	// 处理 SSH 请求（pty-req, shell, exec, window-change 等）
 	isPTY := false // 标记是否为交互式会话（有 PTY）
+	isSFTP := false
 	go func() {
 		for req := range requests {
 			switch req.Type {
@@ -363,7 +364,7 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 				if !isPTY {
 					rows, cols = 24, 80
 				}
-				stream, err := p.endpointServer.RequestShell(ctx, endpointName, login, rows, cols, "")
+				stream, err := p.endpointServer.RequestShell(ctx, endpointName, login, rows, cols, "", "")
 				if err != nil {
 					logger.Warnf("[EndpointSSH] 请求 Endpoint shell 失败: %v", err)
 					shellErr <- err
@@ -386,9 +387,31 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 					}
 				}
 				// exec 不需要 pty，使用默认大小
-				stream, err := p.endpointServer.RequestShell(ctx, endpointName, login, rows, cols, execCommand)
+				stream, err := p.endpointServer.RequestShell(ctx, endpointName, login, rows, cols, execCommand, "")
 				if err != nil {
 					logger.Warnf("[EndpointSSH] 请求 Endpoint exec 失败: %v", err)
+					shellErr <- err
+					return
+				}
+				shellStream = stream
+				close(shellReady)
+
+			case "subsystem":
+				subsystem := parseSSHString(req.Payload)
+				if subsystem != "sftp" {
+					if req.WantReply {
+						req.Reply(false, nil)
+					}
+					logger.Warnf("[EndpointSSH] 不支持的 subsystem: endpoint=%s subsystem=%q", endpointName, subsystem)
+					return
+				}
+				if req.WantReply {
+					req.Reply(true, nil)
+				}
+				isSFTP = true
+				stream, err := p.endpointServer.RequestShell(ctx, endpointName, login, rows, cols, "", subsystem)
+				if err != nil {
+					logger.Warnf("[EndpointSSH] 请求 Endpoint SFTP 失败: %v", err)
 					shellErr <- err
 					return
 				}
@@ -431,7 +454,7 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 
 	// 显示 SSH 横幅（仅在交互式会话时显示，exec 模式不显示）
 	// 判断依据：收到 pty-req 请求表示交互式会话
-	if isPTY {
+	if shouldShowSSHBanner(isPTY, isSFTP) {
 		banner := p.buildSSHBanner(ctx, clientUserName, clientIP)
 		if banner != "" {
 			channel.Write([]byte(banner))
@@ -473,14 +496,25 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 				return
 			}
 			if msg.IsClose {
-				exitMsg := ssh.Marshal(struct{ Status uint32 }{uint32(msg.ExitCode)})
+				if msg.Error != "" {
+					_, _ = channel.Stderr().Write([]byte(msg.Error + "\r\n"))
+				}
+				exitCode := msg.ExitCode
+				if msg.Error != "" && exitCode == 0 {
+					exitCode = 1
+				}
+				exitMsg := ssh.Marshal(struct{ Status uint32 }{uint32(exitCode)})
 				channel.SendRequest("exit-status", false, exitMsg)
 				// 关闭 SSH channel，解除 SSH→gRPC 协程的 Read 阻塞
 				channel.Close()
 				return
 			}
 			if len(msg.Data) > 0 {
-				if _, writeErr := channel.Write(msg.Data); writeErr != nil {
+				writer := io.Writer(channel)
+				if msg.IsStderr {
+					writer = channel.Stderr()
+				}
+				if _, writeErr := writer.Write(msg.Data); writeErr != nil {
 					return
 				}
 			}
@@ -488,6 +522,21 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 	}()
 
 	wg.Wait()
+}
+
+func shouldShowSSHBanner(isPTY, isSFTP bool) bool {
+	return isPTY && !isSFTP
+}
+
+func parseSSHString(payload []byte) string {
+	if len(payload) < 4 {
+		return ""
+	}
+	length := int(payload[0])<<24 | int(payload[1])<<16 | int(payload[2])<<8 | int(payload[3])
+	if length < 0 || len(payload) < 4+length {
+		return ""
+	}
+	return string(payload[4 : 4+length])
 }
 
 // loadOrGenerateHostKey 从文件加载或生成 SSH Host Key
@@ -553,41 +602,14 @@ func (p *EndpointSSHProxy) buildSSHBanner(ctx context.Context, clientUserName, c
 		return "" // 无法获取客户端信息，不显示横幅
 	}
 
-	// 查询用户设备信息（通过 gRPC 调用 Server）
 	userInfo := p.queryUserDeviceInfo(ctx, clientUserName, clientIP)
-
-	// 构建横幅（使用 \r\n 换行，因为直接写入 SSH channel）
-	var banner strings.Builder
-	banner.WriteString("================================================================\r\n")
-	banner.WriteString("           AWECloud Signaling - SSH Access\r\n")
-	banner.WriteString("================================================================\r\n")
-	banner.WriteString(fmt.Sprintf("  Version:      %s\r\n", version))
-	banner.WriteString(fmt.Sprintf("  Build Date:   %s\r\n", buildDate))
-	banner.WriteString(fmt.Sprintf("  Connect Time: %s\r\n", time.Now().Format("2006-01-02 15:04:05")))
-	banner.WriteString("----------------------------------------------------------------\r\n")
-
-	// Remote User 行
-	if userInfo != nil && userInfo.DisplayName != "" {
-		banner.WriteString(fmt.Sprintf("  Remote User:   %s , %s\r\n", clientUserName, userInfo.DisplayName))
-	} else {
-		banner.WriteString(fmt.Sprintf("  Remote User:   %s\r\n", clientUserName))
-	}
-
-	// Remote Device 行
-	deviceParts := []string{clientIP}
+	info := SSHBannerInfo{RemoteUser: clientUserName, RemoteIP: clientIP}
 	if userInfo != nil {
-		if userInfo.DeviceName != "" {
-			deviceParts = append(deviceParts, userInfo.DeviceName)
-		}
-		if userInfo.DeviceOs != "" {
-			deviceParts = append(deviceParts, userInfo.DeviceOs)
-		}
+		info.DisplayName = userInfo.DisplayName
+		info.RemoteDeviceName = userInfo.DeviceName
+		info.RemoteDeviceOS = userInfo.DeviceOs
 	}
-	banner.WriteString(fmt.Sprintf("  Remote Device: %s\r\n", strings.Join(deviceParts, " , ")))
-
-	banner.WriteString("================================================================\r\n")
-
-	return banner.String()
+	return BuildSSHBanner(info)
 }
 
 // queryUserDeviceInfo 查询用户设备信息

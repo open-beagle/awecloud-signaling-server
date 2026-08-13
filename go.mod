@@ -12,6 +12,7 @@ require (
 	github.com/juanfont/headscale v0.27.1
 	github.com/logto-io/go/v2 v2.2.0
 	github.com/miekg/dns v1.1.72
+	github.com/pkg/sftp v1.13.6
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.11.1
 	github.com/uptrace/opentelemetry-go-extra/otelgorm v0.3.2
@@ -101,7 +102,6 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pires/go-proxyproto v0.8.1 // indirect
-	github.com/pkg/sftp v1.13.6 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus-community/pro-bing v0.7.0 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect

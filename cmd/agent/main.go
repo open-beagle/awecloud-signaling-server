@@ -202,6 +202,17 @@ func runTailscaleChild(args []string) error {
 	if len(args) == 0 {
 		return errors.New("missing be-child mode")
 	}
+	if args[0] == "banner" {
+		if len(args) != 3 {
+			return errors.New("banner child requires remote IP and port")
+		}
+		banner, err := agent.RequestSSHBanner(agent.SSHBannerSocketPath, args[1], args[2])
+		if err != nil {
+			return err
+		}
+		_, err = io.WriteString(os.Stdout, banner)
+		return err
+	}
 	fn, ok := childproc.Code[args[0]]
 	if !ok {
 		return fmt.Errorf("unknown be-child mode %q", args[0])

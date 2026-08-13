@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
@@ -50,6 +51,14 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 		Token:     cfg.Agent.Token,
 	}); err != nil {
 		logger.Warnf("发送 OpenShell 首包失败: %v", err)
+		return
+	}
+	if req.Subsystem != "" {
+		if req.Subsystem != "sftp" {
+			stream.Send(&pb.ShellData{IsClose: true, Error: fmt.Sprintf("不支持的 SSH subsystem: %s", req.Subsystem)})
+			return
+		}
+		handleSFTPProcess(stream, u, shell, req)
 		return
 	}
 
@@ -173,6 +182,97 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 	wg.Wait()
 
 	logger.Infof("Shell 已退出: session_id=%s, exit_code=%d", req.SessionId, exitCode)
+}
+
+func handleSFTPProcess(stream pb.EndpointService_OpenShellClient, u *user.User, shell string, req *pb.ShellRequest) {
+	executable, err := os.Executable()
+	if err != nil {
+		logger.Warnf("SFTP 请求失败: session_id=%s err=%v", req.SessionId, err)
+		stream.Send(&pb.ShellData{IsClose: true, Error: fmt.Sprintf("定位 Endpoint SFTP 子进程失败: %v", err)})
+		return
+	}
+
+	cmd := exec.Command(executable, "be-child", "sftp")
+	cmd.Dir = u.HomeDir
+	cmd.Env = buildShellEnv(u, shell)
+	if err := configureShellProcess(cmd, u); err != nil {
+		stream.Send(&pb.ShellData{IsClose: true, Error: fmt.Sprintf("配置 SFTP 进程失败: %v", err)})
+		return
+	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		stream.Send(&pb.ShellData{IsClose: true, Error: fmt.Sprintf("创建 SFTP stdin 失败: %v", err)})
+		return
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		stream.Send(&pb.ShellData{IsClose: true, Error: fmt.Sprintf("创建 SFTP stdout 失败: %v", err)})
+		return
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		stream.Send(&pb.ShellData{IsClose: true, Error: fmt.Sprintf("创建 SFTP stderr 失败: %v", err)})
+		return
+	}
+	if err := cmd.Start(); err != nil {
+		stream.Send(&pb.ShellData{IsClose: true, Error: fmt.Sprintf("启动 SFTP 服务失败: %v", err)})
+		return
+	}
+	logger.Infof("SFTP 已启动: session_id=%s login=%s pid=%d", req.SessionId, req.Login, cmd.Process.Pid)
+
+	var sendMutex sync.Mutex
+	send := func(message *pb.ShellData) error {
+		sendMutex.Lock()
+		defer sendMutex.Unlock()
+		return stream.Send(message)
+	}
+	copyOutput := func(reader io.Reader, isStderr bool, done chan<- struct{}) {
+		defer func() { done <- struct{}{} }()
+		buf := make([]byte, 32*1024)
+		for {
+			n, readErr := reader.Read(buf)
+			if n > 0 {
+				data := append([]byte(nil), buf[:n]...)
+				if sendErr := send(&pb.ShellData{Data: data, IsStderr: isStderr}); sendErr != nil {
+					return
+				}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}
+	outputDone := make(chan struct{}, 2)
+	go copyOutput(stdout, false, outputDone)
+	go copyOutput(stderr, true, outputDone)
+
+	go func() {
+		defer stdin.Close()
+		for {
+			message, recvErr := stream.Recv()
+			if recvErr != nil || message.IsClose {
+				return
+			}
+			if len(message.Data) > 0 {
+				if _, writeErr := stdin.Write(message.Data); writeErr != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	exitCode := 0
+	if err := cmd.Wait(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
+		}
+	}
+	<-outputDone
+	<-outputDone
+	_ = send(&pb.ShellData{IsClose: true, ExitCode: int32(exitCode)})
+	logger.Infof("SFTP 已退出: session_id=%s exit_code=%d", req.SessionId, exitCode)
 }
 
 // sendShellError 发送错误响应（无法启动 shell 时）

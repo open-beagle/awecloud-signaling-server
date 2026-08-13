@@ -1,15 +1,83 @@
 package main
 
 import (
+	"encoding/binary"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/stretchr/testify/require"
 	"tailscale.com/cmd/tailscaled/childproc"
 )
+
+func TestAgentSFTPChildProtocol(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestAgentSFTPChildHelper$")
+	cmd.Env = append(os.Environ(), "BEAGLE_TEST_SFTP_CHILD=1")
+	stdin, err := cmd.StdinPipe()
+	require.NoError(t, err)
+	stdout, err := cmd.StdoutPipe()
+	require.NoError(t, err)
+	cmd.Stderr = os.Stderr
+	require.NoError(t, cmd.Start())
+
+	initPacket := make([]byte, 9)
+	binary.BigEndian.PutUint32(initPacket[0:4], 5)
+	initPacket[4] = 1 // SSH_FXP_INIT
+	binary.BigEndian.PutUint32(initPacket[5:9], 3)
+	_, err = stdin.Write(initPacket)
+	require.NoError(t, err)
+
+	result := make(chan error, 1)
+	go func() {
+		header := make([]byte, 4)
+		if _, err := io.ReadFull(stdout, header); err != nil {
+			result <- err
+			return
+		}
+		length := binary.BigEndian.Uint32(header)
+		if length < 5 || length > 1024*1024 {
+			result <- fmt.Errorf("invalid SFTP response length %d (header=%q)", length, header)
+			return
+		}
+		payload := make([]byte, length)
+		if _, err := io.ReadFull(stdout, payload); err != nil {
+			result <- err
+			return
+		}
+		if payload[0] != 2 || binary.BigEndian.Uint32(payload[1:5]) != 3 {
+			result <- fmt.Errorf("unexpected SFTP version response: %x", payload[:5])
+			return
+		}
+		result <- nil
+	}()
+
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("timed out waiting for SFTP version response")
+	}
+	_ = stdin.Close()
+	require.NoError(t, cmd.Wait())
+}
+
+func TestAgentSFTPChildHelper(t *testing.T) {
+	if os.Getenv("BEAGLE_TEST_SFTP_CHILD") != "1" {
+		return
+	}
+	if err := runTailscaleChild([]string{"sftp"}); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	os.Exit(0)
+}
 
 func TestResolveAgentStartupConfigUsesStoredCredentialWithoutRegistering(t *testing.T) {
 	t.Setenv("SIGNAL_TOKEN", "")
@@ -44,6 +112,8 @@ func TestAgentMainHandlesTailscaleChildrenBeforeLoadingConfig(t *testing.T) {
 	require.NotEqual(t, -1, childRunAt)
 	require.NotEqual(t, -1, configFlagAt)
 	require.Less(t, childRunAt, configFlagAt)
+	require.Contains(t, content, `args[0] == "banner"`)
+	require.Contains(t, content, `agent.RequestSSHBanner(agent.SSHBannerSocketPath`)
 	require.Contains(t, content, `childproc.Code[args[0]]`)
 	require.NotNil(t, childproc.Code["ssh"])
 	require.NotNil(t, childproc.Code["sftp"])
@@ -162,6 +232,18 @@ func TestInstallAgentScriptDeployRestartsServiceAndResetsTunnelState(t *testing.
 			require.Less(t, prepareAt, configAt, "旧状态应在写入新配置前备份")
 		})
 	}
+}
+
+func TestInstallAgentScriptInstallsPTYOnlyDetailedSSHBanner(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "..", "scripts", "install_agent.sh"))
+	require.NoError(t, err)
+	content := string(script)
+
+	require.Contains(t, content, `SSH_BANNER_PROFILE="/etc/profile.d/awecloud-signaling-ssh-banner.sh"`)
+	require.Contains(t, content, `if [ -n "\${SSH_TTY:-}" ] && [ -n "\${SSH_CONNECTION:-}" ]`)
+	require.Contains(t, content, `be-child banner "\${AWE_SSH_REMOTE_IP}" "\${AWE_SSH_REMOTE_PORT}"`)
+	require.Contains(t, content, `chmod 0644 "$SSH_BANNER_PROFILE"`)
+	require.Contains(t, content, `rm -f "$SSH_BANNER_PROFILE"`)
 }
 
 func TestInstallAgentUpgradePreservesExistingCredentialConfig(t *testing.T) {

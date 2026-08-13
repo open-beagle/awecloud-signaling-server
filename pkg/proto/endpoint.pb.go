@@ -2601,6 +2601,7 @@ type ShellRequest struct {
 	Rows          uint32                 `protobuf:"varint,3,opt,name=rows,proto3" json:"rows,omitempty"`                           // 终端行数
 	Cols          uint32                 `protobuf:"varint,4,opt,name=cols,proto3" json:"cols,omitempty"`                           // 终端列数
 	Command       string                 `protobuf:"bytes,5,opt,name=command,proto3" json:"command,omitempty"`                      // 要执行的命令（exec 模式时使用，为空则为交互式 shell）
+	Subsystem     string                 `protobuf:"bytes,6,opt,name=subsystem,proto3" json:"subsystem,omitempty"`                  // SSH subsystem 名称；当前支持 sftp
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2670,6 +2671,13 @@ func (x *ShellRequest) GetCommand() string {
 	return ""
 }
 
+func (x *ShellRequest) GetSubsystem() string {
+	if x != nil {
+		return x.Subsystem
+	}
+	return ""
+}
+
 // ShellData Endpoint Shell 会话数据帧
 type ShellData struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -2683,6 +2691,7 @@ type ShellData struct {
 	IsClose       bool                   `protobuf:"varint,8,opt,name=is_close,json=isClose,proto3" json:"is_close,omitempty"`      // 是否为关闭通知
 	ExitCode      int32                  `protobuf:"varint,9,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`   // 退出码
 	Error         string                 `protobuf:"bytes,10,opt,name=error,proto3" json:"error,omitempty"`                         // 错误信息
+	IsStderr      bool                   `protobuf:"varint,11,opt,name=is_stderr,json=isStderr,proto3" json:"is_stderr,omitempty"`  // data 是否属于 stderr；SFTP stdout 必须保持纯协议数据
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2785,6 +2794,13 @@ func (x *ShellData) GetError() string {
 		return x.Error
 	}
 	return ""
+}
+
+func (x *ShellData) GetIsStderr() bool {
+	if x != nil {
+		return x.IsStderr
+	}
+	return false
 }
 
 // K8SAPIProxyRequest Agent 通知 Endpoint 的 K8S API 代理请求
@@ -3757,14 +3773,15 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	"\vServicePort\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x1a\n" +
-	"\bprotocol\x18\x03 \x01(\tR\bprotocol\"\x85\x01\n" +
+	"\bprotocol\x18\x03 \x01(\tR\bprotocol\"\xa3\x01\n" +
 	"\fShellRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x14\n" +
 	"\x05login\x18\x02 \x01(\tR\x05login\x12\x12\n" +
 	"\x04rows\x18\x03 \x01(\rR\x04rows\x12\x12\n" +
 	"\x04cols\x18\x04 \x01(\rR\x04cols\x12\x18\n" +
-	"\acommand\x18\x05 \x01(\tR\acommand\"\x80\x02\n" +
+	"\acommand\x18\x05 \x01(\tR\acommand\x12\x1c\n" +
+	"\tsubsystem\x18\x06 \x01(\tR\tsubsystem\"\x9d\x02\n" +
 	"\tShellData\x12\x17\n" +
 	"\ais_open\x18\x01 \x01(\bR\x06isOpen\x12\x1d\n" +
 	"\n" +
@@ -3777,7 +3794,8 @@ const file_pkg_proto_endpoint_proto_rawDesc = "" +
 	"\bis_close\x18\b \x01(\bR\aisClose\x12\x1b\n" +
 	"\texit_code\x18\t \x01(\x05R\bexitCode\x12\x14\n" +
 	"\x05error\x18\n" +
-	" \x01(\tR\x05error\"3\n" +
+	" \x01(\tR\x05error\x12\x1b\n" +
+	"\tis_stderr\x18\v \x01(\bR\bisStderr\"3\n" +
 	"\x12K8SAPIProxyRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"\xf7\x02\n" +

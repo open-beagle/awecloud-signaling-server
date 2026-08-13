@@ -33,6 +33,7 @@ TUNNEL_STATE_DIR="${DATA_DIR}/tunnel"
 CONFIG_FILE="${CONFIG_DIR}/k8s-signaling.toml"
 SERVICE_NAME="k8s-signaling"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+SSH_BANNER_PROFILE="/etc/profile.d/awecloud-signaling-ssh-banner.sh"
 
 # 打印消息
 info() { echo -e "${GREEN}[INFO]${NC} $1"; }
@@ -395,10 +396,25 @@ WantedBy=multi-user.target
 EOF
 
     systemctl daemon-reload || error "重新加载 systemd 配置失败"
+    install_ssh_banner_profile
     systemctl enable "$SERVICE_NAME" || error "启用服务失败"
     systemctl restart "$SERVICE_NAME" || error "启动服务失败"
     
     info "服务已启动"
+}
+
+install_ssh_banner_profile() {
+    cat > "$SSH_BANNER_PROFILE" << EOF
+# AWECloud Signaling detailed SSH banner. Interactive PTY sessions only.
+if [ -n "\${SSH_TTY:-}" ] && [ -n "\${SSH_CONNECTION:-}" ] && [ -x "${INSTALL_DIR}/${BINARY_NAME}" ]; then
+    AWE_SSH_REMOTE_IP=\${SSH_CONNECTION%% *}
+    AWE_SSH_CONNECTION_REST=\${SSH_CONNECTION#* }
+    AWE_SSH_REMOTE_PORT=\${AWE_SSH_CONNECTION_REST%% *}
+    "${INSTALL_DIR}/${BINARY_NAME}" be-child banner "\${AWE_SSH_REMOTE_IP}" "\${AWE_SSH_REMOTE_PORT}" 2>/dev/null || true
+    unset AWE_SSH_REMOTE_IP AWE_SSH_CONNECTION_REST AWE_SSH_REMOTE_PORT
+fi
+EOF
+    chmod 0644 "$SSH_BANNER_PROFILE" || error "设置 SSH 横幅脚本权限失败"
 }
 
 # 准备重新部署 Agent
@@ -459,6 +475,7 @@ uninstall_agent() {
     
     # 删除文件
     rm -f "$SERVICE_FILE"
+    rm -f "$SSH_BANNER_PROFILE"
     rm -f "${INSTALL_DIR}/${BINARY_NAME}"
     rm -f "${INSTALL_DIR}/signaling"  # 旧软链接
     rm -rf "${DOWNLOAD_DIR}/${BINARY_NAME}-"*

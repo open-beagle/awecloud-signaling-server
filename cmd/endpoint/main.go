@@ -74,6 +74,8 @@ type SVCConfig struct {
 }
 
 func main() {
+	runEndpointChildIfRequested()
+
 	if len(os.Args) > 1 && os.Args[1] == "updater-apply" {
 		if err := updater.RunApplyCLI(os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "updater apply failed: %v\n", err)

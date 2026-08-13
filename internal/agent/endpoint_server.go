@@ -812,7 +812,7 @@ func (s *EndpointServer) OpenShell(stream pb.EndpointService_OpenShellServer) er
 // RequestShell 请求 Endpoint 开启 shell 会话
 // 由 DialSocket 调用，创建 session → 通知 Endpoint → 等待回调 → 返回 gRPC 流
 // 返回的 stream 可用于双向 I/O 桥接
-func (s *EndpointServer) RequestShell(ctx context.Context, endpointName, login string, rows, cols uint32, command string) (pb.EndpointService_OpenShellServer, error) {
+func (s *EndpointServer) RequestShell(ctx context.Context, endpointName, login string, rows, cols uint32, command, subsystem string) (pb.EndpointService_OpenShellServer, error) {
 	// 检查 Endpoint 是否在线
 	s.connMutex.RLock()
 	_, connected := s.connections[endpointName]
@@ -849,14 +849,17 @@ func (s *EndpointServer) RequestShell(ctx context.Context, endpointName, login s
 		Login:     login,
 		Rows:      rows,
 		Cols:      cols,
-		Command:   command, // 添加命令参数
+		Command:   command,
+		Subsystem: subsystem,
 	}
 
 	s.pendingMutex.Lock()
 	s.pendingShellReqs[endpointName] = append(s.pendingShellReqs[endpointName], shellReq)
 	s.pendingMutex.Unlock()
 
-	if command != "" {
+	if subsystem != "" {
+		logger.Infof("Shell subsystem 请求已排队: session_id=%s, endpoint=%s, login=%s, subsystem=%s", sessionID, endpointName, login, subsystem)
+	} else if command != "" {
 		logger.Infof("Shell exec 请求已排队: session_id=%s, endpoint=%s, login=%s, command=%s", sessionID, endpointName, login, command)
 	} else {
 		logger.Infof("Shell 请求已排队: session_id=%s, endpoint=%s, login=%s", sessionID, endpointName, login)
