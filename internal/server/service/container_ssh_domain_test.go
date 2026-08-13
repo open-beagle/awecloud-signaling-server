@@ -34,7 +34,27 @@ func TestContainerSSHBusinessDomainUsesWorkloadNamespaceAndRootProvider(t *testi
 	require.Equal(t, "ide-public.beagle-ide.beijing.beagle", domain)
 }
 
-func TestContainerSSHBusinessDomainIncludesNamedProvider(t *testing.T) {
+func TestContainerServiceBusinessDomainUsesServiceNamespaceAndAgent(t *testing.T) {
+	database := containerSSHDomainTestDB(t)
+	provider := model.ResourceProvider{
+		ID: uuid.NewString(), Key: "beagle", DisplayName: "Beagle", DomainScope: model.ProviderDomainRoot,
+		Status: model.ProviderStatusActive, Revision: 1, RowVersion: 1,
+	}
+	require.NoError(t, database.Create(&provider).Error)
+	agent := model.TechnicalResource{
+		ID: uuid.NewString(), ProviderID: provider.ID, Type: model.TechnicalResourceAgent,
+		StableKey: "beijing-agent", DomainLabel: "beijing", LifecycleState: model.TechnicalResourceRegistered,
+		HealthState: model.ResourceHealthOnline, CredentialRevision: 1, ConfigRevision: 1, RowVersion: 1,
+	}
+	require.NoError(t, database.Create(&agent).Error)
+
+	domain, err := ContainerServiceBusinessDomain(context.Background(), database, agent.ID,
+		`{"namespace_name":"bookinfo","service_name":"reviews"}`)
+	require.NoError(t, err)
+	require.Equal(t, "reviews.bookinfo.beijing.beagle", domain)
+}
+
+func TestContainerSSHBusinessDomainDoesNotExposeNamedProvider(t *testing.T) {
 	database := containerSSHDomainTestDB(t)
 	provider := model.ResourceProvider{
 		ID: uuid.NewString(), Key: "szzy", DisplayName: "SZYY", DomainScope: model.ProviderDomainNamed, DomainLabel: "szzy",
@@ -51,7 +71,7 @@ func TestContainerSSHBusinessDomainIncludesNamedProvider(t *testing.T) {
 	domain, err := ContainerSSHBusinessDomain(context.Background(), database, agent.ID,
 		`{"namespace_name":"tenant-workloads","workload_name":"ide"}`)
 	require.NoError(t, err)
-	require.Equal(t, "ide.tenant-workloads.guoziyun.szzy.beagle", domain)
+	require.Equal(t, "ide.tenant-workloads.guoziyun.beagle", domain)
 }
 
 func TestContainerSSHBusinessDomainRejectsRuntimePodNameWithoutWorkload(t *testing.T) {

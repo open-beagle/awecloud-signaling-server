@@ -38,6 +38,7 @@ type SessionAuthorizationTarget struct {
 	WorkloadUID   string `json:"workload_uid,omitempty"`
 	WorkloadKind  string `json:"workload_kind,omitempty"`
 	WorkloadName  string `json:"workload_name,omitempty"`
+	DomainMode    string `json:"domain_mode,omitempty"`
 	PodName       string `json:"pod_name,omitempty"`
 	PodUID        string `json:"pod_uid,omitempty"`
 	ContainerName string `json:"container_name,omitempty"`

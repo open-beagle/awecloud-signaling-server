@@ -23,6 +23,21 @@ type containerSSHBusinessTarget struct {
 	PodName       string `json:"pod_name"`
 }
 
+type containerServiceBusinessTarget struct {
+	NamespaceName string `json:"namespace_name"`
+	ServiceName   string `json:"service_name"`
+}
+
+// ContainerServiceBusinessDomain returns the stable user-facing address for a
+// Kubernetes Service. Service UID and Tenant resource IDs never enter it.
+func ContainerServiceBusinessDomain(ctx context.Context, database *gorm.DB, accessTechnicalResourceID, targetSnapshot string) (string, error) {
+	var target containerServiceBusinessTarget
+	if json.Unmarshal([]byte(targetSnapshot), &target) != nil {
+		return "", ErrContainerSSHBusinessDomainInvalid
+	}
+	return containerBusinessDomain(ctx, database, accessTechnicalResourceID, target.ServiceName, target.NamespaceName)
+}
+
 // ContainerSSHRuntimeDomain identifies one current Pod route while the
 // TenantResource and its AccessGrant remain bound to Workload + Container.
 func ContainerSSHRuntimeDomain(ctx context.Context, database *gorm.DB, accessTechnicalResourceID, targetSnapshot string) (string, error) {
@@ -48,16 +63,20 @@ func ContainerSSHRuntimeDomain(ctx context.Context, database *gorm.DB, accessTec
 // ContainerSSHBusinessDomain returns the stable user-facing address for a
 // workload. Runtime Pod identity and Tenant resource IDs never enter it.
 func ContainerSSHBusinessDomain(ctx context.Context, database *gorm.DB, accessTechnicalResourceID, targetSnapshot string) (string, error) {
-	if database == nil || strings.TrimSpace(accessTechnicalResourceID) == "" {
-		return "", ErrContainerSSHBusinessDomainInvalid
-	}
 	var target containerSSHBusinessTarget
 	if json.Unmarshal([]byte(targetSnapshot), &target) != nil {
 		return "", ErrContainerSSHBusinessDomainInvalid
 	}
-	target.WorkloadName = strings.ToLower(strings.TrimSpace(target.WorkloadName))
-	target.NamespaceName = strings.ToLower(strings.TrimSpace(target.NamespaceName))
-	if validation.IsDNS1123Subdomain(target.WorkloadName) != nil || validation.IsDNS1123Label(target.NamespaceName) != nil {
+	return containerBusinessDomain(ctx, database, accessTechnicalResourceID, target.WorkloadName, target.NamespaceName)
+}
+
+func containerBusinessDomain(ctx context.Context, database *gorm.DB, accessTechnicalResourceID, resourceName, namespaceName string) (string, error) {
+	if database == nil || strings.TrimSpace(accessTechnicalResourceID) == "" {
+		return "", ErrContainerSSHBusinessDomainInvalid
+	}
+	resourceName = strings.ToLower(strings.TrimSpace(resourceName))
+	namespaceName = strings.ToLower(strings.TrimSpace(namespaceName))
+	if validation.IsDNS1123Subdomain(resourceName) != nil || validation.IsDNS1123Label(namespaceName) != nil {
 		return "", ErrContainerSSHBusinessDomainInvalid
 	}
 
@@ -85,16 +104,10 @@ func ContainerSSHBusinessDomain(ctx context.Context, database *gorm.DB, accessTe
 	if err := database.WithContext(ctx).Where("id = ? AND status = ?", technical.ProviderID, model.ProviderStatusActive).First(&provider).Error; err != nil {
 		return "", ErrContainerSSHBusinessDomainInvalid
 	}
-	labels := []string{target.WorkloadName, target.NamespaceName, agentLabel}
-	if provider.DomainScope == model.ProviderDomainNamed {
-		providerLabel := strings.ToLower(strings.TrimSpace(provider.DomainLabel))
-		if validation.IsDNS1123Label(providerLabel) != nil {
-			return "", ErrContainerSSHBusinessDomainInvalid
-		}
-		labels = append(labels, providerLabel)
-	} else if provider.DomainScope != model.ProviderDomainRoot {
+	if provider.DomainScope != model.ProviderDomainNamed && provider.DomainScope != model.ProviderDomainRoot {
 		return "", ErrContainerSSHBusinessDomainInvalid
 	}
+	labels := []string{resourceName, namespaceName, agentLabel}
 
 	suffix := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(resourceDomainSuffix(database.WithContext(ctx)))), ".")
 	if validation.IsDNS1123Subdomain(suffix) != nil {

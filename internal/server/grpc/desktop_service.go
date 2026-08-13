@@ -1871,6 +1871,7 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 		action   string
 	}
 	candidates := make([]desktopSessionCandidate, 0, len(targets))
+	defaultPodResourceSelected := make(map[string]struct{})
 	for i := range targets {
 		if err := ctx.Err(); err != nil {
 			return nil, nil
@@ -1888,6 +1889,12 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 		if err := json.Unmarshal([]byte(targets[i].TenantResourceTargetRevision.TargetSnapshot), &targetV2); err != nil {
 			logger.Warnf("Desktop 资源发现目标快照无效: desktop_id=%d resource_id=%s err=%v", desktop.ID, resource.ID, err)
 			continue
+		}
+		if resource.Type == model.TenantResourceContainerSSH && targetV2.DomainMode != "per_pod" {
+			if _, selected := defaultPodResourceSelected[resource.ID]; selected {
+				continue
+			}
+			defaultPodResourceSelected[resource.ID] = struct{}{}
 		}
 		candidates = append(candidates, desktopSessionCandidate{
 			resource: resource, target: targets[i].TenantResourceTargetRevision, targetV2: targetV2, action: action,
@@ -2006,7 +2013,6 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 		})
 	}
 
-	domainSuffix := desktopResourceDomainSuffix(ctx)
 	sshResources := make([]*pb.ContainerSSHResource, 0)
 	serviceResources := make([]*pb.ContainerServiceResource, 0)
 	for _, projection := range projections {
@@ -2023,7 +2029,11 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 			if listenPort == 0 {
 				continue
 			}
-			domain, err := service.ContainerSSHRuntimeDomain(ctx, db.DB, projection.session.AccessTechnicalResourceID, projection.target.TargetSnapshot)
+			domainBuilder := service.ContainerSSHBusinessDomain
+			if projection.targetV2.DomainMode == "per_pod" {
+				domainBuilder = service.ContainerSSHRuntimeDomain
+			}
+			domain, err := domainBuilder(ctx, db.DB, projection.session.AccessTechnicalResourceID, projection.target.TargetSnapshot)
 			if err != nil {
 				logger.Warnf("Desktop ContainerSSH 业务域名无效: resource_id=%s err=%v", projection.resource.ID, err)
 				continue
@@ -2041,11 +2051,16 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 			})
 			continue
 		}
+		domain, err := service.ContainerServiceBusinessDomain(ctx, db.DB, projection.session.AccessTechnicalResourceID, projection.target.TargetSnapshot)
+		if err != nil {
+			logger.Warnf("Desktop ContainerService 业务域名无效: resource_id=%s err=%v", projection.resource.ID, err)
+			continue
+		}
 		serviceResources = append(serviceResources, &pb.ContainerServiceResource{
 			ResourceId: projection.resource.ID, TenantId: projection.resource.TenantID, TenantName: projection.tenant.Name,
 			DisplayName: projection.resource.DisplayName, State: state, TargetRevision: projection.target.Revision,
 			AgentNodeId: projection.agent.ID, AgentIp: projection.agent.IP, SvcProxyPort: 50051,
-			Domain: projection.resource.ID + ".service" + domainSuffix, Namespace: projection.targetV2.NamespaceName,
+			Domain: domain, Namespace: projection.targetV2.NamespaceName,
 			ServiceUid: projection.targetV2.ServiceUID, ServiceName: projection.targetV2.ServiceName,
 			PortName: projection.targetV2.PortName, PortNumber: projection.targetV2.PortNumber, Protocol: projection.targetV2.Protocol,
 			SessionId: projection.session.ID, SourceId: projection.session.TenantResourceSourceID,
