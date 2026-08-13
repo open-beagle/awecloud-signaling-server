@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,6 +27,8 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/telemetry"
 	"github.com/open-beagle/awecloud-signaling-server/internal/updater"
+	"tailscale.com/cmd/tailscaled/childproc"
+	_ "tailscale.com/ssh/tailssh"
 )
 
 var (
@@ -37,6 +40,8 @@ var (
 )
 
 func main() {
+	runTailscaleChildIfRequested()
+
 	if len(os.Args) > 1 && os.Args[1] == "updater-apply" {
 		if err := updater.RunApplyCLI(os.Args[2:]); err != nil {
 			log.Printf("updater apply failed: %v", err)
@@ -48,12 +53,6 @@ func main() {
 	// 禁用 Tailscale 内置的 logtail（避免向 log.tailscale.io 发送遥测数据）
 	// 并防止在 DNS 解析失败时触发到公共 DERP 节点的 bootstrapDNS 请求
 	os.Setenv("TS_NO_LOGS_NO_SUPPORT", "true")
-
-	// 检查是否是 be-child ssh 子命令
-	if len(os.Args) >= 3 && os.Args[1] == "be-child" && os.Args[2] == "ssh" {
-		runSSHChild()
-		return
-	}
 
 	// 检查是否是 dial 子命令：signal_agent dial <host> <port>
 	if len(os.Args) >= 4 && os.Args[1] == "dial" {
@@ -188,6 +187,28 @@ func main() {
 	}
 }
 
+func runTailscaleChildIfRequested() {
+	if len(os.Args) < 2 || os.Args[1] != "be-child" {
+		return
+	}
+	if err := runTailscaleChild(os.Args[2:]); err != nil {
+		log.Printf("tailscale child process failed: %v", err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func runTailscaleChild(args []string) error {
+	if len(args) == 0 {
+		return errors.New("missing be-child mode")
+	}
+	fn, ok := childproc.Code[args[0]]
+	if !ok {
+		return fmt.Errorf("unknown be-child mode %q", args[0])
+	}
+	return fn(args[1:])
+}
+
 type agentTokenRegistrar func(serverAddr, token string) (*config.AgentConfig, *config.RegisterResult, error)
 
 func resolveAgentStartupConfig(configPath, deployToken, serverAddr string, registrar agentTokenRegistrar) (*config.AgentConfig, *config.RegisterResult, error) {
@@ -221,223 +242,6 @@ func mergeLocalAgentConfig(cfg, local *config.AgentConfig) {
 	cfg.K8S = local.K8S
 	cfg.SVC = local.SVC
 	cfg.Container = local.Container
-}
-
-// runSSHChild 处理 be-child ssh 子命令
-// 这个命令由 Tailscale SSH 调用，用于在指定用户身份下启动 shell
-func runSSHChild() {
-	// 解析命令行参数
-	var (
-		loginShell string
-		uid        int = -1
-		gid        int = -1
-		groups     []int
-		homeDir    string
-		localUser  string
-		remoteUser string
-		remoteIP   string
-		shell      bool
-		cmd        string // 命令执行模式的命令
-	)
-
-	// 解析参数
-	for i := 3; i < len(os.Args); i++ {
-		arg := os.Args[i]
-
-		// 处理 --key=value 格式
-		if idx := strings.Index(arg, "="); idx > 0 {
-			key := arg[:idx]
-			value := arg[idx+1:]
-
-			switch key {
-			case "--login-shell":
-				loginShell = value
-			case "--uid":
-				fmt.Sscanf(value, "%d", &uid)
-			case "--gid":
-				fmt.Sscanf(value, "%d", &gid)
-			case "--groups":
-				for _, gStr := range splitString(value, ',') {
-					var g int
-					if _, err := fmt.Sscanf(gStr, "%d", &g); err == nil {
-						groups = append(groups, g)
-					}
-				}
-			case "--home-dir":
-				homeDir = value
-			case "--local-user":
-				localUser = value
-			case "--remote-user":
-				remoteUser = value
-			case "--remote-ip":
-				remoteIP = value
-			case "--cmd":
-				// Tailscale SSH 传递的命令参数
-				cmd = value
-			}
-			continue
-		}
-
-		// 处理 --key value 格式和标志
-		if arg == "--login-shell" && i+1 < len(os.Args) {
-			loginShell = os.Args[i+1]
-			i++
-		} else if arg == "--uid" && i+1 < len(os.Args) {
-			fmt.Sscanf(os.Args[i+1], "%d", &uid)
-			i++
-		} else if arg == "--gid" && i+1 < len(os.Args) {
-			fmt.Sscanf(os.Args[i+1], "%d", &gid)
-			i++
-		} else if arg == "--groups" && i+1 < len(os.Args) {
-			groupsStr := os.Args[i+1]
-			for _, gStr := range splitString(groupsStr, ',') {
-				var g int
-				if _, err := fmt.Sscanf(gStr, "%d", &g); err == nil {
-					groups = append(groups, g)
-				}
-			}
-			i++
-		} else if arg == "--home-dir" && i+1 < len(os.Args) {
-			homeDir = os.Args[i+1]
-			i++
-		} else if arg == "--local-user" && i+1 < len(os.Args) {
-			localUser = os.Args[i+1]
-			i++
-		} else if arg == "--remote-user" && i+1 < len(os.Args) {
-			remoteUser = os.Args[i+1]
-			i++
-		} else if arg == "--remote-ip" && i+1 < len(os.Args) {
-			remoteIP = os.Args[i+1]
-			i++
-		} else if arg == "--cmd" && i+1 < len(os.Args) {
-			// Tailscale SSH 传递的命令参数
-			cmd = os.Args[i+1]
-			i++
-		} else if arg == "--shell" {
-			shell = true
-		}
-	}
-
-	// 如果没有指定 login-shell，使用默认值
-	if loginShell == "" {
-		loginShell = "/bin/bash"
-	}
-
-	// 切换用户身份（如果指定了 uid/gid）
-	if err := switchUserIdentity(uid, gid, groups); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to switch user identity: %v\n", err)
-		os.Exit(1)
-	}
-
-	// 设置环境变量
-	env := os.Environ()
-	if homeDir != "" {
-		env = append(env, "HOME="+homeDir)
-	}
-	if localUser != "" {
-		env = append(env, "USER="+localUser)
-		env = append(env, "LOGNAME="+localUser)
-	}
-
-	// 切换到用户主目录
-	if homeDir != "" {
-		if err := os.Chdir(homeDir); err != nil {
-			fmt.Fprintf(os.Stderr, "failed to chdir to %s: %v\n", homeDir, err)
-		}
-	}
-
-	// 只在交互式会话（--shell 参数）时显示横幅
-	// 命令执行会话（--cmd 参数）不显示横幅，避免污染命令输出
-	if shell {
-		printSSHBanner(localUser, remoteUser, remoteIP)
-	}
-
-	// 使用平台特定的方式启动 shell
-	// 如果有 --cmd 参数，执行命令；否则启动交互式 shell
-	if err := execShell(loginShell, env, cmd); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to exec shell: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-// splitString 分割字符串
-func splitString(s string, sep rune) []string {
-	var result []string
-	var current string
-	for _, c := range s {
-		if c == sep {
-			if current != "" {
-				result = append(result, current)
-				current = ""
-			}
-		} else {
-			current += string(c)
-		}
-	}
-	if current != "" {
-		result = append(result, current)
-	}
-	return result
-}
-
-// printSSHBanner 打印 SSH 登录横幅
-func printSSHBanner(localUser, remoteUser, remoteIP string) {
-	// 提取真实的用户名（去掉 tag: 前缀）
-	displayRemoteUser := extractRealUser(remoteUser)
-
-	// 获取当前时间
-	connectTime := time.Now().Format("2006-01-02 15:04:05")
-
-	fmt.Println("================================================================")
-	fmt.Println("           AWECloud Signaling - SSH Access")
-	fmt.Println("================================================================")
-	fmt.Printf("  Version:      %s\n", version)
-	fmt.Printf("  Build Date:   %s\n", buildDate)
-	fmt.Printf("  Connect Time: %s\n", connectTime)
-	fmt.Println("----------------------------------------------------------------")
-
-	// 构建 Remote User 行
-	if displayRemoteUser != "" {
-		fmt.Printf("  Remote User:   %s\n", displayRemoteUser)
-	}
-
-	// 构建 Remote Device 行
-	if remoteIP != "" {
-		fmt.Printf("  Remote Device: %s\n", remoteIP)
-	}
-
-	fmt.Println("================================================================")
-	fmt.Println()
-}
-
-// extractRealUser 从 Tailscale 用户标签中提取真实用户名
-// 输入: "tag:desktop-group-dev,tag:desktop-shucheng@bd-apaas.com"
-// 输出: "shucheng@bd-apaas.com"
-func extractRealUser(remoteUser string) string {
-	if remoteUser == "" {
-		return ""
-	}
-
-	// 按逗号分割多个标签
-	tags := strings.Split(remoteUser, ",")
-	for _, tag := range tags {
-		tag = strings.TrimSpace(tag)
-
-		// 查找以 "tag:client-" 开头的标签（优先）
-		if strings.HasPrefix(tag, "tag:client-") {
-			// 去掉 "tag:client-" 前缀
-			return strings.TrimPrefix(tag, "tag:client-")
-		}
-
-		// 查找以 "tag:desktop-" 开头但不是 "tag:desktop-group-" 的标签
-		if strings.HasPrefix(tag, "tag:desktop-") && !strings.HasPrefix(tag, "tag:desktop-group-") {
-			// 去掉 "tag:desktop-" 前缀
-			return strings.TrimPrefix(tag, "tag:desktop-")
-		}
-	}
-
-	// 如果没找到，返回原始值
-	return remoteUser
 }
 
 // registerWithToken 使用部署 Token 向 Server 注册

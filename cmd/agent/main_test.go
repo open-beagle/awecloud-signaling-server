@@ -8,6 +8,7 @@ import (
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/stretchr/testify/require"
+	"tailscale.com/cmd/tailscaled/childproc"
 )
 
 func TestResolveAgentStartupConfigUsesStoredCredentialWithoutRegistering(t *testing.T) {
@@ -31,6 +32,21 @@ server = "https://signal.example"
 	require.Nil(t, result)
 	require.Equal(t, "runtime-secret", cfg.Agent.AgentToken)
 	require.Equal(t, "https://signal.example", cfg.Agent.Server)
+}
+
+func TestAgentMainHandlesTailscaleChildrenBeforeLoadingConfig(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	require.NoError(t, err)
+	content := string(source)
+
+	childRunAt := strings.Index(content, `runTailscaleChildIfRequested()`)
+	configFlagAt := strings.Index(content, `configPath := flag.String`)
+	require.NotEqual(t, -1, childRunAt)
+	require.NotEqual(t, -1, configFlagAt)
+	require.Less(t, childRunAt, configFlagAt)
+	require.Contains(t, content, `childproc.Code[args[0]]`)
+	require.NotNil(t, childproc.Code["ssh"])
+	require.NotNil(t, childproc.Code["sftp"])
 }
 
 func TestResolveAgentStartupConfigRegistersOnlyExplicitDeployToken(t *testing.T) {
