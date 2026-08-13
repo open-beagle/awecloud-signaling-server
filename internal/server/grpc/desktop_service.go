@@ -1686,6 +1686,7 @@ func (s *DesktopServiceServer) ResolveDomain(ctx context.Context, req *pb.Resolv
 
 // GetResources 资源发现 - Desktop 查询可访问的资源列表
 func (s *DesktopServiceServer) GetResources(ctx context.Context, req *pb.GetResourcesRequest) (*pb.GetResourcesResponse, error) {
+	startedAt := time.Now()
 	// 验证 Desktop 是否存在
 	var node model.Node
 	if err := db.DB.WithContext(ctx).First(&node, req.DesktopId).Error; err != nil {
@@ -1731,9 +1732,98 @@ func (s *DesktopServiceServer) GetResources(ctx context.Context, req *pb.GetReso
 		resp.ContainerService = containerServices
 	}
 
-	logger.Infof("Desktop %d 资源发现: SSH=%d, K8SAPI=%d, ContainerSSH=%d, ContainerService=%d",
-		req.DesktopId, len(resp.Ssh), len(resp.K8SApi), len(resp.ContainerSsh), len(resp.ContainerService))
+	logger.Infof("Desktop %d 资源发现: tenant_id=%s duration=%s SSH=%d, K8SAPI=%d, ContainerSSH=%d, ContainerService=%d",
+		req.DesktopId, req.TenantId, time.Since(startedAt), len(resp.Ssh), len(resp.K8SApi), len(resp.ContainerSsh), len(resp.ContainerService))
 
+	return resp, nil
+}
+
+// ListResourceTenants returns the Tenant selector without creating or
+// revalidating ResourceSessions. Desktop calls it only after an explicit
+// administrator action.
+func (s *DesktopServiceServer) ListResourceTenants(ctx context.Context, req *pb.ListResourceTenantsRequest) (*pb.ListResourceTenantsResponse, error) {
+	startedAt := time.Now()
+	var desktop model.Node
+	if err := db.DB.WithContext(ctx).First(&desktop, req.DesktopId).Error; err != nil {
+		return nil, status.Errorf(codes.NotFound, "设备不存在")
+	}
+	if desktop.Type != model.NodeTypeDesktop {
+		return nil, status.Errorf(codes.InvalidArgument, "设备类型错误")
+	}
+
+	now := time.Now().UTC()
+	var memberships []model.TenantMembership
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", desktop.UserID, true, now).Find(&memberships).Error; err != nil {
+		return nil, status.Error(codes.Internal, "查询 Tenant 成员关系失败")
+	}
+	if len(memberships) == 0 {
+		return &pb.ListResourceTenantsResponse{}, nil
+	}
+	tenantIDs := make([]string, 0, len(memberships))
+	for _, membership := range memberships {
+		tenantIDs = append(tenantIDs, membership.TenantID)
+	}
+
+	var groupIDs []int64
+	if err := db.DB.WithContext(ctx).Model(&model.GroupMember{}).Where("user_id = ?", desktop.UserID).Pluck("group_id", &groupIDs).Error; err != nil {
+		return nil, status.Error(codes.Internal, "查询用户分组失败")
+	}
+	grantQuery := db.DB.WithContext(ctx).Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND (expires_at IS NULL OR expires_at > ?)", tenantIDs, model.TenantAccessGrantEnabled, now, now).
+		Where("subject_type = ? AND subject_user_id = ?", model.TenantAccessGrantSubjectUser, desktop.UserID)
+	if len(groupIDs) > 0 {
+		grantQuery = db.DB.WithContext(ctx).Where("tenant_id IN ? AND status = ? AND valid_from <= ? AND (expires_at IS NULL OR expires_at > ?)", tenantIDs, model.TenantAccessGrantEnabled, now, now).
+			Where("(subject_type = ? AND subject_user_id = ?) OR (subject_type = ? AND subject_group_id IN ?)",
+				model.TenantAccessGrantSubjectUser, desktop.UserID, model.TenantAccessGrantSubjectGroup, groupIDs)
+	}
+	var grants []model.TenantAccessGrant
+	if err := grantQuery.Find(&grants).Error; err != nil {
+		return nil, status.Error(codes.Internal, "查询资源授权失败")
+	}
+	shellResourceIDs := make([]string, 0, len(grants))
+	connectResourceIDs := make([]string, 0, len(grants))
+	for _, grant := range grants {
+		if grant.SubjectType == model.TenantAccessGrantSubjectGroup && !grpcTenantGroupGrantMatches(ctx, grant) {
+			continue
+		}
+		actions := parseJSONStringArray(grant.Actions)
+		if containsAction(actions, "shell") {
+			shellResourceIDs = append(shellResourceIDs, grant.TenantResourceID)
+		}
+		if containsAction(actions, "connect") {
+			connectResourceIDs = append(connectResourceIDs, grant.TenantResourceID)
+		}
+	}
+	if len(shellResourceIDs) == 0 && len(connectResourceIDs) == 0 {
+		return &pb.ListResourceTenantsResponse{}, nil
+	}
+	var visibleTenantIDs []string
+	resourceQuery := db.DB.WithContext(ctx).Model(&model.TenantResource{}).Distinct("tenant_id").
+		Where("tenant_id IN ? AND visibility_state = ? AND availability_state IN ?", tenantIDs,
+			model.TenantResourceVisible, []model.TenantResourceAvailabilityState{model.TenantResourceAvailable, model.TenantResourceDegraded})
+	if len(shellResourceIDs) > 0 && len(connectResourceIDs) > 0 {
+		resourceQuery = resourceQuery.Where("(id IN ? AND type = ?) OR (id IN ? AND type = ?)",
+			shellResourceIDs, model.TenantResourceContainerSSH, connectResourceIDs, model.TenantResourceContainerService)
+	} else if len(shellResourceIDs) > 0 {
+		resourceQuery = resourceQuery.Where("id IN ? AND type = ?", shellResourceIDs, model.TenantResourceContainerSSH)
+	} else {
+		resourceQuery = resourceQuery.Where("id IN ? AND type = ?", connectResourceIDs, model.TenantResourceContainerService)
+	}
+	if err := resourceQuery.
+		Pluck("tenant_id", &visibleTenantIDs).Error; err != nil {
+		return nil, status.Error(codes.Internal, "查询可见资源失败")
+	}
+	if len(visibleTenantIDs) == 0 {
+		return &pb.ListResourceTenantsResponse{}, nil
+	}
+	var tenants []model.Tenant
+	if err := db.DB.WithContext(ctx).Where("id IN ? AND status = ?", visibleTenantIDs, model.TenantStatusActive).Order("name ASC, id ASC").Find(&tenants).Error; err != nil {
+		return nil, status.Error(codes.Internal, "查询 Tenant 失败")
+	}
+	resp := &pb.ListResourceTenantsResponse{Tenants: make([]*pb.ResourceTenantSummary, 0, len(tenants))}
+	for _, tenant := range tenants {
+		resp.Tenants = append(resp.Tenants, &pb.ResourceTenantSummary{TenantId: tenant.ID, TenantName: tenant.Name})
+	}
+	logger.Infof("Desktop %d 手动获取 Tenant 列表: duration=%s tenants=%d", req.DesktopId, time.Since(startedAt), len(resp.Tenants))
 	return resp, nil
 }
 

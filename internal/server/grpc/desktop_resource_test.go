@@ -332,10 +332,33 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 		Status: model.TenantAccessGrantEnabled, Revision: 1, RowVersion: 1, CreatedByUserID: owner.ID,
 	}
 	require.NoError(t, database.Create(&sshGrant).Error)
+	// A grant whose action does not match the resource type must not make an
+	// otherwise empty Tenant appear in the lightweight selector.
+	mismatchedResource := model.TenantResource{
+		ID: uuid.NewString(), TenantID: otherTenant.ID, Type: model.TenantResourceContainerService,
+		StableKey: strings.Repeat("f", 64), DisplayName: "mismatched-action", VisibilityState: model.TenantResourceVisible,
+		AvailabilityState: model.TenantResourceAvailable, Revision: 1, RowVersion: 1,
+	}
+	require.NoError(t, database.Create(&mismatchedResource).Error)
+	require.NoError(t, database.Create(&model.TenantAccessGrant{
+		ID: uuid.NewString(), TenantID: otherTenant.ID, TenantResourceID: mismatchedResource.ID,
+		SubjectType: model.TenantAccessGrantSubjectUser, SubjectKey: fmt.Sprint(member.ID), SubjectUserID: &member.ID,
+		Actions: `["shell"]`, ValidFrom: now.Add(-time.Minute), MaxSessionSeconds: 3600,
+		Status: model.TenantAccessGrantEnabled, Revision: 1, RowVersion: 1, CreatedByUserID: owner.ID,
+	}).Error)
 
 	server := &DesktopServiceServer{config: &config.ServerConfig{FeatureFlags: config.FeatureFlagsSection{
 		ResourceModelWrite: true,
 	}}}
+	tenantResponse, err := server.ListResourceTenants(context.Background(), &pb.ListResourceTenantsRequest{DesktopId: desktop.ID})
+	require.NoError(t, err)
+	require.Len(t, tenantResponse.Tenants, 1)
+	require.Equal(t, tenant.ID, tenantResponse.Tenants[0].TenantId)
+	require.Equal(t, tenant.Name, tenantResponse.Tenants[0].TenantName)
+	var tenantListSessionCount int64
+	require.NoError(t, database.Model(&model.ResourceSession{}).Where("user_id = ? AND device_id = ?", member.ID, desktop.ID).Count(&tenantListSessionCount).Error)
+	require.Zero(t, tenantListSessionCount, "Tenant summary must not create resource sessions")
+
 	legacyResponse, err := server.GetResources(context.Background(), &pb.GetResourcesRequest{DesktopId: desktop.ID})
 	require.NoError(t, err)
 	require.Empty(t, legacyResponse.ContainerService)

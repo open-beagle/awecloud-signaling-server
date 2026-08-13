@@ -54,6 +54,9 @@ service DesktopService {
   // 资源发现 - Desktop 查询可访问的资源列表
   rpc GetResources(GetResourcesRequest) returns (GetResourcesResponse);
 
+  // 获取有权访问 Kubernetes 资源的 Tenant 摘要，不创建 ResourceSession
+  rpc ListResourceTenants(ListResourceTenantsRequest) returns (ListResourceTenantsResponse);
+
   // 获取域名列表 - Desktop 查询可访问的域名记录（按类型分类）
   rpc GetDomainList(GetDomainListRequest) returns (GetDomainListResponse);
 
@@ -405,6 +408,19 @@ message GetResourcesRequest {
   uint64 desktop_id = 1; // Desktop ID
   string resource_protocol = 2; // 明确协商 resource_session_v2；空表示旧 Desktop
   string tenant_id = 3; // 可选的当前 Tenant；新 Desktop 用于作用域切换，空值保持旧行为
+}
+
+message ListResourceTenantsRequest {
+  uint64 desktop_id = 1;
+}
+
+message ResourceTenantSummary {
+  string tenant_id = 1;
+  string tenant_name = 2;
+}
+
+message ListResourceTenantsResponse {
+  repeated ResourceTenantSummary tenants = 1;
 }
 
 // SSHResource SSH 资源
