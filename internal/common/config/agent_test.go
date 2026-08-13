@@ -40,3 +40,25 @@ ssh_port = 2222
 	require.NoError(t, err)
 	require.Equal(t, 22022, cfg.Tunnel.SSHPort)
 }
+
+func TestAgentConfigReadsLegacyServerAddress(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.toml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+[agent]
+name = "beagle-beijing"
+token = "fixture-token"
+device = "beagle-243"
+
+[server]
+address = "https://signal.wodcloud.com"
+
+[tunnel]
+enable_ssh = true
+`), 0o600))
+
+	cfg, err := LoadAgentConfig(path)
+	require.NoError(t, err)
+	require.Equal(t, "fixture-token", cfg.Agent.AgentToken)
+	require.Equal(t, "https://signal.wodcloud.com", cfg.Agent.Server)
+	require.True(t, cfg.Tunnel.EnableSSH)
+}

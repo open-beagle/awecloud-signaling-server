@@ -133,6 +133,16 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 		if err := toml.Unmarshal(data, &cfg); err != nil {
 			return nil, err
 		}
+		if cfg.Agent.Server == "" {
+			var legacy struct {
+				Server struct {
+					Address string `toml:"address"`
+				} `toml:"server"`
+			}
+			if err := toml.Unmarshal(data, &legacy); err == nil && legacy.Server.Address != "" {
+				cfg.Agent.Server = legacy.Server.Address
+			}
+		}
 		fileLoaded = true
 	}
 
