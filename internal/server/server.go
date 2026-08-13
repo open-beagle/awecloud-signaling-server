@@ -56,7 +56,6 @@ type Server struct {
 	nodeRuntimeStore              *cache.NodeRuntimeStore
 	nodeRuntimePersister          *cache.NodeRuntimePersister
 	snapshotRefresher             *headscale.SnapshotRefresher
-	desktopDataAssembler          *service.DesktopDataAssembler
 	updaterCatalog                *service.UpdaterCatalogService
 	reconciliationCtx             context.Context
 	reconciliationCancel          context.CancelFunc
@@ -136,7 +135,6 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 		}
 	}
 
-	desktopDataAssembler := service.NewDesktopDataAssembler(db.DB, nodeRuntimeStore, snapshotRefresher)
 	updaterCatalog, err := service.NewUpdaterCatalogService(db.DB, cfg.Updater)
 	if err != nil {
 		return nil, fmt.Errorf("初始化 HTTP 制品目录失败: %w", err)
@@ -152,7 +150,6 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 		nodeRuntimeStore:              nodeRuntimeStore,
 		nodeRuntimePersister:          nodeRuntimePersister,
 		snapshotRefresher:             snapshotRefresher,
-		desktopDataAssembler:          desktopDataAssembler,
 		updaterCatalog:                updaterCatalog,
 		reconciliationService:         service.NewResourceReconciliationService(db.DB),
 		providerReconciliationService: service.NewProviderSupplyReconciliationService(db.DB),
@@ -184,7 +181,6 @@ func (s *Server) Run() error {
 	s.desktopService.SetRuntimeStore(s.nodeRuntimeStore)
 	s.desktopService.SetRuntimePersister(s.nodeRuntimePersister)
 	s.desktopService.SetSnapshotRefresher(s.snapshotRefresher)
-	s.desktopService.SetDataAssembler(s.desktopDataAssembler)
 
 	// 创建 Desktop 登录服务和认证 API
 	s.loginService = service.NewDesktopLoginService(s.config)
@@ -436,32 +432,6 @@ func (s *Server) setupRouter() *gin.Engine {
 		router.GET("/auth/desktop/callback", s.desktopAuthAPI.DesktopLoginCallback)
 		logger.Info("Desktop Logto 登录已启用")
 	}
-
-	// Desktop REST API（gRPC 降级兜底，公开接口）
-	desktopRESTAPI := api.NewDesktopRESTAPI(s.desktopService, s.loginService)
-	desktopRESTGroup := router.Group("/api/v1/desktop")
-	{
-		// 认证相关（无需预认证）
-		desktopRESTGroup.POST("/authenticate", desktopRESTAPI.Authenticate)
-		desktopRESTGroup.POST("/create-login-session", desktopRESTAPI.CreateLoginSession)
-		desktopRESTGroup.GET("/login-result/:session_id", desktopRESTAPI.GetLoginResult)
-
-		// 需要 Desktop 凭证认证的接口
-		desktopRESTGroup.POST("/heartbeat", desktopRESTAPI.Heartbeat)
-		desktopRESTGroup.GET("/data", desktopRESTAPI.GetData)
-		desktopRESTGroup.POST("/logout", desktopRESTAPI.Logout)
-		desktopRESTGroup.GET("/hosts", desktopRESTAPI.GetHosts)
-		desktopRESTGroup.GET("/hosts/:host_id/services", desktopRESTAPI.GetHostServices)
-		desktopRESTGroup.GET("/devices", desktopRESTAPI.GetDevices)
-		desktopRESTGroup.POST("/devices/:token/offline", desktopRESTAPI.OfflineDevice)
-		desktopRESTGroup.DELETE("/devices/:token", desktopRESTAPI.DeleteDevice)
-		desktopRESTGroup.POST("/favorites/toggle", desktopRESTAPI.ToggleFavorite)
-		desktopRESTGroup.GET("/favorites", desktopRESTAPI.GetFavorites)
-		desktopRESTGroup.GET("/resolve-domain", desktopRESTAPI.ResolveDomain)
-		desktopRESTGroup.GET("/resources", desktopRESTAPI.GetResources)
-		desktopRESTGroup.GET("/domains", desktopRESTAPI.GetDomains)
-	}
-	logger.Info("Desktop REST API 已启用（gRPC 降级兜底）")
 
 	// 静态文件
 	webRoot := s.config.Web.WebRoot

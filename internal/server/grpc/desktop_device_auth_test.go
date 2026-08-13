@@ -73,13 +73,6 @@ func TestDesktopDeviceMutationsRequireCurrentDeviceSecret(t *testing.T) {
 	require.ErrorIs(t, database.First(&model.Node{}, target.ID).Error, gorm.ErrRecordNotFound)
 }
 
-func TestDesktopDataSnapshotRequiresAssembler(t *testing.T) {
-	server := NewDesktopServiceServer(&config.ServerConfig{})
-	data, err := server.GetDataSnapshotREST(context.Background(), 1)
-	require.EqualError(t, err, "DesktopDataAssembler 未初始化")
-	require.Nil(t, data)
-}
-
 func TestDesktopCredentialVerificationIsReadOnlyAndAuthenticateUpdatesHeartbeat(t *testing.T) {
 	original := db.DB
 	t.Cleanup(func() { db.DB = original })

@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	v1 "github.com/juanfont/headscale/gen/go/headscale/v1"
+	"go.opentelemetry.io/otel"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -64,7 +64,6 @@ type DesktopServiceServer struct {
 	runtimeStore      *cache.NodeRuntimeStore
 	runtimePersister  *cache.NodeRuntimePersister
 	snapshotRefresher *headscale.SnapshotRefresher
-	dataAssembler     *service.DesktopDataAssembler
 	updateService     *service.UpdateService
 }
 
@@ -108,10 +107,6 @@ func (s *DesktopServiceServer) SetRuntimePersister(persister *cache.NodeRuntimeP
 
 func (s *DesktopServiceServer) SetSnapshotRefresher(refresher *headscale.SnapshotRefresher) {
 	s.snapshotRefresher = refresher
-}
-
-func (s *DesktopServiceServer) SetDataAssembler(assembler *service.DesktopDataAssembler) {
-	s.dataAssembler = assembler
 }
 
 func buildHeadscaleDeviceIPIndex(nodes []*v1.Node) headscaleDeviceIPIndex {
@@ -282,18 +277,28 @@ func (s *DesktopServiceServer) Authenticate(ctx context.Context, req *pb.Desktop
 // VerifyCredential verifies a Desktop request without mutating heartbeat state
 // or provisioning Headscale credentials.
 func (s *DesktopServiceServer) VerifyCredential(ctx context.Context, desktopID uint64, secret string) (model.Node, model.User, string, bool) {
+	tracer := otel.Tracer("desktop.auth")
 	var node model.Node
-	if err := db.DB.WithContext(ctx).First(&node, desktopID).Error; err != nil {
+	loadNodeCtx, loadNodeSpan := tracer.Start(ctx, "desktop.auth.load_node")
+	err := db.DB.WithContext(loadNodeCtx).First(&node, desktopID).Error
+	loadNodeSpan.End()
+	if err != nil {
 		return model.Node{}, model.User{}, "设备不存在", false
 	}
 	if node.Type != model.NodeTypeDesktop {
 		return model.Node{}, model.User{}, "设备类型错误", false
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(node.SecretHash), []byte(secret)); err != nil {
+	_, bcryptSpan := tracer.Start(ctx, "desktop.auth.bcrypt")
+	err = bcrypt.CompareHashAndPassword([]byte(node.SecretHash), []byte(secret))
+	bcryptSpan.End()
+	if err != nil {
 		return model.Node{}, model.User{}, "认证失败", false
 	}
 	var user model.User
-	if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err != nil {
+	loadUserCtx, loadUserSpan := tracer.Start(ctx, "desktop.auth.load_user")
+	err = db.DB.WithContext(loadUserCtx).First(&user, node.UserID).Error
+	loadUserSpan.End()
+	if err != nil {
 		return model.Node{}, model.User{}, "用户不存在", false
 	}
 	if !user.Enabled {
@@ -2879,32 +2884,4 @@ func getNodeStatus(node *model.Node) string {
 		return "online"
 	}
 	return "offline"
-}
-
-// ============================================
-// REST API 专用方法（gRPC 降级兜底）
-// ============================================
-
-// HandleDesktopHeartbeatREST REST 心跳处理（替代双向流）
-func (s *DesktopServiceServer) HandleDesktopHeartbeatREST(ctx context.Context, desktopID uint64, tunnelIP string, tunnelConnected bool) {
-	// 查找 node
-	var node model.Node
-	if err := db.DB.WithContext(ctx).First(&node, desktopID).Error; err != nil {
-		logger.Errorf("[DesktopREST] 心跳: desktop_id=%d 不存在", desktopID)
-		return
-	}
-
-	s.handleDesktopHeartbeat(ctx, node.ID, &pb.DesktopHeartbeatRequest{
-		DesktopId:       desktopID,
-		TunnelIp:        tunnelIP,
-		TunnelConnected: tunnelConnected,
-	})
-}
-
-// GetDataSnapshotREST REST 数据快照（替代双向流 DataStream）
-func (s *DesktopServiceServer) GetDataSnapshotREST(ctx context.Context, desktopID uint64) (map[string]any, error) {
-	if s.dataAssembler == nil {
-		return nil, errors.New("DesktopDataAssembler 未初始化")
-	}
-	return s.dataAssembler.BuildDataSnapshotREST(ctx, desktopID)
 }
