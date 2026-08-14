@@ -202,6 +202,298 @@ func TestInstallSignalScriptUsesChinesePromptAndAvoidsDuplicateLogRedirect(t *te
 	}
 }
 
+func TestInstallSignalUpgradeDownloadFailureDoesNotStopClient(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	require.NoError(t, err)
+
+	tempDir := t.TempDir()
+	homeDir := filepath.Join(tempDir, "home")
+	dataDir := filepath.Join(homeDir, ".local", "share", "signal")
+	require.NoError(t, os.MkdirAll(dataDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "agent.toml"), []byte(`[agent]
+token = "runtime-token"
+server = "https://signal.example"
+`), 0o600))
+
+	eventPath := filepath.Join(tempDir, "events.log")
+	fakeBin := filepath.Join(tempDir, "bin")
+	require.NoError(t, os.MkdirAll(fakeBin, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(fakeBin, "curl"), []byte(`#!/bin/bash
+echo "curl:$*" >> "$TEST_EVENT_FILE"
+if [[ "$*" == *"signal_agent-version.json"* ]]; then
+  cat <<'JSON'
+{"version":"v1.0.2","files":{"linux-amd64":"https://artifacts.example/signal_agent"},"sha256":{"linux-amd64":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+JSON
+  exit 0
+fi
+exit 22
+`), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(fakeBin, "pgrep"), []byte(`#!/bin/bash
+echo "pgrep:$*" >> "$TEST_EVENT_FILE"
+echo 4242
+`), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(fakeBin, "sudo"), []byte(`#!/bin/bash
+echo "sudo:$*" >> "$TEST_EVENT_FILE"
+exit 0
+`), 0o700))
+
+	command := exec.Command(bashPath, filepath.ToSlash(filepath.Join("..", "..", "scripts", "install_signal.sh")), "--upgrade")
+	command.Env = append(os.Environ(),
+		"HOME="+filepath.ToSlash(homeDir),
+		"PATH="+filepath.ToSlash(fakeBin)+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"TEST_EVENT_FILE="+filepath.ToSlash(eventPath),
+	)
+	output, runErr := command.CombinedOutput()
+	require.Error(t, runErr, string(output))
+	events, err := os.ReadFile(eventPath)
+	require.NoError(t, err)
+	require.Contains(t, string(events), "https://artifacts.example/signal_agent", string(output))
+	require.NotContains(t, string(events), "https://cache.ali.wodcloud.com/vscode/awecloud-signaling/signal_agent-v1.0.2-linux-amd64", string(output))
+	require.NotContains(t, string(events), "sudo:kill", string(output))
+}
+
+func TestInstallSignalUpgradeRollsBackFailedStart(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	require.NoError(t, err)
+	scriptPath := filepath.Join("..", "..", "scripts", "install_signal.sh")
+	content, err := os.ReadFile(scriptPath)
+	require.NoError(t, err)
+
+	tempDir := t.TempDir()
+	eventPath := filepath.Join(tempDir, "events.log")
+	harness := `
+EVENT_FILE="$TEST_EVENT_FILE"
+BIN_DIR="/opt/bin"
+STAGED_BINARY_PATH=""
+CURRENT_BINARY="/downloads/signal_agent-old"
+
+stage_client() { STAGED_BINARY_PATH="/downloads/signal_agent-new"; echo "stage" >> "$EVENT_FILE"; }
+readlink() { echo "/downloads/signal_agent-old"; }
+stop_client() { echo "stop" >> "$EVENT_FILE"; }
+switch_client_link() { CURRENT_BINARY="$1"; echo "link:$1" >> "$EVENT_FILE"; }
+activate_staged_client() { switch_client_link "$STAGED_BINARY_PATH"; }
+start_client() {
+    echo "start:$CURRENT_BINARY" >> "$EVENT_FILE"
+    [[ "$CURRENT_BINARY" == "/downloads/signal_agent-old" ]]
+}
+
+upgrade_client
+`
+	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
+	source := strings.Replace(normalized, "\nmain \"$@\"", harness, 1)
+	require.NotEqual(t, normalized, source)
+	harnessPath := filepath.Join(tempDir, "upgrade-harness.sh")
+	require.NoError(t, os.WriteFile(harnessPath, []byte(source), 0o700))
+
+	command := exec.Command(bashPath, filepath.ToSlash(harnessPath))
+	command.Env = append(os.Environ(), "TEST_EVENT_FILE="+filepath.ToSlash(eventPath))
+	output, runErr := command.CombinedOutput()
+	require.Error(t, runErr, string(output))
+	events, err := os.ReadFile(eventPath)
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"stage",
+		"stop",
+		"link:/downloads/signal_agent-new",
+		"start:/downloads/signal_agent-new",
+		"stop",
+		"link:/downloads/signal_agent-old",
+		"start:/downloads/signal_agent-old",
+	}, strings.Split(strings.TrimSpace(string(events)), "\n"))
+}
+
+func TestInstallSignalUpgradeAcceptsRegistrationConfigRewrite(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	require.NoError(t, err)
+	scriptPath := filepath.Join("..", "..", "scripts", "install_signal.sh")
+	content, err := os.ReadFile(scriptPath)
+	require.NoError(t, err)
+
+	tempDir := t.TempDir()
+	eventPath := filepath.Join(tempDir, "events.log")
+	configPath := filepath.Join(tempDir, "agent.toml")
+	require.NoError(t, os.WriteFile(configPath, []byte("original\n"), 0o600))
+	harness := `
+EVENT_FILE="$TEST_EVENT_FILE"
+CONFIG_FILE="$TEST_CONFIG_FILE"
+BIN_DIR="/opt/bin"
+STAGED_BINARY_PATH=""
+
+stage_client() { STAGED_BINARY_PATH="/downloads/signal_agent-new"; echo "stage" >> "$EVENT_FILE"; }
+readlink() { echo "/downloads/signal_agent-old"; }
+stop_client() { echo "stop" >> "$EVENT_FILE"; }
+switch_client_link() { echo "link:$1" >> "$EVENT_FILE"; }
+activate_staged_client() { switch_client_link "$STAGED_BINARY_PATH"; }
+start_client() {
+    echo "start" >> "$EVENT_FILE"
+    echo "refreshed-registration" >> "$CONFIG_FILE"
+}
+
+upgrade_client
+`
+	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
+	source := strings.Replace(normalized, "\nmain \"$@\"", harness, 1)
+	require.NotEqual(t, normalized, source)
+	harnessPath := filepath.Join(tempDir, "config-rewrite-harness.sh")
+	require.NoError(t, os.WriteFile(harnessPath, []byte(source), 0o700))
+
+	command := exec.Command(bashPath, filepath.ToSlash(harnessPath))
+	command.Env = append(os.Environ(),
+		"TEST_EVENT_FILE="+filepath.ToSlash(eventPath),
+		"TEST_CONFIG_FILE="+filepath.ToSlash(configPath),
+	)
+	output, runErr := command.CombinedOutput()
+	require.NoError(t, runErr, string(output))
+	events, err := os.ReadFile(eventPath)
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"stage",
+		"stop",
+		"link:/downloads/signal_agent-new",
+		"start",
+	}, strings.Split(strings.TrimSpace(string(events)), "\n"))
+}
+
+func TestInstallSignalStartRequiresClientReadiness(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	require.NoError(t, err)
+	scriptPath := filepath.Join("..", "..", "scripts", "install_signal.sh")
+	content, err := os.ReadFile(scriptPath)
+	require.NoError(t, err)
+
+	tempDir := t.TempDir()
+	eventPath := filepath.Join(tempDir, "events.log")
+	dataDir := filepath.Join(tempDir, "data")
+	require.NoError(t, os.MkdirAll(dataDir, 0o755))
+	harness := `
+EVENT_FILE="$TEST_EVENT_FILE"
+BIN_DIR="/opt/bin"
+CONFIG_FILE="/config/agent.toml"
+DATA_DIR="$TEST_DATA_DIR"
+SIGNAL_TOKEN="runtime-token"
+SIGNAL_SERVER="https://signal.example"
+SUDO_CMD=""
+STAGED_BINARY_PATH="/downloads/signal_agent-new"
+
+nohup() { return 0; }
+sleep() { return 0; }
+ps() { echo "wrapper-ps" >> "$EVENT_FILE"; return 0; }
+pgrep() { echo 4321; }
+readlink() { echo "/downloads/signal_agent-new"; }
+find_client_pid() { echo 4321; }
+wait_client_ready() { echo "readiness" >> "$EVENT_FILE"; return 1; }
+
+start_client
+`
+	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
+	source := strings.Replace(normalized, "\nmain \"$@\"", harness, 1)
+	require.NotEqual(t, normalized, source)
+	harnessPath := filepath.Join(tempDir, "start-harness.sh")
+	require.NoError(t, os.WriteFile(harnessPath, []byte(source), 0o700))
+
+	command := exec.Command(bashPath, filepath.ToSlash(harnessPath))
+	command.Env = append(os.Environ(),
+		"TEST_EVENT_FILE="+filepath.ToSlash(eventPath),
+		"TEST_DATA_DIR="+filepath.ToSlash(dataDir),
+	)
+	output, runErr := command.CombinedOutput()
+	require.Error(t, runErr, string(output))
+	events, err := os.ReadFile(eventPath)
+	require.NoError(t, err)
+	require.Contains(t, string(events), "readiness")
+	require.NotContains(t, string(events), "wrapper-ps")
+}
+
+func TestInstallSignalFindClientPIDUsesReadableCommandLine(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	require.NoError(t, err)
+	scriptPath := filepath.Join("..", "..", "scripts", "install_signal.sh")
+	content, err := os.ReadFile(scriptPath)
+	require.NoError(t, err)
+
+	tempDir := t.TempDir()
+	harness := `
+BIN_DIR="/opt/bin"
+CONFIG_FILE="/config/agent.toml"
+
+pgrep() { echo 4321; }
+read_process_args() {
+    printf '%s\n' "/opt/bin/signal_agent" "-c" "/config/agent.toml"
+}
+readlink() {
+    if [[ "$*" == "-f /opt/bin/signal_agent" ]]; then
+        echo "/downloads/signal_agent-new"
+        return 0
+    fi
+    return 1
+}
+
+[[ "$(find_client_pid)" == "4321" ]]
+`
+	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
+	source := strings.Replace(normalized, "\nmain \"$@\"", harness, 1)
+	require.NotEqual(t, normalized, source)
+	harnessPath := filepath.Join(tempDir, "pid-harness.sh")
+	require.NoError(t, os.WriteFile(harnessPath, []byte(source), 0o700))
+
+	command := exec.Command(bashPath, filepath.ToSlash(harnessPath))
+	output, runErr := command.CombinedOutput()
+	require.NoError(t, runErr, string(output))
+}
+
+func TestInstallSignalStartUsesDataDirForRelativeTunnelState(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	require.NoError(t, err)
+	scriptPath := filepath.Join("..", "..", "scripts", "install_signal.sh")
+	content, err := os.ReadFile(scriptPath)
+	require.NoError(t, err)
+
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	binDir := filepath.Join(tempDir, "bin")
+	configPath := filepath.Join(dataDir, "agent.toml")
+	eventPath := filepath.Join(tempDir, "events.log")
+	require.NoError(t, os.MkdirAll(dataDir, 0o755))
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	require.NoError(t, os.WriteFile(configPath, nil, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "state-marker"), nil, 0o600))
+
+	harness := fmt.Sprintf(`
+EVENT_FILE=%q
+BIN_DIR=%q
+CONFIG_FILE=%q
+DATA_DIR=%q
+SIGNAL_TOKEN="runtime-token"
+SIGNAL_SERVER="https://signal.example"
+SUDO_CMD=""
+
+nohup() {
+    if [[ -f "$PWD/state-marker" ]]; then
+        echo "data-dir" >> "$EVENT_FILE"
+    else
+        printf 'pwd:%%s\n' "$PWD" >> "$EVENT_FILE"
+    fi
+}
+sleep() { return 0; }
+find_client_pid() { echo 4321; }
+wait_client_ready() { return 0; }
+
+start_client
+`, filepath.ToSlash(eventPath), filepath.ToSlash(binDir), filepath.ToSlash(configPath), filepath.ToSlash(dataDir))
+	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
+	source := strings.Replace(normalized, "\nmain \"$@\"", harness, 1)
+	require.NotEqual(t, normalized, source)
+	harnessPath := filepath.Join(tempDir, "working-dir-harness.sh")
+	require.NoError(t, os.WriteFile(harnessPath, []byte(source), 0o700))
+
+	command := exec.Command(bashPath, filepath.ToSlash(harnessPath))
+	output, runErr := command.CombinedOutput()
+	require.NoError(t, runErr, string(output))
+	events, err := os.ReadFile(eventPath)
+	require.NoError(t, err)
+	require.Equal(t, "data-dir", strings.TrimSpace(string(events)))
+}
+
 func TestInstallAgentScriptDeployRestartsServiceAndResetsTunnelState(t *testing.T) {
 	scriptPaths := []string{filepath.Join("..", "..", "scripts", "install_agent.sh")}
 	workspaceScript := filepath.Join("..", "..", "..", "scripts", "install_agent.sh")
