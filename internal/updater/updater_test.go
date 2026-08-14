@@ -18,6 +18,16 @@ import (
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
+func requireSymlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("Windows 当前权限不允许创建符号链接: %v", err)
+		}
+		require.NoError(t, err)
+	}
+}
+
 func TestAgentDownloadAndVerifyStagesUnsignedArtifact(t *testing.T) {
 	payload := []byte("signed signal artifact")
 	digest := sha256.Sum256(payload)
@@ -79,8 +89,8 @@ func TestManagerStartupCleansOnlyUnreferencedArtifactsAndDownloads(t *testing.T)
 		paths[name] = path
 	}
 	currentLink := filepath.Join(t.TempDir(), "signal_agent")
-	require.NoError(t, os.Symlink(paths["current"], currentLink))
-	require.NoError(t, os.Symlink(paths["previous"], currentLink+".previous"))
+	requireSymlink(t, paths["current"], currentLink)
+	requireSymlink(t, paths["previous"], currentLink+".previous")
 	require.NoError(t, writeTaskState(stateDir, taskState{
 		Status: Status{TaskID: "active-task", Phase: "staged"}, Component: "agent",
 		TargetVersion: "v1.0.1", TargetCommitID: strings.Repeat("c", 40),
@@ -165,6 +175,84 @@ func TestHandleResumesRestartingTaskWithPersistedArtifact(t *testing.T) {
 	}
 }
 
+func TestResumeDoesNotStartHelperAfterTaskReachedTerminalState(t *testing.T) {
+	stateDir := t.TempDir()
+	directive := Directive{
+		TaskID: "task-1", Component: "agent", Version: "v1.0.1", ArtifactID: "artifact-1",
+		CommitID: strings.Repeat("c", 40), SHA256: strings.Repeat("d", 64),
+		OS: runtime.GOOS, Arch: runtime.GOARCH, Action: "install",
+	}
+	stale := taskState{
+		Status:    Status{TaskID: directive.TaskID, Phase: "restarting", Progress: 100, Sequence: 92},
+		Component: "agent", TargetVersion: directive.Version, TargetCommitID: directive.CommitID,
+		TargetSHA256: directive.SHA256, StagedBinary: "/tmp/staged-agent",
+	}
+	require.NoError(t, writeTaskState(stateDir, stale))
+	manager, err := NewManager(Config{
+		Component: "agent", CurrentVersion: "v1.0.0", CurrentCommitID: strings.Repeat("a", 40),
+		CurrentSHA256: strings.Repeat("b", 64), StateDir: stateDir,
+		CurrentLink: "/tmp/signal_agent", ServiceName: "signal-agent",
+	})
+	require.NoError(t, err)
+	succeeded := stale
+	succeeded.Phase = "succeeded"
+	succeeded.Sequence = 93
+	require.NoError(t, writeTaskState(stateDir, succeeded))
+	starts := 0
+	manager.startHelper = func(Directive, string) error { starts++; return nil }
+
+	manager.resume(directive, stale)
+
+	require.Zero(t, starts)
+	persisted, err := readTaskState(taskStatePath(stateDir, directive.TaskID))
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", persisted.Phase)
+	require.EqualValues(t, 93, persisted.Sequence)
+}
+
+func TestExecuteStopsWhenDiskReachedTerminalAfterMemoryCheck(t *testing.T) {
+	payload := []byte("agent artifact")
+	digest := sha256.Sum256(payload)
+	digestText := hex.EncodeToString(digest[:])
+	downloads := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		downloads++
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	stateDir := t.TempDir()
+	manager, err := NewManager(Config{
+		Component: "agent", CurrentVersion: "v1.0.0", CurrentCommitID: strings.Repeat("a", 40),
+		CurrentSHA256: strings.Repeat("b", 64), StateDir: stateDir,
+		CurrentLink: "/tmp/signal_agent", ServiceName: "signal-agent",
+	})
+	require.NoError(t, err)
+	manager.client = server.Client()
+	directive := Directive{
+		TaskID: "task-1", Component: "agent", Version: "v1.0.1", ArtifactID: "artifact-1",
+		DownloadURL: server.URL, Filename: "signal_agent", Size: int64(len(payload)),
+		CommitID: strings.Repeat("c", 40), SHA256: digestText,
+		OS: runtime.GOOS, Arch: runtime.GOARCH, Action: "install",
+	}
+	require.NoError(t, writeTaskState(stateDir, taskState{
+		Status:    Status{TaskID: directive.TaskID, Phase: "succeeded", Progress: 100, Sequence: 93},
+		Component: directive.Component, TargetVersion: directive.Version, TargetCommitID: directive.CommitID,
+		TargetSHA256: directive.SHA256,
+	}))
+	starts := 0
+	manager.startHelper = func(Directive, string) error { starts++; return nil }
+
+	manager.execute(directive)
+
+	require.Zero(t, downloads)
+	require.Zero(t, starts)
+	persisted, err := readTaskState(taskStatePath(stateDir, directive.TaskID))
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", persisted.Phase)
+	require.EqualValues(t, 93, persisted.Sequence)
+}
+
 func TestHandleResumesInterruptedDownload(t *testing.T) {
 	payload := []byte("resumed agent artifact")
 	digest := sha256.Sum256(payload)
@@ -223,6 +311,9 @@ func TestHelperUnitRunningIncludesSystemdTransitionStates(t *testing.T) {
 }
 
 func TestRestartAndCheckResetsSystemdFailureStateBeforeRestart(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("测试使用 POSIX shell 脚本模拟 systemctl")
+	}
 	binDir := t.TempDir()
 	logPath := filepath.Join(binDir, "calls")
 	systemctl := filepath.Join(binDir, "systemctl")
@@ -318,8 +409,8 @@ func TestDownloadAndVerifyRejectsInvalidChecksum(t *testing.T) {
 func TestSwitchSymlinkIsAtomicReplacement(t *testing.T) {
 	directory := t.TempDir()
 	linkPath := filepath.Join(directory, "signal_agent")
-	require.NoError(t, os.Symlink("old", linkPath))
-	require.NoError(t, os.Symlink("stale", filepath.Join(directory, ".signal_agent.new")))
+	requireSymlink(t, "old", linkPath)
+	requireSymlink(t, "stale", filepath.Join(directory, ".signal_agent.new"))
 	require.NoError(t, switchSymlink(linkPath, "new"))
 	target, err := os.Readlink(linkPath)
 	require.NoError(t, err)
@@ -334,7 +425,7 @@ func TestApplyRejectsModifiedStagedArtifactBeforeSwitch(t *testing.T) {
 	require.NoError(t, os.WriteFile(currentBinary, []byte("current"), 0755))
 	require.NoError(t, os.WriteFile(stagedBinary, []byte("modified"), 0755))
 	currentLink := filepath.Join(binDir, "signal_agent")
-	require.NoError(t, os.Symlink(currentBinary, currentLink))
+	requireSymlink(t, currentBinary, currentLink)
 
 	state := taskState{
 		Status: Status{TaskID: "task-1", Phase: "staged", Sequence: 3}, Component: "agent",
@@ -357,6 +448,58 @@ func TestApplyRejectsModifiedStagedArtifactBeforeSwitch(t *testing.T) {
 	require.Equal(t, "artifact_mismatch", persisted.ErrorCode)
 }
 
+func TestTaskStateTerminalPhaseRejectsLaterNonTerminalWrite(t *testing.T) {
+	stateDir := t.TempDir()
+	succeeded := taskState{Status: Status{TaskID: "task-1", Phase: "succeeded", Sequence: 93}}
+	require.NoError(t, writeTaskState(stateDir, succeeded))
+
+	staleWriter := taskState{Status: Status{TaskID: "task-1", Phase: "restarting", Sequence: 94}}
+	require.NoError(t, writeTaskState(stateDir, staleWriter))
+
+	persisted, err := readTaskState(taskStatePath(stateDir, "task-1"))
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", persisted.Phase)
+	require.EqualValues(t, 93, persisted.Sequence)
+}
+
+func TestApplyDoesNotRestartTerminalTaskEvenWhenForced(t *testing.T) {
+	stateDir := t.TempDir()
+	binDir := t.TempDir()
+	stagedBinary := filepath.Join(binDir, "agent-b")
+	targetPayload := []byte("agent build b")
+	targetDigest := sha256.Sum256(targetPayload)
+	targetSHA := hex.EncodeToString(targetDigest[:])
+	require.NoError(t, os.WriteFile(stagedBinary, targetPayload, 0755))
+	currentLink := filepath.Join(binDir, "signal_agent")
+	state := taskState{
+		Status:    Status{TaskID: "task-1", Phase: "succeeded", Progress: 100, Sequence: 93},
+		Component: "agent", TargetVersion: "v1.0.1", TargetCommitID: strings.Repeat("c", 40),
+		TargetSHA256: targetSHA, StagedBinary: stagedBinary, Force: true,
+	}
+	require.NoError(t, writeTaskState(stateDir, state))
+	restarts := 0
+	restart := func(context.Context, string) error {
+		restarts++
+		return writeHealthFile(filepath.Join(stateDir, "health"), HealthFile{
+			SchemaVersion: 2, TaskID: state.TaskID, Version: state.TargetVersion,
+			CommitID: state.TargetCommitID, BinarySHA256: state.TargetSHA256,
+			HeartbeatConfirmed: time.Now(),
+		})
+	}
+
+	require.NoError(t, Apply(context.Background(), ApplyConfig{
+		TaskID: "task-1", StateDir: stateDir, BinaryPath: stagedBinary,
+		CurrentLink: currentLink, ServiceName: "signal-agent",
+		restart: restart, healthTimeout: time.Second, healthPoll: time.Millisecond,
+	}))
+
+	require.Zero(t, restarts)
+	persisted, err := readTaskState(taskStatePath(stateDir, state.TaskID))
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", persisted.Phase)
+	require.EqualValues(t, 93, persisted.Sequence)
+}
+
 func TestApplySwitchesAndRequiresMatchingHealthConfirmation(t *testing.T) {
 	stateDir := t.TempDir()
 	binDir := t.TempDir()
@@ -369,7 +512,7 @@ func TestApplySwitchesAndRequiresMatchingHealthConfirmation(t *testing.T) {
 	require.NoError(t, os.WriteFile(stagedBinary, targetPayload, 0755))
 	currentLink := filepath.Join(binDir, "signal_agent")
 	previousLink := currentLink + ".previous"
-	require.NoError(t, os.Symlink(currentBinary, currentLink))
+	requireSymlink(t, currentBinary, currentLink)
 
 	state := taskState{
 		Status: Status{TaskID: "task-1", Phase: "staged", Sequence: 3}, Component: "agent",
@@ -416,7 +559,7 @@ func TestApplyRollsBackWhenHealthConfirmationTimesOut(t *testing.T) {
 	require.NoError(t, os.WriteFile(currentBinary, []byte("agent build a"), 0755))
 	require.NoError(t, os.WriteFile(stagedBinary, targetPayload, 0755))
 	currentLink := filepath.Join(binDir, "signal_agent")
-	require.NoError(t, os.Symlink(currentBinary, currentLink))
+	requireSymlink(t, currentBinary, currentLink)
 	state := taskState{
 		Status: Status{TaskID: "task-1", Phase: "staged", Sequence: 3}, Component: "agent",
 		TargetVersion: "v1.0.1", TargetCommitID: strings.Repeat("c", 40),
@@ -477,6 +620,9 @@ func TestHealthConfirmationMustMatchActiveTaskIdentity(t *testing.T) {
 }
 
 func TestValidHealthFileRejectsLoosePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows 文件权限由 ACL 管理，不暴露 POSIX 0600/0644 模式")
+	}
 	healthDir := t.TempDir()
 	state := taskState{
 		Status:         Status{TaskID: "task-1"},

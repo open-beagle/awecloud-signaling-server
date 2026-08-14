@@ -16,15 +16,18 @@ import (
 )
 
 var (
-	ErrReleaseNotPublished     = errors.New("release is not published")
-	ErrArtifactNotFound        = errors.New("matching artifact not found")
-	ErrActiveTaskExists        = errors.New("an active update task already exists for this target")
-	ErrInvalidUpdatePhase      = errors.New("invalid update phase")
-	ErrComponentNotSupported   = errors.New("component updater is not implemented")
-	ErrUpdateReporterMismatch  = errors.New("update status reporter does not match task target")
-	ErrInvalidUpdateTransition = errors.New("invalid update status transition")
-	ErrInvalidBuildIdentity    = errors.New("release or artifact build identity is invalid")
+	ErrReleaseNotPublished        = errors.New("release is not published")
+	ErrArtifactNotFound           = errors.New("matching artifact not found")
+	ErrActiveTaskExists           = errors.New("an active update task already exists for this target")
+	ErrInvalidUpdatePhase         = errors.New("invalid update phase")
+	ErrComponentNotSupported      = errors.New("component updater is not implemented")
+	ErrUpdateReporterMismatch     = errors.New("update status reporter does not match task target")
+	ErrInvalidUpdateTransition    = errors.New("invalid update status transition")
+	ErrInvalidBuildIdentity       = errors.New("release or artifact build identity is invalid")
+	ErrUpdaterProtocolUnsupported = errors.New("target does not support updater protocol v2")
 )
+
+const supportedUpdaterProtocol = "v2"
 
 type UpdateDirective struct {
 	TaskID        string
@@ -115,9 +118,12 @@ func (s *UpdateService) CreateTask(ctx context.Context, input CreateUpdateTaskIn
 			return ErrInvalidBuildIdentity
 		}
 
-		name, osName, arch, err := s.targetPlatform(tx, input.TargetType, input.TargetID)
+		name, osName, arch, updaterProtocol, err := s.targetPlatform(tx, input.TargetType, input.TargetID)
 		if err != nil {
 			return err
+		}
+		if requiresBuildIdentity && updaterProtocol != supportedUpdaterProtocol {
+			return ErrUpdaterProtocolUnsupported
 		}
 		artifact, err := s.findArtifactRole(tx, release.ID, osName, arch, input.Component)
 		if err != nil {
@@ -215,8 +221,12 @@ func (s *UpdateService) directivesForTarget(ctx context.Context, targetType mode
 			continue
 		}
 
-		_, osName, arch, err := s.targetPlatform(s.db.WithContext(ctx), task.TargetType, task.TargetID)
+		_, osName, arch, updaterProtocol, err := s.targetPlatform(s.db.WithContext(ctx), task.TargetType, task.TargetID)
 		if err != nil {
+			continue
+		}
+		if (task.Component == model.ComponentAgent || task.Component == model.ComponentEndpoint) && updaterProtocol != supportedUpdaterProtocol {
+			_ = s.setTaskStatus(ctx, task.ID, model.UpdateTaskFailed, "updater_protocol_unsupported", "当前节点需要先手工引导到 Updater v2")
 			continue
 		}
 		var artifact model.Artifact
@@ -381,7 +391,15 @@ func (s *UpdateService) Retry(ctx context.Context, taskID string) (*model.Update
 		if release.Component != task.Component || release.Status != model.ReleaseStatusPublished {
 			return ErrReleaseNotPublished
 		}
-
+		if task.Component == model.ComponentAgent || task.Component == model.ComponentEndpoint {
+			_, _, _, updaterProtocol, err := s.targetPlatform(tx, task.TargetType, task.TargetID)
+			if err != nil {
+				return err
+			}
+			if updaterProtocol != supportedUpdaterProtocol {
+				return ErrUpdaterProtocolUnsupported
+			}
+		}
 		var activeCount int64
 		if err := tx.Model(&model.UpdateTask{}).
 			Where("component = ? AND target_type = ? AND target_id = ? AND status NOT IN ?", task.Component, task.TargetType, task.TargetID,
@@ -463,39 +481,39 @@ func (s *UpdateService) setTaskStatus(ctx context.Context, taskID string, next m
 	})
 }
 
-func (s *UpdateService) targetPlatform(tx *gorm.DB, targetType model.UpdateTargetType, targetID string) (name, osName, arch string, err error) {
+func (s *UpdateService) targetPlatform(tx *gorm.DB, targetType model.UpdateTargetType, targetID string) (name, osName, arch, updaterProtocol string, err error) {
 	switch targetType {
 	case model.UpdateTargetNode:
 		id, parseErr := strconv.ParseUint(targetID, 10, 64)
 		if parseErr != nil {
-			return "", "", "", fmt.Errorf("invalid node target id: %w", parseErr)
+			return "", "", "", "", fmt.Errorf("invalid node target id: %w", parseErr)
 		}
 		var node model.Node
 		if err := tx.First(&node, id).Error; err != nil {
-			return "", "", "", err
+			return "", "", "", "", err
 		}
 		if node.Type != model.NodeTypeAgent && node.Type != model.NodeTypeDesktop {
-			return "", "", "", fmt.Errorf("node %d is neither agent nor desktop target", id)
+			return "", "", "", "", fmt.Errorf("node %d is neither agent nor desktop target", id)
 		}
 		var info model.NodeSystemInfo
 		if node.SystemInfo != "" {
 			_ = json.Unmarshal([]byte(node.SystemInfo), &info)
 		}
 		if info.OS == "" || info.Arch == "" {
-			return "", "", "", fmt.Errorf("node %d has no reported os/arch", id)
+			return "", "", "", "", fmt.Errorf("node %d has no reported os/arch", id)
 		}
-		return node.Name, strings.ToLower(info.OS), strings.ToLower(info.Arch), nil
+		return node.Name, strings.ToLower(info.OS), strings.ToLower(info.Arch), node.UpdaterProtocol, nil
 	case model.UpdateTargetEndpoint:
 		var endpoint model.Endpoint
 		if err := tx.First(&endpoint, "id = ?", targetID).Error; err != nil {
-			return "", "", "", err
+			return "", "", "", "", err
 		}
 		if endpoint.OS == "" || endpoint.Arch == "" {
-			return "", "", "", fmt.Errorf("endpoint %s has no reported os/arch", targetID)
+			return "", "", "", "", fmt.Errorf("endpoint %s has no reported os/arch", targetID)
 		}
-		return endpoint.Name, strings.ToLower(endpoint.OS), strings.ToLower(endpoint.Arch), nil
+		return endpoint.Name, strings.ToLower(endpoint.OS), strings.ToLower(endpoint.Arch), endpoint.UpdaterProtocol, nil
 	default:
-		return "", "", "", fmt.Errorf("unsupported target type %q", targetType)
+		return "", "", "", "", fmt.Errorf("unsupported target type %q", targetType)
 	}
 }
 

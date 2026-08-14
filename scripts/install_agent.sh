@@ -34,6 +34,9 @@ CONFIG_FILE="${CONFIG_DIR}/k8s-signaling.toml"
 SERVICE_NAME="k8s-signaling"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 SSH_BANNER_PROFILE="/etc/profile.d/awecloud-signaling-ssh-banner.sh"
+STAGED_BINARY_PATH=""
+UPGRADE_PREVIOUS_TARGET=""
+UPGRADE_ROLLBACK_ACTIVE="false"
 
 # 打印消息
 info() { echo -e "${GREEN}[INFO]${NC} $1"; }
@@ -221,8 +224,8 @@ detect_ssh_port() {
     info "Agent SSH 端口: ${SSH_PORT}"
 }
 
-# 下载 Agent 二进制
-download_agent() {
+# 下载并校验 Agent 二进制，但不切换当前运行版本
+stage_agent() {
     local arch=$(detect_arch)
     
     info "检测到架构: ${arch}"
@@ -258,7 +261,6 @@ download_agent() {
     # 二进制文件名使用不可变摘要，同版本不同 Commit 不会互相覆盖
     local binary_filename="${BINARY_NAME}-${artifact_sha}"
     local binary_path="${DOWNLOAD_DIR}/${binary_filename}"
-    local symlink_path="${INSTALL_DIR}/${BINARY_NAME}"
     
     info "下载 Agent..."
     
@@ -300,12 +302,37 @@ download_agent() {
     mv "$tmp_file" "$binary_path"
     chmod +x "$binary_path"
     
-    # 创建软链接
-    ln -sf "$binary_path" "$symlink_path"
-    
-    info "Agent ${version} 已安装"
+    STAGED_BINARY_PATH="$binary_path"
+
+    info "Agent ${version} 已暂存"
     info "  二进制: ${binary_path}"
-    info "  软链接: ${symlink_path}"
+}
+
+# 原子切换 Agent 软链接
+switch_agent_link() {
+    local target="$1"
+    local symlink_path="${INSTALL_DIR}/${BINARY_NAME}"
+    local temporary_link="${symlink_path}.new.$$"
+    rm -f "$temporary_link"
+    ln -s "$target" "$temporary_link" || return 1
+    if ! mv -Tf "$temporary_link" "$symlink_path"; then
+        rm -f "$temporary_link"
+        return 1
+    fi
+}
+
+activate_staged_agent() {
+    if [[ -z "$STAGED_BINARY_PATH" || ! -x "$STAGED_BINARY_PATH" ]]; then
+        error "没有可激活的 Agent 暂存文件"
+    fi
+    switch_agent_link "$STAGED_BINARY_PATH" || error "切换 Agent 软链接失败"
+    info "Agent 已激活: ${STAGED_BINARY_PATH}"
+}
+
+# 全新安装使用下载后立即激活；升级流程会分开调用以缩短停机时间
+download_agent() {
+    stage_agent
+    activate_staged_agent
 }
 
 # 创建目录
@@ -435,6 +462,20 @@ prepare_redeploy_agent() {
 }
 
 # 升级 Agent
+rollback_agent_upgrade() {
+    if [[ "$UPGRADE_ROLLBACK_ACTIVE" != "true" ]]; then
+        return
+    fi
+    UPGRADE_ROLLBACK_ACTIVE="false"
+    warn "升级失败，正在恢复旧 Agent..."
+    if [[ -z "$UPGRADE_PREVIOUS_TARGET" ]] || ! switch_agent_link "$UPGRADE_PREVIOUS_TARGET"; then
+        warn "恢复旧 Agent 软链接失败，需要通过旁路连接人工处理"
+        return
+    fi
+    systemctl daemon-reload 2>/dev/null || warn "回滚后重新加载 systemd 配置失败"
+    systemctl restart "$SERVICE_NAME" 2>/dev/null || warn "回滚后启动旧 Agent 失败，需要通过旁路连接人工处理"
+}
+
 upgrade_agent() {
     if [[ ! -f "$CONFIG_FILE" ]]; then
         error "升级要求现有配置文件: ${CONFIG_FILE}"
@@ -446,12 +487,16 @@ upgrade_agent() {
     config_sha_before=$(sha256sum "$CONFIG_FILE" | awk '{print $1}') || error "无法读取现有配置文件"
 
     info "升级 Agent..."
-    
-    # 停止服务
-    systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-    
-    # 下载新版本（会自动更新软链接）
-    download_agent
+
+    # 服务运行期间完成下载、校验和不可变文件落盘
+    stage_agent
+
+    UPGRADE_PREVIOUS_TARGET=$(readlink "${INSTALL_DIR}/${BINARY_NAME}") || error "无法读取当前 Agent 软链接"
+    UPGRADE_ROLLBACK_ACTIVE="true"
+    trap 'rollback_agent_upgrade' EXIT
+
+    systemctl stop "$SERVICE_NAME" || error "停止旧服务失败"
+    activate_staged_agent
     
     # 安装新的 systemd 服务（覆盖旧的）
     install_service
@@ -461,7 +506,9 @@ upgrade_agent() {
     if [[ "$config_sha_before" != "$config_sha_after" ]]; then
         error "升级过程中配置文件发生变化"
     fi
-    
+
+    UPGRADE_ROLLBACK_ACTIVE="false"
+    trap - EXIT
     info "升级完成"
 }
 

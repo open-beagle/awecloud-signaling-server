@@ -71,7 +71,7 @@ func TestCreateTaskAndDeliverDirective(t *testing.T) {
 	require.ErrorIs(t, err, ErrActiveTaskExists)
 }
 
-func TestCreateTaskSupportsAgentWithoutVersionCapabilityMarker(t *testing.T) {
+func TestCreateTaskRejectsAgentWithoutUpdaterV2(t *testing.T) {
 	updates, database := newUpdateServiceForTest(t)
 	ctx := context.Background()
 	platform, err := json.Marshal(model.NodeSystemInfo{OS: "linux", Arch: "amd64"})
@@ -87,12 +87,11 @@ func TestCreateTaskSupportsAgentWithoutVersionCapabilityMarker(t *testing.T) {
 	}
 	require.NoError(t, database.Create(&artifact).Error)
 
-	task, err := updates.CreateTask(ctx, CreateUpdateTaskInput{Component: model.ComponentAgent, TargetType: model.UpdateTargetNode, TargetID: "1", ReleaseID: release.ID})
-	require.NoError(t, err)
-	directives, err := updates.DirectivesForNode(ctx, node.ID, model.ComponentAgent)
-	require.NoError(t, err)
-	require.Len(t, directives, 1)
-	require.Equal(t, task.ID, directives[0].TaskID)
+	_, err = updates.CreateTask(ctx, CreateUpdateTaskInput{Component: model.ComponentAgent, TargetType: model.UpdateTargetNode, TargetID: "1", ReleaseID: release.ID})
+	require.ErrorIs(t, err, ErrUpdaterProtocolUnsupported)
+	var taskCount int64
+	require.NoError(t, database.Model(&model.UpdateTask{}).Count(&taskCount).Error)
+	require.Zero(t, taskCount)
 }
 
 func TestCreateTaskSupportsDesktop(t *testing.T) {
@@ -166,7 +165,7 @@ func TestEndpointTaskSupportsSameVersionDifferentCommit(t *testing.T) {
 	require.Equal(t, model.UpdateTaskSucceeded, task.Status)
 }
 
-func TestEndpointTaskSupportsPreviousAgentVersion(t *testing.T) {
+func TestCreateTaskRejectsEndpointWithoutUpdaterV2(t *testing.T) {
 	updates, database := newUpdateServiceForTest(t)
 	ctx := context.Background()
 	endpoint := model.Endpoint{ID: "endpoint-v1", UserID: 1, Name: "legacy-endpoint", OS: "linux", Arch: "amd64", UpdaterProtocol: "v1", SSHUsers: "[]"}
@@ -183,14 +182,48 @@ func TestEndpointTaskSupportsPreviousAgentVersion(t *testing.T) {
 	}
 	require.NoError(t, database.Create(&artifact).Error)
 
-	task, err := updates.CreateTask(ctx, CreateUpdateTaskInput{
+	_, err := updates.CreateTask(ctx, CreateUpdateTaskInput{
 		Component: model.ComponentEndpoint, TargetType: model.UpdateTargetEndpoint, TargetID: endpoint.ID, ReleaseID: release.ID,
 	})
+	require.ErrorIs(t, err, ErrUpdaterProtocolUnsupported)
+	var taskCount int64
+	require.NoError(t, database.Model(&model.UpdateTask{}).Count(&taskCount).Error)
+	require.Zero(t, taskCount)
+}
+
+func TestDirectivesRejectLegacyTaskAfterProtocolDowngrade(t *testing.T) {
+	updates, database := newUpdateServiceForTest(t)
+	ctx := context.Background()
+	node := model.Node{
+		UserID: 1, Name: "legacy", Type: model.NodeTypeAgent,
+		SystemInfo: `{"os":"linux","arch":"amd64"}`, UpdaterProtocol: "v1",
+	}
+	require.NoError(t, database.Create(&node).Error)
+	release := model.Release{
+		ID: uuid.NewString(), Component: model.ComponentAgent, Version: "v1.0.2",
+		CommitID: "2222222222222222222222222222222222222222", Status: model.ReleaseStatusPublished,
+	}
+	require.NoError(t, database.Create(&release).Error)
+	artifact := model.Artifact{
+		ID: uuid.NewString(), ReleaseID: release.ID, OS: "linux", Arch: "amd64", PackageType: "binary",
+		Filename: "signal_agent", DownloadURL: "https://download.example.com/signal_agent", Size: 128,
+		SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Status: model.ArtifactStatusAvailable,
+	}
+	require.NoError(t, database.Create(&artifact).Error)
+	task := model.UpdateTask{
+		ID: uuid.NewString(), Component: model.ComponentAgent, TargetType: model.UpdateTargetNode,
+		TargetID: "1", TargetName: node.Name, ReleaseID: release.ID, ArtifactID: artifact.ID,
+		DesiredVersion: release.Version, DesiredCommitID: release.CommitID, DesiredSHA256: artifact.SHA256,
+		Status: model.UpdateTaskPending, MaxAttempts: 3,
+	}
+	require.NoError(t, database.Create(&task).Error)
+
+	directives, err := updates.DirectivesForNode(ctx, node.ID, model.ComponentAgent)
 	require.NoError(t, err)
-	directives, err := updates.DirectivesForEndpoint(ctx, endpoint.ID)
-	require.NoError(t, err)
-	require.Len(t, directives, 1)
-	require.Equal(t, task.ID, directives[0].TaskID)
+	require.Empty(t, directives)
+	require.NoError(t, database.First(&task, "id = ?", task.ID).Error)
+	require.Equal(t, model.UpdateTaskFailed, task.Status)
+	require.Equal(t, "updater_protocol_unsupported", task.LastErrorCode)
 }
 
 func TestUpdateStatusSequenceIsMonotonic(t *testing.T) {
@@ -265,6 +298,10 @@ func TestReportRejectsBackwardTransition(t *testing.T) {
 
 func TestRetryCreatesNewTaskID(t *testing.T) {
 	updates, database := newUpdateServiceForTest(t)
+	require.NoError(t, database.Create(&model.Node{
+		ID: 1, UserID: 1, Name: "beijing", Type: model.NodeTypeAgent,
+		SystemInfo: `{"os":"linux","arch":"amd64"}`, UpdaterProtocol: "v2",
+	}).Error)
 	release := model.Release{ID: uuid.NewString(), Component: model.ComponentAgent, Version: "v1.2.3", Status: model.ReleaseStatusPublished}
 	require.NoError(t, database.Create(&release).Error)
 	original := model.UpdateTask{ID: uuid.NewString(), Component: model.ComponentAgent, TargetType: model.UpdateTargetNode, TargetID: "1", TargetName: "beijing", ReleaseID: release.ID, DesiredVersion: "v1.2.3", Status: model.UpdateTaskFailed, Attempt: 1, MaxAttempts: 3, CreatedBy: 42}
@@ -282,6 +319,31 @@ func TestRetryCreatesNewTaskID(t *testing.T) {
 	var persistedOriginal model.UpdateTask
 	require.NoError(t, database.First(&persistedOriginal, "id = ?", original.ID).Error)
 	require.Equal(t, model.UpdateTaskFailed, persistedOriginal.Status)
+}
+
+func TestRetryRejectsTargetWithoutUpdaterV2(t *testing.T) {
+	updates, database := newUpdateServiceForTest(t)
+	endpoint := model.Endpoint{
+		ID: "endpoint-v1", UserID: 1, Name: "legacy-endpoint", OS: "linux", Arch: "amd64",
+		UpdaterProtocol: "v1", SSHUsers: "[]",
+	}
+	require.NoError(t, database.Create(&endpoint).Error)
+	release := model.Release{
+		ID: uuid.NewString(), Component: model.ComponentEndpoint, Version: "v1.0.2", Status: model.ReleaseStatusPublished,
+	}
+	require.NoError(t, database.Create(&release).Error)
+	original := model.UpdateTask{
+		ID: uuid.NewString(), Component: model.ComponentEndpoint, TargetType: model.UpdateTargetEndpoint,
+		TargetID: endpoint.ID, ReleaseID: release.ID, DesiredVersion: release.Version,
+		Status: model.UpdateTaskFailed, MaxAttempts: 3,
+	}
+	require.NoError(t, database.Create(&original).Error)
+
+	_, err := updates.Retry(context.Background(), original.ID)
+	require.ErrorIs(t, err, ErrUpdaterProtocolUnsupported)
+	var taskCount int64
+	require.NoError(t, database.Model(&model.UpdateTask{}).Count(&taskCount).Error)
+	require.EqualValues(t, 1, taskCount)
 }
 
 func TestRetryRejectsUnpublishedRelease(t *testing.T) {

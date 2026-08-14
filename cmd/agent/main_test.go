@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,9 @@ import (
 )
 
 func TestAgentSFTPChildProtocol(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Tailscale ssh/sftp childproc 仅在 Unix 构建中注册")
+	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestAgentSFTPChildHelper$")
 	cmd.Env = append(os.Environ(), "BEAGLE_TEST_SFTP_CHILD=1")
 	stdin, err := cmd.StdinPipe()
@@ -103,6 +107,9 @@ server = "https://signal.example"
 }
 
 func TestAgentMainHandlesTailscaleChildrenBeforeLoadingConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Tailscale ssh/sftp childproc 仅在 Unix 构建中注册")
+	}
 	source, err := os.ReadFile("main.go")
 	require.NoError(t, err)
 	content := string(source)
@@ -262,6 +269,77 @@ func TestInstallAgentUpgradePreservesExistingCredentialConfig(t *testing.T) {
 	require.NotContains(t, upgrade, "deploy_with_token")
 	require.NotContains(t, upgrade, "generate_config")
 	require.NotContains(t, upgrade, "AGENT_TOKEN")
+}
+
+func TestInstallAgentUpgradeStagesBeforeStopAndRollsBackFailedRestart(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	require.NoError(t, err)
+	scriptPath := filepath.Join("..", "..", "scripts", "install_agent.sh")
+	content, err := os.ReadFile(scriptPath)
+	require.NoError(t, err)
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "agent.toml")
+	require.NoError(t, os.WriteFile(configPath, []byte("credential = true\n"), 0600))
+	require.NoError(t, os.Chmod(configPath, 0600))
+	eventPath := filepath.Join(tempDir, "events.log")
+	restartCountPath := filepath.Join(tempDir, "restart-count")
+	harness := `
+CONFIG_FILE="$TEST_CONFIG_FILE"
+EVENT_FILE="$TEST_EVENT_FILE"
+RESTART_COUNT_FILE="$TEST_RESTART_COUNT_FILE"
+SERVICE_NAME="k8s-signaling"
+INSTALL_DIR="/opt/bin"
+BINARY_NAME="signal_agent"
+
+download_agent() { echo "download" >> "$EVENT_FILE"; }
+stage_agent() { STAGED_BINARY_PATH="/downloads/signal_agent-new"; echo "stage" >> "$EVENT_FILE"; }
+activate_staged_agent() { echo "activate:$STAGED_BINARY_PATH" >> "$EVENT_FILE"; switch_agent_link "$STAGED_BINARY_PATH"; }
+switch_agent_link() { echo "link:$1" >> "$EVENT_FILE"; }
+readlink() { echo "/downloads/signal_agent-old"; }
+stat() { echo "600"; }
+install_service() {
+    echo "install" >> "$EVENT_FILE"
+    systemctl restart "$SERVICE_NAME" || error "启动服务失败"
+}
+systemctl() {
+    echo "systemctl:$*" >> "$EVENT_FILE"
+    if [[ "$1" == "restart" ]]; then
+        local count=0
+        [[ -f "$RESTART_COUNT_FILE" ]] && count=$(cat "$RESTART_COUNT_FILE")
+        count=$((count + 1))
+        echo "$count" > "$RESTART_COUNT_FILE"
+        [[ "$count" -eq 1 ]] && return 1
+    fi
+    return 0
+}
+
+upgrade_agent
+`
+	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
+	source := strings.Replace(normalized, "\nmain \"$@\"", harness, 1)
+	require.NotEqual(t, normalized, source)
+	harnessPath := filepath.Join(tempDir, "upgrade-harness.sh")
+	require.NoError(t, os.WriteFile(harnessPath, []byte(source), 0700))
+
+	command := exec.Command(bashPath, filepath.ToSlash(harnessPath))
+	command.Env = append(os.Environ(),
+		"TEST_CONFIG_FILE="+filepath.ToSlash(configPath),
+		"TEST_EVENT_FILE="+filepath.ToSlash(eventPath),
+		"TEST_RESTART_COUNT_FILE="+filepath.ToSlash(restartCountPath),
+	)
+	output, runErr := command.CombinedOutput()
+	require.Error(t, runErr, string(output))
+	require.FileExists(t, eventPath, string(output))
+	events, err := os.ReadFile(eventPath)
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSpace(string(events)), "\n")
+
+	require.Equal(t, "stage", lines[0], lines)
+	require.Contains(t, lines, "systemctl:stop k8s-signaling")
+	require.Contains(t, lines, "activate:/downloads/signal_agent-new")
+	require.Contains(t, lines, "link:/downloads/signal_agent-old")
+	require.Equal(t, "systemctl:restart k8s-signaling", lines[len(lines)-1], lines)
 }
 
 func TestMergeLocalAgentConfigPreservesContainerSSHConfig(t *testing.T) {

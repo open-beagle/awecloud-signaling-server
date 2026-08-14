@@ -88,6 +88,17 @@ func TestSyncCatalogRequiresConfiguration(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 }
 
+func TestUpdaterTaskErrorReportsManualBootstrapForLegacyUpdater(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+
+	NewUpdaterAPI().writeTaskError(ctx, service.ErrUpdaterProtocolUnsupported)
+
+	require.Equal(t, http.StatusConflict, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "当前节点需要先手工引导到 Updater v2")
+}
+
 func TestSyncCatalogReturnsCreatedReleaseCount(t *testing.T) {
 	database := setupTestDB(t)
 	manifest, err := json.Marshal(service.UpdaterCatalogManifest{

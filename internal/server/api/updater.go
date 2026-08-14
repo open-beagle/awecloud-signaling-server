@@ -326,6 +326,8 @@ func (a *UpdaterAPI) writeTaskError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, NewErrorResponse("该目标已有未完成更新任务"))
 	case errors.Is(err, service.ErrInvalidBuildIdentity):
 		c.JSON(http.StatusConflict, NewErrorResponse("目标 Release 或 Artifact 缺少有效构建身份"))
+	case errors.Is(err, service.ErrUpdaterProtocolUnsupported):
+		c.JSON(http.StatusConflict, NewErrorResponse("当前节点需要先手工引导到 Updater v2"))
 	case errors.Is(err, service.ErrComponentNotSupported):
 		c.JSON(http.StatusConflict, NewErrorResponse("该组件的自动更新执行器尚未实现"))
 	case errors.Is(err, gorm.ErrRecordNotFound):

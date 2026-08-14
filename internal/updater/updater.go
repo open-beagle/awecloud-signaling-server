@@ -17,7 +17,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
@@ -85,6 +84,8 @@ type HealthFile struct {
 	RegisteredAt       time.Time `json:"registered_at"`
 	HeartbeatConfirmed time.Time `json:"heartbeat_confirmed_at"`
 }
+
+var errTaskAlreadyTerminal = errors.New("updater task already reached a terminal state")
 
 type Manager struct {
 	cfg    Config
@@ -245,13 +246,21 @@ func (m *Manager) resume(directive Directive, state taskState) {
 		_ = m.setStatusWithPath(directive, "failed", state.Progress, state.StagedBinary, "invalid_update_directive", err.Error())
 		return
 	}
+	if latest, err := readTaskStateConsistent(m.cfg.StateDir, directive.TaskID); err == nil {
+		state = latest
+		m.mu.Lock()
+		m.states[directive.TaskID] = latest
+		m.mu.Unlock()
+	} else if !errors.Is(err, os.ErrNotExist) {
+		log.Printf("updater: read latest task %s before resume: %v", directive.TaskID, err)
+		return
+	}
+	if terminal(state.Phase) {
+		return
+	}
 	switch state.Phase {
 	case "staged", "installing", "restarting":
 		if state.StagedBinary != "" {
-			if err := writeTaskState(m.cfg.StateDir, state); err != nil {
-				log.Printf("updater: persist recovered task %s phase %s: %v", directive.TaskID, state.Phase, err)
-				return
-			}
 			if err := m.startHelper(directive, state.StagedBinary); err != nil {
 				_ = m.setStatusWithPath(directive, "failed", state.Progress, state.StagedBinary, "helper_start_failed", err.Error())
 			}
@@ -493,30 +502,41 @@ func (m *Manager) setStatus(directive Directive, phase string, progress int, cod
 
 func (m *Manager) setStatusWithPath(directive Directive, phase string, progress int, stagedPath, code, message string) error {
 	m.mu.Lock()
-	state := m.states[directive.TaskID]
-	state.TaskID = directive.TaskID
-	state.Component = directive.Component
-	state.TargetVersion = directive.Version
-	state.TargetCommitID = directive.CommitID
-	state.TargetSHA256 = directive.SHA256
-	state.Force = directive.Force
-	state.Phase = phase
-	state.Progress = progress
-	state.CurrentVersion = m.cfg.CurrentVersion
-	state.CurrentCommitID = m.cfg.CurrentCommitID
-	state.CurrentSHA256 = m.cfg.CurrentSHA256
-	state.Sequence++
-	state.ErrorCode = code
-	state.ErrorMessage = message
-	if stagedPath != "" {
-		state.StagedBinary = stagedPath
-	}
-	state.UpdatedAt = time.Now()
-	m.states[directive.TaskID] = state
+	base := m.states[directive.TaskID]
 	m.mu.Unlock()
-	if err := writeTaskState(m.cfg.StateDir, state); err != nil {
+
+	state, updated, err := updateTaskState(m.cfg.StateDir, directive.TaskID, base, func(state taskState) taskState {
+		state.TaskID = directive.TaskID
+		state.Component = directive.Component
+		state.TargetVersion = directive.Version
+		state.TargetCommitID = directive.CommitID
+		state.TargetSHA256 = directive.SHA256
+		state.Force = directive.Force
+		state.Phase = phase
+		state.Progress = progress
+		state.CurrentVersion = m.cfg.CurrentVersion
+		state.CurrentCommitID = m.cfg.CurrentCommitID
+		state.CurrentSHA256 = m.cfg.CurrentSHA256
+		state.Sequence++
+		state.ErrorCode = code
+		state.ErrorMessage = message
+		if stagedPath != "" {
+			state.StagedBinary = stagedPath
+		}
+		state.UpdatedAt = time.Now()
+		return state
+	})
+	if err != nil {
 		log.Printf("updater: persist task %s phase %s: %v", directive.TaskID, phase, err)
 		return err
+	}
+	m.mu.Lock()
+	if current, ok := m.states[directive.TaskID]; !ok || current.Sequence < state.Sequence || terminal(state.Phase) {
+		m.states[directive.TaskID] = state
+	}
+	m.mu.Unlock()
+	if !updated {
+		return errTaskAlreadyTerminal
 	}
 	return nil
 }
@@ -539,7 +559,7 @@ func (m *Manager) loadStates() {
 	}
 	m.mu.Lock()
 	for taskID, state := range loaded {
-		if current, ok := m.states[taskID]; !ok || current.Sequence <= state.Sequence {
+		if current, ok := m.states[taskID]; !ok || current.Sequence < state.Sequence {
 			m.states[taskID] = state
 		}
 	}
@@ -574,11 +594,19 @@ func Apply(ctx context.Context, cfg ApplyConfig) error {
 	if cfg.healthPoll <= 0 {
 		cfg.healthPoll = 2 * time.Second
 	}
+	releaseApplyLock, err := acquireTaskFileLock(cfg.StateDir, cfg.TaskID, "apply")
+	if err != nil {
+		return fmt.Errorf("lock updater apply task: %w", err)
+	}
+	defer releaseApplyLock()
 
 	statePath := taskStatePath(cfg.StateDir, cfg.TaskID)
 	state, err := readTaskState(statePath)
 	if err != nil {
 		return fmt.Errorf("read updater task state: %w", err)
+	}
+	if terminal(state.Phase) {
+		return nil
 	}
 	if err := verifyFileSHA256(cfg.BinaryPath, state.TargetSHA256); err != nil {
 		return failApply(cfg, state, "artifact_mismatch", err)
@@ -702,11 +730,10 @@ func writeHealthFile(healthDir string, health HealthFile) error {
 
 func validHealthFile(path string, state taskState) bool {
 	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 {
+	if err != nil || !info.Mode().IsRegular() || !secureTaskFileMode(info) {
 		return false
 	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || stat.Uid != uint32(os.Geteuid()) {
+	if !ownedByCurrentUser(info) {
 		return false
 	}
 	data, err := os.ReadFile(path)
@@ -823,15 +850,6 @@ func switchSymlink(linkPath, target string) error {
 	return syncDirectory(directory)
 }
 
-func syncDirectory(path string) error {
-	directory, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer directory.Close()
-	return directory.Sync()
-}
-
 func verifyFileSHA256(path, expected string) error {
 	if !validSHA256(expected) {
 		return errors.New("invalid expected artifact SHA256")
@@ -862,6 +880,57 @@ func failApply(cfg ApplyConfig, state taskState, code string, err error) error {
 }
 
 func writeTaskState(stateDir string, state taskState) error {
+	release, err := acquireTaskFileLock(stateDir, state.TaskID, "state")
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	path := taskStatePath(stateDir, state.TaskID)
+	current, err := readTaskState(path)
+	if err == nil {
+		if terminal(current.Phase) || state.Sequence <= current.Sequence {
+			return nil
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return replaceTaskState(stateDir, state)
+}
+
+func updateTaskState(stateDir, taskID string, fallback taskState, mutate func(taskState) taskState) (taskState, bool, error) {
+	release, err := acquireTaskFileLock(stateDir, taskID, "state")
+	if err != nil {
+		return taskState{}, false, err
+	}
+	defer release()
+
+	current, err := readTaskState(taskStatePath(stateDir, taskID))
+	if errors.Is(err, os.ErrNotExist) {
+		current = fallback
+	} else if err != nil {
+		return taskState{}, false, err
+	}
+	if terminal(current.Phase) {
+		return current, false, nil
+	}
+	next := mutate(current)
+	if err := replaceTaskState(stateDir, next); err != nil {
+		return taskState{}, false, err
+	}
+	return next, true, nil
+}
+
+func readTaskStateConsistent(stateDir, taskID string) (taskState, error) {
+	release, err := acquireTaskFileLock(stateDir, taskID, "state")
+	if err != nil {
+		return taskState{}, err
+	}
+	defer release()
+	return readTaskState(taskStatePath(stateDir, taskID))
+}
+
+func replaceTaskState(stateDir string, state taskState) error {
 	tasksDir := filepath.Join(stateDir, "tasks")
 	if err := os.MkdirAll(tasksDir, 0700); err != nil {
 		tasksDir = stateDir

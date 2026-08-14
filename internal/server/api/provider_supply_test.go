@@ -33,6 +33,17 @@ func TestProviderTechnicalResourceUpdateRequestDoesNotAcceptReason(t *testing.T)
 	require.Equal(t, http.StatusBadRequest, legacyRecorder.Code)
 }
 
+func TestProviderSupplyErrorTreatsLegacyUpdaterAsUpdateConflict(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+
+	writeProviderSupplyError(ctx, service.ErrUpdaterProtocolUnsupported, true)
+
+	require.Equal(t, http.StatusConflict, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "当前资源不满足更新前置条件")
+}
+
 func prepareProviderSupplyAPIFixture(t *testing.T, flags config.FeatureFlagsSection) (managementContextAPIFixture, LoginResponse) {
 	t.Helper()
 	fixture := newManagementContextAPIFixture(t)

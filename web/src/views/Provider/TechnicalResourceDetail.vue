@@ -5,7 +5,7 @@
         <el-button :icon="ArrowLeft" @click="returnToList">返回列表</el-button>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
         <el-button v-if="resource?.type === 'agent'" :icon="Operation" :disabled="!canWrite || !hasBinding" @click="openCapabilities">编辑能力</el-button>
-        <el-button v-if="resource" type="primary" :icon="Upload" :disabled="!canWrite || !hasBinding" @click="openUpdate(resource)">更新</el-button>
+        <el-button v-if="resource" type="primary" :icon="Upload" :disabled="!canWrite || !hasBinding || !supportsUpdaterV2(resource)" :title="supportsUpdaterV2(resource) ? '更新 Agent' : '需要先手工引导到 Updater v2'" @click="openUpdate(resource)">更新</el-button>
         <el-dropdown v-if="resource && resource.lifecycle_state !== 'deleted'" trigger="click" @command="handleLifecycleCommand">
           <el-button :icon="MoreFilled" :disabled="!canWrite" aria-label="更多操作" />
           <template #dropdown>
@@ -34,6 +34,7 @@
         <div class="summary-item"><span>健康</span><el-tag size="small" effect="plain" :type="healthTag(resource.health_state)">{{ healthLabel(resource.health_state) }}</el-tag></div>
         <div class="summary-item"><span>当前版本</span><strong>{{ resource.version || '-' }}</strong></div>
       </section>
+      <el-alert v-if="!supportsUpdaterV2(resource)" class="state-alert" title="当前节点需要先手工引导到 Updater v2" description="为避免自动更新导致信令节点断联，Server 已禁止向当前节点下发更新任务。" type="warning" show-icon :closable="false" />
 
       <el-tabs v-model="activeTab" class="detail-tabs">
         <el-tab-pane label="概览" name="overview">
@@ -77,8 +78,8 @@
                   <el-table-column label="状态" width="120"><template #default="{ row }"><el-tag size="small" :type="row.lifecycle_state === 'disabled' ? 'warning' : healthTag(row.health_state)">{{ row.lifecycle_state === 'disabled' ? '已停用' : healthLabel(row.health_state) }}</el-tag><span class="secondary">{{ relativeTime(row.last_received_at) }}</span></template></el-table-column>
                   <el-table-column label="开放能力" min-width="210"><template #default="{ row }"><div class="endpoint-capabilities"><el-tag v-for="capability in endpointCapabilityLabels(row)" :key="capability" size="small" effect="plain" type="info">{{ capability }}</el-tag><span v-if="endpointCapabilityLabels(row).length === 0" class="secondary inline">未开放</span></div></template></el-table-column>
                   <el-table-column label="接入信息" min-width="220"><template #default="{ row }"><span class="mono">{{ row.hostname || '-' }}</span><span class="secondary mono">{{ row.stable_key }}</span></template></el-table-column>
-                  <el-table-column label="版本" width="140"><template #default="{ row }"><strong>{{ row.version || '-' }}</strong></template></el-table-column>
-                  <el-table-column label="操作" width="112" fixed="right"><template #default="{ row }"><el-button link :icon="Upload" :disabled="!canWrite" title="更新 Endpoint" @click="openUpdate(row)" /><el-button link type="danger" :icon="Delete" :disabled="!canWrite" title="删除 Endpoint" @click="openDeleteCheck(row)" /></template></el-table-column>
+                  <el-table-column label="版本" width="140"><template #default="{ row }"><strong>{{ row.version || '-' }}</strong><el-tag v-if="!supportsUpdaterV2(row)" size="small" type="warning">需手工引导</el-tag></template></el-table-column>
+                  <el-table-column label="操作" width="112" fixed="right"><template #default="{ row }"><el-button link :icon="Upload" :disabled="!canWrite || !supportsUpdaterV2(row)" :title="supportsUpdaterV2(row) ? '更新 Endpoint' : '需要先手工引导到 Updater v2'" @click="openUpdate(row)" /><el-button link type="danger" :icon="Delete" :disabled="!canWrite" title="删除 Endpoint" @click="openDeleteCheck(row)" /></template></el-table-column>
                 </el-table>
                 <el-empty v-else :description="endpoints.length ? '没有符合条件的 Endpoint' : '当前 Agent 没有 Endpoint'" />
               </div>
@@ -131,7 +132,8 @@
     </el-dialog>
 
     <el-dialog v-model="updateDialog" :title="`更新 ${updateTarget ? endpointName(updateTarget) : ''}`" width="560px" destroy-on-close>
-      <el-form label-position="top"><el-form-item label="目标构建" required><el-select v-model="updateForm.releaseId" style="width:100%" placeholder="选择已发布构建"><el-option v-for="release in releases" :key="release.id" :label="`${release.version} @ ${shortValue(release.commit_id, 8)} · ${formatTime(release.published_at)}`" :value="release.id" /></el-select></el-form-item><el-form-item><el-checkbox v-model="updateForm.force">重新校验并重启同一构建</el-checkbox></el-form-item></el-form><el-alert v-if="releases.length === 0" title="当前组件没有可用的已发布版本" type="warning" show-icon :closable="false" /><template #footer><el-button @click="updateDialog = false">取消</el-button><el-button type="primary" :disabled="!updateForm.releaseId" :loading="submitting" @click="createUpdateTask">创建任务</el-button></template>
+      <el-alert v-if="!updateSupported" title="当前节点需要先手工引导到 Updater v2" type="warning" show-icon :closable="false" />
+      <el-form v-else label-position="top"><el-form-item label="目标构建" required><el-select v-model="updateForm.releaseId" style="width:100%" placeholder="选择已发布构建"><el-option v-for="release in releases" :key="release.id" :label="`${release.version} @ ${shortValue(release.commit_id, 8)} · ${formatTime(release.published_at)}`" :value="release.id" /></el-select></el-form-item><el-form-item><el-checkbox v-model="updateForm.force">重新校验并重启同一构建</el-checkbox></el-form-item></el-form><el-alert v-if="updateSupported && releases.length === 0" title="当前组件没有可用的已发布版本" type="warning" show-icon :closable="false" /><template #footer><el-button @click="updateDialog = false">取消</el-button><el-button type="primary" :disabled="!updateSupported || !updateForm.releaseId" :loading="submitting" @click="createUpdateTask">创建任务</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="deleteCheckDialog" :title="`删除检查 · ${deleteTarget ? endpointName(deleteTarget) : ''}`" width="620px">
@@ -194,6 +196,8 @@ const emptyResource = { display_name: '', domain_label: '', hostname: '' } as Te
 
 const canWrite = computed(() => workspaceStore.can('provider.technical_resources.write'))
 const hasBinding = computed(() => !!resource.value && resource.value.lifecycle_state !== 'pending')
+const supportsUpdaterV2 = (item?: TechnicalResource) => item?.updater_protocol === 'v2'
+const updateSupported = computed(() => supportsUpdaterV2(updateTarget.value))
 const resourceTitle = computed(() => resource.value?.display_name || resource.value?.domain_label || resource.value?.hostname || '等待主机注册')
 const resourceDescription = computed(() => 'Agent 部署位置、开放能力、Endpoint 接入与运行诊断。')
 const endpointName = (item: TechnicalResource) => item.display_name || item.host_domain_label || item.domain_label || item.hostname || '等待主机注册'
@@ -342,14 +346,17 @@ const handleLifecycleCommand = async (command: string) => {
 const openUpdate = async (target: TechnicalResource) => {
   if (!workspaceStore.providerId) return
   updateTarget.value = target
-  const response = await getProviderTechnicalResourceReleases(workspaceStore.providerId, target.id)
-  releases.value = response.success ? response.data : []
+  releases.value = []
+  if (supportsUpdaterV2(target)) {
+    const response = await getProviderTechnicalResourceReleases(workspaceStore.providerId, target.id)
+    releases.value = response.success ? response.data : []
+  }
   updateForm.releaseId = releases.value[0]?.id || ''
   updateForm.force = false
   updateDialog.value = true
 }
 const createUpdateTask = async () => {
-  if (!updateTarget.value || !workspaceStore.providerId || !updateForm.releaseId) return
+  if (!updateTarget.value || !workspaceStore.providerId || !updateSupported.value || !updateForm.releaseId) return
   submitting.value = true
   try { await createProviderTechnicalResourceUpdateTask(workspaceStore.providerId, updateTarget.value.id, updateForm.releaseId, updateForm.force); ElMessage.success('更新任务已创建'); updateDialog.value = false; activeTab.value = 'events'; await load() } finally { submitting.value = false }
 }
