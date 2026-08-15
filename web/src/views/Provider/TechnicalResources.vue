@@ -34,7 +34,7 @@
       <el-table v-loading="loading" :data="items" stripe>
         <el-table-column label="Agent" min-width="250">
           <template #default="{ row }">
-            <strong class="resource-name">{{ resourceName(row) }}</strong>
+            <router-link class="resource-name" :to="{ name: 'ProviderTechnicalResourceDetail', params: { id: row.id } }">{{ resourceName(row) }}</router-link>
             <span class="secondary"><span class="mono">{{ row.stable_key }}</span><template v-if="row.host_domain_label"> · SSH {{ row.host_domain_label }}</template></span>
           </template>
         </el-table-column>
@@ -364,7 +364,8 @@ onMounted(load)
 .secondary { display: block; margin-top: 3px; color: var(--text-secondary); font-size: 12px; }
 .secondary.inline { display: inline; margin-top: 0; }
 .mono { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; }
-.resource-name { display: block; max-width: 100%; overflow: hidden; color: var(--primary-color); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.resource-name { display: block; max-width: 100%; overflow: hidden; color: var(--primary-color); font-weight: 650; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.resource-name:hover, .resource-name:focus-visible { text-decoration: underline; }
 .capabilities { display: flex; flex-wrap: wrap; gap: 4px; }
 .version-commit, .commit-date { display: block; margin-top: 2px; color: var(--text-secondary); font-size: 11px; line-height: 16px; }
 .commit-date { white-space: nowrap; }
