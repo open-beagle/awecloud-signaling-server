@@ -24,6 +24,7 @@ if [[ ! "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]]; then
 fi
 export SOURCE_DATE_EPOCH
 BUILD_DATE=$(date -u -d "@${SOURCE_DATE_EPOCH}" '+%Y-%m-%dT%H:%M:%SZ')
+GIT_COMMIT_DATE="${BUILD_DATE}"
 BUILD_GO=$(go version | awk '{print $3}')
 
 # Server 地址（可选，用于编译时注入）
@@ -50,9 +51,9 @@ LDFLAGS="${LDFLAGS} -X 'main.goVersion=${BUILD_GO}'"
 
 # 如果设置了 BUILD_URL，注入到 Agent
 if [ -n "${BUILD_URL}" ]; then
-    AGENT_LDFLAGS="${LDFLAGS} -X 'main.BUILD_URL=${BUILD_URL}'"
+    AGENT_LDFLAGS="${LDFLAGS} -X 'main.gitCommitDate=${GIT_COMMIT_DATE}' -X 'main.BUILD_URL=${BUILD_URL}'"
 else
-    AGENT_LDFLAGS="${LDFLAGS}"
+    AGENT_LDFLAGS="${LDFLAGS} -X 'main.gitCommitDate=${GIT_COMMIT_DATE}'"
 fi
 
 # 构建 Server
