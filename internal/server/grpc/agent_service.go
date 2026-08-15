@@ -269,6 +269,8 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 
 	if err := db.DB.WithContext(ctx).Save(&node).Error; err != nil {
 		logger.Errorf("更新 Node 信息失败: %v", err)
+	} else if s.runtimeStore != nil {
+		s.runtimeStore.UpsertNode(&node)
 	}
 
 	// 构建响应
@@ -423,6 +425,8 @@ func (s *AgentServiceServer) Authenticate(ctx context.Context, req *pb.AgentAuth
 
 	if err := db.DB.WithContext(ctx).Save(&node).Error; err != nil {
 		logger.Errorf("更新 Node 信息失败: %v", err)
+	} else if s.runtimeStore != nil {
+		s.runtimeStore.UpsertNode(&node)
 	}
 
 	// 构建响应
@@ -1304,20 +1308,10 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 			if err := db.DB.WithContext(ctx).
 				Where("target_type = ? AND target_id = ? AND component = ? AND status = ?", model.UpdateTargetNode, strconv.FormatUint(nodeID, 10), model.ComponentAgent, model.UpdateTaskRestarting).
 				Find(&restartingTasks).Error; err == nil && len(restartingTasks) > 0 {
-				var currentNode model.Node
-				if err := db.DB.WithContext(ctx).First(&currentNode, nodeID).Error; err == nil {
+				if identity, ok := s.currentAgentBuildIdentity(ctx, nodeID); ok {
 					for _, task := range restartingTasks {
-						if task.DesiredCommitID != "" && task.DesiredSHA256 != "" &&
-							currentNode.Version == task.DesiredVersion &&
-							currentNode.CommitID == task.DesiredCommitID &&
-							currentNode.BinarySHA256 == task.DesiredSHA256 {
-							resp.UpdateHealthConfirmations = append(resp.UpdateHealthConfirmations, &pb.UpdateHealthConfirmation{
-								TaskId:          task.ID,
-								Version:         currentNode.Version,
-								CommitId:        currentNode.CommitID,
-								ArtifactSha256:  currentNode.BinarySHA256,
-								ConfirmedAtUnix: time.Now().Unix(),
-							})
+						if confirmation := agentUpdateHealthConfirmation(task, identity, time.Now()); confirmation != nil {
+							resp.UpdateHealthConfirmations = append(resp.UpdateHealthConfirmations, confirmation)
 						}
 					}
 				}
@@ -1445,6 +1439,40 @@ func toProtoUpdateDirective(directive service.UpdateDirective) *pb.UpdateDirecti
 		Action:        directive.Action,
 		TargetName:    directive.TargetName,
 		CommitId:      directive.CommitID,
+	}
+}
+
+type agentBuildIdentity struct {
+	Version      string
+	CommitID     string
+	BinarySHA256 string
+}
+
+func (s *AgentServiceServer) currentAgentBuildIdentity(ctx context.Context, nodeID uint64) (agentBuildIdentity, bool) {
+	if s.runtimeStore != nil {
+		current, ok := s.runtimeStore.GetNode(nodeID)
+		if !ok {
+			return agentBuildIdentity{}, false
+		}
+		return agentBuildIdentity{Version: current.Version, CommitID: current.CommitID, BinarySHA256: current.BinarySHA256}, true
+	}
+
+	var current model.Node
+	if err := db.DB.WithContext(ctx).First(&current, nodeID).Error; err != nil {
+		return agentBuildIdentity{}, false
+	}
+	return agentBuildIdentity{Version: current.Version, CommitID: current.CommitID, BinarySHA256: current.BinarySHA256}, true
+}
+
+func agentUpdateHealthConfirmation(task model.UpdateTask, current agentBuildIdentity, confirmedAt time.Time) *pb.UpdateHealthConfirmation {
+	if task.DesiredCommitID == "" || task.DesiredSHA256 == "" ||
+		current.Version != task.DesiredVersion || current.CommitID != task.DesiredCommitID ||
+		current.BinarySHA256 != task.DesiredSHA256 {
+		return nil
+	}
+	return &pb.UpdateHealthConfirmation{
+		TaskId: task.ID, Version: current.Version, CommitId: current.CommitID,
+		ArtifactSha256: current.BinarySHA256, ConfirmedAtUnix: confirmedAt.Unix(),
 	}
 }
 

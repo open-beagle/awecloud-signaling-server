@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 	"gorm.io/gorm"
 
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/cache"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
@@ -43,10 +45,14 @@ func TestAgentAuthenticateAcceptsConsumedTechnicalResourceToken(t *testing.T) {
 	}
 	require.NoError(t, testDB.Create(&token).Error)
 
-	server := &AgentServiceServer{}
+	runtimeStore := cache.NewNodeRuntimeStore()
+	server := &AgentServiceServer{runtimeStore: runtimeStore}
 	response, err := server.Authenticate(context.Background(), &pb.AgentAuthenticateRequest{AgentId: user.ID, Secret: token.Token, Version: "v1.0.0"})
 	require.NoError(t, err)
 	require.True(t, response.Success)
+	runtimeNode, ok := runtimeStore.GetNodeByUserAndName(user.ID, model.NodeTypeAgent, user.Name)
+	require.True(t, ok)
+	require.Equal(t, "v1.0.0", runtimeNode.Version)
 
 	require.NoError(t, testDB.Model(&resource).Update("lifecycle_state", model.TechnicalResourceRetired).Error)
 	response, err = server.Authenticate(context.Background(), &pb.AgentAuthenticateRequest{AgentId: user.ID, Secret: token.Token})
@@ -83,9 +89,15 @@ func TestAgentRegisterResumesWithConsumedTechnicalResourceToken(t *testing.T) {
 	}
 	require.NoError(t, testDB.Create(&token).Error)
 
-	server := &AgentServiceServer{}
+	runtimeStore := cache.NewNodeRuntimeStore()
+	runtimeStore.UpsertNode(&node)
+	server := &AgentServiceServer{runtimeStore: runtimeStore}
 	commitDate := "2026-08-12T18:42:06+08:00"
-	response, err := server.Register(context.Background(), &pb.AgentRegisterRequest{Secret: token.Token, Version: "v1.0.1", CommitDate: commitDate})
+	commitID := strings.Repeat("a", 40)
+	binarySHA256 := strings.Repeat("b", 64)
+	response, err := server.Register(context.Background(), &pb.AgentRegisterRequest{
+		Secret: token.Token, Version: "v1.0.1", CommitId: commitID, CommitDate: commitDate, BinarySha256: binarySHA256,
+	})
 	require.NoError(t, err)
 	require.True(t, response.Success)
 	require.Equal(t, user.ID, response.AgentId)
@@ -101,6 +113,13 @@ func TestAgentRegisterResumesWithConsumedTechnicalResourceToken(t *testing.T) {
 	expectedCommitDate, err := time.Parse(time.RFC3339, commitDate)
 	require.NoError(t, err)
 	require.True(t, expectedCommitDate.Equal(*persistedNode.CommitDate))
+	runtimeNode, ok := runtimeStore.GetNode(node.ID)
+	require.True(t, ok)
+	require.Equal(t, "v1.0.1", runtimeNode.Version)
+	require.Equal(t, commitID, runtimeNode.CommitID)
+	require.Equal(t, binarySHA256, runtimeNode.BinarySHA256)
+	require.NotNil(t, runtimeNode.CommitDate)
+	require.True(t, expectedCommitDate.Equal(*runtimeNode.CommitDate))
 
 	require.NoError(t, testDB.Delete(&persistedNode).Error)
 	response, err = server.Register(context.Background(), &pb.AgentRegisterRequest{Secret: token.Token, Version: "v1.0.1"})
