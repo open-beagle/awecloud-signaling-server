@@ -413,7 +413,7 @@ func (s *DesktopServiceServer) handleDesktopHeartbeat(ctx context.Context, nodeI
 	now := time.Now()
 
 	if s.runtimeStore != nil {
-		if _, err := s.runtimeStore.UpdateHeartbeat(nodeID, req.TunnelIp, "", "", "", "", "", "", "", now); err != nil {
+		if _, err := s.runtimeStore.UpdateHeartbeat(nodeID, req.TunnelIp, "", "", "", nil, "", "", "", "", now); err != nil {
 			logger.Warnf("Desktop 心跳 RuntimeStore 更新失败: nodeID=%d, err=%v", nodeID, err)
 		}
 	} else {

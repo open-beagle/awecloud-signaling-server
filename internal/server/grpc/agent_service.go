@@ -39,6 +39,18 @@ func parseJSONStringArray(jsonStr string) []string {
 	return result
 }
 
+func parseAgentCommitDate(value string) (*time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil || parsed.IsZero() {
+		return nil, errors.New("commit_date must be a valid RFC 3339 timestamp")
+	}
+	return &parsed, nil
+}
+
 // AgentConnection Agent 连接信息
 // 以 NodeID 为 key 存储，同一 AgentID（UserID）下可以有多个 Node 同时在线
 type AgentConnection struct {
@@ -135,6 +147,10 @@ func NewAgentServiceServer(cfg *config.ServerConfig, workloadSnapshots *service.
 // Register Agent 注册
 func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegisterRequest) (*pb.AgentRegisterResponse, error) {
 	logger.Infof("Agent 注册请求: version=%s", req.Version)
+	commitDate, err := parseAgentCommitDate(req.CommitDate)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 
 	var userID uint64
 	var deviceName string
@@ -229,6 +245,9 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 	if req.CommitId != "" {
 		node.CommitID = req.CommitId
 	}
+	if commitDate != nil {
+		node.CommitDate = commitDate
+	}
 	if req.BinarySha256 != "" {
 		node.BinarySHA256 = req.BinarySha256
 	}
@@ -280,6 +299,10 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 // Authenticate Agent 认证
 func (s *AgentServiceServer) Authenticate(ctx context.Context, req *pb.AgentAuthenticateRequest) (*pb.AgentAuthenticateResponse, error) {
 	logger.Infof("Agent 认证请求: agent_id=%d, version=%s", req.AgentId, req.Version)
+	commitDate, err := parseAgentCommitDate(req.CommitDate)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 
 	// 查询 User
 	var user model.User
@@ -375,6 +398,9 @@ func (s *AgentServiceServer) Authenticate(ctx context.Context, req *pb.AgentAuth
 	}
 	if req.CommitId != "" {
 		node.CommitID = req.CommitId
+	}
+	if commitDate != nil {
+		node.CommitDate = commitDate
 	}
 	if req.BinarySha256 != "" {
 		node.BinarySHA256 = req.BinarySha256
@@ -698,14 +724,21 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 			sysInfoJSON = string(data)
 		}
 	}
+	commitDate, commitDateErr := parseAgentCommitDate(req.CommitDate)
+	reportedVersion, reportedCommitID, reportedBinarySHA256 := req.Version, req.CommitId, req.BinarySha256
+	if commitDateErr != nil {
+		logger.Errorf("Agent 心跳 Commit Date 非法，忽略本次构建身份更新: node_id=%d, value=%q", node.ID, req.CommitDate)
+		commitDate = nil
+		reportedVersion, reportedCommitID, reportedBinarySHA256 = "", "", ""
+	}
 
 	if s.runtimeStore != nil {
-		if _, err := s.runtimeStore.UpdateHeartbeat(node.ID, req.TunnelIp, req.Hostname, req.Version, req.CommitId, req.BinarySha256, sysInfoJSON, req.UpdaterProtocol, containerSSHProtocol, now); err != nil {
+		if _, err := s.runtimeStore.UpdateHeartbeat(node.ID, req.TunnelIp, req.Hostname, reportedVersion, reportedCommitID, commitDate, reportedBinarySHA256, sysInfoJSON, req.UpdaterProtocol, containerSSHProtocol, now); err != nil {
 			// 如果内存中缺失，重新从 DB 读并加载
 			var freshNode model.Node
 			if errDb := db.DB.WithContext(ctx).First(&freshNode, node.ID).Error; errDb == nil {
 				s.runtimeStore.UpsertNode(&freshNode)
-				s.runtimeStore.UpdateHeartbeat(node.ID, req.TunnelIp, req.Hostname, req.Version, req.CommitId, req.BinarySha256, sysInfoJSON, req.UpdaterProtocol, containerSSHProtocol, now)
+				s.runtimeStore.UpdateHeartbeat(node.ID, req.TunnelIp, req.Hostname, reportedVersion, reportedCommitID, commitDate, reportedBinarySHA256, sysInfoJSON, req.UpdaterProtocol, containerSSHProtocol, now)
 			}
 		}
 	} else {
@@ -718,14 +751,17 @@ func (s *AgentServiceServer) handleHeartbeat(ctx context.Context, agentID uint64
 		if req.UpdaterProtocol != "" {
 			updates["updater_protocol"] = req.UpdaterProtocol
 		}
-		if req.Version != "" {
-			updates["version"] = req.Version
+		if reportedVersion != "" {
+			updates["version"] = reportedVersion
 		}
-		if req.CommitId != "" {
-			updates["commit_id"] = req.CommitId
+		if reportedCommitID != "" {
+			updates["commit_id"] = reportedCommitID
 		}
-		if req.BinarySha256 != "" {
-			updates["binary_sha256"] = req.BinarySha256
+		if commitDate != nil {
+			updates["commit_date"] = commitDate
+		}
+		if reportedBinarySHA256 != "" {
+			updates["binary_sha256"] = reportedBinarySHA256
 		}
 		if sysInfoJSON != "" {
 			updates["system_info"] = sysInfoJSON

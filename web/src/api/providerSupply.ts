@@ -26,6 +26,7 @@ export interface TechnicalResource {
   parent_hostname?: string
   version?: string
 	commit_id?: string
+	commit_date?: string
 	binary_sha256?: string
   updater_protocol?: string
   ssh_enabled: boolean
@@ -98,6 +99,7 @@ export interface ProviderRelease {
   component: 'agent' | 'endpoint'
   version: string
 	commit_id: string
+	commit_date: string
   channel: string
   release_notes?: string
   published_at?: string

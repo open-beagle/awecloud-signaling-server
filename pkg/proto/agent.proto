@@ -78,6 +78,7 @@ message AgentRegisterRequest {
   SystemInfo system_info = 4; // 系统信息
   string commit_id = 5; // Agent Git SHA
   string binary_sha256 = 6; // 可执行文件 SHA256 摘要
+  string commit_date = 7; // Agent Git Commit 的 committer date（RFC 3339）
 }
 
 // AgentRegisterResponse Agent 注册响应
@@ -103,6 +104,7 @@ message AgentAuthenticateRequest {
   SystemInfo system_info = 4; // 系统信息
   string commit_id = 5; // Agent Git SHA
   string binary_sha256 = 6; // 可执行文件 SHA256 摘要
+  string commit_date = 7; // Agent Git Commit 的 committer date（RFC 3339）
 }
 
 // AgentAuthenticateResponse Agent 认证响应
@@ -166,6 +168,7 @@ message AgentHeartbeatRequest {
   repeated EndpointSessionAuthorizationReportV2 endpoint_session_authorization_reports_v2 = 26;
   string commit_id = 27; // Agent 当前运行 Git SHA
   string binary_sha256 = 28; // Agent 可执行文件 SHA256 摘要
+  string commit_date = 29; // Agent 当前运行 Git Commit 的 committer date（RFC 3339）
 }
 
 // ConnectedEndpoint Agent 上报的已连接 Endpoint 信息

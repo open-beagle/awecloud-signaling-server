@@ -52,6 +52,7 @@ func TestUpdaterCatalogSyncCreatesPublishedReleaseAndIsIdempotent(t *testing.T) 
 	require.NoError(t, database.First(&release).Error)
 	require.Equal(t, model.ReleaseStatusPublished, release.Status)
 	require.Equal(t, "0123456789abcdef0123456789abcdef01234567", release.CommitID)
+	require.Equal(t, time.Date(2026, 8, 8, 15, 42, 6, 0, time.UTC), release.CommitDate)
 	var artifacts []model.Artifact
 	require.NoError(t, database.Where("release_id = ?", release.ID).Find(&artifacts).Error)
 	require.Len(t, artifacts, 1)
@@ -107,6 +108,19 @@ func TestUpdaterCatalogSyncOverwritesArtifactMutation(t *testing.T) {
 	var artifact model.Artifact
 	require.NoError(t, database.First(&artifact).Error)
 	require.Equal(t, "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", artifact.SHA256)
+}
+
+func TestUpdaterCatalogRejectsMissingCommitDate(t *testing.T) {
+	database := updaterCatalogTestDB(t)
+	syncer, err := NewUpdaterCatalogServiceWithStore(database, &updaterCatalogMemoryStore{}, "https://minio.example/vscode/awecloud-signaling")
+	require.NoError(t, err)
+	var manifest UpdaterCatalogManifest
+	require.NoError(t, json.Unmarshal(updaterCatalogTestManifest(t, updaterCatalogArtifactSHA), &manifest))
+	manifest.Release.CommitDate = time.Time{}
+	data, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	_, err = syncer.parseManifest(data)
+	require.ErrorContains(t, err, "commit_date")
 }
 
 func TestUpdaterCatalogSyncCancelsActiveTaskWhenVersionIsRepublished(t *testing.T) {
@@ -255,7 +269,7 @@ func updaterCatalogTestManifestForCommit(t *testing.T, sha256, commitID string) 
 		PublishedAt:   time.Date(2026, 8, 9, 8, 0, 0, 0, time.UTC),
 		Release: UpdaterCatalogRelease{
 			Component: model.ComponentAgent, Version: "v1.0.0",
-			CommitID: commitID, Channel: "stable",
+			CommitID: commitID, CommitDate: time.Date(2026, 8, 8, 15, 42, 6, 0, time.UTC), Channel: "stable",
 			ReleaseNotes: "Agent build",
 		},
 		Artifacts: []UpdaterCatalogArtifact{{

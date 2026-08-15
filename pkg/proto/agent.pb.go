@@ -192,6 +192,7 @@ type AgentRegisterRequest struct {
 	SystemInfo    *SystemInfo            `protobuf:"bytes,4,opt,name=system_info,json=systemInfo,proto3" json:"system_info,omitempty"`       // 系统信息
 	CommitId      string                 `protobuf:"bytes,5,opt,name=commit_id,json=commitId,proto3" json:"commit_id,omitempty"`             // Agent Git SHA
 	BinarySha256  string                 `protobuf:"bytes,6,opt,name=binary_sha256,json=binarySha256,proto3" json:"binary_sha256,omitempty"` // 可执行文件 SHA256 摘要
+	CommitDate    string                 `protobuf:"bytes,7,opt,name=commit_date,json=commitDate,proto3" json:"commit_date,omitempty"`       // Agent Git Commit 的 committer date（RFC 3339）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -264,6 +265,13 @@ func (x *AgentRegisterRequest) GetCommitId() string {
 func (x *AgentRegisterRequest) GetBinarySha256() string {
 	if x != nil {
 		return x.BinarySha256
+	}
+	return ""
+}
+
+func (x *AgentRegisterRequest) GetCommitDate() string {
+	if x != nil {
+		return x.CommitDate
 	}
 	return ""
 }
@@ -370,6 +378,7 @@ type AgentAuthenticateRequest struct {
 	SystemInfo    *SystemInfo            `protobuf:"bytes,4,opt,name=system_info,json=systemInfo,proto3" json:"system_info,omitempty"`       // 系统信息
 	CommitId      string                 `protobuf:"bytes,5,opt,name=commit_id,json=commitId,proto3" json:"commit_id,omitempty"`             // Agent Git SHA
 	BinarySha256  string                 `protobuf:"bytes,6,opt,name=binary_sha256,json=binarySha256,proto3" json:"binary_sha256,omitempty"` // 可执行文件 SHA256 摘要
+	CommitDate    string                 `protobuf:"bytes,7,opt,name=commit_date,json=commitDate,proto3" json:"commit_date,omitempty"`       // Agent Git Commit 的 committer date（RFC 3339）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -442,6 +451,13 @@ func (x *AgentAuthenticateRequest) GetCommitId() string {
 func (x *AgentAuthenticateRequest) GetBinarySha256() string {
 	if x != nil {
 		return x.BinarySha256
+	}
+	return ""
+}
+
+func (x *AgentAuthenticateRequest) GetCommitDate() string {
+	if x != nil {
+		return x.CommitDate
 	}
 	return ""
 }
@@ -671,6 +687,7 @@ type AgentHeartbeatRequest struct {
 	EndpointSessionAuthorizationReportsV2 []*EndpointSessionAuthorizationReportV2 `protobuf:"bytes,26,rep,name=endpoint_session_authorization_reports_v2,json=endpointSessionAuthorizationReportsV2,proto3" json:"endpoint_session_authorization_reports_v2,omitempty"`
 	CommitId                              string                                  `protobuf:"bytes,27,opt,name=commit_id,json=commitId,proto3" json:"commit_id,omitempty"`             // Agent 当前运行 Git SHA
 	BinarySha256                          string                                  `protobuf:"bytes,28,opt,name=binary_sha256,json=binarySha256,proto3" json:"binary_sha256,omitempty"` // Agent 可执行文件 SHA256 摘要
+	CommitDate                            string                                  `protobuf:"bytes,29,opt,name=commit_date,json=commitDate,proto3" json:"commit_date,omitempty"`       // Agent 当前运行 Git Commit 的 committer date（RFC 3339）
 	unknownFields                         protoimpl.UnknownFields
 	sizeCache                             protoimpl.SizeCache
 }
@@ -890,6 +907,13 @@ func (x *AgentHeartbeatRequest) GetCommitId() string {
 func (x *AgentHeartbeatRequest) GetBinarySha256() string {
 	if x != nil {
 		return x.BinarySha256
+	}
+	return ""
+}
+
+func (x *AgentHeartbeatRequest) GetCommitDate() string {
+	if x != nil {
+		return x.CommitDate
 	}
 	return ""
 }
@@ -3537,7 +3561,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
 	"\x02ip\x18\x02 \x01(\tR\x02ip\x12\x12\n" +
 	"\x04mask\x18\x03 \x01(\tR\x04mask\x12\x18\n" +
-	"\agateway\x18\x04 \x01(\tR\agateway\"\xdf\x01\n" +
+	"\agateway\x18\x04 \x01(\tR\agateway\"\x80\x02\n" +
 	"\x14AgentRegisterRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06secret\x18\x02 \x01(\tR\x06secret\x12\x18\n" +
@@ -3545,7 +3569,9 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\vsystem_info\x18\x04 \x01(\v2\x1e.awecloud.signaling.SystemInfoR\n" +
 	"systemInfo\x12\x1b\n" +
 	"\tcommit_id\x18\x05 \x01(\tR\bcommitId\x12#\n" +
-	"\rbinary_sha256\x18\x06 \x01(\tR\fbinarySha256\"\xde\x01\n" +
+	"\rbinary_sha256\x18\x06 \x01(\tR\fbinarySha256\x12\x1f\n" +
+	"\vcommit_date\x18\a \x01(\tR\n" +
+	"commitDate\"\xde\x01\n" +
 	"\x15AgentRegisterResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x19\n" +
@@ -3555,7 +3581,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"server_url\x18\x05 \x01(\tR\tserverUrl\x12\x1b\n" +
 	"\tuser_name\x18\x06 \x01(\tR\buserName\x12\x1f\n" +
 	"\vdevice_name\x18\a \x01(\tR\n" +
-	"deviceName\"\xea\x01\n" +
+	"deviceName\"\x8b\x02\n" +
 	"\x18AgentAuthenticateRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\x04R\aagentId\x12\x16\n" +
 	"\x06secret\x18\x02 \x01(\tR\x06secret\x12\x18\n" +
@@ -3563,7 +3589,9 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\vsystem_info\x18\x04 \x01(\v2\x1e.awecloud.signaling.SystemInfoR\n" +
 	"systemInfo\x12\x1b\n" +
 	"\tcommit_id\x18\x05 \x01(\tR\bcommitId\x12#\n" +
-	"\rbinary_sha256\x18\x06 \x01(\tR\fbinarySha256\"\x89\x01\n" +
+	"\rbinary_sha256\x18\x06 \x01(\tR\fbinarySha256\x12\x1f\n" +
+	"\vcommit_date\x18\a \x01(\tR\n" +
+	"commitDate\"\x89\x01\n" +
 	"\x19AgentAuthenticateResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x19\n" +
@@ -3579,7 +3607,7 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\n" +
 	"forward_id\x18\x01 \x01(\tR\tforwardId\x12\x18\n" +
 	"\arunning\x18\x02 \x01(\bR\arunning\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\xa9\x0e\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xca\x0e\n" +
 	"\x15AgentHeartbeatRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\x04R\aagentId\x12\x1b\n" +
 	"\ttunnel_ip\x18\x02 \x01(\tR\btunnelIp\x12)\n" +
@@ -3609,7 +3637,9 @@ const file_pkg_proto_agent_proto_rawDesc = "" +
 	"\x1aresource_session_events_v2\x18\x19 \x03(\v2*.awecloud.signaling.ResourceSessionEventV2R\x17resourceSessionEventsV2\x12\x92\x01\n" +
 	")endpoint_session_authorization_reports_v2\x18\x1a \x03(\v28.awecloud.signaling.EndpointSessionAuthorizationReportV2R%endpointSessionAuthorizationReportsV2\x12\x1b\n" +
 	"\tcommit_id\x18\x1b \x01(\tR\bcommitId\x12#\n" +
-	"\rbinary_sha256\x18\x1c \x01(\tR\fbinarySha256J\x04\b\n" +
+	"\rbinary_sha256\x18\x1c \x01(\tR\fbinarySha256\x12\x1f\n" +
+	"\vcommit_date\x18\x1d \x01(\tR\n" +
+	"commitDateJ\x04\b\n" +
 	"\x10\vR\x13discovered_services\"\x96\x05\n" +
 	"\x11ConnectedEndpoint\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +

@@ -44,6 +44,7 @@ type TechnicalResourceView struct {
 	ParentHostname        string `gorm:"column:parent_hostname" json:"parent_hostname,omitempty"`
 	Version               string `gorm:"column:version" json:"version,omitempty"`
 	CommitID              string `gorm:"column:commit_id" json:"commit_id,omitempty"`
+	CommitDate            string `gorm:"column:commit_date" json:"commit_date,omitempty"`
 	BinarySHA256          string `gorm:"column:binary_sha256" json:"binary_sha256,omitempty"`
 	UpdaterProtocol       string `gorm:"column:updater_protocol" json:"updater_protocol,omitempty"`
 	SSHEnabled            bool   `gorm:"column:ssh_enabled" json:"ssh_enabled"`
@@ -221,6 +222,9 @@ func technicalResourceProjectionSelect() string {
 			ELSE COALESCE(bound_endpoint.version, '') END AS version,
 		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.commit_id, '')
 			ELSE '' END AS commit_id,
+		CASE WHEN technical_resource.type = 'agent' AND agent_node.commit_date IS NOT NULL
+			THEN strftime('%Y-%m-%dT%H:%M:%SZ', agent_node.commit_date)
+			ELSE '' END AS commit_date,
 		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.binary_sha256, '')
 			ELSE '' END AS binary_sha256,
 		CASE WHEN technical_resource.type = 'agent' THEN COALESCE(agent_node.updater_protocol, '')

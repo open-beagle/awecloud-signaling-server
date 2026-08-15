@@ -21,7 +21,8 @@ func TestNodeRuntimePersisterPersistsReportedProtocols(t *testing.T) {
 	require.NoError(t, database.Create(&node).Error)
 	store := NewNodeRuntimeStore()
 	store.UpsertNode(&node)
-	_, err = store.UpdateHeartbeat(node.ID, "100.64.0.1", "agent", "v1.0.2", "", "", `{}`, "v2", "v1", time.Now())
+	commitDate := time.Date(2026, 8, 12, 10, 42, 6, 0, time.UTC)
+	_, err = store.UpdateHeartbeat(node.ID, "100.64.0.1", "agent", "v1.0.2", "", &commitDate, "", `{}`, "v2", "v1", time.Now())
 	require.NoError(t, err)
 
 	NewNodeRuntimePersister(store, database).Flush(context.Background())
@@ -30,6 +31,8 @@ func TestNodeRuntimePersisterPersistsReportedProtocols(t *testing.T) {
 	require.NoError(t, database.First(&persisted, node.ID).Error)
 	require.Equal(t, "v2", persisted.UpdaterProtocol)
 	require.Equal(t, "v1", persisted.ContainerSSHProtocol)
+	require.NotNil(t, persisted.CommitDate)
+	require.WithinDuration(t, commitDate, *persisted.CommitDate, time.Second)
 }
 
 func TestNodeRuntimePersisterRefreshesTechnicalResourceLeaseWithoutChangingConfigRevision(t *testing.T) {
@@ -63,7 +66,7 @@ func TestNodeRuntimePersisterRefreshesTechnicalResourceLeaseWithoutChangingConfi
 	reportedAt := time.Now().UTC()
 	store := NewNodeRuntimeStore()
 	store.UpsertNode(&node)
-	_, err = store.UpdateHeartbeat(node.ID, "100.64.0.1", "agent", "v1.0.2", "", "", `{}`, "v2", "v1", reportedAt)
+	_, err = store.UpdateHeartbeat(node.ID, "100.64.0.1", "agent", "v1.0.2", "", nil, "", `{}`, "v2", "v1", reportedAt)
 	require.NoError(t, err)
 	NewNodeRuntimePersister(store, database).Flush(context.Background())
 

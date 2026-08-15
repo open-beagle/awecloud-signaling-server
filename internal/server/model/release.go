@@ -29,6 +29,7 @@ type Release struct {
 	Component           Component     `gorm:"size:20;not null;uniqueIndex:uk_release_component_version,priority:1;index" json:"component"`
 	Version             string        `gorm:"size:64;not null;uniqueIndex:uk_release_component_version,priority:2" json:"version"`
 	CommitID            string        `gorm:"size:40;not null;default:''" json:"commit_id"`
+	CommitDate          time.Time     `gorm:"not null" json:"commit_date"`
 	Channel             string        `gorm:"size:32;not null;default:'stable';index" json:"channel"`
 	Status              ReleaseStatus `gorm:"size:20;not null;default:'draft';index" json:"status"`
 	ReleaseNotes        string        `gorm:"type:text" json:"release_notes"`

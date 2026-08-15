@@ -34,7 +34,7 @@ func TestNodeRuntimeStoreBasicAndHeartbeat(t *testing.T) {
 
 	// 更新心跳
 	now := time.Now()
-	rev, err := store.UpdateHeartbeat(10, "100.64.0.10", "my-desktop-renamed", "v1.0.2", strings.Repeat("a", 40), strings.Repeat("b", 64), "{}", "v1", "v1", now)
+	rev, err := store.UpdateHeartbeat(10, "100.64.0.10", "my-desktop-renamed", "v1.0.2", strings.Repeat("a", 40), &now, strings.Repeat("b", 64), "{}", "v1", "v1", now)
 	if err != nil {
 		t.Fatalf("update heartbeat failed: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestNodeRuntimeStoreBasicAndHeartbeat(t *testing.T) {
 	}
 
 	// 模拟 Flush 时又来了一次心跳
-	_, _ = store.UpdateHeartbeat(10, "100.64.0.10", "my-desktop-renamed", "v1.0.2", strings.Repeat("a", 40), strings.Repeat("b", 64), "{}", "v1", "v1", now.Add(time.Second))
+	_, _ = store.UpdateHeartbeat(10, "100.64.0.10", "my-desktop-renamed", "v1.0.2", strings.Repeat("a", 40), &now, strings.Repeat("b", 64), "{}", "v1", "v1", now.Add(time.Second))
 
 	// 清除旧 Revision 的 Dirty 标记（因为来过新心跳，Dirty 不应该被误清除）
 	store.ClearDirty(map[uint64]uint64{10: rev})

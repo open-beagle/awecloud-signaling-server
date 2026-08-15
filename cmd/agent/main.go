@@ -32,11 +32,12 @@ import (
 )
 
 var (
-	version   = "dev"
-	gitCommit = "unknown"
-	buildDate = "unknown"
-	goVersion = "unknown"
-	BUILD_URL = "" // 编译时注入的默认 Server 地址
+	version       = "dev"
+	gitCommit     = "unknown"
+	gitCommitDate = "unknown"
+	buildDate     = "unknown"
+	goVersion     = "unknown"
+	BUILD_URL     = "" // 编译时注入的默认 Server 地址
 )
 
 func main() {
@@ -75,6 +76,7 @@ func main() {
 		fmt.Printf("AWECloud Signaling Agent\n")
 		fmt.Printf("Version:    %s\n", version)
 		fmt.Printf("Git Commit: %s\n", gitCommit)
+		fmt.Printf("Commit Date: %s\n", gitCommitDate)
 		fmt.Printf("Build Date: %s\n", buildDate)
 		fmt.Printf("Go Version: %s\n", goVersion)
 		os.Exit(0)
@@ -167,7 +169,7 @@ func main() {
 	}
 
 	// 创建并启动Agent
-	agt, err := agent.NewAgent(cfg, version, gitCommit, buildDate)
+	agt, err := agent.NewAgent(cfg, version, gitCommit, gitCommitDate, buildDate)
 	if err != nil {
 		logger.Fatalf("创建Agent失败: %v", err)
 	}

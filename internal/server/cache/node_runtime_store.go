@@ -30,6 +30,7 @@ type RuntimeNode struct {
 	IP                   string         `json:"ip"`
 	Version              string         `json:"version"`
 	CommitID             string         `json:"commit_id"`
+	CommitDate           *time.Time     `json:"commit_date,omitempty"`
 	BinarySHA256         string         `json:"binary_sha256"`
 	UpdaterProtocol      string         `json:"updater_protocol"`
 	ContainerSSHProtocol string         `json:"container_ssh_protocol"`
@@ -62,6 +63,7 @@ type RuntimeNodeDirtySnapshot struct {
 	IP                   string
 	Version              string
 	CommitID             string
+	CommitDate           *time.Time
 	BinarySHA256         string
 	UpdaterProtocol      string
 	ContainerSSHProtocol string
@@ -127,6 +129,7 @@ func (s *NodeRuntimeStore) modelToRuntimeNode(node *model.Node) *RuntimeNode {
 		IP:                   node.IP,
 		Version:              node.Version,
 		CommitID:             node.CommitID,
+		CommitDate:           node.CommitDate,
 		BinarySHA256:         node.BinarySHA256,
 		UpdaterProtocol:      node.UpdaterProtocol,
 		ContainerSSHProtocol: node.ContainerSSHProtocol,
@@ -205,7 +208,7 @@ func (s *NodeRuntimeStore) ListNodesByUser(userID uint64) []RuntimeNode {
 }
 
 // UpdateHeartbeat 心跳热路径更新接口：只改内存，增加 Revision，标记 Dirty
-func (s *NodeRuntimeStore) UpdateHeartbeat(nodeID uint64, ip, hostname, version, commitID, binarySHA256, systemInfo, updaterProto, sshProto string, now time.Time) (uint64, error) {
+func (s *NodeRuntimeStore) UpdateHeartbeat(nodeID uint64, ip, hostname, version, commitID string, commitDate *time.Time, binarySHA256, systemInfo, updaterProto, sshProto string, now time.Time) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -225,6 +228,10 @@ func (s *NodeRuntimeStore) UpdateHeartbeat(nodeID uint64, ip, hostname, version,
 	}
 	if commitID != "" {
 		rn.CommitID = commitID
+	}
+	if commitDate != nil {
+		value := *commitDate
+		rn.CommitDate = &value
 	}
 	if binarySHA256 != "" {
 		rn.BinarySHA256 = binarySHA256
@@ -325,6 +332,7 @@ func (s *NodeRuntimeStore) SnapshotDirty() map[uint64]RuntimeNodeDirtySnapshot {
 				IP:                   rn.IP,
 				Version:              rn.Version,
 				CommitID:             rn.CommitID,
+				CommitDate:           rn.CommitDate,
 				BinarySHA256:         rn.BinarySHA256,
 				UpdaterProtocol:      rn.UpdaterProtocol,
 				ContainerSSHProtocol: rn.ContainerSSHProtocol,

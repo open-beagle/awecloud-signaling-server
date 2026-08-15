@@ -34,16 +34,22 @@
       <el-table v-loading="loading" :data="items" stripe>
         <el-table-column label="Agent" min-width="250">
           <template #default="{ row }">
-              <el-link class="resource-name" type="primary" :underline="false" @click="openDetail(row.id)">{{ row.display_name || row.domain_label }}</el-link>
+            <strong class="resource-name">{{ resourceName(row) }}</strong>
             <span class="secondary"><span class="mono">{{ row.stable_key }}</span><template v-if="row.host_domain_label"> · SSH {{ row.host_domain_label }}</template></span>
           </template>
         </el-table-column>
 		<el-table-column label="域名命名空间" min-width="210"><template #default="{ row }"><span class="mono">*.{{ row.domain_namespace }}.beagle</span></template></el-table-column>
-		<el-table-column label="Endpoints" width="120" align="center"><template #default="{ row }"><el-button link type="primary" @click="openDetail(row.id, 'endpoints')">{{ row.endpoint_count }}</el-button></template></el-table-column>
+		<el-table-column label="Endpoints" width="120" align="center"><template #default="{ row }">{{ row.endpoint_count }}</template></el-table-column>
         <el-table-column label="生命周期" width="120"><template #default="{ row }"><el-tag size="small" :type="lifecycleTag(row.lifecycle_state)">{{ lifecycleLabel(row.lifecycle_state) }}</el-tag></template></el-table-column>
         <el-table-column label="健康" width="110"><template #default="{ row }"><el-tag size="small" effect="plain" :type="healthTag(row.health_state)">{{ healthLabel(row.health_state) }}</el-tag></template></el-table-column>
         <el-table-column label="开放能力" min-width="190"><template #default="{ row }"><div class="capabilities"><el-tag v-for="capability in capabilityLabels(row)" :key="capability" size="small" effect="plain" type="info">{{ capability }}</el-tag><span v-if="capabilityLabels(row).length === 0" class="secondary inline">未开放</span></div></template></el-table-column>
-        <el-table-column label="版本" width="130"><template #default="{ row }"><strong>{{ row.version || '-' }}</strong></template></el-table-column>
+        <el-table-column label="版本" width="220">
+          <template #default="{ row }">
+            <strong>{{ row.version || '-' }}</strong>
+            <span class="version-commit mono">{{ shortCommit(row.commit_id) }}</span>
+            <span class="commit-date" :class="{ missing: !row.commit_date }">{{ row.commit_date ? `Commit Date ${formatTime(row.commit_date)}` : '暂无 Commit Date' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="最后上报" width="180"><template #default="{ row }">{{ formatTime(row.last_received_at) }}</template></el-table-column>
         <el-table-column label="" width="62" fixed="right" align="center">
           <template #default="{ row }">
@@ -53,8 +59,8 @@
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="detail">查看详情</el-dropdown-item>
-                  <el-dropdown-item v-if="canDelete(row)" command="delete" :disabled="!canWrite" divided>删除</el-dropdown-item>
+                  <el-dropdown-item command="update" :icon="Refresh" :disabled="!canWrite || row.lifecycle_state === 'pending'">更新</el-dropdown-item>
+                  <el-dropdown-item command="delete" :icon="Delete" :disabled="!canWrite" divided>删除</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -82,20 +88,66 @@
 		<div class="command-box"><code>{{ installCommand }}</code><el-button :icon="DocumentCopy" circle title="复制安装命令" @click="copyCommand" /></div>
 		<template #footer><el-button type="primary" @click="commandDialog = false">完成</el-button></template>
 	</el-dialog>
+
+    <el-dialog v-model="updateDialog" title="更新 Agent" width="640px" destroy-on-close>
+      <div v-if="updateTarget" v-loading="loadingReleases">
+        <p class="dialog-subtitle">{{ resourceName(updateTarget) }} · <span class="mono">{{ updateTarget.stable_key }}</span></p>
+        <el-descriptions class="build-summary" :column="2" border size="small">
+          <el-descriptions-item label="当前版本">{{ updateTarget.version || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="运行状态">{{ healthLabel(updateTarget.health_state) }}</el-descriptions-item>
+          <el-descriptions-item label="Commit ID"><span class="mono">{{ shortCommit(updateTarget.commit_id) }}</span></el-descriptions-item>
+          <el-descriptions-item label="Commit Date">{{ updateTarget.commit_date ? formatTime(updateTarget.commit_date) : '暂无 Commit Date' }}</el-descriptions-item>
+        </el-descriptions>
+        <template v-if="availableReleases.length">
+          <el-form label-position="top" class="update-form">
+            <el-form-item label="目标版本" required>
+              <el-select v-model="updateForm.releaseId" style="width: 100%">
+                <el-option v-for="release in availableReleases" :key="release.id" :value="release.id" :label="`${release.version} · ${formatTime(release.commit_date)}`" />
+              </el-select>
+            </el-form-item>
+          </el-form>
+          <div v-if="selectedRelease" class="release-preview">
+            <div><strong>{{ selectedRelease.version }}</strong><el-tag size="small" type="success" effect="plain">{{ selectedRelease.channel }}</el-tag></div>
+            <span><b>Commit ID</b> · <span class="mono">{{ shortCommit(selectedRelease.commit_id) }}</span></span>
+            <span><b>Commit Date</b> · {{ formatTime(selectedRelease.commit_date) }}</span>
+          </div>
+          <el-alert v-if="updateTarget.health_state === 'offline'" class="dialog-alert" title="Agent 当前离线。任务创建后保持等待，Agent 恢复在线时开始执行。" type="warning" show-icon :closable="false" />
+          <el-checkbox v-model="updateForm.confirmed" class="update-confirm">确认更新期间 Agent 连接可能短暂中断</el-checkbox>
+        </template>
+        <el-alert v-else-if="!loadingReleases" class="dialog-alert" title="当前 Agent 已运行最新可用版本，无需更新。" type="success" show-icon :closable="false" />
+      </div>
+      <template #footer>
+        <el-button @click="updateDialog = false">取消</el-button>
+        <el-button v-if="availableReleases.length" type="primary" :icon="Refresh" :loading="submittingUpdate" :disabled="!updateFormValid" @click="submitUpdate">创建更新任务</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="deleteDialog" title="删除 Agent" width="560px" destroy-on-close>
+      <template v-if="deleteTarget">
+        <p class="dialog-subtitle">{{ resourceName(deleteTarget) }} · <span class="mono">{{ deleteTarget.stable_key }}</span></p>
+        <el-alert class="dialog-alert" title="删除后部署凭据、运行绑定和未执行的更新任务将失效，此操作不可撤销。" type="error" show-icon :closable="false" />
+        <el-form label-position="top">
+          <el-form-item label="删除原因" required><el-input v-model="deleteForm.reason" type="textarea" :rows="3" maxlength="500" show-word-limit placeholder="请输入删除原因" /></el-form-item>
+          <el-form-item label="输入 Agent 名称确认删除" required><el-input v-model="deleteForm.confirmName" :placeholder="resourceName(deleteTarget)" /></el-form-item>
+        </el-form>
+      </template>
+      <template #footer>
+        <el-button @click="deleteDialog = false">取消</el-button>
+        <el-button type="danger" :icon="Delete" :loading="deletingResourceId === deleteTarget?.id" :disabled="!deleteFormValid" @click="submitDelete">确认删除</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { DocumentCopy, MoreFilled, Plus, Refresh, Search } from '@element-plus/icons-vue'
-import { useRouter } from 'vue-router'
+import { Delete, DocumentCopy, MoreFilled, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import PageHeader from '@/components/Common/PageHeader.vue'
-import { checkProviderTechnicalResourceDelete, createProviderAgent, createProviderDeploymentCredential, deleteProviderTechnicalResource, getProviderTechnicalResources, type TechnicalResource, type TechnicalResourceState } from '@/api/providerSupply'
+import { checkProviderTechnicalResourceDelete, createProviderAgent, createProviderDeploymentCredential, createProviderTechnicalResourceUpdateTask, deleteProviderTechnicalResource, getProviderTechnicalResourceReleases, getProviderTechnicalResources, type ProviderRelease, type TechnicalResource, type TechnicalResourceState } from '@/api/providerSupply'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspaceStore = useWorkspaceStore()
-const router = useRouter()
 const loading = ref(false)
 const errorMessage = ref('')
 const items = ref<TechnicalResource[]>([])
@@ -105,6 +157,15 @@ const createDialog = ref(false)
 const commandDialog = ref(false)
 const creating = ref(false)
 const deletingResourceId = ref('')
+const updateDialog = ref(false)
+const updateTarget = ref<TechnicalResource>()
+const releases = ref<ProviderRelease[]>([])
+const loadingReleases = ref(false)
+const submittingUpdate = ref(false)
+const updateForm = reactive({ releaseId: '', confirmed: false })
+const deleteDialog = ref(false)
+const deleteTarget = ref<TechnicalResource>()
+const deleteForm = reactive({ reason: '', confirmName: '' })
 const installCommand = ref('')
 const createForm = reactive({ name: '', domainLabel: '', nodeName: '', ttlMinutes: 30, reason: '' })
 const canWrite = computed(() => workspaceStore.can('provider.technical_resources.write'))
@@ -112,6 +173,13 @@ const agentNameValid = computed(() => /^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$/.t
 const domainLabelValid = computed(() => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(createForm.domainLabel.trim()))
 const nodeNameValid = computed(() => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(createForm.nodeName.trim()))
 const createFormValid = computed(() => agentNameValid.value && domainLabelValid.value && nodeNameValid.value && !!createForm.reason.trim())
+const resourceName = (resource: TechnicalResource) => resource.display_name || resource.domain_label
+const availableReleases = computed(() => releases.value.filter(release =>
+	!!updateTarget.value && !(release.version === updateTarget.value.version && release.commit_id === updateTarget.value.commit_id)
+))
+const selectedRelease = computed(() => availableReleases.value.find(release => release.id === updateForm.releaseId))
+const updateFormValid = computed(() => !!selectedRelease.value && updateForm.confirmed && !loadingReleases.value)
+const deleteFormValid = computed(() => !!deleteTarget.value && !!deleteForm.reason.trim() && deleteForm.confirmName === resourceName(deleteTarget.value))
 
 const createdResourceId = (response: Awaited<ReturnType<typeof createProviderAgent>>) => {
 	if (!response.success || !response.data) return ''
@@ -187,16 +255,48 @@ const copyCommand = async () => {
 }
 
 const applyFilters = () => { pagination.page = 1; load() }
-const openDetail = (resourceId: string, tab?: string) => router.push({ path: `/provider-technical-resources/${resourceId}`, query: tab ? { tab } : undefined })
-const canDelete = (resource: TechnicalResource) =>
-  (resource.lifecycle_state === 'retired' || resource.health_state === 'offline' || (resource.lifecycle_state === 'pending' && (resource.endpoint_count || 0) === 0)) &&
-  resource.lifecycle_state !== 'deleted'
 const handleRowCommand = async (command: string, resource: TechnicalResource) => {
-  if (command === 'detail') {
-    await openDetail(resource.id)
+  if (command === 'update') {
+    await openUpdate(resource)
     return
   }
-  if (command !== 'delete' || !canWrite.value || !canDelete(resource) || !workspaceStore.providerId) return
+  if (command !== 'delete') return
+  await openDelete(resource)
+}
+
+const openUpdate = async (resource: TechnicalResource) => {
+  if (!canWrite.value || !workspaceStore.providerId || resource.lifecycle_state === 'pending') return
+  updateTarget.value = resource
+  releases.value = []
+  updateForm.releaseId = ''
+  updateForm.confirmed = false
+  updateDialog.value = true
+  loadingReleases.value = true
+  try {
+    const response = await getProviderTechnicalResourceReleases(workspaceStore.providerId, resource.id)
+    releases.value = response.success && response.data ? response.data : []
+    const first = releases.value.find(release => !(release.version === resource.version && release.commit_id === resource.commit_id))
+    updateForm.releaseId = first?.id || ''
+  } finally {
+    loadingReleases.value = false
+  }
+}
+
+const submitUpdate = async () => {
+  if (!workspaceStore.providerId || !updateTarget.value || !selectedRelease.value || !updateFormValid.value) return
+  submittingUpdate.value = true
+  try {
+    await createProviderTechnicalResourceUpdateTask(workspaceStore.providerId, updateTarget.value.id, selectedRelease.value.id, false)
+    ElMessage.success('更新任务已创建')
+    updateDialog.value = false
+    await load()
+  } finally {
+    submittingUpdate.value = false
+  }
+}
+
+const openDelete = async (resource: TechnicalResource) => {
+  if (!canWrite.value || !workspaceStore.providerId) return
 
   deletingResourceId.value = resource.id
   try {
@@ -206,18 +306,24 @@ const handleRowCommand = async (command: string, resource: TechnicalResource) =>
       await ElMessageBox.alert(blockers, '无法删除技术资源', { confirmButtonText: '知道了', type: 'warning' })
       return
     }
-    const result = await ElMessageBox.prompt(`删除 ${resource.hostname || '该资源'} 后不可恢复，请输入删除原因。`, '确认删除技术资源', {
-      confirmButtonText: '确认删除',
-      cancelButtonText: '取消',
-      inputPattern: /\S+/,
-      inputErrorMessage: '请输入删除原因',
-      type: 'warning',
-    })
-    await deleteProviderTechnicalResource(workspaceStore.providerId, resource, result.value.trim())
+    deleteTarget.value = resource
+    deleteForm.reason = ''
+    deleteForm.confirmName = ''
+    deleteDialog.value = true
+  } finally {
+    deletingResourceId.value = ''
+  }
+}
+
+const submitDelete = async () => {
+  if (!workspaceStore.providerId || !deleteTarget.value || !deleteFormValid.value) return
+  const resource = deleteTarget.value
+  deletingResourceId.value = resource.id
+  try {
+    await deleteProviderTechnicalResource(workspaceStore.providerId, resource, deleteForm.reason.trim())
     ElMessage.success('技术资源已删除')
+    deleteDialog.value = false
     await load()
-  } catch (error) {
-    if (error !== 'cancel' && error !== 'close') throw error
   } finally {
     deletingResourceId.value = ''
   }
@@ -233,7 +339,14 @@ const lifecycleLabel = (state: TechnicalResourceState) => ({ pending: '待部署
 const lifecycleTag = (state: TechnicalResourceState) => ({ pending: 'warning', registered: 'success', disabled: 'warning', retired: 'info', deleted: 'info' }[state] as any)
 const healthLabel = (state: string) => ({ unknown: '未知', online: '在线', degraded: '异常', offline: '离线' }[state] || state)
 const healthTag = (state: string) => ({ online: 'success', degraded: 'warning', offline: 'danger', unknown: 'info' }[state] || 'info') as any
-const formatTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
+const shortCommit = (value?: string) => value ? value.slice(0, 7) : '未上报'
+const formatTime = (value?: string) => {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
 
 watch(() => workspaceStore.providerId, () => { pagination.page = 1; load() })
 onMounted(load)
@@ -251,12 +364,23 @@ onMounted(load)
 .secondary { display: block; margin-top: 3px; color: var(--text-secondary); font-size: 12px; }
 .secondary.inline { display: inline; margin-top: 0; }
 .mono { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; }
-.resource-name { max-width: 100%; font-weight: 650; }
+.resource-name { display: block; max-width: 100%; overflow: hidden; color: var(--primary-color); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .capabilities { display: flex; flex-wrap: wrap; gap: 4px; }
+.version-commit, .commit-date { display: block; margin-top: 2px; color: var(--text-secondary); font-size: 11px; line-height: 16px; }
+.commit-date { white-space: nowrap; }
+.commit-date.missing { color: var(--warning-color); }
 .row-actions-button { width: 32px; height: 32px; padding: 0; }
 .row-actions-icon { transform: rotate(90deg); }
 .pagination { display: flex; justify-content: flex-end; padding: 16px; }
 .form-suffix { margin-left: 8px; color: var(--text-secondary); }
 .command-box { display: flex; align-items: flex-start; gap: 12px; margin-top: 14px; padding: 14px; border: 1px solid var(--border-light); border-radius: 5px; background: #f7f8fa; }
 .command-box code { flex: 1; overflow-wrap: anywhere; line-height: 1.7; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; }
+.dialog-subtitle { margin: -8px 0 16px; color: var(--text-secondary); font-size: 12px; }
+.build-summary { margin-bottom: 16px; }
+.update-form { margin-top: 16px; }
+.release-preview { display: grid; gap: 5px; padding: 12px 14px; border: 1px solid var(--border-light); border-radius: 5px; background: #f8fafc; color: var(--text-secondary); font-size: 12px; }
+.release-preview > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-primary); }
+.release-preview b { color: var(--text-primary); }
+.dialog-alert { margin: 16px 0; }
+.update-confirm { margin-top: 2px; }
 </style>

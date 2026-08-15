@@ -3,9 +3,12 @@ package grpc
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
@@ -81,7 +84,8 @@ func TestAgentRegisterResumesWithConsumedTechnicalResourceToken(t *testing.T) {
 	require.NoError(t, testDB.Create(&token).Error)
 
 	server := &AgentServiceServer{}
-	response, err := server.Register(context.Background(), &pb.AgentRegisterRequest{Secret: token.Token, Version: "v1.0.1"})
+	commitDate := "2026-08-12T18:42:06+08:00"
+	response, err := server.Register(context.Background(), &pb.AgentRegisterRequest{Secret: token.Token, Version: "v1.0.1", CommitDate: commitDate})
 	require.NoError(t, err)
 	require.True(t, response.Success)
 	require.Equal(t, user.ID, response.AgentId)
@@ -93,10 +97,20 @@ func TestAgentRegisterResumesWithConsumedTechnicalResourceToken(t *testing.T) {
 	var persistedNode model.Node
 	require.NoError(t, testDB.First(&persistedNode, node.ID).Error)
 	require.Equal(t, "v1.0.1", persistedNode.Version)
+	require.NotNil(t, persistedNode.CommitDate)
+	expectedCommitDate, err := time.Parse(time.RFC3339, commitDate)
+	require.NoError(t, err)
+	require.True(t, expectedCommitDate.Equal(*persistedNode.CommitDate))
 
 	require.NoError(t, testDB.Delete(&persistedNode).Error)
 	response, err = server.Register(context.Background(), &pb.AgentRegisterRequest{Secret: token.Token, Version: "v1.0.1"})
 	require.NoError(t, err)
 	require.False(t, response.Success)
 	require.Equal(t, "Agent Node 不存在", response.Message)
+}
+
+func TestAgentRegisterRejectsInvalidCommitDate(t *testing.T) {
+	server := &AgentServiceServer{}
+	_, err := server.Register(context.Background(), &pb.AgentRegisterRequest{CommitDate: "2026-08-12 18:42:06"})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }

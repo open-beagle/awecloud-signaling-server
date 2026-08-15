@@ -124,6 +124,7 @@ func (p *NodeRuntimePersister) Flush(parentCtx context.Context) {
 				"hostname":               snapshot.Hostname,
 				"version":                snapshot.Version,
 				"commit_id":              snapshot.CommitID,
+				"commit_date":            snapshot.CommitDate,
 				"binary_sha256":          snapshot.BinarySHA256,
 				"system_info":            snapshot.SystemInfo,
 				"updater_protocol":       snapshot.UpdaterProtocol,

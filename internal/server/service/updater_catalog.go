@@ -49,6 +49,7 @@ type UpdaterCatalogRelease struct {
 	Component           model.Component `json:"component"`
 	Version             string          `json:"version"`
 	CommitID            string          `json:"commit_id"`
+	CommitDate          time.Time       `json:"commit_date"`
 	Channel             string          `json:"channel"`
 	ReleaseNotes        string          `json:"release_notes"`
 	MinSupportedVersion string          `json:"min_supported_version"`
@@ -299,8 +300,8 @@ func (s *UpdaterCatalogService) validateManifest(manifest UpdaterCatalogManifest
 	if manifest.SchemaVersion != 1 || manifest.PublishedAt.IsZero() || !manifest.Release.Component.Valid() {
 		return errors.New("manifest identity is incomplete")
 	}
-	if !updaterCatalogVersionPattern.MatchString(manifest.Release.Version) || !updaterCatalogCommitPattern.MatchString(manifest.Release.CommitID) {
-		return errors.New("release version or commit_id is invalid")
+	if !updaterCatalogVersionPattern.MatchString(manifest.Release.Version) || !updaterCatalogCommitPattern.MatchString(manifest.Release.CommitID) || manifest.Release.CommitDate.IsZero() {
+		return errors.New("release version, commit_id or commit_date is invalid")
 	}
 	if !updaterCatalogLabelPattern.MatchString(manifest.Release.Channel) || len(manifest.Artifacts) == 0 {
 		return errors.New("release channel or artifacts are invalid")
@@ -334,7 +335,7 @@ func (s *UpdaterCatalogService) syncManifest(ctx context.Context, manifest Updat
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			release = model.Release{
 				ID: uuid.NewString(), Component: manifest.Release.Component, Version: manifest.Release.Version,
-				CommitID: manifest.Release.CommitID, Channel: manifest.Release.Channel, Status: model.ReleaseStatusPublished,
+				CommitID: manifest.Release.CommitID, CommitDate: manifest.Release.CommitDate, Channel: manifest.Release.Channel, Status: model.ReleaseStatusPublished,
 				ReleaseNotes: manifest.Release.ReleaseNotes, MinSupportedVersion: manifest.Release.MinSupportedVersion,
 				PublishedAt: &manifest.PublishedAt,
 			}
@@ -368,6 +369,7 @@ func (s *UpdaterCatalogService) syncManifest(ctx context.Context, manifest Updat
 		}
 		matches := release.Status == model.ReleaseStatusPublished &&
 			release.CommitID == manifest.Release.CommitID &&
+			release.CommitDate.Equal(manifest.Release.CommitDate) &&
 			release.Channel == manifest.Release.Channel &&
 			release.ReleaseNotes == manifest.Release.ReleaseNotes &&
 			release.MinSupportedVersion == manifest.Release.MinSupportedVersion &&
@@ -412,7 +414,7 @@ func replaceCatalogRelease(tx *gorm.DB, release *model.Release, existing []model
 	}
 
 	if err := tx.Model(release).Updates(map[string]any{
-		"commit_id": manifest.Release.CommitID, "channel": manifest.Release.Channel,
+		"commit_id": manifest.Release.CommitID, "commit_date": manifest.Release.CommitDate, "channel": manifest.Release.Channel,
 		"status": model.ReleaseStatusPublished, "release_notes": manifest.Release.ReleaseNotes,
 		"min_supported_version": manifest.Release.MinSupportedVersion, "published_at": manifest.PublishedAt,
 	}).Error; err != nil {

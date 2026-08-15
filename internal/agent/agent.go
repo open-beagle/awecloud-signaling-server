@@ -37,12 +37,13 @@ import (
 
 // Agent Agent进程
 type Agent struct {
-	config       *config.AgentConfig
-	version      string // Agent版本
-	gitCommit    string // Git SHA
-	binarySHA256 string // 二进制 SHA256
-	userName     string // 用户名（从注册响应获取）
-	deviceName   string // 设备名称（从注册响应获取，即 Node.Name）
+	config        *config.AgentConfig
+	version       string // Agent版本
+	gitCommit     string // Git SHA
+	gitCommitDate string // Git Commit committer date（RFC 3339）
+	binarySHA256  string // 二进制 SHA256
+	userName      string // 用户名（从注册响应获取）
+	deviceName    string // 设备名称（从注册响应获取，即 Node.Name）
 
 	// gRPC连接
 	grpcConn      *grpc.ClientConn
@@ -103,12 +104,17 @@ type Agent struct {
 }
 
 // NewAgent 创建Agent
-func NewAgent(cfg *config.AgentConfig, version, gitCommit, buildDate string) (*Agent, error) {
+func NewAgent(cfg *config.AgentConfig, version, gitCommit, gitCommitDate, buildDate string) (*Agent, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	gitCommit = strings.TrimSpace(gitCommit)
 	if !validGitCommit(gitCommit) {
 		cancel()
 		return nil, fmt.Errorf("Agent Git Commit 必须是完整的 40 位小写 SHA")
+	}
+	gitCommitDate = strings.TrimSpace(gitCommitDate)
+	if parsed, err := time.Parse(time.RFC3339, gitCommitDate); err != nil || parsed.IsZero() {
+		cancel()
+		return nil, fmt.Errorf("Agent Commit Date 必须是有效的 RFC 3339 时间")
 	}
 
 	// 设置版本信息（供 Endpoint SSH 横幅使用）
@@ -131,6 +137,7 @@ func NewAgent(cfg *config.AgentConfig, version, gitCommit, buildDate string) (*A
 		config:         cfg,
 		version:        version,
 		gitCommit:      gitCommit,
+		gitCommitDate:  gitCommitDate,
 		binarySHA256:   binSHA256,
 		lanDetector:    lanDetector,
 		networkInfo:    networkInfo,
@@ -616,6 +623,7 @@ func (a *Agent) register() error {
 		Secret:       a.config.Agent.AgentToken,
 		Version:      a.version,
 		CommitId:     a.gitCommit,
+		CommitDate:   a.gitCommitDate,
 		BinarySha256: a.binarySHA256,
 		SystemInfo:   systemInfo,
 	})
@@ -867,6 +875,7 @@ func (a *Agent) sendHeartbeat(stream pb.AgentService_HeartbeatClient) error {
 		AgentId:         a.agentID,
 		Version:         a.version,
 		CommitId:        a.gitCommit,
+		CommitDate:      a.gitCommitDate,
 		BinarySha256:    a.binarySHA256,
 		UpdaterProtocol: "v2",
 		SystemInfo: &pb.SystemInfo{

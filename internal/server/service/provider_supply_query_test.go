@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -205,8 +207,9 @@ func TestResourceScopeQueriesProjectPlatformResourceAccessDomain(t *testing.T) {
 
 func TestTechnicalResourceQueriesProjectAndSearchRuntimeHostname(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
+	commitDate := time.Date(2026, 8, 12, 10, 42, 6, 0, time.UTC)
 	require.NoError(t, fixture.database.Model(&model.Node{}).Where("id = ?", 1001).Updates(map[string]any{
-		"hostname": "beagle-prod-01", "version": "v1.2.0", "updater_protocol": "v2",
+		"hostname": "beagle-prod-01", "version": "v1.2.0", "commit_id": strings.Repeat("a", 40), "commit_date": commitDate, "updater_protocol": "v2",
 		"container_ssh_protocol": "v1", "k8s_enabled": true,
 	}).Error)
 	agent := fixture.createBoundAgent(t, "legacy-node:1001", 1001)
@@ -233,6 +236,8 @@ func TestTechnicalResourceQueriesProjectAndSearchRuntimeHostname(t *testing.T) {
 	require.Equal(t, "beagle-prod-01", result.Items[0].Hostname)
 	require.Equal(t, "reported", result.Items[0].HostnameSource)
 	require.Equal(t, "v1.2.0", result.Items[0].Version)
+	require.Equal(t, strings.Repeat("a", 40), result.Items[0].CommitID)
+	require.Equal(t, commitDate.Format(time.RFC3339), result.Items[0].CommitDate)
 	require.True(t, result.Items[0].SSHEnabled)
 	require.True(t, result.Items[0].ContainerSSHEnabled)
 	require.True(t, result.Items[0].K8SEnabled)
