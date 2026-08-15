@@ -14,6 +14,7 @@ import (
 // implementation and makes its request policy testable.
 type containerShellOpener interface {
 	OpenShell(context.Context, string, string, ContainerExecStream) error
+	OpenSFTP(context.Context, string, string, ContainerExecStream) error
 }
 
 // ServeContainerSSHSession accepts standard SSH shell and exec requests.
@@ -33,6 +34,7 @@ func ServeContainerSSHSession(ctx context.Context, channel ssh.Channel, requests
 	rows, cols := uint16(24), uint16(80)
 	ptyRequested := false
 	shellStarted := false
+	sftpStarted := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -109,9 +111,27 @@ func ServeContainerSSHSession(ctx context.Context, channel ssh.Channel, requests
 						Rows: initialRows, Cols: initialCols, Resize: resize,
 					})
 				}()
+			case "subsystem":
+				subsystem, ok := parseSubsystem(request.Payload)
+				if !ok || subsystem != "sftp" || shellStarted || ptyRequested {
+					if request.WantReply {
+						request.Reply(false, nil)
+					}
+					continue
+				}
+				shellStarted = true
+				sftpStarted = true
+				if request.WantReply {
+					request.Reply(true, nil)
+				}
+				go func() {
+					result <- opener.OpenSFTP(sessionCtx, userName, resourceID, ContainerExecStream{
+						Stdin: channel, Stdout: channel, Stderr: channel.Stderr(),
+					})
+				}()
 			case "window-change":
 				parsedRows, parsedCols, ok := parseWindowSize(request.Payload)
-				if !ok || !shellStarted {
+				if !ok || !shellStarted || sftpStarted {
 					if request.WantReply {
 						request.Reply(false, nil)
 					}
@@ -128,6 +148,16 @@ func ServeContainerSSHSession(ctx context.Context, channel ssh.Channel, requests
 			}
 		}
 	}
+}
+
+func parseSubsystem(payload []byte) (string, bool) {
+	var request struct {
+		Name string
+	}
+	if err := ssh.Unmarshal(payload, &request); err != nil || request.Name == "" || strings.IndexByte(request.Name, 0) >= 0 {
+		return "", false
+	}
+	return request.Name, true
 }
 
 func parseExecCommand(payload []byte) (string, bool) {

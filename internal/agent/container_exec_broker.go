@@ -41,6 +41,7 @@ type ContainerTerminalSize struct {
 // path can be tested without a live Kubernetes API server.
 type ContainerExecutor interface {
 	Execute(context.Context, *ContainerSSHUserPermission, ContainerExecStream) error
+	ExecuteSFTP(context.Context, *ContainerSSHUserPermission, ContainerExecStream) error
 }
 
 type podReader interface {
@@ -96,7 +97,18 @@ func (b *ContainerExecBroker) OpenShell(ctx context.Context, userName, resourceI
 		return fmt.Errorf("ContainerSSH access denied")
 	}
 
-	return b.openAuthorizedTarget(ctx, permission, stream)
+	return b.openAuthorizedTarget(ctx, permission, stream, b.executor.Execute)
+}
+
+func (b *ContainerExecBroker) OpenSFTP(ctx context.Context, userName, resourceID string, stream ContainerExecStream) error {
+	if b == nil || b.pods == nil || b.permissions == nil || b.executor == nil {
+		return fmt.Errorf("ContainerSSH broker is not configured")
+	}
+	permission, allowed := b.permissions.CheckContainerSSHAccess(userName, resourceID)
+	if !allowed {
+		return fmt.Errorf("ContainerSSH access denied")
+	}
+	return b.openAuthorizedTarget(ctx, permission, stream, b.executor.ExecuteSFTP)
 }
 
 func (b *ContainerExecBroker) OpenAuthorizedShell(ctx context.Context, authorizations *SessionAuthorizationCache, permission *pb.ResourceSessionPermissionV2, stream ContainerExecStream) error {
@@ -107,7 +119,18 @@ func (b *ContainerExecBroker) OpenAuthorizedShell(ctx context.Context, authoriza
 	if err != nil {
 		return err
 	}
-	return b.openAuthorizedTarget(ctx, target, stream)
+	return b.openAuthorizedTarget(ctx, target, stream, b.executor.Execute)
+}
+
+func (b *ContainerExecBroker) OpenAuthorizedSFTP(ctx context.Context, authorizations *SessionAuthorizationCache, permission *pb.ResourceSessionPermissionV2, stream ContainerExecStream) error {
+	if b == nil || b.pods == nil || b.executor == nil || authorizations == nil || permission == nil || permission.Target == nil {
+		return fmt.Errorf("ContainerSSH broker is not configured")
+	}
+	target, err := b.authorizedV2Target(authorizations, permission)
+	if err != nil {
+		return err
+	}
+	return b.openAuthorizedTarget(ctx, target, stream, b.executor.ExecuteSFTP)
 }
 
 func (b *ContainerExecBroker) DialAuthorizedPort(ctx context.Context, authorizations *SessionAuthorizationCache, permission *pb.ResourceSessionPermissionV2, host string, port uint32) (net.Conn, error) {
@@ -163,7 +186,7 @@ func sameResourceSessionIdentity(current, selected *pb.ResourceSessionPermission
 		proto.Equal(current.Target, selected.Target)
 }
 
-func (b *ContainerExecBroker) openAuthorizedTarget(ctx context.Context, permission *ContainerSSHUserPermission, stream ContainerExecStream) error {
+func (b *ContainerExecBroker) openAuthorizedTarget(ctx context.Context, permission *ContainerSSHUserPermission, stream ContainerExecStream, execute func(context.Context, *ContainerSSHUserPermission, ContainerExecStream) error) error {
 	if _, err := b.authorizedPod(ctx, permission); err != nil {
 		return err
 	}
@@ -173,7 +196,7 @@ func (b *ContainerExecBroker) openAuthorizedTarget(ctx context.Context, permissi
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(permission.MaxSessionSeconds)*time.Second)
 		defer cancel()
 	}
-	return b.executor.Execute(ctx, permission, stream)
+	return execute(ctx, permission, stream)
 }
 
 func (b *ContainerExecBroker) authorizedPod(ctx context.Context, permission *ContainerSSHUserPermission) (*corev1.Pod, error) {

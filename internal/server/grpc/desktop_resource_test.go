@@ -334,9 +334,16 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 	require.NoError(t, database.Create(&sshGrant).Error)
 	// A grant whose action does not match the resource type must not make an
 	// otherwise empty Tenant appear in the lightweight selector.
+	otherAllocation := model.ResourceAllocation{
+		ID: uuid.NewString(), TenantID: otherTenant.ID, Mode: model.ResourceAllocationLeased,
+		ValidFrom: now.Add(-time.Minute), ExpiresAt: &expiresAt, State: model.ResourceAllocationDraft,
+		RowVersion: 1, CreatedByUserID: owner.ID,
+	}
+	require.NoError(t, database.Create(&otherAllocation).Error)
 	mismatchedResource := model.TenantResource{
 		ID: uuid.NewString(), TenantID: otherTenant.ID, Type: model.TenantResourceContainerService,
-		StableKey: strings.Repeat("f", 64), DisplayName: "mismatched-action", VisibilityState: model.TenantResourceVisible,
+		StableKey: strings.Repeat("f", 64), EntitlementLineageID: otherAllocation.ID,
+		DisplayName: "mismatched-action", VisibilityState: model.TenantResourceVisible,
 		AvailabilityState: model.TenantResourceAvailable, Revision: 1, RowVersion: 1,
 	}
 	require.NoError(t, database.Create(&mismatchedResource).Error)
@@ -442,17 +449,17 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 	require.Greater(t, projected.AuthorizationRevision, int64(0))
 
 	sshResources, services = server.queryTenantContainerResourcesGRPC(context.Background(), &desktop, nil, "")
-	require.Len(t, sshResources, 2)
+	require.Len(t, sshResources, 1)
 	require.Equal(t, projectedSSH.SessionId, sshResources[0].SessionId)
 	require.Len(t, services, 1)
 	require.Equal(t, projected.SessionId, services[0].SessionId)
 	require.NoError(t, database.Model(&model.ResourceSession{}).Where("user_id = ? AND device_id = ?", member.ID, desktop.ID).Count(&sessionCount).Error)
-	require.Equal(t, int64(3), sessionCount)
+	require.Equal(t, int64(2), sessionCount)
 
 	require.NoError(t, database.Model(&model.TenantAccessGrant{}).Where("id = ?", grant.ID).Updates(map[string]any{
 		"status": model.TenantAccessGrantSuspended, "revision": int64(2), "row_version": int64(2),
 	}).Error)
 	sshResources, services = server.queryTenantContainerResourcesGRPC(context.Background(), &desktop, nil, "")
-	require.Len(t, sshResources, 2)
+	require.Len(t, sshResources, 1)
 	require.Empty(t, services)
 }

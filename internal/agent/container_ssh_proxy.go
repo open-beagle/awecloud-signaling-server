@@ -325,6 +325,13 @@ func (o *authorizedContainerShellOpener) OpenShell(ctx context.Context, userName
 	return o.broker.OpenAuthorizedShell(ctx, o.authorizations, o.permission, stream)
 }
 
+func (o *authorizedContainerShellOpener) OpenSFTP(ctx context.Context, userName, resourceID string, stream ContainerExecStream) error {
+	if o == nil || o.permission == nil || o.permission.UserName != userName || o.permission.ResourceId != resourceID {
+		return fmt.Errorf("ContainerSSH access denied")
+	}
+	return o.broker.OpenAuthorizedSFTP(ctx, o.authorizations, o.permission, stream)
+}
+
 func containerSessionOutcome(err error) (string, string) {
 	if err == nil {
 		return "success", "shell_exited"

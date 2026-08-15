@@ -22,9 +22,18 @@ import (
 
 type recordingContainerExecutor struct {
 	called bool
+	sftp   bool
 	target *ContainerSSHUserPermission
 	stream ContainerExecStream
 	err    error
+}
+
+func (e *recordingContainerExecutor) ExecuteSFTP(_ context.Context, target *ContainerSSHUserPermission, stream ContainerExecStream) error {
+	e.called = true
+	e.sftp = true
+	e.target = target
+	e.stream = stream
+	return e.err
 }
 
 func (e *recordingContainerExecutor) Execute(_ context.Context, target *ContainerSSHUserPermission, stream ContainerExecStream) error {
@@ -68,6 +77,23 @@ func TestContainerExecBrokerValidatesAuthorizedReadyPod(t *testing.T) {
 	err := broker.OpenShell(context.Background(), "alice", "resource-a", ContainerExecStream{})
 	require.NoError(t, err)
 	require.True(t, executor.called)
+	require.Equal(t, "pod-uid-a", executor.target.PodUID)
+}
+
+func TestContainerExecBrokerRoutesSFTPThroughAuthorizedReadyPod(t *testing.T) {
+	client := fake.NewSimpleClientset(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "workspace-0", Namespace: "dev", UID: types.UID("pod-uid-a")},
+		Status:     corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "workspace", Ready: true}}},
+	})
+	cache := NewPermissionCache()
+	cache.UpdateContainerSSHPermissions(map[string][]*ContainerSSHUserPermission{
+		"alice": {{ResourceID: "resource-a", Namespace: "dev", PodName: "workspace-0", PodUID: "pod-uid-a", ContainerName: "workspace", ListenPort: ContainerSSHPortBase}},
+	})
+	executor := &recordingContainerExecutor{}
+
+	require.NoError(t, NewContainerExecBroker(client, cache, executor).OpenSFTP(context.Background(), "alice", "resource-a", ContainerExecStream{}))
+	require.True(t, executor.called)
+	require.True(t, executor.sftp)
 	require.Equal(t, "pod-uid-a", executor.target.PodUID)
 }
 
@@ -147,4 +173,19 @@ func TestContainerExecBrokerV2AcceptsAuthoritativeRefreshOfSameSession(t *testin
 	}), NewPermissionCache(), executor)
 	require.NoError(t, broker.OpenAuthorizedShell(context.Background(), authorizations, selected, ContainerExecStream{}))
 	require.True(t, executor.called)
+}
+
+func TestContainerExecBrokerV2RoutesAuthorizedSFTP(t *testing.T) {
+	now := time.Now().UTC()
+	authorizations := NewSessionAuthorizationCache()
+	permission := sessionPermission(now, "session-server", "resource-a", "alice", 7001, 50200)
+	require.NoError(t, authorizations.Apply(signedSessionSnapshot(t, 1, now, permission), now))
+	executor := &recordingContainerExecutor{}
+	broker := NewContainerExecBroker(fake.NewSimpleClientset(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "ide-0", Namespace: "dev", UID: types.UID("pod-a")},
+		Status:     corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "workspace", Ready: true}}},
+	}), NewPermissionCache(), executor)
+
+	require.NoError(t, broker.OpenAuthorizedSFTP(context.Background(), authorizations, permission, ContainerExecStream{}))
+	require.True(t, executor.sftp)
 }

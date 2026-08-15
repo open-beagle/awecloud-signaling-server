@@ -22,6 +22,12 @@ type KubernetesContainerExecutor struct {
 	newExecutor func(*rest.Config, string, *url.URL) (remotecommand.Executor, error)
 }
 
+var containerSFTPServerPaths = []string{
+	"/usr/lib/openssh/sftp-server",
+	"/usr/libexec/openssh/sftp-server",
+	"/usr/lib/ssh/sftp-server",
+}
+
 func NewKubernetesContainerExecutor(restConfig *rest.Config) (*KubernetesContainerExecutor, error) {
 	if restConfig == nil || restConfig.Host == "" {
 		return nil, fmt.Errorf("Kubernetes REST config is required")
@@ -54,6 +60,47 @@ func (e *KubernetesContainerExecutor) Execute(ctx context.Context, target *Conta
 		command = []string{shell, "-c", stream.Command}
 	}
 	return e.execute(ctx, target, command, stream, stream.TTY)
+}
+
+func (e *KubernetesContainerExecutor) ExecuteSFTP(ctx context.Context, target *ContainerSSHUserPermission, stream ContainerExecStream) error {
+	if e == nil || e.restConfig == nil || e.newExecutor == nil || target == nil {
+		return fmt.Errorf("Kubernetes ContainerSSH executor is not configured")
+	}
+	if target.SSHUser != "" {
+		actual, err := e.effectiveUser(ctx, target)
+		if err != nil {
+			return err
+		}
+		if actual != target.SSHUser {
+			return fmt.Errorf("ContainerSSH user changed: discovered=%s actual=%s", target.SSHUser, actual)
+		}
+	}
+	serverPath, err := e.sftpServerPath(ctx, target)
+	if err != nil {
+		return err
+	}
+	stream.TTY = false
+	stream.Rows, stream.Cols, stream.Resize = 0, 0, nil
+	if err := e.execute(ctx, target, []string{serverPath}, stream, false); err != nil {
+		return fmt.Errorf("SFTP_SERVER_EXEC_FAILED: %w", err)
+	}
+	return nil
+}
+
+func (e *KubernetesContainerExecutor) sftpServerPath(ctx context.Context, target *ContainerSSHUserPermission) (string, error) {
+	for _, candidate := range containerSFTPServerPaths {
+		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		var stdout, stderr bytes.Buffer
+		err := e.execute(probeCtx, target, []string{candidate, "-Q", "requests"}, ContainerExecStream{Stdout: &stdout, Stderr: &stderr}, false)
+		cancel()
+		if err == nil {
+			return candidate, nil
+		}
+		if !executableMissing(err, stderr.String(), candidate) {
+			return "", fmt.Errorf("SFTP_SERVER_EXEC_FAILED: probe %s: %w: %s", candidate, err, strings.TrimSpace(stderr.String()))
+		}
+	}
+	return "", fmt.Errorf("SFTP_SERVER_NOT_FOUND")
 }
 
 func (e *KubernetesContainerExecutor) effectiveUser(ctx context.Context, target *ContainerSSHUserPermission) (string, error) {
@@ -90,6 +137,16 @@ func bashExecutableMissing(err error, stderr string) bool {
 	}
 	message := strings.ToLower(err.Error() + "\n" + stderr)
 	return (strings.Contains(message, `exec: "/bin/bash"`) || strings.Contains(message, "exec /bin/bash") || strings.Contains(message, "stat /bin/bash")) &&
+		(strings.Contains(message, "no such file or directory") || strings.Contains(message, "executable file not found"))
+}
+
+func executableMissing(err error, stderr, executable string) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error() + "\n" + stderr)
+	executable = strings.ToLower(executable)
+	return strings.Contains(message, executable) &&
 		(strings.Contains(message, "no such file or directory") || strings.Contains(message, "executable file not found"))
 }
 

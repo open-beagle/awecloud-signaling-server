@@ -168,6 +168,66 @@ func TestKubernetesContainerExecutorDeclaresStdinOnlyWhenProvided(t *testing.T) 
 	require.Equal(t, "false", interactive.Query().Get("stderr"))
 }
 
+func TestKubernetesContainerExecutorRunsSFTPServerDirectlyWithoutTTY(t *testing.T) {
+	executor, err := NewKubernetesContainerExecutor(&rest.Config{Host: "https://kubernetes.example"})
+	require.NoError(t, err)
+	missing := &recordingRemoteExecutor{
+		err:    fmt.Errorf("command terminated with exit code 126"),
+		stderr: `exec: "/usr/lib/openssh/sftp-server": stat /usr/lib/openssh/sftp-server: no such file or directory`,
+	}
+	probe := &recordingRemoteExecutor{stdout: "open\nclose\n"}
+	server := &recordingRemoteExecutor{}
+	var urls []*url.URL
+	executor.newExecutor = func(_ *rest.Config, _ string, got *url.URL) (remotecommand.Executor, error) {
+		urls = append(urls, got)
+		switch len(urls) {
+		case 1:
+			return missing, nil
+		case 2:
+			return probe, nil
+		default:
+			return server, nil
+		}
+	}
+	stdin := strings.NewReader("sftp protocol bytes")
+	var stdout, stderr bytes.Buffer
+	err = executor.ExecuteSFTP(context.Background(), &ContainerSSHUserPermission{
+		Namespace: "team-a", PodName: "ide-0", ContainerName: "workspace",
+	}, ContainerExecStream{TTY: true, Stdin: stdin, Stdout: &stdout, Stderr: &stderr, Rows: 40, Cols: 120})
+	require.NoError(t, err)
+	require.Len(t, urls, 3)
+	require.Equal(t, []string{"/usr/lib/openssh/sftp-server", "-Q", "requests"}, urls[0].Query()["command"])
+	require.Equal(t, []string{"/usr/libexec/openssh/sftp-server", "-Q", "requests"}, urls[1].Query()["command"])
+	require.Equal(t, []string{"/usr/libexec/openssh/sftp-server"}, urls[2].Query()["command"])
+	require.Equal(t, "true", urls[2].Query().Get("stdin"))
+	require.Equal(t, "true", urls[2].Query().Get("stdout"))
+	require.Equal(t, "true", urls[2].Query().Get("stderr"))
+	require.Equal(t, "false", urls[2].Query().Get("tty"))
+	require.False(t, server.options.Tty)
+	require.Nil(t, server.options.TerminalSizeQueue)
+	require.Empty(t, stdout.String())
+}
+
+func TestKubernetesContainerExecutorFailsWhenSFTPServerIsMissing(t *testing.T) {
+	executor, err := NewKubernetesContainerExecutor(&rest.Config{Host: "https://kubernetes.example"})
+	require.NoError(t, err)
+	calls := 0
+	executor.newExecutor = func(_ *rest.Config, _ string, got *url.URL) (remotecommand.Executor, error) {
+		calls++
+		candidate := got.Query().Get("command")
+		return &recordingRemoteExecutor{
+			err:    fmt.Errorf("command terminated with exit code 126"),
+			stderr: fmt.Sprintf("exec: %q: stat %s: no such file or directory", candidate, candidate),
+		}, nil
+	}
+
+	err = executor.ExecuteSFTP(context.Background(), &ContainerSSHUserPermission{
+		Namespace: "team-a", PodName: "ide-0", ContainerName: "workspace",
+	}, ContainerExecStream{})
+	require.EqualError(t, err, "SFTP_SERVER_NOT_FOUND")
+	require.Equal(t, len(containerSFTPServerPaths), calls)
+}
+
 func TestKubernetesContainerExecutorFallsBackOnlyWhenBashIsMissing(t *testing.T) {
 	executor, err := NewKubernetesContainerExecutor(&rest.Config{Host: "https://kubernetes.example"})
 	require.NoError(t, err)

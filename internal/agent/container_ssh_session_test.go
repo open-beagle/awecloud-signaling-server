@@ -20,6 +20,17 @@ func TestParseExecCommand(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestParseSubsystem(t *testing.T) {
+	name, ok := parseSubsystem(ssh.Marshal(struct{ Name string }{Name: "sftp"}))
+	require.True(t, ok)
+	require.Equal(t, "sftp", name)
+
+	_, ok = parseSubsystem(ssh.Marshal(struct{ Name string }{}))
+	require.False(t, ok)
+	_, ok = parseSubsystem(ssh.Marshal(struct{ Name string }{Name: "sftp\x00bad"}))
+	require.False(t, ok)
+}
+
 func TestParsePTYSize(t *testing.T) {
 	payload := make([]byte, 4+5+8)
 	binary.BigEndian.PutUint32(payload[:4], 5)
