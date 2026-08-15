@@ -105,10 +105,11 @@ func TestSyncCatalogReturnsCreatedReleaseCount(t *testing.T) {
 		SchemaVersion: 1,
 		PublishedAt:   time.Date(2026, 8, 9, 8, 0, 0, 0, time.UTC),
 		Release: service.UpdaterCatalogRelease{
-			Component: model.ComponentAgent,
-			Version:   "v1.0.0",
-			CommitID:  "0123456789abcdef0123456789abcdef01234567",
-			Channel:   "stable",
+			Component:  model.ComponentAgent,
+			Version:    "v1.0.0",
+			CommitID:   "0123456789abcdef0123456789abcdef01234567",
+			CommitDate: time.Date(2026, 8, 8, 15, 42, 6, 0, time.UTC),
+			Channel:    "stable",
 		},
 		Artifacts: []service.UpdaterCatalogArtifact{{
 			OS: "linux", Arch: "amd64", Role: "app", PackageType: "binary", Filename: "signal_agent",

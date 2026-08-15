@@ -34,9 +34,9 @@ write_manifest() {
         item="$(artifact_json "${component}" "${arch}" "${filename}" "${source}")"
         artifacts="$(jq -c --argjson item "${item}" '. + [$item]' <<< "${artifacts}")"
     done
-    jq -n --arg published_at "${PUBLISHED_AT}" --arg component "${component}" \
+    jq -n --arg published_at "${PUBLISHED_AT}" --arg commit_date "${PUBLISHED_AT}" --arg component "${component}" \
         --arg version "${VERSION}" --arg commit "${COMMIT}" --argjson artifacts "${artifacts}" \
-        '{schema_version:1,published_at:$published_at,release:{component:$component,version:$version,commit_id:$commit,channel:"stable",release_notes:(($component|ascii_upcase)+" build "+$commit),min_supported_version:""},artifacts:$artifacts}' \
+        '{schema_version:1,published_at:$published_at,release:{component:$component,version:$version,commit_id:$commit,commit_date:$commit_date,channel:"stable",release_notes:(($component|ascii_upcase)+" build "+$commit),min_supported_version:""},artifacts:$artifacts}' \
         > "${PUBLISH_DIR}/updater/releases/${component}/latest.json"
 }
 
