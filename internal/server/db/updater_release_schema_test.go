@@ -1,7 +1,9 @@
 package db
 
 import (
+	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -9,6 +11,38 @@ import (
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
+
+type releaseWithoutCommitDate struct {
+	ID                  string              `gorm:"primaryKey;size:36"`
+	Component           model.Component     `gorm:"size:20;not null;uniqueIndex:uk_release_component_version,priority:1;index"`
+	Version             string              `gorm:"size:64;not null;uniqueIndex:uk_release_component_version,priority:2"`
+	CommitID            string              `gorm:"size:40;not null;default:''"`
+	Channel             string              `gorm:"size:32;not null;default:'stable';index"`
+	Status              model.ReleaseStatus `gorm:"size:20;not null;default:'draft';index"`
+	ReleaseNotes        string              `gorm:"type:text"`
+	MinSupportedVersion string              `gorm:"size:64"`
+	PublishedAt         *time.Time
+	CreatedBy           uint64
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
+func (releaseWithoutCommitDate) TableName() string {
+	return "release"
+}
+
+func requireFinalCommitDateColumn(t *testing.T, database *gorm.DB) {
+	t.Helper()
+	var notNull int
+	var defaultValue sql.NullString
+	require.NoError(t, database.Raw(`
+		SELECT "notnull", dflt_value
+		FROM pragma_table_info('release')
+		WHERE name = 'commit_date'
+	`).Row().Scan(&notNull, &defaultValue))
+	require.Equal(t, 1, notNull)
+	require.False(t, defaultValue.Valid)
+}
 
 func TestEnsureUpdaterReleaseSchemaPreservesReleaseHistory(t *testing.T) {
 	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -66,6 +100,56 @@ func TestEnsureUpdaterReleaseSchemaPreservesReleaseHistory(t *testing.T) {
 		INSERT INTO release (id, component, version, commit_id)
 		VALUES ('same-version', 'agent', 'v1.0.3', '2222222222222222222222222222222222222222')
 	`).Error)
+}
+
+func TestEnsureUpdaterReleaseSchemaBackfillsCommitDateForExistingReleases(t *testing.T) {
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, database.AutoMigrate(&releaseWithoutCommitDate{}))
+	publishedAt := time.Date(2026, 8, 13, 19, 24, 35, 0, time.UTC)
+	require.NoError(t, database.Create(&releaseWithoutCommitDate{
+		ID:          "agent-v1.0.2",
+		Component:   model.ComponentAgent,
+		Version:     "v1.0.2",
+		CommitID:    "0123456789abcdef0123456789abcdef01234567",
+		PublishedAt: &publishedAt,
+	}).Error)
+
+	require.NoError(t, ensureUpdaterReleaseSchema(database))
+	require.NoError(t, database.AutoMigrate(&model.Release{}))
+	require.NoError(t, ensureUpdaterReleaseSchema(database))
+	require.NoError(t, database.AutoMigrate(&model.Release{}))
+
+	var release model.Release
+	require.NoError(t, database.First(&release, "id = ?", "agent-v1.0.2").Error)
+	require.NotNil(t, release.PublishedAt)
+	require.Equal(t, release.PublishedAt.UTC(), release.CommitDate.UTC())
+	requireFinalCommitDateColumn(t, database)
+}
+
+func TestEnsureUpdaterReleaseSchemaResumesCommitDateBackfill(t *testing.T) {
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, database.AutoMigrate(&releaseWithoutCommitDate{}))
+	publishedAt := time.Date(2026, 8, 13, 19, 24, 35, 0, time.UTC)
+	require.NoError(t, database.Create(&releaseWithoutCommitDate{
+		ID:          "agent-v1.0.2",
+		Component:   model.ComponentAgent,
+		Version:     "v1.0.2",
+		CommitID:    "0123456789abcdef0123456789abcdef01234567",
+		PublishedAt: &publishedAt,
+	}).Error)
+	require.NoError(t, database.Exec(`
+		ALTER TABLE release ADD COLUMN commit_date datetime NOT NULL DEFAULT 0
+	`).Error)
+
+	require.NoError(t, ensureUpdaterReleaseSchema(database))
+	require.NoError(t, database.AutoMigrate(&model.Release{}))
+
+	var release model.Release
+	require.NoError(t, database.First(&release, "id = ?", "agent-v1.0.2").Error)
+	require.Equal(t, publishedAt, release.CommitDate.UTC())
+	requireFinalCommitDateColumn(t, database)
 }
 
 func TestEnsureUpdaterReleaseSchemaReplacesSingleComponentConstraint(t *testing.T) {

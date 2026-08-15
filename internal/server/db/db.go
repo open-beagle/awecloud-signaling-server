@@ -268,6 +268,25 @@ func ensureUpdaterReleaseSchema(database *gorm.DB) error {
 		if err := tx.Exec(`DROP INDEX IF EXISTS uk_release_component_version_commit`).Error; err != nil {
 			return fmt.Errorf("remove obsolete release component/version/commit constraint: %w", err)
 		}
+		if tx.Migrator().HasTable(&model.Release{}) {
+			if !tx.Migrator().HasColumn(&model.Release{}, "CommitDate") {
+				if err := tx.Exec(`ALTER TABLE release ADD COLUMN commit_date datetime NOT NULL DEFAULT 0`).Error; err != nil {
+					return fmt.Errorf("add release commit date column: %w", err)
+				}
+			}
+			if err := tx.Exec(`
+				UPDATE release
+				SET commit_date = COALESCE(
+					NULLIF(published_at, ''),
+					NULLIF(created_at, ''),
+					NULLIF(updated_at, ''),
+					CURRENT_TIMESTAMP
+				)
+				WHERE commit_date IS NULL OR commit_date = 0 OR commit_date = ''
+			`).Error; err != nil {
+				return fmt.Errorf("backfill release commit date: %w", err)
+			}
+		}
 		return nil
 	}); err != nil {
 		return err
