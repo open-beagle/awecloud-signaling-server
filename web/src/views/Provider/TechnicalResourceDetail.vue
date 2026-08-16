@@ -32,7 +32,12 @@
         </div>
         <div class="summary-item"><span>生命周期</span><el-tag size="small" :type="lifecycleTag(resource.lifecycle_state)">{{ lifecycleLabel(resource.lifecycle_state) }}</el-tag></div>
         <div class="summary-item"><span>健康</span><el-tag size="small" effect="plain" :type="healthTag(resource.health_state)">{{ healthLabel(resource.health_state) }}</el-tag></div>
-        <div class="summary-item"><span>当前版本</span><strong>{{ resource.version || '-' }}</strong></div>
+        <div class="summary-item summary-version">
+          <span>当前版本</span>
+          <strong>{{ resource.version || '未上报' }}</strong>
+          <small class="mono" :title="resource.commit_id || '未上报 Commit ID'">Commit ID · {{ resource.commit_id ? shortValue(resource.commit_id, 7) : '未上报' }}</small>
+          <small>Commit Date · {{ resource.commit_date ? formatTime(resource.commit_date) : '未上报' }}</small>
+        </div>
       </section>
       <el-alert v-if="!supportsUpdaterV2(resource)" class="state-alert" title="当前节点需要先手工引导到 Updater v2" description="为避免自动更新导致信令节点断联，Server 已禁止向当前节点下发更新任务。" type="warning" show-icon :closable="false" />
 
@@ -74,12 +79,11 @@
                   <span>共 {{ filteredEndpoints.length }} 个 Endpoint</span>
                 </div>
                 <el-table v-if="filteredEndpoints.length" :data="filteredEndpoints" stripe>
-                  <el-table-column label="Endpoint" min-width="210"><template #default="{ row }"><el-button link type="primary" class="endpoint-name" @click="openEndpoint(row)">{{ endpointName(row) }}</el-button><span class="secondary mono">{{ endpointDomain(row) }}</span></template></el-table-column>
+                  <el-table-column label="Endpoint" min-width="250"><template #default="{ row }"><el-button link type="primary" class="endpoint-name" @click="openEndpoint(row)">{{ endpointName(row) }}</el-button><span class="secondary mono">{{ endpointDomain(row) }}</span><span class="secondary mono" :title="row.stable_key">{{ row.stable_key }}</span></template></el-table-column>
                   <el-table-column label="状态" width="120"><template #default="{ row }"><el-tag size="small" :type="row.lifecycle_state === 'disabled' ? 'warning' : healthTag(row.health_state)">{{ row.lifecycle_state === 'disabled' ? '已停用' : healthLabel(row.health_state) }}</el-tag><span class="secondary">{{ relativeTime(row.last_received_at) }}</span></template></el-table-column>
                   <el-table-column label="开放能力" min-width="210"><template #default="{ row }"><div class="endpoint-capabilities"><el-tag v-for="capability in endpointCapabilityLabels(row)" :key="capability" size="small" effect="plain" type="info">{{ capability }}</el-tag><span v-if="endpointCapabilityLabels(row).length === 0" class="secondary inline">未开放</span></div></template></el-table-column>
-                  <el-table-column label="接入信息" min-width="220"><template #default="{ row }"><span class="mono">{{ row.hostname || '-' }}</span><span class="secondary mono">{{ row.stable_key }}</span></template></el-table-column>
-                  <el-table-column label="版本" width="140"><template #default="{ row }"><strong>{{ row.version || '-' }}</strong><el-tag v-if="!supportsUpdaterV2(row)" size="small" type="warning">需手工引导</el-tag></template></el-table-column>
-                  <el-table-column label="操作" width="112" fixed="right"><template #default="{ row }"><el-button link :icon="Upload" :disabled="!canWrite || !supportsUpdaterV2(row)" :title="supportsUpdaterV2(row) ? '更新 Endpoint' : '需要先手工引导到 Updater v2'" @click="openUpdate(row)" /><el-button link type="danger" :icon="Delete" :disabled="!canWrite" title="删除 Endpoint" @click="openDeleteCheck(row)" /></template></el-table-column>
+                  <el-table-column label="版本" width="220"><template #default="{ row }"><strong>{{ row.version || '未上报' }}</strong><span class="secondary mono" :title="row.commit_id || '未上报 Commit ID'">Commit ID · {{ row.commit_id ? shortValue(row.commit_id, 7) : '未上报' }}</span><span class="secondary">Commit Date · {{ row.commit_date ? formatTime(row.commit_date) : '未上报' }}</span><el-tag v-if="!supportsUpdaterV2(row)" class="version-status" size="small" type="warning">需手工引导</el-tag></template></el-table-column>
+                  <el-table-column label="操作" width="148" fixed="right"><template #default="{ row }"><el-button link :icon="Edit" :disabled="!canWrite" title="编辑 Endpoint" aria-label="编辑 Endpoint" @click="openEndpoint(row)" /><el-button link :icon="Upload" :disabled="!canWrite || !supportsUpdaterV2(row)" :title="supportsUpdaterV2(row) ? '更新 Endpoint' : '需要先手工引导到 Updater v2'" aria-label="更新 Endpoint" @click="openUpdate(row)" /><el-button link type="danger" :icon="Delete" :disabled="!canWrite" title="删除 Endpoint" aria-label="删除 Endpoint" @click="openDeleteCheck(row)" /></template></el-table-column>
                 </el-table>
                 <el-empty v-else :description="endpoints.length ? '没有符合条件的 Endpoint' : '当前 Agent 没有 Endpoint'" />
               </div>
@@ -133,11 +137,12 @@
       <template v-if="selectedEndpoint">
         <div class="endpoint-summary"><div><span>生命周期</span><el-tag :type="lifecycleTag(selectedEndpoint.lifecycle_state)">{{ lifecycleLabel(selectedEndpoint.lifecycle_state) }}</el-tag></div><div><span>健康</span><el-tag :type="healthTag(selectedEndpoint.health_state)">{{ healthLabel(selectedEndpoint.health_state) }}</el-tag></div><div><span>稳定 Endpoint ID</span><strong class="mono">{{ selectedEndpoint.stable_key }}</strong></div></div>
         <el-alert title="稳定身份保存在 Endpoint 本机" description="停用和恢复不改变 endpoint_id；删除后原 ID 不得再次注册。" type="info" show-icon :closable="false" />
-        <section class="dialog-section"><h3>访问域名</h3><div class="domain-editor"><el-input v-model="endpointDomainLabel" placeholder="DNS 单标签" /><span class="mono">.{{ selectedEndpoint.domain_namespace }}.beagle</span><el-button :disabled="!canWrite" @click="saveEndpointDomain">保存域名</el-button></div></section>
+        <section class="dialog-section"><h3>接入诊断</h3><div class="endpoint-diagnostics"><div><span>Endpoint 上报主机名</span><strong class="mono">{{ selectedEndpoint.hostname || '未上报' }}</strong></div><div><span>Agent 接入地址</span><strong class="mono">{{ endpointAccessAddress }}</strong></div><div><span>网络方向</span><strong>Endpoint → Agent TCP</strong></div></div></section>
+        <section class="dialog-section"><h3>访问域名</h3><div class="domain-editor"><el-input v-model="endpointDomainLabel" placeholder="DNS 单标签" /><span class="mono">.{{ selectedEndpoint.domain_namespace }}.beagle</span><el-button :disabled="!canWrite" @click="saveEndpointDomain">提交</el-button></div></section>
         <section class="dialog-section"><h3>开放能力</h3><el-form v-if="endpointCapabilityForm" label-position="top"><div class="endpoint-switch-grid"><el-form-item label="SSH"><el-switch v-model="endpointCapabilityForm.ssh_enabled" /></el-form-item><el-form-item label="Kubernetes API"><el-switch v-model="endpointCapabilityForm.k8s_enabled" /></el-form-item><el-form-item label="Kubernetes Service"><el-switch v-model="endpointCapabilityForm.svc_enabled" /></el-form-item></div><el-form-item v-if="endpointCapabilityForm.ssh_enabled" label="SSH 登录用户"><el-select v-model="endpointCapabilityForm.ssh_users" multiple allow-create filterable default-first-option /></el-form-item><el-form-item v-if="endpointCapabilityForm.svc_enabled" label="Service Namespace"><el-select v-model="endpointCapabilityForm.svc_namespaces" multiple allow-create filterable default-first-option /></el-form-item><el-form-item v-if="endpointCapabilityForm.svc_enabled" label="Service 标签选择器"><el-input v-model="endpointCapabilityForm.svc_label_selector" /></el-form-item></el-form></section>
         <section class="dialog-section danger-zone"><div><h3>生命周期</h3><p>停用保留配置并拒绝业务访问；删除前必须通过依赖检查。</p></div><div><el-button v-if="selectedEndpoint.lifecycle_state === 'registered'" :disabled="!canWrite" @click="setEndpointLifecycle('maintenance')">停用</el-button><el-button v-else-if="selectedEndpoint.lifecycle_state === 'disabled'" :disabled="!canWrite" @click="setEndpointLifecycle('resume')">恢复</el-button><el-button type="danger" :disabled="!canWrite" @click="openDeleteCheck(selectedEndpoint)">删除</el-button></div></section>
       </template>
-      <template #footer><el-button @click="endpointDialog = false">取消</el-button><el-button type="primary" :disabled="!canWrite || !endpointCapabilityForm" :loading="submitting" @click="saveEndpointCapabilities">保存能力配置</el-button></template>
+      <template #footer><el-button @click="endpointDialog = false">取消</el-button><el-button type="primary" :disabled="!canWrite || !endpointCapabilityForm" :loading="submitting" @click="saveEndpointCapabilities">保存</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="updateDialog" :title="`更新 ${updateTarget ? endpointName(updateTarget) : ''}`" width="560px" destroy-on-close>
@@ -450,6 +455,9 @@ onBeforeUnmount(clearSensitiveAccess)
 .summary-identity p { margin: 2px 0 0; color: var(--text-secondary); font-size: 11px; }
 .summary-item { display: flex; flex-direction: column; justify-content: center; border-left: 1px solid var(--border-light); }
 .summary-item > span { margin-bottom: 6px; color: var(--text-secondary); font-size: 11px; }
+.summary-version { gap: 2px; }
+.summary-version > span { margin-bottom: 3px; }
+.summary-version small { overflow: hidden; color: var(--text-secondary); font-size: 10px; line-height: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .detail-tabs { border: 1px solid var(--border-light); border-radius: 6px; background: #fff; }
 .detail-tabs :deep(.el-tabs__header) { margin: 0; padding: 0 14px; }
 .detail-tabs :deep(.el-tabs__content) { padding: 14px; }
@@ -483,6 +491,7 @@ onBeforeUnmount(clearSensitiveAccess)
 .endpoint-capabilities { display: flex; flex-wrap: wrap; gap: 4px; }
 .secondary { display: block; margin-top: 3px; color: var(--text-secondary); font-size: 11px; }
 .secondary.inline { display: inline; }
+.version-status { margin-top: 5px; }
 .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--border-light); border-radius: 6px; }
 .metric-grid > div { min-height: 66px; padding: 11px 13px; border-left: 1px solid var(--border-lighter); }
 .metric-grid > div:first-child { border-left: 0; }
@@ -501,6 +510,11 @@ onBeforeUnmount(clearSensitiveAccess)
 .endpoint-summary > div:first-child { border-left: 0; }
 .endpoint-summary span { margin-bottom: 5px; color: var(--text-secondary); font-size: 10px; }
 .dialog-section { margin-top: 18px; }
+.endpoint-diagnostics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 8px; border: 1px solid var(--border-light); border-radius: 5px; }
+.endpoint-diagnostics > div { min-width: 0; min-height: 62px; display: flex; flex-direction: column; justify-content: center; padding: 10px 12px; border-left: 1px solid var(--border-lighter); }
+.endpoint-diagnostics > div:first-child { border-left: 0; }
+.endpoint-diagnostics span { margin-bottom: 5px; color: var(--text-secondary); font-size: 10px; }
+.endpoint-diagnostics strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .domain-editor { display: grid; grid-template-columns: 220px minmax(220px, 1fr) auto; align-items: center; gap: 8px; margin-top: 8px; padding: 10px; border: 1px solid var(--border-light); border-radius: 5px; }
 .endpoint-switch-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .danger-zone { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px; border: 1px solid #e7b9b6; border-radius: 5px; background: #fff1f0; }
@@ -508,5 +522,5 @@ onBeforeUnmount(clearSensitiveAccess)
 .blocker-list > div { display: flex; align-items: center; justify-content: space-between; min-height: 56px; padding: 10px 14px; border-bottom: 1px solid var(--border-lighter); }
 .blocker-list > div:last-child { border-bottom: 0; }
 .blocker-list span { color: var(--text-secondary); font-size: 11px; }
-@media (max-width: 1280px) { .summary-surface { grid-template-columns: minmax(250px, 1.3fr) repeat(4, minmax(110px, .6fr)); } .capability-row { grid-template-columns: minmax(190px, 1.1fr) minmax(190px, 1fr) 110px 74px; } }
+@media (max-width: 1280px) { .summary-surface { grid-template-columns: minmax(250px, 1.3fr) repeat(3, minmax(110px, .6fr)); } .capability-row { grid-template-columns: minmax(190px, 1.1fr) minmax(190px, 1fr) 110px 74px; } }
 </style>
