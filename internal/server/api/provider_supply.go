@@ -92,8 +92,9 @@ type providerTechnicalResourceUpdateRequest struct {
 }
 
 type providerAgentDomainLabelRequest struct {
-	DomainLabel string `json:"domain_label"`
-	Reason      string `json:"reason"`
+	DomainLabel              string `json:"domain_label"`
+	DomainChangeConfirmation string `json:"domain_change_confirmation"`
+	Reason                   string `json:"reason"`
 }
 
 type providerAgentHostDomainLabelRequest struct {
@@ -183,21 +184,36 @@ func (a *ProviderSupplyAPI) UpdateAgentDomainLabel(c *gin.Context) {
 		return
 	}
 	request.DomainLabel = strings.TrimSpace(request.DomainLabel)
+	request.DomainChangeConfirmation = strings.TrimSpace(request.DomainChangeConfirmation)
 	request.Reason = strings.TrimSpace(request.Reason)
 	if request.Reason == "" || len(request.Reason) > 500 {
 		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "变更原因无效")
 		return
 	}
-	executeProviderConfigMutation(c, authorization, model.ActionUpdateAgent, request.Reason,
+	domainLabel, err := service.NormalizeAgentDomainLabel(request.DomainLabel)
+	if err != nil {
+		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "Agent 域名标识无效")
+		return
+	}
+	confirmation, err := service.NormalizeAgentDomainLabel(request.DomainChangeConfirmation)
+	if err != nil || confirmation != domainLabel {
+		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "域名变更确认与新域名标识不一致")
+		return
+	}
+	auditDetail := gin.H{}
+	executeProviderConfigMutation(c, authorization, model.ActionUpdateAgent, request.Reason, auditDetail,
 		func(supply *service.ProviderSupplyService) (any, *model.TechnicalResource, any, any, error) {
 			before, err := supply.GetTechnicalResource(c.Request.Context(), authorization, c.Param("id"))
 			if err != nil {
 				return nil, nil, nil, nil, err
 			}
-			resource, err := supply.ChangeAgentDomainLabel(c.Request.Context(), authorization, c.Param("id"), request.DomainLabel, rowVersion)
+			resource, err := supply.ChangeAgentDomainLabel(c.Request.Context(), authorization, c.Param("id"), domainLabel, rowVersion)
 			if err != nil {
 				return nil, nil, nil, nil, err
 			}
+			auditDetail["domain_change_confirmation"] = confirmation
+			auditDetail["affected_domain_count"] = before.AffectedDomainCount
+			auditDetail["active_session_count"] = before.ActiveSessionCount
 			return resource, resource, gin.H{"domain_label": before.Resource.DomainLabel}, gin.H{"domain_label": resource.DomainLabel}, nil
 		})
 }
@@ -218,7 +234,7 @@ func (a *ProviderSupplyAPI) UpdateAgentHostDomainLabel(c *gin.Context) {
 		return
 	}
 	request.HostDomainLabel = strings.TrimSpace(request.HostDomainLabel)
-	executeProviderConfigMutation(c, authorization, model.ActionUpdateAgent, "",
+	executeProviderConfigMutation(c, authorization, model.ActionUpdateAgent, "", nil,
 		func(supply *service.ProviderSupplyService) (any, *model.TechnicalResource, any, any, error) {
 			before, err := supply.GetTechnicalResource(c.Request.Context(), authorization, c.Param("id"))
 			if err != nil {
@@ -383,7 +399,7 @@ func (a *ProviderSupplyAPI) UpdateTechnicalResourceCapabilities(c *gin.Context) 
 	if _, ok := decodeProviderSupplyRequest(c, &request); !ok {
 		return
 	}
-	executeProviderConfigMutation(c, authorization, "update_technical_resource_capabilities", "",
+	executeProviderConfigMutation(c, authorization, "update_technical_resource_capabilities", "", nil,
 		func(supply *service.ProviderSupplyService) (any, *model.TechnicalResource, any, any, error) {
 			before, err := supply.GetTechnicalResourceCapabilities(c.Request.Context(), authorization, c.Param("id"))
 			if err != nil {
@@ -441,7 +457,7 @@ func (a *ProviderSupplyAPI) RotateTechnicalResourceEndpointToken(c *gin.Context)
 	}
 	serverAddr := serverAddrFromRequest(a.config, c)
 	c.Header("Cache-Control", "no-store")
-	executeProviderConfigMutation(c, authorization, "rotate_endpoint_access_token", "",
+	executeProviderConfigMutation(c, authorization, "rotate_endpoint_access_token", "", nil,
 		func(supply *service.ProviderSupplyService) (any, *model.TechnicalResource, any, any, error) {
 			before, err := supply.GetTechnicalResource(c.Request.Context(), authorization, c.Param("id"))
 			if err != nil {
@@ -962,7 +978,7 @@ func executeProviderMutation(c *gin.Context, authorization *service.ManagementAu
 	executeProviderMutationWithStatus(c, authorization, http.StatusOK, action, reason, mutation)
 }
 
-func executeProviderConfigMutation(c *gin.Context, authorization *service.ManagementAuthorizationContext, action, reason string, mutation providerConfigMutation) {
+func executeProviderConfigMutation(c *gin.Context, authorization *service.ManagementAuthorizationContext, action, reason string, auditDetail gin.H, mutation providerConfigMutation) {
 	var data any
 	var resource *model.TechnicalResource
 	err := db.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
@@ -997,6 +1013,9 @@ func executeProviderConfigMutation(c *gin.Context, authorization *service.Manage
 		}
 		if reason != "" {
 			detail["reason"] = reason
+		}
+		for key, value := range auditDetail {
+			detail[key] = value
 		}
 		if err := recordAuditLogStrictWithDB(c.Request.Context(), tx, c, action, "technical_resource", resource.ID, resource.DomainLabel, detail); err != nil {
 			return fmt.Errorf("%w: %v", errProviderSupplyAudit, err)

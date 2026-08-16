@@ -66,6 +66,8 @@ export interface TechnicalResourceDetail {
   resource: TechnicalResource
   bindings: TechnicalResourceBinding[]
   endpoints: TechnicalResource[]
+  affected_domain_count: number
+  active_session_count: number
 }
 
 export interface TechnicalResourceCapabilities {
@@ -274,7 +276,7 @@ export const getProviderTechnicalResource = (providerId: string, resourceId: str
 
 export const updateProviderAgentDomainLabel = (providerId: string, resource: TechnicalResource, domainLabel: string, reason: string) =>
   request.patch<any, { success: boolean; data: TechnicalResource }>(`/api/v1/management/provider/technical-resources/${resource.id}/domain-label`, {
-    domain_label: domainLabel, reason,
+    domain_label: domainLabel, domain_change_confirmation: domainLabel, reason,
   }, { headers: { ...providerHeaders(providerId), 'If-Match': String(resource.row_version) } })
 
 export const updateProviderAgentDisplayName = (providerId: string, resource: TechnicalResource, displayName: string) =>

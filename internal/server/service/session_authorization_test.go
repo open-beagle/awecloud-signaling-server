@@ -86,6 +86,30 @@ func TestSessionAuthorizationBuildSnapshotStopsOnCanceledContext(t *testing.T) {
 	require.Empty(t, snapshot.Terminations)
 }
 
+func TestSessionAuthorizationRevalidatesOnlyRequestedSessions(t *testing.T) {
+	fixture := newTenantManagementConstraintFixture(t)
+	database := serverdb.DB
+	require.NoError(t, database.Model(&model.Node{}).Where("id = ?", fixture.desktop.ID).Update("headscale_node_id", uint64(9904)).Error)
+	selected := fixture.session(uuid.NewString())
+	unrelated := fixture.session(uuid.NewString())
+	require.NoError(t, database.Create(&selected).Error)
+	require.NoError(t, database.Create(&unrelated).Error)
+
+	authorizer := NewSessionAuthorizationService(database)
+	authorizer.now = func() time.Time { return fixture.now.Add(time.Second) }
+	results, err := authorizer.RevalidateSessions(context.Background(), []model.ResourceSession{selected})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, selected.ID, results[0].SessionID)
+	require.NotNil(t, results[0].Permission)
+	require.Equal(t, selected.ID, results[0].Permission.SessionID)
+
+	var storedUnrelated model.ResourceSession
+	require.NoError(t, database.First(&storedUnrelated, "id = ?", unrelated.ID).Error)
+	require.Equal(t, int64(1), storedUnrelated.RowVersion)
+	require.Equal(t, unrelated.ValidUntil.UTC(), storedUnrelated.ValidUntil.UTC())
+}
+
 func TestSessionAuthorizationLimitsDueTerminationBatch(t *testing.T) {
 	fixture := newTenantManagementConstraintFixture(t)
 	database := serverdb.DB

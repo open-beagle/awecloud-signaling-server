@@ -53,12 +53,13 @@
         <el-table-column label="最后上报" width="180"><template #default="{ row }">{{ formatTime(row.last_received_at) }}</template></el-table-column>
         <el-table-column label="" width="62" fixed="right" align="center">
           <template #default="{ row }">
-            <el-dropdown trigger="click" @command="command => handleRowCommand(command, row)">
+            <el-dropdown trigger="click" @command="handleRowCommand($event, row)">
               <el-button class="row-actions-button" text :loading="deletingResourceId === row.id" aria-label="更多操作" @click.stop>
                 <el-icon v-if="deletingResourceId !== row.id" class="row-actions-icon"><MoreFilled /></el-icon>
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
+                  <el-dropdown-item command="edit" :icon="Edit" :disabled="!canWrite">编辑</el-dropdown-item>
                   <el-dropdown-item command="update" :icon="Refresh" :disabled="!canWrite || row.lifecycle_state === 'pending'">更新</el-dropdown-item>
                   <el-dropdown-item command="delete" :icon="Delete" :disabled="!canWrite" divided>删除</el-dropdown-item>
                 </el-dropdown-menu>
@@ -88,6 +89,15 @@
 		<div class="command-box"><code>{{ installCommand }}</code><el-button :icon="DocumentCopy" circle title="复制安装命令" @click="copyCommand" /></div>
 		<template #footer><el-button type="primary" @click="commandDialog = false">完成</el-button></template>
 	</el-dialog>
+
+    <AgentEditDialog
+      v-model="editDialog"
+      :resource="editTarget"
+      :affected-domain-count="editImpact.affectedDomainCount"
+      :active-session-count="editImpact.activeSessionCount"
+      :loading="editing"
+      @submit="saveAgentEdit"
+    />
 
     <el-dialog v-model="updateDialog" title="更新 Agent" width="640px" destroy-on-close>
       <div v-if="updateTarget" v-loading="loadingReleases">
@@ -142,9 +152,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, DocumentCopy, MoreFilled, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { Delete, DocumentCopy, Edit, MoreFilled, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import PageHeader from '@/components/Common/PageHeader.vue'
-import { checkProviderTechnicalResourceDelete, createProviderAgent, createProviderDeploymentCredential, createProviderTechnicalResourceUpdateTask, deleteProviderTechnicalResource, getProviderTechnicalResourceReleases, getProviderTechnicalResources, type ProviderRelease, type TechnicalResource, type TechnicalResourceState } from '@/api/providerSupply'
+import AgentEditDialog from '@/views/Provider/components/AgentEditDialog.vue'
+import { checkProviderTechnicalResourceDelete, createProviderAgent, createProviderDeploymentCredential, createProviderTechnicalResourceUpdateTask, deleteProviderTechnicalResource, getProviderTechnicalResource, getProviderTechnicalResourceReleases, getProviderTechnicalResources, updateProviderAgentDisplayName, updateProviderAgentDomainLabel, type ProviderRelease, type TechnicalResource, type TechnicalResourceState } from '@/api/providerSupply'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const workspaceStore = useWorkspaceStore()
@@ -156,6 +167,10 @@ const pagination = reactive({ page: 1, size: 20, total: 0 })
 const createDialog = ref(false)
 const commandDialog = ref(false)
 const creating = ref(false)
+const editing = ref(false)
+const editDialog = ref(false)
+const editTarget = ref<TechnicalResource>()
+const editImpact = reactive({ affectedDomainCount: 0, activeSessionCount: 0 })
 const deletingResourceId = ref('')
 const updateDialog = ref(false)
 const updateTarget = ref<TechnicalResource>()
@@ -168,7 +183,7 @@ const deleteTarget = ref<TechnicalResource>()
 const deleteForm = reactive({ reason: '', confirmName: '' })
 const installCommand = ref('')
 const createForm = reactive({ name: '', domainLabel: '', nodeName: '', ttlMinutes: 30, reason: '' })
-const canWrite = computed(() => workspaceStore.can('provider.technical_resources.write'))
+const canWrite = computed(() => workspaceStore.can('provider.technical_resources.write') && !workspaceStore.isSimulationActive)
 const agentNameValid = computed(() => /^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$/.test(createForm.name.trim()))
 const domainLabelValid = computed(() => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(createForm.domainLabel.trim()))
 const nodeNameValid = computed(() => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(createForm.nodeName.trim()))
@@ -255,13 +270,52 @@ const copyCommand = async () => {
 }
 
 const applyFilters = () => { pagination.page = 1; load() }
-const handleRowCommand = async (command: string, resource: TechnicalResource) => {
+const handleRowCommand = async (command: string | number | object, resource: TechnicalResource) => {
+  if (command === 'edit') {
+    await openEdit(resource)
+    return
+  }
   if (command === 'update') {
     await openUpdate(resource)
     return
   }
   if (command !== 'delete') return
   await openDelete(resource)
+}
+
+const openEdit = async (resource: TechnicalResource) => {
+  if (!canWrite.value || !workspaceStore.providerId) return
+  const response = await getProviderTechnicalResource(workspaceStore.providerId, resource.id)
+  if (!response.success) return
+  editTarget.value = response.data.resource
+  editImpact.affectedDomainCount = response.data.affected_domain_count
+  editImpact.activeSessionCount = response.data.active_session_count
+  editDialog.value = true
+}
+
+const saveAgentEdit = async (value: { displayName: string; domainLabel: string; reason: string }) => {
+  if (!workspaceStore.providerId || !editTarget.value) return
+  const original = editTarget.value
+  const domainChanged = value.domainLabel !== original.domain_label
+  const displayNameChanged = value.displayName !== resourceName(original)
+  editing.value = true
+  try {
+    let current = original
+    if (domainChanged) {
+      const response = await updateProviderAgentDomainLabel(workspaceStore.providerId, current, value.domainLabel, value.reason)
+      if (!response.success) return
+      current = response.data
+    }
+    if (displayNameChanged) {
+      const response = await updateProviderAgentDisplayName(workspaceStore.providerId, current, value.displayName)
+      if (!response.success) return
+    }
+    ElMessage.success(domainChanged ? 'Agent 信息已保存，新域名命名空间已生效' : 'Agent 显示名称已保存')
+    editDialog.value = false
+    await load()
+  } finally {
+    editing.value = false
+  }
 }
 
 const openUpdate = async (resource: TechnicalResource) => {

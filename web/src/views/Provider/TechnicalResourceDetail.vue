@@ -4,7 +4,7 @@
       <template #actions>
         <el-button :icon="ArrowLeft" @click="returnToList">返回列表</el-button>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
-        <el-button v-if="resource?.type === 'agent'" :icon="Operation" :disabled="!canWrite || !hasBinding" @click="openCapabilities">编辑能力</el-button>
+        <el-button v-if="resource?.type === 'agent'" :icon="Edit" :disabled="!canWrite" @click="openAgentEdit">编辑</el-button>
         <el-button v-if="resource" type="primary" :icon="Upload" :disabled="!canWrite || !hasBinding || !supportsUpdaterV2(resource)" :title="supportsUpdaterV2(resource) ? '更新 Agent' : '需要先手工引导到 Updater v2'" @click="openUpdate(resource)">更新</el-button>
         <el-dropdown v-if="resource && resource.lifecycle_state !== 'deleted'" trigger="click" @command="handleLifecycleCommand">
           <el-button :icon="MoreFilled" :disabled="!canWrite" aria-label="更多操作" />
@@ -117,8 +117,17 @@
           <el-tab-pane label="Endpoint 接入" name="endpoint"><CapabilitySwitch title="Endpoint 接入" description="接受隔离网络 Endpoint 主动建立长连接" v-model="capabilityForm.endpoint_access_enabled" /><el-form label-position="top"><el-form-item label="Agent 内网地址" :required="capabilityForm.endpoint_access_enabled"><el-input v-model="capabilityForm.endpoint_address" placeholder="Endpoint 所在网络可达的 IP 或内网域名" /></el-form-item><el-form-item label="监听端口"><el-input-number v-model="capabilityForm.endpoint_listen_port" :min="1" :max="65535" placeholder="50052" /></el-form-item></el-form><el-alert title="关闭能力、修改地址或轮换令牌会影响 Endpoint 重连。请先放通新的 TCP 网络策略。" type="warning" :closable="false" /><el-button class="rotate-button" type="danger" plain :disabled="!capabilityForm.endpoint_token_exists" @click="rotateEndpointToken">轮换共享令牌</el-button></el-tab-pane>
         </el-tabs>
       </template>
-      <template #footer><el-button @click="capabilityDrawer = false">取消</el-button><el-button type="primary" :loading="submitting" :disabled="!capabilityChanged" @click="saveCapabilities">保存配置</el-button></template>
+      <template #footer><el-button @click="capabilityDrawer = false">取消</el-button><el-button type="primary" :loading="submitting" :disabled="!capabilityChanged" @click="saveCapabilities">保存</el-button></template>
     </el-drawer>
+
+    <AgentEditDialog
+      v-model="editDialog"
+      :resource="resource"
+      :affected-domain-count="editImpact.affectedDomainCount"
+      :active-session-count="editImpact.activeSessionCount"
+      :loading="editing"
+      @submit="saveAgentEdit"
+    />
 
     <el-dialog v-model="endpointDialog" :title="endpointName(selectedEndpoint || emptyResource)" width="860px" destroy-on-close @closed="selectedEndpoint = undefined">
       <template v-if="selectedEndpoint">
@@ -148,14 +157,16 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Box, Connection, CopyDocument, Cpu, Delete, Monitor, MoreFilled, Operation, Refresh, Search, Service, Upload } from '@element-plus/icons-vue'
+import { ArrowLeft, Box, Connection, CopyDocument, Cpu, Delete, Edit, Monitor, MoreFilled, Operation, Refresh, Search, Service, Upload } from '@element-plus/icons-vue'
 import PageHeader from '@/components/Common/PageHeader.vue'
+import AgentEditDialog from '@/views/Provider/components/AgentEditDialog.vue'
 import CapabilitySwitch from '@/views/Provider/components/CapabilitySwitch.vue'
 import {
   checkProviderTechnicalResourceDelete, createProviderTechnicalResourceUpdateTask, deleteProviderTechnicalResource,
   getProviderTechnicalResource, getProviderTechnicalResourceCapabilities, getProviderTechnicalResourceEndpointAccess,
   getProviderTechnicalResourceReleases, getProviderTechnicalResourceUpdateTasks, rotateProviderTechnicalResourceEndpointToken,
-  setProviderTechnicalResourceLifecycle, updateProviderAgentHostDomainLabel, updateProviderTechnicalResourceCapabilities,
+  setProviderTechnicalResourceLifecycle, updateProviderAgentDisplayName, updateProviderAgentDomainLabel,
+  updateProviderAgentHostDomainLabel, updateProviderTechnicalResourceCapabilities,
   type ProviderRelease, type ProviderUpdateTask, type TechnicalResource, type TechnicalResourceCapabilities,
   type TechnicalResourceDeleteCheck, type TechnicalResourceEndpointAccess, type TechnicalResourceState,
 } from '@/api/providerSupply'
@@ -166,6 +177,7 @@ const router = useRouter()
 const workspaceStore = useWorkspaceStore()
 const loading = ref(false)
 const submitting = ref(false)
+const editing = ref(false)
 const errorMessage = ref('')
 const resource = ref<TechnicalResource>()
 const endpoints = ref<TechnicalResource[]>([])
@@ -179,6 +191,8 @@ const capabilityDrawer = ref(false)
 const capabilityTab = ref('endpoint')
 const capabilityForm = ref<TechnicalResourceCapabilities>()
 const capabilitySnapshot = ref('')
+const editDialog = ref(false)
+const editImpact = reactive({ affectedDomainCount: 0, activeSessionCount: 0 })
 const endpointDialog = ref(false)
 const selectedEndpoint = ref<TechnicalResource>()
 const endpointCapabilityForm = ref<TechnicalResourceCapabilities>()
@@ -194,7 +208,7 @@ const deleteReason = ref('')
 const deleteConfirmName = ref('')
 const emptyResource = { display_name: '', domain_label: '', hostname: '' } as TechnicalResource
 
-const canWrite = computed(() => workspaceStore.can('provider.technical_resources.write'))
+const canWrite = computed(() => workspaceStore.can('provider.technical_resources.write') && !workspaceStore.isSimulationActive)
 const hasBinding = computed(() => !!resource.value && resource.value.lifecycle_state !== 'pending')
 const supportsUpdaterV2 = (item?: TechnicalResource) => item?.updater_protocol === 'v2'
 const updateSupported = computed(() => supportsUpdaterV2(updateTarget.value))
@@ -242,6 +256,8 @@ const load = async () => {
     }
     resource.value = current
     endpoints.value = response.success ? response.data.endpoints || [] : []
+    editImpact.affectedDomainCount = response.success ? response.data.affected_domain_count : 0
+    editImpact.activeSessionCount = response.success ? response.data.active_session_count : 0
     if (!current) return
     const [capabilityResponse, taskResponse] = await Promise.all([
       getProviderTechnicalResourceCapabilities(providerId, current.id),
@@ -267,6 +283,34 @@ const loadEndpointAccess = async () => {
   endpointAccess.value = response.success ? response.data : undefined
 }
 const clearSensitiveAccess = () => { endpointAccess.value = undefined }
+const openAgentEdit = () => {
+  if (!resource.value || !canWrite.value) return
+  editDialog.value = true
+}
+const saveAgentEdit = async (value: { displayName: string; domainLabel: string; reason: string }) => {
+  if (!resource.value || !workspaceStore.providerId) return
+  const original = resource.value
+  const domainChanged = value.domainLabel !== original.domain_label
+  const displayNameChanged = value.displayName !== resourceTitle.value
+  editing.value = true
+  try {
+    let current = original
+    if (domainChanged) {
+      const response = await updateProviderAgentDomainLabel(workspaceStore.providerId, current, value.domainLabel, value.reason)
+      if (!response.success) return
+      current = response.data
+    }
+    if (displayNameChanged) {
+      const response = await updateProviderAgentDisplayName(workspaceStore.providerId, current, value.displayName)
+      if (!response.success) return
+    }
+    ElMessage.success(domainChanged ? 'Agent 信息已保存，新域名命名空间已生效' : 'Agent 显示名称已保存')
+    editDialog.value = false
+    await load()
+  } finally {
+    editing.value = false
+  }
+}
 const openCapabilities = async () => {
   if (!resource.value || !workspaceStore.providerId) return
   const response = await getProviderTechnicalResourceCapabilities(workspaceStore.providerId, resource.value.id)

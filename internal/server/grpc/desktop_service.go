@@ -1779,10 +1779,14 @@ func (s *DesktopServiceServer) ListResourceTenants(ctx context.Context, req *pb.
 	if err := grantQuery.Find(&grants).Error; err != nil {
 		return nil, status.Error(codes.Internal, "查询资源授权失败")
 	}
+	validGroupGrants, err := grpcTenantGroupGrantSet(ctx, groupIDs, tenantIDs)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "查询授权分组失败")
+	}
 	shellResourceIDs := make([]string, 0, len(grants))
 	connectResourceIDs := make([]string, 0, len(grants))
 	for _, grant := range grants {
-		if grant.SubjectType == model.TenantAccessGrantSubjectGroup && !grpcTenantGroupGrantMatches(ctx, grant) {
+		if grant.SubjectType == model.TenantAccessGrantSubjectGroup && !grpcTenantGroupGrantMatches(grant, validGroupGrants) {
 			continue
 		}
 		actions := parseJSONStringArray(grant.Actions)
@@ -1854,6 +1858,7 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 	if desktop == nil || desktop.ID == 0 || desktop.UserID == 0 {
 		return nil, nil
 	}
+	startedAt := time.Now()
 	now := time.Now().UTC()
 	var memberships []model.TenantMembership
 	membershipQuery := db.DB.WithContext(ctx).Where("user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)", desktop.UserID, true, now)
@@ -1899,9 +1904,14 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 		logger.Warnf("Desktop 资源发现查询授权失败: desktop_id=%d tenant_id=%s err=%v", desktop.ID, tenantID, err)
 		return nil, nil
 	}
+	validGroupGrants, err := grpcTenantGroupGrantSet(ctx, groupIDs, activeTenantIDs)
+	if err != nil {
+		logger.Warnf("Desktop 资源发现查询授权分组失败: desktop_id=%d tenant_id=%s err=%v", desktop.ID, tenantID, err)
+		return nil, nil
+	}
 	actionByResource := make(map[string]string)
 	for _, grant := range grants {
-		if grant.SubjectType == model.TenantAccessGrantSubjectGroup && !grpcTenantGroupGrantMatches(ctx, grant) {
+		if grant.SubjectType == model.TenantAccessGrantSubjectGroup && !grpcTenantGroupGrantMatches(grant, validGroupGrants) {
 			continue
 		}
 		actions := parseJSONStringArray(grant.Actions)
@@ -2010,26 +2020,57 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 		}
 		agentByTechnicalID[technicalID] = agentNode
 	}
+	catalogDuration := time.Since(startedAt)
 
 	authorizationService := service.NewSessionAuthorizationService(db.DB)
 	permissions := make(map[string]service.SessionAuthorizationPermission)
 	listenPorts := make(map[string]map[string]uint16)
-	for technicalID := range agentByTechnicalID {
-		if err := ctx.Err(); err != nil {
+	sessions := make([]*model.ResourceSession, len(candidates))
+	candidateByPermissionKey := make(map[string]int, len(candidates))
+	candidateResourceIDs := make([]string, 0, len(candidates))
+	for i := range candidates {
+		candidateByPermissionKey[desktopSessionPermissionKey(desktop.ID, candidates[i].resource.ID, candidates[i].target.ID, candidates[i].action)] = i
+		candidateResourceIDs = append(candidateResourceIDs, candidates[i].resource.ID)
+	}
+	sessionLookupStartedAt := time.Now()
+	var existingSessions []model.ResourceSession
+	if err := db.DB.WithContext(ctx).
+		Where("tenant_id IN ? AND tenant_resource_id IN ? AND user_id = ? AND device_id = ? AND status IN ?",
+			activeTenantIDs, candidateResourceIDs, desktop.UserID, desktop.ID,
+			[]model.ResourceSessionStatus{model.ResourceSessionAuthorizing, model.ResourceSessionActive}).
+		Order("started_at DESC, id ASC").Find(&existingSessions).Error; err != nil {
+		logger.Warnf("Desktop 资源发现批量查询 Session 失败: desktop_id=%d tenant_id=%s err=%v", desktop.ID, tenantID, err)
+		return nil, nil
+	}
+	if len(existingSessions) > 0 {
+		validated, err := authorizationService.RevalidateSessions(ctx, existingSessions)
+		if err != nil {
+			logger.Warnf("Desktop 资源发现批量校验 Session 失败: desktop_id=%d tenant_id=%s err=%v", desktop.ID, tenantID, err)
 			return nil, nil
 		}
-		snapshot, err := authorizationService.BuildSnapshot(ctx, technicalID, true)
-		if err != nil {
-			logger.Warnf("Desktop 资源发现构建授权快照失败: desktop_id=%d technical_resource_id=%s err=%v", desktop.ID, technicalID, err)
-			continue
+		existingSessionByID := make(map[string]model.ResourceSession, len(existingSessions))
+		for i := range existingSessions {
+			existingSessionByID[existingSessions[i].ID] = existingSessions[i]
 		}
-		for _, permission := range snapshot.Permissions {
-			permissions[desktopSessionPermissionKey(permission.DeviceID, permission.ResourceID, permission.TargetRevisionID, permission.Action)] = permission
+		for _, result := range validated {
+			if result.Permission == nil || result.Permission.UserID != desktop.UserID {
+				continue
+			}
+			key := desktopSessionPermissionKey(result.Permission.DeviceID, result.Permission.ResourceID, result.Permission.TargetRevisionID, result.Permission.Action)
+			candidateIndex, found := candidateByPermissionKey[key]
+			if !found || sessions[candidateIndex] != nil {
+				continue
+			}
+			session, found := existingSessionByID[result.SessionID]
+			if !found {
+				continue
+			}
+			sessions[candidateIndex] = &session
+			permissions[key] = *result.Permission
 		}
-		listenPorts[technicalID] = allocateSessionAuthorizationListenPorts(snapshot.Permissions)
 	}
+	sessionLookupDuration := time.Since(sessionLookupStartedAt)
 
-	sessions := make([]*model.ResourceSession, len(candidates))
 	missingCandidateIndexes := make([]int, 0, len(candidates))
 	inputs := make([]service.CreateResourceSessionInput, 0, len(candidates))
 	for i := range candidates {
@@ -2037,13 +2078,7 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 		if _, available := agentByTechnicalID[technicalID]; !available {
 			continue
 		}
-		key := desktopSessionPermissionKey(desktop.ID, candidates[i].resource.ID, candidates[i].target.ID, candidates[i].action)
-		if permission, found := permissions[key]; found && permission.UserID == desktop.UserID {
-			sessions[i] = &model.ResourceSession{
-				ID: permission.SessionID, TenantID: permission.TenantID, TenantResourceID: permission.ResourceID,
-				TenantResourceSourceID: permission.SourceID, TargetRevisionID: permission.TargetRevisionID,
-				AccessTechnicalResourceID: technicalID, AuthorizationRevision: permission.AuthorizationRevision,
-			}
+		if sessions[i] != nil {
 			continue
 		}
 		missingCandidateIndexes = append(missingCandidateIndexes, i)
@@ -2054,7 +2089,7 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 		})
 	}
 
-	refreshedTechnicalIDs := make(map[string]struct{})
+	sessionEnsureStartedAt := time.Now()
 	if len(inputs) > 0 {
 		ensured, err := sessionService.EnsureManyForDesktop(ctx, desktop.UserID, inputs)
 		if err != nil {
@@ -2069,28 +2104,41 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 				continue
 			}
 			sessions[candidateIndex] = ensured[i].Session
-			refreshedTechnicalIDs[ensured[i].Session.AccessTechnicalResourceID] = struct{}{}
+			if candidates[candidateIndex].resource.Type == model.TenantResourceContainerService {
+				key := desktopSessionPermissionKey(desktop.ID, candidates[candidateIndex].resource.ID, candidates[candidateIndex].target.ID, candidates[candidateIndex].action)
+				permissions[key] = service.SessionAuthorizationPermission{
+					SessionID: ensured[i].Session.ID, TenantID: ensured[i].Session.TenantID,
+					ResourceID: ensured[i].Session.TenantResourceID, SourceID: ensured[i].Session.TenantResourceSourceID,
+					TargetRevisionID: ensured[i].Session.TargetRevisionID, UserID: ensured[i].Session.UserID,
+					DeviceID: ensured[i].Session.DeviceID, ResourceType: model.TenantResourceContainerService,
+					Action: ensured[i].Session.Action, AuthorizationRevision: ensured[i].Session.AuthorizationRevision,
+				}
+			}
 		}
 	}
-	for technicalID := range refreshedTechnicalIDs {
-		if err := ctx.Err(); err != nil {
-			return nil, nil
+	sessionEnsureDuration := time.Since(sessionEnsureStartedAt)
+
+	// ContainerSSH ports are allocated across the complete Agent permission
+	// set. Build that view once, after all missing sessions have been created.
+	sshTechnicalIDs := make(map[string]struct{})
+	for i := range candidates {
+		if candidates[i].resource.Type == model.TenantResourceContainerSSH && sessions[i] != nil {
+			sshTechnicalIDs[candidates[i].target.AccessTechnicalResourceID] = struct{}{}
 		}
+	}
+	sshSnapshotStartedAt := time.Now()
+	for technicalID := range sshTechnicalIDs {
 		snapshot, err := authorizationService.BuildSnapshot(ctx, technicalID, true)
 		if err != nil {
-			logger.Warnf("Desktop 资源发现刷新授权快照失败: desktop_id=%d technical_resource_id=%s err=%v", desktop.ID, technicalID, err)
+			logger.Warnf("Desktop 资源发现构建 ContainerSSH 端口快照失败: desktop_id=%d technical_resource_id=%s err=%v", desktop.ID, technicalID, err)
 			continue
-		}
-		for i := range candidates {
-			if candidates[i].target.AccessTechnicalResourceID == technicalID {
-				delete(permissions, desktopSessionPermissionKey(desktop.ID, candidates[i].resource.ID, candidates[i].target.ID, candidates[i].action))
-			}
 		}
 		for _, permission := range snapshot.Permissions {
 			permissions[desktopSessionPermissionKey(permission.DeviceID, permission.ResourceID, permission.TargetRevisionID, permission.Action)] = permission
 		}
 		listenPorts[technicalID] = allocateSessionAuthorizationListenPorts(snapshot.Permissions)
 	}
+	sshSnapshotDuration := time.Since(sshSnapshotStartedAt)
 
 	projections := make([]desktopTenantResourceProjection, 0, len(candidates))
 	for i := range candidates {
@@ -2157,6 +2205,9 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 			TargetRevisionId: projection.session.TargetRevisionID, AuthorizationRevision: permission.AuthorizationRevision,
 		})
 	}
+	logger.Infof("Desktop Tenant 资源发现分段: desktop_id=%d tenant_id=%s candidates=%d existing_sessions=%d missing_sessions=%d ssh_agents=%d catalog=%s session_lookup=%s session_ensure=%s ssh_snapshot=%s total=%s",
+		desktop.ID, tenantID, len(candidates), len(existingSessions), len(inputs), len(sshTechnicalIDs), catalogDuration,
+		sessionLookupDuration, sessionEnsureDuration, sshSnapshotDuration, time.Since(startedAt))
 	return sshResources, serviceResources
 }
 
@@ -2164,12 +2215,27 @@ func desktopSessionPermissionKey(deviceID uint64, resourceID, targetRevisionID, 
 	return strconv.FormatUint(deviceID, 10) + "\x00" + resourceID + "\x00" + targetRevisionID + "\x00" + action
 }
 
-func grpcTenantGroupGrantMatches(ctx context.Context, grant model.TenantAccessGrant) bool {
+func grpcTenantGroupGrantMatches(grant model.TenantAccessGrant, validGroupGrants map[string]struct{}) bool {
 	if grant.SubjectGroupID == nil || grant.TenantID == "" {
 		return false
 	}
-	var count int64
-	return db.DB.WithContext(ctx).Model(&model.Group{}).Where("id = ? AND tenant_id = ?", *grant.SubjectGroupID, grant.TenantID).Count(&count).Error == nil && count == 1
+	_, ok := validGroupGrants[grant.TenantID+"\x00"+strconv.FormatInt(*grant.SubjectGroupID, 10)]
+	return ok
+}
+
+func grpcTenantGroupGrantSet(ctx context.Context, groupIDs []int64, tenantIDs []string) (map[string]struct{}, error) {
+	result := make(map[string]struct{})
+	if len(groupIDs) == 0 || len(tenantIDs) == 0 {
+		return result, nil
+	}
+	var groups []model.Group
+	if err := db.DB.WithContext(ctx).Where("id IN ? AND tenant_id IN ?", groupIDs, tenantIDs).Find(&groups).Error; err != nil {
+		return nil, err
+	}
+	for _, group := range groups {
+		result[group.TenantID+"\x00"+strconv.FormatInt(group.ID, 10)] = struct{}{}
+	}
+	return result, nil
 }
 
 func desktopAccessAgentNode(ctx context.Context, technicalResourceID string) (model.Node, error) {

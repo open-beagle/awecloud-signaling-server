@@ -52,7 +52,7 @@ func prepareProviderSupplyAPIFixture(t *testing.T, flags config.FeatureFlagsSect
 		&model.SupplyCandidate{}, &model.PlatformResource{}, &model.PlatformResourceSource{},
 		&model.NamespaceObservation{}, &model.ResourceScope{}, &model.OutboxEvent{}, &model.TechnicalResourceDeployToken{},
 		&model.ResourceAllocation{}, &model.ResourceAllocationItem{},
-		&model.Node{}, &model.Endpoint{}, &model.DomainRegistry{},
+		&model.Node{}, &model.Endpoint{}, &model.DomainRegistry{}, &model.ResourceSession{}, &model.SystemConfig{},
 	))
 	var providerMemberships int64
 	require.NoError(t, fixture.database.Model(&model.AdminProviderMembership{}).
@@ -81,6 +81,7 @@ func prepareProviderSupplyAPIFixture(t *testing.T, flags config.FeatureFlagsSect
 	provider.GET("/technical-resources/:id/capabilities", RequireManagementPermission(service.PermissionProviderTechnicalResourcesRead), providerAPI.GetTechnicalResourceCapabilities)
 	provider.PATCH("/technical-resources/:id/config", RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), providerAPI.UpdateTechnicalResourceCapabilities)
 	provider.PATCH("/technical-resources/:id/display-name", RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), providerAPI.UpdateAgentDisplayName)
+	provider.PATCH("/technical-resources/:id/domain-label", RequireManagementPermission(service.PermissionProviderTechnicalResourcesWrite), RequireFeatureFlag(flags, config.FeatureResourceModelWrite, true), RequireIfMatch(), providerAPI.UpdateAgentDomainLabel)
 	provider.GET("/resources", RequireManagementPermission(service.PermissionProviderResourcesRead), providerAPI.ListPlatformResources)
 	provider.GET("/resources/:id", RequireManagementPermission(service.PermissionProviderResourcesRead), providerAPI.GetPlatformResource)
 	provider.GET("/scopes", RequireManagementPermission(service.PermissionProviderResourcesRead), providerAPI.ListResourceScopes)
@@ -380,6 +381,62 @@ func TestProviderSupplyAPIUpdatesAgentDisplayNameOnly(t *testing.T) {
 	require.Equal(t, http.StatusOK, detail.Code, detail.Body.String())
 	require.Contains(t, detail.Body.String(), `"display_name":"A100 平台"`)
 	require.Contains(t, detail.Body.String(), `"domain_label":"agent-display-api"`)
+}
+
+func TestProviderSupplyAPIRequiresAgentDomainChangeConfirmation(t *testing.T) {
+	fixture, login := prepareProviderSupplyAPIFixture(t, config.FeatureFlagsSection{ResourceModelWrite: true})
+	body := `{"type":"agent","stable_key":"agent-domain-api","runtime_name":"agent-domain-api","domain_label":"agent-domain-api","credential_revision":1,"reason":"register domain agent"}`
+	created := providerAPIRequest(fixture, login, http.MethodPost, providerTechnicalResourceCreateRoute, fixture.provider.ID,
+		body, map[string]string{HeaderIdempotencyKey: "provider-create-agent-domain-change"})
+	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
+	var createdBody struct {
+		Data struct {
+			Result model.TechnicalResource `json:"result"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &createdBody))
+	now := time.Now().UTC()
+	require.NoError(t, fixture.database.Exec(`INSERT INTO domain_registry
+		(domain, type, user_id, provider_id, agent_resource_id, resource_kind, resource_id, node_id, endpoint_id, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`,
+		"ssh.agent-domain-api.provider-a.beagle", model.DomainTypeSSH, fixture.user.ID, fixture.provider.ID, createdBody.Data.Result.ID,
+		model.DomainResourceNode, "agent-domain-api", model.DomainStatusOnline, now, now).Error)
+
+	path := "/api/v1/management/provider/technical-resources/" + createdBody.Data.Result.ID + "/domain-label"
+	missing := providerAPIRequest(fixture, login, http.MethodPatch, path, fixture.provider.ID,
+		`{"domain_label":"agent-domain-new","reason":"rename agent domain"}`, map[string]string{HeaderIfMatch: `"1"`})
+	require.Equal(t, http.StatusBadRequest, missing.Code, missing.Body.String())
+	assertResponseErrorCode(t, missing, ErrorCodeInvalidArgument)
+
+	mismatch := providerAPIRequest(fixture, login, http.MethodPatch, path, fixture.provider.ID,
+		`{"domain_label":"agent-domain-new","domain_change_confirmation":"agent-domain-wrong","reason":"rename agent domain"}`, map[string]string{HeaderIfMatch: `"1"`})
+	require.Equal(t, http.StatusBadRequest, mismatch.Code, mismatch.Body.String())
+	assertResponseErrorCode(t, mismatch, ErrorCodeInvalidArgument)
+
+	updated := providerAPIRequest(fixture, login, http.MethodPatch, path, fixture.provider.ID,
+		`{"domain_label":" Agent-Domain-New ","domain_change_confirmation":" agent-domain-new ","reason":"rename agent domain"}`, map[string]string{HeaderIfMatch: `"1"`})
+	require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+	require.Equal(t, `"2"`, updated.Header().Get("ETag"))
+	require.Contains(t, updated.Body.String(), `"domain_label":"agent-domain-new"`)
+
+	var persisted model.TechnicalResource
+	require.NoError(t, fixture.database.First(&persisted, "id = ?", createdBody.Data.Result.ID).Error)
+	require.Equal(t, "agent-domain-new", persisted.DomainLabel)
+	require.Equal(t, int64(2), persisted.RowVersion)
+
+	var audit model.AuditLog
+	require.NoError(t, fixture.database.First(&audit, "action_type = ? AND target_id = ?", model.ActionUpdateAgent, persisted.ID).Error)
+	var detail struct {
+		DomainChangeConfirmation string `json:"domain_change_confirmation"`
+		AffectedDomainCount      int64  `json:"affected_domain_count"`
+		ActiveSessionCount       int64  `json:"active_session_count"`
+		Reason                   string `json:"reason"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(audit.Detail), &detail))
+	require.Equal(t, "agent-domain-new", detail.DomainChangeConfirmation)
+	require.Equal(t, int64(1), detail.AffectedDomainCount)
+	require.Zero(t, detail.ActiveSessionCount)
+	require.Equal(t, "rename agent domain", detail.Reason)
 }
 
 func TestProviderSupplyAPICreateAgentDomainConflictReturnsConflict(t *testing.T) {

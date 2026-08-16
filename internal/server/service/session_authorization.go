@@ -78,6 +78,11 @@ type SessionAuthorizationSnapshot struct {
 	Terminations        []SessionTerminationCommand
 }
 
+type SessionAuthorizationValidation struct {
+	SessionID  string
+	Permission *SessionAuthorizationPermission
+}
+
 type SessionTerminationAckInput struct {
 	SessionID       string
 	CommandRevision int64
@@ -193,6 +198,44 @@ func (s *SessionAuthorizationService) BuildSnapshot(ctx context.Context, technic
 		return nil
 	})
 	return result, err
+}
+
+// RevalidateSessions validates only the sessions requested by a Desktop
+// resource discovery call. Agent snapshot generation continues to use
+// BuildSnapshot because it owns the complete Agent authorization view.
+func (s *SessionAuthorizationService) RevalidateSessions(ctx context.Context, sessions []model.ResourceSession) ([]SessionAuthorizationValidation, error) {
+	if s == nil || s.db == nil || len(sessions) == 0 {
+		return nil, ErrSessionAuthorizationInvalidInput
+	}
+	now := s.now().UTC()
+	results := make([]SessionAuthorizationValidation, len(sessions))
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for i := range sessions {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if strings.TrimSpace(sessions[i].ID) == "" {
+				return ErrSessionAuthorizationInvalidInput
+			}
+			results[i].SessionID = sessions[i].ID
+			permission, reasonCode, err := s.revalidateSession(tx, &sessions[i], now, true)
+			if err != nil {
+				return err
+			}
+			if permission == nil {
+				if reasonCode == "" {
+					reasonCode = sessionAuthorizationInvalidCode
+				}
+				if err := endInvalidResourceSession(tx, &sessions[i], reasonCode, now); err != nil {
+					return err
+				}
+				continue
+			}
+			results[i].Permission = permission
+		}
+		return nil
+	})
+	return results, err
 }
 
 func (s *SessionAuthorizationService) revalidateSession(tx *gorm.DB, session *model.ResourceSession, now time.Time, includePermissions bool) (*SessionAuthorizationPermission, string, error) {

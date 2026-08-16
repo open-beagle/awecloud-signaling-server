@@ -26,9 +26,11 @@ type TechnicalResourceListResult struct {
 }
 
 type TechnicalResourceDetail struct {
-	Resource  *TechnicalResourceView           `json:"resource"`
-	Bindings  []model.TechnicalResourceBinding `json:"bindings"`
-	Endpoints []TechnicalResourceView          `json:"endpoints"`
+	Resource            *TechnicalResourceView           `json:"resource"`
+	Bindings            []model.TechnicalResourceBinding `json:"bindings"`
+	Endpoints           []TechnicalResourceView          `json:"endpoints"`
+	AffectedDomainCount int64                            `json:"affected_domain_count"`
+	ActiveSessionCount  int64                            `json:"active_session_count"`
 }
 
 // TechnicalResourceView projects the Provider-owned identity together with its
@@ -171,7 +173,23 @@ func (s *ProviderSupplyService) GetTechnicalResource(ctx context.Context, author
 			return nil, err
 		}
 	}
-	return &TechnicalResourceDetail{Resource: &resource, Bindings: bindings, Endpoints: endpoints}, nil
+	var affectedDomainCount int64
+	if err := s.db.WithContext(ctx).Model(&model.DomainRegistry{}).Where("agent_resource_id = ?", resource.ID).Count(&affectedDomainCount).Error; err != nil {
+		return nil, err
+	}
+	var activeSessionCount int64
+	if err := s.db.WithContext(ctx).Model(&model.ResourceSession{}).
+		Where("status IN ?", []model.ResourceSessionStatus{model.ResourceSessionAuthorizing, model.ResourceSessionActive}).
+		Where(`access_technical_resource_id = ? OR access_technical_resource_id IN (
+			SELECT id FROM technical_resource WHERE parent_id = ? AND deleted_at IS NULL
+		)`, resource.ID, resource.ID).
+		Count(&activeSessionCount).Error; err != nil {
+		return nil, err
+	}
+	return &TechnicalResourceDetail{
+		Resource: &resource, Bindings: bindings, Endpoints: endpoints,
+		AffectedDomainCount: affectedDomainCount, ActiveSessionCount: activeSessionCount,
+	}, nil
 }
 
 func technicalResourceProjectionQuery(query *gorm.DB) *gorm.DB {

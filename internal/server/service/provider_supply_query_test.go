@@ -242,9 +242,25 @@ func TestTechnicalResourceQueriesProjectAndSearchRuntimeHostname(t *testing.T) {
 	require.True(t, result.Items[0].ContainerSSHEnabled)
 	require.True(t, result.Items[0].K8SEnabled)
 	require.Equal(t, int64(1), result.Items[0].EndpointCount)
+	for _, domain := range []struct {
+		name      string
+		typeValue model.DomainType
+		kind      model.DomainResourceKind
+		port      int
+	}{
+		{name: "beagle-prod-01.legacy-node-1001.provider-a.beagle", typeValue: model.DomainTypeSSH, kind: model.DomainResourceNode, port: 22},
+		{name: "kubernetes.legacy-node-1001.provider-a.beagle", typeValue: model.DomainTypeK8SAPI, kind: model.DomainResourceKubernetes, port: 6443},
+	} {
+		require.NoError(t, fixture.database.Exec(
+			`INSERT INTO domain_registry (domain, type, user_id, provider_id, agent_resource_id, resource_kind, resource_id, node_id, endpoint_id, target_port, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+			domain.name, domain.typeValue, agent.RuntimeUserID, fixture.provider.ID, agent.ID, domain.kind, "1001", 1001, domain.port, model.DomainStatusOnline, fixture.now, fixture.now,
+		).Error)
+	}
 
 	agentDetail, err := fixture.service.GetTechnicalResource(context.Background(), fixture.authorization, agent.ID)
 	require.NoError(t, err)
+	require.EqualValues(t, 2, agentDetail.AffectedDomainCount)
+	require.Zero(t, agentDetail.ActiveSessionCount)
 	require.Len(t, agentDetail.Endpoints, 1)
 	require.Equal(t, endpoint.ID, agentDetail.Endpoints[0].ID)
 	require.Equal(t, "endpoint-a", agentDetail.Endpoints[0].Hostname)
