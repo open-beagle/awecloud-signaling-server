@@ -133,14 +133,47 @@
       @submit="saveAgentEdit"
     />
 
-    <el-dialog v-model="endpointDialog" :title="endpointName(selectedEndpoint || emptyResource)" width="860px" destroy-on-close @closed="selectedEndpoint = undefined">
+    <el-dialog v-model="endpointDialog" class="endpoint-editor-dialog" width="760px" top="32px" destroy-on-close @closed="selectedEndpoint = undefined">
+      <template #header><div class="endpoint-dialog-title"><strong>{{ endpointName(selectedEndpoint || emptyResource) }}</strong><span>Endpoint 运行、能力和生命周期由服务器统一维护。</span></div></template>
       <template v-if="selectedEndpoint">
-        <div class="endpoint-summary"><div><span>生命周期</span><el-tag :type="lifecycleTag(selectedEndpoint.lifecycle_state)">{{ lifecycleLabel(selectedEndpoint.lifecycle_state) }}</el-tag></div><div><span>健康</span><el-tag :type="healthTag(selectedEndpoint.health_state)">{{ healthLabel(selectedEndpoint.health_state) }}</el-tag></div><div><span>稳定 Endpoint ID</span><strong class="mono">{{ selectedEndpoint.stable_key }}</strong></div></div>
-        <el-alert title="稳定身份保存在 Endpoint 本机" description="停用和恢复不改变 endpoint_id；删除后原 ID 不得再次注册。" type="info" show-icon :closable="false" />
+        <div class="endpoint-summary"><div><span>生命周期</span><strong><el-tag size="small" :type="lifecycleTag(selectedEndpoint.lifecycle_state)">{{ lifecycleLabel(selectedEndpoint.lifecycle_state) }}</el-tag></strong></div><div><span>健康状态</span><strong>{{ healthLabel(selectedEndpoint.health_state) }} · {{ relativeTime(selectedEndpoint.last_received_at) }}</strong></div><div><span>稳定 Endpoint ID</span><strong class="mono" :title="selectedEndpoint.stable_key">{{ selectedEndpoint.stable_key }}</strong></div></div>
+        <el-alert title="稳定身份保存在 Endpoint 本机" description="停用和恢复不会改变 endpoint_id；删除后该 ID 被拒绝再次注册，必须重新安装并生成新 ID。" type="info" show-icon :closable="false" />
+
         <section class="dialog-section"><h3>接入诊断</h3><div class="endpoint-diagnostics"><div><span>Endpoint 上报主机名</span><strong class="mono">{{ selectedEndpoint.hostname || '未上报' }}</strong></div><div><span>Agent 接入地址</span><strong class="mono">{{ endpointAccessAddress }}</strong></div><div><span>网络方向</span><strong>Endpoint → Agent TCP</strong></div></div></section>
-        <section class="dialog-section"><h3>访问域名</h3><div class="domain-editor"><el-input v-model="endpointDomainLabel" placeholder="DNS 单标签" /><span class="mono">.{{ selectedEndpoint.domain_namespace }}.beagle</span><el-button :disabled="!canWrite" @click="saveEndpointDomain">提交</el-button></div></section>
-        <section class="dialog-section"><h3>开放能力</h3><el-form v-if="endpointCapabilityForm" label-position="top"><div class="endpoint-switch-grid"><el-form-item label="SSH"><el-switch v-model="endpointCapabilityForm.ssh_enabled" /></el-form-item><el-form-item label="Kubernetes API"><el-switch v-model="endpointCapabilityForm.k8s_enabled" /></el-form-item><el-form-item label="Kubernetes Service"><el-switch v-model="endpointCapabilityForm.svc_enabled" /></el-form-item></div><el-form-item v-if="endpointCapabilityForm.ssh_enabled" label="SSH 登录用户"><el-select v-model="endpointCapabilityForm.ssh_users" multiple allow-create filterable default-first-option /></el-form-item><el-form-item v-if="endpointCapabilityForm.svc_enabled" label="Service Namespace"><el-select v-model="endpointCapabilityForm.svc_namespaces" multiple allow-create filterable default-first-option /></el-form-item><el-form-item v-if="endpointCapabilityForm.svc_enabled" label="Service 标签选择器"><el-input v-model="endpointCapabilityForm.svc_label_selector" /></el-form-item></el-form></section>
-        <section class="dialog-section danger-zone"><div><h3>生命周期</h3><p>停用保留配置并拒绝业务访问；删除前必须通过依赖检查。</p></div><div><el-button v-if="selectedEndpoint.lifecycle_state === 'registered'" :disabled="!canWrite" @click="setEndpointLifecycle('maintenance')">停用</el-button><el-button v-else-if="selectedEndpoint.lifecycle_state === 'disabled'" :disabled="!canWrite" @click="setEndpointLifecycle('resume')">恢复</el-button><el-button type="danger" :disabled="!canWrite" @click="openDeleteCheck(selectedEndpoint)">删除</el-button></div></section>
+
+        <section class="dialog-section">
+          <h3>访问域名</h3>
+          <div class="domain-editor">
+            <el-form-item label="域名标识"><el-input v-model="endpointDomainLabel" class="mono" maxlength="63" placeholder="DNS 单标签" /></el-form-item>
+            <el-form-item label="生效后的完整域名"><el-input :model-value="endpointDomainPreview" class="mono" readonly /></el-form-item>
+            <el-button :disabled="!canWrite || !endpointDomainChanged || !endpointDomainValid" :loading="submitting" @click="saveEndpointDomain">提交</el-button>
+          </div>
+          <p class="domain-help">修改后旧域名立即失效；域名标识在当前 Agent 命名空间内必须唯一。</p>
+        </section>
+
+        <section class="dialog-section">
+          <h3>开放能力</h3>
+          <template v-if="endpointCapabilityForm">
+            <div class="endpoint-capability-config">
+              <div class="endpoint-switch-row"><div><strong>SSH</strong><span>允许主机终端访问；Endpoint 首次注册时默认开启</span></div><el-switch v-model="endpointCapabilityForm.ssh_enabled" /></div>
+              <div class="endpoint-switch-row"><div><strong>Kubernetes API</strong><span>使用 Endpoint 本机 kubeconfig 的 current-context</span></div><el-switch v-model="endpointCapabilityForm.k8s_enabled" /></div>
+              <div class="endpoint-switch-row"><div><strong>Kubernetes Service</strong><span>按 Namespace 和标签选择器发现 Service</span></div><el-switch v-model="endpointCapabilityForm.svc_enabled" /></div>
+            </div>
+
+            <div v-if="endpointCapabilityForm.k8s_enabled" class="endpoint-kube-block">
+              <el-alert title="Kubernetes 集群连接由资源提供者维护" description="Endpoint 使用 /root/.kube/config 的 current-context；Server 只控制能力开关和访问范围，不保存或下发 kubeconfig。" type="info" show-icon :closable="false" />
+              <div class="endpoint-kube-status"><div><span>配置文件</span><strong class="mono">/root/.kube/config</strong></div><div><span>实际 API Server</span><strong class="mono" :title="endpointCapabilityForm.k8s_api_address || '等待 Endpoint 上报'">{{ endpointCapabilityForm.k8s_api_address || '等待 Endpoint 上报' }}</strong></div></div>
+            </div>
+
+            <el-form class="endpoint-settings" label-position="top">
+              <el-form-item v-if="endpointCapabilityForm.ssh_enabled" label="SSH 登录用户"><el-select v-model="endpointCapabilityForm.ssh_users" multiple allow-create filterable default-first-option placeholder="输入用户名后回车" /></el-form-item>
+              <el-form-item v-if="endpointCapabilityForm.svc_enabled" label="Service Namespace"><el-select v-model="endpointCapabilityForm.svc_namespaces" multiple allow-create filterable default-first-option placeholder="留空表示全部 Namespace" /></el-form-item>
+              <el-form-item v-if="endpointCapabilityForm.svc_enabled" label="Service 标签选择器"><el-input v-model="endpointCapabilityForm.svc_label_selector" placeholder="signal.beagle.io/expose=true" /></el-form-item>
+            </el-form>
+          </template>
+        </section>
+
+        <section class="dialog-section"><h3>生命周期</h3><div class="danger-zone"><div><strong>停用或删除 Endpoint</strong><span>停用保留配置并禁止业务访问；删除会移除配置、授权和域名，并拒绝原稳定 ID 再次注册。</span></div><div class="endpoint-lifecycle-actions"><el-button v-if="selectedEndpoint.lifecycle_state === 'registered'" :disabled="!canWrite" @click="setEndpointLifecycle('maintenance')">停用</el-button><el-button v-else-if="selectedEndpoint.lifecycle_state === 'disabled'" :disabled="!canWrite" @click="setEndpointLifecycle('resume')">恢复</el-button><el-button type="danger" :icon="Delete" :disabled="!canWrite" @click="openDeleteCheck(selectedEndpoint)">删除</el-button></div></div></section>
       </template>
       <template #footer><el-button @click="endpointDialog = false">取消</el-button><el-button type="primary" :disabled="!canWrite || !endpointCapabilityForm" :loading="submitting" @click="saveEndpointCapabilities">保存</el-button></template>
     </el-dialog>
@@ -221,6 +254,12 @@ const resourceTitle = computed(() => resource.value?.display_name || resource.va
 const resourceDescription = computed(() => 'Agent 部署位置、开放能力、Endpoint 接入与运行诊断。')
 const endpointName = (item: TechnicalResource) => item.display_name || item.host_domain_label || item.domain_label || item.hostname || '等待主机注册'
 const endpointDomain = (item: TechnicalResource) => item.host_domain_label && item.domain_namespace ? `${item.host_domain_label}.${item.domain_namespace}.beagle` : '-'
+const endpointDomainReservedLabels = new Set(['admin', 'api', 'container', 'kubernetes', 'service', 'system'])
+const isEndpointDomainLabelValid = (value: string) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value) && !endpointDomainReservedLabels.has(value)
+const normalizedEndpointHostname = (item: TechnicalResource) => {
+  const value = (item.hostname || '').trim().toLowerCase()
+  return isEndpointDomainLabelValid(value) ? value : ''
+}
 const endpointCapabilityLabels = (item: TechnicalResource) => [item.ssh_enabled ? 'SSH' : '', item.k8s_enabled ? 'Kubernetes API' : '', item.svc_enabled ? 'Kubernetes Service' : ''].filter(Boolean)
 const filteredEndpoints = computed(() => endpoints.value.filter(item => {
   const state = item.lifecycle_state === 'disabled' ? '已停用' : item.health_state === 'online' ? '在线' : '离线'
@@ -230,6 +269,12 @@ const filteredEndpoints = computed(() => endpoints.value.filter(item => {
 }))
 const endpointAccessAddress = computed(() => endpointAccess.value?.address ? `${endpointAccess.value.address}:${endpointAccess.value.port}` : capabilities.value?.endpoint_address ? `${capabilities.value.endpoint_address}:${capabilities.value.endpoint_listen_port || 50052}` : '待配置')
 const endpointAccessReady = computed(() => capabilities.value?.endpoint_access_enabled && !!(endpointAccess.value?.address || capabilities.value?.endpoint_address))
+const endpointDomainValid = computed(() => isEndpointDomainLabelValid(endpointDomainLabel.value.trim().toLowerCase()))
+const endpointDomainChanged = computed(() => !!selectedEndpoint.value && endpointDomainLabel.value.trim().toLowerCase() !== selectedEndpoint.value.host_domain_label)
+const endpointDomainPreview = computed(() => {
+  const label = endpointDomainLabel.value.trim().toLowerCase()
+  return label && selectedEndpoint.value?.domain_namespace ? `${label}.${selectedEndpoint.value.domain_namespace}.beagle` : '等待填写域名标识'
+})
 const capabilityRows = computed(() => resource.value && capabilities.value ? [
   { label: 'SSH', description: '主机终端访问', value: resource.value.host_domain_label ? `${resource.value.host_domain_label}.${resource.value.domain_namespace}.beagle` : '待配置域名', valueLabel: '访问域名', source: 'Agent 域名配置', enabled: capabilities.value.ssh_enabled, icon: Connection },
   { label: 'Kubernetes API', description: '代理原生 Kubernetes API', value: capabilities.value.k8s_api_address || '等待 Agent 上报', valueLabel: '本机 current-context API Server', source: '本机 kubeconfig', enabled: capabilities.value.k8s_enabled, icon: Monitor },
@@ -351,7 +396,7 @@ const rotateEndpointToken = async () => {
 const openEndpoint = async (item: TechnicalResource) => {
   if (!workspaceStore.providerId) return
   selectedEndpoint.value = item
-  endpointDomainLabel.value = item.host_domain_label || ''
+  endpointDomainLabel.value = item.host_domain_label || normalizedEndpointHostname(item)
   endpointDialog.value = true
   const response = await getProviderTechnicalResourceCapabilities(workspaceStore.providerId, item.id)
   endpointCapabilityForm.value = response.success ? { ...response.data, ssh_users: [...(response.data.ssh_users || [])], svc_namespaces: [...(response.data.svc_namespaces || [])] } : undefined
@@ -359,12 +404,19 @@ const openEndpoint = async (item: TechnicalResource) => {
 const saveEndpointDomain = async () => {
   if (!selectedEndpoint.value || !workspaceStore.providerId) return
   const label = endpointDomainLabel.value.trim().toLowerCase()
-  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) { ElMessage.warning('请输入有效的 DNS 单标签'); return }
+  if (!isEndpointDomainLabelValid(label)) { ElMessage.warning('请输入有效且非保留名称的 DNS 单标签'); return }
   await ElMessageBox.confirm(`旧域名将立即失效，新域名为 ${label}.${selectedEndpoint.value.domain_namespace}.beagle。`, '确认变更域名', { type: 'warning' })
-  await updateProviderAgentHostDomainLabel(workspaceStore.providerId, selectedEndpoint.value, label)
-  ElMessage.success('Endpoint 访问域名已更新')
-  endpointDialog.value = false
-  await load()
+  submitting.value = true
+  try {
+    const response = await updateProviderAgentHostDomainLabel(workspaceStore.providerId, selectedEndpoint.value, label)
+    if (!response.success) return
+    const updated = response.data
+    const index = endpoints.value.findIndex(item => item.id === updated.id)
+    if (index >= 0) endpoints.value.splice(index, 1, updated)
+    selectedEndpoint.value = updated
+    endpointDomainLabel.value = updated.host_domain_label
+    ElMessage.success('Endpoint 访问域名已更新')
+  } finally { submitting.value = false }
 }
 const saveEndpointCapabilities = async () => {
   if (!selectedEndpoint.value || !endpointCapabilityForm.value || !workspaceStore.providerId) return
@@ -505,19 +557,52 @@ onBeforeUnmount(clearSensitiveAccess)
 .capability-editor :deep(.el-tabs__content) { height: 100%; padding: 4px 4px 4px 20px; }
 .capability-editor :deep(.el-select) { width: 100%; }
 .rotate-button { margin-top: 14px; }
-.endpoint-summary { display: grid; grid-template-columns: 1fr 1fr 2fr; margin-bottom: 12px; border: 1px solid var(--border-light); border-radius: 5px; }
-.endpoint-summary > div { min-height: 64px; display: flex; flex-direction: column; justify-content: center; padding: 10px 12px; border-left: 1px solid var(--border-lighter); }
+.endpoint-dialog-title strong, .endpoint-dialog-title span { display: block; }
+.endpoint-dialog-title strong { font-size: 16px; }
+.endpoint-dialog-title span { margin-top: 2px; color: var(--text-secondary); font-size: 11px; }
+:global(.endpoint-editor-dialog) { max-height: calc(100vh - 64px); display: flex; flex-direction: column; overflow: hidden; }
+:global(.endpoint-editor-dialog .el-dialog__header) { flex: 0 0 auto; margin-right: 0; padding: 16px 18px 13px; }
+:global(.endpoint-editor-dialog .el-dialog__body) { flex: 1 1 auto; overflow: auto; padding: 15px 18px 18px; }
+:global(.endpoint-editor-dialog .el-dialog__footer) { flex: 0 0 auto; padding: 11px 18px; }
+.endpoint-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 14px; border: 1px solid var(--border-light); border-radius: 5px; }
+.endpoint-summary > div { min-width: 0; min-height: 58px; display: flex; flex-direction: column; justify-content: center; padding: 9px 10px; border-left: 1px solid var(--border-lighter); }
 .endpoint-summary > div:first-child { border-left: 0; }
-.endpoint-summary span { margin-bottom: 5px; color: var(--text-secondary); font-size: 10px; }
+.endpoint-summary span, .endpoint-summary strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.endpoint-summary span { margin-bottom: 4px; color: var(--text-secondary); font-size: 9px; }
+.endpoint-summary strong { font-size: 11px; }
 .dialog-section { margin-top: 18px; }
+.dialog-section > h3 { margin-bottom: 8px; font-size: 12px; }
 .endpoint-diagnostics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 8px; border: 1px solid var(--border-light); border-radius: 5px; }
 .endpoint-diagnostics > div { min-width: 0; min-height: 62px; display: flex; flex-direction: column; justify-content: center; padding: 10px 12px; border-left: 1px solid var(--border-lighter); }
 .endpoint-diagnostics > div:first-child { border-left: 0; }
 .endpoint-diagnostics span { margin-bottom: 5px; color: var(--text-secondary); font-size: 10px; }
 .endpoint-diagnostics strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.domain-editor { display: grid; grid-template-columns: 220px minmax(220px, 1fr) auto; align-items: center; gap: 8px; margin-top: 8px; padding: 10px; border: 1px solid var(--border-light); border-radius: 5px; }
-.endpoint-switch-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.danger-zone { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px; border: 1px solid #e7b9b6; border-radius: 5px; background: #fff1f0; }
+.domain-editor { display: grid; grid-template-columns: 180px minmax(0, 1fr) auto; align-items: end; gap: 10px; padding: 11px; border: 1px solid var(--border-light); border-radius: 5px; background: var(--bg-subtle); }
+.domain-editor :deep(.el-form-item) { margin-bottom: 0; }
+.domain-editor :deep(.el-form-item__label) { height: 24px; padding: 0; font-size: 11px; line-height: 24px; }
+.domain-editor > .el-button { margin-bottom: 1px; }
+.domain-help { margin: 5px 0 0; color: var(--text-secondary); font-size: 10px; }
+.endpoint-capability-config { padding: 0 11px; border: 1px solid var(--border-light); border-radius: 5px; }
+.endpoint-switch-row { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--border-lighter); }
+.endpoint-switch-row:last-child { border-bottom: 0; }
+.endpoint-switch-row strong, .endpoint-switch-row span { display: block; }
+.endpoint-switch-row strong { font-size: 12px; }
+.endpoint-switch-row span { margin-top: 2px; color: var(--text-secondary); font-size: 10px; }
+.endpoint-kube-block { margin-top: 12px; }
+.endpoint-kube-status { display: grid; grid-template-columns: .8fr 1.4fr; margin-top: 10px; border: 1px solid #cbd9e6; border-radius: 5px; background: #eef4f8; }
+.endpoint-kube-status > div { min-width: 0; min-height: 57px; display: flex; flex-direction: column; justify-content: center; padding: 8px 11px; border-left: 1px solid #d8e2eb; }
+.endpoint-kube-status > div:first-child { border-left: 0; }
+.endpoint-kube-status span { margin-bottom: 4px; color: var(--text-secondary); font-size: 9px; }
+.endpoint-kube-status strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.endpoint-settings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; padding: 12px; border: 1px solid var(--border-light); border-radius: 5px; }
+.endpoint-settings :deep(.el-form-item) { min-width: 0; margin-bottom: 0; }
+.endpoint-settings :deep(.el-form-item__label) { padding-bottom: 4px; font-size: 11px; line-height: 18px; }
+.endpoint-settings :deep(.el-select) { width: 100%; }
+.danger-zone { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 11px; border: 1px solid #e7b9b6; border-radius: 5px; background: #fff1f0; }
+.danger-zone strong, .danger-zone span { display: block; }
+.danger-zone strong { color: var(--danger-color); font-size: 11px; }
+.danger-zone span { margin-top: 2px; color: var(--text-secondary); font-size: 10px; }
+.endpoint-lifecycle-actions { display: flex; flex: 0 0 auto; gap: 8px; }
 .blocker-list { margin-top: 14px; border: 1px solid var(--border-light); border-radius: 5px; }
 .blocker-list > div { display: flex; align-items: center; justify-content: space-between; min-height: 56px; padding: 10px 14px; border-bottom: 1px solid var(--border-lighter); }
 .blocker-list > div:last-child { border-bottom: 0; }
