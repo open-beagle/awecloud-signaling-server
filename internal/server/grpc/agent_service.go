@@ -3,6 +3,7 @@ package grpc
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1936,6 +1937,8 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 				logger.Infof("创建 Endpoint: name=%s, id=%s, ssh_port=%d, k8sapi_port=%d, ssh_users=%v",
 					ep.Name, record.ID, record.SSHPort, record.K8SAPIPort, ep.SshUsers)
 
+				s.ensureEndpointTechnicalResource(ctx, agentID, nodeID, &record, now)
+
 				// Endpoint 创建成功后，创建域名记录（使用预分配的端口）
 				// 查询 Agent Node 和 User 信息
 				var agentNode model.Node
@@ -2027,6 +2030,8 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 				ep.Name, existing.ID, ep.SshUsers)
 			db.DB.WithContext(ctx).Model(&existing).Updates(updates)
 
+			s.ensureEndpointTechnicalResource(ctx, agentID, nodeID, &existing, now)
+
 			// 如果修复了端口，需要更新域名记录
 			if needAutoRepair {
 				// 重新读取 Endpoint（获取更新后的端口）
@@ -2094,23 +2099,291 @@ func (s *AgentServiceServer) handleConnectedEndpoints(ctx context.Context, agent
 	}
 
 	// 将不在列表中的 Endpoint 标记为 offline
+	var offlineIDs []string
 	if len(reportedNames) > 0 {
 		names := make([]string, 0, len(reportedNames))
 		for n := range reportedNames {
 			names = append(names, n)
 		}
+		db.DB.WithContext(ctx).Model(&model.Endpoint{}).
+			Where("user_id = ? AND status = ? AND name NOT IN ? AND revoked = ?", agentID, "online", names, false).
+			Pluck("id", &offlineIDs)
+
 		// 标记 Endpoint 为 offline
 		db.DB.WithContext(ctx).Model(&model.Endpoint{}).
 			Where("user_id = ? AND status = ? AND name NOT IN ? AND revoked = ?", agentID, "online", names, false).
 			Update("status", "offline")
 	} else {
+		db.DB.WithContext(ctx).Model(&model.Endpoint{}).
+			Where("user_id = ? AND status = ? AND revoked = ?", agentID, "online", false).
+			Pluck("id", &offlineIDs)
+
 		// 标记所有 Endpoint 为 offline
 		db.DB.WithContext(ctx).Model(&model.Endpoint{}).
 			Where("user_id = ? AND status = ? AND revoked = ?", agentID, "online", false).
 			Update("status", "offline")
 	}
 
+	if len(offlineIDs) > 0 {
+		s.syncOfflineEndpointTechnicalResources(ctx, offlineIDs, now)
+	}
+
 	logger.Infof("Agent Endpoint 上报完成: agent_id=%d, count=%d", agentID, len(reportedNames))
+}
+
+// ensureEndpointTechnicalResource 确保 Endpoint 在 TechnicalResource 模型中有对应映射与有效绑定
+func (s *AgentServiceServer) ensureEndpointTechnicalResource(ctx context.Context, agentID uint64, nodeID uint64, endpoint *model.Endpoint, now time.Time) {
+	if endpoint == nil || endpoint.ID == "" {
+		return
+	}
+
+	// 1. 检查是否存在已启用的 TechnicalResourceBinding
+	var existingBinding model.TechnicalResourceBinding
+	err := db.DB.WithContext(ctx).
+		Where("source_type = ? AND source_id = ? AND enabled = ?", model.TechnicalResourceBindingLegacyEndpoint, endpoint.ID, true).
+		First(&existingBinding).Error
+
+	if err == nil {
+		// 绑定已存在：刷新心跳时间与在线状态
+		db.DB.WithContext(ctx).Model(&model.TechnicalResource{}).
+			Where("id = ? AND lifecycle_state = ?", existingBinding.TechnicalResourceID, model.TechnicalResourceRegistered).
+			Updates(map[string]any{
+				"health_state":     model.ResourceHealthOnline,
+				"last_received_at": now,
+				"updated_at":       now,
+			})
+		db.DB.WithContext(ctx).Model(&model.SupplyCandidate{}).
+			Where("technical_resource_id = ? AND resource_type = ?", existingBinding.TechnicalResourceID, model.SupplyResourceHost).
+			Updates(map[string]any{
+				"last_observed_at": now,
+				"updated_at":       now,
+			})
+		db.DB.WithContext(ctx).Model(&model.PlatformResource{}).
+			Where("id = (SELECT platform_resource_id FROM platform_resource_source WHERE supply_candidate_id = (SELECT id FROM supply_candidate WHERE technical_resource_id = ? AND resource_type = ? LIMIT 1))",
+				existingBinding.TechnicalResourceID, model.SupplyResourceHost).
+			Updates(map[string]any{
+				"health_state": model.ResourceHealthOnline,
+				"updated_at":   now,
+			})
+		return
+	}
+
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		logger.Warnf("查询 Endpoint TechnicalResourceBinding 失败: endpoint_id=%s, err=%v", endpoint.ID, err)
+		return
+	}
+
+	// 2. 绑定不存在：查找父 Agent 节点对应的 TechnicalResourceBinding
+	var parentBinding model.TechnicalResourceBinding
+	if err := db.DB.WithContext(ctx).
+		Where("source_type = ? AND source_id = ? AND enabled = ?", model.TechnicalResourceBindingLegacyNode, strconv.FormatUint(nodeID, 10), true).
+		First(&parentBinding).Error; err != nil {
+		logger.Warnf("查询父 Agent TechnicalResourceBinding 失败: node_id=%d, err=%v", nodeID, err)
+		return
+	}
+
+	var parentResource model.TechnicalResource
+	if err := db.DB.WithContext(ctx).
+		Where("id = ? AND deleted_at IS NULL", parentBinding.TechnicalResourceID).
+		First(&parentResource).Error; err != nil {
+		logger.Warnf("查询父 Agent TechnicalResource 失败: resource_id=%s, err=%v", parentBinding.TechnicalResourceID, err)
+		return
+	}
+
+	// 3. 在事务中创建 TechnicalResource、Binding、SupplyCandidate 及 PlatformResource
+	txErr := db.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		stableKey := "legacy-endpoint:" + endpoint.ID
+		var techResource model.TechnicalResource
+		findErr := tx.Where("provider_id = ? AND type = ? AND stable_key = ?", parentResource.ProviderID, model.TechnicalResourceEndpoint, stableKey).First(&techResource).Error
+		if errors.Is(findErr, gorm.ErrRecordNotFound) {
+			createdAt := endpoint.CreatedAt
+			if createdAt.IsZero() {
+				createdAt = now
+			}
+			techResource = model.TechnicalResource{
+				ID:                 uuid.New().String(),
+				ProviderID:         parentResource.ProviderID,
+				Type:               model.TechnicalResourceEndpoint,
+				StableKey:          stableKey,
+				ParentID:           &parentResource.ID,
+				LifecycleState:     model.TechnicalResourceRegistered,
+				HealthState:        model.ResourceHealthOnline,
+				CredentialRevision: 1,
+				ConfigRevision:     1,
+				RowVersion:         1,
+				LastReceivedAt:     &now,
+				CreatedAt:          createdAt,
+				UpdatedAt:          now,
+			}
+			if err := tx.Create(&techResource).Error; err != nil {
+				return fmt.Errorf("create technical_resource: %w", err)
+			}
+		} else if findErr != nil {
+			return findErr
+		} else {
+			if err := tx.Model(&techResource).Updates(map[string]any{
+				"health_state":     model.ResourceHealthOnline,
+				"last_received_at": now,
+				"updated_at":       now,
+			}).Error; err != nil {
+				return err
+			}
+		}
+
+		// 创建 TechnicalResourceBinding
+		var binding model.TechnicalResourceBinding
+		bErr := tx.Where("source_type = ? AND source_id = ?", model.TechnicalResourceBindingLegacyEndpoint, endpoint.ID).First(&binding).Error
+		if errors.Is(bErr, gorm.ErrRecordNotFound) {
+			boundBy := parentBinding.BoundByUserID
+			if boundBy == 0 {
+				boundBy = agentID
+			}
+			binding = model.TechnicalResourceBinding{
+				ID:                  uuid.New().String(),
+				TechnicalResourceID: techResource.ID,
+				SourceType:          model.TechnicalResourceBindingLegacyEndpoint,
+				SourceID:            endpoint.ID,
+				CredentialRevision:  techResource.CredentialRevision,
+				Enabled:             true,
+				BoundByUserID:       boundBy,
+				Reason:              "automatic endpoint discovery and registration",
+				RowVersion:          1,
+				CreatedAt:           now,
+				UpdatedAt:           now,
+			}
+			if err := tx.Create(&binding).Error; err != nil {
+				return fmt.Errorf("create technical_resource_binding: %w", err)
+			}
+		} else if bErr != nil {
+			return bErr
+		}
+
+		// 创建 SupplyCandidate 和 PlatformResource（用于主机供给与控制台展示）
+		hostStableKey := "legacy-host-legacy_endpoint:" + endpoint.ID
+		snapshot := map[string]any{
+			"legacy_source_type": model.TechnicalResourceBindingLegacyEndpoint,
+			"legacy_source_id":   endpoint.ID,
+			"display_name":       endpoint.Name,
+		}
+		snapshotJSON, _ := json.Marshal(snapshot)
+		payloadHash := fmt.Sprintf("%x", sha256.Sum256(snapshotJSON))
+
+		candidateID := uuid.New().String()
+		var candidate model.SupplyCandidate
+		cErr := tx.Where("provider_id = ? AND technical_resource_id = ? AND resource_type = ? AND stable_key = ?",
+			parentResource.ProviderID, techResource.ID, model.SupplyResourceHost, hostStableKey).First(&candidate).Error
+		if errors.Is(cErr, gorm.ErrRecordNotFound) {
+			candidate = model.SupplyCandidate{
+				ID:                  candidateID,
+				ProviderID:          parentResource.ProviderID,
+				TechnicalResourceID: techResource.ID,
+				ResourceType:        model.SupplyResourceHost,
+				StableKey:           hostStableKey,
+				IdentityQuality:     model.SupplyIdentityStrong,
+				PayloadHash:         payloadHash,
+				ObservationSnapshot: string(snapshotJSON),
+				FirstObservedAt:     now,
+				LastObservedAt:      now,
+				LeaseExpiresAt:      now.AddDate(100, 0, 0),
+				ReviewState:         model.SupplyCandidateLinked,
+				ReviewedByUserID:    &parentBinding.BoundByUserID,
+				ReviewedAt:          &now,
+				RowVersion:          1,
+				CreatedAt:           now,
+				UpdatedAt:           now,
+			}
+			if err := tx.Create(&candidate).Error; err != nil {
+				return fmt.Errorf("create supply_candidate: %w", err)
+			}
+		} else if cErr != nil {
+			return cErr
+		} else {
+			candidateID = candidate.ID
+		}
+
+		var platformRes model.PlatformResource
+		pErr := tx.Where("provider_id = ? AND type = ? AND stable_key = ?", parentResource.ProviderID, model.SupplyResourceHost, hostStableKey).First(&platformRes).Error
+		if errors.Is(pErr, gorm.ErrRecordNotFound) {
+			platformRes = model.PlatformResource{
+				ID:             uuid.New().String(),
+				ProviderID:     parentResource.ProviderID,
+				Type:           model.SupplyResourceHost,
+				StableKey:      hostStableKey,
+				DisplayName:    endpoint.Name,
+				LifecycleState: model.PlatformResourceActive,
+				HealthState:    model.ResourceHealthOnline,
+				RowVersion:     1,
+				CreatedAt:      now,
+				UpdatedAt:      now,
+			}
+			if err := tx.Create(&platformRes).Error; err != nil {
+				return fmt.Errorf("create platform_resource: %w", err)
+			}
+		} else if pErr != nil {
+			return pErr
+		}
+
+		var platformSource model.PlatformResourceSource
+		psErr := tx.Where("provider_id = ? AND platform_resource_id = ? AND supply_candidate_id = ?",
+			parentResource.ProviderID, platformRes.ID, candidateID).First(&platformSource).Error
+		if errors.Is(psErr, gorm.ErrRecordNotFound) {
+			platformSource = model.PlatformResourceSource{
+				ID:                 uuid.New().String(),
+				ProviderID:         parentResource.ProviderID,
+				PlatformResourceID: platformRes.ID,
+				SupplyCandidateID:  candidateID,
+				IsPrimary:          true,
+				LinkedAt:           now,
+				LastConfirmedAt:    now,
+				CreatedAt:          now,
+				UpdatedAt:          now,
+			}
+			if err := tx.Create(&platformSource).Error; err != nil {
+				return fmt.Errorf("create platform_resource_source: %w", err)
+			}
+		} else if psErr != nil {
+			return psErr
+		}
+
+		return nil
+	})
+
+	if txErr != nil {
+		logger.Errorf("自动同步 Endpoint TechnicalResource 失败: name=%s, endpoint_id=%s, err=%v", endpoint.Name, endpoint.ID, txErr)
+	} else {
+		logger.Infof("已自动同步 Endpoint TechnicalResource: name=%s, endpoint_id=%s", endpoint.Name, endpoint.ID)
+	}
+}
+
+// syncOfflineEndpointTechnicalResources 同步离线 Endpoint 的 TechnicalResource 和 PlatformResource 状态
+func (s *AgentServiceServer) syncOfflineEndpointTechnicalResources(ctx context.Context, endpointIDs []string, now time.Time) {
+	if len(endpointIDs) == 0 {
+		return
+	}
+	var techResourceIDs []string
+	db.DB.WithContext(ctx).Model(&model.TechnicalResourceBinding{}).
+		Where("source_type = ? AND source_id IN (?) AND enabled = ?", model.TechnicalResourceBindingLegacyEndpoint, endpointIDs, true).
+		Pluck("technical_resource_id", &techResourceIDs)
+
+	if len(techResourceIDs) > 0 {
+		db.DB.WithContext(ctx).Model(&model.TechnicalResource{}).
+			Where("id IN (?)", techResourceIDs).
+			Updates(map[string]any{
+				"health_state": model.ResourceHealthOffline,
+				"updated_at":   now,
+			})
+	}
+
+	hostStableKeys := make([]string, len(endpointIDs))
+	for i, id := range endpointIDs {
+		hostStableKeys[i] = "legacy-host-legacy_endpoint:" + id
+	}
+	db.DB.WithContext(ctx).Model(&model.PlatformResource{}).
+		Where("type = ? AND stable_key IN (?)", model.SupplyResourceHost, hostStableKeys).
+		Updates(map[string]any{
+			"health_state": model.ResourceHealthOffline,
+			"updated_at":   now,
+		})
 }
 
 // queryEndpointK8SAPIPermissions 查询 Agent 关联的 Endpoint K8SAPI 授权列表
