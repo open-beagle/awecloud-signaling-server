@@ -779,59 +779,40 @@ func (a *UnifiedResourceAPI) ListAllGrants(c *gin.Context) {
 		return
 	}
 	if !unrestricted {
-		query = query.Where("tenant_id IN ?", tenantIDs)
+		query = query.Where("access_grant.tenant_id IN ?", tenantIDs)
 	}
 	if status := strings.TrimSpace(c.Query("status")); status != "" {
-		query = query.Where("status = ?", status)
+		query = query.Where("access_grant.status = ?", status)
 	}
 	if resourceID := strings.TrimSpace(c.Query("resource_id")); resourceID != "" {
-		query = query.Where("resource_id = ?", resourceID)
+		query = query.Where("access_grant.resource_id = ?", resourceID)
 	}
 	if subjectType := strings.TrimSpace(c.Query("subject_type")); subjectType != "" {
-		query = query.Where("subject_type = ?", subjectType)
+		query = query.Where("access_grant.subject_type = ?", subjectType)
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询访问策略失败"))
 		return
 	}
-	var grants []model.AccessGrant
-	if err := query.Order("created_at DESC").Offset((page - 1) * size).Limit(size).Find(&grants).Error; err != nil {
+	var items []accessGrantListItem
+	listQuery := query.
+		Select(`access_grant.*,
+			resource.display_name AS resource_name,
+			resource.type AS resource_type,
+			tenant.name AS tenant_name,
+			CASE
+				WHEN access_grant.subject_type = 'user' THEN COALESCE(NULLIF(subject_user.alias, ''), subject_user.name, '')
+				WHEN access_grant.subject_type = 'group' THEN COALESCE(NULLIF(subject_group.alias, ''), subject_group.name, '')
+				ELSE ''
+			END AS subject_name`).
+		Joins("LEFT JOIN resource ON resource.id = access_grant.resource_id AND resource.tenant_id = access_grant.tenant_id").
+		Joins("LEFT JOIN tenant ON tenant.id = access_grant.tenant_id").
+		Joins("LEFT JOIN user AS subject_user ON subject_user.id = access_grant.subject_user_id").
+		Joins(`LEFT JOIN "group" AS subject_group ON subject_group.id = access_grant.subject_group_id AND subject_group.tenant_id = access_grant.tenant_id`)
+	if err := listQuery.Order("access_grant.created_at DESC").Offset((page - 1) * size).Limit(size).Scan(&items).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询访问策略失败"))
 		return
-	}
-	items := make([]accessGrantListItem, 0, len(grants))
-	for _, grant := range grants {
-		item := accessGrantListItem{AccessGrant: grant}
-		var resource model.Resource
-		if err := db.DB.WithContext(ctx).First(&resource, "id = ? AND tenant_id = ?", grant.ResourceID, grant.TenantID).Error; err == nil {
-			item.ResourceName = resource.DisplayName
-			item.ResourceType = resource.Type
-		}
-		var tenant model.Tenant
-		if err := db.DB.WithContext(ctx).First(&tenant, "id = ?", grant.TenantID).Error; err == nil {
-			item.TenantName = tenant.Name
-		}
-		if grant.SubjectType == "user" && grant.SubjectUserID != 0 {
-			var user model.User
-			if err := db.DB.WithContext(ctx).
-				Joins("JOIN tenant_membership ON tenant_membership.user_id = user.id AND tenant_membership.tenant_id = ?", grant.TenantID).
-				First(&user, "user.id = ?", grant.SubjectUserID).Error; err == nil {
-				item.SubjectName = user.Alias
-				if item.SubjectName == "" {
-					item.SubjectName = user.Name
-				}
-			}
-		} else if grant.SubjectType == "group" && grant.SubjectGroupID != nil {
-			var group model.Group
-			if err := db.DB.WithContext(ctx).First(&group, "id = ? AND tenant_id = ?", *grant.SubjectGroupID, grant.TenantID).Error; err == nil {
-				item.SubjectName = group.Alias
-				if item.SubjectName == "" {
-					item.SubjectName = group.Name
-				}
-			}
-		}
-		items = append(items, item)
 	}
 	c.JSON(http.StatusOK, NewPagedResponse(items, total, page, size))
 }

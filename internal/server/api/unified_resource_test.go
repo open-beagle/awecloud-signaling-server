@@ -177,6 +177,7 @@ func TestUnifiedResourceTenantAndGrantBoundaries(t *testing.T) {
 	require.NoError(t, testDB.Create(&tenantGroup).Error)
 	require.NoError(t, testDB.Create(&crossTenantGroup).Error)
 	require.NoError(t, testDB.Create(&legacyGroup).Error)
+	var tenantGroupGrantID string
 	for _, tc := range []struct {
 		groupID int64
 		want    int
@@ -192,7 +193,26 @@ func TestUnifiedResourceTenantAndGrantBoundaries(t *testing.T) {
 		resp := httptest.NewRecorder()
 		r.ServeHTTP(resp, req)
 		require.Equal(t, tc.want, resp.Code)
+		if tc.groupID == tenantGroup.ID {
+			var created struct {
+				Data model.AccessGrant `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &created))
+			tenantGroupGrantID = created.Data.ID
+		}
 	}
+	require.NotEmpty(t, tenantGroupGrantID)
+	groupGrantListResp := httptest.NewRecorder()
+	r.ServeHTTP(groupGrantListResp, httptest.NewRequest(http.MethodGet, "/grants?tenant_id="+tenantA.ID+"&subject_type=group", nil))
+	require.Equal(t, http.StatusOK, groupGrantListResp.Code)
+	var groupGrantListBody struct {
+		Data []accessGrantListItem `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(groupGrantListResp.Body.Bytes(), &groupGrantListBody))
+	require.Len(t, groupGrantListBody.Data, 1)
+	require.Equal(t, tenantGroupGrantID, groupGrantListBody.Data[0].ID)
+	require.Equal(t, resourceA.DisplayName, groupGrantListBody.Data[0].ResourceName)
+	require.Equal(t, tenantGroup.Name, groupGrantListBody.Data[0].SubjectName)
 
 	hostResource := model.Resource{
 		ID: uuid.NewString(), TenantID: tenantA.ID, Type: model.ResourceTypeHostSSH,
