@@ -62,9 +62,11 @@ export type TenantGrantStatus = 'enabled' | 'suspended' | 'revoked' | 'expired'
 export interface TenantGrantV2 {
   id: string
   resource_id: string
+  resource_name?: string
   subject_type: 'user' | 'group'
   subject_user_id?: number
   subject_group_id?: number
+  subject_name?: string
   actions: string[]
   valid_from: string
   expires_at?: string

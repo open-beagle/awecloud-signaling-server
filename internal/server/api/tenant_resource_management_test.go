@@ -327,7 +327,22 @@ func TestTenantResourceAPIIsScopeFirstAndRedactsTrustedTargets(t *testing.T) {
 	grants := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/grants?page=1&size=1", "", nil)
 	require.Equal(t, http.StatusOK, grants.Code, grants.Body.String())
 	require.Contains(t, grants.Body.String(), fixture.grant.ID)
+	require.Contains(t, grants.Body.String(), fixture.resource.DisplayName)
+	require.Contains(t, grants.Body.String(), fixture.user.Name)
 	require.NotContains(t, grants.Body.String(), fixture.otherGrant.ID)
+	group := model.Group{TenantID: fixture.tenant.ID, Name: "tenant-operators", Alias: "Tenant Operators"}
+	require.NoError(t, fixture.database.Create(&group).Error)
+	groupGrant := fixture.grant
+	groupGrant.ID = uuid.NewString()
+	groupGrant.SubjectType = model.TenantAccessGrantSubjectGroup
+	groupGrant.SubjectKey = fmt.Sprint(group.ID)
+	groupGrant.SubjectUserID = nil
+	groupGrant.SubjectGroupID = &group.ID
+	require.NoError(t, fixture.database.Create(&groupGrant).Error)
+	groupGrants := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/grants?subject_type=group&page=1&size=20", "", nil)
+	require.Equal(t, http.StatusOK, groupGrants.Code, groupGrants.Body.String())
+	require.Contains(t, groupGrants.Body.String(), fixture.resource.DisplayName)
+	require.Contains(t, groupGrants.Body.String(), group.Alias)
 	foreignGrantFilter := tenantAPIRequest(fixture, http.MethodGet, "/api/v1/management/tenants/"+fixture.tenant.ID+"/grants?resource_id="+fixture.other.ID, "", nil)
 	require.Equal(t, http.StatusOK, foreignGrantFilter.Code, foreignGrantFilter.Body.String())
 	require.NotContains(t, foreignGrantFilter.Body.String(), fixture.otherGrant.ID)

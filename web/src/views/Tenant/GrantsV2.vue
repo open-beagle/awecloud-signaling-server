@@ -11,7 +11,7 @@
         <span class="result-count">{{ pagination.total }} 条授权</span>
       </div>
       <el-table v-loading="loading" :data="items" stripe>
-        <el-table-column label="Resource ID" min-width="250"><template #default="{ row }"><span class="mono">{{ row.resource_id }}</span></template></el-table-column>
+        <el-table-column label="资源" min-width="250"><template #default="{ row }"><strong>{{ row.resource_name || row.resource_id }}</strong><span v-if="row.resource_name" class="secondary mono">{{ row.resource_id }}</span></template></el-table-column>
         <el-table-column label="授权主体" min-width="160"><template #default="{ row }"><strong>{{ subjectLabel(row) }}</strong><span class="secondary">{{ row.subject_type === 'user' ? '直接用户' : '租户成员组' }}</span></template></el-table-column>
         <el-table-column label="Action" min-width="150"><template #default="{ row }"><el-tag v-for="action in row.actions" :key="action" size="small" effect="plain">{{ action }}</el-tag></template></el-table-column>
         <el-table-column label="状态" width="110"><template #default="{ row }"><el-tag size="small" :type="statusTag(row.status)">{{ statusLabel(row.status) }}</el-tag></template></el-table-column>
@@ -34,7 +34,7 @@ import { useTenantStore } from '@/stores/tenant'
 const tenantStore=useTenantStore(),loading=ref(false),errorMessage=ref(''),items=ref<TenantGrantV2[]>([])
 const filters=reactive({status:'',subjectType:''}),pagination=reactive({page:1,size:20,total:0})
 const load=async()=>{const tenantId=tenantStore.tenantId;if(!tenantId){items.value=[];pagination.total=0;errorMessage.value='当前没有有效的租户上下文。';return}loading.value=true;errorMessage.value='';try{const response=await getTenantGrantsV2(tenantId,{status:filters.status||undefined,subject_type:filters.subjectType||undefined,page:pagination.page,size:pagination.size});items.value=response.success&&response.data?response.data:[];pagination.total=response.total||0}catch{items.value=[];pagination.total=0;errorMessage.value='请确认当前租户权限、资源模型读取开关和服务状态后重试。'}finally{loading.value=false}}
-const applyFilters=()=>{pagination.page=1;load()},subjectLabel=(row:TenantGrantV2)=>row.subject_type==='user'?`User #${row.subject_user_id}`:`Group #${row.subject_group_id}`
+const applyFilters=()=>{pagination.page=1;load()},subjectLabel=(row:TenantGrantV2)=>row.subject_name||(row.subject_type==='user'?`User #${row.subject_user_id}`:`Group #${row.subject_group_id}`)
 const statusLabel=(value:string)=>({enabled:'生效中',suspended:'已暂停',revoked:'已撤销',expired:'已过期'}[value]||value),statusTag=(value:string)=>({enabled:'success',suspended:'warning',revoked:'info',expired:'info'}[value]||'info') as any
 const formatTime=(value?:string)=>value?new Date(value).toLocaleString('zh-CN',{hour12:false}):'长期有效',durationLabel=(seconds:number)=>seconds>=3600?`${Math.round(seconds/3600)} 小时`:`${Math.round(seconds/60)} 分钟`
 watch(()=>tenantStore.contextRevision,()=>{filters.status='';filters.subjectType='';pagination.page=1;load()});onMounted(load)
