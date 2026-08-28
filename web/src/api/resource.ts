@@ -24,6 +24,12 @@ export interface TenantMember {
   expires_at?: string
 }
 
+export interface TenantMemberCandidate {
+  user_id: number
+  name: string
+  alias?: string
+}
+
 export interface Resource {
   id: string
   tenant_id: string
@@ -210,6 +216,13 @@ export const createTenant = (data: { key: string; name: string }) => {
 
 export const addTenantMember = (tenantId: string, data: { user_id: number; role: 'member' | 'viewer' }) => {
   return request.post<any, ApiResponse<TenantMember>>(`/api/v1/admin/tenants/${tenantId}/members`, data, { headers: { 'X-Tenant-ID': tenantId } })
+}
+
+export const getTenantMemberCandidates = (tenantId: string, params: { search?: string; page?: number; size?: number }) => {
+  return request.get<any, PagedResponse<TenantMemberCandidate[]>>(`/api/v1/admin/tenants/${tenantId}/member-candidates`, {
+    params,
+    headers: { 'X-Tenant-ID': tenantId }
+  })
 }
 
 export const getTenantMembers = (tenantId: string) => {

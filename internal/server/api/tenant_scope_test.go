@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"testing"
 	"time"
@@ -196,6 +197,70 @@ func TestTenantMemberListDoesNotExposeAnotherTenant(t *testing.T) {
 	deniedResp := httptest.NewRecorder()
 	router.ServeHTTP(deniedResp, deniedReq)
 	require.Equal(t, http.StatusForbidden, deniedResp.Code)
+}
+
+func TestTenantMemberCandidatesAreScopedAndFiltered(t *testing.T) {
+	oldDB := db.DB
+	t.Cleanup(func() { db.DB = oldDB })
+	database, err := gorm.Open(sqlite.Open("file:tenant_member_candidates_test?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	db.DB = database
+	require.NoError(t, database.AutoMigrate(&model.Admin{}, &model.AdminTenantMembership{}, &model.User{}, &model.Tenant{}, &model.TenantMembership{}, &model.AuditLog{}))
+
+	admin := model.Admin{Username: "tenant-candidate-admin", PasswordHash: "test", Role: "tenant_admin"}
+	tenant := model.Tenant{ID: uuid.NewString(), Key: "candidate-tenant", Name: "Candidate Tenant", Status: model.TenantStatusActive}
+	otherTenant := model.Tenant{ID: uuid.NewString(), Key: "candidate-other", Name: "Candidate Other", Status: model.TenantStatusActive}
+	require.NoError(t, database.Create(&admin).Error)
+	require.NoError(t, database.Create(&tenant).Error)
+	require.NoError(t, database.Create(&otherTenant).Error)
+	require.NoError(t, database.Create(&model.AdminTenantMembership{AdminID: admin.ID, TenantID: tenant.ID, Role: "tenant_admin", Enabled: true}).Error)
+
+	candidate := model.User{Name: "yin-rong-wei", Alias: "尹蝾威", Role: model.UserRoleClient, SecretHash: "test", Enabled: true}
+	existing := model.User{Name: "existing-client", Role: model.UserRoleClient, SecretHash: "test", Enabled: true}
+	disabled := model.User{Name: "disabled-client", Role: model.UserRoleClient, SecretHash: "test", Enabled: false}
+	agent := model.User{Name: "candidate-agent", Role: model.UserRoleAgent, SecretHash: "test", Enabled: true}
+	require.NoError(t, database.Create(&candidate).Error)
+	require.NoError(t, database.Create(&existing).Error)
+	require.NoError(t, database.Create(&disabled).Error)
+	require.NoError(t, database.Create(&agent).Error)
+	require.NoError(t, database.Model(&disabled).Update("enabled", false).Error)
+	disabled.Enabled = false
+	require.NoError(t, database.Create(&model.TenantMembership{TenantID: tenant.ID, UserID: existing.ID, Enabled: true}).Error)
+	require.NoError(t, database.Create(&model.TenantMembership{TenantID: otherTenant.ID, UserID: candidate.ID, Enabled: true}).Error)
+
+	api := NewUnifiedResourceAPI()
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("admin_id", admin.ID) })
+	router.GET("/tenants/:id/member-candidates", api.ListTenantMemberCandidates)
+	router.POST("/tenants/:id/members", api.AddTenantMember)
+
+	request := httptest.NewRequest(http.MethodGet, "/tenants/"+tenant.ID+"/member-candidates?search="+url.QueryEscape("尹蝾威"), nil)
+	request.Header.Set("X-Tenant-ID", tenant.ID)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var body struct {
+		Data  []tenantMemberCandidate `json:"data"`
+		Total int64                   `json:"total"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Equal(t, int64(1), body.Total)
+	require.Equal(t, []tenantMemberCandidate{{UserID: candidate.ID, Name: candidate.Name, Alias: candidate.Alias}}, body.Data)
+
+	denied := httptest.NewRequest(http.MethodGet, "/tenants/"+otherTenant.ID+"/member-candidates", nil)
+	denied.Header.Set("X-Tenant-ID", otherTenant.ID)
+	deniedResponse := httptest.NewRecorder()
+	router.ServeHTTP(deniedResponse, denied)
+	require.Equal(t, http.StatusForbidden, deniedResponse.Code)
+
+	for _, user := range []model.User{disabled, agent} {
+		add := httptest.NewRequest(http.MethodPost, "/tenants/"+tenant.ID+"/members", bytes.NewBufferString(`{"user_id":`+strconv.FormatUint(user.ID, 10)+`,"role":"member"}`))
+		add.Header.Set("Content-Type", "application/json")
+		add.Header.Set("X-Tenant-ID", tenant.ID)
+		addResponse := httptest.NewRecorder()
+		router.ServeHTTP(addResponse, add)
+		require.Equal(t, http.StatusBadRequest, addResponse.Code)
+	}
 }
 
 func TestTenantMemberDisableRestorePreservesMembership(t *testing.T) {

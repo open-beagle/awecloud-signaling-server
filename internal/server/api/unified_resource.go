@@ -87,6 +87,12 @@ type tenantMemberListItem struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
+type tenantMemberCandidate struct {
+	UserID uint64 `json:"user_id"`
+	Name   string `json:"name"`
+	Alias  string `json:"alias"`
+}
+
 type resourceListItem struct {
 	model.Resource
 	TenantName   string `json:"tenant_name"`
@@ -223,6 +229,10 @@ func (a *UnifiedResourceAPI) AddTenantMember(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("用户不存在"))
 		return
 	}
+	if user.Role != model.UserRoleClient || !user.Enabled {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("只能添加已启用的客户端身份"))
+		return
+	}
 	membership := model.TenantMembership{TenantID: tenantID, UserID: req.UserID, Role: req.Role, Enabled: true}
 	if err := db.DB.WithContext(c.Request.Context()).Where("tenant_id = ? AND user_id = ?", tenantID, req.UserID).
 		Assign(map[string]interface{}{"role": req.Role, "enabled": true, "deleted_at": nil}).FirstOrCreate(&membership).Error; err != nil {
@@ -344,6 +354,45 @@ func (a *UnifiedResourceAPI) ListTenantMembers(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, NewSuccessResponse(items))
+}
+
+// ListTenantMemberCandidates exposes the minimum identity projection needed
+// to add a member without granting access to the platform identity directory.
+func (a *UnifiedResourceAPI) ListTenantMemberCandidates(c *gin.Context) {
+	tenantID := c.Param("id")
+	if !requireTenantPermission(c, tenantID, PermissionTenantMembersWrite) {
+		return
+	}
+	ctx := c.Request.Context()
+	var tenant model.Tenant
+	if err := db.DB.WithContext(ctx).First(&tenant, "id = ?", tenantID).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("租户不存在"))
+		return
+	}
+
+	page, size := pageParams(c)
+	query := db.DB.WithContext(ctx).Model(&model.User{}).
+		Where("role = ? AND enabled = ?", model.UserRoleClient, true).
+		Where("NOT EXISTS (SELECT 1 FROM tenant_membership WHERE tenant_membership.tenant_id = ? AND tenant_membership.user_id = user.id AND tenant_membership.deleted_at IS NULL)", tenantID)
+	if search := strings.TrimSpace(c.Query("search")); search != "" {
+		like := "%" + search + "%"
+		query = query.Where("name LIKE ? OR alias LIKE ?", like, like)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询成员候选失败"))
+		return
+	}
+	var users []model.User
+	if err := query.Order("created_at DESC").Offset((page - 1) * size).Limit(size).Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询成员候选失败"))
+		return
+	}
+	items := make([]tenantMemberCandidate, 0, len(users))
+	for _, user := range users {
+		items = append(items, tenantMemberCandidate{UserID: user.ID, Name: user.Name, Alias: user.Alias})
+	}
+	c.JSON(http.StatusOK, NewPagedResponse(items, total, page, size))
 }
 
 // List returns resources in the selected tenant context. Omitting tenant_id
