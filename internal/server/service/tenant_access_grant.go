@@ -30,9 +30,11 @@ var (
 type TenantGrantView struct {
 	ID                string                             `json:"id"`
 	ResourceID        string                             `json:"resource_id"`
+	ResourceName      string                             `json:"resource_name,omitempty"`
 	SubjectType       model.TenantAccessGrantSubjectType `json:"subject_type"`
 	SubjectUserID     *uint64                            `json:"subject_user_id,omitempty"`
 	SubjectGroupID    *int64                             `json:"subject_group_id,omitempty"`
+	SubjectName       string                             `json:"subject_name,omitempty"`
 	Actions           []string                           `json:"actions"`
 	ValidFrom         time.Time                          `json:"valid_from"`
 	ExpiresAt         *time.Time                         `json:"expires_at,omitempty"`
@@ -138,7 +140,88 @@ func (s *TenantAccessGrantService) List(ctx context.Context, authorization *Mana
 		}
 		result.Items = append(result.Items, hostGrants...)
 	}
+	if err := s.enrichGrantViews(ctx, tenantID, result.Items); err != nil {
+		return nil, err
+	}
 	return result, nil
+}
+
+func (s *TenantAccessGrantService) enrichGrantViews(ctx context.Context, tenantID string, views []TenantGrantView) error {
+	resourceIDs := make([]string, 0, len(views))
+	userIDs := make([]uint64, 0, len(views))
+	groupIDs := make([]int64, 0, len(views))
+	for i := range views {
+		resourceIDs = append(resourceIDs, views[i].ResourceID)
+		if views[i].SubjectUserID != nil {
+			userIDs = append(userIDs, *views[i].SubjectUserID)
+		}
+		if views[i].SubjectGroupID != nil {
+			groupIDs = append(groupIDs, *views[i].SubjectGroupID)
+		}
+	}
+	resourceNames := make(map[string]string, len(resourceIDs))
+	if len(resourceIDs) > 0 {
+		var tenantResources []struct {
+			ID          string
+			DisplayName string
+		}
+		if err := s.db.WithContext(ctx).Model(&model.TenantResource{}).
+			Select("id, display_name").Where("tenant_id = ? AND id IN ?", tenantID, resourceIDs).Scan(&tenantResources).Error; err != nil {
+			return err
+		}
+		for _, resource := range tenantResources {
+			resourceNames[resource.ID] = resource.DisplayName
+		}
+		var legacyResources []struct {
+			ID          string
+			DisplayName string
+		}
+		if err := s.db.WithContext(ctx).Model(&model.Resource{}).
+			Select("id, display_name").Where("tenant_id = ? AND id IN ?", tenantID, resourceIDs).Scan(&legacyResources).Error; err != nil {
+			return err
+		}
+		for _, resource := range legacyResources {
+			resourceNames[resource.ID] = resource.DisplayName
+		}
+	}
+	userNames := make(map[uint64]string, len(userIDs))
+	if len(userIDs) > 0 {
+		var users []model.User
+		if err := s.db.WithContext(ctx).Select("id, name, alias").Where("id IN ?", userIDs).Find(&users).Error; err != nil {
+			return err
+		}
+		for _, user := range users {
+			userNames[user.ID] = firstNonEmpty(user.Alias, user.Name)
+		}
+	}
+	groupNames := make(map[int64]string, len(groupIDs))
+	if len(groupIDs) > 0 {
+		var groups []model.Group
+		if err := s.db.WithContext(ctx).Select("id, name, alias").Where("tenant_id = ? AND id IN ?", tenantID, groupIDs).Find(&groups).Error; err != nil {
+			return err
+		}
+		for _, group := range groups {
+			groupNames[group.ID] = firstNonEmpty(group.Alias, group.Name)
+		}
+	}
+	for i := range views {
+		views[i].ResourceName = resourceNames[views[i].ResourceID]
+		if views[i].SubjectUserID != nil {
+			views[i].SubjectName = userNames[*views[i].SubjectUserID]
+		} else if views[i].SubjectGroupID != nil {
+			views[i].SubjectName = groupNames[*views[i].SubjectGroupID]
+		}
+	}
+	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (s *TenantAccessGrantService) listUnifiedHostSSHGrants(ctx context.Context, tenantID string, input TenantGrantListInput, now time.Time) ([]TenantGrantView, int64, error) {
@@ -195,7 +278,15 @@ func (s *TenantAccessGrantService) Get(ctx context.Context, authorization *Manag
 	if err != nil {
 		return nil, err
 	}
-	return tenantGrantView(grant)
+	view, err := tenantGrantView(grant)
+	if err != nil {
+		return nil, err
+	}
+	enriched := []TenantGrantView{*view}
+	if err := s.enrichGrantViews(ctx, tenantID, enriched); err != nil {
+		return nil, err
+	}
+	return &enriched[0], nil
 }
 
 type CreateTenantGrantInput struct {
