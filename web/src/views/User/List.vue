@@ -85,6 +85,18 @@
             <el-tag v-else type="danger" size="small">{{ row.source === 'logto' ? $t('user.pendingApproval') : $t('user.enabledFalse') }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="删除状态" min-width="190">
+          <template #default="{ row }">
+            <div v-if="row.deletion" class="deletion-status">
+              <el-tag :type="row.deletion.status === 'failed' ? 'danger' : 'warning'" size="small">
+                {{ row.deletion.status === 'failed' ? '删除失败' : '删除中' }}
+              </el-tag>
+              <span>{{ deletionStepText(row.deletion.current_step) }} · {{ row.deletion.progress }}%</span>
+              <el-button type="primary" link size="small" @click="openDeletionDetail(row.deletion)">{{ row.deletion.status === 'failed' ? '查看原因' : '查看进度' }}</el-button>
+            </div>
+            <span v-else class="secondary">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="source" :label="$t('user.source')" width="100" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.source === 'logto'" type="warning" size="small">{{ $t('user.sourceLogto') }}</el-tag>
@@ -98,11 +110,18 @@
         </el-table-column>
         <el-table-column v-if="canWrite" :label="$t('common.actions')" width="260" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="!row.enabled" type="success" link size="small" @click="handleEnable(row)">{{ $t('user.enabledTrue') }}</el-button>
-            <el-button v-else type="warning" link size="small" @click="handleDisable(row)">{{ $t('user.enabledFalse') }}</el-button>
-            <el-button v-if="row.role === 'client'" type="primary" link size="small" :icon="Upload" @click="handleDeploy(row)">{{ $t('user.deploy') }}</el-button>
-            <el-button type="primary" link size="small" @click="handleEdit(row)">{{ $t('common.edit') }}</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">{{ $t('common.delete') }}</el-button>
+            <template v-if="row.deletion?.status === 'failed'">
+              <el-button type="primary" link size="small" @click="openDeletionDetail(row.deletion)">查看原因</el-button>
+              <el-button type="danger" link size="small" @click="handleRetryDeletion(row)">重试删除</el-button>
+            </template>
+            <el-button v-else-if="row.deletion" type="primary" link size="small" @click="openDeletionDetail(row.deletion)">查看进度</el-button>
+            <template v-else-if="!row.deletion">
+              <el-button v-if="!row.enabled" type="success" link size="small" @click="handleEnable(row)">{{ $t('user.enabledTrue') }}</el-button>
+              <el-button v-else type="warning" link size="small" @click="handleDisable(row)">{{ $t('user.enabledFalse') }}</el-button>
+              <el-button v-if="row.role === 'client'" type="primary" link size="small" :icon="Upload" @click="handleDeploy(row)">{{ $t('user.deploy') }}</el-button>
+              <el-button type="primary" link size="small" @click="handleEdit(row)">{{ $t('common.edit') }}</el-button>
+              <el-button type="danger" link size="small" @click="handleDelete(row)">{{ $t('common.delete') }}</el-button>
+            </template>
           </template>
         </el-table-column>
       </el-table>
@@ -126,17 +145,32 @@
 
     <!-- Desktop 部署弹窗 -->
     <DeployDialog v-model="showDeployDialog" :user="selectedUser" @success="fetchUsers" />
+
+    <el-drawer v-model="showDeletionDetail" title="删除任务" size="420px">
+      <template v-if="selectedDeletion">
+        <el-alert v-if="selectedDeletion.status === 'failed'" type="error" :title="selectedDeletion.error_message || '删除任务执行失败'" :closable="false" show-icon />
+        <el-progress class="deletion-progress" :percentage="selectedDeletion.progress" :status="selectedDeletion.status === 'failed' ? 'exception' : undefined" />
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="状态">{{ selectedDeletion.status === 'failed' ? '删除失败' : '删除中' }}</el-descriptions-item>
+          <el-descriptions-item label="当前步骤">{{ deletionStepText(selectedDeletion.current_step) }}</el-descriptions-item>
+          <el-descriptions-item label="受理时间">{{ formatTime(selectedDeletion.created_at) }}</el-descriptions-item>
+          <el-descriptions-item label="最近更新">{{ formatTime(selectedDeletion.updated_at) }}</el-descriptions-item>
+          <el-descriptions-item label="请求 ID">{{ selectedDeletion.request_id }}</el-descriptions-item>
+          <el-descriptions-item label="任务 ID">{{ selectedDeletion.id }}</el-descriptions-item>
+        </el-descriptions>
+      </template>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Upload } from '@element-plus/icons-vue'
 import { Warning } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
-import { getUsers, deleteUser, enableUser, disableUser, type User, type UserRole, type UserSource } from '@/api/user'
+import { getUsers, createUserDeletionJob, retryUserDeletionJob, enableUser, disableUser, type User, type UserDeletionSummary, type UserRole, type UserSource } from '@/api/user'
 import { formatTime } from '@/utils/time'
 import CreateDialog from './components/CreateDialog.vue'
 import DeployDialog from './components/DeployDialog.vue'
@@ -152,6 +186,11 @@ const users = ref<User[]>([])
 const showCreateDialog = ref(false)
 const showDeployDialog = ref(false)
 const selectedUser = ref<User | null>(null)
+const showDeletionDetail = ref(false)
+const selectedDeletion = ref<UserDeletionSummary | null>(null)
+let pollingTimer: number | undefined
+const activeDeletionStatuses = new Set(['accepting', 'queued', 'running'])
+const hasActiveDeletion = computed(() => users.value.some(user => user.deletion && activeDeletionStatuses.has(user.deletion.status)))
 
 const searchForm = reactive({
   role: '' as UserRole | '',
@@ -167,8 +206,8 @@ const pagination = reactive({
 })
 
 // 获取用户列表
-const fetchUsers = async () => {
-  loading.value = true
+const fetchUsers = async (background = false) => {
+  if (!background) loading.value = true
   try {
     const res = await getUsers({
       role: (searchForm.role || undefined) as UserRole | undefined,
@@ -179,13 +218,19 @@ const fetchUsers = async () => {
       size: pagination.size
     })
     if (res.success && res.data) {
+      const previousActive = new Set(users.value.filter(user => user.deletion && activeDeletionStatuses.has(user.deletion.status)).map(user => user.id))
+      const nextIDs = new Set(res.data.map(user => user.id))
       users.value = res.data
       pagination.total = res.total
+      if (background && [...previousActive].some(id => !nextIDs.has(id))) ElMessage.success('用户已删除')
+      if (selectedDeletion.value) {
+        selectedDeletion.value = res.data.find(user => user.deletion?.id === selectedDeletion.value?.id)?.deletion || selectedDeletion.value
+      }
     }
   } catch (error) {
     console.error('获取用户列表失败:', error)
   } finally {
-    loading.value = false
+    if (!background) loading.value = false
   }
 }
 
@@ -225,10 +270,11 @@ const handleDelete = async (row: User) => {
       t('common.warning'),
       { type: 'warning' }
     )
-    const res = await deleteUser(row.name)
+    const res = await createUserDeletionJob(row.name, crypto.randomUUID())
     if (res.success) {
-      ElMessage.success(t('common.deleteSuccess'))
-      fetchUsers()
+      if (res.data) row.deletion = res.data
+      ElMessage.success('删除任务已受理')
+      fetchUsers(true)
     } else {
       ElMessage.error(res.message || t('common.deleteFailed'))
     }
@@ -238,6 +284,31 @@ const handleDelete = async (row: User) => {
     }
   }
 }
+
+const handleRetryDeletion = async (row: User) => {
+  if (!canWrite.value || !row.deletion) return
+  try {
+    const res = await retryUserDeletionJob(row.deletion, crypto.randomUUID())
+    if (res.success && res.data) {
+      row.deletion = res.data
+      ElMessage.success('删除任务已重新排队')
+      fetchUsers(true)
+    }
+  } catch (error) {
+    console.error('重试删除失败:', error)
+  }
+}
+
+const openDeletionDetail = (deletion: UserDeletionSummary) => {
+  selectedDeletion.value = deletion
+  showDeletionDetail.value = true
+}
+
+const deletionStepText = (step: UserDeletionSummary['current_step']) => ({
+  accepting: '正在确认请求', accepted: '等待执行', disconnecting: '断开连接',
+  cleaning_headscale: '清理 Headscale', cleaning_authorizations: '清理授权',
+  cleaning_resources: '清理资源', finalizing: '完成删除', completed: '已完成'
+}[step] || step)
 
 // Desktop 部署
 const handleDeploy = (row: User) => {
@@ -330,6 +401,19 @@ const compareVersion = (v1: string, v2: string): number => {
 
 onMounted(() => {
   fetchUsers()
+  pollingTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible' && hasActiveDeletion.value) fetchUsers(true)
+  }, 3000)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+})
+
+const handleVisibilityChange = () => {
+  if (document.visibilityState === 'visible' && hasActiveDeletion.value) fetchUsers(true)
+}
+
+onUnmounted(() => {
+  if (pollingTimer !== undefined) window.clearInterval(pollingTimer)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 
@@ -380,4 +464,16 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
 }
+
+.deletion-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.deletion-progress { margin-bottom: 20px; }
+
+.secondary { color: var(--text-secondary); }
 </style>

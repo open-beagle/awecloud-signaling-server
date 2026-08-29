@@ -9,6 +9,7 @@ import (
 func TestLoadServerConfigAdminCredentialsFromEnvironment(t *testing.T) {
 	t.Setenv("ADMIN_USERNAME", "env-admin")
 	t.Setenv("ADMIN_PASSWORD", "env-password")
+	t.Setenv("SIGNAL_INTERNAL_TOKEN", "test-internal-token")
 
 	path := filepath.Join(t.TempDir(), "server.toml")
 	if err := os.WriteFile(path, []byte("[web]\nlisten_port = 8080\n"), 0o600); err != nil {
@@ -37,6 +38,7 @@ func TestLoadServerConfigHeadscaleAutoSyncOverride(t *testing.T) {
 	t.Setenv("ADMIN_USERNAME", "env-admin")
 	t.Setenv("ADMIN_PASSWORD", "env-password")
 	t.Setenv("HEADSCALE_AUTO_SYNC", "false")
+	t.Setenv("SIGNAL_INTERNAL_TOKEN", "test-internal-token")
 
 	path := filepath.Join(t.TempDir(), "server.toml")
 	if err := os.WriteFile(path, []byte("[web]\nlisten_port = 8080\n"), 0o600); err != nil {
@@ -80,6 +82,7 @@ func TestResourceFeatureFlagsDefaultOffAndEnvironmentOverrides(t *testing.T) {
 	}
 	t.Setenv("ADMIN_USERNAME", "feature-admin")
 	t.Setenv("ADMIN_PASSWORD", "feature-password")
+	t.Setenv("SIGNAL_INTERNAL_TOKEN", "test-internal-token")
 
 	path := filepath.Join(t.TempDir(), "server.toml")
 	data := []byte("[web]\nlisten_port = 8080\n")

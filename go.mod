@@ -12,6 +12,7 @@ require (
 	github.com/juanfont/headscale v0.27.1
 	github.com/logto-io/go/v2 v2.2.0
 	github.com/miekg/dns v1.1.72
+	github.com/open-beagle/signal-worker v0.0.0-20260829061835-17c49d3f3fe3
 	github.com/pkg/sftp v1.13.6
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.11.1

@@ -7,6 +7,24 @@ export type UserRole = 'agent' | 'client'
 // 用户来源
 export type UserSource = 'manual' | 'logto'
 
+export type UserDeletionStatus = 'accepting' | 'queued' | 'running' | 'failed' | 'succeeded'
+
+export interface UserDeletionSummary {
+  id: string
+  user_id: number
+  status: UserDeletionStatus
+  current_step: string
+  progress: number
+  attempt: number
+  error_code?: string
+  error_message?: string
+  request_id: string
+  created_at: string
+  updated_at: string
+  completed_at?: string
+  row_version: number
+}
+
 // 用户模型
 export interface User {
   id: number
@@ -24,6 +42,7 @@ export interface User {
   group_count?: number
   versions?: string[]      // 设备版本列表（去重）
   latest_version?: string  // 最新版本号
+  deletion?: UserDeletionSummary
 }
 
 // 用户详情中的设备
@@ -83,9 +102,20 @@ export const updateUser = (identifier: number | string, data: UpdateUserRequest)
   return request.put<any, ApiResponse<User>>(`/api/v1/admin/users/${identifier}`, data)
 }
 
-// 删除用户（支持 ID 或用户名）
-export const deleteUser = (identifier: number | string) => {
-  return request.delete<any, ApiResponse>(`/api/v1/admin/users/${identifier}`)
+export const createUserDeletionJob = (identifier: number | string, idempotencyKey: string) => {
+  return request.post<any, ApiResponse<UserDeletionSummary>>(`/api/v1/admin/users/${identifier}/deletion-jobs`, undefined, {
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+}
+
+export const getUserDeletionJob = (jobId: string) => {
+  return request.get<any, ApiResponse<UserDeletionSummary>>(`/api/v1/admin/user-deletion-jobs/${jobId}`)
+}
+
+export const retryUserDeletionJob = (job: UserDeletionSummary, idempotencyKey: string) => {
+  return request.post<any, ApiResponse<UserDeletionSummary>>(`/api/v1/admin/user-deletion-jobs/${job.id}/retry`, undefined, {
+    headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(job.row_version) }
+  })
 }
 
 // 重新生成密钥（支持 ID 或用户名）

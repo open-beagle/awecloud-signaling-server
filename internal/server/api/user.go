@@ -10,7 +10,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -19,7 +22,15 @@ import (
 	grpcserver "github.com/open-beagle/awecloud-signaling-server/internal/server/grpc"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	pb "github.com/open-beagle/signal-worker/pkg/proto"
 )
+
+type UserDeletionWorker interface {
+	Submit(context.Context, *pb.SubmitUserDeletionRequest) (*pb.UserDeletionJob, error)
+	Get(context.Context, string) (*pb.UserDeletionJob, error)
+	List(context.Context, []uint64) ([]*pb.UserDeletionJob, error)
+	Retry(context.Context, *pb.RetryUserDeletionRequest) (*pb.UserDeletionJob, error)
+}
 
 // UserAPI 用户管理 API
 type UserAPI struct {
@@ -27,7 +38,10 @@ type UserAPI struct {
 	hsClient       *headscale.Client
 	agentService   *grpcserver.AgentServiceServer
 	desktopService *grpcserver.DesktopServiceServer
+	deletionWorker UserDeletionWorker
 }
+
+func (a *UserAPI) SetDeletionWorker(worker UserDeletionWorker) { a.deletionWorker = worker }
 
 // NewUserAPI 创建 UserAPI
 func NewUserAPI(cfg *config.ServerConfig) *UserAPI {
@@ -60,22 +74,51 @@ func (a *UserAPI) SetDesktopService(service *grpcserver.DesktopServiceServer) {
 
 // UserListItem 用户列表项
 type UserListItem struct {
-	ID            uint64           `json:"id"`
-	Name          string           `json:"name"`
-	Alias         string           `json:"alias"`
-	Role          string           `json:"role"`
-	NodeCount     int64            `json:"node_count"`    // 设备数量
-	OnlineCount   int64            `json:"online_count"`  // 在线设备数量
-	ServiceCount  int64            `json:"service_count"` // 服务数量（仅 Agent）
-	GroupCount    int64            `json:"group_count"`   // 分组数量
-	Status        string           `json:"status"`
-	SSHEnabled    bool             `json:"ssh_enabled"` // SSH 是否启用（仅 Agent）
-	Enabled       bool             `json:"enabled"`     // 是否启用
-	Source        model.UserSource `json:"source"`      // 来源：manual / logto
-	LastOnline    string           `json:"last_online"`
-	Versions      []string         `json:"versions"`       // 设备版本列表（去重）
-	LatestVersion string           `json:"latest_version"` // 最新版本号
-	CreatedAt     time.Time        `json:"created_at"`
+	ID            uint64               `json:"id"`
+	Name          string               `json:"name"`
+	Alias         string               `json:"alias"`
+	Role          string               `json:"role"`
+	NodeCount     int64                `json:"node_count"`    // 设备数量
+	OnlineCount   int64                `json:"online_count"`  // 在线设备数量
+	ServiceCount  int64                `json:"service_count"` // 服务数量（仅 Agent）
+	GroupCount    int64                `json:"group_count"`   // 分组数量
+	Status        string               `json:"status"`
+	SSHEnabled    bool                 `json:"ssh_enabled"` // SSH 是否启用（仅 Agent）
+	Enabled       bool                 `json:"enabled"`     // 是否启用
+	Source        model.UserSource     `json:"source"`      // 来源：manual / logto
+	LastOnline    string               `json:"last_online"`
+	Versions      []string             `json:"versions"`       // 设备版本列表（去重）
+	LatestVersion string               `json:"latest_version"` // 最新版本号
+	CreatedAt     time.Time            `json:"created_at"`
+	Deletion      *UserDeletionSummary `json:"deletion,omitempty"`
+}
+
+type UserDeletionSummary struct {
+	ID           string `json:"id"`
+	UserID       uint64 `json:"user_id"`
+	Status       string `json:"status"`
+	CurrentStep  string `json:"current_step"`
+	Progress     int32  `json:"progress"`
+	Attempt      int32  `json:"attempt"`
+	ErrorCode    string `json:"error_code,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+	RequestID    string `json:"request_id"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+	CompletedAt  string `json:"completed_at,omitempty"`
+	RowVersion   int64  `json:"row_version"`
+}
+
+func deletionSummary(job *pb.UserDeletionJob) *UserDeletionSummary {
+	return &UserDeletionSummary{ID: job.Id, UserID: job.UserId, Status: job.Status, CurrentStep: job.CurrentStep, Progress: job.Progress, Attempt: job.Attempt, ErrorCode: job.ErrorCode, ErrorMessage: job.ErrorMessage, RequestID: job.RequestId, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, CompletedAt: job.CompletedAt, RowVersion: job.RowVersion}
+}
+
+func rejectDeletingUser(c *gin.Context, user *model.User) bool {
+	if user.DeletionJobID == nil {
+		return false
+	}
+	codedError(c, http.StatusConflict, "USER_DELETION_IN_PROGRESS", "用户正在删除，不能执行该操作")
+	return true
 }
 
 // List 获取用户列表
@@ -194,6 +237,7 @@ func (a *UserAPI) List(c *gin.Context) {
 		Pluck("version", &latestVersion)
 
 	result := make([]UserListItem, len(users))
+	userIDs := make([]uint64, len(users))
 	for i, user := range users {
 		stats := nodeStatsMap[user.ID]
 		status := "offline"
@@ -227,6 +271,21 @@ func (a *UserAPI) List(c *gin.Context) {
 			LatestVersion: latestVersion,
 			CreatedAt:     user.CreatedAt,
 		}
+		userIDs[i] = user.ID
+	}
+	if a.deletionWorker != nil && len(userIDs) > 0 {
+		jobs, err := a.deletionWorker.List(ctx, userIDs)
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, NewCodedErrorResponse("USER_DELETION_WORKER_UNAVAILABLE", "删除任务服务暂不可用", requestID(c)))
+			return
+		}
+		byUser := make(map[uint64]*UserDeletionSummary, len(jobs))
+		for _, job := range jobs {
+			byUser[job.UserId] = deletionSummary(job)
+		}
+		for i := range result {
+			result[i].Deletion = byUser[result[i].ID]
+		}
 	}
 
 	c.JSON(http.StatusOK, NewPagedResponse(result, total, page, size))
@@ -234,15 +293,16 @@ func (a *UserAPI) List(c *gin.Context) {
 
 // UserDetail 用户详情
 type UserDetail struct {
-	ID         uint64            `json:"id"`
-	Name       string            `json:"name"`
-	Alias      string            `json:"alias"`
-	Role       string            `json:"role"`
-	SSHEnabled bool              `json:"ssh_enabled"`
-	CreatedAt  time.Time         `json:"created_at"`
-	UpdatedAt  time.Time         `json:"updated_at"`
-	Nodes      []UserNodeItem    `json:"nodes"`    // 设备列表
-	Services   []UserServiceItem `json:"services"` // 服务列表（仅 Agent）
+	ID         uint64               `json:"id"`
+	Name       string               `json:"name"`
+	Alias      string               `json:"alias"`
+	Role       string               `json:"role"`
+	SSHEnabled bool                 `json:"ssh_enabled"`
+	CreatedAt  time.Time            `json:"created_at"`
+	UpdatedAt  time.Time            `json:"updated_at"`
+	Nodes      []UserNodeItem       `json:"nodes"`    // 设备列表
+	Services   []UserServiceItem    `json:"services"` // 服务列表（仅 Agent）
+	Deletion   *UserDeletionSummary `json:"deletion,omitempty"`
 }
 
 // UserNodeItem 用户设备项
@@ -355,6 +415,16 @@ func (a *UserAPI) Get(c *gin.Context) {
 		UpdatedAt:  user.UpdatedAt,
 		Nodes:      nodeItems,
 		Services:   serviceItems,
+	}
+	if a.deletionWorker != nil {
+		jobs, err := a.deletionWorker.List(ctx, []uint64{user.ID})
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, NewCodedErrorResponse("USER_DELETION_WORKER_UNAVAILABLE", "删除任务服务暂不可用", requestID(c)))
+			return
+		}
+		if len(jobs) > 0 {
+			result.Deletion = deletionSummary(jobs[0])
+		}
 	}
 
 	c.JSON(http.StatusOK, NewSuccessResponse(result))
@@ -484,6 +554,9 @@ func (a *UserAPI) Update(c *gin.Context) {
 		return
 	}
 
+	if rejectDeletingUser(c, &user) {
+		return
+	}
 	user.Alias = req.Alias
 
 	// 更新 SSH 配置（Agent 和 Client 用户都支持）
@@ -538,6 +611,9 @@ func (a *UserAPI) UpdateSSH(c *gin.Context) {
 		return
 	}
 
+	if rejectDeletingUser(c, &user) {
+		return
+	}
 	oldEnabled := user.SSHEnabled
 	user.SSHEnabled = req.Enabled
 
@@ -557,57 +633,97 @@ func (a *UserAPI) UpdateSSH(c *gin.Context) {
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("SSH 配置更新成功", nil))
 }
 
-// Delete 删除用户（支持 ID 或用户名）
-func (a *UserAPI) Delete(c *gin.Context) {
+func (a *UserAPI) CreateDeletionJob(c *gin.Context) {
+	if a.deletionWorker == nil {
+		codedError(c, http.StatusServiceUnavailable, "USER_DELETION_WORKER_UNAVAILABLE", "删除任务服务暂不可用")
+		return
+	}
 	ctx := c.Request.Context()
 	identifier := c.Param("id")
-
 	var user model.User
 	var err error
-
-	// 尝试解析为 ID
 	if id, parseErr := strconv.ParseUint(identifier, 10, 64); parseErr == nil {
 		err = db.DB.WithContext(ctx).First(&user, id).Error
 	} else {
 		err = db.DB.WithContext(ctx).Where("name = ?", identifier).First(&user).Error
 	}
-
 	if err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
+		codedError(c, http.StatusNotFound, "USER_NOT_FOUND", "用户不存在")
 		return
 	}
-
-	logger.Infof("开始删除用户: id=%d, name=%s, role=%s", user.ID, user.Name, user.Role)
-
-	// 步骤 1：断开所有 gRPC 连接
-	a.disconnectUserConnections(ctx, user.ID, user.Role)
-
-	// 步骤 2：清理 Headscale 节点和用户
-	if a.hsClient != nil {
-		a.cleanupHeadscaleResources(ctx, user.ID, user.Name, user.Role)
-	}
-
-	// 步骤 3：删除数据库相关数据
-	db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.Node{})
-	db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.ProxyService{})
-	db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.PortForward{})
-	db.DB.WithContext(ctx).Where("user_id = ?", user.ID).Delete(&model.GroupMember{})
-
-	// 步骤 4：删除用户
-	if err := db.DB.WithContext(ctx).Delete(&model.User{}, user.ID).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
+	idempotency, _ := c.Get(contextIdempotencyKey)
+	key, _ := idempotency.(string)
+	adminID := getAdminIDFromContext(c)
+	operationID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("user-deletion:%d:%s", adminID, key))).String()
+	callCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	job, err := a.deletionWorker.Submit(callCtx, &pb.SubmitUserDeletionRequest{UserId: user.ID, SubjectName: user.Name, SubjectAlias: user.Alias, SubjectRole: string(user.Role), RequestedByAdminId: adminID, RequestId: requestID(c), OperationId: operationID, IdempotencyKey: key})
+	if err != nil {
+		a.userDeletionError(c, err, true)
 		return
 	}
+	recordAuditLog(ctx, c, "deletion_accepted", "user", strconv.FormatUint(user.ID, 10), user.Name, map[string]any{"job_id": job.Id})
+	c.Header("Location", "/api/v1/admin/user-deletion-jobs/"+job.Id)
+	c.JSON(http.StatusAccepted, NewSuccessMessageResponse("删除任务已受理", deletionSummary(job)))
+}
 
-	logger.Infof("删除用户成功: id=%d, name=%s", user.ID, user.Name)
-
-	actionType := model.ActionDeleteAgent
-	if user.Role == model.UserRoleClient {
-		actionType = model.ActionDeleteClient
+func (a *UserAPI) GetDeletionJob(c *gin.Context) {
+	if a.deletionWorker == nil {
+		codedError(c, http.StatusServiceUnavailable, "USER_DELETION_WORKER_UNAVAILABLE", "删除任务服务暂不可用")
+		return
 	}
-	recordAuditLog(ctx, c, actionType, "user", strconv.FormatUint(user.ID, 10), user.Name, nil)
+	job, err := a.deletionWorker.Get(c.Request.Context(), c.Param("job_id"))
+	if err != nil {
+		a.userDeletionError(c, err, false)
+		return
+	}
+	SetRevisionETag(c, job.RowVersion)
+	c.JSON(http.StatusOK, NewSuccessResponse(deletionSummary(job)))
+}
 
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
+func (a *UserAPI) RetryDeletionJob(c *gin.Context) {
+	if a.deletionWorker == nil {
+		codedError(c, http.StatusServiceUnavailable, "USER_DELETION_WORKER_UNAVAILABLE", "删除任务服务暂不可用")
+		return
+	}
+	revision, _ := requiredRevision(c)
+	idempotency, _ := c.Get(contextIdempotencyKey)
+	key, _ := idempotency.(string)
+	adminID := getAdminIDFromContext(c)
+	operationID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("user-deletion-retry:%d:%s", adminID, key))).String()
+	job, err := a.deletionWorker.Retry(c.Request.Context(), &pb.RetryUserDeletionRequest{JobId: c.Param("job_id"), ExpectedRowVersion: revision, RequestedByAdminId: adminID, RequestId: requestID(c), OperationId: operationID, IdempotencyKey: key})
+	if err != nil {
+		a.userDeletionError(c, err, false)
+		return
+	}
+	recordAuditLog(c.Request.Context(), c, "deletion_retried", "user_deletion_job", job.Id, job.SubjectName, nil)
+	SetRevisionETag(c, job.RowVersion)
+	c.JSON(http.StatusAccepted, NewSuccessMessageResponse("删除任务已重新排队", deletionSummary(job)))
+}
+
+func (a *UserAPI) userDeletionError(c *gin.Context, err error, accepting bool) {
+	switch status.Code(err) {
+	case codes.NotFound:
+		codedError(c, http.StatusNotFound, "USER_NOT_FOUND", "用户或删除任务不存在")
+	case codes.AlreadyExists:
+		codedError(c, http.StatusConflict, "USER_DELETION_MARKER_CONFLICT", "用户已绑定其他删除任务")
+	case codes.FailedPrecondition:
+		codedError(c, http.StatusConflict, "USER_DELETION_NOT_FAILED", "只有失败的删除任务可以重试")
+	case codes.Aborted:
+		codedError(c, http.StatusPreconditionFailed, "USER_DELETION_REVISION_CONFLICT", "删除任务状态已变化，请刷新后重试")
+	case codes.DeadlineExceeded:
+		codedError(c, http.StatusGatewayTimeout, "USER_DELETION_ACCEPT_UNKNOWN", "删除任务受理结果未知，请使用相同请求重试")
+	case codes.Unavailable:
+		code := "USER_DELETION_WORKER_UNAVAILABLE"
+		message := "删除任务服务暂不可用"
+		if accepting {
+			code = "USER_DELETION_ACCEPT_UNKNOWN"
+			message = "删除任务可能已创建，请使用相同请求重试"
+		}
+		codedError(c, http.StatusServiceUnavailable, code, message)
+	default:
+		codedError(c, http.StatusInternalServerError, "USER_DELETION_ACCEPT_FAILED", "删除任务受理失败")
+	}
 }
 
 // RegenerateSecret 重新生成用户密钥（支持 ID 或用户名）
@@ -630,6 +746,9 @@ func (a *UserAPI) RegenerateSecret(c *gin.Context) {
 		return
 	}
 
+	if rejectDeletingUser(c, &user) {
+		return
+	}
 	secret, err := generateUserSecret(32)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("生成密钥失败"))
@@ -690,6 +809,9 @@ func (a *UserAPI) setUserEnabled(c *gin.Context, enabled bool) {
 		return
 	}
 
+	if rejectDeletingUser(c, &user) {
+		return
+	}
 	oldEnabled := user.Enabled
 	user.Enabled = enabled
 

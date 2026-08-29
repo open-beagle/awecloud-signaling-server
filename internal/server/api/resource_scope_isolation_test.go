@@ -26,7 +26,7 @@ func TestTenantResourceScopeRejectsCrossObjectRequestAndQueryInputs(t *testing.T
 	db.DB = database
 	require.NoError(t, database.AutoMigrate(
 		&model.Admin{}, &model.AdminTenantMembership{}, &model.User{}, &model.Tenant{}, &model.TenantMembership{},
-		&model.Resource{}, &model.ResourceTarget{}, &model.AccessGrant{}, &model.ContainerSession{},
+		&model.Group{}, &model.Resource{}, &model.ResourceTarget{}, &model.AccessGrant{}, &model.ContainerSession{},
 		&model.WorkspaceBinding{}, &model.AuditLog{},
 	))
 
