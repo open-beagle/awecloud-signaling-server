@@ -1,11 +1,15 @@
 <template>
   <div class="user-detail">
+    <el-alert v-if="user?.deletion" class="deletion-alert" :type="user.deletion.status === 'failed' ? 'error' : 'warning'" :closable="false" show-icon>
+      <template #title>{{ user.deletion.status === 'failed' ? '删除失败' : '用户删除中' }}</template>
+      {{ user.deletion.error_message || `${user.deletion.current_step} · ${user.deletion.progress}%` }}
+    </el-alert>
     <!-- 基本信息 -->
     <el-card v-loading="loading" class="info-card" shadow="never">
       <template #header>
         <div class="card-header">
           <span>{{ $t('user.basicInfo') }}</span>
-          <el-button v-if="canWrite" type="primary" size="small" @click="showEditDialog = true">
+          <el-button v-if="canMutate" type="primary" size="small" @click="showEditDialog = true">
             {{ $t('common.edit') }}
           </el-button>
         </div>
@@ -34,7 +38,7 @@
       <template #header>
         <div class="card-header">
           <span>{{ $t('user.deployHistory') }}</span>
-          <el-button v-if="canWrite" type="primary" size="small" @click="showDeployDialog = true">
+          <el-button v-if="canMutate" type="primary" size="small" @click="showDeployDialog = true">
             {{ $t('user.deploy') }}
           </el-button>
         </div>
@@ -56,7 +60,7 @@
         <el-table-column :label="$t('clientToken.boundAt')" width="180">
           <template #default="{ row }">{{ row.bound_at ? formatTime(row.bound_at) : '-' }}</template>
         </el-table-column>
-        <el-table-column v-if="canWrite" :label="$t('common.actions')" width="150" fixed="right">
+        <el-table-column v-if="canMutate" :label="$t('common.actions')" width="150" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="handleViewCommand(row)">{{ $t('common.view') }}</el-button>
             <el-button size="small" type="danger" @click="handleDeleteToken(row)">{{ $t('common.delete') }}</el-button>
@@ -154,12 +158,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
-import { getUser, updateUser, deleteUser, regenerateUserSecret, type User, type UserDetail, type UserNode } from '@/api/user'
+import { getUser, getUserDeletionJob, updateUser, regenerateUserSecret, type User, type UserDetail, type UserNode } from '@/api/user'
 import { getDeployTokens, revokeDeployToken, getDeployCommand, type DeployToken } from '@/api/deployToken'
 import { formatTime } from '@/utils/time'
 import DeployDialog from './components/DeployDialog.vue'
@@ -170,6 +174,7 @@ const route = useRoute()
 const router = useRouter()
 const workspaceStore = useWorkspaceStore()
 const canWrite = computed(() => workspaceStore.can('platform.identities.write'))
+const canMutate = computed(() => canWrite.value && !user.value?.deletion)
 
 const loading = ref(false)
 const saving = ref(false)
@@ -183,6 +188,7 @@ const tokensLoading = ref(false)
 const tokens = ref<DeployToken[]>([])
 const showCommandDialog = ref(false)
 const deployCommand = ref('')
+let deletionPollingTimer: number | undefined
 
 const editForm = reactive({
   alias: '',
@@ -209,6 +215,12 @@ const fetchUser = async () => {
       }
     }
   } catch (error) {
+    if ((error as any)?.response?.status === 404 && user.value?.deletion) {
+      user.value = null
+      ElMessage.success('用户已删除')
+      router.replace('/platform-identities')
+      return
+    }
     console.error('获取用户详情失败:', error)
   } finally {
     loading.value = false
@@ -325,30 +337,6 @@ const handleRegenerateSecret = async () => {
   }
 }
 
-// 删除用户
-const handleDelete = async () => {
-  if (!canWrite.value || !user.value) return
-
-  try {
-    await ElMessageBox.confirm(
-      t('user.deleteConfirm', { name: user.value.name }),
-      t('common.warning'),
-      { type: 'warning' }
-    )
-    const res = await deleteUser(user.value.name)
-    if (res.success) {
-      ElMessage.success(t('common.deleteSuccess'))
-      router.push('/platform-identities')
-    } else {
-      ElMessage.error(res.message || t('common.deleteFailed'))
-    }
-  } catch (error) {
-    if (error !== 'cancel') {
-      console.error('删除用户失败:', error)
-    }
-  }
-}
-
 // 复制密钥
 const copySecret = async () => {
   try {
@@ -359,8 +347,28 @@ const copySecret = async () => {
   }
 }
 
+const pollDeletion = async () => {
+  if (!user.value?.deletion) return
+  const response = await getUserDeletionJob(user.value.deletion.id)
+  if (!response.success || !response.data) return
+  if (response.data.status === 'succeeded') {
+    user.value = null
+    ElMessage.success('用户已删除')
+    router.replace('/platform-identities')
+    return
+  }
+  user.value.deletion = response.data
+}
+
 onMounted(() => {
   fetchUser()
+  deletionPollingTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible' && user.value?.deletion && user.value.deletion.status !== 'failed') pollDeletion()
+  }, 3000)
+})
+
+onUnmounted(() => {
+  if (deletionPollingTimer !== undefined) window.clearInterval(deletionPollingTimer)
 })
 </script>
 
@@ -372,6 +380,8 @@ onMounted(() => {
 .info-card {
   margin-bottom: 20px;
 }
+
+.deletion-alert { margin-bottom: 16px; }
 
 .nodes-card {
   margin-bottom: 20px;

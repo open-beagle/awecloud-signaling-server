@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -18,7 +19,9 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -31,7 +34,9 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/proxy"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
+	workerclient "github.com/open-beagle/awecloud-signaling-server/internal/server/worker"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
+	workerpb "github.com/open-beagle/signal-worker/pkg/proto"
 )
 
 type Server struct {
@@ -57,6 +62,7 @@ type Server struct {
 	nodeRuntimePersister          *cache.NodeRuntimePersister
 	snapshotRefresher             *headscale.SnapshotRefresher
 	updaterCatalog                *service.UpdaterCatalogService
+	deletionWorker                *workerclient.Client
 	reconciliationCtx             context.Context
 	reconciliationCancel          context.CancelFunc
 }
@@ -137,10 +143,22 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 
 	updaterCatalog, err := service.NewUpdaterCatalogService(db.DB, cfg.Updater)
 	if err != nil {
+		reconciliationCancel()
+		if aclSyncCancel != nil {
+			aclSyncCancel()
+		}
 		return nil, fmt.Errorf("初始化 HTTP 制品目录失败: %w", err)
 	}
 
 	workloadSnapshots := service.NewWorkloadSnapshotStore()
+	deletionWorker, err := workerclient.NewClient(cfg.Worker.Address, cfg.Worker.InternalToken)
+	if err != nil {
+		reconciliationCancel()
+		if aclSyncCancel != nil {
+			aclSyncCancel()
+		}
+		return nil, fmt.Errorf("初始化 Worker 客户端失败: %w", err)
+	}
 	return &Server{
 		config:                        cfg,
 		headscaleClient:               headscaleClient,
@@ -151,6 +169,7 @@ func NewServer(cfg *config.ServerConfig) (*Server, error) {
 		nodeRuntimePersister:          nodeRuntimePersister,
 		snapshotRefresher:             snapshotRefresher,
 		updaterCatalog:                updaterCatalog,
+		deletionWorker:                deletionWorker,
 		reconciliationService:         service.NewResourceReconciliationService(db.DB),
 		providerReconciliationService: service.NewProviderSupplyReconciliationService(db.DB),
 		allocationExpiryService:       service.NewPlatformAllocationExpiryService(db.DB),
@@ -202,10 +221,11 @@ func (s *Server) Run() error {
 		)
 	}
 	// 添加 Device Token 认证拦截器
-	grpcOpts = append(grpcOpts, grpc.UnaryInterceptor(deviceTokenAuthInterceptor()))
+	grpcOpts = append(grpcOpts, grpc.UnaryInterceptor(deviceTokenAuthInterceptor(s.config.Worker.InternalToken)))
 	s.grpcServer = grpc.NewServer(grpcOpts...)
 	pb.RegisterAgentServiceServer(s.grpcServer, s.agentService)
 	pb.RegisterDesktopServiceServer(s.grpcServer, s.desktopService)
+	workerpb.RegisterServerServiceServer(s.grpcServer, grpcserver.NewUserDeletionServiceServer(s.agentService, s.desktopService))
 
 	ginRouter := s.setupRouter()
 
@@ -342,6 +362,9 @@ func (s *Server) Run() error {
 	defer cancel()
 
 	s.grpcServer.GracefulStop()
+	if s.deletionWorker != nil {
+		_ = s.deletionWorker.Close()
+	}
 
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		return fmt.Errorf("服务器关闭失败: %w", err)
@@ -631,6 +654,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					userAPI := api.NewUserAPI(s.config)
 					userAPI.SetAgentService(s.agentService)
 					userAPI.SetDesktopService(s.desktopService)
+					userAPI.SetDeletionWorker(s.deletionWorker)
 					adminAuthGroup.GET("/users", userAPI.List)
 					adminAuthGroup.GET("/users/:id", userAPI.Get)
 					adminAuthGroup.POST("/users", userAPI.Create)
@@ -638,7 +662,9 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.PUT("/users/:id/ssh", userAPI.UpdateSSH)
 					adminAuthGroup.PUT("/users/:id/enable", userAPI.Enable)
 					adminAuthGroup.PUT("/users/:id/disable", userAPI.Disable)
-					adminAuthGroup.DELETE("/users/:id", userAPI.Delete)
+					adminAuthGroup.POST("/users/:id/deletion-jobs", api.RequireIdempotencyKey(), userAPI.CreateDeletionJob)
+					adminAuthGroup.GET("/user-deletion-jobs/:job_id", userAPI.GetDeletionJob)
+					adminAuthGroup.POST("/user-deletion-jobs/:job_id/retry", api.RequireIdempotencyKey(), api.RequireIfMatch(), userAPI.RetryDeletionJob)
 					adminAuthGroup.POST("/users/:id/regenerate-secret", userAPI.RegenerateSecret)
 
 					// Desktop Token 继续归属 User；Agent Token 由资源方技术资源管理。
@@ -909,8 +935,17 @@ func (s *Server) setupRouter() *gin.Engine {
 
 // deviceTokenAuthInterceptor gRPC 认证拦截器，处理 Device Token 和 Agent Token 认证
 // 从 metadata 中提取 Bearer Token，验证后将 user_id 注入到 context
-func deviceTokenAuthInterceptor() grpc.UnaryServerInterceptor {
+func deviceTokenAuthInterceptor(internalToken string) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		if strings.HasPrefix(info.FullMethod, "/signal.worker.v1.ServerService/") {
+			md, _ := metadata.FromIncomingContext(ctx)
+			values := md.Get("authorization")
+			expected := "Bearer " + internalToken
+			if len(values) != 1 || subtle.ConstantTimeCompare([]byte(values[0]), []byte(expected)) != 1 {
+				return nil, status.Error(codes.Unauthenticated, "invalid service identity")
+			}
+			return handler(ctx, req)
+		}
 		// 从 metadata 中提取 authorization header
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {

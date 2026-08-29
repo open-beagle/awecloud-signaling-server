@@ -19,6 +19,12 @@ type ServerConfig struct {
 	Tailscale    TailscaleSection    `toml:"tailscale"`
 	Telemetry    TelemetrySection    `toml:"telemetry"`
 	Logto        LogtoSection        `toml:"logto"`
+	Worker       WorkerSection       `toml:"worker"`
+}
+
+type WorkerSection struct {
+	Address       string `toml:"address"`
+	InternalToken string `toml:"internal_token"`
 }
 
 type UpdaterSection struct {
@@ -208,6 +214,9 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
 	}
+	if cfg.Worker.Address == "" {
+		cfg.Worker.Address = "worker:9091"
+	}
 
 	// 环境变量覆盖（优先级最高）
 	if webRoot := os.Getenv("SIGNAL_WEB_ROOT"); webRoot != "" {
@@ -239,11 +248,20 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	if password := os.Getenv("ADMIN_PASSWORD"); password != "" {
 		cfg.Web.DefaultAdminPassword = password
 	}
+	if address := strings.TrimSpace(os.Getenv("SIGNAL_WORKER_GRPC_ADDRESS")); address != "" {
+		cfg.Worker.Address = address
+	}
+	if token := strings.TrimSpace(os.Getenv("SIGNAL_INTERNAL_TOKEN")); token != "" {
+		cfg.Worker.InternalToken = token
+	}
 	if cfg.Web.DefaultAdminUsername == "" {
 		return nil, fmt.Errorf("ADMIN_USERNAME is required when web.default_admin_username is not configured")
 	}
 	if cfg.Web.DefaultAdminPassword == "" {
 		return nil, fmt.Errorf("ADMIN_PASSWORD is required when web.default_admin_password is not configured")
+	}
+	if cfg.Worker.InternalToken == "" {
+		return nil, fmt.Errorf("SIGNAL_INTERNAL_TOKEN is required when worker.internal_token is not configured")
 	}
 
 	// Tailscale 配置默认值
