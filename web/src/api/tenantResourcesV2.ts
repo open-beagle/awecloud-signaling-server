@@ -45,6 +45,15 @@ export interface TenantResourceListResult {
   next_cursor?: string
 }
 
+export interface TenantResourceListParams {
+  type?: string
+  visibility?: string
+  availability?: string
+  namespace?: string
+  query?: string
+  cursor?: string
+}
+
 export interface TenantGrantCreateInput {
   resource_id: string
   subject: {
@@ -109,10 +118,10 @@ const tenantHeaders = (tenantId: string) => ({
   'X-Management-Scope-ID': tenantId,
 })
 
-export const getTenantResourcesV2 = (tenantId: string, params: { type?: string; visibility?: string; availability?: string; namespace?: string; query?: string; cursor?: string; limit?: number }) =>
+export const getTenantResourcesV2 = (tenantId: string, params: TenantResourceListParams) =>
   request.get<any, ApiResponse<TenantResourceListResult>>(`/api/v1/management/tenants/${tenantId}/resources`, { params, headers: tenantHeaders(tenantId) })
 
-export const getTenantResourceCandidatesV2 = (tenantId: string, params: { type?: string; availability?: string; namespace?: string; query?: string; cursor?: string; limit?: number }) =>
+export const getTenantResourceCandidatesV2 = (tenantId: string, params: Omit<TenantResourceListParams, 'visibility'>) =>
   request.get<any, ApiResponse<TenantResourceListResult>>(`/api/v1/management/tenants/${tenantId}/resource-candidates`, { params, headers: tenantHeaders(tenantId) })
 
 export const publishTenantResourceCandidateV2 = (tenantId: string, resource: TenantResourceV2, reason: string) =>
