@@ -34,7 +34,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Key, Refresh, Search } from '@element-plus/icons-vue'
 import PageHeader from '@/components/Common/PageHeader.vue'
-import { getTenantResourceCandidatesV2, getTenantResourcesV2, publishTenantResourceCandidateV2, type TenantResourceV2 } from '@/api/tenantResourcesV2'
+import { getTenantResourceCandidatesV2, getTenantResourcesV2, publishTenantResourceCandidateV2, type TenantResourceListParams, type TenantResourceV2 } from '@/api/tenantResourcesV2'
 import { useTenantStore } from '@/stores/tenant'
 
 const tenantStore = useTenantStore()
@@ -42,16 +42,37 @@ const router = useRouter()
 const loading = ref(false), errorMessage = ref(''), items = ref<TenantResourceV2[]>([]), mode = ref<'published'|'candidates'>('published'), publishingId = ref('')
 const filters = reactive({ query: '', type: '', availability: '' })
 const canPublish = computed(() => tenantStore.canTenant('tenant.resources.write'))
+let loadRevision = 0
+const loadCatalog = async (tenantId: string, candidates: boolean, params: TenantResourceListParams) => {
+  const result: TenantResourceV2[] = []
+  const visitedCursors = new Set<string>()
+  let cursor: string | undefined
+  do {
+    const pageParams = { ...params, cursor }
+    const response = candidates ? await getTenantResourceCandidatesV2(tenantId, pageParams) : await getTenantResourcesV2(tenantId, pageParams)
+    if (!response.success || !response.data) throw new Error('资源目录响应无效')
+    result.push(...response.data.items)
+    cursor = response.data.next_cursor
+    if (cursor && visitedCursors.has(cursor)) throw new Error('资源目录游标重复')
+    if (cursor) visitedCursors.add(cursor)
+  } while (cursor)
+  return result
+}
 const load = async () => {
   const tenantId = tenantStore.tenantId
   if (!tenantId) { items.value = []; errorMessage.value = '当前没有有效的租户上下文。'; return }
+  const revision = ++loadRevision
+  const candidates = mode.value === 'candidates'
   loading.value = true; errorMessage.value = ''
   try {
-    const params = { query: filters.query.trim() || undefined, type: filters.type || undefined, availability: filters.availability || undefined, limit: 100 }
-    const response = mode.value === 'published' ? await getTenantResourcesV2(tenantId, params) : await getTenantResourceCandidatesV2(tenantId, params)
-    items.value = response.success && response.data ? response.data.items : []
-  } catch { items.value = []; errorMessage.value = '请确认当前租户权限、资源模型读取开关和服务状态后重试。' }
-  finally { loading.value = false }
+    const params = { query: filters.query.trim() || undefined, type: filters.type || undefined, availability: filters.availability || undefined }
+    const result = await loadCatalog(tenantId, candidates, params)
+    if (revision === loadRevision) items.value = result
+  } catch {
+    if (revision === loadRevision) { items.value = []; errorMessage.value = '请确认当前租户权限、资源模型读取开关和服务状态后重试。' }
+  } finally {
+    if (revision === loadRevision) loading.value = false
+  }
 }
 const applyFilters = () => load()
 const publish = async (row: TenantResourceV2) => {
