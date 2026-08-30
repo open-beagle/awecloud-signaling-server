@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/creack/pty"
 
@@ -79,6 +80,10 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 		stream.Send(&pb.ShellData{IsClose: true, Error: fmt.Sprintf("配置 shell 进程失败: %v", err)})
 		return
 	}
+	if !shouldAllocateShellPTY(req) {
+		handleNonPTYShellProcess(cmd, stream, req)
+		return
+	}
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
 		Rows: uint16(req.Rows),
@@ -93,6 +98,7 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 		return
 	}
 	// 注意：ptmx 在 shell 退出后手动关闭（cmd.Wait 之后），不使用 defer
+	processDone := make(chan struct{})
 
 	if req.Command != "" {
 		logger.Infof("Shell exec 已启动: session_id=%s, login=%s, command=%s, pid=%d",
@@ -134,13 +140,12 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 		for {
 			msg, err := stream.Recv()
 			if err != nil {
-				// 流关闭，终止 shell
-				_ = signalShellProcess(cmd)
+				terminateShellProcess(cmd, processDone)
 				return
 			}
 
 			if msg.IsClose {
-				_ = signalShellProcess(cmd)
+				terminateShellProcess(cmd, processDone)
 				return
 			}
 
@@ -151,6 +156,10 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 				})
 				continue
 			}
+			if msg.Signal != "" {
+				_ = signalShellProcessByName(cmd, msg.Signal)
+				continue
+			}
 
 			if len(msg.Data) > 0 {
 				ptmx.Write(msg.Data)
@@ -159,12 +168,8 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 	}()
 
 	// 等待 shell 退出
-	exitCode := 0
-	if err := cmd.Wait(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		}
-	}
+	exitCode, exitSignal := shellProcessResult(cmd.Wait())
+	close(processDone)
 
 	// shell 已退出，关闭 PTY 以解除 PTY→gRPC 协程的 Read 阻塞
 	ptmx.Close()
@@ -176,12 +181,121 @@ func handleShellRequest(ctx context.Context, client pb.EndpointServiceClient, cf
 	stream.Send(&pb.ShellData{
 		IsClose:  true,
 		ExitCode: int32(exitCode),
+		Signal:   exitSignal,
 	})
 
 	// 等待 gRPC→PTY 协程完成
 	wg.Wait()
 
 	logger.Infof("Shell 已退出: session_id=%s, exit_code=%d", req.SessionId, exitCode)
+}
+
+// shouldAllocateShellPTY keeps interactive shells and explicitly allocated exec
+// sessions on a terminal. A non-interactive exec is represented by zero terminal
+// dimensions by the Agent.
+func shouldAllocateShellPTY(req *pb.ShellRequest) bool {
+	switch req.Mode {
+	case pb.ShellMode_SHELL_MODE_PTY:
+		return true
+	case pb.ShellMode_SHELL_MODE_PIPES:
+		return false
+	}
+	return req.Command == "" || req.Rows != 0 || req.Cols != 0
+}
+
+type shellDataStream interface {
+	Send(*pb.ShellData) error
+	Recv() (*pb.ShellData, error)
+}
+
+// handleNonPTYShellProcess bridges an exec command through ordinary pipes so
+// stdout and stderr remain independent byte streams.
+func handleNonPTYShellProcess(cmd *exec.Cmd, stream shellDataStream, req *pb.ShellRequest) {
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		sendShellProcessError(stream, fmt.Sprintf("创建 shell stdin 失败: %v", err))
+		return
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		sendShellProcessError(stream, fmt.Sprintf("创建 shell stdout 失败: %v", err))
+		return
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		sendShellProcessError(stream, fmt.Sprintf("创建 shell stderr 失败: %v", err))
+		return
+	}
+	if err := cmd.Start(); err != nil {
+		sendShellProcessError(stream, fmt.Sprintf("启动 shell 失败: %v", err))
+		return
+	}
+
+	logger.Infof("Shell 无 TTY exec 已启动: session_id=%s, login=%s, command=%s, pid=%d",
+		req.SessionId, req.Login, req.Command, cmd.Process.Pid)
+	processDone := make(chan struct{})
+
+	var sendMutex sync.Mutex
+	send := func(message *pb.ShellData) error {
+		sendMutex.Lock()
+		defer sendMutex.Unlock()
+		return stream.Send(message)
+	}
+	copyOutput := func(reader io.Reader, isStderr bool, done chan<- struct{}) {
+		defer func() { done <- struct{}{} }()
+		buf := make([]byte, 32*1024)
+		for {
+			n, readErr := reader.Read(buf)
+			if n > 0 {
+				data := append([]byte(nil), buf[:n]...)
+				if sendErr := send(&pb.ShellData{Data: data, IsStderr: isStderr}); sendErr != nil {
+					return
+				}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}
+
+	outputDone := make(chan struct{}, 2)
+	go copyOutput(stdout, false, outputDone)
+	go copyOutput(stderr, true, outputDone)
+	go func() {
+		defer stdin.Close()
+		for {
+			message, recvErr := stream.Recv()
+			if recvErr != nil {
+				terminateShellProcess(cmd, processDone)
+				return
+			}
+			if message.IsClose {
+				return
+			}
+			if message.Signal != "" {
+				_ = signalShellProcessByName(cmd, message.Signal)
+				continue
+			}
+			if len(message.Data) > 0 {
+				if _, writeErr := stdin.Write(message.Data); writeErr != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	// StdoutPipe/StderrPipe must be drained before Wait closes their descriptors.
+	<-outputDone
+	<-outputDone
+
+	exitCode, exitSignal := shellProcessResult(cmd.Wait())
+	close(processDone)
+	_ = send(&pb.ShellData{IsClose: true, ExitCode: int32(exitCode), Signal: exitSignal})
+	logger.Infof("Shell 无 TTY exec 已退出: session_id=%s, exit_code=%d", req.SessionId, exitCode)
+}
+
+func sendShellProcessError(stream shellDataStream, message string) {
+	_ = stream.Send(&pb.ShellData{IsClose: true, ExitCode: 1, Error: message})
 }
 
 func handleSFTPProcess(stream pb.EndpointService_OpenShellClient, u *user.User, shell string, req *pb.ShellRequest) {
@@ -219,6 +333,7 @@ func handleSFTPProcess(stream pb.EndpointService_OpenShellClient, u *user.User, 
 		return
 	}
 	logger.Infof("SFTP 已启动: session_id=%s login=%s pid=%d", req.SessionId, req.Login, cmd.Process.Pid)
+	processDone := make(chan struct{})
 
 	var sendMutex sync.Mutex
 	send := func(message *pb.ShellData) error {
@@ -250,7 +365,11 @@ func handleSFTPProcess(stream pb.EndpointService_OpenShellClient, u *user.User, 
 		defer stdin.Close()
 		for {
 			message, recvErr := stream.Recv()
-			if recvErr != nil || message.IsClose {
+			if recvErr != nil {
+				terminateShellProcess(cmd, processDone)
+				return
+			}
+			if message.IsClose {
 				return
 			}
 			if len(message.Data) > 0 {
@@ -261,18 +380,25 @@ func handleSFTPProcess(stream pb.EndpointService_OpenShellClient, u *user.User, 
 		}
 	}()
 
-	exitCode := 0
-	if err := cmd.Wait(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = 1
-		}
-	}
+	exitCode, exitSignal := shellProcessResult(cmd.Wait())
+	close(processDone)
 	<-outputDone
 	<-outputDone
-	_ = send(&pb.ShellData{IsClose: true, ExitCode: int32(exitCode)})
+	_ = send(&pb.ShellData{IsClose: true, ExitCode: int32(exitCode), Signal: exitSignal})
 	logger.Infof("SFTP 已退出: session_id=%s exit_code=%d", req.SessionId, exitCode)
+}
+
+func terminateShellProcess(cmd *exec.Cmd, processDone <-chan struct{}) {
+	_ = signalShellProcess(cmd)
+	go func() {
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-processDone:
+		case <-timer.C:
+			_ = killShellProcess(cmd)
+		}
+	}()
 }
 
 // sendShellError 发送错误响应（无法启动 shell 时）

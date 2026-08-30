@@ -31,6 +31,7 @@ type EndpointConnection struct {
 	Version         string
 	CommitID        string
 	BinarySHA256    string
+	ShellProtocol   string
 	OS              string
 	Arch            string
 	UpdaterProtocol string
@@ -66,8 +67,33 @@ type shellSession struct {
 	cols      uint32
 	// Endpoint 回调 OpenShell 后，Agent 通过此 channel 获取 gRPC 流
 	streamCh chan pb.EndpointService_OpenShellServer
+	done     chan struct{}
 	// 创建时间，用于超时清理
 	createdAt time.Time
+}
+
+type endpointShellStream interface {
+	Send(*pb.ShellData) error
+	Recv() (*pb.ShellData, error)
+	Close()
+}
+
+type endpointShellStreamHandle struct {
+	stream pb.EndpointService_OpenShellServer
+	done   chan struct{}
+	once   sync.Once
+}
+
+func (h *endpointShellStreamHandle) Send(message *pb.ShellData) error {
+	return h.stream.Send(message)
+}
+
+func (h *endpointShellStreamHandle) Recv() (*pb.ShellData, error) {
+	return h.stream.Recv()
+}
+
+func (h *endpointShellStreamHandle) Close() {
+	h.once.Do(func() { close(h.done) })
 }
 
 // k8sapiSession 等待中的 K8S API 代理会话
@@ -685,6 +711,7 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 			conn.Version = req.Version
 			conn.CommitID = req.CommitId
 			conn.BinarySHA256 = req.BinarySha256
+			conn.ShellProtocol = req.ShellProtocol
 			conn.OS = req.Os
 			conn.Arch = req.Arch
 			conn.UpdaterProtocol = req.UpdaterProtocol
@@ -802,17 +829,18 @@ func (s *EndpointServer) OpenShell(stream pb.EndpointService_OpenShellServer) er
 		return fmt.Errorf("session channel 已满")
 	}
 
-	// 保持流存活，直到流关闭
-	// 实际的 I/O 桥接由 RequestShell 的调用方（DialSocket）完成
-	// 这里只需要等待流结束
-	<-stream.Context().Done()
-	return nil
+	select {
+	case <-stream.Context().Done():
+		return nil
+	case <-session.done:
+		return nil
+	}
 }
 
 // RequestShell 请求 Endpoint 开启 shell 会话
 // 由 DialSocket 调用，创建 session → 通知 Endpoint → 等待回调 → 返回 gRPC 流
 // 返回的 stream 可用于双向 I/O 桥接
-func (s *EndpointServer) RequestShell(ctx context.Context, endpointName, login string, rows, cols uint32, command, subsystem string) (pb.EndpointService_OpenShellServer, error) {
+func (s *EndpointServer) RequestShell(ctx context.Context, endpointName, login string, rows, cols uint32, command, subsystem string) (endpointShellStream, error) {
 	// 检查 Endpoint 是否在线
 	s.connMutex.RLock()
 	_, connected := s.connections[endpointName]
@@ -829,6 +857,7 @@ func (s *EndpointServer) RequestShell(ctx context.Context, endpointName, login s
 		rows:      rows,
 		cols:      cols,
 		streamCh:  make(chan pb.EndpointService_OpenShellServer, 1),
+		done:      make(chan struct{}),
 		createdAt: time.Now(),
 	}
 
@@ -852,6 +881,11 @@ func (s *EndpointServer) RequestShell(ctx context.Context, endpointName, login s
 		Command:   command,
 		Subsystem: subsystem,
 	}
+	if subsystem != "" || (command != "" && rows == 0 && cols == 0) {
+		shellReq.Mode = pb.ShellMode_SHELL_MODE_PIPES
+	} else {
+		shellReq.Mode = pb.ShellMode_SHELL_MODE_PTY
+	}
 
 	s.pendingMutex.Lock()
 	s.pendingShellReqs[endpointName] = append(s.pendingShellReqs[endpointName], shellReq)
@@ -869,7 +903,7 @@ func (s *EndpointServer) RequestShell(ctx context.Context, endpointName, login s
 	select {
 	case stream := <-session.streamCh:
 		logger.Infof("Shell 会话已建立: session_id=%s, endpoint=%s", sessionID, endpointName)
-		return stream, nil
+		return &endpointShellStreamHandle{stream: stream, done: session.done}, nil
 	case <-time.After(30 * time.Second):
 		return nil, fmt.Errorf("等待 Endpoint %s 回调超时（30s）", endpointName)
 	case <-ctx.Done():
@@ -883,6 +917,13 @@ func (s *EndpointServer) IsEndpointConnected(name string) bool {
 	defer s.connMutex.RUnlock()
 	_, exists := s.connections[name]
 	return exists
+}
+
+func (s *EndpointServer) SupportsEndpointShellV2(name string) bool {
+	s.connMutex.RLock()
+	defer s.connMutex.RUnlock()
+	connection := s.connections[name]
+	return connection != nil && connection.ShellProtocol == "ssh_shell_v2"
 }
 
 // OpenK8SAPIProxy Endpoint 回调的 K8S API 代理会话（gRPC 双向流）
