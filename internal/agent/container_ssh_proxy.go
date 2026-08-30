@@ -144,7 +144,7 @@ func (p *ContainerSSHProxy) handleConn(ctx context.Context, conn net.Conn, liste
 		return
 	}
 	defer sshConn.Close()
-	go ssh.DiscardRequests(requests)
+	go serveSSHGlobalRequests(requests)
 	sshUser := strings.TrimSpace(sshConn.User())
 	if v2Permission != nil && !containsContainerSSHUser(v2Permission.SshUsers, sshUser) {
 		logger.Warnf("[ContainerSSH] SSH 用户未由 Agent 发现，拒绝连接: desktop_user=%s ssh_user=%s resource=%s allowed=%v", identity.UserName, sshUser, resourceID, v2Permission.SshUsers)

@@ -624,6 +624,7 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *upda
 			for _, rawReq := range resp.RawStreamRequests {
 				go handleRawStreamRequest(ctx, client, cfg, rawReq)
 			}
+
 		}
 	}()
 
@@ -639,6 +640,7 @@ func connectAndRun(ctx context.Context, cfg *EndpointConfig, updateManager *upda
 				Name:            cfg.Agent.Name,
 				Capabilities:    caps,
 				SshUsers:        sshUsers, // 始终上报 SSH 用户列表
+				ShellProtocol:   "ssh_shell_v2",
 				Version:         version,
 				Os:              runtime.GOOS,
 				Arch:            runtime.GOARCH,

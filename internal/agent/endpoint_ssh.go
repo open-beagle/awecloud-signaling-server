@@ -46,6 +46,11 @@ func SetVersionInfo(ver, date string) {
 // 每个 Endpoint 分配一个端口：50053, 50054, 50055, ...
 const EndpointSSHPortBase = 50053
 
+const (
+	endpointSSHMaxChannelsPerConnection = 16
+	endpointSSHMaxConcurrentChannels    = 128
+)
+
 // EndpointSSHProxy Endpoint SSH 代理
 // 在 Agent 内部运行 SSH Server，接收 Desktop SSH 连接
 // 从 SSH 握手中提取 login 用户名，然后通过 gRPC 转发到 Endpoint
@@ -61,8 +66,9 @@ type EndpointSSHProxy struct {
 	// 端口 → Endpoint 名称映射
 	portMap map[uint16]string
 	// Endpoint 名称 → 端口映射
-	nameMap map[string]uint16
-	mapMu   sync.RWMutex
+	nameMap  map[string]uint16
+	mapMu    sync.RWMutex
+	channels chan struct{}
 
 	// 下一个可分配的端口
 	nextPort uint16
@@ -98,6 +104,7 @@ func NewEndpointSSHProxy(endpointServer *EndpointServer, tsManager *TailscaleMan
 		hostKey:        hostKey,
 		portMap:        make(map[uint16]string),
 		nameMap:        make(map[string]uint16),
+		channels:       make(chan struct{}, endpointSSHMaxConcurrentChannels),
 		nextPort:       EndpointSSHPortBase,
 		ctx:            ctx,
 		cancel:         cancel,
@@ -218,7 +225,6 @@ func (p *EndpointSSHProxy) GetPort(endpointName string) uint16 {
 // 运行 SSH 握手，提取用户名，请求 Endpoint 开启 shell，桥接 I/O
 func (p *EndpointSSHProxy) HandleConn(ctx context.Context, conn net.Conn, endpointName string) {
 	defer conn.Close()
-	startedAt := time.Now()
 
 	// 尝试通过 tsnet WhoIs 提取 Desktop 用户身份
 	clientUserName := ""
@@ -287,41 +293,92 @@ func (p *EndpointSSHProxy) HandleConn(ctx context.Context, conn net.Conn, endpoi
 		logger.Warnf("[EndpointSSH] 权限缓存未初始化，跳过权限检查")
 	}
 
-	// 丢弃全局请求
-	go ssh.DiscardRequests(reqs)
+	go serveSSHGlobalRequests(reqs)
+	connectionCtx, cancelConnection := context.WithCancel(ctx)
+	defer cancelConnection()
+	connectionChannels := make(chan struct{}, endpointSSHMaxChannelsPerConnection)
 
-	// 等待 session channel
+	var channelHandlers sync.WaitGroup
 	for newChannel := range chans {
 		if newChannel.ChannelType() != "session" {
 			newChannel.Reject(ssh.UnknownChannelType, "不支持的 channel 类型")
 			continue
 		}
-
-		channel, requests, err := newChannel.Accept()
-		if err != nil {
-			logger.Warnf("[EndpointSSH] 接受 channel 失败: %v", err)
-			return
+		select {
+		case connectionChannels <- struct{}{}:
+		default:
+			_ = newChannel.Reject(ssh.ResourceShortage, "too many channels on this connection")
+			continue
 		}
-
-		// 处理 session（只处理第一个）
-		p.handleSession(ctx, channel, requests, endpointName, login, clientUserName, clientIP)
-
-		// 会话结束，记录审计
-		if p.auditCollector != nil {
-			endedAt := time.Now()
-			target := fmt.Sprintf("%s@%s", login, endpointName)
-			p.auditCollector.Record(
-				clientUserName,
-				endpointName,
-				"ssh_session",
-				target,
-				"",
-				startedAt,
-				endedAt,
-			)
+		select {
+		case p.channels <- struct{}{}:
+		default:
+			<-connectionChannels
+			_ = newChannel.Reject(ssh.ResourceShortage, "too many concurrent Endpoint SSH channels")
+			continue
 		}
-		return
+		channelHandlers.Add(1)
+		go func(newChannel ssh.NewChannel) {
+			defer channelHandlers.Done()
+			defer func() { <-connectionChannels }()
+			defer func() { <-p.channels }()
+			startedAt := time.Now()
+			channel, requests, acceptErr := newChannel.Accept()
+			if acceptErr != nil {
+				logger.Warnf("[EndpointSSH] 接受 channel 失败: %v", acceptErr)
+				return
+			}
+			p.handleSession(connectionCtx, channel, requests, endpointName, login, clientUserName, clientIP)
+
+			if p.auditCollector != nil {
+				target := fmt.Sprintf("%s@%s", login, endpointName)
+				p.auditCollector.Record(
+					clientUserName,
+					endpointName,
+					"ssh_session",
+					target,
+					"",
+					startedAt,
+					time.Now(),
+				)
+			}
+		}(newChannel)
 	}
+	cancelConnection()
+	channelHandlers.Wait()
+}
+
+func serveSSHGlobalRequests(requests <-chan *ssh.Request) {
+	for request := range requests {
+		if request.WantReply {
+			_ = request.Reply(supportsSSHGlobalRequest(request.Type), nil)
+		}
+	}
+}
+
+func supportsSSHGlobalRequest(requestType string) bool {
+	return requestType == "keepalive@openssh.com"
+}
+
+type endpointSSHRequestState struct {
+	started bool
+	pty     bool
+}
+
+func (s *endpointSSHRequestState) allocatePTY() bool {
+	if s.started || s.pty {
+		return false
+	}
+	s.pty = true
+	return true
+}
+
+func (s *endpointSSHRequestState) start() bool {
+	if s.started {
+		return false
+	}
+	s.started = true
+	return true
 }
 
 // handleSession 处理 SSH session channel
@@ -330,38 +387,74 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 	defer channel.Close()
 
 	var rows, cols uint32 = 24, 80 // 默认终端大小
-	var shellStream pb.EndpointService_OpenShellServer
+	var shellStream endpointShellStream
+	var shellSendMu sync.Mutex
+	sendShellData := func(message *pb.ShellData) error {
+		shellSendMu.Lock()
+		defer shellSendMu.Unlock()
+		if shellStream == nil {
+			return fmt.Errorf("shell stream is not ready")
+		}
+		return shellStream.Send(message)
+	}
 	shellReady := make(chan struct{})
 	shellErr := make(chan error, 1)
 	var execCommand string // exec 模式的命令
 
 	// 处理 SSH 请求（pty-req, shell, exec, window-change 等）
-	isPTY := false // 标记是否为交互式会话（有 PTY）
+	state := &endpointSSHRequestState{}
 	isSFTP := false
 	go func() {
+		defer func() {
+			if !state.started {
+				select {
+				case shellErr <- io.EOF:
+				default:
+				}
+			}
+		}()
 		for req := range requests {
 			switch req.Type {
 			case "pty-req":
 				// 解析终端大小
 				// pty-req payload: string term, uint32 cols, uint32 rows, ...
-				if len(req.Payload) >= 4 {
-					termLen := int(req.Payload[3]) | int(req.Payload[2])<<8 | int(req.Payload[1])<<16 | int(req.Payload[0])<<24
-					if len(req.Payload) >= 4+termLen+8 {
-						offset := 4 + termLen
-						cols = uint32(req.Payload[offset])<<24 | uint32(req.Payload[offset+1])<<16 | uint32(req.Payload[offset+2])<<8 | uint32(req.Payload[offset+3])
-						rows = uint32(req.Payload[offset+4])<<24 | uint32(req.Payload[offset+5])<<16 | uint32(req.Payload[offset+6])<<8 | uint32(req.Payload[offset+7])
+				if len(req.Payload) < 4 {
+					if req.WantReply {
+						req.Reply(false, nil)
 					}
+					continue
 				}
-				isPTY = true // 收到 pty-req 表示交互式会话
+				termLen := int(req.Payload[3]) | int(req.Payload[2])<<8 | int(req.Payload[1])<<16 | int(req.Payload[0])<<24
+				if termLen < 0 || len(req.Payload) < 4+termLen+8 {
+					if req.WantReply {
+						req.Reply(false, nil)
+					}
+					continue
+				}
+				if !state.allocatePTY() {
+					if req.WantReply {
+						req.Reply(false, nil)
+					}
+					continue
+				}
+				offset := 4 + termLen
+				cols = uint32(req.Payload[offset])<<24 | uint32(req.Payload[offset+1])<<16 | uint32(req.Payload[offset+2])<<8 | uint32(req.Payload[offset+3])
+				rows = uint32(req.Payload[offset+4])<<24 | uint32(req.Payload[offset+5])<<16 | uint32(req.Payload[offset+6])<<8 | uint32(req.Payload[offset+7])
 				if req.WantReply {
 					req.Reply(true, nil)
 				}
 
 			case "shell":
+				if !state.start() {
+					if req.WantReply {
+						req.Reply(false, nil)
+					}
+					continue
+				}
 				if req.WantReply {
 					req.Reply(true, nil)
 				}
-				if !isPTY {
+				if !state.pty {
 					rows, cols = 24, 80
 				}
 				stream, err := p.endpointServer.RequestShell(ctx, endpointName, login, rows, cols, "", "")
@@ -375,19 +468,26 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 
 			case "exec":
 				// exec 请求：执行单个命令
+				if state.started {
+					if req.WantReply {
+						req.Reply(false, nil)
+					}
+					continue
+				}
+				execCommand = parseSSHString(req.Payload)
+				if execCommand == "" {
+					if req.WantReply {
+						req.Reply(false, nil)
+					}
+					continue
+				}
+				state.started = true
 				if req.WantReply {
 					req.Reply(true, nil)
 				}
-				// 解析命令：payload 是 string (uint32 length + data)
-				if len(req.Payload) >= 4 {
-					cmdLen := int(req.Payload[0])<<24 | int(req.Payload[1])<<16 | int(req.Payload[2])<<8 | int(req.Payload[3])
-					if len(req.Payload) >= 4+cmdLen {
-						execCommand = string(req.Payload[4 : 4+cmdLen])
-						logger.Infof("[EndpointSSH] exec 请求: endpoint=%s, login=%s, command=%s", endpointName, login, execCommand)
-					}
-				}
-				// exec 不需要 pty，使用默认大小
-				stream, err := p.endpointServer.RequestShell(ctx, endpointName, login, rows, cols, execCommand, "")
+				logger.Infof("[EndpointSSH] exec 请求: endpoint=%s, login=%s, command=%s", endpointName, login, execCommand)
+				requestRows, requestCols := dimensionsForShellRequest(state.pty, rows, cols)
+				stream, err := p.endpointServer.RequestShell(ctx, endpointName, login, requestRows, requestCols, execCommand, "")
 				if err != nil {
 					logger.Warnf("[EndpointSSH] 请求 Endpoint exec 失败: %v", err)
 					shellErr <- err
@@ -397,6 +497,12 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 				close(shellReady)
 
 			case "subsystem":
+				if state.started {
+					if req.WantReply {
+						req.Reply(false, nil)
+					}
+					continue
+				}
 				subsystem := parseSSHString(req.Payload)
 				if subsystem != "sftp" {
 					if req.WantReply {
@@ -405,6 +511,7 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 					logger.Warnf("[EndpointSSH] 不支持的 subsystem: endpoint=%s subsystem=%q", endpointName, subsystem)
 					return
 				}
+				state.started = true
 				if req.WantReply {
 					req.Reply(true, nil)
 				}
@@ -423,12 +530,30 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 					newCols := uint32(req.Payload[0])<<24 | uint32(req.Payload[1])<<16 | uint32(req.Payload[2])<<8 | uint32(req.Payload[3])
 					newRows := uint32(req.Payload[4])<<24 | uint32(req.Payload[5])<<16 | uint32(req.Payload[6])<<8 | uint32(req.Payload[7])
 					if shellStream != nil {
-						shellStream.Send(&pb.ShellData{
+						_ = sendShellData(&pb.ShellData{
 							IsResize: true,
 							Rows:     newRows,
 							Cols:     newCols,
 						})
 					}
+				}
+				if req.WantReply {
+					req.Reply(true, nil)
+				}
+
+			case "signal":
+				signalName, ok := parseSSHSignal(req.Payload)
+				if !ok || shellStream == nil || !p.endpointServer.SupportsEndpointShellV2(endpointName) {
+					if req.WantReply {
+						req.Reply(false, nil)
+					}
+					continue
+				}
+				if sendErr := sendShellData(&pb.ShellData{Signal: signalName}); sendErr != nil {
+					if req.WantReply {
+						req.Reply(false, nil)
+					}
+					continue
 				}
 				if req.WantReply {
 					req.Reply(true, nil)
@@ -451,10 +576,11 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 	case <-ctx.Done():
 		return
 	}
+	defer shellStream.Close()
 
 	// 显示 SSH 横幅（仅在交互式会话时显示，exec 模式不显示）
 	// 判断依据：收到 pty-req 请求表示交互式会话
-	if shouldShowSSHBanner(isPTY, isSFTP) {
+	if shouldShowSSHBanner(state.pty, isSFTP) {
 		banner := p.buildSSHBanner(ctx, clientUserName, clientIP)
 		if banner != "" {
 			channel.Write([]byte(banner))
@@ -463,6 +589,15 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 
 	// 双向桥接：SSH channel ↔ gRPC Shell 流
 	var wg sync.WaitGroup
+	bridgeDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = channel.Close()
+			shellStream.Close()
+		case <-bridgeDone:
+		}
+	}()
 
 	// SSH channel → gRPC（Desktop stdin → Endpoint）
 	wg.Add(1)
@@ -472,14 +607,14 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 		for {
 			n, err := channel.Read(buf)
 			if n > 0 {
-				if sendErr := shellStream.Send(&pb.ShellData{
+				if sendErr := sendShellData(&pb.ShellData{
 					Data: buf[:n],
 				}); sendErr != nil {
 					return
 				}
 			}
 			if err != nil {
-				shellStream.Send(&pb.ShellData{IsClose: true})
+				_ = sendShellData(&pb.ShellData{IsClose: true})
 				return
 			}
 		}
@@ -503,8 +638,18 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 				if msg.Error != "" && exitCode == 0 {
 					exitCode = 1
 				}
-				exitMsg := ssh.Marshal(struct{ Status uint32 }{uint32(exitCode)})
-				channel.SendRequest("exit-status", false, exitMsg)
+				if msg.Signal != "" {
+					exitSignal := ssh.Marshal(struct {
+						Signal       string
+						CoreDumped   bool
+						ErrorMessage string
+						LanguageTag  string
+					}{Signal: msg.Signal})
+					_, _ = channel.SendRequest("exit-signal", false, exitSignal)
+				} else {
+					exitMsg := ssh.Marshal(struct{ Status uint32 }{uint32(exitCode)})
+					_, _ = channel.SendRequest("exit-status", false, exitMsg)
+				}
 				// 关闭 SSH channel，解除 SSH→gRPC 协程的 Read 阻塞
 				channel.Close()
 				return
@@ -522,10 +667,27 @@ func (p *EndpointSSHProxy) handleSession(ctx context.Context, channel ssh.Channe
 	}()
 
 	wg.Wait()
+	close(bridgeDone)
 }
 
 func shouldShowSSHBanner(isPTY, isSFTP bool) bool {
 	return isPTY && !isSFTP
+}
+
+// dimensionsForShellRequest uses zero dimensions to represent an exec request
+// without an allocated PTY. A PTY request always carries non-zero dimensions so
+// the Endpoint preserves terminal behavior even when the client sends zeroes.
+func dimensionsForShellRequest(isPTY bool, rows, cols uint32) (uint32, uint32) {
+	if !isPTY {
+		return 0, 0
+	}
+	if rows == 0 {
+		rows = 1
+	}
+	if cols == 0 {
+		cols = 1
+	}
+	return rows, cols
 }
 
 func parseSSHString(payload []byte) string {
@@ -537,6 +699,21 @@ func parseSSHString(payload []byte) string {
 		return ""
 	}
 	return string(payload[4 : 4+length])
+}
+
+func parseSSHSignal(payload []byte) (string, bool) {
+	var request struct {
+		Signal string
+	}
+	if err := ssh.Unmarshal(payload, &request); err != nil {
+		return "", false
+	}
+	switch request.Signal {
+	case "INT", "TERM":
+		return request.Signal, true
+	default:
+		return "", false
+	}
 }
 
 // loadOrGenerateHostKey 从文件加载或生成 SSH Host Key

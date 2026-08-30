@@ -36,6 +36,7 @@ service EndpointService {
 
   // OpenRawStream - Agent 指令 Endpoint 开启原始字节流（用于协议升级，如 kubectl logs/exec）
   rpc OpenRawStream(stream RawStreamData) returns (stream RawStreamData);
+
 }
 
 // ============================================
@@ -89,6 +90,7 @@ message EndpointHeartbeatRequest {
   repeated ResourceSessionEventV2 resource_session_events = 18;
   string commit_id = 19; // Endpoint 当前运行 Git SHA
   string binary_sha256 = 20; // Endpoint 可执行文件 SHA256 摘要
+  string shell_protocol = 21; // Endpoint Shell 协议版本；ssh_shell_v2 支持显式模式、stderr 与 signal
 }
 
 // EndpointCapabilityInfo Endpoint 单项能力信息
@@ -360,6 +362,12 @@ message ServicePort {
 // ============================================
 
 // ShellRequest Agent 通知 Endpoint 的 Shell 请求
+enum ShellMode {
+  SHELL_MODE_UNSPECIFIED = 0; // 兼容旧版本，按 command 和终端尺寸推断
+  SHELL_MODE_PTY = 1;
+  SHELL_MODE_PIPES = 2;
+}
+
 message ShellRequest {
   string session_id = 1; // 会话 ID（Agent 生成，Endpoint 回调时携带）
   string login = 2; // 登录用户名（如 "root"）
@@ -367,6 +375,7 @@ message ShellRequest {
   uint32 cols = 4; // 终端列数
   string command = 5; // 要执行的命令（exec 模式时使用，为空则为交互式 shell）
   string subsystem = 6; // SSH subsystem 名称；当前支持 sftp
+  ShellMode mode = 7; // 明确选择 PTY 或标准管道
 }
 
 // ShellData Endpoint Shell 会话数据帧
@@ -382,6 +391,7 @@ message ShellData {
   int32 exit_code = 9; // 退出码
   string error = 10; // 错误信息
   bool is_stderr = 11; // data 是否属于 stderr；SFTP stdout 必须保持纯协议数据
+  string signal = 12; // 受限 SSH 信号名称；当前仅允许 INT / TERM
 }
 
 // ============================================
