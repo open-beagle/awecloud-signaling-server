@@ -338,3 +338,44 @@ func TestPublishedContainerResourceTracksReplicaSetAcrossRollingReplacement(t *t
 	require.Equal(t, published.ID, persisted.ID)
 	require.Equal(t, model.TenantResourceAvailable, persisted.AvailabilityState)
 }
+
+func TestContainerResourceListDoesNotRequireRuntimeSSHUsers(t *testing.T) {
+	fixture := newWorkloadInventoryFixture(t)
+	payload, hash := fixture.containerPayload(t, "shell-0")
+	input := fixture.input(payload, hash, "epoch-a", 1, "snapshot-a")
+	input.Kind = model.WorkloadObservationContainer
+	_, err := fixture.workload.ReceiveBatch(context.Background(), input)
+	require.NoError(t, err)
+
+	resources := NewTenantResourceService(fixture.database, fixture.snapshots)
+	resources.now = func() time.Time { return fixture.now }
+	candidates, err := resources.List(context.Background(), fixture.tenantAuth, fixture.tenantA.ID, TenantResourceListInput{Candidates: true, Limit: 100})
+	require.NoError(t, err)
+	require.Len(t, candidates.Items, 1)
+	published, err := resources.Review(context.Background(), fixture.tenantAuth, ReviewTenantResourceInput{
+		TenantID: fixture.tenantA.ID, ResourceID: candidates.Items[0].ResourceID, ExpectedRowVersion: candidates.Items[0].RowVersion,
+		ObservationRevision: candidates.Items[0].ObservationRevision, Reason: "publish workload", Publish: true,
+	})
+	require.NoError(t, err)
+
+	var target model.TenantResourceTargetRevision
+	require.NoError(t, fixture.database.Where("tenant_resource_source_id IN (?)",
+		fixture.database.Model(&model.TenantResourceSource{}).Select("id").Where("tenant_resource_id = ?", published.ID)).
+		Where("superseded_at IS NULL").First(&target).Error)
+	var snapshot map[string]any
+	require.NoError(t, json.Unmarshal([]byte(target.TargetSnapshot), &snapshot))
+	delete(snapshot, "ssh_users")
+	withoutSSHUsers, err := json.Marshal(snapshot)
+	require.NoError(t, err)
+	require.NoError(t, fixture.database.Model(&target).Update("target_snapshot", string(withoutSSHUsers)).Error)
+
+	catalog, err := resources.List(context.Background(), fixture.tenantAuth, fixture.tenantA.ID, TenantResourceListInput{
+		Type: string(model.TenantResourceContainerSSH), Limit: 100,
+	})
+	require.NoError(t, err)
+	require.Len(t, catalog.Items, 1)
+	require.Empty(t, catalog.Items[0].SSHUsers)
+
+	_, err = resources.Get(context.Background(), fixture.tenantAuth, fixture.tenantA.ID, published.ID, false)
+	require.ErrorIs(t, err, ErrTenantResourceInvalidInput)
+}

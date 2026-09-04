@@ -841,7 +841,7 @@ func tenantResourceView(tx *gorm.DB, resource *model.TenantResource, now time.Ti
 	if chain.Target.ID == "" {
 		return view, nil
 	}
-	if resource.Type == model.TenantResourceContainerSSH {
+	if resource.Type == model.TenantResourceContainerSSH && includeRuntimeIdentity {
 		view.SSHUsers, err = containerSSHUsersFromTargetSnapshot(chain.Target.TargetSnapshot)
 		if err != nil {
 			return nil, ErrTenantResourceInvalidInput
