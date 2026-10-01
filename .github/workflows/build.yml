@@ -224,9 +224,8 @@ jobs:
 
       - name: Setup MinIO Client
         run: |
-          curl -fsSLo mc https://dl.min.io/client/mc/release/linux-amd64/mc
-          chmod +x mc
-          sudo mv mc /usr/local/bin/mc
+          go install github.com/minio/mc@latest
+          sudo cp "$(go env GOPATH)/bin/mc" /usr/local/bin/mc
 
       - name: Publish artifacts
         env:
