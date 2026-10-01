@@ -224,6 +224,7 @@ import { ElMessage } from 'element-plus'
 import {
   Check, Connection, Cpu, DocumentCopy, Monitor, SetUp, Share
 } from '@element-plus/icons-vue'
+import { getTunnelDetail, updateTunnelPorts, type TunnelPortMapping } from '@/api/signalTunnel'
 
 const route = useRoute()
 const saving = ref(false)
@@ -236,7 +237,7 @@ const tunnel = ref({
   ip_address: '100.64.0.50'
 })
 
-const services = ref([
+const services = ref<TunnelPortMapping[]>([
   {
     resource_id: 'res-mcp-1',
     service_name: 'mcp-service',
@@ -274,11 +275,38 @@ const copyKubeConfigUrl = async () => {
   }
 }
 
+const loadDetail = async () => {
+  const id = route.params.id
+  if (!id) return
+  try {
+    const res = await getTunnelDetail(id as string)
+    if (res.data) {
+      const d = res.data
+      tunnel.value = {
+        id: d.id,
+        name: d.name,
+        target_agent: d.target_agent,
+        ip_address: d.ip_address || '100.64.0.50'
+      }
+      if (d.service_ports && d.service_ports.length > 0) {
+        services.value = d.service_ports
+      }
+      k8sApiEnabled.value = d.k8s_api_enabled !== false
+      k8sApiPort.value = d.k8s_api_port || 6443
+    }
+  } catch (e) {
+    console.warn('获取 Tunnel 详情异常:', e)
+  }
+}
+
 const handleSave = async () => {
   saving.value = true
   try {
-    // 模拟持久化授权与端口下发
-    await new Promise(r => setTimeout(r, 600))
+    await updateTunnelPorts(tunnel.value.id, {
+      k8s_api_enabled: k8sApiEnabled.value,
+      k8s_api_port: k8sApiPort.value,
+      ports: services.value
+    })
     ElMessage.success('保存成功！白名单监听端口与授权配置已毫秒级下发至 Tunnel Pod')
   } catch (err: any) {
     ElMessage.error(err.message || '保存失败')
@@ -291,6 +319,7 @@ onMounted(() => {
   const id = route.params.id
   if (id) {
     tunnel.value.id = Number(id)
+    loadDetail()
   }
 })
 </script>

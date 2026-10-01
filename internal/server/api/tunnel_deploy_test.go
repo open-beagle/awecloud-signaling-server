@@ -232,4 +232,120 @@ func TestTunnel_ContainerServiceResourceProto(t *testing.T) {
 	require.Equal(t, int32(8000), decoded.PortNumber)
 }
 
+// TestSignalTunnelAPI_CRUD tests the full lifecycle of Signal Tunnel REST endpoints
+func TestSignalTunnelAPI_CRUD(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	database := setupTunnelTestDB(t)
+
+	admin := model.Admin{Username: "superadmin", Role: "superadmin"}
+	require.NoError(t, database.Create(&admin).Error)
+
+	tunnelAPI := NewTunnelAPI(&config.ServerConfig{})
+
+	router := gin.New()
+	adminGroup := router.Group("/api/v1/admin")
+	adminGroup.Use(func(c *gin.Context) {
+		c.Set("admin_id", int64(admin.ID))
+		c.Next()
+	})
+	{
+		adminGroup.GET("/tunnels", tunnelAPI.ListSignalTunnels)
+		adminGroup.POST("/tunnels", tunnelAPI.CreateSignalTunnel)
+		adminGroup.GET("/tunnels/available-agents", tunnelAPI.GetAvailableAgents)
+		adminGroup.GET("/tunnels/:id", tunnelAPI.GetSignalTunnel)
+		adminGroup.PUT("/tunnels/:id/ports", tunnelAPI.UpdateSignalTunnelPorts)
+		adminGroup.DELETE("/tunnels/:id", tunnelAPI.DeleteSignalTunnel)
+	}
+
+	// 1. Initial List (should be empty, HTTP 200)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/tunnels", nil)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var listResp PagedResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &listResp))
+	require.True(t, listResp.Success)
+	require.Equal(t, int64(0), listResp.Total)
+
+	// 2. Get Available Agents (HTTP 200, returns defaults or registered)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/tunnels/available-agents", nil)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// 3. Create Tunnel (POST /api/v1/admin/tunnels)
+	createPayload := CreateSignalTunnelRequest{
+		Name:        "signal-tunnel-test-5090",
+		TargetAgent: "edge-gpu-5090",
+	}
+	body, _ := json.Marshal(createPayload)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/tunnels", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var createResp Response
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &createResp))
+	require.True(t, createResp.Success)
+
+	dataMap := createResp.Data.(map[string]interface{})
+	tunnelID := uint64(dataMap["id"].(float64))
+	require.NotEmpty(t, dataMap["token"])
+	require.Contains(t, dataMap["k8s_deploy_yaml"].(string), "run-tunnel")
+
+	// 4. Query List again (should have 1 item)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/tunnels", nil)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var listResp2 PagedResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &listResp2))
+	require.Equal(t, int64(1), listResp2.Total)
+
+	// 5. Get Tunnel Detail (GET /api/v1/admin/tunnels/:id)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/admin/tunnels/%d", tunnelID), nil)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var detailResp Response
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &detailResp))
+	require.True(t, detailResp.Success)
+	detailMap := detailResp.Data.(map[string]interface{})
+	require.Equal(t, "signal-tunnel-test-5090", detailMap["name"])
+	require.Equal(t, "edge-gpu-5090", detailMap["target_agent"])
+
+	// 6. Update Tunnel Ports (PUT /api/v1/admin/tunnels/:id/ports)
+	updatePayload := UpdateSignalTunnelPortsRequest{
+		K8sAPIEnabled: true,
+		K8sAPIPort:    16443,
+		Ports: []SignalTunnelPortMapping{
+			{
+				ResourceID:  "res-mcp-1",
+				ServiceName: "mcp-service",
+				TargetPort:  8000,
+				Protocol:    "TCP",
+				LocalPort:   10080,
+			},
+		},
+	}
+	body, _ = json.Marshal(updatePayload)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/admin/tunnels/%d/ports", tunnelID), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// 7. Delete Tunnel (DELETE /api/v1/admin/tunnels/:id)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v1/admin/tunnels/%d", tunnelID), nil)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Verify status is revoked
+	var tok model.DeployToken
+	require.NoError(t, database.First(&tok, tunnelID).Error)
+	require.Equal(t, model.DeployTokenStatusRevoked, tok.Status)
+}
+
+
 

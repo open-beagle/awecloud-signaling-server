@@ -892,6 +892,14 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.PUT("/tunnel/acl", tunnelAPI.UpdateTunnelACL)
 					adminAuthGroup.GET("/tunnel/acl/rules", tunnelAPI.GetTunnelACLRules)
 					adminAuthGroup.POST("/tunnel/acl/sync", tunnelAPI.SyncTunnelACL)
+
+					// Signal Tunnel (专用出站隧道) 管理
+					adminAuthGroup.GET("/tunnels", tunnelAPI.ListSignalTunnels)
+					adminAuthGroup.POST("/tunnels", tunnelAPI.CreateSignalTunnel)
+					adminAuthGroup.GET("/tunnels/available-agents", tunnelAPI.GetAvailableAgents)
+					adminAuthGroup.GET("/tunnels/:id", tunnelAPI.GetSignalTunnel)
+					adminAuthGroup.PUT("/tunnels/:id/ports", tunnelAPI.UpdateSignalTunnelPorts)
+					adminAuthGroup.DELETE("/tunnels/:id", tunnelAPI.DeleteSignalTunnel)
 				}
 			}
 

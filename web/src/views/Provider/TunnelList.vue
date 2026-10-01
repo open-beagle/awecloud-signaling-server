@@ -242,7 +242,7 @@ import {
 } from '@element-plus/icons-vue'
 import PageHeader from '@/components/Common/PageHeader.vue'
 import {
-  getTunnelList, createTunnelInstance, getAvailableEdgeAgents,
+  getTunnelList, createTunnelInstance, getAvailableEdgeAgents, deleteTunnelInstance,
   type TunnelItem
 } from '@/api/signalTunnel'
 
@@ -314,7 +314,7 @@ const loadData = async () => {
   loading.value = true
   try {
     const res = await getTunnelList()
-    const list = res.data?.items || []
+    const list = Array.isArray(res.data) ? res.data : (res.data?.items || res.items || [])
     if (list.length > 0) {
       items.value = list
     } else {
@@ -338,14 +338,19 @@ const loadData = async () => {
         }
       ]
     }
-    const agents = await getAvailableEdgeAgents().catch(() => [])
-    if (agents.length > 0) {
+  } catch (e) {
+    console.warn('获取 Tunnel 列表异常:', e)
+  } finally {
+    loading.value = false
+  }
+
+  try {
+    const agents = await getAvailableEdgeAgents()
+    if (agents && agents.length > 0) {
       availableAgents.value = agents
     }
   } catch (e) {
-    console.error(e)
-  } finally {
-    loading.value = false
+    console.warn('获取可用边缘 Agent 异常:', e)
   }
 }
 
@@ -483,9 +488,14 @@ const handleDelete = (row: TunnelItem) => {
     type: 'warning',
     confirmButtonText: '确定删除',
     cancelButtonText: '取消'
-  }).then(() => {
-    items.value = items.value.filter(i => i.id !== row.id)
-    ElMessage.success('已注销该 Tunnel 实例')
+  }).then(async () => {
+    try {
+      await deleteTunnelInstance(row.id)
+      ElMessage.success('已注销该 Tunnel 实例')
+      await loadData()
+    } catch (err: any) {
+      ElMessage.error(err.message || '删除失败')
+    }
   }).catch(() => {})
 }
 

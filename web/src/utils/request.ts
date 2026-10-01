@@ -41,7 +41,7 @@ service.interceptors.request.use(
 			}
 		}
 		const contextFreePaths = ['/api/v1/admin/tenants', '/api/v1/admin/tenant-contexts', '/api/v1/admin/tenant-admin-memberships', '/api/v1/admin/overview', '/api/v1/admin/platform-admins', '/api/v1/admin/platform']
-		const platformResourcePaths = ['/api/v1/admin/nodes', '/api/v1/admin/endpoints', '/api/v1/admin/legacy-resource-claims']
+		const platformResourcePaths = ['/api/v1/admin/nodes', '/api/v1/admin/endpoints', '/api/v1/admin/legacy-resource-claims', '/api/v1/admin/tunnels']
 		const isPlatformResource = platformResourcePaths.some(path => config.url === path || config.url?.startsWith(`${path}/`))
 		const isContextFree = isPlatformResource || (config.method?.toLowerCase() === 'get' && contextFreePaths.some(path => config.url === path || config.url?.startsWith(`${path}/`)))
 		if (tenantId && activeWorkspace === 'tenant' && !isContextFree && !isManagementRequest) {
