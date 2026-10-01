@@ -578,6 +578,11 @@ func ensureDeployTokenSchema(database *gorm.DB) error {
 			return fmt.Errorf("add deploy_tokens mode: %w", err)
 		}
 	}
+	if !migrator.HasColumn(&model.DeployToken{}, "ports_config") {
+		if err := database.Exec("ALTER TABLE deploy_tokens ADD COLUMN ports_config TEXT").Error; err != nil {
+			return fmt.Errorf("add deploy_tokens ports_config: %w", err)
+		}
+	}
 	return nil
 }
 

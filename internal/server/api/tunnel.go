@@ -1228,29 +1228,61 @@ func (a *TunnelAPI) ListSignalTunnels(c *gin.Context) {
 			}
 		}
 
-		// 查询已授权端口
+		// 查询已授权端口（优先读取 tok.PortsConfig，兼容 grants）
 		var exposedPorts []SignalTunnelExposedPort
-		var grants []model.TenantAccessGrant
-		if err := db.DB.WithContext(ctx).Where("subject_user_id = ? AND status = ?", tok.UserID, model.TenantAccessGrantEnabled).Find(&grants).Error; err == nil {
-			for _, g := range grants {
-				if g.LocalPort > 0 {
-					pType := "service"
-					name := g.TenantResourceID
-					if g.LocalPort == 6443 || g.AllowK8sAPI {
-						pType = "k8sapi"
-						name = "K8s API"
+		if tok.PortsConfig != "" {
+			var savedReq UpdateSignalTunnelPortsRequest
+			if err := json.Unmarshal([]byte(tok.PortsConfig), &savedReq); err == nil {
+				if savedReq.K8sAPIEnabled {
+					kPort := 6443
+					if savedReq.K8sAPIPort > 0 {
+						kPort = savedReq.K8sAPIPort
 					}
 					exposedPorts = append(exposedPorts, SignalTunnelExposedPort{
-						Port: int(g.LocalPort),
-						Name: name,
-						Type: pType,
+						Port: kPort,
+						Name: "K8s API",
+						Type: "k8sapi",
 					})
+				}
+				for _, p := range savedReq.Ports {
+					if p.LocalPort > 0 {
+						sName := p.ServiceName
+						if sName == "" {
+							sName = p.ResourceID
+						}
+						exposedPorts = append(exposedPorts, SignalTunnelExposedPort{
+							Port: p.LocalPort,
+							Name: sName,
+							Type: "service",
+						})
+					}
+				}
+			}
+		}
+
+		if len(exposedPorts) == 0 {
+			var grants []model.TenantAccessGrant
+			if err := db.DB.WithContext(ctx).Where("subject_user_id = ? AND status = ?", tok.UserID, model.TenantAccessGrantEnabled).Find(&grants).Error; err == nil {
+				for _, g := range grants {
+					if g.LocalPort > 0 {
+						pType := "service"
+						name := g.TenantResourceID
+						if g.LocalPort == 6443 || g.AllowK8sAPI {
+							pType = "k8sapi"
+							name = "K8s API"
+						}
+						exposedPorts = append(exposedPorts, SignalTunnelExposedPort{
+							Port: int(g.LocalPort),
+							Name: name,
+							Type: pType,
+						})
+					}
 				}
 			}
 		}
 
 		// 确保默认端口暴露直观展现（若暂未配置特定端口，展示默认白名单声明）
-		if len(exposedPorts) == 0 {
+		if len(exposedPorts) == 0 && tok.PortsConfig == "" {
 			exposedPorts = []SignalTunnelExposedPort{
 				{Port: 10080, Name: "MCP 推理", Type: "service"},
 				{Port: 6443, Name: "K8s API", Type: "k8sapi"},
@@ -1464,60 +1496,91 @@ func (a *TunnelAPI) GetSignalTunnel(c *gin.Context) {
 	k8sApiEnabled := true
 	k8sApiPort := 6443
 
-	var grants []model.TenantAccessGrant
-	if err := db.DB.WithContext(ctx).Where("subject_user_id = ?", tok.UserID).Find(&grants).Error; err == nil {
-		for _, g := range grants {
-			if g.AllowK8sAPI {
-				k8sApiEnabled = (g.Status == model.TenantAccessGrantEnabled)
-				if g.LocalPort > 0 {
-					k8sApiPort = int(g.LocalPort)
-				}
-			} else {
-				servicePorts = append(servicePorts, SignalTunnelPortMapping{
-					ResourceID:  g.TenantResourceID,
-					ServiceName: g.TenantResourceID,
-					TargetPort:  8000,
-					Protocol:    "TCP",
-					LocalPort:   int(g.LocalPort),
-					Namespace:   "beagle-system",
+	if tok.PortsConfig != "" {
+		var savedReq UpdateSignalTunnelPortsRequest
+		if err := json.Unmarshal([]byte(tok.PortsConfig), &savedReq); err == nil {
+			k8sApiEnabled = savedReq.K8sAPIEnabled
+			if savedReq.K8sAPIPort > 0 {
+				k8sApiPort = savedReq.K8sAPIPort
+			}
+			servicePorts = savedReq.Ports
+			if k8sApiEnabled {
+				exposedPorts = append(exposedPorts, SignalTunnelExposedPort{
+					Port: k8sApiPort,
+					Name: "K8s API",
+					Type: "k8sapi",
 				})
-				if g.LocalPort > 0 && g.Status == model.TenantAccessGrantEnabled {
+			}
+			for _, p := range servicePorts {
+				if p.LocalPort > 0 {
+					sName := p.ServiceName
+					if sName == "" {
+						sName = p.ResourceID
+					}
 					exposedPorts = append(exposedPorts, SignalTunnelExposedPort{
-						Port: int(g.LocalPort),
-						Name: g.TenantResourceID,
+						Port: p.LocalPort,
+						Name: sName,
 						Type: "service",
 					})
 				}
 			}
 		}
-	}
+	} else {
+		var grants []model.TenantAccessGrant
+		if err := db.DB.WithContext(ctx).Where("subject_user_id = ?", tok.UserID).Find(&grants).Error; err == nil {
+			for _, g := range grants {
+				if g.AllowK8sAPI {
+					k8sApiEnabled = (g.Status == model.TenantAccessGrantEnabled)
+					if g.LocalPort > 0 {
+						k8sApiPort = int(g.LocalPort)
+					}
+				} else {
+					servicePorts = append(servicePorts, SignalTunnelPortMapping{
+						ResourceID:  g.TenantResourceID,
+						ServiceName: g.TenantResourceID,
+						TargetPort:  8000,
+						Protocol:    "TCP",
+						LocalPort:   int(g.LocalPort),
+						Namespace:   "beagle-system",
+					})
+					if g.LocalPort > 0 && g.Status == model.TenantAccessGrantEnabled {
+						exposedPorts = append(exposedPorts, SignalTunnelExposedPort{
+							Port: int(g.LocalPort),
+							Name: g.TenantResourceID,
+							Type: "service",
+						})
+					}
+				}
+			}
+		}
 
-	if k8sApiEnabled {
-		exposedPorts = append(exposedPorts, SignalTunnelExposedPort{
-			Port: k8sApiPort,
-			Name: "K8s API",
-			Type: "k8sapi",
-		})
-	}
+		if k8sApiEnabled {
+			exposedPorts = append(exposedPorts, SignalTunnelExposedPort{
+				Port: k8sApiPort,
+				Name: "K8s API",
+				Type: "k8sapi",
+			})
+		}
 
-	if len(servicePorts) == 0 {
-		servicePorts = []SignalTunnelPortMapping{
-			{
-				ResourceID:  "res-mcp-inference",
-				ServiceName: "mcp-service",
-				TargetPort:  8000,
-				Protocol:    "TCP",
-				LocalPort:   10080,
-				Namespace:   "beagle-system",
-			},
-			{
-				ResourceID:  "res-redis-cache",
-				ServiceName: "redis-cache",
-				TargetPort:  6379,
-				Protocol:    "TCP",
-				LocalPort:   0,
-				Namespace:   "beagle-system",
-			},
+		if len(servicePorts) == 0 {
+			servicePorts = []SignalTunnelPortMapping{
+				{
+					ResourceID:  "res-mcp-inference",
+					ServiceName: "mcp-service",
+					TargetPort:  8000,
+					Protocol:    "TCP",
+					LocalPort:   10080,
+					Namespace:   "beagle-system",
+				},
+				{
+					ResourceID:  "res-redis-cache",
+					ServiceName: "redis-cache",
+					TargetPort:  6379,
+					Protocol:    "TCP",
+					LocalPort:   0,
+					Namespace:   "beagle-system",
+				},
+			}
 		}
 	}
 
@@ -1586,6 +1649,10 @@ func (a *TunnelAPI) UpdateSignalTunnelPorts(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("参数格式错误"))
 		return
 	}
+
+	// 保存配置到 tok.PortsConfig
+	configBytes, _ := json.Marshal(req)
+	_ = db.DB.WithContext(ctx).Model(&tok).Update("ports_config", string(configBytes)).Error
 
 	// 更新或创建对应用户的 TenantAccessGrant
 	for _, p := range req.Ports {

@@ -40,6 +40,7 @@ type DeployToken struct {
 	NodeID            *uint64           `gorm:"index" json:"node_id"`                            // 关联的 Headscale Node ID
 	TargetAgentName   string            `gorm:"size:100" json:"target_agent_name,omitempty"`    // 绑定的目标 Agent（Tunnel 模式防呆校验）
 	Mode              string            `gorm:"size:50;default:''" json:"mode,omitempty"`        // 运行模式，例如 "tunnel"
+	PortsConfig       string            `gorm:"type:text" json:"ports_config,omitempty"`         // 隧道端口与授权配置（JSON）
 
 	// 关联
 	User           *User  `gorm:"foreignKey:UserID" json:"user,omitempty"`
