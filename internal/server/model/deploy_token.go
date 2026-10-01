@@ -38,6 +38,8 @@ type DeployToken struct {
 	BoundAt           *time.Time        `json:"bound_at"`                                        // 绑定时间
 	LastUsedAt        *time.Time        `json:"last_used_at"`                                    // 最后使用时间
 	NodeID            *uint64           `gorm:"index" json:"node_id"`                            // 关联的 Headscale Node ID
+	TargetAgentName   string            `gorm:"size:100" json:"target_agent_name,omitempty"`    // 绑定的目标 Agent（Tunnel 模式防呆校验）
+	Mode              string            `gorm:"size:50;default:''" json:"mode,omitempty"`        // 运行模式，例如 "tunnel"
 
 	// 关联
 	User           *User  `gorm:"foreignKey:UserID" json:"user,omitempty"`

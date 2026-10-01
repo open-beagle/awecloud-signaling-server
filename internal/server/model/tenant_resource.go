@@ -240,6 +240,8 @@ type TenantAccessGrant struct {
 	RevokedByUserID   *uint64                      `gorm:"index" json:"revoked_by_user_id,omitempty"`
 	RevokedAt         *time.Time                   `json:"revoked_at,omitempty"`
 	RevokeReason      string                       `gorm:"size:500;not null;default:'';check:chk_tenant_access_grant_revoke,(status = 'revoked' AND revoked_by_user_id IS NOT NULL AND revoked_at IS NOT NULL AND revoke_reason <> '') OR (status <> 'revoked' AND revoked_by_user_id IS NULL AND revoked_at IS NULL AND revoke_reason = '')" json:"revoke_reason,omitempty"`
+	LocalPort         int32                        `gorm:"default:0" json:"local_port"`                                                    // 本地出站监听端口（Tunnel 专用：0 表示静默，> 0 开启监听）
+	AllowK8sAPI       bool                         `gorm:"default:false" json:"allow_k8s_api"`                                             // 是否允许代理 Kubernetes API (6443)
 	CreatedAt         time.Time                    `json:"created_at"`
 	UpdatedAt         time.Time                    `json:"updated_at"`
 

@@ -95,7 +95,10 @@ type Agent struct {
 	updater      *updater.Manager
 
 	// 运行模式标识
-	isClientMode bool // true = Client 模式（CloudIDE 等），false = Agent 模式
+	isClientMode       bool // true = Client 模式（CloudIDE 等），false = Agent 模式
+	isTunnelMode       bool // true = Signal Tunnel 专用出站代理模式
+	targetAgent        string
+	tunnelProxyManager *TunnelProxyManager
 
 	// 上下文
 	ctx    context.Context
@@ -503,6 +506,140 @@ func (a *Agent) RunClient(regResult *config.RegisterResult) error {
 	logger.Info("Client 已关闭")
 	return nil
 }
+
+// RunTunnel 运行 Signal Tunnel 专用出站代理模式
+// 与边缘 Agent 建立 1:1 对等出站管道，白名单驱动显式 local_port 本地监听
+// 遵循三不原则：不分配动态 VIP、不劫持系统 DNS、非 root 零特权运行
+func (a *Agent) RunTunnel(regResult *config.RegisterResult, targetAgent string) error {
+	a.isTunnelMode = true
+	a.targetAgent = targetAgent
+
+	if regResult.DeviceName != "" {
+		a.deviceName = regResult.DeviceName
+		logger.Infof("[Tunnel] 设备名称: %s", a.deviceName)
+	}
+	if regResult.UserName != "" {
+		a.userName = regResult.UserName
+		logger.Infof("[Tunnel] 用户名: %s", a.userName)
+	}
+
+	if regResult.HeadscaleURL == "" || regResult.AuthKey == "" {
+		return fmt.Errorf("注册结果缺少 Headscale 认证信息")
+	}
+
+	logger.Infof("[Tunnel] 专用出站隧道启动: targetAgent=%s, user=%s (ID: %d)", targetAgent, regResult.UserName, regResult.UserID)
+
+	// 启动 Tailscale 出站连接
+	a.tsManager = NewTailscaleManager(a.config, nil, 0, "", a.ctx)
+	if err := a.tsManager.Start(regResult.HeadscaleURL, regResult.AuthKey, a.deviceName); err != nil {
+		return fmt.Errorf("启动 Tailscale 失败: %w", err)
+	}
+
+	a.tailscaleIP = a.tsManager.GetIP()
+	logger.Infof("[Tunnel] Tailscale 已连接，IP: %s", a.tailscaleIP)
+
+	// 创建 TunnelProxyManager
+	a.tunnelProxyManager = NewTunnelProxyManager(targetAgent, a.tsManager, a.ctx)
+
+	// 连接 gRPC Server（用于心跳上报与资源发现）
+	if err := a.connectToServer(); err != nil {
+		logger.Warnf("[Tunnel] 连接 gRPC Server 失败: %v", err)
+	} else {
+		a.agentID = regResult.UserID
+
+		// 启动心跳
+		a.wg.Add(1)
+		go a.heartbeatLoop()
+
+		// 启动隧道资源同步循环
+		a.wg.Add(1)
+		go a.syncTunnelResourcesLoop(a.tunnelProxyManager)
+	}
+
+	// 等待中断信号
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case <-quit:
+		logger.Info("[Tunnel] 收到终止信号，正在关闭...")
+	case <-a.ctx.Done():
+		logger.Info("[Tunnel] 上下文结束，正在关闭...")
+	}
+
+	a.cancel()
+
+	// 停止 TunnelProxyManager 并释放所有本地监听端口
+	if a.tunnelProxyManager != nil {
+		a.tunnelProxyManager.Stop()
+	}
+
+	// 停止 Tailscale
+	if a.tsManager != nil {
+		a.tsManager.Stop()
+	}
+
+	// 关闭 gRPC 连接
+	if a.grpcConn != nil {
+		a.grpcConn.Close()
+	}
+
+	a.wg.Wait()
+	logger.Info("[Tunnel] 专用出站代理已关闭")
+	return nil
+}
+
+// syncTunnelResourcesLoop 周期性从 Server 获取已授权资源并同步到 TunnelProxyManager
+func (a *Agent) syncTunnelResourcesLoop(mgr *TunnelProxyManager) {
+	defer a.wg.Done()
+
+	// 立即同步一次
+	a.syncTunnelResources(mgr)
+
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			a.syncTunnelResources(mgr)
+		case <-a.ctx.Done():
+			logger.Debug("[Tunnel] 资源同步协程退出")
+			return
+		}
+	}
+}
+
+// syncTunnelResources 执行一次资源同步
+func (a *Agent) syncTunnelResources(mgr *TunnelProxyManager) {
+	if !a.IsGRPCConnected() {
+		logger.Debug("[Tunnel] gRPC 未连接，跳过资源同步")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+
+	desktopClient := pb.NewDesktopServiceClient(a.grpcConn)
+	resp, err := desktopClient.GetResources(ctx, &pb.GetResourcesRequest{DesktopId: a.agentID})
+	if err != nil {
+		logger.Warnf("[Tunnel] 获取资源列表失败: %v", err)
+		return
+	}
+
+	mgr.SyncTunnelProxies(resp.ContainerService)
+}
+
+// IsTunnelMode 判断是否为 Tunnel 专用出站模式
+func (a *Agent) IsTunnelMode() bool {
+	return a.isTunnelMode
+}
+
+// TunnelProxyManager 返回内部 TunnelProxyManager（供测试或状态检查）
+func (a *Agent) TunnelProxyManager() *TunnelProxyManager {
+	return a.tunnelProxyManager
+}
+
 
 // connectToServer 连接到Server
 func (a *Agent) connectToServer() error {

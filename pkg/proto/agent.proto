@@ -79,6 +79,7 @@ message AgentRegisterRequest {
   string commit_id = 5; // Agent Git SHA
   string binary_sha256 = 6; // 可执行文件 SHA256 摘要
   string commit_date = 7; // Agent Git Commit 的 committer date（RFC 3339）
+  string target_agent = 8; // 客户端声明的目标 Agent（Tunnel 模式防呆校验）
 }
 
 // AgentRegisterResponse Agent 注册响应
@@ -105,6 +106,7 @@ message AgentAuthenticateRequest {
   string commit_id = 5; // Agent Git SHA
   string binary_sha256 = 6; // 可执行文件 SHA256 摘要
   string commit_date = 7; // Agent Git Commit 的 committer date（RFC 3339）
+  string target_agent = 8; // 客户端声明的目标 Agent（Tunnel 模式防呆校验）
 }
 
 // AgentAuthenticateResponse Agent 认证响应

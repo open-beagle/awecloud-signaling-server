@@ -33,6 +33,8 @@ type tenantGrantCreateRequest struct {
 	ValidFrom         *time.Time                `json:"valid_from"`
 	ExpiresAt         *time.Time                `json:"expires_at"`
 	MaxSessionSeconds int                       `json:"max_session_seconds"`
+	LocalPort         int32                     `json:"local_port"`
+	AllowK8sAPI       bool                      `json:"allow_k8s_api"`
 }
 
 type optionalNullableTime struct {
@@ -59,6 +61,8 @@ type tenantGrantUpdateRequest struct {
 	ValidFrom         *time.Time           `json:"valid_from"`
 	ExpiresAt         optionalNullableTime `json:"expires_at"`
 	MaxSessionSeconds *int                 `json:"max_session_seconds"`
+	LocalPort         *int32               `json:"local_port"`
+	AllowK8sAPI       *bool                `json:"allow_k8s_api"`
 }
 
 type tenantGrantActionRequest struct {
@@ -117,7 +121,8 @@ func (a *TenantAccessGrantAPI) Create(c *gin.Context) {
 			grant, err := grantService.Create(c.Request.Context(), authorization, service.CreateTenantGrantInput{
 				TenantID: tenantID, ResourceID: request.ResourceID, SubjectType: request.Subject.Type,
 				SubjectUserID: request.Subject.UserID, SubjectGroupID: request.Subject.GroupID, Actions: request.Actions,
-				ValidFrom: validFrom, ExpiresAt: request.ExpiresAt, MaxSessionSeconds: request.MaxSessionSeconds, RequestID: requestID(c),
+				ValidFrom: validFrom, ExpiresAt: request.ExpiresAt, MaxSessionSeconds: request.MaxSessionSeconds,
+				LocalPort: request.LocalPort, AllowK8sAPI: request.AllowK8sAPI, RequestID: requestID(c),
 			})
 			if err != nil {
 				return nil, err
@@ -145,7 +150,8 @@ func (a *TenantAccessGrantAPI) Update(c *gin.Context) {
 			grant, err := grantService.Update(c.Request.Context(), authorization, service.UpdateTenantGrantInput{
 				TenantID: tenantID, GrantID: c.Param("id"), ExpectedRowVersion: rowVersion,
 				Actions: request.Actions, ValidFrom: request.ValidFrom, ExpiresAt: request.ExpiresAt.Value,
-				SetExpiresAt: request.ExpiresAt.Set, MaxSessionSeconds: request.MaxSessionSeconds, RequestID: requestID(c),
+				SetExpiresAt: request.ExpiresAt.Set, MaxSessionSeconds: request.MaxSessionSeconds,
+				LocalPort: request.LocalPort, AllowK8sAPI: request.AllowK8sAPI, RequestID: requestID(c),
 			})
 			if err != nil {
 				return nil, err

@@ -66,6 +66,18 @@ const routes: RouteRecordRaw[] = [
 			meta: { requiresAuth: true, scope: 'provider', workspace: 'provider', permission: 'provider.technical_resources.read', menuDomain: 'provider' }
 		},
 		{
+			path: 'provider-tunnels',
+			name: 'ProviderTunnels',
+			component: () => import('@/views/Provider/TunnelList.vue'),
+			meta: { requiresAuth: true, scope: 'provider', workspace: 'provider', permission: 'provider.resources.read', menuDomain: 'provider' }
+		},
+		{
+			path: 'provider-tunnels/:id',
+			name: 'ProviderTunnelDetail',
+			component: () => import('@/views/Provider/TunnelDetail.vue'),
+			meta: { requiresAuth: true, scope: 'provider', workspace: 'provider', permission: 'provider.resources.read', menuDomain: 'provider' }
+		},
+		{
 			path: 'provider-supply-candidates',
 			name: 'ProviderSupplyCandidates',
 			component: () => import('@/views/Provider/SupplyCandidates.vue'),

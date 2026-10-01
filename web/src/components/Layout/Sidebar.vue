@@ -47,6 +47,7 @@
         <el-menu-item v-if="workspaceStore.can('provider.overview.read')" index="/provider-overview"><el-icon><DataAnalysis /></el-icon><template #title>概览</template></el-menu-item>
         <div v-if="!appStore.sidebarCollapsed" class="nav-section">资源供给</div>
         <el-menu-item v-if="workspaceStore.can('provider.technical_resources.read')" index="/provider-technical-resources"><el-icon><Cpu /></el-icon><template #title>技术资源</template></el-menu-item>
+        <el-menu-item v-if="workspaceStore.can('provider.resources.read')" index="/provider-tunnels"><el-icon><Connection /></el-icon><template #title>Tunnel 隧道</template></el-menu-item>
         <el-menu-item v-if="workspaceStore.can('provider.resources.read')" index="/provider-supply-candidates"><el-icon><Search /></el-icon><template #title>供给候选</template></el-menu-item>
         <el-menu-item v-if="workspaceStore.can('provider.resources.read')" index="/provider-hosts"><el-icon><Monitor /></el-icon><template #title>主机</template></el-menu-item>
         <el-menu-item v-if="workspaceStore.can('provider.resources.read')" index="/provider-kubernetes"><el-icon><Connection /></el-icon><template #title>Kubernetes</template></el-menu-item>
@@ -118,6 +119,7 @@ const activeMenu = computed(() => {
   if (route.path.startsWith('/tenant-overview')) return '/tenant-overview'
   if (route.path.startsWith('/provider-overview')) return '/provider-overview'
   if (route.path.startsWith('/provider-technical-resources')) return '/provider-technical-resources'
+  if (route.path.startsWith('/provider-tunnels')) return '/provider-tunnels'
   if (route.path.startsWith('/provider-supply-candidates')) return '/provider-supply-candidates'
   if (route.path.startsWith('/provider-hosts')) return '/provider-hosts'
   if (route.path.startsWith('/provider-kubernetes')) return '/provider-kubernetes'

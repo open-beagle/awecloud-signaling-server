@@ -1910,6 +1910,7 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 		return nil, nil
 	}
 	actionByResource := make(map[string]string)
+	localPortByResource := make(map[string]int32)
 	for _, grant := range grants {
 		if grant.SubjectType == model.TenantAccessGrantSubjectGroup && !grpcTenantGroupGrantMatches(grant, validGroupGrants) {
 			continue
@@ -1919,6 +1920,7 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 			actionByResource[grant.TenantResourceID] = "shell"
 		} else if containsAction(actions, "connect") {
 			actionByResource[grant.TenantResourceID] = "connect"
+			localPortByResource[grant.TenantResourceID] = grant.LocalPort
 		}
 	}
 	resourceIDs := make([]string, 0, len(actionByResource))
@@ -2203,6 +2205,7 @@ func (s *DesktopServiceServer) queryTenantContainerResourcesGRPC(ctx context.Con
 			PortName: projection.targetV2.PortName, PortNumber: projection.targetV2.PortNumber, Protocol: projection.targetV2.Protocol,
 			SessionId: projection.session.ID, SourceId: projection.session.TenantResourceSourceID,
 			TargetRevisionId: projection.session.TargetRevisionID, AuthorizationRevision: permission.AuthorizationRevision,
+			LocalPort: localPortByResource[projection.resource.ID], AgentName: projection.agent.Name,
 		})
 	}
 	logger.Infof("Desktop Tenant 资源发现分段: desktop_id=%d tenant_id=%s candidates=%d existing_sessions=%d missing_sessions=%d ssh_agents=%d catalog=%s session_lookup=%s session_ensure=%s ssh_snapshot=%s total=%s",

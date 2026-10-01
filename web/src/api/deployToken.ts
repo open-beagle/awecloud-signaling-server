@@ -12,6 +12,8 @@ export interface DeployToken {
   device_fingerprint?: string
   device_name?: string
   ssh_enabled: boolean
+  target_agent_name?: string
+  mode?: string
   created_by: number
   created_by_name?: string
   created_at: string
@@ -23,6 +25,8 @@ export interface DeployToken {
 // 创建部署 Token 请求
 export interface CreateDeployTokenRequest {
   name: string
+  target_agent_name?: string
+  mode?: string
 }
 
 // 创建部署 Token 响应
@@ -32,12 +36,16 @@ export interface CreateDeployTokenResponse {
   expires_at?: string
   install_command?: string
   env_config?: string
+  target_agent_name?: string
+  mode?: string
+  k8s_deploy_yaml?: string
 }
 
 // 获取部署命令响应
 export interface GetDeployCommandResponse {
   install_command?: string
   env_config?: string
+  k8s_deploy_yaml?: string
 }
 
 // 创建部署 Token（支持 ID 或用户名）

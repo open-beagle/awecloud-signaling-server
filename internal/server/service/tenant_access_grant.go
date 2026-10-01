@@ -44,6 +44,8 @@ type TenantGrantView struct {
 	RowVersion        int64                              `json:"row_version"`
 	RevokedAt         *time.Time                         `json:"revoked_at,omitempty"`
 	RevokeReason      string                             `json:"revoke_reason,omitempty"`
+	LocalPort         int32                              `json:"local_port"`
+	AllowK8sAPI       bool                               `json:"allow_k8s_api"`
 	CreatedAt         time.Time                          `json:"created_at"`
 	UpdatedAt         time.Time                          `json:"updated_at"`
 }
@@ -299,6 +301,8 @@ type CreateTenantGrantInput struct {
 	ValidFrom         time.Time
 	ExpiresAt         *time.Time
 	MaxSessionSeconds int
+	LocalPort         int32
+	AllowK8sAPI       bool
 	RequestID         string
 }
 
@@ -355,6 +359,7 @@ func (s *TenantAccessGrantService) Create(ctx context.Context, authorization *Ma
 			SubjectType: input.SubjectType, SubjectKey: subjectKey, SubjectUserID: input.SubjectUserID, SubjectGroupID: input.SubjectGroupID,
 			Actions: actionsJSON, ValidFrom: input.ValidFrom, ExpiresAt: input.ExpiresAt, MaxSessionSeconds: input.MaxSessionSeconds,
 			Status: model.TenantAccessGrantEnabled, Revision: 1, RowVersion: 1, CreatedByUserID: authorization.EffectiveUserID,
+			LocalPort: input.LocalPort, AllowK8sAPI: input.AllowK8sAPI,
 		}
 		if err := tx.Create(&grant).Error; err != nil {
 			return mapTenantGrantConstraint(err)
@@ -373,11 +378,13 @@ type UpdateTenantGrantInput struct {
 	ExpiresAt          *time.Time
 	SetExpiresAt       bool
 	MaxSessionSeconds  *int
+	LocalPort          *int32
+	AllowK8sAPI        *bool
 	RequestID          string
 }
 
 func (s *TenantAccessGrantService) Update(ctx context.Context, authorization *ManagementAuthorizationContext, input UpdateTenantGrantInput) (*model.TenantAccessGrant, error) {
-	if s == nil || s.db == nil || input.Actions == nil && input.ValidFrom == nil && !input.SetExpiresAt && input.MaxSessionSeconds == nil {
+	if s == nil || s.db == nil || (input.Actions == nil && input.ValidFrom == nil && !input.SetExpiresAt && input.MaxSessionSeconds == nil && input.LocalPort == nil && input.AllowK8sAPI == nil) {
 		return nil, ErrTenantGrantInvalidInput
 	}
 	input.TenantID, input.GrantID, input.RequestID = strings.TrimSpace(input.TenantID), strings.TrimSpace(input.GrantID), strings.TrimSpace(input.RequestID)
@@ -431,6 +438,12 @@ func (s *TenantAccessGrantService) Update(ctx context.Context, authorization *Ma
 		if input.MaxSessionSeconds != nil {
 			maxSeconds = *input.MaxSessionSeconds
 			updates["max_session_seconds"] = maxSeconds
+		}
+		if input.LocalPort != nil {
+			updates["local_port"] = *input.LocalPort
+		}
+		if input.AllowK8sAPI != nil {
+			updates["allow_k8s_api"] = *input.AllowK8sAPI
 		}
 		if err := validateTenantGrantWindow(validFrom, expiresAt, maxSeconds, now); err != nil {
 			return err
@@ -731,6 +744,7 @@ func tenantGrantView(grant *model.TenantAccessGrant) (*TenantGrantView, error) {
 		ValidFrom: grant.ValidFrom, ExpiresAt: grant.ExpiresAt, MaxSessionSeconds: grant.MaxSessionSeconds,
 		Status: grant.Status, Revision: grant.Revision, RowVersion: grant.RowVersion,
 		RevokedAt: grant.RevokedAt, RevokeReason: grant.RevokeReason, CreatedAt: grant.CreatedAt, UpdatedAt: grant.UpdatedAt,
+		LocalPort: grant.LocalPort, AllowK8sAPI: grant.AllowK8sAPI,
 	}, nil
 }
 

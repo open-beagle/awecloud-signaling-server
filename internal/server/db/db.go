@@ -117,6 +117,12 @@ func autoMigrate() error {
 	if err := ensureUpdaterReleaseSchema(DB); err != nil {
 		return err
 	}
+	if err := ensureDeployTokenSchema(DB); err != nil {
+		return err
+	}
+	if err := ensureTenantAccessGrantSchema(DB); err != nil {
+		return err
+	}
 	err := DB.AutoMigrate(
 		// 基础模型
 		&model.Admin{},
@@ -551,6 +557,44 @@ func ensureTenantGovernanceSchema(database *gorm.DB) error {
 		}
 		if err := database.Exec("ALTER TABLE tenant ADD COLUMN " + column + " INTEGER NOT NULL DEFAULT 1").Error; err != nil {
 			return fmt.Errorf("add tenant governance column %s: %w", column, err)
+		}
+	}
+	return nil
+}
+
+// ensureDeployTokenSchema 确保 deploy_tokens 表拥有 target_agent_name 和 mode 字段（用于 Signal Tunnel）
+func ensureDeployTokenSchema(database *gorm.DB) error {
+	migrator := database.Migrator()
+	if !migrator.HasTable(&model.DeployToken{}) {
+		return nil
+	}
+	if !migrator.HasColumn(&model.DeployToken{}, "target_agent_name") {
+		if err := database.Exec("ALTER TABLE deploy_tokens ADD COLUMN target_agent_name VARCHAR(100)").Error; err != nil {
+			return fmt.Errorf("add deploy_tokens target_agent_name: %w", err)
+		}
+	}
+	if !migrator.HasColumn(&model.DeployToken{}, "mode") {
+		if err := database.Exec("ALTER TABLE deploy_tokens ADD COLUMN mode VARCHAR(50) DEFAULT ''").Error; err != nil {
+			return fmt.Errorf("add deploy_tokens mode: %w", err)
+		}
+	}
+	return nil
+}
+
+// ensureTenantAccessGrantSchema 确保 tenant_access_grant 表拥有 local_port 和 allow_k8s_api 字段
+func ensureTenantAccessGrantSchema(database *gorm.DB) error {
+	migrator := database.Migrator()
+	if !migrator.HasTable(&model.TenantAccessGrant{}) {
+		return nil
+	}
+	if !migrator.HasColumn(&model.TenantAccessGrant{}, "local_port") {
+		if err := database.Exec("ALTER TABLE tenant_access_grant ADD COLUMN local_port INTEGER NOT NULL DEFAULT 0").Error; err != nil {
+			return fmt.Errorf("add tenant_access_grant local_port: %w", err)
+		}
+	}
+	if !migrator.HasColumn(&model.TenantAccessGrant{}, "allow_k8s_api") {
+		if err := database.Exec("ALTER TABLE tenant_access_grant ADD COLUMN allow_k8s_api BOOLEAN NOT NULL DEFAULT 0").Error; err != nil {
+			return fmt.Errorf("add tenant_access_grant allow_k8s_api: %w", err)
 		}
 	}
 	return nil

@@ -556,4 +556,6 @@ message ContainerServiceResource {
   string source_id = 18;
   string target_revision_id = 19;
   int64 authorization_revision = 20;
+  int32 local_port = 21; // 本地出站代理监听端口（Tunnel 专用：0 表示静默，> 0 开启监听）
+  string agent_name = 22; // 目标边缘 Agent 节点名称（Tunnel 1:1 边界校验）
 }

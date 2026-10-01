@@ -166,6 +166,17 @@ func (s *AgentServiceServer) Register(ctx context.Context, req *pb.AgentRegister
 		if err := db.DB.WithContext(ctx).Save(&deployToken).Error; err != nil {
 			return nil, err
 		}
+		if deployToken.TargetAgentName != "" {
+			if req.TargetAgent == "" {
+				logger.Warnf("[Tunnel 防呆拦截] 缺少声明的目标 Agent (target_agent)，防呆校验未通过: token_name=%s", deployToken.Name)
+				return &pb.AgentRegisterResponse{Success: false, Message: "缺少声明的目标 Agent，防呆校验未通过"}, nil
+			}
+			if req.TargetAgent != deployToken.TargetAgentName {
+				errMsg := fmt.Sprintf("目标 Agent 校验失败！客户端声明: %s, 服务端权威绑定: %s (防呆校验拒绝)", req.TargetAgent, deployToken.TargetAgentName)
+				logger.Warnf("[Tunnel 防呆拦截] %s", errMsg)
+				return &pb.AgentRegisterResponse{Success: false, Message: errMsg}, nil
+			}
+		}
 		userID = deployToken.UserID
 		deviceName = deployToken.Name
 	} else if !errors.Is(legacyErr, gorm.ErrRecordNotFound) {
@@ -350,6 +361,17 @@ func (s *AgentServiceServer) Authenticate(ctx context.Context, req *pb.AgentAuth
 			"user_id = ? AND token = ? AND status = ?",
 			user.ID, req.Secret, model.DeployTokenStatusBound,
 		).First(&deployToken).Error; err == nil {
+			if deployToken.TargetAgentName != "" {
+				if req.TargetAgent == "" {
+					logger.Warnf("[Tunnel 防呆拦截] 认证缺少声明的目标 Agent (target_agent): token_name=%s", deployToken.Name)
+					return &pb.AgentAuthenticateResponse{Success: false, Message: "缺少声明的目标 Agent，防呆校验未通过"}, nil
+				}
+				if req.TargetAgent != deployToken.TargetAgentName {
+					errMsg := fmt.Sprintf("目标 Agent 校验失败！客户端声明: %s, 服务端权威绑定: %s (防呆校验拒绝)", req.TargetAgent, deployToken.TargetAgentName)
+					logger.Warnf("[Tunnel 防呆拦截] %s", errMsg)
+					return &pb.AgentAuthenticateResponse{Success: false, Message: errMsg}, nil
+				}
+			}
 			authenticated = true
 			deployToken.UpdateLastUsed()
 			db.DB.WithContext(ctx).Save(&deployToken)

@@ -61,6 +61,14 @@ func main() {
 		return
 	}
 
+	// 检查是否是 run-tunnel 子命令：signal_agent run-tunnel [flags]
+	if len(os.Args) > 1 && os.Args[1] == "run-tunnel" {
+		if err := RunTunnelCLI(os.Args[2:]); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
+
 	configPath := flag.String("c", "config/agent.toml", "配置文件路径")
 	showVersion := flag.Bool("v", false, "显示版本信息")
 	showVersionLong := flag.Bool("version", false, "显示版本信息")

@@ -51,22 +51,29 @@ func NewDeployAPI(cfg *config.ServerConfig) *DeployAPI {
 
 // CreateDeployTokenRequest 创建部署 Token 请求
 type CreateDeployTokenRequest struct {
-	Name string `json:"name" binding:"required"` // Token 名称/备注
+	Name            string `json:"name" binding:"required"` // Token 名称/备注
+	TargetAgentName string `json:"target_agent_name,omitempty"` // 绑定的目标 Agent（Tunnel 模式防呆校验）
+	Mode            string `json:"mode,omitempty"` // 运行模式（例如 "tunnel"）
 }
 
 // CreateDeployTokenResponse 创建部署 Token 响应
 type CreateDeployTokenResponse struct {
-	Token          string  `json:"token"`                     // Token
-	Name           string  `json:"name"`                      // Token 名称
-	ExpiresAt      *string `json:"expires_at,omitempty"`      // 过期时间（Agent 有，Client 无）
-	InstallCommand string  `json:"install_command,omitempty"` // 安装命令（Agent 专用）
-	EnvConfig      string  `json:"env_config,omitempty"`      // 环境变量配置（Client 专用）
+	Token           string  `json:"token"`                     // Token
+	Name            string  `json:"name"`                      // Token 名称
+	TargetAgentName string  `json:"target_agent_name,omitempty"` // 绑定的目标 Agent
+	Mode            string  `json:"mode,omitempty"`            // 运行模式
+	ExpiresAt       *string `json:"expires_at,omitempty"`      // 过期时间（Agent 有，Client 无）
+	InstallCommand  string  `json:"install_command,omitempty"` // 安装命令（Agent 专用）
+	EnvConfig       string  `json:"env_config,omitempty"`      // 环境变量配置（Client 专用）
+	K8sDeployYaml   string  `json:"k8s_deploy_yaml,omitempty"` // Kubernetes 编排清单（Tunnel 专用）
 }
 
 // DeployTokenListItem 部署 Token 列表项
 type DeployTokenListItem struct {
 	ID                uint64     `json:"id"`
 	Name              string     `json:"name"`
+	TargetAgentName   string     `json:"target_agent_name,omitempty"`
+	Mode              string     `json:"mode,omitempty"`
 	Status            string     `json:"status"`
 	DeviceFingerprint string     `json:"device_fingerprint,omitempty"`
 	SSHEnabled        bool       `json:"ssh_enabled"`
@@ -82,6 +89,7 @@ type DeployTokenListItem struct {
 type RegisterRequest struct {
 	Token             string `json:"token" binding:"required"`              // 部署 Token
 	DeviceFingerprint string `json:"device_fingerprint" binding:"required"` // 设备指纹（SHA256(hostname)）
+	TargetAgent       string `json:"target_agent,omitempty"`                // 客户端声明的目标 Agent（Tunnel 模式防呆校验）
 }
 
 // RegisterResponse 统一注册响应
@@ -137,12 +145,14 @@ func (a *DeployAPI) CreateDeployToken(c *gin.Context) {
 	adminID := getAdminIDFromContext(c)
 
 	deployToken := &model.DeployToken{
-		Token:     token,
-		UserID:    user.ID,
-		Name:      req.Name,
-		Status:    model.DeployTokenStatusPending,
-		CreatedBy: uint64(adminID),
-		ExpiresAt: nil,
+		Token:           token,
+		UserID:          user.ID,
+		Name:            req.Name,
+		Status:          model.DeployTokenStatusPending,
+		CreatedBy:       uint64(adminID),
+		ExpiresAt:       nil,
+		TargetAgentName: req.TargetAgentName,
+		Mode:            req.Mode,
 	}
 
 	if err := db.DB.WithContext(ctx).Create(deployToken).Error; err != nil {
@@ -154,8 +164,10 @@ func (a *DeployAPI) CreateDeployToken(c *gin.Context) {
 	serverAddr := a.getServerAddr(c)
 
 	resp := CreateDeployTokenResponse{
-		Token: token,
-		Name:  req.Name,
+		Token:           token,
+		Name:            req.Name,
+		TargetAgentName: req.TargetAgentName,
+		Mode:            req.Mode,
 	}
 
 	resp.InstallCommand = fmt.Sprintf(
@@ -164,8 +176,36 @@ func (a *DeployAPI) CreateDeployToken(c *gin.Context) {
 	)
 	resp.EnvConfig = "SIGNAL_TOKEN=" + token + "\n" +
 		"SIGNAL_SERVER=" + serverAddr
+	if req.TargetAgentName != "" {
+		resp.EnvConfig += "\nSIGNAL_TARGET_AGENT=" + req.TargetAgentName
+	}
 
-	logger.Infof("创建部署 Token: user_id=%d, user_name=%s, role=%s, name=%s", user.ID, user.Name, user.Role, req.Name)
+	if req.Mode == "tunnel" || req.TargetAgentName != "" {
+		resp.K8sDeployYaml = fmt.Sprintf(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: beagle-system
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: tunnel
+          image: registry.example.com/beagle/signal-agent:v1.0.0
+          command: ["/app/signal_agent", "run-tunnel"]
+          env:
+            - name: SIGNAL_SERVER
+              value: "%s"
+            - name: SIGNAL_DEPLOY_TOKEN
+              value: "%s"
+            - name: SIGNAL_TARGET_AGENT
+              value: "%s"
+`, req.Name, serverAddr, token, req.TargetAgentName)
+	}
+
+	logger.Infof("创建部署 Token: user_id=%d, user_name=%s, role=%s, name=%s, target_agent=%s, mode=%s",
+		user.ID, user.Name, user.Role, req.Name, req.TargetAgentName, req.Mode)
 
 	c.JSON(http.StatusOK, NewSuccessResponse(resp))
 }
@@ -227,6 +267,8 @@ func (a *DeployAPI) ListDeployTokens(c *gin.Context) {
 		item := DeployTokenListItem{
 			ID:                t.ID,
 			Name:              t.Name,
+			TargetAgentName:   t.TargetAgentName,
+			Mode:              t.Mode,
 			Status:            string(t.Status),
 			DeviceFingerprint: t.DeviceFingerprint,
 			SSHEnabled:        t.SSHEnabled,
@@ -357,6 +399,20 @@ func (a *DeployAPI) Register(c *gin.Context) {
 	if !canUse {
 		c.JSON(http.StatusForbidden, NewErrorResponse(errMsg))
 		return
+	}
+
+	// 防呆校验：如果是 Tunnel 模式或设置了目标 Agent
+	if deployToken.TargetAgentName != "" {
+		if req.TargetAgent == "" {
+			c.JSON(http.StatusBadRequest, NewErrorResponse("缺少声明的目标 Agent (target_agent)，防呆校验未通过"))
+			return
+		}
+		if req.TargetAgent != deployToken.TargetAgentName {
+			errMsg := fmt.Sprintf("目标 Agent 校验失败！客户端声明: %s, 服务端权威绑定: %s (防呆校验拒绝)", req.TargetAgent, deployToken.TargetAgentName)
+			logger.Warnf("[Tunnel 防呆拦截] %s", errMsg)
+			c.JSON(http.StatusForbidden, NewErrorResponse(errMsg))
+			return
+		}
 	}
 
 	// 获取关联用户
