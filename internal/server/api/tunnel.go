@@ -1166,7 +1166,7 @@ func (a *TunnelAPI) ListSignalTunnels(c *gin.Context) {
 	}
 
 	query := db.DB.WithContext(ctx).Model(&model.DeployToken{}).
-		Where("mode = ? OR target_agent_name != ?", "tunnel", "")
+		Where("(mode = ? OR target_agent_name != ?) AND status != ?", "tunnel", "", model.DeployTokenStatusRevoked)
 
 	if search != "" {
 		query = query.Where("name LIKE ? OR target_agent_name LIKE ?", "%"+search+"%", "%"+search+"%")
@@ -1425,7 +1425,7 @@ func (a *TunnelAPI) GetSignalTunnel(c *gin.Context) {
 	}
 
 	var tok model.DeployToken
-	if err := db.DB.WithContext(ctx).First(&tok, id).Error; err != nil {
+	if err := db.DB.WithContext(ctx).First(&tok, id).Error; err != nil || tok.Status == model.DeployTokenStatusRevoked {
 		c.JSON(http.StatusNotFound, NewErrorResponse("未找到对应的 Tunnel 实例"))
 		return
 	}
@@ -1663,11 +1663,12 @@ func (a *TunnelAPI) DeleteSignalTunnel(c *gin.Context) {
 		return
 	}
 
-	// 标记为 revoked
+	// 标记为 revoked 并清理相关授权
 	if err := db.DB.WithContext(ctx).Model(&tok).Update("status", model.DeployTokenStatusRevoked).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("注销失败: "+err.Error()))
 		return
 	}
+	_ = db.DB.WithContext(ctx).Where("subject_user_id = ?", tok.UserID).Delete(&model.TenantAccessGrant{}).Error
 
 	logger.Infof("已成功注销 Tunnel 实例: id=%d, name=%s", id, tok.Name)
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("注销成功", nil))
