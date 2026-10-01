@@ -1,11 +1,5 @@
 <template>
-  <div class="tunnel-detail-page">
-    <!-- 面包屑导航 -->
-    <el-breadcrumb class="breadcrumb-bar" separator="/">
-      <el-breadcrumb-item :to="{ path: '/provider-technical-resources' }">技术资源</el-breadcrumb-item>
-      <el-breadcrumb-item :to="{ path: '/provider-tunnels' }">Tunnel 隧道</el-breadcrumb-item>
-      <el-breadcrumb-item>详情与授权</el-breadcrumb-item>
-    </el-breadcrumb>
+  <div class="provider-page">
 
     <!-- 顶部状态与操作条 -->
     <div class="detail-header-card">
@@ -18,6 +12,7 @@
         </span>
       </div>
       <div class="detail-header-right">
+        <el-button :icon="ArrowLeft" @click="returnToList">返回列表</el-button>
         <el-tooltip
           content="保存当前端口映射与授权配置并下发至 Tunnel Pod"
           placement="top"
@@ -219,16 +214,21 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  Check, Connection, Cpu, DocumentCopy, Monitor, SetUp, Share
+  ArrowLeft, Check, Connection, Cpu, DocumentCopy, Monitor, SetUp, Share
 } from '@element-plus/icons-vue'
 import { getTunnelDetail, updateTunnelPorts, type TunnelPortMapping } from '@/api/signalTunnel'
 
 const route = useRoute()
+const router = useRouter()
 const saving = ref(false)
 const activeTab = ref('services')
+
+const returnToList = () => {
+  router.push('/provider-tunnels')
+}
 
 const tunnel = ref({
   id: 1,
@@ -325,12 +325,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.tunnel-detail-page { width: 100%; }
-
-.breadcrumb-bar {
-  margin-bottom: 16px;
-  font-size: 13px;
-}
+.provider-page { width: 100%; }
 
 .detail-header-card {
   display: flex;

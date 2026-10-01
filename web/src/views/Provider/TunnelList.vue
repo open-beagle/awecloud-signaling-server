@@ -1,5 +1,5 @@
 <template>
-  <div class="tunnel-list-page">
+  <div class="provider-page">
     <PageHeader title="Tunnel 隧道" description="管理直连边缘专属出站隧道实例、1:1 Agent 绑定与本地暴露端口白名单。">
       <template #actions>
         <el-button :icon="Refresh" :loading="loading" @click="loadData">刷新</el-button>
@@ -482,7 +482,7 @@ onMounted(loadData)
 </script>
 
 <style scoped>
-.tunnel-list-page { width: 100%; }
+.provider-page { width: 100%; }
 
 .stats-grid {
   display: grid;
