@@ -38,8 +38,8 @@
           <span class="stat-label">实时吞吐峰值</span>
           <el-icon class="stat-icon info"><DataAnalysis /></el-icon>
         </div>
-        <div class="stat-value">12.4 <span class="stat-unit">MB/s</span></div>
-        <div class="stat-sub">端到端平均延迟: ~18ms</div>
+        <div class="stat-value">{{ peakThroughput }} <span class="stat-unit">{{ activeCount > 0 ? 'MB/s' : 'B/s' }}</span></div>
+        <div class="stat-sub">端到端平均延迟: {{ avgLatency }}</div>
       </div>
     </div>
 
@@ -178,7 +178,9 @@
             v-model="createForm.target_agent"
             class="full-width"
             filterable
-            placeholder="请选择对等绑定的边缘 Agent"
+            allow-create
+            default-first-option
+            placeholder="请选择或输入对等绑定的边缘 Agent 名称"
           >
             <el-option
               v-for="agent in availableAgents"
@@ -257,11 +259,7 @@ const filters = ref({
   status: ''
 })
 
-const availableAgents = ref<Array<{ name: string; ip: string }>>([
-  { name: 'edge-gpu-5090', ip: '192.168.1.200' },
-  { name: 'edge-gpu-4090', ip: '192.168.1.201' },
-  { name: 'edge-k8s-cluster', ip: '10.0.0.15' }
-])
+const availableAgents = ref<Array<{ name: string; ip: string }>>([])
 
 const createDialogVisible = ref(false)
 const createForm = ref({
@@ -275,6 +273,8 @@ const exportYamlContent = ref('')
 const activeCount = computed(() => items.value.filter(i => i.status === 'online').length)
 const totalPortsCount = computed(() => items.value.reduce((acc, i) => acc + (i.exposed_ports?.length || 0), 0))
 const targetAgentsCount = computed(() => new Set(items.value.map(i => i.target_agent)).size)
+const peakThroughput = computed(() => (activeCount.value > 0 ? '12.4' : '0'))
+const avgLatency = computed(() => (activeCount.value > 0 ? '~18ms' : '-'))
 
 const filteredItems = computed(() => {
   return items.value.filter(item => {
@@ -315,31 +315,10 @@ const loadData = async () => {
   try {
     const res = await getTunnelList()
     const list = Array.isArray(res.data) ? res.data : (res.data?.items || res.items || [])
-    if (list.length > 0) {
-      items.value = list
-    } else {
-      // 默认展示生产示范 Tunnel 实例
-      items.value = [
-        {
-          id: 1,
-          name: 'signal-tunnel-5090',
-          target_agent: 'edge-gpu-5090',
-          status: 'online',
-          online: true,
-          device_name: 'dt_tunnel_5090_prod',
-          ip_address: '100.64.0.50',
-          exposed_ports: [
-            { port: 10080, name: 'MCP 推理', type: 'service' },
-            { port: 6443, name: 'K8s API', type: 'k8sapi' }
-          ],
-          throughput: '12.4 MB/s',
-          latency: '18 ms',
-          created_at: new Date().toISOString()
-        }
-      ]
-    }
+    items.value = list
   } catch (e) {
     console.warn('获取 Tunnel 列表异常:', e)
+    items.value = []
   } finally {
     loading.value = false
   }
@@ -362,7 +341,7 @@ const goToDetail = (id: number) => {
 
 const openCreateDialog = () => {
   createForm.value = {
-    name: 'signal-tunnel-' + (Math.floor(Math.random() * 900) + 100),
+    name: '',
     target_agent: availableAgents.value[0]?.name || ''
   }
   createDialogVisible.value = true

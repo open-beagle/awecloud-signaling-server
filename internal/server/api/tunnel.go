@@ -1706,13 +1706,8 @@ func (a *TunnelAPI) GetAvailableAgents(c *gin.Context) {
 		})
 	}
 
-	// 如果暂无注册的真实 agent，返回生产示范备选 Agent
-	if len(result) == 0 {
-		result = []AgentOption{
-			{Name: "edge-gpu-5090", IP: "192.168.1.200", Online: true, Status: "online"},
-			{Name: "edge-gpu-4090", IP: "192.168.1.201", Online: true, Status: "online"},
-			{Name: "edge-k8s-cluster", IP: "10.0.0.15", Online: true, Status: "online"},
-		}
+	if result == nil {
+		result = []AgentOption{}
 	}
 
 	c.JSON(http.StatusOK, NewSuccessResponse(result))
