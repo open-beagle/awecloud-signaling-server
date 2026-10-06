@@ -621,7 +621,10 @@ func (a *Agent) syncTunnelResources(mgr *TunnelProxyManager) {
 	defer cancel()
 
 	desktopClient := pb.NewDesktopServiceClient(a.grpcConn)
-	resp, err := desktopClient.GetResources(ctx, &pb.GetResourcesRequest{DesktopId: a.agentID})
+	resp, err := desktopClient.GetResources(ctx, &pb.GetResourcesRequest{
+		DesktopId:        a.agentID,
+		ResourceProtocol: sessionAuthorizationProtocolV2,
+	})
 	if err != nil {
 		logger.Warnf("[Tunnel] 获取资源列表失败: %v", err)
 		return

@@ -295,10 +295,17 @@ func registerWithToken(serverAddr, token string) (*config.AgentConfig, *config.R
 
 	if resp.StatusCode != http.StatusOK {
 		var errResp struct {
-			Error string `json:"error"`
+			Error   string `json:"error"`
+			Message string `json:"message"`
 		}
-		if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
-			return nil, nil, fmt.Errorf("%s", errResp.Error)
+		if json.Unmarshal(body, &errResp) == nil {
+			msg := errResp.Message
+			if msg == "" {
+				msg = errResp.Error
+			}
+			if msg != "" {
+				return nil, nil, fmt.Errorf("%s", msg)
+			}
 		}
 		return nil, nil, fmt.Errorf("注册失败: HTTP %d", resp.StatusCode)
 	}

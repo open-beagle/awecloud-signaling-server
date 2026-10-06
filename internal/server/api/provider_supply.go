@@ -292,17 +292,18 @@ func (a *ProviderSupplyAPI) CreateDeploymentCredential(c *gin.Context) {
 		return
 	}
 	request.Name = strings.TrimSpace(request.Name)
-	if request.TTLMinutes == 0 {
-		request.TTLMinutes = 30
-	}
-	if request.Name == "" || request.TTLMinutes < 1 || request.TTLMinutes > 1440 {
+	if request.Name == "" || request.TTLMinutes < 0 {
 		codedError(c, http.StatusBadRequest, ErrorCodeInvalidArgument, "部署凭据参数无效")
 		return
 	}
 	serverAddr := serverAddrFromRequest(a.config, c)
 	executeProviderMutationWithStatus(c, authorization, http.StatusCreated, "create_technical_resource_deployment_credential", "generate deployment credential",
 		func(supply *service.ProviderSupplyService) (any, string, string, int64, error) {
-			credential, err := supply.CreateTechnicalResourceDeploymentCredential(c.Request.Context(), authorization, c.Param("id"), request.Name, time.Duration(request.TTLMinutes)*time.Minute)
+			var ttl time.Duration
+			if request.TTLMinutes > 0 {
+				ttl = time.Duration(request.TTLMinutes) * time.Minute
+			}
+			credential, err := supply.CreateTechnicalResourceDeploymentCredential(c.Request.Context(), authorization, c.Param("id"), request.Name, ttl)
 			if err != nil {
 				return nil, "", "", 0, err
 			}

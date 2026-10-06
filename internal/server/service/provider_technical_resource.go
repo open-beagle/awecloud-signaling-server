@@ -20,14 +20,14 @@ import (
 )
 
 type TechnicalResourceDeploymentCredential struct {
-	ID                  string    `json:"id"`
-	TechnicalResourceID string    `json:"technical_resource_id"`
-	Token               string    `json:"token"`
-	ExpiresAt           time.Time `json:"expires_at"`
+	ID                  string     `json:"id"`
+	TechnicalResourceID string     `json:"technical_resource_id"`
+	Token               string     `json:"token"`
+	ExpiresAt           *time.Time `json:"expires_at,omitempty"`
 }
 
 func (s *ProviderSupplyService) CreateTechnicalResourceDeploymentCredential(ctx context.Context, authorization *ManagementAuthorizationContext, resourceID, name string, ttl time.Duration) (*TechnicalResourceDeploymentCredential, error) {
-	if ttl <= 0 || ttl > 24*time.Hour {
+	if ttl < 0 {
 		return nil, ErrProviderSupplyInvalidInput
 	}
 	name = strings.TrimSpace(name)
@@ -39,7 +39,12 @@ func (s *ProviderSupplyService) CreateTechnicalResourceDeploymentCredential(ctx 
 		return nil, err
 	}
 	rawToken := "tr_" + hex.EncodeToString(random)
-	now, expiresAt := s.now().UTC(), s.now().UTC().Add(ttl)
+	now := s.now().UTC()
+	var expiresAtPtr *time.Time
+	if ttl > 0 {
+		expiresAt := now.Add(ttl)
+		expiresAtPtr = &expiresAt
+	}
 	result := &TechnicalResourceDeploymentCredential{}
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		providerID, err := reauthorizeProviderPermission(tx, authorization, PermissionProviderTechnicalResourcesWrite, now)
@@ -65,7 +70,7 @@ func (s *ProviderSupplyService) CreateTechnicalResourceDeploymentCredential(ctx 
 		token := model.TechnicalResourceDeployToken{
 			ID: uuid.NewString(), TechnicalResourceID: resource.ID, Token: rawToken, Name: name,
 			RuntimeUserID: resource.RuntimeUserID, Status: model.TechnicalResourceDeployTokenPending,
-			ExpiresAt: &expiresAt, CreatedByUserID: authorization.EffectiveUserID,
+			ExpiresAt: expiresAtPtr, CreatedByUserID: authorization.EffectiveUserID,
 		}
 		if err := tx.Create(&token).Error; err != nil {
 			return err
@@ -79,7 +84,7 @@ func (s *ProviderSupplyService) CreateTechnicalResourceDeploymentCredential(ctx 
 		if updated.RowsAffected != 1 {
 			return ErrProviderSupplyVersionConflict
 		}
-		result = &TechnicalResourceDeploymentCredential{ID: token.ID, TechnicalResourceID: resource.ID, Token: rawToken, ExpiresAt: expiresAt}
+		result = &TechnicalResourceDeploymentCredential{ID: token.ID, TechnicalResourceID: resource.ID, Token: rawToken, ExpiresAt: expiresAtPtr}
 		return nil
 	})
 	if err != nil {

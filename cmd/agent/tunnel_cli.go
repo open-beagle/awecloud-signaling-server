@@ -137,10 +137,17 @@ func RegisterTunnelWithToken(serverAddr, token, targetAgent string) (*config.Reg
 
 	if resp.StatusCode != http.StatusOK {
 		var errResp struct {
-			Error string `json:"error"`
+			Error   string `json:"error"`
+			Message string `json:"message"`
 		}
-		if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
-			return nil, fmt.Errorf("注册失败 (HTTP %d): %s", resp.StatusCode, errResp.Error)
+		if json.Unmarshal(body, &errResp) == nil {
+			msg := errResp.Message
+			if msg == "" {
+				msg = errResp.Error
+			}
+			if msg != "" {
+				return nil, fmt.Errorf("注册失败 (HTTP %d): %s", resp.StatusCode, msg)
+			}
 		}
 		return nil, fmt.Errorf("注册失败: HTTP %d", resp.StatusCode)
 	}

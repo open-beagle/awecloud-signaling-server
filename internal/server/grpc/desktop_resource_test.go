@@ -463,3 +463,70 @@ func TestDesktopTenantContainerResourceProjectionUsesLiveSessionAuthorization(t 
 	require.Len(t, sshResources, 1)
 	require.Empty(t, services)
 }
+
+func TestQueryTunnelContainerServicesGRPC(t *testing.T) {
+	database, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.NewString())), &gorm.Config{IgnoreRelationshipsWhenMigrating: true})
+	require.NoError(t, err)
+	require.NoError(t, database.AutoMigrate(
+		&model.User{}, &model.Node{}, &model.DeployToken{},
+	))
+	previous := db.DB
+	db.DB = database
+	t.Cleanup(func() { db.DB = previous })
+
+	tunnelUser := model.User{Name: "svc-tunnel-tunnel-test", Role: model.UserRoleClient, Enabled: true}
+	require.NoError(t, database.Create(&tunnelUser).Error)
+
+	tunnelDesktopNode := model.Node{UserID: tunnelUser.ID, Name: "tunnel-test", Type: model.NodeTypeDesktop}
+	require.NoError(t, database.Create(&tunnelDesktopNode).Error)
+
+	agentUser := model.User{Name: "agent-edge-test", Role: model.UserRoleAgent, Enabled: true}
+	require.NoError(t, database.Create(&agentUser).Error)
+
+	targetAgentNode := model.Node{UserID: agentUser.ID, Name: "edge-test-agent", Type: model.NodeTypeAgent, IP: "100.64.0.99"}
+	require.NoError(t, database.Create(&targetAgentNode).Error)
+
+	portsCfg := `{
+		"k8s_api_enabled": true,
+		"k8s_api_port": 6443,
+		"ports": [
+			{"resource_id": "res-studio", "service_name": "verdantflare-studio", "target_port": 18080, "local_port": 18080, "protocol": "TCP"},
+			{"resource_id": "res-clash", "service_name": "openclash", "target_port": 18090, "local_port": 18090, "protocol": "TCP"}
+		]
+	}`
+	deployToken := model.DeployToken{
+		Token:           "dummy-token",
+		UserID:          tunnelUser.ID,
+		Name:            "tunnel-test",
+		Status:          model.DeployTokenStatusBound,
+		TargetAgentName: "edge-test-agent",
+		Mode:            "tunnel",
+		PortsConfig:     portsCfg,
+	}
+	require.NoError(t, database.Create(&deployToken).Error)
+
+	server := &DesktopServiceServer{}
+	services := server.queryTunnelContainerServicesGRPC(context.Background(), &tunnelDesktopNode)
+	require.Len(t, services, 3)
+
+	// Verify K8s API port
+	require.Equal(t, "k8s-api", services[0].ResourceId)
+	require.Equal(t, "K8s API", services[0].ServiceName)
+	require.Equal(t, "edge-test-agent", services[0].AgentName)
+	require.Equal(t, "100.64.0.99", services[0].AgentIp)
+	require.Equal(t, int32(6443), services[0].LocalPort)
+	require.Equal(t, int32(6443), services[0].PortNumber)
+
+	// Verify Service 1
+	require.Equal(t, "res-studio", services[1].ResourceId)
+	require.Equal(t, "verdantflare-studio", services[1].ServiceName)
+	require.Equal(t, int32(18080), services[1].LocalPort)
+	require.Equal(t, int32(18080), services[1].PortNumber)
+
+	// Verify Service 2
+	require.Equal(t, "res-clash", services[2].ResourceId)
+	require.Equal(t, "openclash", services[2].ServiceName)
+	require.Equal(t, int32(18090), services[2].LocalPort)
+	require.Equal(t, int32(18090), services[2].PortNumber)
+}
+

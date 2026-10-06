@@ -1731,11 +1731,107 @@ func (s *DesktopServiceServer) GetResources(ctx context.Context, req *pb.GetReso
 		resp.ContainerSsh = append(resp.ContainerSsh, containerSSH...)
 		resp.ContainerService = containerServices
 	}
+	if req.TenantId == "" {
+		tunnelServices := s.queryTunnelContainerServicesGRPC(ctx, &node)
+		if len(tunnelServices) > 0 {
+			resp.ContainerService = append(resp.ContainerService, tunnelServices...)
+		}
+	}
 
 	logger.Infof("Desktop %d 资源发现: tenant_id=%s duration=%s SSH=%d, K8SAPI=%d, ContainerSSH=%d, ContainerService=%d",
 		req.DesktopId, req.TenantId, time.Since(startedAt), len(resp.Ssh), len(resp.K8SApi), len(resp.ContainerSsh), len(resp.ContainerService))
 
 	return resp, nil
+}
+
+func (s *DesktopServiceServer) queryTunnelContainerServicesGRPC(ctx context.Context, desktop *model.Node) []*pb.ContainerServiceResource {
+	if desktop == nil || desktop.UserID == 0 {
+		return nil
+	}
+	var deployToken model.DeployToken
+	if err := db.DB.WithContext(ctx).
+		Where("user_id = ? AND status != ? AND (mode = ? OR target_agent_name != ?)",
+			desktop.UserID, model.DeployTokenStatusRevoked, "tunnel", "").
+		First(&deployToken).Error; err != nil {
+		return nil
+	}
+	if deployToken.TargetAgentName == "" || deployToken.PortsConfig == "" {
+		return nil
+	}
+
+	var targetAgentNode model.Node
+	if err := db.DB.WithContext(ctx).
+		Where("name = ? AND type = ?", deployToken.TargetAgentName, model.NodeTypeAgent).
+		First(&targetAgentNode).Error; err != nil || targetAgentNode.IP == "" {
+		logger.Warnf("[Tunnel] 无法解析目标 Agent 节点或 IP: target=%s err=%v", deployToken.TargetAgentName, err)
+		return nil
+	}
+
+	var savedReq struct {
+		K8sAPIEnabled bool `json:"k8s_api_enabled"`
+		K8sAPIPort    int  `json:"k8s_api_port"`
+		Ports         []struct {
+			ResourceID  string `json:"resource_id"`
+			ServiceName string `json:"service_name"`
+			TargetPort  int    `json:"target_port"`
+			Protocol    string `json:"protocol"`
+			LocalPort   int    `json:"local_port"`
+			Namespace   string `json:"namespace"`
+		} `json:"ports"`
+	}
+	if err := json.Unmarshal([]byte(deployToken.PortsConfig), &savedReq); err != nil {
+		logger.Warnf("[Tunnel] 解析 ports_config 失败: token_id=%d err=%v", deployToken.ID, err)
+		return nil
+	}
+
+	var results []*pb.ContainerServiceResource
+	if savedReq.K8sAPIEnabled {
+		kPort := 6443
+		if savedReq.K8sAPIPort > 0 {
+			kPort = savedReq.K8sAPIPort
+		}
+		results = append(results, &pb.ContainerServiceResource{
+			ResourceId:  "k8s-api",
+			ServiceName: "K8s API",
+			AgentName:   deployToken.TargetAgentName,
+			AgentIp:     targetAgentNode.IP,
+			PortNumber:  int32(kPort),
+			LocalPort:   int32(kPort),
+			Protocol:    "TCP",
+		})
+	}
+	for _, p := range savedReq.Ports {
+		if p.LocalPort <= 0 {
+			continue
+		}
+		tPort := p.TargetPort
+		if tPort <= 0 {
+			tPort = p.LocalPort
+		}
+		proto := p.Protocol
+		if proto == "" {
+			proto = "TCP"
+		}
+		sName := p.ServiceName
+		if sName == "" {
+			sName = p.ResourceID
+		}
+		ns := p.Namespace
+		if ns == "" {
+			ns = "beagle-system"
+		}
+		results = append(results, &pb.ContainerServiceResource{
+			ResourceId:  p.ResourceID,
+			ServiceName: sName,
+			Namespace:   ns,
+			AgentName:   deployToken.TargetAgentName,
+			AgentIp:     targetAgentNode.IP,
+			PortNumber:  int32(tPort),
+			LocalPort:   int32(p.LocalPort),
+			Protocol:    proto,
+		})
+	}
+	return results
 }
 
 // ListResourceTenants returns the Tenant selector without creating or

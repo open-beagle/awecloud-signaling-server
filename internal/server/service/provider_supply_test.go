@@ -348,6 +348,27 @@ func TestProviderCreatesResourceOwnedOneTimeDeploymentCredential(t *testing.T) {
 	require.Equal(t, resource.RowVersion+2, updatedResource.RowVersion)
 }
 
+func TestProviderCreateAgentDeployCredentialPermanentWhenTTLZero(t *testing.T) {
+	fixture := newProviderSupplyFixture(t)
+	ctx := context.Background()
+
+	resource, err := fixture.service.CreateTechnicalResource(ctx, fixture.authorization, CreateTechnicalResourceInput{
+		Type: model.TechnicalResourceAgent, CredentialRevision: 1, RuntimeName: "perm-agent", DomainLabel: "perm-agent",
+	})
+	require.NoError(t, err)
+
+	credential, err := fixture.service.CreateTechnicalResourceDeploymentCredential(ctx, fixture.authorization, resource.ID, "perm-agent", 0)
+	require.NoError(t, err)
+	require.NotEmpty(t, credential.Token)
+	require.Nil(t, credential.ExpiresAt)
+
+	var token model.TechnicalResourceDeployToken
+	require.NoError(t, fixture.database.First(&token, "id = ?", credential.ID).Error)
+	require.Nil(t, token.ExpiresAt)
+	require.Equal(t, model.TechnicalResourceDeployTokenPending, token.Status)
+	require.True(t, token.CanConsume(time.Now().Add(365*24*time.Hour)))
+}
+
 func TestProviderCreateAgentUsesUniqueRuntimeUserNameWhenLegacyUserExists(t *testing.T) {
 	fixture := newProviderSupplyFixture(t)
 	ctx := context.Background()
