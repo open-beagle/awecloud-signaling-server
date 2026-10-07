@@ -601,7 +601,7 @@ func (a *TunnelAPI) GetTunnelNode(c *gin.Context) {
 	}
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
+	if err != nil || id == 0 {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
 		return
 	}
@@ -611,7 +611,16 @@ func (a *TunnelAPI) GetTunnelNode(c *gin.Context) {
 
 	node, err := a.hsClient.GetNode(ctx, id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("获取 Node 失败"))
+		tunnelNodeLookupError(c, err)
+		return
+	}
+	if node == nil || node.Id != id {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("Headscale 返回的 Node 身份不匹配"))
+		return
+	}
+	localNode, err := linkedTunnelNode(ctx, id)
+	if err != nil {
+		tunnelNodeBindingError(c, err)
 		return
 	}
 
@@ -635,24 +644,10 @@ func (a *TunnelAPI) GetTunnelNode(c *gin.Context) {
 	if node.User != nil {
 		detail.UserID = node.User.Id
 		detail.UserName = node.User.Name
-
-		// 判断关联类型
-		if strings.HasPrefix(node.User.Name, "agent-") {
-			localUserName := strings.TrimPrefix(node.User.Name, "agent-")
-			var localNode model.Node
-			if err := db.DB.WithContext(ctx).Joins("JOIN user ON user.id = node.user_id").
-				Where("user.name = ? AND user.role = ? AND node.id = ?", localUserName, model.UserRoleAgent, id).
-				First(&localNode).Error; err == nil {
-				detail.LinkedType = "agent"
-				detail.LinkedID = localNode.ID
-			}
-		} else if strings.HasPrefix(node.User.Name, "client-") {
-			var localNode model.Node
-			if err := db.DB.WithContext(ctx).Where("id = ? AND type = ?", id, model.NodeTypeDesktop).First(&localNode).Error; err == nil {
-				detail.LinkedType = "desktop"
-				detail.LinkedID = localNode.ID
-			}
-		}
+	}
+	if localNode != nil {
+		detail.LinkedType = string(localNode.Type)
+		detail.LinkedID = localNode.ID
 	}
 
 	c.JSON(http.StatusOK, NewSuccessResponse(detail))
@@ -747,13 +742,19 @@ func (a *TunnelAPI) UpdateTunnelNodeTags(c *gin.Context) {
 
 // DeleteTunnelNode 删除 Node
 func (a *TunnelAPI) DeleteTunnelNode(c *gin.Context) {
+	audit := beginSensitiveWrite(c, model.ActionDeleteTunnelNode, "tunnel_node", c.Param("id"))
+	if audit == nil {
+		return
+	}
+	defer audit.finish()
+	audit.detail.SyncStatus = "not_required"
 	if a.hsClient == nil {
 		c.JSON(http.StatusServiceUnavailable, NewErrorResponse("Headscale 未配置"))
 		return
 	}
 
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
+	if err != nil || id == 0 {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
 		return
 	}
@@ -764,7 +765,27 @@ func (a *TunnelAPI) DeleteTunnelNode(c *gin.Context) {
 	// 获取 Node 信息
 	node, err := a.hsClient.GetNode(ctx, id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("获取 Node 失败"))
+		tunnelNodeLookupError(c, err)
+		return
+	}
+	if node == nil || node.Id != id {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("Headscale 返回的 Node 身份不匹配"))
+		return
+	}
+	localNode, err := linkedTunnelNode(ctx, id)
+	if err != nil {
+		tunnelNodeBindingError(c, err)
+		return
+	}
+	audit.entry.TargetName = node.GivenName
+	if audit.entry.TargetName == "" {
+		audit.entry.TargetName = node.Name
+	}
+	audit.detail.Before = tunnelNodeAuditState(localNode)
+	audit.detail.Request = gin.H{"headscale_node_id": id}
+	audit.detail.ExternalStatus = "unknown"
+	if err := audit.save(ctx, audit.database); err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("审计记录不可用，操作未执行"))
 		return
 	}
 
@@ -773,31 +794,46 @@ func (a *TunnelAPI) DeleteTunnelNode(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除 Node 失败: "+err.Error()))
 		return
 	}
+	audit.detail.ExternalStatus = "applied"
 
-	// 同步删除本地关联实体
-	if node.User != nil {
-		if strings.HasPrefix(node.User.Name, "agent-") {
-			// 清空 Agent Node 的 ip
-			localUserName := strings.TrimPrefix(node.User.Name, "agent-")
-			db.DB.WithContext(ctx).Model(&model.Node{}).
-				Joins("JOIN user ON user.id = node.user_id").
-				Where("user.name = ? AND user.role = ? AND node.id = ?", localUserName, model.UserRoleAgent, id).
-				Updates(map[string]interface{}{"ip": ""})
-			logger.Infof("清空 Agent Node IP: user=%s, node_id=%d", localUserName, id)
-		} else if strings.HasPrefix(node.User.Name, "client-") {
-			// 删除 Desktop Node 记录
-			db.DB.WithContext(ctx).Where("id = ? AND type = ?", id, model.NodeTypeDesktop).Delete(&model.Node{})
-			logger.Infof("删除 Desktop Node: node_id=%d", id)
+	// Keep the preflight binding in the predicate: a concurrent reconnect must
+	// not clear/delete a Node that now points to a different Headscale identity.
+	if localNode != nil {
+		err := audit.transaction(func(tx *gorm.DB) error {
+			query := tx.Model(&model.Node{}).Where("id = ? AND headscale_node_id = ? AND user_id = ? AND type = ?",
+				localNode.ID, id, localNode.UserID, localNode.Type)
+			var result *gorm.DB
+			if localNode.Type == model.NodeTypeAgent {
+				result = query.Updates(map[string]interface{}{"ip": "", "headscale_node_id": 0})
+			} else {
+				result = query.Delete(&model.Node{})
+			}
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return errTunnelNodeBinding
+			}
+			audit.detail.After = nil
+			if localNode.Type == model.NodeTypeAgent {
+				after := *localNode
+				after.IP, after.HeadscaleNodeID = "", 0
+				audit.detail.After = tunnelNodeAuditState(&after)
+			}
+			return nil
+		})
+		if err != nil {
+			logger.Errorf("Headscale Node 已删除，本地绑定清理失败: hs_id=%d node_id=%d error=%v", id, localNode.ID, err)
+			statusCode := http.StatusInternalServerError
+			if errors.Is(err, errTunnelNodeBinding) {
+				statusCode = http.StatusConflict
+			}
+			c.JSON(statusCode, NewErrorResponse("Headscale Node 已删除，本地绑定清理未完成，请核验当前绑定"))
+			return
 		}
 	}
 
-	nodeName := node.GivenName
-	if nodeName == "" {
-		nodeName = node.Name
-	}
-
-	logger.Infof("删除隧道 Node: id=%d, name=%s", id, nodeName)
-	recordAuditLog(ctx, c, model.ActionDeleteTunnelNode, "tunnel_node", strconv.FormatUint(id, 10), nodeName, nil)
+	logger.Infof("删除隧道 Node: headscale_node_id=%d, name=%s", id, audit.entry.TargetName)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("删除成功", nil))
 }
