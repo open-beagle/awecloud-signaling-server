@@ -215,7 +215,7 @@ func TestAgentTunnelVerify_JSONOutput(t *testing.T) {
 			}
 			buf := make([]byte, 16)
 			_, _ = c.Read(buf)
-			atomic.StoreInt64(&k8sOK, 1)
+			atomic.AddInt64(&k8sOK, 1)
 			_ = c.Close()
 		}
 	}()
@@ -237,24 +237,38 @@ func TestAgentTunnelVerify_JSONOutput(t *testing.T) {
 	defer ts.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL, "-json"}, &stdout, &stderr)
-	// B4：仅有 k8s-api、没有任何业务端口被探测时，D2-0 必须 FAIL，不得空集通过
-	if code != 1 {
-		t.Fatalf("expected exit code 1, got %d. stderr: %s, stdout: %s", code, stderr.String(), stdout.String())
+	// 只配置了 k8s-api 的 Tunnel：期望 1 个、实际探测 1 个 → PASS
+	code := runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL, "-json", "-expect-probes", "1"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", code, stderr.String(), stdout.String())
 	}
 
 	var report AgentTunnelVerifyReport
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatalf("failed to decode JSON output: %v, raw:\n%s", err, stdout.String())
 	}
-	if report.Overall != "FAIL" {
-		t.Errorf("expected report.Overall = FAIL, got: %s", report.Overall)
+	if report.Overall != "PASS" {
+		t.Errorf("expected report.Overall = PASS, got: %s", report.Overall)
 	}
 	if len(report.Checks) != 3 { // D2-0, D2-3 and D2-4
 		t.Fatalf("expected 3 checks, got %d", len(report.Checks))
 	}
+	if report.Checks[0].ID != "D2-0" || !report.Checks[0].Passed {
+		t.Errorf("expected D2-0 coverage check to pass, got %+v", report.Checks[0])
+	}
+
+	// B4：Server 按 ports_config 期望 3 个，statusz 只有 1 个（业务端口被丢弃）→ D2-0 FAIL
+	stdout.Reset()
+	code = runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL, "-json", "-expect-probes", "3"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("expected exit code 1 on probe shortfall, got %d. stdout: %s", code, stdout.String())
+	}
+	report = AgentTunnelVerifyReport{}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("failed to decode JSON output: %v", err)
+	}
 	if report.Checks[0].ID != "D2-0" || report.Checks[0].Passed {
-		t.Errorf("expected D2-0 coverage check to fail, got %+v", report.Checks[0])
+		t.Errorf("expected D2-0 to fail on shortfall, got %+v", report.Checks[0])
 	}
 	for _, c := range report.Checks[1:] {
 		if !c.Passed {

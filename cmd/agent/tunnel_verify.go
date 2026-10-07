@@ -36,6 +36,7 @@ func runAgentTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int
 	fs := flag.NewFlagSet("tunnel-verify", flag.ContinueOnError)
 	statusURL := fs.String("statusz-url", "http://127.0.0.1:19090/statusz", "/statusz 接口地址")
 	jsonOutput := fs.Bool("json", false, "以 JSON 格式输出检测报告")
+	expectProbes := fs.Int("expect-probes", 0, "期望探测的资源数（由 server tunnel-verify 按 ports_config 给出；0 表示仅要求至少一次探测）")
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(stderr, "解析命令行参数失败: %v\n", err)
@@ -236,25 +237,24 @@ func runAgentTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int
 		}
 	}
 
-	// D2-0 探测覆盖度（B4）：未执行任何端口探测、或没有业务端口被探测时，不得空集通过
-	probedTotal, probedBusiness := 0, 0
+	// D2-0 探测覆盖度（B4）：statusz 只列出 local_port>0 的资源，看不到「已配置但被丢弃」的端口，
+	// 因此以 Server 按 ports_config 给出的期望数（--expect-probes）为准；至少执行一次探测。
+	probedTotal := 0
 	for _, s := range initialStatuses {
-		if s.LocalPort <= 0 {
-			continue
-		}
-		probedTotal++
-		if s.ResourceID != "k8s-api" {
-			probedBusiness++
+		if s.LocalPort > 0 {
+			probedTotal++
 		}
 	}
 	coverage := AgentCheckResult{
 		ID:      "D2-0",
-		Name:    "probe coverage (>=1 business port)",
-		Passed:  probedBusiness > 0,
-		Message: fmt.Sprintf("statusz 资源 %d 个，已探测 %d 个（业务端口 %d 个）", len(initialStatuses), probedTotal, probedBusiness),
+		Name:    "probe coverage (all configured)",
+		Passed:  probedTotal > 0 && probedTotal >= *expectProbes,
+		Message: fmt.Sprintf("已探测 %d 个，期望 %d 个", probedTotal, *expectProbes),
 	}
 	if probedTotal == 0 {
-		coverage.Message = fmt.Sprintf("未执行任何端口探测（statusz 资源 %d 个，均无 local_port）", len(initialStatuses))
+		coverage.Message = fmt.Sprintf("未执行任何端口探测（statusz 资源 %d 个，期望 %d 个）", len(initialStatuses), *expectProbes)
+	} else if probedTotal < *expectProbes {
+		coverage.Message = fmt.Sprintf("已配置但未探测：已探测 %d 个 < 期望 %d 个", probedTotal, *expectProbes)
 	}
 	report.Checks = append([]AgentCheckResult{coverage}, report.Checks...)
 

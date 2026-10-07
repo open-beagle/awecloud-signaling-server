@@ -30,12 +30,14 @@ type CheckResult struct {
 }
 
 type TunnelVerifyReport struct {
-	TunnelName string        `json:"tunnel_name"`
-	Overall    string        `json:"overall"` // PASS / PARTIAL (存在 SKIP) / FAIL
-	Skipped    int           `json:"skipped"`
-	Exempted   int           `json:"exempted"`
-	Checks     []CheckResult `json:"checks"`
-	DurationMs int64         `json:"duration_ms"`
+	TunnelName string `json:"tunnel_name"`
+	Overall    string `json:"overall"` // PASS / PARTIAL (存在 SKIP) / FAIL
+	Skipped    int    `json:"skipped"`
+	Exempted   int    `json:"exempted"`
+	// ExpectedProbes 数据面应探测的资源数：ports_config 条目数 + (K8s API 启用 ? 1 : 0)，供 agent D2-0 交叉校验
+	ExpectedProbes int           `json:"expected_probes"`
+	Checks         []CheckResult `json:"checks"`
+	DurationMs     int64         `json:"duration_ms"`
 }
 
 // agentHeartbeatMaxAge 由代码常量推导（非按线上数据调参）：
@@ -394,6 +396,13 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 	}
 	report.Checks = append(report.Checks, d21Check)
 
+	if cfgForProbes, err := service.ParseTunnelPortsConfig(tok.PortsConfig); err == nil {
+		report.ExpectedProbes = len(cfgForProbes.Ports)
+		if cfgForProbes.K8sAPIEnabled {
+			report.ExpectedProbes++
+		}
+	}
+
 	// 计算总体状态：任一 FAIL → FAIL；无 FAIL 但存在 SKIP → PARTIAL；否则 PASS。
 	// EXEMPT（验收标准写明的已知豁免）单独计数，不阻塞 PASS。
 	failed := false
@@ -442,6 +451,7 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "SKIPPED: %d\n", report.Skipped)
 		fmt.Fprintf(stdout, "EXEMPTED: %d\n", report.Exempted)
+		fmt.Fprintf(stdout, "EXPECTED_PROBES: %d\n", report.ExpectedProbes)
 		fmt.Fprintf(stdout, "RESULT: %s\n", report.Overall)
 	}
 
