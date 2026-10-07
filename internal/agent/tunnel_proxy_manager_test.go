@@ -245,6 +245,7 @@ func TestTunnel_K8sAPIProxy6443(t *testing.T) {
 type mockAgentSVCProxyServer struct {
 	pb.UnimplementedAgentServiceServer
 	rejectMsg string
+	silent    bool // 收到首包后不回任何确认，模拟 Agent 卡住
 	received  chan *pb.SVCProxyData
 }
 
@@ -255,6 +256,10 @@ func (s *mockAgentSVCProxyServer) SVCProxy(stream grpc.BidiStreamingServer[pb.SV
 	}
 	if s.received != nil {
 		s.received <- req
+	}
+	if s.silent {
+		<-stream.Context().Done()
+		return nil
 	}
 	if s.rejectMsg != "" {
 		return stream.Send(&pb.SVCProxyData{
@@ -425,6 +430,69 @@ func TestTunnel_NoFallbackAfterAgentReject(t *testing.T) {
 
 	// 断言：拨号记录必须仅包含 AgentIp:50051，从未拨过 AgentIp:8000
 	require.Equal(t, []string{"100.64.0.50:50051"}, dialedAddrs)
+
+	// 真实 handleConn 路径：拒绝被计入 svcproxy_rejected，守卫计数保持 0，成功计数不增加
+	require.Eventually(t, func() bool {
+		for _, s := range mgr.GetStatuses() {
+			if s.ResourceID == "res-mcp-reject" {
+				return s.SVCProxyRejected == 1
+			}
+		}
+		return false
+	}, 3*time.Second, 50*time.Millisecond)
+	for _, s := range mgr.GetStatuses() {
+		if s.ResourceID == "res-mcp-reject" {
+			require.Equal(t, int64(0), s.DirectDialViolation)
+			require.Equal(t, int64(0), s.SVCProxyOK)
+		}
+	}
+}
+
+// TestTunnel_FirstAckTimeoutCountsAsReject (R2) Agent 收到首包后不确认，必须记为拒绝而不是成功
+func TestTunnel_FirstAckTimeoutCountsAsReject(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	grpcListener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer grpcListener.Close()
+
+	grpcServer := grpc.NewServer()
+	pb.RegisterAgentServiceServer(grpcServer, &mockAgentSVCProxyServer{silent: true})
+	go func() { _ = grpcServer.Serve(grpcListener) }()
+	defer grpcServer.Stop()
+
+	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	defer mgr.Stop()
+	mgr.SetDialer(func(dialCtx context.Context, network, addr string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(dialCtx, "tcp", grpcListener.Addr().String())
+	})
+
+	localPort := getFreePort(t)
+	mgr.SyncTunnelProxies([]*pb.ContainerServiceResource{{
+		ResourceId: "res-silent", ServiceName: "silent-svc", LocalPort: int32(localPort),
+		PortNumber: 8000, SvcProxyPort: 50051, AgentIp: "100.64.0.50", AgentName: "edge-gpu-5090", Protocol: "TCP",
+	}})
+
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", localPort), 2*time.Second)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	require.Eventually(t, func() bool {
+		for _, s := range mgr.GetStatuses() {
+			if s.ResourceID == "res-silent" {
+				return s.SVCProxyRejected == 1
+			}
+		}
+		return false
+	}, 8*time.Second, 100*time.Millisecond)
+	for _, s := range mgr.GetStatuses() {
+		if s.ResourceID == "res-silent" {
+			require.Equal(t, int64(0), s.SVCProxyOK, "首包超时不得计入成功")
+			require.Equal(t, "first ack timeout", s.LastSVCProxyError)
+		}
+	}
 }
 
 // TestTunnel_StatuszEndpoint (T13b) 验证 /statusz 监控端点输出路径、指标与守卫计数
@@ -521,7 +589,7 @@ func TestTunnel_DirectDialViolationGuard(t *testing.T) {
 		return c1, nil
 	})
 
-	conn, err := mgr.DialTargetForResource(ctx, "tcp", "100.64.0.50:50051", res)
+	conn, err := mgr.dialTarget(ctx, "tcp", "100.64.0.50:50051", res)
 	require.NoError(t, err)
 	if conn != nil {
 		_ = conn.Close()
@@ -532,7 +600,7 @@ func TestTunnel_DirectDialViolationGuard(t *testing.T) {
 	require.Equal(t, int64(0), statuses[0].DirectDialViolation, "合规端口拨号不应增加 violation")
 
 	// 2. 违规拨号到目标业务端口 (8080)：守卫拦截并拒绝，violation 增加为 1
-	connFail, errFail := mgr.DialTargetForResource(ctx, "tcp", "100.64.0.50:8080", res)
+	connFail, errFail := mgr.dialTarget(ctx, "tcp", "100.64.0.50:8080", res)
 	require.Error(t, errFail)
 	require.Nil(t, connFail)
 	require.Contains(t, errFail.Error(), "direct dial violation")
@@ -551,4 +619,3 @@ func TestTunnel_DirectDialViolationGuard(t *testing.T) {
 	require.Len(t, httpStatuses, 1)
 	require.Equal(t, int64(1), httpStatuses[0].DirectDialViolation)
 }
-

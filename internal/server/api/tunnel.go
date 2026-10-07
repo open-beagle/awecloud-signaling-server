@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
@@ -1274,26 +1273,7 @@ func (a *TunnelAPI) ListSignalTunnels(c *gin.Context) {
 			}
 		}
 
-		if len(exposedPorts) == 0 {
-			var grants []model.TenantAccessGrant
-			if err := db.DB.WithContext(ctx).Where("subject_user_id = ? AND status = ?", tok.UserID, model.TenantAccessGrantEnabled).Find(&grants).Error; err == nil {
-				for _, g := range grants {
-					if g.LocalPort > 0 {
-						pType := "service"
-						name := g.TenantResourceID
-						if g.LocalPort == 6443 || g.AllowK8sAPI {
-							pType = "k8sapi"
-							name = "K8s API"
-						}
-						exposedPorts = append(exposedPorts, SignalTunnelExposedPort{
-							Port: int(g.LocalPort),
-							Name: name,
-							Type: pType,
-						})
-					}
-				}
-			}
-		}
+		// Tunnel 端口只以 ports_config 为准，不再回退读取 TenantAccessGrant（R3）
 
 		// 确保默认端口暴露直观展现（若暂未配置特定端口，展示默认白名单声明）
 		if len(exposedPorts) == 0 && tok.PortsConfig == "" {
@@ -1723,99 +1703,11 @@ func (a *TunnelAPI) UpdateSignalTunnelPorts(c *gin.Context) {
 		return
 	}
 
-	// 事务写入 ports_config 与 TenantAccessGrant
+	// 只写入 ports_config：Tunnel 端口的唯一来源，不再写 TenantAccessGrant（R3）
 	txErr := db.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&tok).Update("ports_config", string(configBytes)).Error; err != nil {
 			return err
 		}
-
-		for _, b := range bindings {
-			var grant model.TenantAccessGrant
-			findErr := tx.Where("subject_user_id = ? AND tenant_resource_id = ?", tok.UserID, b.ResourceID).First(&grant).Error
-			if errors.Is(findErr, gorm.ErrRecordNotFound) {
-				// 从资源归属或 User 租户关系派生真实 TenantID，严禁硬编码 beagle-system
-				effectiveTenantID := ""
-				var tr model.TenantResource
-				if err := tx.Where("id = ?", b.ResourceID).First(&tr).Error; err == nil && tr.TenantID != "" {
-					effectiveTenantID = tr.TenantID
-				}
-				if effectiveTenantID == "" {
-					var tm model.TenantMembership
-					if err := tx.Where("user_id = ? AND enabled = ?", tok.UserID, true).First(&tm).Error; err == nil && tm.TenantID != "" {
-						effectiveTenantID = tm.TenantID
-					}
-				}
-				if effectiveTenantID == "" {
-					effectiveTenantID = fmt.Sprintf("tunnel-user-%d", tok.UserID)
-				}
-
-				grant = model.TenantAccessGrant{
-					ID:               uuid.New().String(),
-					TenantID:         effectiveTenantID,
-					TenantResourceID: b.ResourceID,
-					SubjectType:      model.TenantAccessGrantSubjectUser,
-					SubjectKey:       fmt.Sprintf("user:%d", tok.UserID),
-					SubjectUserID:    &tok.UserID,
-					Actions:          `["connect"]`,
-					ValidFrom:        time.Now(),
-					Status:           model.TenantAccessGrantEnabled,
-					LocalPort:        b.LocalPort,
-				}
-				if err := tx.Create(&grant).Error; err != nil {
-					return err
-				}
-			} else if findErr == nil {
-				if err := tx.Model(&grant).Update("local_port", b.LocalPort).Error; err != nil {
-					return err
-				}
-			} else {
-				return findErr
-			}
-		}
-
-		var k8sGrant model.TenantAccessGrant
-		k8sErr := tx.Where("subject_user_id = ? AND allow_k8s_api = ?", tok.UserID, true).First(&k8sGrant).Error
-		kStatus := model.TenantAccessGrantEnabled
-		if !req.K8sAPIEnabled {
-			kStatus = model.TenantAccessGrantSuspended
-		}
-		if errors.Is(k8sErr, gorm.ErrRecordNotFound) {
-			k8sTenantID := ""
-			var tm model.TenantMembership
-			if err := tx.Where("user_id = ? AND enabled = ?", tok.UserID, true).First(&tm).Error; err == nil && tm.TenantID != "" {
-				k8sTenantID = tm.TenantID
-			}
-			if k8sTenantID == "" {
-				k8sTenantID = fmt.Sprintf("tunnel-user-%d", tok.UserID)
-			}
-
-			k8sGrant = model.TenantAccessGrant{
-				ID:               uuid.New().String(),
-				TenantID:         k8sTenantID,
-				TenantResourceID: "k8s-api",
-				SubjectType:      model.TenantAccessGrantSubjectUser,
-				SubjectKey:       fmt.Sprintf("user:%d", tok.UserID),
-				SubjectUserID:    &tok.UserID,
-				Actions:          `["admin"]`,
-				ValidFrom:        time.Now(),
-				Status:           kStatus,
-				AllowK8sAPI:      true,
-				LocalPort:        int32(req.K8sAPIPort),
-			}
-			if err := tx.Create(&k8sGrant).Error; err != nil {
-				return err
-			}
-		} else if k8sErr == nil {
-			if err := tx.Model(&k8sGrant).Updates(map[string]interface{}{
-				"local_port": int32(req.K8sAPIPort),
-				"status":     kStatus,
-			}).Error; err != nil {
-				return err
-			}
-		} else {
-			return k8sErr
-		}
-
 		return nil
 	})
 	if txErr != nil {
@@ -1930,4 +1822,3 @@ func nodeHeartbeat(t *time.Time) time.Time {
 	}
 	return *t
 }
-

@@ -47,11 +47,11 @@ type TunnelProxyManager struct {
 	tsManager   *TailscaleManager
 	dialer      TunnelDialer
 
-	listeners map[int]net.Listener
-	resources map[int]*pb.ContainerServiceResource
-	statusMap map[string]*TunnelResourceStatus
+	listeners    map[int]net.Listener
+	resources    map[int]*pb.ContainerServiceResource
+	statusMap    map[string]*TunnelResourceStatus
 	statusServer *http.Server
-	mu        sync.Mutex
+	mu           sync.Mutex
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -259,11 +259,6 @@ func (m *TunnelProxyManager) dialTarget(ctx context.Context, network, addr strin
 	return d.DialContext(ctx, network, addr)
 }
 
-// DialTargetForResource 导出拨号入口，供测试与校验使用
-func (m *TunnelProxyManager) DialTargetForResource(ctx context.Context, network, addr string, res *pb.ContainerServiceResource) (net.Conn, error) {
-	return m.dialTarget(ctx, network, addr, res)
-}
-
 // isHostDirectService 判断是否为宿主机原生控制面服务（仅限 Kubernetes API Server，精确匹配 ResourceId == "k8s-api"）
 func isHostDirectService(res *pb.ContainerServiceResource) bool {
 	if res == nil {
@@ -377,8 +372,10 @@ func (m *TunnelProxyManager) handleConn(clientConn net.Conn, res *pb.ContainerSe
 			m.recordStatusReject(res.ResourceId, err.Error())
 			return
 		case <-time.After(5 * time.Second):
-			// 握手正常建立
-			m.recordStatusSuccess(res.ResourceId)
+			// Agent 握手成功后会立即回空包确认（k8s_svc_proxy.go），超时说明 Agent 卡住或链路异常，按拒绝处理
+			logger.Warnf("[Tunnel] 对端 Agent 首包确认超时 (%s)", res.ServiceName)
+			m.recordStatusReject(res.ResourceId, "first ack timeout")
+			return
 		}
 
 		m.bridgeStream(clientConn, stream)
