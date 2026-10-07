@@ -25,6 +25,7 @@ type CheckResult struct {
 	Name    string `json:"name"`
 	Passed  bool   `json:"passed"`
 	Skipped bool   `json:"skipped,omitempty"` // 未覆盖：不计入 PASS，单独统计
+	Exempt  bool   `json:"exempt,omitempty"`  // 已知豁免（验收标准写明不适用）：单独统计，不阻塞 PASS
 	Message string `json:"message,omitempty"`
 }
 
@@ -32,6 +33,7 @@ type TunnelVerifyReport struct {
 	TunnelName string        `json:"tunnel_name"`
 	Overall    string        `json:"overall"` // PASS / PARTIAL (存在 SKIP) / FAIL
 	Skipped    int           `json:"skipped"`
+	Exempted   int           `json:"exempted"`
 	Checks     []CheckResult `json:"checks"`
 	DurationMs int64         `json:"duration_ms"`
 }
@@ -354,9 +356,8 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 						}
 					}
 					if allCompleteAndMatched {
-						// B4：候选集为空时无法做强一致校验，必须显式 SKIP，不得计为 PASS
-						d21Check.Skipped = true
-						d21Check.Message = "候选集为空（目标 Agent 未上报有效 Workload Observation），仅完成条目完整性校验，候选集一致性未覆盖"
+						eligible, eligErr := agentWorkloadInventoryEligible(ctx, targetAgentName, time.Now().UTC())
+						classifyEmptyCandidates(&d21Check, eligible, eligErr)
 					} else {
 						d21Check.Passed = false
 						d21Check.Message = mismatchReason
@@ -393,12 +394,16 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 	}
 	report.Checks = append(report.Checks, d21Check)
 
-	// 计算总体状态：任一 FAIL → FAIL；无 FAIL 但存在 SKIP → PARTIAL；否则 PASS
+	// 计算总体状态：任一 FAIL → FAIL；无 FAIL 但存在 SKIP → PARTIAL；否则 PASS。
+	// EXEMPT（验收标准写明的已知豁免）单独计数，不阻塞 PASS。
 	failed := false
 	for _, c := range report.Checks {
-		if c.Skipped {
+		switch {
+		case c.Exempt:
+			report.Exempted++
+		case c.Skipped:
 			report.Skipped++
-		} else if !c.Passed {
+		case !c.Passed:
 			failed = true
 		}
 	}
@@ -422,7 +427,9 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 		for _, c := range report.Checks {
 			dots := strings.Repeat(".", max(2, 45-len(c.Name)-len(c.ID)))
 			statusStr := "PASS"
-			if c.Skipped {
+			if c.Exempt {
+				statusStr = "EXEMPT"
+			} else if c.Skipped {
 				statusStr = "SKIP"
 			} else if !c.Passed {
 				statusStr = "FAIL"
@@ -434,6 +441,7 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		fmt.Fprintf(stdout, "SKIPPED: %d\n", report.Skipped)
+		fmt.Fprintf(stdout, "EXEMPTED: %d\n", report.Exempted)
 		fmt.Fprintf(stdout, "RESULT: %s\n", report.Overall)
 	}
 
@@ -444,6 +452,39 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 		return 2
 	default:
 		return 1
+	}
+}
+
+// agentWorkloadInventoryEligible 判断目标 Agent 是否已接入治理平台、具备 Workload Inventory 上报资格。
+func agentWorkloadInventoryEligible(ctx context.Context, agentName string, now time.Time) (bool, error) {
+	var agentNode model.Node
+	if err := db.DB.WithContext(ctx).Where("name = ? AND type = ?", agentName, model.NodeTypeAgent).First(&agentNode).Error; err != nil {
+		return false, fmt.Errorf("目标 Agent 节点不存在: %w", err)
+	}
+	var binding model.TechnicalResourceBinding
+	if err := db.DB.WithContext(ctx).
+		Where("source_type = ? AND source_id = ? AND enabled = ?", model.TechnicalResourceBindingLegacyNode, fmt.Sprint(agentNode.ID), true).
+		First(&binding).Error; err != nil {
+		return false, fmt.Errorf("未绑定 technical_resource: %w", err)
+	}
+	return service.TechnicalResourceWorkloadInventoryEligible(ctx, db.DB, binding.TechnicalResourceID, now)
+}
+
+// classifyEmptyCandidates 候选集为空（条目完整性已满足）时的 D2-1 判定：
+//   - 无法判定资格 → FAIL
+//   - 已接入治理却无候选 → FAIL（上报缺失，是真实缺陷）
+//   - 未接入治理 → EXEMPT（验收标准 10.16 已知豁免，端口正确性由数据面 D2-2/D2-4 真实探测兜底）
+func classifyEmptyCandidates(check *CheckResult, eligible bool, err error) {
+	switch {
+	case err != nil:
+		check.Passed = false
+		check.Message = fmt.Sprintf("候选集为空，且无法判定目标 Agent 的治理接入状态: %v", err)
+	case eligible:
+		check.Passed = false
+		check.Message = "目标 Agent 已接入治理（具备 workload_inventory_v1），但候选集为空：Workload Inventory 上报缺失"
+	default:
+		check.Exempt = true
+		check.Message = "目标 Agent 未接入治理平台集群（无 linked cluster 候选），D2-1 不适用（已知豁免）；条目完整性已校验，端口正确性由 D2-2/D2-4 探测兜底"
 	}
 }
 

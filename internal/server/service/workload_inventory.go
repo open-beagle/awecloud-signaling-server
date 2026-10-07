@@ -500,6 +500,20 @@ func resolveTrustedWorkloadNamespaceScope(tx *gorm.DB, source *model.TechnicalRe
 	return &scopes[0], nil
 }
 
+// TechnicalResourceWorkloadInventoryEligible 判断技术资源是否具备上报 Workload Inventory 的资格
+// （与下发 WorkloadInventoryConfig 的判定一致：存在 linked、强身份、未过期、声明
+// workload_inventory_v1 能力的集群候选）。供 tunnel-verify 区分「未接入治理」与「上报缺失」。
+func TechnicalResourceWorkloadInventoryEligible(ctx context.Context, gormDB *gorm.DB, technicalResourceID string, now time.Time) (bool, error) {
+	if gormDB == nil || technicalResourceID == "" {
+		return false, nil
+	}
+	var source model.TechnicalResource
+	if err := gormDB.WithContext(ctx).Where("id = ?", technicalResourceID).First(&source).Error; err != nil {
+		return false, err
+	}
+	return workloadSourceHasCapability(gormDB.WithContext(ctx), &source, "", now)
+}
+
 func workloadSourceHasCapability(tx *gorm.DB, source *model.TechnicalResource, platformResourceID string, now time.Time) (bool, error) {
 	if tx == nil || source == nil {
 		return false, nil
