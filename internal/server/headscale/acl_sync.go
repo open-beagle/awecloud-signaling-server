@@ -405,8 +405,14 @@ func (s *ACLSyncService) generateACLPolicy(ctx context.Context) (*ACLPolicy, err
 	}
 
 	// 8. 同用户节点互访规则 — Client 用户的多个设备（Desktop、CloudIDE 等）之间互相访问
+	// Tunnel 服务身份由 Token 关联确认，撤销后也不得恢复同账号全端口授权。
+	var tunnelUserIDs []uint64
+	if err := db.DB.WithContext(ctx).Model(&model.DeployToken{}).
+		Where("mode = ?", "tunnel").Distinct("user_id").Pluck("user_id", &tunnelUserIDs).Error; err != nil {
+		return nil, fmt.Errorf("查询 Tunnel DeployToken 失败（服务账号身份）: %w", err)
+	}
 	for _, user := range users {
-		if user.Role == model.UserRoleClient {
+		if user.Role == model.UserRoleClient && !slices.Contains(tunnelUserIDs, user.ID) {
 			tagName := fmt.Sprintf("tag:client-%s", user.Name)
 			usedTags[tagName] = true
 			policy.TagOwners[tagName] = []string{}

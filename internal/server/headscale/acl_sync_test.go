@@ -263,6 +263,23 @@ func TestGenerateACLPolicy_AbortsOnError(t *testing.T) {
 	require.Contains(t, syncErr.Error(), "生成 ACL 策略失败")
 }
 
+func TestTunnelAccountNeverGetsClientSelfWildcard(t *testing.T) {
+	database := newHeadscaleACLTestDB(t)
+	ordinary := model.User{Name: "ordinary-client", Role: model.UserRoleClient, Enabled: true}
+	tunnel := model.User{Name: "dedicated-service", Role: model.UserRoleClient, Enabled: true}
+	require.NoError(t, database.Create(&ordinary).Error)
+	require.NoError(t, database.Create(&tunnel).Error)
+	token := model.DeployToken{Token: "self-wildcard-test", UserID: tunnel.ID, Name: "test", Mode: "tunnel", TargetAgentName: "edge", Status: model.DeployTokenStatusPending}
+	require.NoError(t, database.Create(&token).Error)
+	for _, status := range []model.DeployTokenStatus{model.DeployTokenStatusPending, model.DeployTokenStatusBound, model.DeployTokenStatusRevoked} {
+		require.NoError(t, database.Model(&token).Update("status", status).Error)
+		policy, err := NewACLSyncService(nil).generateACLPolicy(context.Background())
+		require.NoError(t, err)
+		require.NotContains(t, policy.ACLs, ACLRule{Action: "accept", Src: []string{"tag:client-dedicated-service"}, Dst: []string{"tag:client-dedicated-service:*"}})
+		require.Contains(t, policy.ACLs, ACLRule{Action: "accept", Src: []string{"tag:client-ordinary-client"}, Dst: []string{"tag:client-ordinary-client:*"}})
+	}
+}
+
 func newHeadscaleACLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 

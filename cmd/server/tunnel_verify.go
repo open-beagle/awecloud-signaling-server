@@ -166,59 +166,21 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 				d11Check.Passed = false
 				d11Check.Message = fmt.Sprintf("解析线上 ACL JSON 失败: %v", err)
 			} else {
-				// 解析端口配置以确定预期端口
-				portsCfg, _ := service.ParseTunnelPortsConfig(tok.PortsConfig)
-				srcTag := "tag:client-" + tok.Name
-				if tok.User != nil && tok.User.Name != "" {
-					srcTag = "tag:client-" + tok.User.Name
-				} else {
-					srcTag = "tag:client-svc-tunnel-" + tok.Name
-				}
-				targetTag := "tag:agent-" + targetAgentName
-
-				hasWildcard := false
-				has50051 := false
-				has6443 := false
-
-				for _, r := range livePolicy.ACLs {
-					isSrc := false
-					for _, s := range r.Src {
-						if s == srcTag {
-							isSrc = true
-							break
-						}
-					}
-					if !isSrc {
-						continue
-					}
-
-					for _, d := range r.Dst {
-						if d == targetTag+":*" || (strings.HasPrefix(d, "tag:agent-") && strings.HasSuffix(d, ":*")) {
-							hasWildcard = true
-						}
-						if strings.HasSuffix(d, ":50051") {
-							has50051 = true
-						}
-						if strings.HasSuffix(d, ":6443") {
-							has6443 = true
+				portsCfg, checkErr := service.ParseTunnelPortsConfig(tok.PortsConfig)
+				if checkErr == nil {
+					var tags []string
+					tags, checkErr = tunnelAgentTags(ctx, targetAgentName)
+					if checkErr == nil {
+						var identity tunnelACLIdentity
+						identity, checkErr = loadTunnelACLIdentity(ctx, hsClient, tok)
+						if checkErr == nil {
+							checkErr = checkTunnelACL(&livePolicy, identity, tunnelAllowedDestinations(tags, portsCfg.K8sAPIEnabled))
 						}
 					}
 				}
-
-				if hasWildcard {
-					d11Check.Passed = false
-					d11Check.Message = fmt.Sprintf("线上策略中存在通配端口授权 (%s:*)", targetTag)
-				} else if !has50051 {
-					d11Check.Passed = false
-					d11Check.Message = "线上策略缺少对 Agent 50051 端口的授权"
-				} else if portsCfg.K8sAPIEnabled && !has6443 {
-					d11Check.Passed = false
-					d11Check.Message = "已启用 K8s API，但线上策略缺少对 6443 端口的授权"
-				} else if !portsCfg.K8sAPIEnabled && has6443 {
-					d11Check.Passed = false
-					d11Check.Message = "未启用 K8s API，但线上策略冗余放行了 6443 端口"
-				} else {
-					d11Check.Passed = true
+				d11Check.Passed = checkErr == nil
+				if checkErr != nil {
+					d11Check.Message = checkErr.Error()
 				}
 			}
 		}
@@ -250,82 +212,8 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 
 	// ==================== [D1-3] 临时 Tunnel 注入与吊销耗时探测 (可选) ====================
 	if *probeRevoke {
-		d13Check := CheckResult{ID: "D1-3", Name: "probe-revoke"}
-		probeName := fmt.Sprintf("verify-probe-%d", time.Now().UnixNano())
-		probeUser := model.User{
-			Name:       "svc-tunnel-" + probeName,
-			Role:       model.UserRoleClient,
-			SecretHash: "probe-hash",
-			Enabled:    true,
-		}
-
-		if err := db.DB.WithContext(ctx).Create(&probeUser).Error; err != nil {
-			d13Check.Passed = false
-			d13Check.Message = fmt.Sprintf("创建探针临时用户失败: %v", err)
-		} else {
-			defer func() {
-				_ = db.DB.WithContext(ctx).Where("name = ?", probeUser.Name).Delete(&model.User{})
-			}()
-
-			probeToken := model.DeployToken{
-				Name:            probeName,
-				UserID:          probeUser.ID,
-				TargetAgentName: targetAgentName,
-				Mode:            "tunnel",
-				Status:          model.DeployTokenStatusBound,
-				Token:           "probe-token-" + probeName,
-			}
-
-			t0 := time.Now()
-			if err := db.DB.WithContext(ctx).Create(&probeToken).Error; err != nil {
-				d13Check.Passed = false
-				d13Check.Message = fmt.Sprintf("写入探针 Token 失败: %v", err)
-			} else {
-				defer func() {
-					_ = db.DB.WithContext(ctx).Where("id = ?", probeToken.ID).Delete(&model.DeployToken{})
-				}()
-
-				// 1. 同步后校验规则出现
-				if err := aclSyncer.FullSync(ctx); err != nil {
-					d13Check.Passed = false
-					d13Check.Message = fmt.Sprintf("探针创建后 FullSync 失败: %v", err)
-				} else {
-					tCreate := time.Since(t0)
-					newPolicyStr, _ := hsClient.GetPolicy(ctx)
-					probeUserTag := "tag:client-" + probeUser.Name
-					hasProbeRule := strings.Contains(newPolicyStr, probeUserTag)
-
-					if !hasProbeRule {
-						d13Check.Passed = false
-						d13Check.Message = "探针创建并同步后，线上策略未检索到对应 tag:client 规则"
-					} else {
-						// 2. 注销并校验规则消失
-						t1 := time.Now()
-						_ = db.DB.WithContext(ctx).Model(&probeToken).Update("status", model.DeployTokenStatusRevoked)
-						_ = db.DB.WithContext(ctx).Where("name = ?", probeUser.Name).Delete(&model.User{})
-						if err := aclSyncer.FullSync(ctx); err != nil {
-							d13Check.Passed = false
-							d13Check.Message = fmt.Sprintf("探针吊销后 FullSync 失败: %v", err)
-						} else {
-							tRevoke := time.Since(t1)
-							revokedPolicyStr, _ := hsClient.GetPolicy(ctx)
-							hasProbeRuleAfter := strings.Contains(revokedPolicyStr, probeUserTag)
-
-							if hasProbeRuleAfter {
-								d13Check.Passed = false
-								d13Check.Message = "探针吊销并同步后，线上策略仍残留该规则"
-							} else {
-								d13Check.Passed = true
-								d13Check.Message = fmt.Sprintf("create: %v, revoke: %v", tCreate.Round(time.Millisecond), tRevoke.Round(time.Millisecond))
-							}
-						}
-					}
-				}
-			}
-		}
-		report.Checks = append(report.Checks, d13Check)
+		report.Checks = append(report.Checks, verifyTunnelPolicyProbe(ctx, hsClient, aclSyncer, targetAgentName))
 	}
-
 	// ==================== [D2-1] ports_config 完整性与候选集一致 ====================
 	d21Check := CheckResult{ID: "D2-1", Name: "ports_config complete & matches inventory"}
 	{
