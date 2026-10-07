@@ -489,3 +489,66 @@ func TestTunnel_StatuszEndpoint(t *testing.T) {
 	require.Equal(t, "svcproxy", webStatus.Path)
 	require.Equal(t, int64(0), webStatus.DirectDialViolation)
 }
+
+// TestTunnel_DirectDialViolationGuard (R1) 验证非 k8s-api 资源尝试直连非 SvcProxyPort 时被守卫拦截并递增计数
+func TestTunnel_DirectDialViolationGuard(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	defer mgr.Stop()
+
+	statusPort := getFreePort(t)
+	err := mgr.StartStatusServer(fmt.Sprintf("127.0.0.1:%d", statusPort))
+	require.NoError(t, err)
+
+	res := &pb.ContainerServiceResource{
+		ResourceId:   "res-secure-app",
+		ServiceName:  "secure-app",
+		Namespace:    "default",
+		LocalPort:    18081,
+		PortNumber:   8080,
+		SvcProxyPort: 50051,
+		AgentIp:      "100.64.0.50",
+		AgentName:    "edge-gpu-5090",
+	}
+	mgr.SyncTunnelProxies([]*pb.ContainerServiceResource{res})
+
+	// 1. 合法拨号到 SvcProxyPort (50051)：守卫不拦截，violation == 0
+	mgr.SetDialer(func(dialCtx context.Context, network, addr string) (net.Conn, error) {
+		c1, c2 := net.Pipe()
+		_ = c2.Close()
+		return c1, nil
+	})
+
+	conn, err := mgr.DialTargetForResource(ctx, "tcp", "100.64.0.50:50051", res)
+	require.NoError(t, err)
+	if conn != nil {
+		_ = conn.Close()
+	}
+
+	statuses := mgr.GetStatuses()
+	require.Len(t, statuses, 1)
+	require.Equal(t, int64(0), statuses[0].DirectDialViolation, "合规端口拨号不应增加 violation")
+
+	// 2. 违规拨号到目标业务端口 (8080)：守卫拦截并拒绝，violation 增加为 1
+	connFail, errFail := mgr.DialTargetForResource(ctx, "tcp", "100.64.0.50:8080", res)
+	require.Error(t, errFail)
+	require.Nil(t, connFail)
+	require.Contains(t, errFail.Error(), "direct dial violation")
+
+	statuses = mgr.GetStatuses()
+	require.Len(t, statuses, 1)
+	require.Equal(t, int64(1), statuses[0].DirectDialViolation, "违规拨号必须增加 violation 计数")
+
+	// 3. 通过 /statusz 验证 HTTP 端点也准确反映 violation
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/statusz", statusPort))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	var httpStatuses []*TunnelResourceStatus
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&httpStatuses))
+	require.Len(t, httpStatuses, 1)
+	require.Equal(t, int64(1), httpStatuses[0].DirectDialViolation)
+}
+

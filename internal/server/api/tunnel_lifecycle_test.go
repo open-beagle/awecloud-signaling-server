@@ -41,7 +41,7 @@ func setupTunnelLifecycleTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, database.AutoMigrate(
 		&model.Admin{}, &model.User{}, &model.Node{}, &model.DeployToken{},
 		&model.TechnicalResource{}, &model.TechnicalResourceDeployToken{},
-		&model.Tenant{}, &model.TenantResource{}, &model.TenantAccessGrant{}, &model.TenantAccessGrantEvent{},
+		&model.Tenant{}, &model.TenantResource{}, &model.TenantMembership{}, &model.TenantAccessGrant{}, &model.TenantAccessGrantEvent{},
 		&model.TechnicalResourceBinding{}, &model.WorkloadObservation{},
 		&model.WorkloadObservationSource{}, &model.ResourceScope{}, &model.NamespaceObservation{},
 		&model.SystemConfig{},

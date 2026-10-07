@@ -14,7 +14,10 @@ import (
 )
 
 func TestAgentTunnelVerify_Success(t *testing.T) {
-	// 启动两个模拟本地监听端口
+	var k8sOKCount int64 = 0
+	var svcOKCount int64 = 0
+
+	// 启动两个真实的本地监听端口
 	lK8s, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to listen for k8s-api mock: %v", err)
@@ -29,13 +32,16 @@ func TestAgentTunnelVerify_Success(t *testing.T) {
 	defer lSvc.Close()
 	svcPort := lSvc.Addr().(*net.TCPAddr).Port
 
-	// 模拟接受连接
+	// 模拟接受探测连接并在收到首包探测字节后真实自增 ok 计数
 	go func() {
 		for {
 			c, err := lK8s.Accept()
 			if err != nil {
 				return
 			}
+			buf := make([]byte, 16)
+			_, _ = c.Read(buf)
+			atomic.StoreInt64(&k8sOKCount, 1)
 			_ = c.Close()
 		}
 	}()
@@ -45,18 +51,21 @@ func TestAgentTunnelVerify_Success(t *testing.T) {
 			if err != nil {
 				return
 			}
+			buf := make([]byte, 16)
+			_, _ = c.Read(buf)
+			atomic.StoreInt64(&svcOKCount, 1)
 			_ = c.Close()
 		}
 	}()
 
-	var svcOKCount int64 = 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		curOK := atomic.AddInt64(&svcOKCount, 1)
 		statuses := []*agent.TunnelResourceStatus{
 			{
 				ResourceID:          "k8s-api",
 				Path:                "host_direct",
 				LocalPort:           int32(k8sPort),
+				SVCProxyOK:          atomic.LoadInt64(&k8sOKCount),
+				SVCProxyRejected:    0,
 				DirectDialViolation: 0,
 			},
 			{
@@ -66,7 +75,7 @@ func TestAgentTunnelVerify_Success(t *testing.T) {
 				PortNumber:          80,
 				Path:                "svcproxy",
 				LocalPort:           int32(svcPort),
-				SVCProxyOK:          curOK,
+				SVCProxyOK:          atomic.LoadInt64(&svcOKCount),
 				SVCProxyRejected:    0,
 				DirectDialViolation: 0,
 			},
@@ -97,6 +106,66 @@ func TestAgentTunnelVerify_Success(t *testing.T) {
 	}
 }
 
+// TestAgentTunnelVerify_RejectFail (R2 反例测试) 验证本地端口可连但被 Agent 拒绝时，必须判定为 FAIL 且退出码为 1
+func TestAgentTunnelVerify_RejectFail(t *testing.T) {
+	// 启动一个可正常拨通的本地监听端口
+	lSvc, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen for svc mock: %v", err)
+	}
+	defer lSvc.Close()
+	svcPort := lSvc.Addr().(*net.TCPAddr).Port
+
+	var rejectedCount int64 = 0
+	go func() {
+		for {
+			c, err := lSvc.Accept()
+			if err != nil {
+				return
+			}
+			buf := make([]byte, 16)
+			_, _ = c.Read(buf)
+			// 模拟 Agent 拒绝流，导致 rejected 自增而 ok 不自增
+			atomic.StoreInt64(&rejectedCount, 1)
+			_ = c.Close()
+		}
+	}()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		statuses := []*agent.TunnelResourceStatus{
+			{
+				ResourceID:          "beagle-svc-reject",
+				ServiceName:         "backend-svc",
+				Namespace:           "prod",
+				PortNumber:          8080,
+				Path:                "svcproxy",
+				LocalPort:           int32(svcPort),
+				SVCProxyOK:          0, // ok 恒为 0
+				SVCProxyRejected:    atomic.LoadInt64(&rejectedCount),
+				LastSVCProxyError:   "permission denied: service revoked",
+				DirectDialViolation: 0,
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(statuses)
+	}))
+	defer ts.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("expected exit code 1 when Agent rejects connection, got %d. stdout:\n%s", code, stdout.String())
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "RESULT: FAIL") {
+		t.Errorf("expected RESULT: FAIL, got:\n%s", out)
+	}
+	if !strings.Contains(out, "被对端 Agent 拒绝: permission denied: service revoked") {
+		t.Errorf("expected rejection reason in output, got:\n%s", out)
+	}
+}
+
 func TestAgentTunnelVerify_ViolationFail(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		statuses := []*agent.TunnelResourceStatus{
@@ -105,7 +174,7 @@ func TestAgentTunnelVerify_ViolationFail(t *testing.T) {
 				ServiceName:         "bad-svc",
 				Namespace:           "default",
 				Path:                "svcproxy",
-				LocalPort:           18080,
+				LocalPort:           0,
 				DirectDialViolation: 2, // 违规直连计数 > 0
 			},
 		}
@@ -130,6 +199,7 @@ func TestAgentTunnelVerify_ViolationFail(t *testing.T) {
 }
 
 func TestAgentTunnelVerify_JSONOutput(t *testing.T) {
+	var k8sOK int64 = 0
 	lK8s, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to listen: %v", err)
@@ -143,6 +213,9 @@ func TestAgentTunnelVerify_JSONOutput(t *testing.T) {
 			if err != nil {
 				return
 			}
+			buf := make([]byte, 16)
+			_, _ = c.Read(buf)
+			atomic.StoreInt64(&k8sOK, 1)
 			_ = c.Close()
 		}
 	}()
@@ -153,6 +226,8 @@ func TestAgentTunnelVerify_JSONOutput(t *testing.T) {
 				ResourceID:          "k8s-api",
 				Path:                "host_direct",
 				LocalPort:           int32(k8sPort),
+				SVCProxyOK:          atomic.LoadInt64(&k8sOK),
+				SVCProxyRejected:    0,
 				DirectDialViolation: 0,
 			},
 		}
@@ -164,7 +239,7 @@ func TestAgentTunnelVerify_JSONOutput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL, "-json"}, &stdout, &stderr)
 	if code != 0 {
-		t.Fatalf("expected exit code 0, got %d. stderr: %s", code, stderr.String())
+		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", code, stderr.String(), stdout.String())
 	}
 
 	var report AgentTunnelVerifyReport

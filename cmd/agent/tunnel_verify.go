@@ -110,22 +110,61 @@ func runAgentTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int
 		probeResults[s.ResourceID] = nil
 	}
 
-	// 等待一小段间隔让代理统计刷新
-	time.Sleep(100 * time.Millisecond)
-
-	// 3. 读取探测后的更新状态
-	resp2, err := client.Get(*statusURL)
-	if err != nil {
-		fmt.Fprintf(stderr, "探测后重新获取 /statusz 失败: %v\n", err)
-		return 1
-	}
-	defer resp2.Body.Close()
-
+	// 3. 轮询读取更新状态，直到所有被探测的资源计数产生变化（ok 增加或 rejected 增加），上限 6 秒
+	pollDeadline := time.Now().Add(6 * time.Second)
 	var afterStatuses []*agent.TunnelResourceStatus
-	_ = json.NewDecoder(resp2.Body).Decode(&afterStatuses)
-	afterMap := make(map[string]*agent.TunnelResourceStatus)
-	for _, s := range afterStatuses {
-		afterMap[s.ResourceID] = s
+	var afterMap map[string]*agent.TunnelResourceStatus
+
+	for {
+		resp2, err := client.Get(*statusURL)
+		if err == nil && resp2.StatusCode == http.StatusOK {
+			var curStatuses []*agent.TunnelResourceStatus
+			if err := json.NewDecoder(resp2.Body).Decode(&curStatuses); err == nil {
+				_ = resp2.Body.Close()
+				curMap := make(map[string]*agent.TunnelResourceStatus, len(curStatuses))
+				for _, s := range curStatuses {
+					curMap[s.ResourceID] = s
+				}
+
+				allUpdated := true
+				for _, s := range initialStatuses {
+					if s.LocalPort <= 0 {
+						continue
+					}
+					after := curMap[s.ResourceID]
+					if after == nil {
+						allUpdated = false
+						break
+					}
+					// 判定该资源计数是否已产生变化（ok 增加或 rejected 增加）
+					if after.SVCProxyOK == s.SVCProxyOK && after.SVCProxyRejected == s.SVCProxyRejected {
+						allUpdated = false
+						break
+					}
+				}
+
+				afterStatuses = curStatuses
+				afterMap = curMap
+
+				if allUpdated || time.Now().After(pollDeadline) {
+					break
+				}
+			} else {
+				_ = resp2.Body.Close()
+			}
+		} else if resp2 != nil {
+			_ = resp2.Body.Close()
+		}
+
+		if time.Now().After(pollDeadline) {
+			break
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+
+	if afterMap == nil {
+		fmt.Fprintf(stderr, "探测后未能获取有效的 /statusz 状态\n")
+		return 1
 	}
 
 	// 4. 执行校验项：D2-2, D2-3, D2-4
@@ -155,13 +194,17 @@ func runAgentTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int
 		probeErr := probeResults[s.ResourceID]
 
 		if s.ResourceID == "k8s-api" {
-			// D2-4: k8s-api path = host_direct 且探测成功
-			passed := s.Path == "host_direct" && (probeErr == nil || (after != nil && after.SVCProxyOK > s.SVCProxyOK))
+			// D2-4: k8s-api path = host_direct 且探测成功 (必须满足: svcproxy_ok 增加且 rejected 不增加)
+			passed := s.Path == "host_direct" && probeErr == nil && after != nil && after.SVCProxyOK > s.SVCProxyOK && after.SVCProxyRejected == s.SVCProxyRejected
 			msg := ""
 			if s.Path != "host_direct" {
 				msg = fmt.Sprintf("路径非 host_direct (实际为 %s)", s.Path)
-			} else if probeErr != nil && (after == nil || after.SVCProxyOK <= s.SVCProxyOK) {
-				msg = fmt.Sprintf("探测拨号失败: %v", probeErr)
+			} else if probeErr != nil {
+				msg = fmt.Sprintf("本地端口探测失败: %v", probeErr)
+			} else if after == nil || after.SVCProxyOK <= s.SVCProxyOK {
+				msg = "探测超时: svcproxy_ok 未增加"
+			} else if after.SVCProxyRejected > s.SVCProxyRejected {
+				msg = fmt.Sprintf("拨号被拒绝: %s", after.LastSVCProxyError)
 			}
 			report.Checks = append(report.Checks, AgentCheckResult{
 				ID:      "D2-4",
@@ -170,19 +213,19 @@ func runAgentTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int
 				Message: msg,
 			})
 		} else {
-			// D2-2: 普通容器服务 path = svcproxy 且探测成功 / svcproxy_ok 增加
+			// D2-2: 普通容器服务 path = svcproxy 且探测成功 (必须满足: svcproxy_ok 增加且 svcproxy_rejected 不增加)
 			svcDesc := fmt.Sprintf("%s.%s:%d", s.ServiceName, s.Namespace, s.LocalPort)
 			checkName := fmt.Sprintf("%-28s path=svcproxy  probe ok", svcDesc)
-			passed := s.Path == "svcproxy" && (after != nil && after.SVCProxyOK > s.SVCProxyOK || probeErr == nil)
+			passed := s.Path == "svcproxy" && probeErr == nil && after != nil && after.SVCProxyOK > s.SVCProxyOK && after.SVCProxyRejected == s.SVCProxyRejected
 			msg := ""
 			if s.Path != "svcproxy" {
 				msg = fmt.Sprintf("路径非 svcproxy (实际为 %s)", s.Path)
+			} else if probeErr != nil {
+				msg = fmt.Sprintf("本地端口拨号失败: %v", probeErr)
 			} else if after != nil && after.SVCProxyRejected > s.SVCProxyRejected {
-				msg = fmt.Sprintf("被 Agent 拒绝: %s", after.LastSVCProxyError)
-				passed = false
-			} else if probeErr != nil && (after == nil || after.SVCProxyOK <= s.SVCProxyOK) {
-				msg = fmt.Sprintf("探测失败: %v", probeErr)
-				passed = false
+				msg = fmt.Sprintf("被对端 Agent 拒绝: %s", after.LastSVCProxyError)
+			} else if after == nil || after.SVCProxyOK <= s.SVCProxyOK {
+				msg = "探测超时: svcproxy_ok 未增加"
 			}
 			report.Checks = append(report.Checks, AgentCheckResult{
 				ID:      "D2-2",

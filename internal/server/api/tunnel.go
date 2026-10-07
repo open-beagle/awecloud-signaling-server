@@ -1733,9 +1733,25 @@ func (a *TunnelAPI) UpdateSignalTunnelPorts(c *gin.Context) {
 			var grant model.TenantAccessGrant
 			findErr := tx.Where("subject_user_id = ? AND tenant_resource_id = ?", tok.UserID, b.ResourceID).First(&grant).Error
 			if errors.Is(findErr, gorm.ErrRecordNotFound) {
+				// 从资源归属或 User 租户关系派生真实 TenantID，严禁硬编码 beagle-system
+				effectiveTenantID := ""
+				var tr model.TenantResource
+				if err := tx.Where("id = ?", b.ResourceID).First(&tr).Error; err == nil && tr.TenantID != "" {
+					effectiveTenantID = tr.TenantID
+				}
+				if effectiveTenantID == "" {
+					var tm model.TenantMembership
+					if err := tx.Where("user_id = ? AND enabled = ?", tok.UserID, true).First(&tm).Error; err == nil && tm.TenantID != "" {
+						effectiveTenantID = tm.TenantID
+					}
+				}
+				if effectiveTenantID == "" {
+					effectiveTenantID = fmt.Sprintf("tunnel-user-%d", tok.UserID)
+				}
+
 				grant = model.TenantAccessGrant{
 					ID:               uuid.New().String(),
-					TenantID:         "beagle-system",
+					TenantID:         effectiveTenantID,
 					TenantResourceID: b.ResourceID,
 					SubjectType:      model.TenantAccessGrantSubjectUser,
 					SubjectKey:       fmt.Sprintf("user:%d", tok.UserID),
@@ -1764,9 +1780,18 @@ func (a *TunnelAPI) UpdateSignalTunnelPorts(c *gin.Context) {
 			kStatus = model.TenantAccessGrantSuspended
 		}
 		if errors.Is(k8sErr, gorm.ErrRecordNotFound) {
+			k8sTenantID := ""
+			var tm model.TenantMembership
+			if err := tx.Where("user_id = ? AND enabled = ?", tok.UserID, true).First(&tm).Error; err == nil && tm.TenantID != "" {
+				k8sTenantID = tm.TenantID
+			}
+			if k8sTenantID == "" {
+				k8sTenantID = fmt.Sprintf("tunnel-user-%d", tok.UserID)
+			}
+
 			k8sGrant = model.TenantAccessGrant{
 				ID:               uuid.New().String(),
-				TenantID:         "beagle-system",
+				TenantID:         k8sTenantID,
 				TenantResourceID: "k8s-api",
 				SubjectType:      model.TenantAccessGrantSubjectUser,
 				SubjectKey:       fmt.Sprintf("user:%d", tok.UserID),

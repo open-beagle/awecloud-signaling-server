@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -216,8 +217,33 @@ func (m *TunnelProxyManager) serveConn(listener net.Listener, port int) {
 	}
 }
 
-// dialTarget 统一拨号到目标地址
-func (m *TunnelProxyManager) dialTarget(ctx context.Context, network, addr string) (net.Conn, error) {
+// dialTarget 统一拨号到目标地址，并校验资源目标端口合规性（守卫防护）
+func (m *TunnelProxyManager) dialTarget(ctx context.Context, network, addr string, res *pb.ContainerServiceResource) (net.Conn, error) {
+	if res != nil {
+		_, portStr, err := net.SplitHostPort(addr)
+		if err == nil {
+			portNum, _ := strconv.Atoi(portStr)
+			if !isHostDirectService(res) {
+				// 非 k8s-api 容器服务：拨号的目标端口必须等于 SvcProxyPort (如 50051)
+				// 若拨号端口 != SvcProxyPort，记录守卫计数并拒绝连接
+				if uint32(portNum) != res.SvcProxyPort {
+					m.RecordDirectDialViolation(res.ResourceId)
+					logger.Errorf("[Tunnel] 违规直连拨号被守卫拦截: 容器服务 %s (id=%s) 尝试拨号目标 %s (目标端口 %d != SvcProxyPort %d)",
+						res.ServiceName, res.ResourceId, addr, portNum, res.SvcProxyPort)
+					return nil, fmt.Errorf("direct dial violation: container service %s forbidden to dial %s (only SvcProxyPort %d allowed)",
+						res.ResourceId, addr, res.SvcProxyPort)
+				}
+			} else {
+				// k8s-api 宿主机原生控制面服务：目标端口必须为 6443
+				if portNum != 6443 {
+					m.RecordDirectDialViolation(res.ResourceId)
+					logger.Errorf("[Tunnel] k8s-api 违规端口拨号被守卫拦截: 尝试拨号 %s (非 6443 端口)", addr)
+					return nil, fmt.Errorf("direct dial violation: k8s-api must dial port 6443, got %d", portNum)
+				}
+			}
+		}
+	}
+
 	m.mu.Lock()
 	customDialer := m.dialer
 	tsMgr := m.tsManager
@@ -231,6 +257,11 @@ func (m *TunnelProxyManager) dialTarget(ctx context.Context, network, addr strin
 	}
 	var d net.Dialer
 	return d.DialContext(ctx, network, addr)
+}
+
+// DialTargetForResource 导出拨号入口，供测试与校验使用
+func (m *TunnelProxyManager) DialTargetForResource(ctx context.Context, network, addr string, res *pb.ContainerServiceResource) (net.Conn, error) {
+	return m.dialTarget(ctx, network, addr, res)
 }
 
 // isHostDirectService 判断是否为宿主机原生控制面服务（仅限 Kubernetes API Server，精确匹配 ResourceId == "k8s-api"）
@@ -251,7 +282,7 @@ func (m *TunnelProxyManager) handleConn(clientConn net.Conn, res *pb.ContainerSe
 	// 路径 1: 宿主机原生控制面服务（仅限 Kubernetes API Server 6443），采用直接 TCP 通道转发到宿主机固定 6443 端口
 	if isHostDirectService(res) {
 		targetAddr := fmt.Sprintf("%s:%d", res.AgentIp, 6443)
-		targetConn, err := m.dialTarget(ctx, "tcp", targetAddr)
+		targetConn, err := m.dialTarget(ctx, "tcp", targetAddr, res)
 		if err != nil {
 			logger.Errorf("[Tunnel] 拨号边缘宿主机服务目标失败 (%s -> %s): %v", res.ServiceName, targetAddr, err)
 			m.recordStatusReject(res.ResourceId, err.Error())
@@ -277,7 +308,7 @@ func (m *TunnelProxyManager) handleConn(clientConn net.Conn, res *pb.ContainerSe
 		grpcAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(dialCtx context.Context, addr string) (net.Conn, error) {
-			return m.dialTarget(dialCtx, "tcp", addr)
+			return m.dialTarget(dialCtx, "tcp", addr, res)
 		}),
 	)
 	if err != nil {
