@@ -176,7 +176,7 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 					}
 
 					for _, d := range r.Dst {
-						if d == targetTag+":*" || strings.HasSuffix(d, ":*") {
+						if d == targetTag+":*" || (strings.HasPrefix(d, "tag:agent-") && strings.HasSuffix(d, ":*")) {
 							hasWildcard = true
 						}
 						if strings.HasSuffix(d, ":50051") {
@@ -285,6 +285,7 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 						// 2. 注销并校验规则消失
 						t1 := time.Now()
 						_ = db.DB.WithContext(ctx).Model(&probeToken).Update("status", model.DeployTokenStatusRevoked)
+						_ = db.DB.WithContext(ctx).Where("name = ?", probeUser.Name).Delete(&model.User{})
 						if err := aclSyncer.FullSync(ctx); err != nil {
 							d13Check.Passed = false
 							d13Check.Message = fmt.Sprintf("探针吊销后 FullSync 失败: %v", err)
