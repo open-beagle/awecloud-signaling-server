@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -12,6 +13,94 @@ import (
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/agent"
 )
+
+func encodeTestIDs(ids ...string) string {
+	raw, _ := json.Marshal(ids)
+	return base64.StdEncoding.EncodeToString(raw)
+}
+
+func TestAgentTunnelVerify_ResourceCoverage(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		ids      []string
+		baseline string
+		after    []string
+		pass     bool
+	}{
+		{name: "exact reordered", ids: []string{"b", "a"}, baseline: encodeTestIDs("a", "b"), pass: true},
+		{name: "same count substitution", ids: []string{"a", "x"}, baseline: encodeTestIDs("a", "b")},
+		{name: "missing", ids: []string{"a"}, baseline: encodeTestIDs("a", "b")},
+		{name: "extra", ids: []string{"a", "b"}, baseline: encodeTestIDs("a")},
+		{name: "duplicate actual", ids: []string{"a", "a"}, baseline: encodeTestIDs("a", "b")},
+		{name: "duplicate expected", ids: []string{"a"}, baseline: encodeTestIDs("a", "a")},
+		{name: "missing baseline", ids: []string{"a"}},
+		{name: "malformed base64", ids: []string{"a"}, baseline: "!!!"},
+		{name: "malformed json", ids: []string{"a"}, baseline: base64.StdEncoding.EncodeToString([]byte("{}"))},
+		{name: "empty baseline", ids: []string{"a"}, baseline: encodeTestIDs()},
+		{name: "empty expected ID", ids: []string{"a"}, baseline: encodeTestIDs("")},
+		{name: "empty actual ID", ids: []string{""}, baseline: encodeTestIDs("a")},
+		{name: "null actual", ids: []string{"<null>"}, baseline: encodeTestIDs("a")},
+		{name: "no local port", ids: []string{"<inactive>"}, baseline: encodeTestIDs("<inactive>")},
+		{name: "unexpected k8s", ids: []string{"a", "k8s-api"}, baseline: encodeTestIDs("a")},
+		{name: "after snapshot drift", ids: []string{"a"}, after: []string{"x"}, baseline: encodeTestIDs("a")},
+		{name: "after duplicate", ids: []string{"a"}, after: []string{"a", "a"}, baseline: encodeTestIDs("a")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			var count atomic.Int64
+			go func() {
+				for {
+					c, e := listener.Accept()
+					if e != nil {
+						return
+					}
+					buf := make([]byte, 1)
+					_, _ = c.Read(buf)
+					count.Add(1)
+					_ = c.Close()
+				}
+			}()
+			var requests atomic.Int64
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ids := tc.ids
+				if requests.Add(1) > 1 && tc.after != nil {
+					ids = tc.after
+				}
+				statuses := []*agent.TunnelResourceStatus{}
+				for _, id := range ids {
+					if id == "<null>" {
+						statuses = append(statuses, nil)
+						continue
+					}
+					port := int32(listener.Addr().(*net.TCPAddr).Port)
+					if id == "<inactive>" {
+						port = 0
+					}
+					path := "svcproxy"
+					if id == "k8s-api" {
+						path = "host_direct"
+					}
+					statuses = append(statuses, &agent.TunnelResourceStatus{ResourceID: id, LocalPort: port, Path: path, SVCProxyOK: count.Load()})
+				}
+				_ = json.NewEncoder(w).Encode(statuses)
+			}))
+			defer ts.Close()
+			var out, stderr bytes.Buffer
+			code := runAgentTunnelVerifyWithOutput([]string{"--statusz-url", ts.URL, "--json", "--expect-resource-ids-base64", tc.baseline}, &out, &stderr)
+			var report AgentTunnelVerifyReport
+			if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+				t.Fatalf("%v: %s %s", err, out.String(), stderr.String())
+			}
+			if len(report.Checks) == 0 || report.Checks[0].ID != "D2-0" || report.Checks[0].Passed != tc.pass || (code == 0) != tc.pass {
+				t.Fatalf("code=%d report=%+v", code, report)
+			}
+		})
+	}
+}
 
 func TestAgentTunnelVerify_Success(t *testing.T) {
 	var k8sOKCount int64 = 0
@@ -86,7 +175,7 @@ func TestAgentTunnelVerify_Success(t *testing.T) {
 	defer ts.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL}, &stdout, &stderr)
+	code := runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL, "--expect-resource-ids-base64", encodeTestIDs("k8s-api", "beagle-web-res")}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", code, stderr.String(), stdout.String())
 	}
@@ -152,7 +241,7 @@ func TestAgentTunnelVerify_RejectFail(t *testing.T) {
 	defer ts.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL}, &stdout, &stderr)
+	code := runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL, "--expect-resource-ids-base64", encodeTestIDs("beagle-svc-reject")}, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("expected exit code 1 when Agent rejects connection, got %d. stdout:\n%s", code, stdout.String())
 	}
@@ -184,7 +273,7 @@ func TestAgentTunnelVerify_ViolationFail(t *testing.T) {
 	defer ts.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL}, &stdout, &stderr)
+	code := runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL, "--expect-resource-ids-base64", encodeTestIDs("bad-res")}, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("expected exit code 1, got %d", code)
 	}
@@ -238,7 +327,7 @@ func TestAgentTunnelVerify_JSONOutput(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	// 只配置了 k8s-api 的 Tunnel：期望 1 个、实际探测 1 个 → PASS
-	code := runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL, "-json", "-expect-probes", "1"}, &stdout, &stderr)
+	code := runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL, "-json", "--expect-resource-ids-base64", encodeTestIDs("k8s-api"), "-expect-probes", "1"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", code, stderr.String(), stdout.String())
 	}
@@ -259,7 +348,7 @@ func TestAgentTunnelVerify_JSONOutput(t *testing.T) {
 
 	// B4：Server 按 ports_config 期望 3 个，statusz 只有 1 个（业务端口被丢弃）→ D2-0 FAIL
 	stdout.Reset()
-	code = runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL, "-json", "-expect-probes", "3"}, &stdout, &stderr)
+	code = runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL, "-json", "--expect-resource-ids-base64", encodeTestIDs("k8s-api"), "-expect-probes", "3"}, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("expected exit code 1 on probe shortfall, got %d. stdout: %s", code, stdout.String())
 	}

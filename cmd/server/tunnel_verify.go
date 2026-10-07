@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -35,9 +36,10 @@ type TunnelVerifyReport struct {
 	Skipped    int    `json:"skipped"`
 	Exempted   int    `json:"exempted"`
 	// ExpectedProbes 数据面应探测的资源数：ports_config 条目数 + (K8s API 启用 ? 1 : 0)，供 agent D2-0 交叉校验
-	ExpectedProbes int           `json:"expected_probes"`
-	Checks         []CheckResult `json:"checks"`
-	DurationMs     int64         `json:"duration_ms"`
+	ExpectedProbes      int           `json:"expected_probes"`
+	ExpectedResourceIDs []string      `json:"expected_resource_ids"`
+	Checks              []CheckResult `json:"checks"`
+	DurationMs          int64         `json:"duration_ms"`
 }
 
 // agentHeartbeatMaxAge 由代码常量推导（非按线上数据调参）：
@@ -282,14 +284,14 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 	}
-	report.Checks = append(report.Checks, d21Check)
-
-	if cfgForProbes, err := service.ParseTunnelPortsConfig(tok.PortsConfig); err == nil {
-		report.ExpectedProbes = len(cfgForProbes.Ports)
-		if cfgForProbes.K8sAPIEnabled {
-			report.ExpectedProbes++
-		}
+	if ids, err := expectedTunnelResourceIDs(tok.PortsConfig); err != nil {
+		d21Check.Passed, d21Check.Exempt, d21Check.Skipped = false, false, false
+		d21Check.Message = err.Error()
+	} else {
+		report.ExpectedResourceIDs = ids
+		report.ExpectedProbes = len(ids)
 	}
+	report.Checks = append(report.Checks, d21Check)
 
 	// 计算总体状态：任一 FAIL → FAIL；无 FAIL 但存在 SKIP → PARTIAL；否则 PASS。
 	// EXEMPT（验收标准写明的已知豁免）单独计数，不阻塞 PASS。
@@ -340,6 +342,10 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "SKIPPED: %d\n", report.Skipped)
 		fmt.Fprintf(stdout, "EXEMPTED: %d\n", report.Exempted)
 		fmt.Fprintf(stdout, "EXPECTED_PROBES: %d\n", report.ExpectedProbes)
+		if report.ExpectedResourceIDs != nil {
+			raw, _ := json.Marshal(report.ExpectedResourceIDs)
+			fmt.Fprintf(stdout, "EXPECTED_RESOURCE_IDS_B64: %s\n", base64.StdEncoding.EncodeToString(raw))
+		}
 		fmt.Fprintf(stdout, "RESULT: %s\n", report.Overall)
 	}
 

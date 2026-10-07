@@ -36,7 +36,8 @@ func runAgentTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int
 	fs := flag.NewFlagSet("tunnel-verify", flag.ContinueOnError)
 	statusURL := fs.String("statusz-url", "http://127.0.0.1:19090/statusz", "/statusz 接口地址")
 	jsonOutput := fs.Bool("json", false, "以 JSON 格式输出检测报告")
-	expectProbes := fs.Int("expect-probes", 0, "期望探测的资源数（由 server tunnel-verify 按 ports_config 给出；0 表示仅要求至少一次探测）")
+	expectProbes := fs.Int("expect-probes", 0, "额外交叉校验资源数量；0 表示不校验数量，仍必须提供资源集合")
+	expectedIDsFlag := fs.String("expect-resource-ids-base64", "", "Server 配置 resource_id JSON 数组的 Base64，必填")
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(stderr, "解析命令行参数失败: %v\n", err)
@@ -85,15 +86,23 @@ func runAgentTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int
 		return 1
 	}
 
-	initialMap := make(map[string]*agent.TunnelResourceStatus)
-	for _, s := range initialStatuses {
-		initialMap[s.ResourceID] = s
+	expectedIDs, baselineErr := decodeExpectedResourceIDs(*expectedIDsFlag)
+	coverage := AgentCheckResult{ID: "D2-0", Name: "probe resource_id coverage (all configured)"}
+	coverageErrors := []string{}
+	if baselineErr != nil {
+		coverageErrors = append(coverageErrors, baselineErr.Error())
+	}
+	if *expectProbes < 0 || (*expectProbes > 0 && *expectProbes != len(expectedIDs)) {
+		coverageErrors = append(coverageErrors, fmt.Sprintf("期望数量 %d 与 resource_id 基线 %d 不一致", *expectProbes, len(expectedIDs)))
+	}
+	if err := checkResourceCoverage(expectedIDs, initialStatuses); err != nil {
+		coverageErrors = append(coverageErrors, "initial: "+err.Error())
 	}
 
 	// 2. 对每个 local_port > 0 的资源进行一次主动 TCP 探测
 	probeResults := make(map[string]error)
 	for _, s := range initialStatuses {
-		if s.LocalPort <= 0 {
+		if s == nil || s.LocalPort <= 0 {
 			continue
 		}
 		targetAddr := fmt.Sprintf("127.0.0.1:%d", s.LocalPort)
@@ -124,12 +133,14 @@ func runAgentTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int
 				_ = resp2.Body.Close()
 				curMap := make(map[string]*agent.TunnelResourceStatus, len(curStatuses))
 				for _, s := range curStatuses {
-					curMap[s.ResourceID] = s
+					if s != nil {
+						curMap[s.ResourceID] = s
+					}
 				}
 
 				allUpdated := true
 				for _, s := range initialStatuses {
-					if s.LocalPort <= 0 {
+					if s == nil || s.LocalPort <= 0 {
 						continue
 					}
 					after := curMap[s.ResourceID]
@@ -146,6 +157,10 @@ func runAgentTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int
 
 				afterStatuses = curStatuses
 				afterMap = curMap
+				if err := checkResourceCoverage(expectedIDs, curStatuses); err != nil {
+					coverageErrors = append(coverageErrors, "after: "+err.Error())
+					break
+				}
 
 				if allUpdated || time.Now().After(pollDeadline) {
 					break
@@ -173,7 +188,7 @@ func runAgentTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int
 	hasViolation := false
 	var violationDetail string
 	for _, s := range afterStatuses {
-		if s.DirectDialViolation > 0 {
+		if s != nil && s.DirectDialViolation > 0 {
 			hasViolation = true
 			violationDetail = fmt.Sprintf("资源 %s 发生违规直连，计数: %d", s.ResourceID, s.DirectDialViolation)
 			break
@@ -187,7 +202,7 @@ func runAgentTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int
 	})
 
 	for _, s := range initialStatuses {
-		if s.LocalPort <= 0 {
+		if s == nil || s.LocalPort <= 0 {
 			continue
 		}
 
@@ -237,24 +252,10 @@ func runAgentTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int
 		}
 	}
 
-	// D2-0 探测覆盖度（B4）：statusz 只列出 local_port>0 的资源，看不到「已配置但被丢弃」的端口，
-	// 因此以 Server 按 ports_config 给出的期望数（--expect-probes）为准；至少执行一次探测。
-	probedTotal := 0
-	for _, s := range initialStatuses {
-		if s.LocalPort > 0 {
-			probedTotal++
-		}
-	}
-	coverage := AgentCheckResult{
-		ID:      "D2-0",
-		Name:    "probe coverage (all configured)",
-		Passed:  probedTotal > 0 && probedTotal >= *expectProbes,
-		Message: fmt.Sprintf("已探测 %d 个，期望 %d 个", probedTotal, *expectProbes),
-	}
-	if probedTotal == 0 {
-		coverage.Message = fmt.Sprintf("未执行任何端口探测（statusz 资源 %d 个，期望 %d 个）", len(initialStatuses), *expectProbes)
-	} else if probedTotal < *expectProbes {
-		coverage.Message = fmt.Sprintf("已配置但未探测：已探测 %d 个 < 期望 %d 个", probedTotal, *expectProbes)
+	coverage.Passed = len(coverageErrors) == 0
+	coverage.Message = fmt.Sprintf("resource_ids=%q，已探测 %d 个，期望 %d 个", expectedIDs, len(probeResults), len(expectedIDs))
+	if !coverage.Passed {
+		coverage.Message = strings.Join(coverageErrors, "; ")
 	}
 	report.Checks = append([]AgentCheckResult{coverage}, report.Checks...)
 
