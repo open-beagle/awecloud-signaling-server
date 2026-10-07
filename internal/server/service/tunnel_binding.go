@@ -145,7 +145,9 @@ func QueryTunnelCandidateServices(ctx context.Context, gormDB *gorm.DB, targetAg
 	var sources []model.WorkloadObservationSource
 	if err := gormDB.WithContext(ctx).
 		Preload("WorkloadObservation").
-		Where("source_technical_resource_id = ? AND state = ? AND lease_expires_at > ?",
+		// SQLite timestamps may contain different offsets; compare instants,
+		// not the lexical order of their UTC/local-time representations.
+		Where("source_technical_resource_id = ? AND state = ? AND julianday(lease_expires_at) > julianday(?)",
 			technical.ID, model.WorkloadObservationSourceObserved, now).
 		Find(&sources).Error; err != nil {
 		return nil, err

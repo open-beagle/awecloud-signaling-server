@@ -58,15 +58,15 @@ func setupTestNamespaceScope(t *testing.T, database *gorm.DB, nsName, nsUID stri
 	platformID := uuid.NewString()
 
 	nsObs := model.NamespaceObservation{
-		ID:                 uuid.NewString(),
-		ProviderID:         providerID,
-		ClusterResourceID:  platformID,
-		Name:               nsName,
-		NamespaceUID:       nsUID,
-		Revision:           1,
-		ObservedAt:         now,
-		LeaseExpiresAt:     now.Add(10 * time.Hour),
-		State:              model.NamespaceObservationObserved,
+		ID:                uuid.NewString(),
+		ProviderID:        providerID,
+		ClusterResourceID: platformID,
+		Name:              nsName,
+		NamespaceUID:      nsUID,
+		Revision:          1,
+		ObservedAt:        now,
+		LeaseExpiresAt:    now.Add(10 * time.Hour),
+		State:             model.NamespaceObservationObserved,
 	}
 	require.NoError(t, database.Create(&nsObs).Error)
 
@@ -382,7 +382,7 @@ func TestTunnelCandidates_T4_FilterAndFields(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	var resp struct {
-		Code int                             `json:"code"`
+		Code int                              `json:"code"`
 		Data []service.TunnelCandidateService `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -399,6 +399,35 @@ func TestTunnelCandidates_T4_FilterAndFields(t *testing.T) {
 	require.Equal(t, 8000, cand.PortNumber)
 	require.Equal(t, "TCP", cand.Protocol)
 	require.True(t, cand.Ready)
+
+	// SQLite stores offsets in timestamp text. Candidate leases must be compared
+	// as instants, regardless of the writer's or API caller's time zone.
+	createTestWorkloadObservation(t, database, techRes.ID, scope.ID, "obs-expired", "svc-expired", "expired", "http", "TCP", 8080, true)
+	now := time.Date(2026, 10, 7, 11, 0, 0, 0, time.UTC)
+	utcPlus8 := time.FixedZone("UTC+8", 8*60*60)
+	utcMinus7 := time.FixedZone("UTC-7", -7*60*60)
+	for _, test := range []struct {
+		name    string
+		written *time.Location
+		queried *time.Location
+	}{
+		{"UTC_written_UTC_plus_8_query", time.UTC, utcPlus8},
+		{"UTC_plus_8_written_UTC_query", utcPlus8, time.UTC},
+		{"UTC_written_UTC_minus_7_query", time.UTC, utcMinus7},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.NoError(t, database.Model(&model.WorkloadObservationSource{}).
+				Where("workload_observation_id = ?", "obs-mcp-8000").
+				Updates(map[string]any{"received_at": now.Add(-10 * time.Minute).In(test.written), "lease_expires_at": now.Add(5 * time.Minute).In(test.written)}).Error)
+			require.NoError(t, database.Model(&model.WorkloadObservationSource{}).
+				Where("workload_observation_id = ?", "obs-expired").
+				Updates(map[string]any{"received_at": now.Add(-10 * time.Minute).In(test.written), "lease_expires_at": now.Add(-time.Minute).In(test.written)}).Error)
+			candidates, err := service.QueryTunnelCandidateServices(context.Background(), database, agentNode.Name, now.In(test.queried))
+			require.NoError(t, err)
+			require.Len(t, candidates, 1)
+			require.Equal(t, "obs-mcp-8000", candidates[0].ResourceID)
+		})
+	}
 }
 
 // TestTunnelPortsUpdate_T5_ValidationAndPersistence 验证 UpdateSignalTunnelPorts 的校验拦截与真实持久化
