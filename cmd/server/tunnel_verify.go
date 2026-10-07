@@ -118,7 +118,7 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 				First(&agentNode).Error; err != nil {
 				preCheck.Passed = false
 				preCheck.Message = fmt.Sprintf("目标 Agent 节点 (%s) 不存在: %v", targetAgentName, err)
-			} else if agentNode.LastHeartbeat == nil || time.Since(*agentNode.LastHeartbeat) > 6*time.Minute {
+			} else if agentNode.LastHeartbeat == nil || time.Since(*agentNode.LastHeartbeat) > 15*time.Minute {
 				preCheck.Passed = false
 				if agentNode.LastHeartbeat == nil {
 					preCheck.Message = fmt.Sprintf("目标 Agent 节点 (%s) 无心跳记录", targetAgentName)
