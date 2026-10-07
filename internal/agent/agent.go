@@ -108,6 +108,15 @@ type Agent struct {
 
 // NewAgent 创建Agent
 func NewAgent(cfg *config.AgentConfig, version, gitCommit, gitCommitDate, buildDate string) (*Agent, error) {
+	return newAgent(cfg, version, gitCommit, gitCommitDate, buildDate, false)
+}
+
+// NewTunnelAgent creates a container-managed Tunnel without the host systemd updater.
+func NewTunnelAgent(cfg *config.AgentConfig, version, gitCommit, gitCommitDate, buildDate string) (*Agent, error) {
+	return newAgent(cfg, version, gitCommit, gitCommitDate, buildDate, true)
+}
+
+func newAgent(cfg *config.AgentConfig, version, gitCommit, gitCommitDate, buildDate string, tunnelMode bool) (*Agent, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	gitCommit = strings.TrimSpace(gitCommit)
 	if !validGitCommit(gitCommit) {
@@ -147,6 +156,10 @@ func NewAgent(cfg *config.AgentConfig, version, gitCommit, gitCommitDate, buildD
 		auditCollector: NewAuditCollector(),
 		ctx:            ctx,
 		cancel:         cancel,
+		isTunnelMode:   tunnelMode,
+	}
+	if tunnelMode {
+		return agent, nil
 	}
 	updateManager, err := newAgentUpdateManager(version, gitCommit, binSHA256)
 	if err != nil {
@@ -645,7 +658,6 @@ func (a *Agent) IsTunnelMode() bool {
 func (a *Agent) TunnelProxyManager() *TunnelProxyManager {
 	return a.tunnelProxyManager
 }
-
 
 // connectToServer 连接到Server
 func (a *Agent) connectToServer() error {

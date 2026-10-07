@@ -146,7 +146,7 @@ func TestTunnel_HandshakeSuccess(t *testing.T) {
 // TestTunnel_RunAsNonRoot 验证 Tunnel 模式下 Agent 标志及隔离性（无需特权/无 VIP / 无 DNS 劫持）
 func TestTunnel_RunAsNonRoot(t *testing.T) {
 	// 创建测试 Agent
-	agt, err := agent.NewAgent(&config.AgentConfig{
+	agt, err := agent.NewTunnelAgent(&config.AgentConfig{
 		Agent: config.AgentSection{
 			AgentToken: "test-token",
 			Server:     "http://127.0.0.1:8080",
@@ -158,6 +158,6 @@ func TestTunnel_RunAsNonRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, agt)
 
-	// 初始状态下未启动 Tunnel
-	require.False(t, agt.IsTunnelMode())
+	// 使用实际 run-tunnel 入口的构造器，初始化不写宿主机 updater 目录。
+	require.True(t, agt.IsTunnelMode())
 }

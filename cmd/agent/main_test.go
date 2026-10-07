@@ -237,14 +237,34 @@ echo "sudo:$*" >> "$TEST_EVENT_FILE"
 exit 0
 `), 0o700))
 
-	command := exec.Command(bashPath, filepath.ToSlash(filepath.Join("..", "..", "scripts", "install_signal.sh")), "--upgrade")
+	// The installer resolves the account's real home with getent. Isolate its
+	// paths and command fixtures after definitions, before the real main entry.
+	content, err := os.ReadFile(filepath.Join("..", "..", "scripts", "install_signal.sh"))
+	require.NoError(t, err)
+	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
+	harness := `
+TRUE_HOME="$TEST_CLIENT_HOME"
+BIN_DIR="$TRUE_HOME/.local/bin"
+DATA_DIR="$TRUE_HOME/.local/share/signal"
+CONFIG_FILE="$DATA_DIR/agent.toml"
+curl() { bash "$TEST_FAKE_BIN/curl" "$@"; }
+pgrep() { bash "$TEST_FAKE_BIN/pgrep" "$@"; }
+sudo() { bash "$TEST_FAKE_BIN/sudo" "$@"; }
+main "$@"
+`
+	source := strings.Replace(normalized, "\nmain \"$@\"", harness, 1)
+	require.NotEqual(t, normalized, source)
+	harnessPath := filepath.Join(tempDir, "download-failure-harness.sh")
+	require.NoError(t, os.WriteFile(harnessPath, []byte(source), 0o700))
+	command := exec.Command(bashPath, filepath.ToSlash(harnessPath), "--upgrade")
 	command.Env = append(os.Environ(),
-		"HOME="+filepath.ToSlash(homeDir),
-		"PATH="+filepath.ToSlash(fakeBin)+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"TEST_CLIENT_HOME="+filepath.ToSlash(homeDir),
+		"TEST_FAKE_BIN="+filepath.ToSlash(fakeBin),
 		"TEST_EVENT_FILE="+filepath.ToSlash(eventPath),
 	)
 	output, runErr := command.CombinedOutput()
 	require.Error(t, runErr, string(output))
+	require.Contains(t, string(output), "下载客户端制品失败，旧客户端未停止")
 	events, err := os.ReadFile(eventPath)
 	require.NoError(t, err)
 	require.Contains(t, string(events), "https://artifacts.example/signal_agent", string(output))

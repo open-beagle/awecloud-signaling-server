@@ -226,7 +226,7 @@ func RunTunnelCLI(args []string) error {
 	log.SetOutput(logger.NewLogrusWriter())
 	log.SetFlags(0)
 
-	agt, err := agent.NewAgent(agentConfig, version, gitCommit, gitCommitDate, buildDate)
+	agt, err := agent.NewTunnelAgent(agentConfig, version, gitCommit, gitCommitDate, buildDate)
 	if err != nil {
 		log.Fatalf("创建 Tunnel Agent 失败: %v", err)
 	}
