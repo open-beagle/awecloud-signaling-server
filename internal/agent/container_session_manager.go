@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -161,13 +162,11 @@ func (m *ContainerSessionManager) BeginV2(parent context.Context, permission *pb
 		active.connections++
 		return active.ctx, nil
 	}
-	if m.nextSequence[permission.SessionId] > 0 {
-		if strings.HasPrefix(permission.SessionId, "tunnel-") {
-			// Tunnel 合成会话是常驻隧道代理，允许在后续连接中重入
-			delete(m.nextSequence, permission.SessionId)
-		} else {
-			return nil, fmt.Errorf("resource session has already started")
-		}
+	// Tunnel 合成会话是常驻隧道代理，允许在后续连接中重入；判定依据为 Server
+	// 构造的完整结构化身份而非 SessionId 前缀。重入时不重置 nextSequence，
+	// source_sequence 保持单调递增，避免序号回退。
+	if m.nextSequence[permission.SessionId] > 0 && !isTunnelSyntheticPermission(permission) {
+		return nil, fmt.Errorf("resource session has already started")
 	}
 	ctx, cancel := context.WithCancel(parent)
 	if err := m.queueResourceEventLocked(permission.SessionId, "connected", "", true); err != nil {
@@ -182,6 +181,28 @@ func (m *ContainerSessionManager) BeginV2(parent context.Context, permission *pb
 	m.active[permission.SessionId] = active
 	m.resetV2ExpiryTimerLocked(permission.SessionId, active, validUntil)
 	return ctx, nil
+}
+
+// isTunnelSyntheticPermission 判定授权是否为 Server 构造的 Tunnel 合成会话。
+// 与 service.TunnelSessionIDs 及 Server 端 Tunnel 授权快照构造保持一致：
+// SessionId/SourceId/AllocationId/GrantId 必须全部由同一个 token ID 派生，
+// 且 SessionId 与 ResourceId 绑定。普通会话 SessionId 为 UUID，不可能满足。
+func isTunnelSyntheticPermission(p *pb.ResourceSessionPermissionV2) bool {
+	if p == nil || p.ResourceId == "" {
+		return false
+	}
+	tokenText, ok := strings.CutPrefix(p.SourceId, "tunnel-token-")
+	if !ok {
+		return false
+	}
+	tokenID, err := strconv.ParseUint(tokenText, 10, 64)
+	if err != nil || tokenID == 0 || strconv.FormatUint(tokenID, 10) != tokenText {
+		return false
+	}
+	return p.SessionId == fmt.Sprintf("tunnel-%d-%s", tokenID, p.ResourceId) &&
+		p.TargetRevisionId == fmt.Sprintf("tunnel-target-%d-%s", tokenID, p.ResourceId) &&
+		p.AllocationId == fmt.Sprintf("tunnel-allocation-%d", tokenID) &&
+		p.GrantId == fmt.Sprintf("tunnel-grant-%d", tokenID)
 }
 
 func (m *ContainerSessionManager) resetV2ExpiryTimerLocked(sessionID string, active *containerActiveSession, validUntil time.Time) {
