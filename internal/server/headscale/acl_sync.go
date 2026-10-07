@@ -477,7 +477,6 @@ func (s *ACLSyncService) generateACLPolicy(ctx context.Context) (*ACLPolicy, err
 		}
 	}
 
-
 	// 生成 SSH 规则
 	sshRules, err := s.generateSSHRules(ctx, usedTags)
 	if err != nil {
@@ -592,6 +591,16 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 
 	if s.refresher != nil {
 		snapshot := s.refresher.LoadSnapshot()
+		// 启动时快照仍是 version=0 的空占位，不能当作「Headscale 中没有节点」处理，
+		// 否则会把全部 node 记录的 IP / headscale_node_id 清空。
+		if snapshot.Version == 0 {
+			refreshed, err := s.refresher.RefreshNow(ctx)
+			if err != nil || refreshed == nil || refreshed.Version == 0 {
+				logger.Warnf("Headscale 节点快照未就绪，跳过本轮 Node Tag 同步（不修改任何节点）: %v", err)
+				return fmt.Errorf("headscale node snapshot not ready: %v", err)
+			}
+			snapshot = refreshed
+		}
 		for _, view := range snapshot.ByID {
 			if view.User != "" {
 				ip := ""
@@ -628,6 +637,11 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 				})
 			}
 		}
+	}
+
+	if len(userNodesMap) == 0 {
+		logger.Warnf("Headscale 节点列表为空，跳过本轮 Node Tag 同步以避免误清空节点 IP")
+		return nil
 	}
 
 	// 同步所有 Node 的 Tag（Agent 模式节点）

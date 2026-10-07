@@ -263,7 +263,6 @@ func TestGenerateACLPolicy_AbortsOnError(t *testing.T) {
 	require.Contains(t, syncErr.Error(), "生成 ACL 策略失败")
 }
 
-
 func newHeadscaleACLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -329,3 +328,26 @@ func TestMatchHeadscaleNodeTunnelAccountPrefersOnlineNewest(t *testing.T) {
 	require.Equal(t, uint64(201), matchHeadscaleNode(tunnel, hsNodes, false).HeadscaleNodeID)
 }
 
+// 启动竞态回归：快照仍为 version=0 空占位且 Headscale 不可达时，SyncAllNodeTags
+// 必须跳过本轮，不得把 node 记录的 IP / headscale_node_id 清空。
+func TestSyncAllNodeTagsSkipsWhenSnapshotNotReady(t *testing.T) {
+	database := newHeadscaleACLTestDB(t)
+	user := model.User{Name: "edge-gpu", Role: model.UserRoleAgent, SecretHash: "x", Enabled: true}
+	require.NoError(t, database.Create(&user).Error)
+	node := model.Node{UserID: user.ID, Name: "deploy-edge-gpu", Type: model.NodeTypeAgent, IP: "100.64.0.55", HeadscaleNodeID: 181}
+	require.NoError(t, database.Create(&node).Error)
+
+	client, err := NewClient(Config{URL: "http://127.0.0.1:1", APIKey: "test"})
+	require.NoError(t, err)
+	svc := NewACLSyncService(client)
+	svc.SetRefresher(NewSnapshotRefresher(client))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	require.Error(t, svc.SyncAllNodeTags(ctx))
+
+	var after model.Node
+	require.NoError(t, database.First(&after, node.ID).Error)
+	require.Equal(t, "100.64.0.55", after.IP)
+	require.Equal(t, uint64(181), after.HeadscaleNodeID)
+}
