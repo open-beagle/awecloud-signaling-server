@@ -539,17 +539,55 @@ func (s *ACLSyncService) StartPeriodicSync(ctx context.Context) {
 	}
 }
 
+// hsNodeInfo 是 SyncAllNodeTags 使用的 Headscale 节点精简视图
+type hsNodeInfo struct {
+	HeadscaleNodeID uint64
+	GivenName       string
+	IP              string
+	Tags            []string
+	Online          bool
+}
+
+// preferOnlineNewest 在候选中选出在线优先、ID 最大的节点
+func preferOnlineNewest(hsNodes []hsNodeInfo, filter func(*hsNodeInfo) bool) *hsNodeInfo {
+	var picked *hsNodeInfo
+	for i := range hsNodes {
+		c := &hsNodes[i]
+		if filter != nil && !filter(c) {
+			continue
+		}
+		if picked == nil || (c.Online && !picked.Online) ||
+			(c.Online == picked.Online && c.HeadscaleNodeID > picked.HeadscaleNodeID) {
+			picked = c
+		}
+	}
+	return picked
+}
+
+// matchHeadscaleNode 为 node 表中的一条记录匹配对应的 Headscale 节点。
+//
+// 普通节点：先按 IP 精确匹配，再按 GivenName 精确匹配（在线优先、ID 最新）。
+// tunnelAccount=true：仅用于持有有效 Tunnel Token、且只有一条设备记录的服务账号。
+// Tunnel Pod 每次重建都会注册新节点，Headscale 会给 GivenName 加随机后缀，旧 IP
+// 指向已离线的旧节点，因此直接取该账号下在线优先、ID 最新的节点。
+func matchHeadscaleNode(dbNode *model.Node, hsNodes []hsNodeInfo, tunnelAccount bool) *hsNodeInfo {
+	if tunnelAccount {
+		return preferOnlineNewest(hsNodes, nil)
+	}
+	if dbNode.IP != "" {
+		for i := range hsNodes {
+			if hsNodes[i].IP == dbNode.IP {
+				return &hsNodes[i]
+			}
+		}
+	}
+	return preferOnlineNewest(hsNodes, func(c *hsNodeInfo) bool { return c.GivenName == dbNode.Name })
+}
+
 // SyncAllNodeTags 同步所有 Node 的 Tag
 func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 	logger.Info("开始同步所有 Node 的 Tag")
 
-	type hsNodeInfo struct {
-		HeadscaleNodeID uint64
-		GivenName       string
-		IP              string
-		Tags            []string
-		Online          bool
-	}
 	userNodesMap := make(map[string][]hsNodeInfo)
 
 	if s.refresher != nil {
@@ -600,6 +638,21 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 	// 记录已处理的 Headscale Node ID，避免重复处理
 	processedNodeIDs := make(map[uint64]bool)
 
+	// Tunnel 服务账号：持有有效 Tunnel Token，且 node 表中只有一条记录
+	tunnelUserIDs := make(map[uint64]bool)
+	var tunnelTokens []model.DeployToken
+	if err := db.DB.WithContext(ctx).Scopes(model.ActiveTunnelTokenScope).Select("user_id").Find(&tunnelTokens).Error; err != nil {
+		logger.Warnf("查询 Tunnel DeployToken 失败，跳过 Tunnel 账号兜底匹配: %v", err)
+	} else {
+		for _, t := range tunnelTokens {
+			tunnelUserIDs[t.UserID] = true
+		}
+	}
+	nodeCountByUser := make(map[uint64]int)
+	for _, n := range dbNodes {
+		nodeCountByUser[n.UserID]++
+	}
+
 	for _, dbNode := range dbNodes {
 		if dbNode.User == nil {
 			continue
@@ -624,27 +677,9 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 			continue
 		}
 
-		// 在同一 User 的多个 Headscale Node 中，按 GivenName 精确匹配
-		var nodeInfo *hsNodeInfo
-		for i := range hsNodes {
-			if dbNode.IP != "" && hsNodes[i].IP == dbNode.IP {
-				nodeInfo = &hsNodes[i]
-				break
-			}
-		}
-		for i := range hsNodes {
-			if nodeInfo != nil {
-				break
-			}
-			candidate := &hsNodes[i]
-			if candidate.GivenName != dbNode.Name {
-				continue
-			}
-			if nodeInfo == nil || (candidate.Online && !nodeInfo.Online) ||
-				(candidate.Online == nodeInfo.Online && candidate.HeadscaleNodeID > nodeInfo.HeadscaleNodeID) {
-				nodeInfo = candidate
-			}
-		}
+		// 在同一 User 的多个 Headscale Node 中按设备精确匹配；Tunnel 服务账号走兜底
+		tunnelAccount := tunnelUserIDs[dbNode.UserID] && nodeCountByUser[dbNode.UserID] == 1
+		nodeInfo := matchHeadscaleNode(&dbNode, hsNodes, tunnelAccount)
 
 		if nodeInfo == nil {
 			logger.Warnf("Node %s 在 Headscale User %s 下未找到匹配的 Node（共 %d 个 Node）", dbNode.Name, userName, len(hsNodes))
@@ -763,29 +798,6 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 				}
 
 				processedNodeIDs[nodeInfo.HeadscaleNodeID] = true
-			}
-
-			// 找到该 User 下最新的有效/在线 Headscale 节点，同步至 node 表中的 Desktop 节点（支持 Tunnel 客户端）
-			var activeNode *hsNodeInfo
-			for i := range hsNodes {
-				if activeNode == nil || (hsNodes[i].Online && !activeNode.Online) ||
-					(hsNodes[i].Online == activeNode.Online && hsNodes[i].HeadscaleNodeID > activeNode.HeadscaleNodeID) {
-					activeNode = &hsNodes[i]
-				}
-			}
-			if activeNode != nil {
-				var dbDesktop model.Node
-				if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", user.ID, model.NodeTypeDesktop).First(&dbDesktop).Error; err == nil {
-					if dbDesktop.HeadscaleNodeID != activeNode.HeadscaleNodeID || dbDesktop.IP != activeNode.IP {
-						dbDesktop.HeadscaleNodeID = activeNode.HeadscaleNodeID
-						dbDesktop.IP = activeNode.IP
-						if err := db.DB.WithContext(ctx).Save(&dbDesktop).Error; err != nil {
-							logger.Warnf("更新 Client/Desktop Node %s 失败: %v", dbDesktop.Name, err)
-						} else {
-							logger.Infof("Client/Desktop Node %s HeadscaleNodeID/IP 已同步: id=%d, ip=%s", dbDesktop.Name, activeNode.HeadscaleNodeID, activeNode.IP)
-						}
-					}
-				}
 			}
 		}
 	}

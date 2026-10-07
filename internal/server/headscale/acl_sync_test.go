@@ -294,3 +294,38 @@ func newHeadscaleACLTestDB(t *testing.T) *gorm.DB {
 	db.DB = database
 	return database
 }
+
+// B1 回归：多设备用户的每条 desktop 记录只能匹配到自己的设备，不能被"最新在线节点"覆盖
+func TestMatchHeadscaleNodeKeepsMultiDeviceUsersOnOwnDevice(t *testing.T) {
+	hsNodes := []hsNodeInfo{
+		{HeadscaleNodeID: 59, GivenName: "ide", IP: "100.64.0.58", Online: false},
+		{HeadscaleNodeID: 111, GivenName: "4.local", IP: "100.64.0.24", Online: true},
+		{HeadscaleNodeID: 112, GivenName: "bogon", IP: "100.64.0.25", Online: true},
+	}
+
+	ide := &model.Node{Name: "ide", IP: "100.64.0.58"}
+	require.Equal(t, uint64(59), matchHeadscaleNode(ide, hsNodes, false).HeadscaleNodeID)
+
+	// IP 为空时按 GivenName 匹配，离线也不能漂移到同用户的其他在线设备
+	ideNoIP := &model.Node{Name: "ide"}
+	require.Equal(t, uint64(59), matchHeadscaleNode(ideNoIP, hsNodes, false).HeadscaleNodeID)
+
+	// 名称和 IP 都对不上时返回 nil（由调用方清空），不能兜底到别的设备
+	unknown := &model.Node{Name: "HOME-MENGK"}
+	require.Nil(t, matchHeadscaleNode(unknown, hsNodes, false))
+}
+
+// Tunnel 服务账号：Pod 重建后 GivenName 带随机后缀，旧 IP 指向离线旧节点，应取在线最新节点
+func TestMatchHeadscaleNodeTunnelAccountPrefersOnlineNewest(t *testing.T) {
+	hsNodes := []hsNodeInfo{
+		{HeadscaleNodeID: 201, GivenName: "tunnel-gpu-5090-xfipesky", IP: "100.64.0.141", Online: false},
+		{HeadscaleNodeID: 202, GivenName: "tunnel-gpu-5090-t1f0ec9i", IP: "100.64.0.142", Online: true},
+		{HeadscaleNodeID: 190, GivenName: "tunnel-gpu-5090", IP: "100.64.0.130", Online: false},
+	}
+	tunnel := &model.Node{Name: "tunnel-gpu-5090", IP: "100.64.0.141"}
+
+	require.Equal(t, uint64(202), matchHeadscaleNode(tunnel, hsNodes, true).HeadscaleNodeID)
+	// 不是 Tunnel 账号时维持原有精确匹配语义（按旧 IP 命中旧节点）
+	require.Equal(t, uint64(201), matchHeadscaleNode(tunnel, hsNodes, false).HeadscaleNodeID)
+}
+
