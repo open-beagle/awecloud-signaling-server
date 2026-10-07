@@ -8,10 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
-	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
 // ========== K8S API 授权 ==========
@@ -223,57 +221,7 @@ type AddK8SACLUsersRequest struct {
 
 // AddK8SACLUsers 添加 K8S 用户授权
 func (a *ACLAPI) AddK8SACLUsers(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetUserID, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
-		return
-	}
-
-	var req AddK8SACLUsersRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
-		return
-	}
-
-	var targetUser model.User
-	if err := db.DB.WithContext(ctx).First(&targetUser, targetUserID).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
-		return
-	}
-
-	k8sGroupsJSON := formatJSONStringArray(req.K8SGroups)
-	namespacesJSON := formatJSONStringArray(req.Namespaces)
-	now := time.Now()
-
-	for _, userID := range req.UserIDs {
-		var existing model.AclK8SUserPermission
-		if err := db.DB.WithContext(ctx).Where("target_user_id = ? AND user_id = ?", targetUserID, userID).First(&existing).Error; err == nil {
-			// 更新现有授权
-			existing.K8SGroups = k8sGroupsJSON
-			existing.Namespaces = namespacesJSON
-			existing.Enabled = true
-			db.DB.WithContext(ctx).Save(&existing)
-			continue
-		}
-
-		perm := &model.AclK8SUserPermission{
-			TargetUserID: targetUserID,
-			UserID:       userID,
-			K8SGroups:    k8sGroupsJSON,
-			Namespaces:   namespacesJSON,
-			Enabled:      true,
-			GrantedAt:    now,
-		}
-		db.DB.WithContext(ctx).Create(perm)
-	}
-
-	logger.Infof("添加 K8S 用户授权: target_user_id=%d, user_ids=%v", targetUserID, req.UserIDs)
-	
-	// 推送权限变更到 Desktop 客户端（K8S API 权限 → 全部数据）
-	a.notifyDesktopDataChange(pb.DesktopDataType_DESKTOP_DATA_TYPE_ALL)
-	
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
+	a.writeACL(c, "k8s", false, false)
 }
 
 // AddK8SACLGroupsRequest 添加 K8S 分组授权请求
@@ -285,92 +233,17 @@ type AddK8SACLGroupsRequest struct {
 
 // AddK8SACLGroups 添加 K8S 分组授权
 func (a *ACLAPI) AddK8SACLGroups(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetUserID, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
-		return
-	}
-
-	var req AddK8SACLGroupsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
-		return
-	}
-
-	var targetUser model.User
-	if err := db.DB.WithContext(ctx).First(&targetUser, targetUserID).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
-		return
-	}
-
-	k8sGroupsJSON := formatJSONStringArray(req.K8SGroups)
-	namespacesJSON := formatJSONStringArray(req.Namespaces)
-	now := time.Now()
-
-	for _, groupID := range req.GroupIDs {
-		var existing model.AclK8SGroupPermission
-		if err := db.DB.WithContext(ctx).Where("target_user_id = ? AND group_id = ?", targetUserID, groupID).First(&existing).Error; err == nil {
-			existing.K8SGroups = k8sGroupsJSON
-			existing.Namespaces = namespacesJSON
-			existing.Enabled = true
-			db.DB.WithContext(ctx).Save(&existing)
-			continue
-		}
-
-		perm := &model.AclK8SGroupPermission{
-			TargetUserID: targetUserID,
-			GroupID:      groupID,
-			K8SGroups:    k8sGroupsJSON,
-			Namespaces:   namespacesJSON,
-			Enabled:      true,
-			GrantedAt:    now,
-		}
-		db.DB.WithContext(ctx).Create(perm)
-	}
-
-	logger.Infof("添加 K8S 分组授权: target_user_id=%d, group_ids=%v", targetUserID, req.GroupIDs)
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
+	a.writeACL(c, "k8s", true, false)
 }
 
 // RemoveK8SACLUser 撤销 K8S 用户授权
 func (a *ACLAPI) RemoveK8SACLUser(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetUserID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	userID, _ := strconv.ParseUint(c.Param("uid"), 10, 64)
-
-	result := db.DB.WithContext(ctx).Where("target_user_id = ? AND user_id = ?", targetUserID, userID).Delete(&model.AclK8SUserPermission{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
-		return
-	}
-
-	logger.Infof("撤销 K8S 用户授权: target_user_id=%d, user_id=%d", targetUserID, userID)
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
+	a.writeACL(c, "k8s", false, true)
 }
 
 // RemoveK8SACLGroup 撤销 K8S 分组授权
 func (a *ACLAPI) RemoveK8SACLGroup(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetUserID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	groupID, _ := strconv.ParseInt(c.Param("gid"), 10, 64)
-
-	result := db.DB.WithContext(ctx).Where("target_user_id = ? AND group_id = ?", targetUserID, groupID).Delete(&model.AclK8SGroupPermission{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
-		return
-	}
-
-	logger.Infof("撤销 K8S 分组授权: target_user_id=%d, group_id=%d", targetUserID, groupID)
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
+	a.writeACL(c, "k8s", true, true)
 }
 
 // ========== JSON 数组工具函数 ==========
@@ -623,49 +496,7 @@ type AddEndpointK8SAPIACLUsersRequest struct {
 
 // AddEndpointK8SAPIACLUsers 添加 Endpoint K8SAPI 用户授权（兼容路由）
 func (a *ACLAPI) AddEndpointK8SAPIACLUsers(c *gin.Context) {
-	ctx := c.Request.Context()
-	endpointID := c.Param("id")
-
-	var req AddEndpointK8SAPIACLUsersRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
-		return
-	}
-
-	var endpoint model.Endpoint
-	if err := db.DB.WithContext(ctx).First(&endpoint, "id = ?", endpointID).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
-		return
-	}
-
-	agentID := endpoint.UserID
-	k8sGroupsJSON := formatJSONStringArray(req.K8SGroups)
-	namespacesJSON := formatJSONStringArray(req.Namespaces)
-	now := time.Now()
-
-	for _, userID := range req.UserIDs {
-		var existing model.AclK8SUserPermission
-		if err := db.DB.WithContext(ctx).Where("target_user_id = ? AND user_id = ?", agentID, userID).First(&existing).Error; err == nil {
-			existing.K8SGroups = k8sGroupsJSON
-			existing.Namespaces = namespacesJSON
-			existing.Enabled = true
-			db.DB.WithContext(ctx).Save(&existing)
-			continue
-		}
-
-		perm := &model.AclK8SUserPermission{
-			TargetUserID: agentID,
-			UserID:       userID,
-			K8SGroups:    k8sGroupsJSON,
-			Namespaces:   namespacesJSON,
-			Enabled:      true,
-			GrantedAt:    now,
-		}
-		db.DB.WithContext(ctx).Create(perm)
-	}
-
-	logger.Infof("添加 K8SAPI 用户授权 (Endpoint兼容路由): endpoint_id=%s, agent_id=%d, user_ids=%v", endpointID, agentID, req.UserIDs)
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
+	a.writeACL(c, "endpoint_k8sapi", false, false)
 }
 
 // AddEndpointK8SAPIACLGroupsRequest 添加 Endpoint K8SAPI 分组授权请求（兼容前端）
@@ -677,101 +508,15 @@ type AddEndpointK8SAPIACLGroupsRequest struct {
 
 // AddEndpointK8SAPIACLGroups 添加 Endpoint K8SAPI 分组授权（兼容路由）
 func (a *ACLAPI) AddEndpointK8SAPIACLGroups(c *gin.Context) {
-	ctx := c.Request.Context()
-	endpointID := c.Param("id")
-
-	var req AddEndpointK8SAPIACLGroupsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
-		return
-	}
-
-	var endpoint model.Endpoint
-	if err := db.DB.WithContext(ctx).First(&endpoint, "id = ?", endpointID).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
-		return
-	}
-
-	agentID := endpoint.UserID
-	k8sGroupsJSON := formatJSONStringArray(req.K8SGroups)
-	namespacesJSON := formatJSONStringArray(req.Namespaces)
-	now := time.Now()
-
-	for _, groupID := range req.GroupIDs {
-		var existing model.AclK8SGroupPermission
-		if err := db.DB.WithContext(ctx).Where("target_user_id = ? AND group_id = ?", agentID, groupID).First(&existing).Error; err == nil {
-			existing.K8SGroups = k8sGroupsJSON
-			existing.Namespaces = namespacesJSON
-			existing.Enabled = true
-			db.DB.WithContext(ctx).Save(&existing)
-			continue
-		}
-
-		perm := &model.AclK8SGroupPermission{
-			TargetUserID: agentID,
-			GroupID:      groupID,
-			K8SGroups:    k8sGroupsJSON,
-			Namespaces:   namespacesJSON,
-			Enabled:      true,
-			GrantedAt:    now,
-		}
-		db.DB.WithContext(ctx).Create(perm)
-	}
-
-	logger.Infof("添加 K8SAPI 分组授权 (Endpoint兼容路由): endpoint_id=%s, agent_id=%d, group_ids=%v", endpointID, agentID, req.GroupIDs)
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
+	a.writeACL(c, "endpoint_k8sapi", true, false)
 }
 
 // RemoveEndpointK8SAPIACLUser 撤销 Endpoint K8SAPI 用户授权（兼容路由）
 func (a *ACLAPI) RemoveEndpointK8SAPIACLUser(c *gin.Context) {
-	ctx := c.Request.Context()
-	endpointID := c.Param("id")
-	userID, _ := strconv.ParseUint(c.Param("uid"), 10, 64)
-
-	var endpoint model.Endpoint
-	if err := db.DB.WithContext(ctx).First(&endpoint, "id = ?", endpointID).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
-		return
-	}
-
-	agentID := endpoint.UserID
-	result := db.DB.WithContext(ctx).Where("target_user_id = ? AND user_id = ?", agentID, userID).Delete(&model.AclK8SUserPermission{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
-		return
-	}
-
-	logger.Infof("撤销 K8SAPI 用户授权 (Endpoint兼容路由): endpoint_id=%s, agent_id=%d, user_id=%d", endpointID, agentID, userID)
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
+	a.writeACL(c, "endpoint_k8sapi", false, true)
 }
 
 // RemoveEndpointK8SAPIACLGroup 撤销 Endpoint K8SAPI 分组授权（兼容路由）
 func (a *ACLAPI) RemoveEndpointK8SAPIACLGroup(c *gin.Context) {
-	ctx := c.Request.Context()
-	endpointID := c.Param("id")
-	groupID, _ := strconv.ParseInt(c.Param("gid"), 10, 64)
-
-	var endpoint model.Endpoint
-	if err := db.DB.WithContext(ctx).First(&endpoint, "id = ?", endpointID).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("Endpoint 不存在"))
-		return
-	}
-
-	agentID := endpoint.UserID
-	result := db.DB.WithContext(ctx).Where("target_user_id = ? AND group_id = ?", agentID, groupID).Delete(&model.AclK8SGroupPermission{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
-		return
-	}
-
-	logger.Infof("撤销 K8SAPI 分组授权 (Endpoint兼容路由): endpoint_id=%s, agent_id=%d, group_id=%d", endpointID, agentID, groupID)
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
+	a.writeACL(c, "endpoint_k8sapi", true, true)
 }

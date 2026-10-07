@@ -26,7 +26,7 @@ func setupTunnelTestDB(t *testing.T) *gorm.DB {
 	database, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.NewString())), &gorm.Config{IgnoreRelationshipsWhenMigrating: true})
 	require.NoError(t, err)
 	require.NoError(t, database.AutoMigrate(
-		&model.Admin{}, &model.User{}, &model.Node{}, &model.DeployToken{},
+		&model.Admin{}, &model.User{}, &model.Node{}, &model.DeployToken{}, &model.AuditLog{},
 		&model.TechnicalResource{}, &model.TechnicalResourceDeployToken{},
 		&model.Tenant{}, &model.TenantResource{}, &model.TenantAccessGrant{}, &model.TenantAccessGrantEvent{},
 	))
@@ -338,6 +338,3 @@ func TestSignalTunnelAPI_CRUD(t *testing.T) {
 	require.NoError(t, database.First(&tok, tunnelID).Error)
 	require.Equal(t, model.DeployTokenStatusRevoked, tok.Status)
 }
-
-
-

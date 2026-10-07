@@ -44,7 +44,7 @@ func setupTunnelLifecycleTestDB(t *testing.T) *gorm.DB {
 		&model.Tenant{}, &model.TenantResource{}, &model.TenantMembership{}, &model.TenantAccessGrant{}, &model.TenantAccessGrantEvent{},
 		&model.TechnicalResourceBinding{}, &model.WorkloadObservation{},
 		&model.WorkloadObservationSource{}, &model.ResourceScope{}, &model.NamespaceObservation{},
-		&model.SystemConfig{},
+		&model.SystemConfig{}, &model.AuditLog{},
 	))
 	previous := serverdb.DB
 	serverdb.DB = database
@@ -305,6 +305,29 @@ func TestTunnelLifecycle_T3_ACLSyncVerifications(t *testing.T) {
 	tunnelAPI.DeleteSignalTunnel(c)
 	require.Equal(t, http.StatusInternalServerError, w.Code)
 	require.Contains(t, w.Body.String(), "ACL 同步失败")
+
+	var audits []model.AuditLog
+	require.NoError(t, database.Order("id").Find(&audits).Error)
+	require.Len(t, audits, 6)
+	for i, entry := range audits {
+		var detail sensitiveWriteDetail
+		require.NoError(t, json.Unmarshal([]byte(entry.Detail), &detail))
+		require.True(t, detail.DatabaseCommitted)
+		require.NotEmpty(t, entry.TargetID)
+		require.Equal(t, admin.ID, entry.ActorAdminID)
+		require.NotContains(t, entry.Detail, createResp.Data.Token)
+		require.NotContains(t, entry.Detail, "SIGNAL_DEPLOY_TOKEN")
+		require.NotContains(t, entry.Detail, "secret_hash")
+		require.NotNil(t, detail.After)
+		if i < 3 {
+			require.Equal(t, "succeeded", detail.Result)
+			require.Equal(t, "succeeded", detail.SyncStatus)
+		} else {
+			require.Equal(t, "partial", detail.Result)
+			require.Equal(t, "failed", detail.SyncStatus)
+			require.Equal(t, 500, detail.HTTPStatus)
+		}
+	}
 }
 
 // TestTunnelCandidates_T4_FilterAndFields 验证候选服务 API 严格过滤非 TCP 服务，且元数据字段与 inventory 一致

@@ -89,8 +89,13 @@ func recordAuditLogStrict(ctx context.Context, c *gin.Context, actionType, targe
 }
 
 func recordAuditLogStrictWithDB(ctx context.Context, database *gorm.DB, c *gin.Context, actionType, targetType, targetID, targetName string, detail interface{}) error {
+	_, err := recordAuditLogEntryWithDB(ctx, database, c, actionType, targetType, targetID, targetName, detail)
+	return err
+}
+
+func recordAuditLogEntryWithDB(ctx context.Context, database *gorm.DB, c *gin.Context, actionType, targetType, targetID, targetName string, detail interface{}) (*model.AuditLog, error) {
 	if database == nil {
-		return fmt.Errorf("audit database is not initialized")
+		return nil, fmt.Errorf("audit database is not initialized")
 	}
 	userID := getAdminIDFromContext(c)
 	actorUsername := ""
@@ -116,7 +121,7 @@ func recordAuditLogStrictWithDB(ctx context.Context, database *gorm.DB, c *gin.C
 	if detail != nil {
 		data, err := json.Marshal(detail)
 		if err != nil {
-			return fmt.Errorf("marshal audit detail: %w", err)
+			return nil, fmt.Errorf("marshal audit detail: %w", err)
 		}
 		detailStr = string(data)
 	}
@@ -147,7 +152,7 @@ func recordAuditLogStrictWithDB(ctx context.Context, database *gorm.DB, c *gin.C
 		Detail:              detailStr,
 	}
 
-	return database.WithContext(ctx).Create(log).Error
+	return log, database.WithContext(ctx).Create(log).Error
 }
 
 func auditTraceID(ctx context.Context) string {

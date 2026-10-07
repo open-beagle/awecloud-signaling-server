@@ -895,6 +895,11 @@ type UpdateTunnelACLRequest struct {
 
 // UpdateTunnelACL 更新 ACL Policy
 func (a *TunnelAPI) UpdateTunnelACL(c *gin.Context) {
+	audit := beginSensitiveWrite(c, model.ActionUpdateTunnelACL, "tunnel_acl", "policy")
+	if audit == nil {
+		return
+	}
+	defer audit.finish()
 	if a.hsClient == nil {
 		c.JSON(http.StatusServiceUnavailable, NewErrorResponse("Headscale 未配置"))
 		return
@@ -905,6 +910,7 @@ func (a *TunnelAPI) UpdateTunnelACL(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
 		return
 	}
+	audit.detail.Request = policyAuditState(req.Policy)
 
 	// 验证 JSON 格式
 	var jsonCheck interface{}
@@ -915,21 +921,43 @@ func (a *TunnelAPI) UpdateTunnelACL(c *gin.Context) {
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
-
-	if err := a.hsClient.SetPolicy(ctx, req.Policy); err != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新 ACL Policy 失败: "+err.Error()))
+	before, err := a.hsClient.GetPolicy(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("读取原 ACL Policy 失败"))
+		return
+	}
+	audit.detail.Before = policyAuditState(before)
+	audit.detail.ExternalStatus = "unknown"
+	if err := audit.save(ctx, audit.database); err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("审计记录不可用，操作未执行"))
 		return
 	}
 
+	if err := a.hsClient.SetPolicy(ctx, req.Policy); err != nil {
+		audit.detail.SyncStatus = "failed"
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新 ACL Policy 失败: "+err.Error()))
+		return
+	}
+	audit.detail.ExternalStatus = "applied"
+	audit.detail.SyncStatus = "succeeded"
+	after, err := a.hsClient.GetPolicy(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("ACL 已更新，读取结果失败"))
+		return
+	}
+	audit.detail.After = policyAuditState(after)
+
 	// 记录同步时间
 	now := time.Now()
-	db.DB.WithContext(ctx).Where("key = ?", "acl_last_synced_at").Assign(model.SystemConfig{
+	if err := db.DB.WithContext(ctx).Where("key = ?", "acl_last_synced_at").Assign(model.SystemConfig{
 		Key:   "acl_last_synced_at",
 		Value: now.Format(time.RFC3339),
-	}).FirstOrCreate(&model.SystemConfig{})
+	}).FirstOrCreate(&model.SystemConfig{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("ACL 已更新，记录同步时间失败"))
+		return
+	}
 
 	logger.Infof("更新隧道 ACL Policy")
-	recordAuditLog(ctx, c, model.ActionUpdateTunnelACL, "tunnel_acl", "", "", nil)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("更新成功", nil))
 }
@@ -1070,26 +1098,55 @@ func (a *TunnelAPI) GetTunnelACLRules(c *gin.Context) {
 
 // SyncTunnelACL 强制同步 ACL
 func (a *TunnelAPI) SyncTunnelACL(c *gin.Context) {
+	audit := beginSensitiveWrite(c, model.ActionSyncTunnelACL, "tunnel_acl", "policy")
+	if audit == nil {
+		return
+	}
+	defer audit.finish()
 	ctx := c.Request.Context()
 	if a.aclSync == nil {
 		c.JSON(http.StatusServiceUnavailable, NewErrorResponse("ACL 同步服务未配置"))
 		return
 	}
 
-	if err := a.aclSync.FullSync(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("同步 ACL 失败: "+err.Error()))
+	audit.detail.Request = gin.H{"operation": "db_derived_full_sync"}
+	if a.hsClient != nil {
+		before, err := a.hsClient.GetPolicy(ctx)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, NewErrorResponse("读取原 ACL Policy 失败"))
+			return
+		}
+		audit.detail.Before = policyAuditState(before)
+	}
+	audit.detail.ExternalStatus = "unknown"
+	if err := audit.save(ctx, audit.database); err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("审计记录不可用，操作未执行"))
 		return
+	}
+	if !audit.sync(a.aclSync) {
+		return
+	}
+	audit.detail.ExternalStatus = "applied"
+	if a.hsClient != nil {
+		after, err := a.hsClient.GetPolicy(ctx)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, NewErrorResponse("ACL 已同步，读取结果失败"))
+			return
+		}
+		audit.detail.After = policyAuditState(after)
 	}
 
 	// 记录同步时间
 	now := time.Now()
-	db.DB.WithContext(ctx).Where("key = ?", "acl_last_synced_at").Assign(model.SystemConfig{
+	if err := db.DB.WithContext(ctx).Where("key = ?", "acl_last_synced_at").Assign(model.SystemConfig{
 		Key:   "acl_last_synced_at",
 		Value: now.Format(time.RFC3339),
-	}).FirstOrCreate(&model.SystemConfig{})
+	}).FirstOrCreate(&model.SystemConfig{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("ACL 已同步，记录同步时间失败"))
+		return
+	}
 
 	logger.Infof("强制同步隧道 ACL")
-	recordAuditLog(ctx, c, model.ActionSyncTunnelACL, "tunnel_acl", "", "", nil)
 
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("同步成功", nil))
 }
@@ -1303,36 +1360,19 @@ func (a *TunnelAPI) ListSignalTunnels(c *gin.Context) {
 
 // CreateSignalTunnel 创建 Tunnel 实例
 func (a *TunnelAPI) CreateSignalTunnel(c *gin.Context) {
-	ctx := c.Request.Context()
+	audit := beginSensitiveWrite(c, "create_signal_tunnel", "signal_tunnel", "")
+	if audit == nil {
+		return
+	}
+	defer audit.finish()
 	var req CreateSignalTunnelRequest
+	audit.detail.Request = &req
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("名称和目标 Agent 不能为空"))
 		return
 	}
 
 	adminID := getAdminIDFromContext(c)
-
-	// 查找或自动创建专属 Service User (svc-tunnel-<name>)
-	userName := "svc-tunnel-" + req.Name
-	var user model.User
-	err := db.DB.WithContext(ctx).Where("name = ?", userName).First(&user).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		user = model.User{
-			Name:       userName,
-			Alias:      "Signal Tunnel " + req.Name,
-			Role:       model.UserRoleClient,
-			SecretHash: "-",
-			Enabled:    true,
-			Source:     model.UserSourceManual,
-		}
-		if err := db.DB.WithContext(ctx).Create(&user).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, NewErrorResponse("创建 Tunnel 服务账号失败: "+err.Error()))
-			return
-		}
-	} else if err != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询用户失败: "+err.Error()))
-		return
-	}
 
 	tokenStr, err := generateDeployToken(64)
 	if err != nil {
@@ -1342,7 +1382,6 @@ func (a *TunnelAPI) CreateSignalTunnel(c *gin.Context) {
 
 	deployToken := &model.DeployToken{
 		Token:           tokenStr,
-		UserID:          user.ID,
 		Name:            req.Name,
 		Status:          model.DeployTokenStatusPending,
 		CreatedBy:       uint64(adminID),
@@ -1350,7 +1389,29 @@ func (a *TunnelAPI) CreateSignalTunnel(c *gin.Context) {
 		Mode:            "tunnel",
 	}
 
-	if err := db.DB.WithContext(ctx).Create(deployToken).Error; err != nil {
+	if err := audit.transaction(func(tx *gorm.DB) error {
+		// Account, token and audit evidence either all commit or all roll back.
+		userName := "svc-tunnel-" + req.Name
+		var user model.User
+		err := tx.Where("name = ?", userName).First(&user).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			user = model.User{Name: userName, Alias: "Signal Tunnel " + req.Name,
+				Role: model.UserRoleClient, SecretHash: "-", Enabled: true, Source: model.UserSourceManual}
+			if err := tx.Create(&user).Error; err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+		deployToken.UserID = user.ID
+		if err := tx.Create(deployToken).Error; err != nil {
+			return err
+		}
+		audit.entry.TargetID = strconv.FormatUint(deployToken.ID, 10)
+		audit.entry.TargetName = deployToken.Name
+		audit.detail.After = tunnelAuditState(deployToken)
+		return nil
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("创建 Tunnel Token 失败: "+err.Error()))
 		return
 	}
@@ -1431,14 +1492,8 @@ spec:
 
 	logger.Infof("成功创建 Signal Tunnel 实例: name=%s, target_agent=%s, token_id=%d", req.Name, req.TargetAgent, deployToken.ID)
 
-	if a.aclSync != nil {
-		if err := a.aclSync.FullSync(ctx); err != nil {
-			logger.Errorf("创建 Signal Tunnel 后同步 ACL 失败: %v", err)
-			c.JSON(http.StatusInternalServerError, NewErrorResponse("配置已保存，ACL 同步失败，请在 ACL 页面手动同步: "+err.Error()))
-			return
-		}
-	} else {
-		logger.Warn("ACL 同步服务未配置，跳过创建 Tunnel 即时同步")
+	if !audit.sync(a.aclSync) {
+		return
 	}
 
 	c.JSON(http.StatusOK, NewSuccessResponse(CreateSignalTunnelResponse{
@@ -1608,6 +1663,11 @@ func (a *TunnelAPI) GetTunnelCandidateServices(c *gin.Context) {
 
 // UpdateSignalTunnelPorts 更新 Tunnel 端口白名单配置与 K8s API 授权
 func (a *TunnelAPI) UpdateSignalTunnelPorts(c *gin.Context) {
+	audit := beginSensitiveWrite(c, "update_signal_tunnel_ports", "signal_tunnel", c.Param("id"))
+	if audit == nil {
+		return
+	}
+	defer audit.finish()
 	ctx := c.Request.Context()
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 64)
@@ -1623,6 +1683,7 @@ func (a *TunnelAPI) UpdateSignalTunnelPorts(c *gin.Context) {
 	}
 
 	var req UpdateSignalTunnelPortsRequest
+	audit.detail.Request = &req
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("参数格式错误: "+err.Error()))
 		return
@@ -1704,10 +1765,16 @@ func (a *TunnelAPI) UpdateSignalTunnelPorts(c *gin.Context) {
 	}
 
 	// 只写入 ports_config：Tunnel 端口的唯一来源，不再写 TenantAccessGrant（R3）
-	txErr := db.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	txErr := audit.transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&tok, id).Error; err != nil {
+			return err
+		}
+		audit.entry.TargetName = tok.Name
+		audit.detail.Before = tunnelAuditState(&tok)
 		if err := tx.Model(&tok).Update("ports_config", string(configBytes)).Error; err != nil {
 			return err
 		}
+		audit.detail.After = tunnelAuditState(&tok)
 		return nil
 	})
 	if txErr != nil {
@@ -1716,14 +1783,8 @@ func (a *TunnelAPI) UpdateSignalTunnelPorts(c *gin.Context) {
 	}
 
 	// 立即同步 ACL
-	if a.aclSync != nil {
-		if err := a.aclSync.FullSync(ctx); err != nil {
-			logger.Errorf("更新 Tunnel 端口后同步 ACL 失败: %v", err)
-			c.JSON(http.StatusInternalServerError, NewErrorResponse("配置已保存，ACL 同步失败，请在 ACL 页面手动同步: "+err.Error()))
-			return
-		}
-	} else {
-		logger.Warn("ACL 同步服务未配置，跳过更新端口即时同步")
+	if !audit.sync(a.aclSync) {
+		return
 	}
 
 	logger.Infof("已成功更新 Tunnel 端口配置: id=%d, ports=%d, k8s_api=%v(%d)", id, len(bindings), req.K8sAPIEnabled, req.K8sAPIPort)
@@ -1732,6 +1793,11 @@ func (a *TunnelAPI) UpdateSignalTunnelPorts(c *gin.Context) {
 
 // DeleteSignalTunnel 删除/注销 Tunnel 实例
 func (a *TunnelAPI) DeleteSignalTunnel(c *gin.Context) {
+	audit := beginSensitiveWrite(c, "revoke_signal_tunnel", "signal_tunnel", c.Param("id"))
+	if audit == nil {
+		return
+	}
+	defer audit.finish()
 	ctx := c.Request.Context()
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 64)
@@ -1747,13 +1813,25 @@ func (a *TunnelAPI) DeleteSignalTunnel(c *gin.Context) {
 	}
 
 	// 标记为 revoked 并清理相关授权
-	txErr := db.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	txErr := audit.transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&tok, id).Error; err != nil {
+			return err
+		}
+		audit.entry.TargetName = tok.Name
+		audit.detail.Before = tunnelAuditState(&tok)
+		var grants []model.TenantAccessGrant
+		if err := tx.Where("subject_user_id = ?", tok.UserID).Find(&grants).Error; err != nil {
+			return err
+		}
+		audit.detail.Before.(map[string]interface{})["grants"] = grants
 		if err := tx.Model(&tok).Update("status", model.DeployTokenStatusRevoked).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("subject_user_id = ?", tok.UserID).Delete(&model.TenantAccessGrant{}).Error; err != nil {
 			return err
 		}
+		audit.detail.After = tunnelAuditState(&tok)
+		audit.detail.After.(map[string]interface{})["grants"] = []model.TenantAccessGrant{}
 		return nil
 	})
 	if txErr != nil {
@@ -1762,14 +1840,8 @@ func (a *TunnelAPI) DeleteSignalTunnel(c *gin.Context) {
 	}
 
 	// 立即同步 ACL
-	if a.aclSync != nil {
-		if err := a.aclSync.FullSync(ctx); err != nil {
-			logger.Errorf("注销 Signal Tunnel 后同步 ACL 失败: %v", err)
-			c.JSON(http.StatusInternalServerError, NewErrorResponse("配置已保存，ACL 同步失败，请在 ACL 页面手动同步: "+err.Error()))
-			return
-		}
-	} else {
-		logger.Warn("ACL 同步服务未配置，跳过注销 Tunnel 即时同步")
+	if !audit.sync(a.aclSync) {
+		return
 	}
 
 	logger.Infof("已成功注销 Tunnel 实例: id=%d, name=%s", id, tok.Name)

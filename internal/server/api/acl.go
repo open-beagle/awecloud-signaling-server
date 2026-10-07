@@ -18,7 +18,7 @@ import (
 // ACLAPI 授权管理 API
 type ACLAPI struct {
 	config         *config.ServerConfig
-	aclSync        *headscale.ACLSyncService
+	aclSync        aclSyncer
 	desktopService DesktopServiceInterface
 }
 
@@ -243,51 +243,7 @@ type AddACLUsersRequest struct {
 
 // AddServiceACLUsers 添加服务用户授权
 func (a *ACLAPI) AddServiceACLUsers(c *gin.Context) {
-	ctx := c.Request.Context()
-	serviceID := c.Param("id")
-
-	var req AddACLUsersRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
-		return
-	}
-
-	// 验证服务存在
-	var service model.ProxyService
-	if err := db.DB.WithContext(ctx).First(&service, "id = ?", serviceID).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("服务不存在"))
-		return
-	}
-
-	// 批量添加授权
-	now := time.Now()
-	for _, userID := range req.UserIDs {
-		// 检查是否已授权
-		var existing model.AclServiceUserPermission
-		if err := db.DB.WithContext(ctx).Where("service_id = ? AND user_id = ?", serviceID, userID).First(&existing).Error; err == nil {
-			continue // 已存在，跳过
-		}
-
-		perm := &model.AclServiceUserPermission{
-			ServiceID: serviceID,
-			UserID:    userID,
-			GrantedAt: now,
-		}
-		db.DB.WithContext(ctx).Create(perm)
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	logger.Infof("添加服务用户授权: service_id=%s, user_ids=%v", serviceID, req.UserIDs)
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
+	a.writeACL(c, "service", false, false)
 }
 
 // AddACLGroupsRequest 添加分组授权请求（支持批量）
@@ -297,118 +253,17 @@ type AddACLGroupsRequest struct {
 
 // AddServiceACLGroups 添加服务分组授权
 func (a *ACLAPI) AddServiceACLGroups(c *gin.Context) {
-	ctx := c.Request.Context()
-	serviceID := c.Param("id")
-
-	var req AddACLGroupsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
-		return
-	}
-
-	// 验证服务存在
-	var service model.ProxyService
-	if err := db.DB.WithContext(ctx).First(&service, "id = ?", serviceID).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("服务不存在"))
-		return
-	}
-
-	// 批量添加授权
-	now := time.Now()
-	for _, groupID := range req.GroupIDs {
-		var existing model.AclServiceGroupPermission
-		if err := db.DB.WithContext(ctx).Where("service_id = ? AND group_id = ?", serviceID, groupID).First(&existing).Error; err == nil {
-			continue
-		}
-
-		perm := &model.AclServiceGroupPermission{
-			ServiceID: serviceID,
-			GroupID:   groupID,
-			GrantedAt: now,
-		}
-		db.DB.WithContext(ctx).Create(perm)
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	logger.Infof("添加服务分组授权: service_id=%s, group_ids=%v", serviceID, req.GroupIDs)
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
+	a.writeACL(c, "service", true, false)
 }
 
 // RemoveServiceACLUser 撤销服务用户授权
 func (a *ACLAPI) RemoveServiceACLUser(c *gin.Context) {
-	ctx := c.Request.Context()
-	serviceID := c.Param("id")
-	userID, err := strconv.ParseUint(c.Param("uid"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的用户 ID"))
-		return
-	}
-
-	result := db.DB.WithContext(ctx).Where("service_id = ? AND user_id = ?", serviceID, userID).Delete(&model.AclServiceUserPermission{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
-		return
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	logger.Infof("撤销服务用户授权: service_id=%s, user_id=%d", serviceID, userID)
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
+	a.writeACL(c, "service", false, true)
 }
 
 // RemoveServiceACLGroup 撤销服务分组授权
 func (a *ACLAPI) RemoveServiceACLGroup(c *gin.Context) {
-	ctx := c.Request.Context()
-	serviceID := c.Param("id")
-	groupID, err := strconv.ParseInt(c.Param("gid"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的分组 ID"))
-		return
-	}
-
-	result := db.DB.WithContext(ctx).Where("service_id = ? AND group_id = ?", serviceID, groupID).Delete(&model.AclServiceGroupPermission{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
-		return
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	logger.Infof("撤销服务分组授权: service_id=%s, group_id=%d", serviceID, groupID)
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
+	a.writeACL(c, "service", true, true)
 }
 
 // ========== 用户授权 ==========
@@ -568,171 +423,22 @@ func (a *ACLAPI) GetUserACL(c *gin.Context) {
 
 // AddUserACLUsers 添加用户授权（用户级别）
 func (a *ACLAPI) AddUserACLUsers(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetUserID, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
-		return
-	}
-
-	var req AddACLUsersRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
-		return
-	}
-
-	// 验证目标用户存在
-	var targetUser model.User
-	if err := db.DB.WithContext(ctx).First(&targetUser, targetUserID).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
-		return
-	}
-
-	now := time.Now()
-	for _, userID := range req.UserIDs {
-		var existing model.AclUserUserPermission
-		if err := db.DB.WithContext(ctx).Where("target_user_id = ? AND granted_user_id = ?", targetUserID, userID).First(&existing).Error; err == nil {
-			continue
-		}
-
-		perm := &model.AclUserUserPermission{
-			TargetUserID:  targetUserID,
-			GrantedUserID: userID,
-			GrantedAt:     now,
-		}
-		db.DB.WithContext(ctx).Create(perm)
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	// 推送权限变更到 Desktop 客户端（SSH 权限 → 我的主机）
-	a.notifyDesktopDataChange(pb.DesktopDataType_DESKTOP_DATA_TYPE_HOSTS)
-
-	logger.Infof("添加用户授权: target_user_id=%d, user_ids=%v", targetUserID, req.UserIDs)
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
+	a.writeACL(c, "user", false, false)
 }
 
 // AddUserACLGroups 添加用户授权（分组级别）
 func (a *ACLAPI) AddUserACLGroups(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetUserID, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
-		return
-	}
-
-	var req AddACLGroupsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
-		return
-	}
-
-	var targetUser model.User
-	if err := db.DB.WithContext(ctx).First(&targetUser, targetUserID).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
-		return
-	}
-
-	now := time.Now()
-	for _, groupID := range req.GroupIDs {
-		var existing model.AclUserGroupPermission
-		if err := db.DB.WithContext(ctx).Where("target_user_id = ? AND group_id = ?", targetUserID, groupID).First(&existing).Error; err == nil {
-			continue
-		}
-
-		perm := &model.AclUserGroupPermission{
-			TargetUserID: targetUserID,
-			GroupID:      groupID,
-			GrantedAt:    now,
-		}
-		db.DB.WithContext(ctx).Create(perm)
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	// 推送权限变更到 Desktop 客户端（SSH 权限 → 我的主机）
-	a.notifyDesktopDataChange(pb.DesktopDataType_DESKTOP_DATA_TYPE_HOSTS)
-
-	logger.Infof("添加用户分组授权: target_user_id=%d, group_ids=%v", targetUserID, req.GroupIDs)
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
+	a.writeACL(c, "user", true, false)
 }
 
 // RemoveUserACLUser 撤销用户授权（用户级别）
 func (a *ACLAPI) RemoveUserACLUser(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetUserID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	grantedUserID, _ := strconv.ParseUint(c.Param("uid"), 10, 64)
-
-	result := db.DB.WithContext(ctx).Where("target_user_id = ? AND granted_user_id = ?", targetUserID, grantedUserID).Delete(&model.AclUserUserPermission{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
-		return
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	// 推送权限变更到 Desktop 客户端（SSH 权限 → 我的主机）
-	a.notifyDesktopDataChange(pb.DesktopDataType_DESKTOP_DATA_TYPE_HOSTS)
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
+	a.writeACL(c, "user", false, true)
 }
 
 // RemoveUserACLGroup 撤销用户授权（分组级别）
 func (a *ACLAPI) RemoveUserACLGroup(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetUserID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	groupID, _ := strconv.ParseInt(c.Param("gid"), 10, 64)
-
-	result := db.DB.WithContext(ctx).Where("target_user_id = ? AND group_id = ?", targetUserID, groupID).Delete(&model.AclUserGroupPermission{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
-		return
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	// 推送权限变更到 Desktop 客户端（SSH 权限 → 我的主机）
-	a.notifyDesktopDataChange(pb.DesktopDataType_DESKTOP_DATA_TYPE_HOSTS)
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
+	a.writeACL(c, "user", true, true)
 }
 
 // ========== 分组授权 ==========
@@ -903,154 +609,22 @@ func (a *ACLAPI) GetGroupACL(c *gin.Context) {
 
 // AddGroupACLUsers 添加分组授权（用户级别）
 func (a *ACLAPI) AddGroupACLUsers(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetGroupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
-		return
-	}
-
-	var req AddACLUsersRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
-		return
-	}
-
-	var targetGroup model.Group
-	if err := db.DB.WithContext(ctx).First(&targetGroup, targetGroupID).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("分组不存在"))
-		return
-	}
-
-	now := time.Now()
-	for _, userID := range req.UserIDs {
-		var existing model.AclGroupUserPermission
-		if err := db.DB.WithContext(ctx).Where("target_group_id = ? AND user_id = ?", targetGroupID, userID).First(&existing).Error; err == nil {
-			continue
-		}
-
-		perm := &model.AclGroupUserPermission{
-			TargetGroupID: targetGroupID,
-			UserID:        userID,
-			GrantedAt:     now,
-		}
-		db.DB.WithContext(ctx).Create(perm)
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
+	a.writeACL(c, "group", false, false)
 }
 
 // AddGroupACLGroups 添加分组授权（分组级别）
 func (a *ACLAPI) AddGroupACLGroups(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetGroupID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
-		return
-	}
-
-	var req AddACLGroupsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
-		return
-	}
-
-	var targetGroup model.Group
-	if err := db.DB.WithContext(ctx).First(&targetGroup, targetGroupID).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("分组不存在"))
-		return
-	}
-
-	now := time.Now()
-	for _, groupID := range req.GroupIDs {
-		var existing model.AclGroupGroupPermission
-		if err := db.DB.WithContext(ctx).Where("target_group_id = ? AND group_id = ?", targetGroupID, groupID).First(&existing).Error; err == nil {
-			continue
-		}
-
-		perm := &model.AclGroupGroupPermission{
-			TargetGroupID: targetGroupID,
-			GroupID:       groupID,
-			GrantedAt:     now,
-		}
-		db.DB.WithContext(ctx).Create(perm)
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
+	a.writeACL(c, "group", true, false)
 }
 
 // RemoveGroupACLUser 撤销分组授权（用户级别）
 func (a *ACLAPI) RemoveGroupACLUser(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetGroupID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
-	userID, _ := strconv.ParseUint(c.Param("uid"), 10, 64)
-
-	result := db.DB.WithContext(ctx).Where("target_group_id = ? AND user_id = ?", targetGroupID, userID).Delete(&model.AclGroupUserPermission{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
-		return
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
+	a.writeACL(c, "group", false, true)
 }
 
 // RemoveGroupACLGroup 撤销分组授权（分组级别）
 func (a *ACLAPI) RemoveGroupACLGroup(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetGroupID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
-	groupID, _ := strconv.ParseInt(c.Param("gid"), 10, 64)
-
-	result := db.DB.WithContext(ctx).Where("target_group_id = ? AND group_id = ?", targetGroupID, groupID).Delete(&model.AclGroupGroupPermission{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
-		return
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
+	a.writeACL(c, "group", true, true)
 }
 
 // ========== SSH 授权 ==========
@@ -1237,64 +811,7 @@ type AddSSHACLUsersRequest struct {
 
 // AddSSHACLUsers 添加 SSH 用户授权
 func (a *ACLAPI) AddSSHACLUsers(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetUserID, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
-		return
-	}
-
-	var req AddSSHACLUsersRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
-		return
-	}
-
-	var targetUser model.User
-	if err := db.DB.WithContext(ctx).First(&targetUser, targetUserID).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
-		return
-	}
-
-	// Agent 用户需要启用 SSH，Client 用户无需检查
-	if targetUser.Role == model.UserRoleAgent && !targetUser.SSHEnabled {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("该用户未启用 SSH"))
-		return
-	}
-
-	sshUsersJSON := formatSSHUsers(req.SSHUsers)
-	now := time.Now()
-
-	for _, userID := range req.UserIDs {
-		var existing model.AclSSHUserPermission
-		if err := db.DB.WithContext(ctx).Where("target_user_id = ? AND user_id = ?", targetUserID, userID).First(&existing).Error; err == nil {
-			// 更新现有授权
-			existing.SSHUsers = sshUsersJSON
-			existing.Enabled = true
-			db.DB.WithContext(ctx).Save(&existing)
-			continue
-		}
-
-		perm := &model.AclSSHUserPermission{
-			TargetUserID: targetUserID,
-			UserID:       userID,
-			SSHUsers:     sshUsersJSON,
-			Enabled:      true,
-			GrantedAt:    now,
-		}
-		db.DB.WithContext(ctx).Create(perm)
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
+	a.writeACL(c, "ssh", false, false)
 }
 
 // AddSSHACLGroupsRequest 添加 SSH 分组授权请求
@@ -1305,119 +822,17 @@ type AddSSHACLGroupsRequest struct {
 
 // AddSSHACLGroups 添加 SSH 分组授权
 func (a *ACLAPI) AddSSHACLGroups(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetUserID, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
-		return
-	}
-
-	var req AddSSHACLGroupsRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误"))
-		return
-	}
-
-	var targetUser model.User
-	if err := db.DB.WithContext(ctx).First(&targetUser, targetUserID).Error; err != nil {
-		c.JSON(http.StatusNotFound, NewErrorResponse("用户不存在"))
-		return
-	}
-
-	// Agent 用户需要启用 SSH，Client 用户无需检查
-	if targetUser.Role == model.UserRoleAgent && !targetUser.SSHEnabled {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("该用户未启用 SSH"))
-		return
-	}
-
-	sshUsersJSON := formatSSHUsers(req.SSHUsers)
-	now := time.Now()
-
-	for _, groupID := range req.GroupIDs {
-		var existing model.AclSSHGroupPermission
-		if err := db.DB.WithContext(ctx).Where("target_user_id = ? AND group_id = ?", targetUserID, groupID).First(&existing).Error; err == nil {
-			existing.SSHUsers = sshUsersJSON
-			existing.Enabled = true
-			db.DB.WithContext(ctx).Save(&existing)
-			continue
-		}
-
-		perm := &model.AclSSHGroupPermission{
-			TargetUserID: targetUserID,
-			GroupID:      groupID,
-			SSHUsers:     sshUsersJSON,
-			Enabled:      true,
-			GrantedAt:    now,
-		}
-		db.DB.WithContext(ctx).Create(perm)
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("授权成功", nil))
+	a.writeACL(c, "ssh", true, false)
 }
 
 // RemoveSSHACLUser 撤销 SSH 用户授权
 func (a *ACLAPI) RemoveSSHACLUser(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetUserID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	userID, _ := strconv.ParseUint(c.Param("uid"), 10, 64)
-
-	result := db.DB.WithContext(ctx).Where("target_user_id = ? AND user_id = ?", targetUserID, userID).Delete(&model.AclSSHUserPermission{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
-		return
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
+	a.writeACL(c, "ssh", false, true)
 }
 
 // RemoveSSHACLGroup 撤销 SSH 分组授权
 func (a *ACLAPI) RemoveSSHACLGroup(c *gin.Context) {
-	ctx := c.Request.Context()
-	targetUserID, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	groupID, _ := strconv.ParseInt(c.Param("gid"), 10, 64)
-
-	result := db.DB.WithContext(ctx).Where("target_user_id = ? AND group_id = ?", targetUserID, groupID).Delete(&model.AclSSHGroupPermission{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("删除失败"))
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, NewErrorResponse("授权不存在"))
-		return
-	}
-
-	// 同步 ACL
-	if a.aclSync != nil {
-		go func() {
-			if err := a.aclSync.FullSync(nil); err != nil {
-				logger.Warnf("同步 ACL 失败: %v", err)
-			}
-		}()
-	}
-
-	c.JSON(http.StatusOK, NewSuccessMessageResponse("撤销成功", nil))
+	a.writeACL(c, "ssh", true, true)
 }
 
 // parseSSHUsers 解析 SSH 用户列表 JSON
