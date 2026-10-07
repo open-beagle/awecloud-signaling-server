@@ -219,6 +219,11 @@ func (s *ACLSyncService) FullSync(ctx context.Context) error {
 	return nil
 }
 
+// GenerateACLPolicy 根据数据库配置生成 ACL 策略（导出供验证工具与测试复用）
+func (s *ACLSyncService) GenerateACLPolicy(ctx context.Context) (*ACLPolicy, error) {
+	return s.generateACLPolicy(ctx)
+}
+
 // generateACLPolicy 根据数据库配置生成 ACL 策略
 // 使用新的统一模型：User, Node, Group, GroupMember
 // Tag 格式:
@@ -413,6 +418,65 @@ func (s *ACLSyncService) generateACLPolicy(ctx context.Context) (*ACLPolicy, err
 			policy.ACLs = append(policy.ACLs, rule)
 		}
 	}
+
+	// 9. Tunnel 服务账号互访规则（专用出站隧道自动放行到目标 Agent）
+	var tunnelTokens []model.DeployToken
+	if err := db.DB.WithContext(ctx).
+		Scopes(model.ActiveTunnelTokenScope).
+		Preload("User").
+		Find(&tunnelTokens).Error; err != nil {
+		return nil, fmt.Errorf("查询 Tunnel DeployToken 失败: %w", err)
+	}
+	for _, token := range tunnelTokens {
+		if token.User == nil || token.User.Name == "" || token.TargetAgentName == "" {
+			continue
+		}
+		srcTag := fmt.Sprintf("tag:client-%s", token.User.Name)
+		usedTags[srcTag] = true
+		policy.TagOwners[srcTag] = []string{}
+
+		targetTags := []string{fmt.Sprintf("tag:agent-%s", token.TargetAgentName)}
+		var agentNode model.Node
+		err := db.DB.WithContext(ctx).Preload("User").Where("name = ? AND type = ?", token.TargetAgentName, model.NodeTypeAgent).First(&agentNode).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("查询 Agent 节点失败 (name=%s): %w", token.TargetAgentName, err)
+		}
+		if err == nil && agentNode.User != nil && agentNode.User.Name != "" {
+			agentUserTag := fmt.Sprintf("tag:agent-%s", agentNode.User.Name)
+			if agentUserTag != targetTags[0] {
+				targetTags = append(targetTags, agentUserTag)
+			}
+		}
+
+		// 解析端口配置，检查是否启用了 K8s API
+		k8sAPIEnabled := false
+		if token.PortsConfig != "" {
+			var cfg struct {
+				K8sAPIEnabled bool `json:"k8s_api_enabled"`
+			}
+			if err := json.Unmarshal([]byte(token.PortsConfig), &cfg); err == nil {
+				k8sAPIEnabled = cfg.K8sAPIEnabled
+			}
+		}
+
+		for _, aTag := range targetTags {
+			usedTags[aTag] = true
+			policy.TagOwners[aTag] = []string{}
+
+			dsts := []string{fmt.Sprintf("%s:50051", aTag)}
+			if k8sAPIEnabled {
+				dsts = append(dsts, fmt.Sprintf("%s:6443", aTag))
+			}
+
+			rule := ACLRule{
+				Action: "accept",
+				Src:    []string{srcTag},
+				Dst:    dsts,
+			}
+			policy.ACLs = append(policy.ACLs, rule)
+		}
+	}
+
 
 	// 生成 SSH 规则
 	sshRules, err := s.generateSSHRules(ctx, usedTags)

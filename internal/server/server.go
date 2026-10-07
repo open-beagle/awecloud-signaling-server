@@ -898,6 +898,7 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.POST("/tunnels", tunnelAPI.CreateSignalTunnel)
 					adminAuthGroup.GET("/tunnels/available-agents", tunnelAPI.GetAvailableAgents)
 					adminAuthGroup.GET("/tunnels/:id", tunnelAPI.GetSignalTunnel)
+					adminAuthGroup.GET("/tunnels/:id/candidate-services", tunnelAPI.GetTunnelCandidateServices)
 					adminAuthGroup.PUT("/tunnels/:id/ports", tunnelAPI.UpdateSignalTunnelPorts)
 					adminAuthGroup.DELETE("/tunnels/:id", tunnelAPI.DeleteSignalTunnel)
 				}

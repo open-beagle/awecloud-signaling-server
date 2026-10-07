@@ -100,24 +100,46 @@ func (s *AgentServiceServer) processSessionAuthorizationReport(ctx context.Conte
 	if len(events) == 0 {
 		return nil
 	}
-	inputs := make([]service.SessionEventInput, 0, len(events))
+	var tunnelAcks []*pb.ResourceSessionEventAckV2
+	normalInputs := make([]service.SessionEventInput, 0, len(events))
 	for _, event := range events {
 		if event == nil || event.OccurredAt == nil || !event.OccurredAt.IsValid() {
 			continue
 		}
-		inputs = append(inputs, service.SessionEventInput{
-			EventID: event.EventId, SessionID: event.SessionId, SourceSequence: event.SourceSequence,
-			EventType: model.ResourceSessionEventType(event.EventType), OccurredAt: event.OccurredAt.AsTime(), ResultCode: event.ResultCode,
+		if service.IsTunnelSessionID(event.SessionId) {
+			logger.Infof("Tunnel 合成会话事件前置分流 ACK: session_id=%s event_id=%s event_type=%s result_code=%s",
+				event.SessionId, event.EventId, event.EventType, event.ResultCode)
+			tunnelAcks = append(tunnelAcks, &pb.ResourceSessionEventAckV2{
+				EventId:    event.EventId,
+				ResultCode: "SESSION_EVENT_ACCEPTED",
+				Replay:     false,
+			})
+			continue
+		}
+		normalInputs = append(normalInputs, service.SessionEventInput{
+			EventID:        event.EventId,
+			SessionID:      event.SessionId,
+			SourceSequence: event.SourceSequence,
+			EventType:      model.ResourceSessionEventType(event.EventType),
+			OccurredAt:     event.OccurredAt.AsTime(),
+			ResultCode:     event.ResultCode,
 		})
 	}
-	accepted, err := s.sessionAuthorization.AcceptEvents(ctx, technicalResourceID, inputs)
-	if err != nil {
-		logger.Warnf("Session Event 接收失败: technical_resource_id=%s err=%v", technicalResourceID, err)
-		return nil
-	}
-	result := make([]*pb.ResourceSessionEventAckV2, 0, len(accepted))
-	for _, ack := range accepted {
-		result = append(result, &pb.ResourceSessionEventAckV2{EventId: ack.EventID, ResultCode: ack.ResultCode, Replay: ack.Replay})
+
+	result := append([]*pb.ResourceSessionEventAckV2(nil), tunnelAcks...)
+	if len(normalInputs) > 0 {
+		accepted, err := s.sessionAuthorization.AcceptEvents(ctx, technicalResourceID, normalInputs)
+		if err != nil {
+			logger.Warnf("Session Event 接收失败: technical_resource_id=%s err=%v", technicalResourceID, err)
+		} else {
+			for _, ack := range accepted {
+				result = append(result, &pb.ResourceSessionEventAckV2{
+					EventId:    ack.EventID,
+					ResultCode: ack.ResultCode,
+					Replay:     ack.Replay,
+				})
+			}
+		}
 	}
 	return result
 }
@@ -149,6 +171,7 @@ func (s *AgentServiceServer) appendSessionAuthorizationResponse(ctx context.Cont
 			if snapshot, buildErr := s.sessionAuthorization.BuildSnapshot(ctx, technical.ID, includePermissions); buildErr != nil {
 				logger.Warnf("构建 Agent Session 授权快照失败: node_id=%d err=%v", conn.NodeID, buildErr)
 			} else {
+				s.appendTunnelAuthorizationPermissions(ctx, conn.NodeID, snapshot)
 				resp.AuthorizationSnapshotV2 = s.toProtoAuthorizationSnapshot(snapshot, includePermissions)
 			}
 		}
@@ -175,6 +198,76 @@ func (s *AgentServiceServer) appendSessionAuthorizationResponse(ctx context.Cont
 		resp.EndpointAuthorizationSnapshotsV2 = append(resp.EndpointAuthorizationSnapshotsV2, wrapper)
 	}
 	requestImmediateTerminationReport(resp)
+}
+
+// appendTunnelAuthorizationPermissions supplies the v2 authorization snapshot
+// for permanent Tunnel clients. Tunnel resources are stored on DeployToken
+// rather than tenant_resource/resource_session, so the normal session builder
+// has no rows to emit for them.
+func (s *AgentServiceServer) appendTunnelAuthorizationPermissions(ctx context.Context, agentNodeID uint64, snapshot *service.SessionAuthorizationSnapshot) {
+	if snapshot == nil || !s.sessionAuthorizationPermissionsEnabled() {
+		return
+	}
+	var agentNode model.Node
+	if err := db.DB.WithContext(ctx).First(&agentNode, agentNodeID).Error; err != nil || agentNode.Type != model.NodeTypeAgent {
+		return
+	}
+	var tokens []model.DeployToken
+	if err := db.DB.WithContext(ctx).
+		Scopes(model.ActiveTunnelTokenScope).
+		Where("target_agent_name = ?", agentNode.Name).
+		Find(&tokens).Error; err != nil {
+		return
+	}
+	now := time.Now().UTC()
+	for _, token := range tokens {
+		var desktop model.Node
+		if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", token.UserID, model.NodeTypeDesktop).First(&desktop).Error; err != nil || desktop.HeadscaleNodeID == 0 {
+			continue
+		}
+		var user model.User
+		if err := db.DB.WithContext(ctx).First(&user, token.UserID).Error; err != nil || !user.Enabled {
+			continue
+		}
+		cfg, err := service.ParseTunnelPortsConfig(token.PortsConfig)
+		if err != nil {
+			continue
+		}
+		for _, p := range cfg.Ports {
+			if !p.Complete() {
+				logger.Warnf("[Tunnel] 授权快照跳过元数据不完整的服务绑定条目: token_id=%d res=%s", token.ID, p.ResourceID)
+				continue
+			}
+			sessionID, sourceID, targetRevisionID := service.TunnelSessionIDs(token.ID, p.ResourceID)
+			snapshot.Permissions = append(snapshot.Permissions, service.SessionAuthorizationPermission{
+				SessionID:             sessionID,
+				TenantID:              fmt.Sprintf("tunnel-%d", token.UserID),
+				ResourceID:            p.ResourceID,
+				SourceID:              sourceID,
+				TargetRevisionID:      targetRevisionID,
+				UserID:                token.UserID,
+				UserName:              user.Name,
+				DeviceID:              desktop.ID,
+				DeviceHeadscaleNodeID: desktop.HeadscaleNodeID,
+				ResourceType:          model.TenantResourceContainerService,
+				Action:                "connect",
+				AllocationID:          fmt.Sprintf("tunnel-allocation-%d", token.ID),
+				GrantID:               fmt.Sprintf("tunnel-grant-%d", token.ID),
+				GrantRevision:         1,
+				AuthorizationRevision: 1,
+				ValidUntil:            now.Add(30 * time.Minute),
+				Target: service.SessionAuthorizationTarget{
+					NamespaceUID: p.NamespaceUID,
+					NamespaceName: p.Namespace,
+					ServiceUID:   p.ServiceUID,
+					ServiceName:  p.ServiceName,
+					PortName:     p.PortName,
+					PortNumber:   p.PortNumber,
+					Protocol:     p.Protocol,
+				},
+			})
+		}
+	}
 }
 
 // requestImmediateTerminationReport asks the Agent to return termination ACKs

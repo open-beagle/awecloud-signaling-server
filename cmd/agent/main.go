@@ -69,6 +69,11 @@ func main() {
 		return
 	}
 
+	// 检查是否是 tunnel-verify 子命令：signal_agent tunnel-verify [flags]
+	if len(os.Args) > 1 && os.Args[1] == "tunnel-verify" {
+		os.Exit(RunAgentTunnelVerify(os.Args[2:]))
+	}
+
 	configPath := flag.String("c", "config/agent.toml", "配置文件路径")
 	showVersion := flag.Bool("v", false, "显示版本信息")
 	showVersionLong := flag.Bool("version", false, "显示版本信息")

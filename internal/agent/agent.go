@@ -540,6 +540,9 @@ func (a *Agent) RunTunnel(regResult *config.RegisterResult, targetAgent string) 
 
 	// 创建 TunnelProxyManager
 	a.tunnelProxyManager = NewTunnelProxyManager(targetAgent, a.tsManager, a.ctx)
+	if err := a.tunnelProxyManager.StartStatusServer("127.0.0.1:19090"); err != nil {
+		logger.Warnf("[Tunnel] 启动 /statusz 监控端点失败: %v", err)
+	}
 
 	// 连接 gRPC Server（用于心跳上报与资源发现）
 	if err := a.connectToServer(); err != nil {

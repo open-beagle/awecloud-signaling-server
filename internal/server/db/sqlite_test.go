@@ -26,6 +26,7 @@ func TestSQLiteDSNAllowsReadsDuringWriteTransaction(t *testing.T) {
 
 	sqlDB, err := database.DB()
 	require.NoError(t, err)
+	defer sqlDB.Close()
 	sqlDB.SetMaxOpenConns(sqliteMaxOpenConnections)
 	sqlDB.SetMaxIdleConns(sqliteMaxOpenConnections)
 
@@ -50,6 +51,7 @@ func TestSQLiteDSNWaitsForConcurrentWriter(t *testing.T) {
 
 	sqlDB, err := database.DB()
 	require.NoError(t, err)
+	defer sqlDB.Close()
 	sqlDB.SetMaxOpenConns(sqliteMaxOpenConnections)
 	sqlDB.SetMaxIdleConns(sqliteMaxOpenConnections)
 
@@ -81,6 +83,7 @@ func TestSQLiteDSNPreventsDeferredTransactionSnapshotConflict(t *testing.T) {
 
 	sqlDB, err := database.DB()
 	require.NoError(t, err)
+	defer sqlDB.Close()
 	sqlDB.SetMaxOpenConns(sqliteMaxOpenConnections)
 	sqlDB.SetMaxIdleConns(sqliteMaxOpenConnections)
 

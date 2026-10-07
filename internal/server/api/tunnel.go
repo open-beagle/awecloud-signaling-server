@@ -19,13 +19,24 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 )
+
+// aclSyncer 定义 ACL 同步器接口，便于测试 mock 与依赖注入
+type aclSyncer interface {
+	FullSync(ctx context.Context) error
+}
 
 // TunnelAPI 隧道管理 API
 type TunnelAPI struct {
 	config   *config.ServerConfig
 	hsClient *headscale.Client
-	aclSync  *headscale.ACLSyncService
+	aclSync  aclSyncer
+}
+
+// SetACLSyncer 注入 ACL 同步器（供测试或动态装配使用）
+func (a *TunnelAPI) SetACLSyncer(syncer aclSyncer) {
+	a.aclSync = syncer
 }
 
 // NewTunnelAPI 创建 TunnelAPI
@@ -1110,12 +1121,15 @@ type SignalTunnelItem struct {
 
 // SignalTunnelPortMapping 端口映射明细
 type SignalTunnelPortMapping struct {
-	ResourceID  string `json:"resource_id"`
-	ServiceName string `json:"service_name"`
-	TargetPort  int    `json:"target_port"`
-	Protocol    string `json:"protocol"`
-	LocalPort   int    `json:"local_port"`
-	Namespace   string `json:"namespace,omitempty"`
+	ResourceID   string `json:"resource_id"`
+	ServiceName  string `json:"service_name,omitempty"`
+	ServiceUID   string `json:"service_uid,omitempty"`
+	PortName     string `json:"port_name,omitempty"`
+	Namespace    string `json:"namespace,omitempty"`
+	NamespaceUID string `json:"namespace_uid,omitempty"`
+	TargetPort   int    `json:"target_port,omitempty"`
+	Protocol     string `json:"protocol,omitempty"`
+	LocalPort    int    `json:"local_port"`
 }
 
 // SignalTunnelDetail 隧道详情
@@ -1166,7 +1180,7 @@ func (a *TunnelAPI) ListSignalTunnels(c *gin.Context) {
 	}
 
 	query := db.DB.WithContext(ctx).Model(&model.DeployToken{}).
-		Where("(mode = ? OR target_agent_name != ?) AND status != ?", "tunnel", "", model.DeployTokenStatusRevoked)
+		Scopes(model.ActiveTunnelTokenScope)
 
 	if search != "" {
 		query = query.Where("name LIKE ? OR target_agent_name LIKE ?", "%"+search+"%", "%"+search+"%")
@@ -1437,6 +1451,16 @@ spec:
 
 	logger.Infof("成功创建 Signal Tunnel 实例: name=%s, target_agent=%s, token_id=%d", req.Name, req.TargetAgent, deployToken.ID)
 
+	if a.aclSync != nil {
+		if err := a.aclSync.FullSync(ctx); err != nil {
+			logger.Errorf("创建 Signal Tunnel 后同步 ACL 失败: %v", err)
+			c.JSON(http.StatusInternalServerError, NewErrorResponse("配置已保存，ACL 同步失败，请在 ACL 页面手动同步: "+err.Error()))
+			return
+		}
+	} else {
+		logger.Warn("ACL 同步服务未配置，跳过创建 Tunnel 即时同步")
+	}
+
 	c.JSON(http.StatusOK, NewSuccessResponse(CreateSignalTunnelResponse{
 		ID:            deployToken.ID,
 		Name:          deployToken.Name,
@@ -1493,95 +1517,44 @@ func (a *TunnelAPI) GetSignalTunnel(c *gin.Context) {
 
 	var exposedPorts []SignalTunnelExposedPort
 	var servicePorts []SignalTunnelPortMapping
-	k8sApiEnabled := true
+	k8sApiEnabled := false
 	k8sApiPort := 6443
 
 	if tok.PortsConfig != "" {
-		var savedReq UpdateSignalTunnelPortsRequest
-		if err := json.Unmarshal([]byte(tok.PortsConfig), &savedReq); err == nil {
-			k8sApiEnabled = savedReq.K8sAPIEnabled
-			if savedReq.K8sAPIPort > 0 {
-				k8sApiPort = savedReq.K8sAPIPort
+		if cfg, err := service.ParseTunnelPortsConfig(tok.PortsConfig); err == nil {
+			k8sApiEnabled = cfg.K8sAPIEnabled
+			if cfg.K8sAPIPort > 0 {
+				k8sApiPort = cfg.K8sAPIPort
 			}
-			servicePorts = savedReq.Ports
-			if k8sApiEnabled {
-				exposedPorts = append(exposedPorts, SignalTunnelExposedPort{
-					Port: k8sApiPort,
-					Name: "K8s API",
-					Type: "k8sapi",
+			for _, p := range cfg.Ports {
+				servicePorts = append(servicePorts, SignalTunnelPortMapping{
+					ResourceID:   p.ResourceID,
+					ServiceName:  p.ServiceName,
+					ServiceUID:   p.ServiceUID,
+					PortName:     p.PortName,
+					Namespace:    p.Namespace,
+					NamespaceUID: p.NamespaceUID,
+					TargetPort:   int(p.PortNumber),
+					Protocol:     p.Protocol,
+					LocalPort:    int(p.LocalPort),
 				})
-			}
-			for _, p := range servicePorts {
 				if p.LocalPort > 0 {
-					sName := p.ServiceName
-					if sName == "" {
-						sName = p.ResourceID
-					}
 					exposedPorts = append(exposedPorts, SignalTunnelExposedPort{
-						Port: p.LocalPort,
-						Name: sName,
+						Port: int(p.LocalPort),
+						Name: p.ServiceName,
 						Type: "service",
 					})
 				}
 			}
 		}
-	} else {
-		var grants []model.TenantAccessGrant
-		if err := db.DB.WithContext(ctx).Where("subject_user_id = ?", tok.UserID).Find(&grants).Error; err == nil {
-			for _, g := range grants {
-				if g.AllowK8sAPI {
-					k8sApiEnabled = (g.Status == model.TenantAccessGrantEnabled)
-					if g.LocalPort > 0 {
-						k8sApiPort = int(g.LocalPort)
-					}
-				} else {
-					servicePorts = append(servicePorts, SignalTunnelPortMapping{
-						ResourceID:  g.TenantResourceID,
-						ServiceName: g.TenantResourceID,
-						TargetPort:  8000,
-						Protocol:    "TCP",
-						LocalPort:   int(g.LocalPort),
-						Namespace:   "beagle-system",
-					})
-					if g.LocalPort > 0 && g.Status == model.TenantAccessGrantEnabled {
-						exposedPorts = append(exposedPorts, SignalTunnelExposedPort{
-							Port: int(g.LocalPort),
-							Name: g.TenantResourceID,
-							Type: "service",
-						})
-					}
-				}
-			}
-		}
+	}
 
-		if k8sApiEnabled {
-			exposedPorts = append(exposedPorts, SignalTunnelExposedPort{
-				Port: k8sApiPort,
-				Name: "K8s API",
-				Type: "k8sapi",
-			})
-		}
-
-		if len(servicePorts) == 0 {
-			servicePorts = []SignalTunnelPortMapping{
-				{
-					ResourceID:  "res-mcp-inference",
-					ServiceName: "mcp-service",
-					TargetPort:  8000,
-					Protocol:    "TCP",
-					LocalPort:   10080,
-					Namespace:   "beagle-system",
-				},
-				{
-					ResourceID:  "res-redis-cache",
-					ServiceName: "redis-cache",
-					TargetPort:  6379,
-					Protocol:    "TCP",
-					LocalPort:   0,
-					Namespace:   "beagle-system",
-				},
-			}
-		}
+	if k8sApiEnabled {
+		exposedPorts = append(exposedPorts, SignalTunnelExposedPort{
+			Port: k8sApiPort,
+			Name: "K8s API",
+			Type: "k8sapi",
+		})
 	}
 
 	serverAddr := serverAddrFromRequest(a.config, c)
@@ -1628,6 +1601,31 @@ spec:
 	c.JSON(http.StatusOK, NewSuccessResponse(detail))
 }
 
+// GetTunnelCandidateServices 获取 Tunnel 目标 Agent 上的真实 Kubernetes TCP 容器服务候选列表
+func (a *TunnelAPI) GetTunnelCandidateServices(c *gin.Context) {
+	ctx := c.Request.Context()
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 Tunnel ID"))
+		return
+	}
+
+	var tok model.DeployToken
+	if err := db.DB.WithContext(ctx).First(&tok, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("未找到对应的 Tunnel 实例"))
+		return
+	}
+
+	candidates, err := service.QueryTunnelCandidateServices(ctx, db.DB, tok.TargetAgentName, time.Now())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("查询候选服务失败: "+err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, NewSuccessResponse(candidates))
+}
+
 // UpdateSignalTunnelPorts 更新 Tunnel 端口白名单配置与 K8s API 授权
 func (a *TunnelAPI) UpdateSignalTunnelPorts(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1646,71 +1644,172 @@ func (a *TunnelAPI) UpdateSignalTunnelPorts(c *gin.Context) {
 
 	var req UpdateSignalTunnelPortsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse("参数格式错误"))
+		c.JSON(http.StatusBadRequest, NewErrorResponse("参数格式错误: "+err.Error()))
 		return
 	}
 
-	// 保存配置到 tok.PortsConfig
-	configBytes, _ := json.Marshal(req)
-	_ = db.DB.WithContext(ctx).Model(&tok).Update("ports_config", string(configBytes)).Error
+	// 端口缺省与校验
+	if req.K8sAPIPort <= 0 {
+		req.K8sAPIPort = 6443
+	}
+	if req.K8sAPIEnabled && (req.K8sAPIPort < 1024 || req.K8sAPIPort > 65535) {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(fmt.Sprintf("K8s API 本地端口必须在 1024-65535 之间: %d", req.K8sAPIPort)))
+		return
+	}
 
-	// 更新或创建对应用户的 TenantAccessGrant
+	// 从目标 Agent 候选集反查元数据（仅信任客户端传入的 resource_id 与 local_port）
+	candidates, err := service.QueryTunnelCandidateServices(ctx, db.DB, tok.TargetAgentName, time.Now())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("反查候选服务失败: "+err.Error()))
+		return
+	}
+	candidateMap := make(map[string]service.TunnelCandidateService, len(candidates))
+	for _, cand := range candidates {
+		candidateMap[cand.ResourceID] = cand
+	}
+
+	usedLocalPorts := make(map[int]bool)
+	if req.K8sAPIEnabled {
+		usedLocalPorts[req.K8sAPIPort] = true
+	}
+
+	bindings := make([]service.TunnelServiceBinding, 0, len(req.Ports))
 	for _, p := range req.Ports {
-		var grant model.TenantAccessGrant
-		err := db.DB.WithContext(ctx).Where("subject_user_id = ? AND tenant_resource_id = ?", tok.UserID, p.ResourceID).First(&grant).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			grant = model.TenantAccessGrant{
+		cand, ok := candidateMap[p.ResourceID]
+		if !ok {
+			c.JSON(http.StatusBadRequest, NewErrorResponse("候选服务不存在或已失效: "+p.ResourceID))
+			return
+		}
+
+		if p.LocalPort < 0 || (p.LocalPort > 0 && (p.LocalPort < 1024 || p.LocalPort > 65535)) {
+			c.JSON(http.StatusBadRequest, NewErrorResponse(fmt.Sprintf("本地端口必须为 0 或介于 1024-65535 之间: %d", p.LocalPort)))
+			return
+		}
+
+		if p.LocalPort > 0 {
+			if usedLocalPorts[p.LocalPort] {
+				c.JSON(http.StatusBadRequest, NewErrorResponse(fmt.Sprintf("本地端口重复或与 K8s API 冲突: %d", p.LocalPort)))
+				return
+			}
+			usedLocalPorts[p.LocalPort] = true
+		}
+
+		binding := service.TunnelServiceBinding{
+			ResourceID:   cand.ResourceID,
+			Namespace:    cand.Namespace,
+			NamespaceUID: cand.NamespaceUID,
+			ServiceName:  cand.ServiceName,
+			ServiceUID:   cand.ServiceUID,
+			PortName:     cand.PortName,
+			PortNumber:   int32(cand.PortNumber),
+			Protocol:     cand.Protocol,
+			LocalPort:    int32(p.LocalPort),
+		}
+		if !binding.Complete() {
+			c.JSON(http.StatusBadRequest, NewErrorResponse("候选服务元数据不完整: "+p.ResourceID))
+			return
+		}
+		bindings = append(bindings, binding)
+	}
+
+	portsConfig := service.TunnelPortsConfig{
+		K8sAPIEnabled: req.K8sAPIEnabled,
+		K8sAPIPort:    req.K8sAPIPort,
+		Ports:         bindings,
+	}
+	configBytes, err := json.Marshal(portsConfig)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("序列化配置失败: "+err.Error()))
+		return
+	}
+
+	// 事务写入 ports_config 与 TenantAccessGrant
+	txErr := db.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&tok).Update("ports_config", string(configBytes)).Error; err != nil {
+			return err
+		}
+
+		for _, b := range bindings {
+			var grant model.TenantAccessGrant
+			findErr := tx.Where("subject_user_id = ? AND tenant_resource_id = ?", tok.UserID, b.ResourceID).First(&grant).Error
+			if errors.Is(findErr, gorm.ErrRecordNotFound) {
+				grant = model.TenantAccessGrant{
+					ID:               uuid.New().String(),
+					TenantID:         "beagle-system",
+					TenantResourceID: b.ResourceID,
+					SubjectType:      model.TenantAccessGrantSubjectUser,
+					SubjectKey:       fmt.Sprintf("user:%d", tok.UserID),
+					SubjectUserID:    &tok.UserID,
+					Actions:          `["connect"]`,
+					ValidFrom:        time.Now(),
+					Status:           model.TenantAccessGrantEnabled,
+					LocalPort:        b.LocalPort,
+				}
+				if err := tx.Create(&grant).Error; err != nil {
+					return err
+				}
+			} else if findErr == nil {
+				if err := tx.Model(&grant).Update("local_port", b.LocalPort).Error; err != nil {
+					return err
+				}
+			} else {
+				return findErr
+			}
+		}
+
+		var k8sGrant model.TenantAccessGrant
+		k8sErr := tx.Where("subject_user_id = ? AND allow_k8s_api = ?", tok.UserID, true).First(&k8sGrant).Error
+		kStatus := model.TenantAccessGrantEnabled
+		if !req.K8sAPIEnabled {
+			kStatus = model.TenantAccessGrantSuspended
+		}
+		if errors.Is(k8sErr, gorm.ErrRecordNotFound) {
+			k8sGrant = model.TenantAccessGrant{
 				ID:               uuid.New().String(),
 				TenantID:         "beagle-system",
-				TenantResourceID: p.ResourceID,
+				TenantResourceID: "k8s-api",
 				SubjectType:      model.TenantAccessGrantSubjectUser,
 				SubjectKey:       fmt.Sprintf("user:%d", tok.UserID),
 				SubjectUserID:    &tok.UserID,
-				Actions:          `["connect"]`,
+				Actions:          `["admin"]`,
 				ValidFrom:        time.Now(),
-				Status:           model.TenantAccessGrantEnabled,
-				LocalPort:        int32(p.LocalPort),
+				Status:           kStatus,
+				AllowK8sAPI:      true,
+				LocalPort:        int32(req.K8sAPIPort),
 			}
-			_ = db.DB.WithContext(ctx).Create(&grant).Error
-		} else if err == nil {
-			_ = db.DB.WithContext(ctx).Model(&grant).Update("local_port", int32(p.LocalPort)).Error
+			if err := tx.Create(&k8sGrant).Error; err != nil {
+				return err
+			}
+		} else if k8sErr == nil {
+			if err := tx.Model(&k8sGrant).Updates(map[string]interface{}{
+				"local_port": int32(req.K8sAPIPort),
+				"status":     kStatus,
+			}).Error; err != nil {
+				return err
+			}
+		} else {
+			return k8sErr
 		}
+
+		return nil
+	})
+	if txErr != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新 Tunnel 端口配置失败: "+txErr.Error()))
+		return
 	}
 
-	// 处理 K8s API 授权
-	var k8sGrant model.TenantAccessGrant
-	k8sErr := db.DB.WithContext(ctx).Where("subject_user_id = ? AND allow_k8s_api = ?", tok.UserID, true).First(&k8sGrant).Error
-	if errors.Is(k8sErr, gorm.ErrRecordNotFound) {
-		kStatus := model.TenantAccessGrantEnabled
-		if !req.K8sAPIEnabled {
-			kStatus = model.TenantAccessGrantSuspended
+	// 立即同步 ACL
+	if a.aclSync != nil {
+		if err := a.aclSync.FullSync(ctx); err != nil {
+			logger.Errorf("更新 Tunnel 端口后同步 ACL 失败: %v", err)
+			c.JSON(http.StatusInternalServerError, NewErrorResponse("配置已保存，ACL 同步失败，请在 ACL 页面手动同步: "+err.Error()))
+			return
 		}
-		k8sGrant = model.TenantAccessGrant{
-			ID:               uuid.New().String(),
-			TenantID:         "beagle-system",
-			TenantResourceID: "k8s-api",
-			SubjectType:      model.TenantAccessGrantSubjectUser,
-			SubjectKey:       fmt.Sprintf("user:%d", tok.UserID),
-			SubjectUserID:    &tok.UserID,
-			Actions:          `["admin"]`,
-			ValidFrom:        time.Now(),
-			Status:           kStatus,
-			AllowK8sAPI:      true,
-			LocalPort:        int32(req.K8sAPIPort),
-		}
-		_ = db.DB.WithContext(ctx).Create(&k8sGrant).Error
-	} else if k8sErr == nil {
-		kStatus := model.TenantAccessGrantEnabled
-		if !req.K8sAPIEnabled {
-			kStatus = model.TenantAccessGrantSuspended
-		}
-		_ = db.DB.WithContext(ctx).Model(&k8sGrant).Updates(map[string]interface{}{
-			"local_port": int32(req.K8sAPIPort),
-			"status":     kStatus,
-		}).Error
+	} else {
+		logger.Warn("ACL 同步服务未配置，跳过更新端口即时同步")
 	}
 
-	logger.Infof("已成功更新 Tunnel 端口配置: id=%d, ports=%d, k8s_api=%v(%d)", id, len(req.Ports), req.K8sAPIEnabled, req.K8sAPIPort)
+	logger.Infof("已成功更新 Tunnel 端口配置: id=%d, ports=%d, k8s_api=%v(%d)", id, len(bindings), req.K8sAPIEnabled, req.K8sAPIPort)
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("保存成功", nil))
 }
 
@@ -1731,11 +1830,30 @@ func (a *TunnelAPI) DeleteSignalTunnel(c *gin.Context) {
 	}
 
 	// 标记为 revoked 并清理相关授权
-	if err := db.DB.WithContext(ctx).Model(&tok).Update("status", model.DeployTokenStatusRevoked).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, NewErrorResponse("注销失败: "+err.Error()))
+	txErr := db.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&tok).Update("status", model.DeployTokenStatusRevoked).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("subject_user_id = ?", tok.UserID).Delete(&model.TenantAccessGrant{}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if txErr != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("注销失败: "+txErr.Error()))
 		return
 	}
-	_ = db.DB.WithContext(ctx).Where("subject_user_id = ?", tok.UserID).Delete(&model.TenantAccessGrant{}).Error
+
+	// 立即同步 ACL
+	if a.aclSync != nil {
+		if err := a.aclSync.FullSync(ctx); err != nil {
+			logger.Errorf("注销 Signal Tunnel 后同步 ACL 失败: %v", err)
+			c.JSON(http.StatusInternalServerError, NewErrorResponse("配置已保存，ACL 同步失败，请在 ACL 页面手动同步: "+err.Error()))
+			return
+		}
+	} else {
+		logger.Warn("ACL 同步服务未配置，跳过注销 Tunnel 即时同步")
+	}
 
 	logger.Infof("已成功注销 Tunnel 实例: id=%d, name=%s", id, tok.Name)
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("注销成功", nil))

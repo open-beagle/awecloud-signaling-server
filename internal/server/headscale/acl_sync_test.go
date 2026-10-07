@@ -3,6 +3,7 @@ package headscale
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -172,6 +173,96 @@ func TestGenerateACLPolicyAllowsUnifiedHostSSHGroupGrantOnNodeDomainTargetPort(t
 func ptrInt64(value int64) *int64 {
 	return &value
 }
+
+func TestGenerateACLPolicyAllowsTunnelDeployTokenToTargetAgent(t *testing.T) {
+	database := newHeadscaleACLTestDB(t)
+
+	agentUser := model.User{Name: "szzy-agent-user", Role: model.UserRoleAgent, Enabled: true}
+	tunnelUser := model.User{Name: "svc-tunnel-5090", Role: model.UserRoleClient, Enabled: true}
+	require.NoError(t, database.Create(&agentUser).Error)
+	require.NoError(t, database.Create(&tunnelUser).Error)
+
+	agentNode := model.Node{
+		UserID: agentUser.ID,
+		Name:   "edge-gpu-5090",
+		Type:   model.NodeTypeAgent,
+		IP:     "100.64.0.50",
+	}
+	require.NoError(t, database.Create(&agentNode).Error)
+
+	// Case 1: K8s API disabled -> only :50051
+	deployToken := model.DeployToken{
+		Token:           "dt_test_tunnel_token",
+		UserID:          tunnelUser.ID,
+		Name:            "5090",
+		Status:          model.DeployTokenStatusPending,
+		TargetAgentName: "edge-gpu-5090",
+		Mode:            "tunnel",
+		PortsConfig:     `{"k8s_api_enabled":false}`,
+	}
+	require.NoError(t, database.Create(&deployToken).Error)
+
+	service := NewACLSyncService(nil)
+	policy, err := service.generateACLPolicy(context.Background())
+	require.NoError(t, err)
+
+	// Verify that the ACL policy allows tag:client-svc-tunnel-5090 to access :50051 only (no :*)
+	require.Contains(t, policy.ACLs, ACLRule{
+		Action: "accept",
+		Src:    []string{"tag:client-svc-tunnel-5090"},
+		Dst:    []string{"tag:agent-edge-gpu-5090:50051"},
+	})
+	require.Contains(t, policy.ACLs, ACLRule{
+		Action: "accept",
+		Src:    []string{"tag:client-svc-tunnel-5090"},
+		Dst:    []string{"tag:agent-szzy-agent-user:50051"},
+	})
+	for _, rule := range policy.ACLs {
+		if len(rule.Src) > 0 && rule.Src[0] == "tag:client-svc-tunnel-5090" {
+			for _, dst := range rule.Dst {
+				if strings.HasPrefix(dst, "tag:agent-") {
+					require.NotContains(t, dst, ":*", "Tunnel -> Agent ACL rules must not contain :* wildcard")
+				}
+			}
+		}
+	}
+
+	// Case 2: K8s API enabled -> :50051 and :6443
+	deployToken.PortsConfig = `{"k8s_api_enabled":true}`
+	require.NoError(t, database.Save(&deployToken).Error)
+
+	policyWithK8s, err := service.generateACLPolicy(context.Background())
+	require.NoError(t, err)
+	require.Contains(t, policyWithK8s.ACLs, ACLRule{
+		Action: "accept",
+		Src:    []string{"tag:client-svc-tunnel-5090"},
+		Dst:    []string{"tag:agent-edge-gpu-5090:50051", "tag:agent-edge-gpu-5090:6443"},
+	})
+	require.Contains(t, policyWithK8s.ACLs, ACLRule{
+		Action: "accept",
+		Src:    []string{"tag:client-svc-tunnel-5090"},
+		Dst:    []string{"tag:agent-szzy-agent-user:50051", "tag:agent-szzy-agent-user:6443"},
+	})
+}
+
+func TestGenerateACLPolicy_AbortsOnError(t *testing.T) {
+	database := newHeadscaleACLTestDB(t)
+
+	// Dropping deploy_tokens table to simulate DB error
+	require.NoError(t, database.Migrator().DropTable(&model.DeployToken{}))
+
+	service := NewACLSyncService(nil)
+	policy, err := service.generateACLPolicy(context.Background())
+	require.Error(t, err)
+	require.Nil(t, policy)
+	require.Contains(t, err.Error(), "查询 Tunnel DeployToken 失败")
+
+	// SyncACL also aborts before SetPolicy
+	syncErr := service.SyncACL(context.Background())
+	require.Error(t, syncErr)
+	require.Contains(t, syncErr.Error(), "生成 ACL 策略失败")
+}
+
 
 func newHeadscaleACLTestDB(t *testing.T) *gorm.DB {
 	t.Helper()

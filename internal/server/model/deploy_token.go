@@ -51,6 +51,11 @@ type DeployToken struct {
 	UserName      string `json:"user_name" gorm:"-"`       // 用户名称
 }
 
+// ActiveTunnelTokenScope 统一过滤处于有效状态（mode=tunnel, target_agent_name 非空且未撤销）的 DeployToken
+func ActiveTunnelTokenScope(db *gorm.DB) *gorm.DB {
+	return db.Where("mode = ? AND target_agent_name <> ? AND status <> ?", "tunnel", "", DeployTokenStatusRevoked)
+}
+
 // TableName 表名
 func (DeployToken) TableName() string {
 	return "deploy_tokens"

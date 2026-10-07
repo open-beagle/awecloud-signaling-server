@@ -59,9 +59,27 @@ export const getAvailableEdgeAgents = () => {
   })
 }
 
+// 候选真实服务接口
+export interface TunnelCandidateService {
+  resource_id: string
+  namespace: string
+  namespace_uid: string
+  service_name: string
+  service_uid: string
+  port_name: string
+  port_number: number
+  protocol: string
+  ready: boolean
+}
+
 // 获取 Tunnel 详情
 export const getTunnelDetail = (id: number | string) => {
   return request.get<any, ApiResponse<TunnelDetail>>(`/api/v1/admin/tunnels/${id}`)
+}
+
+// 获取目标 Agent 上经资源治理发现的真实 TCP 候选服务
+export const getTunnelCandidateServices = (id: number | string) => {
+  return request.get<any, ApiResponse<TunnelCandidateService[]>>(`/api/v1/admin/tunnels/${id}/candidate-services`)
 }
 
 // 保存 Tunnel 端口与 K8s API 配置

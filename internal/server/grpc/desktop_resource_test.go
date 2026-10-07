@@ -490,8 +490,9 @@ func TestQueryTunnelContainerServicesGRPC(t *testing.T) {
 		"k8s_api_enabled": true,
 		"k8s_api_port": 6443,
 		"ports": [
-			{"resource_id": "res-studio", "service_name": "verdantflare-studio", "target_port": 18080, "local_port": 18080, "protocol": "TCP"},
-			{"resource_id": "res-clash", "service_name": "openclash", "target_port": 18090, "local_port": 18090, "protocol": "TCP"}
+			{"resource_id": "res-studio", "service_name": "verdantflare-studio", "namespace": "verdantflare", "namespace_uid": "ns-uid", "service_uid": "svc-uid", "port_name": "http", "target_port": 18080, "local_port": 18080, "protocol": "TCP"},
+			{"resource_id": "res-clash", "service_name": "openclash", "namespace": "openclash", "namespace_uid": "ns-clash-uid", "service_uid": "svc-clash-uid", "port_name": "controller", "target_port": 18090, "local_port": 18090, "protocol": "TCP"},
+			{"resource_id": "res-incomplete", "service_name": "broken", "target_port": 8080, "local_port": 18099, "protocol": "TCP"}
 		]
 	}`
 	deployToken := model.DeployToken{
@@ -507,6 +508,7 @@ func TestQueryTunnelContainerServicesGRPC(t *testing.T) {
 
 	server := &DesktopServiceServer{}
 	services := server.queryTunnelContainerServicesGRPC(context.Background(), &tunnelDesktopNode)
+	// 2 complete services + 1 k8s-api; incomplete service is skipped
 	require.Len(t, services, 3)
 
 	// Verify K8s API port
@@ -520,13 +522,20 @@ func TestQueryTunnelContainerServicesGRPC(t *testing.T) {
 	// Verify Service 1
 	require.Equal(t, "res-studio", services[1].ResourceId)
 	require.Equal(t, "verdantflare-studio", services[1].ServiceName)
+	require.Equal(t, "verdantflare", services[1].Namespace)
 	require.Equal(t, int32(18080), services[1].LocalPort)
 	require.Equal(t, int32(18080), services[1].PortNumber)
+	require.Equal(t, uint32(50051), services[1].SvcProxyPort)
+	require.Equal(t, "svc-uid", services[1].ServiceUid)
+	require.Equal(t, "http", services[1].PortName)
 
 	// Verify Service 2
 	require.Equal(t, "res-clash", services[2].ResourceId)
 	require.Equal(t, "openclash", services[2].ServiceName)
+	require.Equal(t, "openclash", services[2].Namespace)
 	require.Equal(t, int32(18090), services[2].LocalPort)
 	require.Equal(t, int32(18090), services[2].PortNumber)
+	require.Equal(t, uint32(50051), services[2].SvcProxyPort)
+	require.Equal(t, "svc-clash-uid", services[2].ServiceUid)
+	require.Equal(t, "controller", services[2].PortName)
 }
-

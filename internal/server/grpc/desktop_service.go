@@ -1750,8 +1750,8 @@ func (s *DesktopServiceServer) queryTunnelContainerServicesGRPC(ctx context.Cont
 	}
 	var deployToken model.DeployToken
 	if err := db.DB.WithContext(ctx).
-		Where("user_id = ? AND status != ? AND (mode = ? OR target_agent_name != ?)",
-			desktop.UserID, model.DeployTokenStatusRevoked, "tunnel", "").
+		Scopes(model.ActiveTunnelTokenScope).
+		Where("user_id = ?", desktop.UserID).
 		First(&deployToken).Error; err != nil {
 		return nil
 	}
@@ -1767,36 +1767,25 @@ func (s *DesktopServiceServer) queryTunnelContainerServicesGRPC(ctx context.Cont
 		return nil
 	}
 
-	var savedReq struct {
-		K8sAPIEnabled bool `json:"k8s_api_enabled"`
-		K8sAPIPort    int  `json:"k8s_api_port"`
-		Ports         []struct {
-			ResourceID  string `json:"resource_id"`
-			ServiceName string `json:"service_name"`
-			TargetPort  int    `json:"target_port"`
-			Protocol    string `json:"protocol"`
-			LocalPort   int    `json:"local_port"`
-			Namespace   string `json:"namespace"`
-		} `json:"ports"`
-	}
-	if err := json.Unmarshal([]byte(deployToken.PortsConfig), &savedReq); err != nil {
+	savedReq, err := service.ParseTunnelPortsConfig(deployToken.PortsConfig)
+	if err != nil {
 		logger.Warnf("[Tunnel] 解析 ports_config 失败: token_id=%d err=%v", deployToken.ID, err)
 		return nil
 	}
 
 	var results []*pb.ContainerServiceResource
 	if savedReq.K8sAPIEnabled {
-		kPort := 6443
-		if savedReq.K8sAPIPort > 0 {
-			kPort = savedReq.K8sAPIPort
+		kLocalPort := savedReq.K8sAPIPort
+		if kLocalPort <= 0 {
+			kLocalPort = 6443
 		}
 		results = append(results, &pb.ContainerServiceResource{
 			ResourceId:  "k8s-api",
 			ServiceName: "K8s API",
 			AgentName:   deployToken.TargetAgentName,
 			AgentIp:     targetAgentNode.IP,
-			PortNumber:  int32(kPort),
-			LocalPort:   int32(kPort),
+			PortNumber:  6443, // 边缘目标固定 6443
+			LocalPort:   int32(kLocalPort),
 			Protocol:    "TCP",
 		})
 	}
@@ -1804,31 +1793,27 @@ func (s *DesktopServiceServer) queryTunnelContainerServicesGRPC(ctx context.Cont
 		if p.LocalPort <= 0 {
 			continue
 		}
-		tPort := p.TargetPort
-		if tPort <= 0 {
-			tPort = p.LocalPort
+		if !p.Complete() {
+			logger.Warnf("[Tunnel] 跳过元数据不完整的服务绑定条目: token_id=%d res=%s", deployToken.ID, p.ResourceID)
+			continue
 		}
-		proto := p.Protocol
-		if proto == "" {
-			proto = "TCP"
-		}
-		sName := p.ServiceName
-		if sName == "" {
-			sName = p.ResourceID
-		}
-		ns := p.Namespace
-		if ns == "" {
-			ns = "beagle-system"
-		}
+		sessionID, sourceID, targetRevisionID := service.TunnelSessionIDs(deployToken.ID, p.ResourceID)
 		results = append(results, &pb.ContainerServiceResource{
-			ResourceId:  p.ResourceID,
-			ServiceName: sName,
-			Namespace:   ns,
-			AgentName:   deployToken.TargetAgentName,
-			AgentIp:     targetAgentNode.IP,
-			PortNumber:  int32(tPort),
-			LocalPort:   int32(p.LocalPort),
-			Protocol:    proto,
+			ResourceId:            p.ResourceID,
+			ServiceName:           p.ServiceName,
+			Namespace:             p.Namespace,
+			AgentName:             deployToken.TargetAgentName,
+			AgentIp:               targetAgentNode.IP,
+			SvcProxyPort:          50051,
+			SessionId:             sessionID,
+			SourceId:              sourceID,
+			TargetRevisionId:      targetRevisionID,
+			AuthorizationRevision: 1,
+			ServiceUid:            p.ServiceUID,
+			PortName:              p.PortName,
+			PortNumber:            p.PortNumber,
+			LocalPort:             p.LocalPort,
+			Protocol:              p.Protocol,
 		})
 	}
 	return results

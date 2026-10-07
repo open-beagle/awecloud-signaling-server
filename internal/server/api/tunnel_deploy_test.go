@@ -318,15 +318,7 @@ func TestSignalTunnelAPI_CRUD(t *testing.T) {
 	updatePayload := UpdateSignalTunnelPortsRequest{
 		K8sAPIEnabled: true,
 		K8sAPIPort:    16443,
-		Ports: []SignalTunnelPortMapping{
-			{
-				ResourceID:  "res-mcp-1",
-				ServiceName: "mcp-service",
-				TargetPort:  8000,
-				Protocol:    "TCP",
-				LocalPort:   10080,
-			},
-		},
+		Ports:         []SignalTunnelPortMapping{},
 	}
 	body, _ = json.Marshal(updatePayload)
 	w = httptest.NewRecorder()

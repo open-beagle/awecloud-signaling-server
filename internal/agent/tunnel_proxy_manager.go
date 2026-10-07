@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
@@ -19,6 +22,20 @@ import (
 // TunnelDialer 拨号函数抽象，支持 tsnet 拨号或测试 Mock 拨号
 type TunnelDialer func(ctx context.Context, network, addr string) (net.Conn, error)
 
+// TunnelResourceStatus 隧道资源运行状态与探针指标
+type TunnelResourceStatus struct {
+	ResourceID          string `json:"resource_id"`
+	ServiceName         string `json:"service_name"`
+	Namespace           string `json:"namespace"`
+	LocalPort           int32  `json:"local_port"`
+	PortNumber          int32  `json:"port_number"`
+	Path                string `json:"path"` // "svcproxy" | "host_direct"
+	SVCProxyOK          int64  `json:"svcproxy_ok"`
+	SVCProxyRejected    int64  `json:"svcproxy_rejected"`
+	LastSVCProxyError   string `json:"last_svcproxy_error,omitempty"`
+	DirectDialViolation int64  `json:"direct_dial_violation"`
+}
+
 // TunnelProxyManager 专用出站隧道管理器
 // 遵循显式 local_port 白名单驱动与 1:1 对等绑定原则：
 // 1. 严格过滤只处理属于 targetAgent 的资源；
@@ -31,6 +48,8 @@ type TunnelProxyManager struct {
 
 	listeners map[int]net.Listener
 	resources map[int]*pb.ContainerServiceResource
+	statusMap map[string]*TunnelResourceStatus
+	statusServer *http.Server
 	mu        sync.Mutex
 
 	ctx    context.Context
@@ -49,6 +68,7 @@ func NewTunnelProxyManager(targetAgent string, tsManager *TailscaleManager, pare
 		tsManager:   tsManager,
 		listeners:   make(map[int]net.Listener),
 		resources:   make(map[int]*pb.ContainerServiceResource),
+		statusMap:   make(map[string]*TunnelResourceStatus),
 		ctx:         ctx,
 		cancel:      cancel,
 	}
@@ -72,6 +92,7 @@ func (m *TunnelProxyManager) SyncTunnelProxies(resources []*pb.ContainerServiceR
 	defer m.mu.Unlock()
 
 	activePorts := make(map[int]bool)
+	activeResourceIDs := make(map[string]bool)
 
 	for _, res := range resources {
 		if res == nil {
@@ -90,7 +111,29 @@ func (m *TunnelProxyManager) SyncTunnelProxies(resources []*pb.ContainerServiceR
 
 		port := int(res.LocalPort)
 		activePorts[port] = true
+		activeResourceIDs[res.ResourceId] = true
 		m.resources[port] = res
+
+		path := "svcproxy"
+		if isHostDirectService(res) {
+			path = "host_direct"
+		}
+		if st, exists := m.statusMap[res.ResourceId]; !exists {
+			m.statusMap[res.ResourceId] = &TunnelResourceStatus{
+				ResourceID:  res.ResourceId,
+				ServiceName: res.ServiceName,
+				Namespace:   res.Namespace,
+				LocalPort:   res.LocalPort,
+				PortNumber:  res.PortNumber,
+				Path:        path,
+			}
+		} else {
+			st.ServiceName = res.ServiceName
+			st.Namespace = res.Namespace
+			st.LocalPort = res.LocalPort
+			st.PortNumber = res.PortNumber
+			st.Path = path
+		}
 
 		if _, exists := m.listeners[port]; !exists {
 			listenAddr := fmt.Sprintf("0.0.0.0:%d", port)
@@ -108,13 +151,18 @@ func (m *TunnelProxyManager) SyncTunnelProxies(resources []*pb.ContainerServiceR
 		}
 	}
 
-	// 自动清理已被取消 LocalPort 或撤销授权的废弃监听器
+	// 自动清理已被取消 LocalPort 或撤销授权的废弃监听器与状态项
 	for port, listener := range m.listeners {
 		if !activePorts[port] {
 			listener.Close()
 			delete(m.listeners, port)
 			delete(m.resources, port)
 			logger.Infof("[Tunnel] 资源授权已变更，停止本地监听端口: %d", port)
+		}
+	}
+	for resID := range m.statusMap {
+		if !activeResourceIDs[resID] {
+			delete(m.statusMap, resID)
 		}
 	}
 }
@@ -185,6 +233,14 @@ func (m *TunnelProxyManager) dialTarget(ctx context.Context, network, addr strin
 	return d.DialContext(ctx, network, addr)
 }
 
+// isHostDirectService 判断是否为宿主机原生控制面服务（仅限 Kubernetes API Server，精确匹配 ResourceId == "k8s-api"）
+func isHostDirectService(res *pb.ContainerServiceResource) bool {
+	if res == nil {
+		return false
+	}
+	return res.ResourceId == "k8s-api"
+}
+
 // handleConn 处理单个本地入站连接，路由转发至对端
 func (m *TunnelProxyManager) handleConn(clientConn net.Conn, res *pb.ContainerServiceResource) {
 	defer clientConn.Close()
@@ -192,90 +248,196 @@ func (m *TunnelProxyManager) handleConn(clientConn net.Conn, res *pb.ContainerSe
 	ctx, cancel := context.WithCancel(m.ctx)
 	defer cancel()
 
-	// 优先路径 A: 若存在 SvcProxyPort 且设置了 AgentIp，通过 gRPC SVCProxy 流式代理（携带零信任会话鉴权上下文）
-	if res.SvcProxyPort > 0 && res.AgentIp != "" {
-		grpcAddr := fmt.Sprintf("%s:%d", res.AgentIp, res.SvcProxyPort)
-		grpcConn, err := grpc.NewClient(
-			grpcAddr,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithContextDialer(func(dialCtx context.Context, addr string) (net.Conn, error) {
-				return m.dialTarget(dialCtx, "tcp", addr)
-			}),
-		)
-		if err == nil {
-			defer grpcConn.Close()
-			svcClient := pb.NewAgentServiceClient(grpcConn)
-
-			streamCtx, streamCancel := context.WithCancel(ctx)
-			defer streamCancel()
-
-			stream, streamErr := svcClient.SVCProxy(streamCtx)
-			if streamErr == nil {
-				// 发送首包建立连接
-				firstMsg := &pb.SVCProxyData{
-					Namespace:             res.Namespace,
-					ServiceName:           res.ServiceName,
-					Port:                  res.PortNumber,
-					IsConnect:             true,
-					SessionId:             res.SessionId,
-					ResourceId:            res.ResourceId,
-					SourceId:              res.SourceId,
-					TargetRevisionId:      res.TargetRevisionId,
-					ServiceUid:            res.ServiceUid,
-					PortName:              res.PortName,
-					Protocol:              res.Protocol,
-					AuthorizationRevision: res.AuthorizationRevision,
-				}
-				if sendErr := stream.Send(firstMsg); sendErr == nil {
-					// 等待对端首包确认（快速错误排查）
-					firstRespCh := make(chan *pb.SVCProxyData, 1)
-					firstErrCh := make(chan error, 1)
-					go func() {
-						resp, err := stream.Recv()
-						if err != nil {
-							firstErrCh <- err
-							return
-						}
-						firstRespCh <- resp
-					}()
-
-					select {
-					case resp := <-firstRespCh:
-						if resp.Error != "" {
-							logger.Warnf("[Tunnel] 对端 Agent 拒绝连接 (%s): %s", res.ServiceName, resp.Error)
-							return
-						}
-						if len(resp.Data) > 0 {
-							_, _ = clientConn.Write(resp.Data)
-						}
-						if resp.IsClose {
-							return
-						}
-					case err := <-firstErrCh:
-						logger.Warnf("[Tunnel] 对端 Agent 首包接收失败 (%s): %v", res.ServiceName, err)
-						return
-					case <-time.After(5 * time.Second):
-						// 握手正常建立
-					}
-
-					m.bridgeStream(clientConn, stream)
-					return
-				}
-			}
+	// 路径 1: 宿主机原生控制面服务（仅限 Kubernetes API Server 6443），采用直接 TCP 通道转发到宿主机固定 6443 端口
+	if isHostDirectService(res) {
+		targetAddr := fmt.Sprintf("%s:%d", res.AgentIp, 6443)
+		targetConn, err := m.dialTarget(ctx, "tcp", targetAddr)
+		if err != nil {
+			logger.Errorf("[Tunnel] 拨号边缘宿主机服务目标失败 (%s -> %s): %v", res.ServiceName, targetAddr, err)
+			m.recordStatusReject(res.ResourceId, err.Error())
+			return
 		}
-		logger.Warnf("[Tunnel] gRPC SVCProxy 连接建立失败，尝试直连降级")
-	}
+		defer targetConn.Close()
 
-	// 路径 B: 纯 TCP 直连代理（适用于 K8s API Server 6443 或无独立 gRPC SVCProxy 端口的服务）
-	targetAddr := fmt.Sprintf("%s:%d", res.AgentIp, res.PortNumber)
-	targetConn, err := m.dialTarget(ctx, "tcp", targetAddr)
-	if err != nil {
-		logger.Errorf("[Tunnel] 拨号边缘服务目标失败 (%s -> %s): %v", res.ServiceName, targetAddr, err)
+		m.recordStatusSuccess(res.ResourceId)
+		m.bridgeConns(clientConn, targetConn)
 		return
 	}
-	defer targetConn.Close()
 
-	m.bridgeConns(clientConn, targetConn)
+	// 路径 2: Kubernetes Service（ClusterIP 业务应用），遵循与 Desktop 一致的规范：
+	// 严禁直连物理节点 AgentIp:PortNumber，必须且只能通过 Agent 的 gRPC SVCProxy 双向流代理到集群内网 ClusterIP
+	if res.SvcProxyPort <= 0 || res.AgentIp == "" {
+		logger.Errorf("[Tunnel] 容器服务 %s (id=%s) 未配置 SvcProxyPort 或 AgentIp，禁止盲目直连", res.ServiceName, res.ResourceId)
+		m.recordStatusReject(res.ResourceId, "未配置 SvcProxyPort 或 AgentIp")
+		return
+	}
+
+	grpcAddr := fmt.Sprintf("%s:%d", res.AgentIp, res.SvcProxyPort)
+	grpcConn, err := grpc.NewClient(
+		grpcAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithContextDialer(func(dialCtx context.Context, addr string) (net.Conn, error) {
+			return m.dialTarget(dialCtx, "tcp", addr)
+		}),
+	)
+	if err != nil {
+		logger.Errorf("[Tunnel] 连接 Agent gRPC 代理端口失败 (%s): %v", grpcAddr, err)
+		m.recordStatusReject(res.ResourceId, err.Error())
+		return
+	}
+	defer grpcConn.Close()
+
+	svcClient := pb.NewAgentServiceClient(grpcConn)
+
+	streamCtx, streamCancel := context.WithCancel(ctx)
+	defer streamCancel()
+
+	stream, streamErr := svcClient.SVCProxy(streamCtx)
+	if streamErr != nil {
+		logger.Errorf("[Tunnel] 创建 Agent SVCProxy 流失败 (%s -> %s): %v", res.ServiceName, grpcAddr, streamErr)
+		m.recordStatusReject(res.ResourceId, streamErr.Error())
+		return
+	}
+
+	// 发送首包建立连接
+	firstMsg := &pb.SVCProxyData{
+		Namespace:             res.Namespace,
+		ServiceName:           res.ServiceName,
+		Port:                  res.PortNumber,
+		IsConnect:             true,
+		SessionId:             res.SessionId,
+		ResourceId:            res.ResourceId,
+		SourceId:              res.SourceId,
+		TargetRevisionId:      res.TargetRevisionId,
+		ServiceUid:            res.ServiceUid,
+		PortName:              res.PortName,
+		Protocol:              res.Protocol,
+		AuthorizationRevision: res.AuthorizationRevision,
+	}
+	if sendErr := stream.Send(firstMsg); sendErr == nil {
+		// 等待对端首包确认（快速错误排查）
+		firstRespCh := make(chan *pb.SVCProxyData, 1)
+		firstErrCh := make(chan error, 1)
+		go func() {
+			resp, err := stream.Recv()
+			if err != nil {
+				firstErrCh <- err
+				return
+			}
+			firstRespCh <- resp
+		}()
+
+		select {
+		case resp := <-firstRespCh:
+			if resp.Error != "" {
+				logger.Warnf("[Tunnel] 对端 Agent 拒绝连接 (%s): %s", res.ServiceName, resp.Error)
+				m.recordStatusReject(res.ResourceId, resp.Error)
+				return
+			}
+			m.recordStatusSuccess(res.ResourceId)
+			if len(resp.Data) > 0 {
+				_, _ = clientConn.Write(resp.Data)
+			}
+			if resp.IsClose {
+				return
+			}
+		case err := <-firstErrCh:
+			logger.Warnf("[Tunnel] 对端 Agent 首包接收失败 (%s): %v", res.ServiceName, err)
+			m.recordStatusReject(res.ResourceId, err.Error())
+			return
+		case <-time.After(5 * time.Second):
+			// 握手正常建立
+			m.recordStatusSuccess(res.ResourceId)
+		}
+
+		m.bridgeStream(clientConn, stream)
+		return
+	} else {
+		logger.Errorf("[Tunnel] 发送 SVCProxy 首包失败 (%s): %v", res.ServiceName, sendErr)
+		m.recordStatusReject(res.ResourceId, sendErr.Error())
+	}
+}
+
+// recordStatusSuccess 记录成功代理
+func (m *TunnelProxyManager) recordStatusSuccess(resourceID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if st, ok := m.statusMap[resourceID]; ok {
+		st.SVCProxyOK++
+	}
+}
+
+// recordStatusReject 记录被拒绝或失败
+func (m *TunnelProxyManager) recordStatusReject(resourceID, errStr string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if st, ok := m.statusMap[resourceID]; ok {
+		st.SVCProxyRejected++
+		st.LastSVCProxyError = errStr
+	}
+}
+
+// RecordDirectDialViolation 记录非 k8s-api 资源违规直连的守卫计数
+func (m *TunnelProxyManager) RecordDirectDialViolation(resourceID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if st, ok := m.statusMap[resourceID]; ok {
+		st.DirectDialViolation++
+	}
+}
+
+// GetStatuses 获取所有隧道资源当前状态列表
+func (m *TunnelProxyManager) GetStatuses() []*TunnelResourceStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	result := make([]*TunnelResourceStatus, 0, len(m.statusMap))
+	for _, st := range m.statusMap {
+		cp := *st
+		result = append(result, &cp)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Namespace != result[j].Namespace {
+			return result[i].Namespace < result[j].Namespace
+		}
+		return result[i].ServiceName < result[j].ServiceName
+	})
+	return result
+}
+
+// StartStatusServer 在指定地址（默认 127.0.0.1:19090）启动只读 /statusz 端点
+func (m *TunnelProxyManager) StartStatusServer(addr string) error {
+	if addr == "" {
+		addr = "127.0.0.1:19090"
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/statusz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(m.GetStatuses())
+	})
+
+	server := &http.Server{
+		Addr:    addr,
+		Handler: mux,
+	}
+
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	m.statusServer = server
+	m.mu.Unlock()
+
+	go func() {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Warnf("[Tunnel] /statusz 服务退出: %v", err)
+		}
+	}()
+
+	logger.Infof("[Tunnel] 成功启动 /statusz 端点: http://%s/statusz", addr)
+	return nil
 }
 
 // bridgeStream 双向桥接 TCP 连接与 gRPC SVCProxy 流
@@ -359,6 +521,10 @@ func (m *TunnelProxyManager) Stop() {
 	m.cancel()
 
 	m.mu.Lock()
+	if m.statusServer != nil {
+		_ = m.statusServer.Close()
+		m.statusServer = nil
+	}
 	for port, listener := range m.listeners {
 		_ = listener.Close()
 		delete(m.listeners, port)

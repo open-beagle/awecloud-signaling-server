@@ -2,15 +2,18 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
@@ -151,71 +154,43 @@ func TestTunnel_DynamicPortRevocation(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestTunnel_TCPProxyForwarding 验证出站代理端到端双向数据转发
-func TestTunnel_TCPProxyForwarding(t *testing.T) {
+// TestTunnel_ContainerServiceRejectsDirectDial 验证普通容器服务在未配置 SvcProxyPort 时坚决不拨号宿主机端口
+func TestTunnel_ContainerServiceRejectsDirectDial(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	// 启动一个模拟的边缘后端 Echo TCP Server
-	echoBackend, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer echoBackend.Close()
-
-	backendPort := echoBackend.Addr().(*net.TCPAddr).Port
-
-	go func() {
-		for {
-			conn, err := echoBackend.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				_, _ = io.Copy(c, c) // Echo back
-			}(conn)
-		}
-	}()
 
 	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
 	defer mgr.Stop()
 
-	// 使用 Mock Dialer 桥接目标地址
-	mgr.SetDialer(func(dialCtx context.Context, network, addr string) (net.Conn, error) {
-		var d net.Dialer
-		return d.DialContext(dialCtx, "tcp", fmt.Sprintf("127.0.0.1:%d", backendPort))
-	})
-
 	localPort := getFreePort(t)
 
+	// 下发普通业务应用，SvcProxyPort 为 0（未配置有效 SVCProxy）
 	mgr.SyncTunnelProxies([]*pb.ContainerServiceResource{
 		{
-			ResourceId:  "res-echo",
-			ServiceName: "mcp-service",
-			LocalPort:   int32(localPort),
-			PortNumber:  8000,
-			AgentIp:     "100.64.0.50",
-			AgentName:   "edge-gpu-5090",
+			ResourceId:   "res-mcp",
+			ServiceName:  "mcp-service",
+			LocalPort:    int32(localPort),
+			PortNumber:   8000,
+			SvcProxyPort: 0, // 无有效代理端口
+			AgentIp:      "100.64.0.50",
+			AgentName:    "edge-gpu-5090",
+			Protocol:     "TCP",
 		},
 	})
 
 	require.Len(t, mgr.GetActivePorts(), 1)
 
-	// 客户端连接本地 Tunnel 端口
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", localPort), 2*time.Second)
 	require.NoError(t, err)
 	defer conn.Close()
 
-	testMsg := "hello ztna signal tunnel"
-	_, err = conn.Write([]byte(testMsg))
-	require.NoError(t, err)
-
+	// 服务端应立即断开连接（EOF），坚决不尝试拨号 AgentIp:PortNumber
 	buf := make([]byte, 1024)
-	n, err := conn.Read(buf)
-	require.NoError(t, err)
-	require.Equal(t, testMsg, string(buf[:n]))
+	_, err = conn.Read(buf)
+	require.Equal(t, io.EOF, err)
 }
 
-// TestTunnel_K8sAPIProxy6443 验证启用 6443 控制面代理后，本地发起的请求能透明路由至边缘 K8s API
+// TestTunnel_K8sAPIProxy6443 验证精确匹配 k8s-api 时透明转发至宿主机 6443
 func TestTunnel_K8sAPIProxy6443(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -233,16 +208,17 @@ func TestTunnel_K8sAPIProxy6443(t *testing.T) {
 
 	// Mock Dialer 路由到模拟的 mockK8sAPI
 	mgr.SetDialer(func(dialCtx context.Context, network, addr string) (net.Conn, error) {
+		require.Equal(t, "100.64.0.10:6443", addr, "K8s API 目标端口必须固定为 6443")
 		var d net.Dialer
 		return d.DialContext(dialCtx, "tcp", mockK8sAPI.Listener.Addr().String())
 	})
 
 	localPort := getFreePort(t)
 
-	// 下发 K8s API 代理资源（默认本地端口 6443，测试中使用 localPort）
+	// 下发 K8s API 代理资源（ResourceId 必须精确匹配 k8s-api）
 	mgr.SyncTunnelProxies([]*pb.ContainerServiceResource{
 		{
-			ResourceId:  "res-k8s-api",
+			ResourceId:  "k8s-api",
 			ServiceName: "kubernetes",
 			Namespace:   "default",
 			LocalPort:   int32(localPort),
@@ -266,3 +242,250 @@ func TestTunnel_K8sAPIProxy6443(t *testing.T) {
 	require.Equal(t, "ok", string(body))
 }
 
+type mockAgentSVCProxyServer struct {
+	pb.UnimplementedAgentServiceServer
+	rejectMsg string
+	received  chan *pb.SVCProxyData
+}
+
+func (s *mockAgentSVCProxyServer) SVCProxy(stream grpc.BidiStreamingServer[pb.SVCProxyData, pb.SVCProxyData]) error {
+	req, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	if s.received != nil {
+		s.received <- req
+	}
+	if s.rejectMsg != "" {
+		return stream.Send(&pb.SVCProxyData{
+			Error:      s.rejectMsg,
+			SessionId:  req.SessionId,
+			ResourceId: req.ResourceId,
+			IsClose:    true,
+		})
+	}
+	// 首包确认建立连接
+	if err := stream.Send(&pb.SVCProxyData{
+		SessionId:  req.SessionId,
+		ResourceId: req.ResourceId,
+		Data:       []byte("connected"),
+	}); err != nil {
+		return err
+	}
+
+	for {
+		data, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+		if data.IsClose {
+			return nil
+		}
+		if err := stream.Send(data); err != nil {
+			return err
+		}
+	}
+}
+
+// TestTunnel_ContainerServiceWithPort6443UsesSVCProxy (T8) 验证普通容器服务即使端口为 6443 也必须走 SVCProxy 而非 host_direct
+func TestTunnel_ContainerServiceWithPort6443UsesSVCProxy(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 启动模拟的 Agent gRPC 服务
+	grpcListener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer grpcListener.Close()
+
+	grpcServer := grpc.NewServer()
+	mockSvc := &mockAgentSVCProxyServer{
+		received: make(chan *pb.SVCProxyData, 1),
+	}
+	pb.RegisterAgentServiceServer(grpcServer, mockSvc)
+	go func() { _ = grpcServer.Serve(grpcListener) }()
+	defer grpcServer.Stop()
+
+	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	defer mgr.Stop()
+
+	var dialedAddrs []string
+	var dialMu sync.Mutex
+
+	mgr.SetDialer(func(dialCtx context.Context, network, addr string) (net.Conn, error) {
+		dialMu.Lock()
+		dialedAddrs = append(dialedAddrs, addr)
+		dialMu.Unlock()
+
+		// 将发往 100.64.0.50:50051 的 gRPC 拨号重定向至本地 grpcListener
+		var d net.Dialer
+		return d.DialContext(dialCtx, "tcp", grpcListener.Addr().String())
+	})
+
+	localPort := getFreePort(t)
+
+	// 下发一个 PortNumber 刚好为 6443 的普通容器服务（非 k8s-api）
+	mgr.SyncTunnelProxies([]*pb.ContainerServiceResource{
+		{
+			ResourceId:            "obs-custom-webhook-6443",
+			ServiceName:           "custom-webhook",
+			Namespace:             "dev-ops",
+			LocalPort:             int32(localPort),
+			PortNumber:            6443, // 端口虽然是 6443，但绝不是 k8s-api
+			SvcProxyPort:          50051,
+			AgentIp:               "100.64.0.50",
+			AgentName:             "edge-gpu-5090",
+			Protocol:              "TCP",
+			SessionId:             "session-test-6443",
+			ServiceUid:            "uid-webhook-1",
+			AuthorizationRevision: 1,
+		},
+	})
+
+	require.Len(t, mgr.GetActivePorts(), 1)
+
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", localPort), 2*time.Second)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	select {
+	case req := <-mockSvc.received:
+		require.Equal(t, "obs-custom-webhook-6443", req.ResourceId)
+		require.Equal(t, "custom-webhook", req.ServiceName)
+		require.Equal(t, int32(6443), req.Port)
+	case <-time.After(3 * time.Second):
+		t.Fatal("超时未收到 Agent SVCProxy 首包")
+	}
+
+	dialMu.Lock()
+	defer dialMu.Unlock()
+	require.Contains(t, dialedAddrs, "100.64.0.50:50051", "必须拨号 Agent gRPC 代理端口 50051")
+	for _, a := range dialedAddrs {
+		require.NotEqual(t, "100.64.0.50:6443", a, "绝对禁止直连宿主机 6443 端口")
+	}
+}
+
+// TestTunnel_NoFallbackAfterAgentReject (T11) 验证被 Agent 拒绝后坚决不降级直连
+func TestTunnel_NoFallbackAfterAgentReject(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 启动模拟的 Agent gRPC 服务，配置为拒绝连接
+	grpcListener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer grpcListener.Close()
+
+	grpcServer := grpc.NewServer()
+	mockSvc := &mockAgentSVCProxyServer{
+		rejectMsg: "tenant permission denied: service revoked",
+	}
+	pb.RegisterAgentServiceServer(grpcServer, mockSvc)
+	go func() { _ = grpcServer.Serve(grpcListener) }()
+	defer grpcServer.Stop()
+
+	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	defer mgr.Stop()
+
+	var dialedAddrs []string
+	var dialMu sync.Mutex
+
+	mgr.SetDialer(func(dialCtx context.Context, network, addr string) (net.Conn, error) {
+		dialMu.Lock()
+		dialedAddrs = append(dialedAddrs, addr)
+		dialMu.Unlock()
+
+		var d net.Dialer
+		return d.DialContext(dialCtx, "tcp", grpcListener.Addr().String())
+	})
+
+	localPort := getFreePort(t)
+
+	mgr.SyncTunnelProxies([]*pb.ContainerServiceResource{
+		{
+			ResourceId:   "res-mcp-reject",
+			ServiceName:  "mcp-service",
+			LocalPort:    int32(localPort),
+			PortNumber:   8000,
+			SvcProxyPort: 50051,
+			AgentIp:      "100.64.0.50",
+			AgentName:    "edge-gpu-5090",
+			Protocol:     "TCP",
+		},
+	})
+
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", localPort), 2*time.Second)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	// 客户端读取响应，对端应直接断开 EOF
+	buf := make([]byte, 1024)
+	_, _ = conn.Read(buf)
+
+	dialMu.Lock()
+	defer dialMu.Unlock()
+
+	// 断言：拨号记录必须仅包含 AgentIp:50051，从未拨过 AgentIp:8000
+	require.Equal(t, []string{"100.64.0.50:50051"}, dialedAddrs)
+}
+
+// TestTunnel_StatuszEndpoint (T13b) 验证 /statusz 监控端点输出路径、指标与守卫计数
+func TestTunnel_StatuszEndpoint(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	defer mgr.Stop()
+
+	statusPort := getFreePort(t)
+	err := mgr.StartStatusServer(fmt.Sprintf("127.0.0.1:%d", statusPort))
+	require.NoError(t, err)
+
+	mgr.SyncTunnelProxies([]*pb.ContainerServiceResource{
+		{
+			ResourceId:   "obs-web-app",
+			ServiceName:  "web-app",
+			Namespace:    "prod",
+			LocalPort:    18080,
+			PortNumber:   8080,
+			SvcProxyPort: 50051,
+			AgentIp:      "100.64.0.50",
+			AgentName:    "edge-gpu-5090",
+		},
+		{
+			ResourceId:  "k8s-api",
+			ServiceName: "kubernetes-api",
+			Namespace:   "default",
+			LocalPort:   16443,
+			PortNumber:  6443,
+			AgentIp:     "100.64.0.50",
+			AgentName:   "edge-gpu-5090",
+		},
+	})
+
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/statusz", statusPort))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var statuses []*TunnelResourceStatus
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&statuses))
+
+	require.Len(t, statuses, 2)
+
+	// k8s-api 判定为 host_direct
+	var k8sStatus, webStatus *TunnelResourceStatus
+	for _, s := range statuses {
+		if s.ResourceID == "k8s-api" {
+			k8sStatus = s
+		} else if s.ResourceID == "obs-web-app" {
+			webStatus = s
+		}
+	}
+
+	require.NotNil(t, k8sStatus)
+	require.Equal(t, "host_direct", k8sStatus.Path)
+	require.Equal(t, int64(0), k8sStatus.DirectDialViolation)
+
+	require.NotNil(t, webStatus)
+	require.Equal(t, "svcproxy", webStatus.Path)
+	require.Equal(t, int64(0), webStatus.DirectDialViolation)
+}

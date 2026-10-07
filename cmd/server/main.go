@@ -23,6 +23,11 @@ var (
 )
 
 func main() {
+	// 子命令分支：tunnel-verify
+	if len(os.Args) > 1 && os.Args[1] == "tunnel-verify" {
+		os.Exit(RunTunnelVerify(os.Args[2:]))
+	}
+
 	configPath := flag.String("c", "config/server.toml", "配置文件路径")
 	showVersion := flag.Bool("v", false, "显示版本信息")
 	showVersionLong := flag.Bool("version", false, "显示版本信息")
