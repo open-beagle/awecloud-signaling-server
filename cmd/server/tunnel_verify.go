@@ -24,15 +24,22 @@ type CheckResult struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Passed  bool   `json:"passed"`
+	Skipped bool   `json:"skipped,omitempty"` // 未覆盖：不计入 PASS，单独统计
 	Message string `json:"message,omitempty"`
 }
 
 type TunnelVerifyReport struct {
 	TunnelName string        `json:"tunnel_name"`
-	Overall    string        `json:"overall"` // PASS or FAIL
+	Overall    string        `json:"overall"` // PASS / PARTIAL (存在 SKIP) / FAIL
+	Skipped    int           `json:"skipped"`
 	Checks     []CheckResult `json:"checks"`
 	DurationMs int64         `json:"duration_ms"`
 }
+
+// agentHeartbeatMaxAge 由代码常量推导（非按线上数据调参）：
+// NodeRuntimePersister 落库周期 5m + Agent 心跳间隔 30s × 2。
+// verifier 是独立进程，只能读 DB，DB 中 last_heartbeat 天然滞后至多一个落库周期。
+const agentHeartbeatMaxAge = 5*time.Minute + 2*30*time.Second
 
 // RunTunnelVerify 执行 server tunnel-verify CLI
 func RunTunnelVerify(args []string) int {
@@ -118,15 +125,21 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 				First(&agentNode).Error; err != nil {
 				preCheck.Passed = false
 				preCheck.Message = fmt.Sprintf("目标 Agent 节点 (%s) 不存在: %v", targetAgentName, err)
-			} else if agentNode.LastHeartbeat == nil || time.Since(*agentNode.LastHeartbeat) > 15*time.Minute {
+			} else if agentNode.LastHeartbeat == nil || time.Since(*agentNode.LastHeartbeat) > agentHeartbeatMaxAge {
 				preCheck.Passed = false
 				if agentNode.LastHeartbeat == nil {
 					preCheck.Message = fmt.Sprintf("目标 Agent 节点 (%s) 无心跳记录", targetAgentName)
 				} else {
-					preCheck.Message = fmt.Sprintf("目标 Agent 节点 (%s) 心跳超时: %v 前", targetAgentName, time.Since(*agentNode.LastHeartbeat))
+					preCheck.Message = fmt.Sprintf("目标 Agent 节点 (%s) 心跳超时: %v 前 (阈值 %v)", targetAgentName,
+						time.Since(*agentNode.LastHeartbeat).Round(time.Second), agentHeartbeatMaxAge)
 				}
+			} else if msg := checkAgentTechnicalLease(ctx, agentNode.ID, time.Now()); msg != "" {
+				preCheck.Passed = false
+				preCheck.Message = fmt.Sprintf("目标 Agent 节点 (%s) %s", targetAgentName, msg)
 			} else {
 				preCheck.Passed = true
+				preCheck.Message = fmt.Sprintf("last_heartbeat %v 前 (阈值 %v)，technical_resource online 且租约未过期",
+					time.Since(*agentNode.LastHeartbeat).Round(time.Second), agentHeartbeatMaxAge)
 			}
 		}
 	}
@@ -341,8 +354,9 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 						}
 					}
 					if allCompleteAndMatched {
-						d21Check.Passed = true
-						d21Check.Message = "条目完整性已满足；目标节点未接入集群治理资产，跳过候选集强一致校验"
+						// B4：候选集为空时无法做强一致校验，必须显式 SKIP，不得计为 PASS
+						d21Check.Skipped = true
+						d21Check.Message = "候选集为空（目标 Agent 未上报有效 Workload Observation），仅完成条目完整性校验，候选集一致性未覆盖"
 					} else {
 						d21Check.Passed = false
 						d21Check.Message = mismatchReason
@@ -379,19 +393,23 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 	}
 	report.Checks = append(report.Checks, d21Check)
 
-	// 计算总体状态
-	allPassed := true
+	// 计算总体状态：任一 FAIL → FAIL；无 FAIL 但存在 SKIP → PARTIAL；否则 PASS
+	failed := false
 	for _, c := range report.Checks {
-		if !c.Passed {
-			allPassed = false
-			break
+		if c.Skipped {
+			report.Skipped++
+		} else if !c.Passed {
+			failed = true
 		}
 	}
 
-	if allPassed {
-		report.Overall = "PASS"
-	} else {
+	switch {
+	case failed:
 		report.Overall = "FAIL"
+	case report.Skipped > 0:
+		report.Overall = "PARTIAL"
+	default:
+		report.Overall = "PASS"
 	}
 	report.DurationMs = time.Since(startTime).Milliseconds()
 
@@ -404,7 +422,9 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 		for _, c := range report.Checks {
 			dots := strings.Repeat(".", max(2, 45-len(c.Name)-len(c.ID)))
 			statusStr := "PASS"
-			if !c.Passed {
+			if c.Skipped {
+				statusStr = "SKIP"
+			} else if !c.Passed {
 				statusStr = "FAIL"
 			}
 			if c.Message != "" {
@@ -413,13 +433,39 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stdout, "[%s] %s %s %s\n", c.ID, c.Name, dots, statusStr)
 			}
 		}
+		fmt.Fprintf(stdout, "SKIPPED: %d\n", report.Skipped)
 		fmt.Fprintf(stdout, "RESULT: %s\n", report.Overall)
 	}
 
-	if allPassed {
+	switch report.Overall {
+	case "PASS":
 		return 0
+	case "PARTIAL":
+		return 2
+	default:
+		return 1
 	}
-	return 1
+}
+
+// checkAgentTechnicalLease 校验 Agent 节点绑定的 technical_resource 在线且租约未过期；通过返回空串。
+func checkAgentTechnicalLease(ctx context.Context, agentNodeID uint64, now time.Time) string {
+	var binding model.TechnicalResourceBinding
+	if err := db.DB.WithContext(ctx).
+		Where("source_type = ? AND source_id = ? AND enabled = ?", model.TechnicalResourceBindingLegacyNode, fmt.Sprint(agentNodeID), true).
+		First(&binding).Error; err != nil {
+		return fmt.Sprintf("未绑定 technical_resource: %v", err)
+	}
+	var technical model.TechnicalResource
+	if err := db.DB.WithContext(ctx).Where("id = ?", binding.TechnicalResourceID).First(&technical).Error; err != nil {
+		return fmt.Sprintf("technical_resource (%s) 不存在: %v", binding.TechnicalResourceID, err)
+	}
+	if technical.HealthState != model.ResourceHealthOnline {
+		return fmt.Sprintf("technical_resource health_state=%s", technical.HealthState)
+	}
+	if technical.LeaseExpiresAt == nil || !technical.LeaseExpiresAt.After(now) {
+		return "technical_resource 租约已过期"
+	}
+	return ""
 }
 
 func canonicalPolicyHash(p *headscale.ACLPolicy) string {

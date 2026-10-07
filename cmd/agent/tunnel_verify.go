@@ -236,6 +236,28 @@ func runAgentTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int
 		}
 	}
 
+	// D2-0 探测覆盖度（B4）：未执行任何端口探测、或没有业务端口被探测时，不得空集通过
+	probedTotal, probedBusiness := 0, 0
+	for _, s := range initialStatuses {
+		if s.LocalPort <= 0 {
+			continue
+		}
+		probedTotal++
+		if s.ResourceID != "k8s-api" {
+			probedBusiness++
+		}
+	}
+	coverage := AgentCheckResult{
+		ID:      "D2-0",
+		Name:    "probe coverage (>=1 business port)",
+		Passed:  probedBusiness > 0,
+		Message: fmt.Sprintf("statusz 资源 %d 个，已探测 %d 个（业务端口 %d 个）", len(initialStatuses), probedTotal, probedBusiness),
+	}
+	if probedTotal == 0 {
+		coverage.Message = fmt.Sprintf("未执行任何端口探测（statusz 资源 %d 个，均无 local_port）", len(initialStatuses))
+	}
+	report.Checks = append([]AgentCheckResult{coverage}, report.Checks...)
+
 	allPassed := true
 	for _, c := range report.Checks {
 		if !c.Passed {

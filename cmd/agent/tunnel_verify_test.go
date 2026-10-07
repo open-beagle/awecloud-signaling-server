@@ -238,18 +238,50 @@ func TestAgentTunnelVerify_JSONOutput(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL, "-json"}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("expected exit code 0, got %d. stderr: %s, stdout: %s", code, stderr.String(), stdout.String())
+	// B4：仅有 k8s-api、没有任何业务端口被探测时，D2-0 必须 FAIL，不得空集通过
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d. stderr: %s, stdout: %s", code, stderr.String(), stdout.String())
 	}
 
 	var report AgentTunnelVerifyReport
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatalf("failed to decode JSON output: %v, raw:\n%s", err, stdout.String())
 	}
-	if report.Overall != "PASS" {
-		t.Errorf("expected report.Overall = PASS, got: %s", report.Overall)
+	if report.Overall != "FAIL" {
+		t.Errorf("expected report.Overall = FAIL, got: %s", report.Overall)
 	}
-	if len(report.Checks) != 2 { // D2-3 and D2-4
-		t.Errorf("expected 2 checks, got %d", len(report.Checks))
+	if len(report.Checks) != 3 { // D2-0, D2-3 and D2-4
+		t.Fatalf("expected 3 checks, got %d", len(report.Checks))
+	}
+	if report.Checks[0].ID != "D2-0" || report.Checks[0].Passed {
+		t.Errorf("expected D2-0 coverage check to fail, got %+v", report.Checks[0])
+	}
+	for _, c := range report.Checks[1:] {
+		if !c.Passed {
+			t.Errorf("expected %s to pass, got %+v", c.ID, c)
+		}
+	}
+}
+
+// TestAgentTunnelVerify_ZeroProbesFails (B4) statusz 为空 / 无 local_port 时必须 FAIL。
+func TestAgentTunnelVerify_ZeroProbesFails(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		statuses := []*agent.TunnelResourceStatus{{ResourceID: "res-studio", Path: "svcproxy", LocalPort: 0}}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(statuses)
+	}))
+	defer ts.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := runAgentTunnelVerifyWithOutput([]string{"-statusz-url", ts.URL, "-json"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d. stdout: %s", code, stdout.String())
+	}
+	var report AgentTunnelVerifyReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("failed to decode JSON output: %v", err)
+	}
+	if report.Overall != "FAIL" || report.Checks[0].ID != "D2-0" || report.Checks[0].Passed {
+		t.Fatalf("expected D2-0 FAIL, got %+v", report)
 	}
 }
