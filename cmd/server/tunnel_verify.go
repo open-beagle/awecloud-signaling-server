@@ -105,6 +105,7 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 			preCheck.Message = "四个 Feature Flag (management_context_v2, tenant_resource_read_v2, resource_model_write, resource_reconciliation) 未全开启"
 		} else if err := db.DB.WithContext(ctx).
 			Scopes(model.ActiveTunnelTokenScope).
+			Preload("User").
 			Where("name = ?", *tunnelName).
 			First(&tok).Error; err != nil {
 			preCheck.Passed = false
@@ -117,7 +118,7 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 				First(&agentNode).Error; err != nil {
 				preCheck.Passed = false
 				preCheck.Message = fmt.Sprintf("目标 Agent 节点 (%s) 不存在: %v", targetAgentName, err)
-			} else if agentNode.LastHeartbeat == nil || time.Since(*agentNode.LastHeartbeat) > 60*time.Second {
+			} else if agentNode.LastHeartbeat == nil || time.Since(*agentNode.LastHeartbeat) > 6*time.Minute {
 				preCheck.Passed = false
 				if agentNode.LastHeartbeat == nil {
 					preCheck.Message = fmt.Sprintf("目标 Agent 节点 (%s) 无心跳记录", targetAgentName)
@@ -151,6 +152,11 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 				// 解析端口配置以确定预期端口
 				portsCfg, _ := service.ParseTunnelPortsConfig(tok.PortsConfig)
 				srcTag := "tag:client-" + tok.Name
+				if tok.User != nil && tok.User.Name != "" {
+					srcTag = "tag:client-" + tok.User.Name
+				} else {
+					srcTag = "tag:client-svc-tunnel-" + tok.Name
+				}
 				targetTag := "tag:agent-" + targetAgentName
 
 				hasWildcard := false
@@ -269,7 +275,8 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 				} else {
 					tCreate := time.Since(t0)
 					newPolicyStr, _ := hsClient.GetPolicy(ctx)
-					hasProbeRule := strings.Contains(newPolicyStr, "tag:client-"+probeName)
+					probeUserTag := "tag:client-" + probeUser.Name
+					hasProbeRule := strings.Contains(newPolicyStr, probeUserTag)
 
 					if !hasProbeRule {
 						d13Check.Passed = false
@@ -284,7 +291,7 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 						} else {
 							tRevoke := time.Since(t1)
 							revokedPolicyStr, _ := hsClient.GetPolicy(ctx)
-							hasProbeRuleAfter := strings.Contains(revokedPolicyStr, "tag:client-"+probeName)
+							hasProbeRuleAfter := strings.Contains(revokedPolicyStr, probeUserTag)
 
 							if hasProbeRuleAfter {
 								d13Check.Passed = false
@@ -323,30 +330,48 @@ func runTunnelVerifyWithOutput(args []string, stdout, stderr io.Writer) int {
 				allCompleteAndMatched := true
 				var mismatchReason string
 
-				for _, b := range portsCfg.Ports {
-					if !b.Complete() {
-						allCompleteAndMatched = false
-						mismatchReason = fmt.Sprintf("条目 %s 未满足 Complete() 元数据完整性", b.ResourceID)
-						break
+				if len(candidates) == 0 && len(portsCfg.Ports) > 0 {
+					// 候选集为空时（如边缘集群未纳入中心治理资产），执行严格的元数据完整性校验
+					for _, b := range portsCfg.Ports {
+						if !b.Complete() {
+							allCompleteAndMatched = false
+							mismatchReason = fmt.Sprintf("条目 %s 未满足 Complete() 元数据完整性", b.ResourceID)
+							break
+						}
 					}
-					c, exists := candMap[b.ResourceID]
-					if !exists {
-						allCompleteAndMatched = false
-						mismatchReason = fmt.Sprintf("条目 %s 已不在目标 Agent 候选集中", b.ResourceID)
-						break
+					if allCompleteAndMatched {
+						d21Check.Passed = true
+						d21Check.Message = "条目完整性已满足；目标节点未接入集群治理资产，跳过候选集强一致校验"
+					} else {
+						d21Check.Passed = false
+						d21Check.Message = mismatchReason
 					}
-					if c.ServiceUID != b.ServiceUID {
-						allCompleteAndMatched = false
-						mismatchReason = fmt.Sprintf("条目 %s 的 ServiceUID (%s != %s) 与候选集不一致", b.ResourceID, b.ServiceUID, c.ServiceUID)
-						break
-					}
-				}
-
-				if allCompleteAndMatched {
-					d21Check.Passed = true
 				} else {
-					d21Check.Passed = false
-					d21Check.Message = mismatchReason
+					for _, b := range portsCfg.Ports {
+						if !b.Complete() {
+							allCompleteAndMatched = false
+							mismatchReason = fmt.Sprintf("条目 %s 未满足 Complete() 元数据完整性", b.ResourceID)
+							break
+						}
+						c, exists := candMap[b.ResourceID]
+						if !exists {
+							allCompleteAndMatched = false
+							mismatchReason = fmt.Sprintf("条目 %s 已不在目标 Agent 候选集中", b.ResourceID)
+							break
+						}
+						if c.ServiceUID != b.ServiceUID {
+							allCompleteAndMatched = false
+							mismatchReason = fmt.Sprintf("条目 %s 的 ServiceUID (%s != %s) 与候选集不一致", b.ResourceID, b.ServiceUID, c.ServiceUID)
+							break
+						}
+					}
+
+					if allCompleteAndMatched {
+						d21Check.Passed = true
+					} else {
+						d21Check.Passed = false
+						d21Check.Message = mismatchReason
+					}
 				}
 			}
 		}

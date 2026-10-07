@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -161,7 +162,12 @@ func (m *ContainerSessionManager) BeginV2(parent context.Context, permission *pb
 		return active.ctx, nil
 	}
 	if m.nextSequence[permission.SessionId] > 0 {
-		return nil, fmt.Errorf("resource session has already started")
+		if strings.HasPrefix(permission.SessionId, "tunnel-") {
+			// Tunnel 合成会话是常驻隧道代理，允许在后续连接中重入
+			delete(m.nextSequence, permission.SessionId)
+		} else {
+			return nil, fmt.Errorf("resource session has already started")
+		}
 	}
 	ctx, cancel := context.WithCancel(parent)
 	if err := m.queueResourceEventLocked(permission.SessionId, "connected", "", true); err != nil {

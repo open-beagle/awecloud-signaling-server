@@ -764,6 +764,29 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 
 				processedNodeIDs[nodeInfo.HeadscaleNodeID] = true
 			}
+
+			// 找到该 User 下最新的有效/在线 Headscale 节点，同步至 node 表中的 Desktop 节点（支持 Tunnel 客户端）
+			var activeNode *hsNodeInfo
+			for i := range hsNodes {
+				if activeNode == nil || (hsNodes[i].Online && !activeNode.Online) ||
+					(hsNodes[i].Online == activeNode.Online && hsNodes[i].HeadscaleNodeID > activeNode.HeadscaleNodeID) {
+					activeNode = &hsNodes[i]
+				}
+			}
+			if activeNode != nil {
+				var dbDesktop model.Node
+				if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", user.ID, model.NodeTypeDesktop).First(&dbDesktop).Error; err == nil {
+					if dbDesktop.HeadscaleNodeID != activeNode.HeadscaleNodeID || dbDesktop.IP != activeNode.IP {
+						dbDesktop.HeadscaleNodeID = activeNode.HeadscaleNodeID
+						dbDesktop.IP = activeNode.IP
+						if err := db.DB.WithContext(ctx).Save(&dbDesktop).Error; err != nil {
+							logger.Warnf("更新 Client/Desktop Node %s 失败: %v", dbDesktop.Name, err)
+						} else {
+							logger.Infof("Client/Desktop Node %s HeadscaleNodeID/IP 已同步: id=%d, ip=%s", dbDesktop.Name, activeNode.HeadscaleNodeID, activeNode.IP)
+						}
+					}
+				}
+			}
 		}
 	}
 
