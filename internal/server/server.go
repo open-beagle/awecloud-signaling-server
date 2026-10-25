@@ -31,6 +31,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	grpcserver "github.com/open-beagle/awecloud-signaling-server/internal/server/grpc"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/mcp"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/proxy"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
@@ -624,6 +625,10 @@ func (s *Server) setupRouter() *gin.Engine {
 				}
 			}
 
+			// 远端 MCP 端点（零本地 CLI，使用 SIGNAL_MCP_TOKEN 鉴权）
+			mcpHandler := mcp.NewHandler(s.config, router)
+			v1Group.POST("/mcp", mcpHandler.ServeHTTP)
+
 			// 管理员 API
 			adminGroup := v1Group.Group("/admin")
 			{
@@ -638,6 +643,7 @@ func (s *Server) setupRouter() *gin.Engine {
 				{
 					adminAuthGroup.GET("/auth/me", adminAPI.GetMe)
 					adminAuthGroup.PUT("/auth/password", adminAPI.ChangePassword)
+					adminAuthGroup.POST("/auth/mcp-token", adminAPI.IssueMCPToken)
 
 					// 管理账号与 Tenant 管理范围（Platform Admin 专属）
 					managementAccountAPI := api.NewManagementAccountAPI()

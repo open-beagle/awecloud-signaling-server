@@ -203,6 +203,82 @@ func (a *AdminAPI) ChangePassword(c *gin.Context) {
 	c.JSON(http.StatusOK, NewSuccessMessageResponse("密码修改成功", nil))
 }
 
+// IssueMCPTokenRequest 签发 MCP 专用令牌请求
+type IssueMCPTokenRequest struct {
+	ExpiresDays int `json:"expires_days"` // 有效天数，默认 90 天，最大 365 天
+}
+
+// IssueMCPTokenResponse 签发 MCP 专用令牌响应
+type IssueMCPTokenResponse struct {
+	Token     string     `json:"token"`
+	Purpose   string     `json:"purpose"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	Admin     *AdminInfo `json:"admin"`
+}
+
+// IssueMCPToken 签发绑定当前管理员与统一身份的 SIGNAL_MCP_TOKEN（改密或禁用即自动失效）
+func (a *AdminAPI) IssueMCPToken(c *gin.Context) {
+	ctx := c.Request.Context()
+	adminID := getAdminIDFromContext(c)
+	if adminID == 0 {
+		c.JSON(http.StatusUnauthorized, NewErrorResponse("未认证"))
+		return
+	}
+
+	var req IssueMCPTokenRequest
+	_ = c.ShouldBindJSON(&req)
+	if req.ExpiresDays <= 0 {
+		req.ExpiresDays = 90
+	}
+	if req.ExpiresDays > 365 {
+		req.ExpiresDays = 365
+	}
+
+	var admin model.Admin
+	if err := db.DB.WithContext(ctx).Where("id = ? AND enabled = ?", adminID, true).First(&admin).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("管理员不存在或已禁用"))
+		return
+	}
+
+	claims := jwt.MapClaims{
+		"admin_id": admin.ID,
+		"username": admin.Username,
+		"purpose":  "mcp",
+	}
+	adminInfo := &AdminInfo{
+		ID: admin.ID, Username: admin.Username, Role: admin.Role, Enabled: admin.Enabled, CreatedAt: admin.CreatedAt,
+	}
+	identity, identityErr := service.LoadLegacyAdminIdentity(db.DB.WithContext(ctx), admin.ID)
+	if identityErr == nil {
+		claims["user_id"] = identity.UserID
+		claims["auth_revision"] = identity.AuthRevision
+		claims["credential_revision"] = identity.CredentialRevision
+		adminInfo.UnifiedUserID = identity.UserID
+		adminInfo.AuthRevision = identity.AuthRevision
+		adminInfo.CredentialRevision = identity.CredentialRevision
+	} else if !errors.Is(identityErr, service.ErrManagementIdentityNotMapped) && !errors.Is(identityErr, service.ErrManagementUserDisabled) {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("读取统一身份映射失败"))
+		return
+	}
+
+	expiresAt := time.Now().Add(time.Duration(req.ExpiresDays) * 24 * time.Hour)
+	claims["exp"] = expiresAt.Unix()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(a.config.Security.JWTSecret))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("签发 SIGNAL_MCP_TOKEN 失败"))
+		return
+	}
+
+	logger.Infof("管理员签发 SIGNAL_MCP_TOKEN: username=%s, expires_days=%d", admin.Username, req.ExpiresDays)
+	c.JSON(http.StatusOK, NewSuccessResponse(IssueMCPTokenResponse{
+		Token:     tokenString,
+		Purpose:   "mcp",
+		ExpiresAt: expiresAt,
+		Admin:     adminInfo,
+	}))
+}
+
 // getAdminIDFromContext 从上下文获取管理员 ID
 func getAdminIDFromContext(c *gin.Context) int64 {
 	if adminID, exists := c.Get("admin_id"); exists {
