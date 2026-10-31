@@ -21,11 +21,12 @@ import (
 )
 
 type recordingContainerExecutor struct {
-	called bool
-	sftp   bool
-	target *ContainerSSHUserPermission
-	stream ContainerExecStream
-	err    error
+	sftpDone chan struct{}
+	called   bool
+	sftp     bool
+	target   *ContainerSSHUserPermission
+	stream   ContainerExecStream
+	err      error
 }
 
 func (e *recordingContainerExecutor) ExecuteSFTP(_ context.Context, target *ContainerSSHUserPermission, stream ContainerExecStream) error {
@@ -33,6 +34,9 @@ func (e *recordingContainerExecutor) ExecuteSFTP(_ context.Context, target *Cont
 	e.sftp = true
 	e.target = target
 	e.stream = stream
+	if e.sftpDone != nil {
+		close(e.sftpDone)
+	}
 	return e.err
 }
 

@@ -215,7 +215,7 @@ func TestContainerSSHProxyForwardsSFTPSubsystemWithoutPTY(t *testing.T) {
 	cache.UpdateContainerSSHPermissions(map[string][]*ContainerSSHUserPermission{
 		"alice": {{ResourceID: "resource-a", Namespace: "dev", PodName: "workspace-0", PodUID: "pod-uid-a", ContainerName: "workspace", ListenPort: ContainerSSHPortBase}},
 	})
-	executor := &recordingContainerExecutor{}
+	executor := &recordingContainerExecutor{sftpDone: make(chan struct{})}
 	broker := NewContainerExecBroker(fake.NewSimpleClientset(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "workspace-0", Namespace: "dev", UID: types.UID("pod-uid-a")},
 		Status:     corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "workspace", Ready: true}}},
@@ -247,6 +247,13 @@ func TestContainerSSHProxyForwardsSFTPSubsystemWithoutPTY(t *testing.T) {
 	session, err := client.NewSession()
 	require.NoError(t, err)
 	require.NoError(t, session.RequestSubsystem("sftp"))
+	// The subsystem ACK precedes asynchronous executor dispatch. Wait for its
+	// completion before closing the transport, otherwise cancellation can win.
+	select {
+	case <-executor.sftpDone:
+	case <-time.After(time.Second):
+		t.Fatal("SFTP executor did not start")
+	}
 	_ = session.Close()
 	_ = client.Close()
 	<-done
