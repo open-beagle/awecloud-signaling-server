@@ -168,7 +168,9 @@ func handleSVCProxyRequestV2(ctx context.Context, client pb.EndpointServiceClien
 		logger.Warnf("Endpoint SVCProxy v2 会话注册失败: session_id=%s err=%v", req.SessionId, err)
 		return
 	}
-	stream, err := client.OpenSVCProxy(sessionCtx)
+	streamCtx, cancelStream := context.WithCancel(sessionCtx)
+	defer cancelStream()
+	stream, err := client.OpenSVCProxy(streamCtx)
 	if err != nil {
 		_ = authorization.sessions.EndV2(req.SessionId, "failed", "ENDPOINT_STREAM_FAILED")
 		return

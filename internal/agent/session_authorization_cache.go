@@ -30,7 +30,9 @@ var (
 	ErrSessionSnapshotRouteConflict    = errors.New("resource session authorization snapshot route conflicts")
 )
 
-// SessionAuthorizationCache is the v2 fail-closed authorization store. A new
+// SessionAuthorizationCache stores the last verified v2 authorization view.
+// Envelope expiry rejects incoming stale snapshots, not cached permissions.
+// Cached permissions remain bounded by their original authorization deadline. A new
 // snapshot is fully validated in temporary maps before the live state changes.
 type SessionAuthorizationCache struct {
 	mu          sync.RWMutex
@@ -177,6 +179,7 @@ func buildSessionSnapshotState(snapshot *pb.ResourceSessionAuthorizationSnapshot
 		}
 		seenCommands[key] = struct{}{}
 		commands = append(commands, proto.Clone(command).(*pb.ResourceSessionTerminationCommandV2))
+		delete(permissions, command.SessionId)
 	}
 	return permissions, routes, commands, nil
 }
@@ -256,13 +259,22 @@ func (c *SessionAuthorizationCache) ValidUntil() time.Time {
 	return c.validUntil
 }
 
+// Enabled reports whether the verified view has any unexpired v2 permission.
 func (c *SessionAuthorizationCache) Enabled(now time.Time) bool {
 	if c == nil {
 		return false
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.revision > 0 && c.enforceV2 && c.validUntil.After(now.UTC())
+	if c.revision == 0 || !c.enforceV2 {
+		return false
+	}
+	for _, permission := range c.permissions {
+		if permission.ValidUntil.AsTime().After(now.UTC()) {
+			return true
+		}
+	}
+	return false
 }
 
 // EnforceV2 reports the last completely applied Server policy even after its
@@ -283,7 +295,7 @@ func (c *SessionAuthorizationCache) Permission(sessionID string, now time.Time) 
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if c.revision == 0 || !c.validUntil.After(now.UTC()) {
+	if c.revision == 0 {
 		return nil, false
 	}
 	permission := c.permissions[sessionID]
@@ -299,7 +311,7 @@ func (c *SessionAuthorizationCache) ResolveContainerSSH(listenPort uint16, userN
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if c.revision == 0 || !c.validUntil.After(now.UTC()) {
+	if c.revision == 0 {
 		return nil, false
 	}
 	for _, sessionID := range c.sshRoutes[listenPort] {
@@ -318,7 +330,12 @@ func (c *SessionAuthorizationCache) HasContainerSSHRoute(listenPort uint16, now 
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.revision > 0 && c.validUntil.After(now.UTC()) && len(c.sshRoutes[listenPort]) > 0
+	for _, sessionID := range c.sshRoutes[listenPort] {
+		if p := c.permissions[sessionID]; p != nil && p.ValidUntil.AsTime().After(now.UTC()) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *SessionAuthorizationCache) Permissions(now time.Time) []*pb.ResourceSessionPermissionV2 {
@@ -327,7 +344,7 @@ func (c *SessionAuthorizationCache) Permissions(now time.Time) []*pb.ResourceSes
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if c.revision == 0 || !c.validUntil.After(now.UTC()) {
+	if c.revision == 0 {
 		return nil
 	}
 	result := make([]*pb.ResourceSessionPermissionV2, 0, len(c.permissions))

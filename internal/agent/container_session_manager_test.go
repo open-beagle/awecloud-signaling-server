@@ -380,3 +380,34 @@ func TestPersistentContainerSessionManagerExpandsHomeDirectory(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(home, "signal-state", "resource_session_events_v2.json"), manager.statePath)
 }
+
+func TestServiceSessionIdleReuseAndIndependentSocketLifetime(t *testing.T) {
+	now := time.Now().UTC()
+	permission := serviceSessionPermission(now)
+	permission.ValidUntil = timestamppb.New(now.Add(time.Second))
+	manager := NewContainerSessionManager()
+	manager.idleGrace = time.Millisecond
+	parent, cancel := context.WithCancel(context.Background())
+	first, err := manager.BeginV2(parent, permission)
+	require.NoError(t, err)
+	second, err := manager.BeginV2(context.Background(), permission)
+	require.NoError(t, err)
+	cancel()
+	require.NoError(t, manager.EndV2(permission.SessionId, "success", "stream_closed"))
+	require.NoError(t, second.Err())
+	require.NoError(t, manager.EndV2(permission.SessionId, "success", "stream_closed"))
+	time.Sleep(20 * time.Millisecond)
+	third, err := manager.BeginV2(context.Background(), permission)
+	require.NoError(t, err)
+	require.Equal(t, first, third)
+	require.Len(t, manager.ResourceEventsForHeartbeat(), 1)
+	require.NoError(t, manager.EndV2(permission.SessionId, "success", "stream_closed"))
+	select {
+	case <-third.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("idle session outlived real authorization")
+	}
+	require.Eventually(t, func() bool { return len(manager.ResourceEventsForHeartbeat()) == 2 }, time.Second, time.Millisecond)
+	_, err = manager.BeginV2(context.Background(), permission)
+	require.ErrorIs(t, err, ErrSessionSnapshotExpired)
+}

@@ -312,3 +312,41 @@ func TestSessionAuthorizationRejectsCrossSourceEventsAndSequenceConflicts(t *tes
 	}})
 	require.ErrorIs(t, err, ErrSessionAuthorizationSourceDenied)
 }
+
+// Every read in the authorization chain must preserve the last trusted view on
+// operational failure, without committing a termination or partial renewal.
+func TestSessionAuthorizationDatabaseFaultDoesNotRevoke(t *testing.T) {
+	for _, table := range []string{"tenant_resource", "tenant_resource_source", "workload_observation", "resource_allocation_item", "resource_allocation", "resource_scope", "namespace_observation", "resource_target_revision_v2", "workload_observation_source", "technical_resource", "technical_resource_binding", "tenant_access_grant", "tenant_membership", "user", "node"} {
+		t.Run(table, func(t *testing.T) {
+			fixture := newTenantManagementConstraintFixture(t)
+			database := serverdb.DB
+			require.NoError(t, database.Model(&model.Node{}).Where("id = ?", fixture.desktop.ID).Update("headscale_node_id", uint64(9901)).Error)
+			session := fixture.session(uuid.NewString())
+			require.NoError(t, database.Create(&session).Error)
+			authorizer := NewSessionAuthorizationService(database)
+			authorizer.now = func() time.Time { return fixture.now.Add(time.Second) }
+			injected := fmt.Errorf("injected database unavailable: %s", table)
+			hits := 0
+			require.NoError(t, database.Callback().Query().Before("gorm:query").Register("test:authorization_fault", func(tx *gorm.DB) {
+				if tx.Statement.Table == table {
+					hits++
+					tx.AddError(injected)
+				}
+			}))
+			_, err := authorizer.BuildSnapshot(context.Background(), fixture.technical.ID, true)
+			require.NoError(t, database.Callback().Query().Remove("test:authorization_fault"))
+			require.Positive(t, hits, "fault must reach the intended query")
+			require.ErrorIs(t, err, injected)
+			var stored model.ResourceSession
+			require.NoError(t, database.First(&stored, "id = ?", session.ID).Error)
+			require.Equal(t, session.Status, stored.Status)
+			require.Equal(t, session.RowVersion, stored.RowVersion)
+			var count int64
+			require.NoError(t, database.Model(&model.ResourceSessionTermination{}).Where("session_id = ?", session.ID).Count(&count).Error)
+			require.Zero(t, count)
+			recovered, err := authorizer.BuildSnapshot(context.Background(), fixture.technical.ID, true)
+			require.NoError(t, err)
+			require.Len(t, recovered.Permissions, 1)
+		})
+	}
+}

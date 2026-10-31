@@ -252,7 +252,10 @@ func (s *SessionAuthorizationService) revalidateSession(tx *gorm.DB, session *mo
 	}
 	chain, err := loadTenantResourceChainForTarget(tx, session.TenantID, session.TenantResourceID, session.TargetRevisionID, now, true)
 	if err != nil {
-		return nil, sessionAuthorizationInvalidCode, nil
+		if errors.Is(err, ErrTenantResourceNotFound) || errors.Is(err, ErrTenantResourceTargetNotTrusted) || errors.Is(err, ErrTenantResourceUpstreamUnavailable) {
+			return nil, sessionAuthorizationInvalidCode, nil
+		}
+		return nil, "", err
 	}
 	if chain.Resource.VisibilityState != model.TenantResourceVisible || chain.Source.ID != session.TenantResourceSourceID ||
 		chain.Target.ID != session.TargetRevisionID || chain.Allocation.ID != session.AllocationID || chain.Item.ID != session.AllocationItemID ||
@@ -262,6 +265,9 @@ func (s *SessionAuthorizationService) revalidateSession(tx *gorm.DB, session *mo
 	var grant model.TenantAccessGrant
 	if err := tx.Where("id = ? AND tenant_id = ? AND tenant_resource_id = ? AND revision = ? AND status = ? AND valid_from <= ? AND (expires_at IS NULL OR expires_at > ?)",
 		session.GrantID, session.TenantID, session.TenantResourceID, session.GrantRevision, model.TenantAccessGrantEnabled, now, now).First(&grant).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, "", err
+		}
 		return nil, sessionAuthorizationInvalidCode, nil
 	}
 	var actions []string
@@ -288,15 +294,26 @@ func (s *SessionAuthorizationService) revalidateSession(tx *gorm.DB, session *mo
 	var membership model.TenantMembership
 	if err := tx.Where("id = ? AND tenant_id = ? AND user_id = ? AND enabled = ? AND (expires_at IS NULL OR expires_at > ?)",
 		session.TenantMembershipID, session.TenantID, session.UserID, true, now).First(&membership).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, "", err
+		}
 		return nil, sessionAuthorizationInvalidCode, nil
 	}
 	var user model.User
 	if err := tx.Where("id = ? AND enabled = ?", session.UserID, true).First(&user).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, "", err
+		}
 		return nil, sessionAuthorizationInvalidCode, nil
 	}
 	var device model.Node
-	if err := tx.Where("id = ? AND user_id = ? AND type = ?", session.DeviceID, session.UserID, model.NodeTypeDesktop).First(&device).Error; err != nil ||
-		device.HeadscaleNodeID == 0 {
+	if err := tx.Where("id = ? AND user_id = ? AND type = ?", session.DeviceID, session.UserID, model.NodeTypeDesktop).First(&device).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, "", err
+		}
+		return nil, sessionAuthorizationInvalidCode, nil
+	}
+	if device.HeadscaleNodeID == 0 {
 		return nil, sessionAuthorizationInvalidCode, nil
 	}
 	deadlines := []*time.Time{membership.ExpiresAt, chain.Allocation.ExpiresAt, grant.ExpiresAt, namespaceLeaseDeadline(chain)}
@@ -318,9 +335,8 @@ func (s *SessionAuthorizationService) revalidateSession(tx *gorm.DB, session *mo
 		session.ValidUntil = sessionValidUntil
 		session.RowVersion++
 	}
-	// Permission expiry is the real authorization deadline for active connections.
-	// The transport snapshot has its own short TTL for admitting new connections;
-	// losing that snapshot must not revoke an already authorized data stream.
+	// Permission expiry bounds existing and new connections of this Session.
+	// The short envelope TTL only bounds acceptance of incoming snapshots.
 	var target SessionAuthorizationTarget
 	if err := json.Unmarshal([]byte(chain.Target.TargetSnapshot), &target); err != nil {
 		return nil, sessionAuthorizationInvalidCode, nil

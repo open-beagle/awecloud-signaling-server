@@ -27,7 +27,7 @@ jobs:
           go-version: "1.26"
           cache: true
       - name: Verify Agent and Server before publication
-        run: go test ./cmd/agent ./cmd/server ./internal/server/headscale ./internal/server/api ./internal/server/grpc
+        run: go test ./cmd/agent ./cmd/endpoint ./cmd/server ./internal/agent ./internal/server/service ./internal/server/headscale ./internal/server/api ./internal/server/grpc
 
   prepare:
     name: Prepare Release

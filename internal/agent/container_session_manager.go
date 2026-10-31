@@ -42,6 +42,7 @@ type containerActiveSession struct {
 	authorizationRevision int64
 	validUntil            time.Time
 	v2                    bool
+	reusableService       bool
 }
 
 type containerPendingEvent struct {
@@ -168,6 +169,11 @@ func (m *ContainerSessionManager) BeginV2(parent context.Context, permission *pb
 	if m.nextSequence[permission.SessionId] > 0 && !isTunnelSyntheticPermission(permission) {
 		return nil, fmt.Errorf("resource session has already started")
 	}
+	// A Service Session spans parallel HTTP sockets. Closing the first socket
+	// must not cancel siblings or the cached Session used by a later refresh.
+	if permission.ResourceType == "container_service" {
+		parent = context.WithoutCancel(parent)
+	}
 	ctx, cancel := context.WithCancel(parent)
 	if err := m.queueResourceEventLocked(permission.SessionId, "connected", "", true); err != nil {
 		cancel()
@@ -176,7 +182,7 @@ func (m *ContainerSessionManager) BeginV2(parent context.Context, permission *pb
 	active := &containerActiveSession{
 		ctx: ctx, cancel: cancel, connections: 1, userName: permission.UserName, resourceID: permission.ResourceId,
 		grantRevision: permission.GrantRevision, authorizationRevision: permission.AuthorizationRevision,
-		validUntil: validUntil, v2: true,
+		validUntil: validUntil, v2: true, reusableService: permission.ResourceType == "container_service",
 	}
 	m.active[permission.SessionId] = active
 	m.resetV2ExpiryTimerLocked(permission.SessionId, active, validUntil)
@@ -381,6 +387,12 @@ func (m *ContainerSessionManager) end(sessionID, result, reason string, allowIdl
 		}
 		active.connections--
 		if active.connections > 0 {
+			m.mu.Unlock()
+			return nil
+		}
+		// Keep an authorized Service Session idle until its real deadline; each
+		// socket still closes normally. Revocation/expiry cancels it immediately.
+		if active.reusableService && active.reason == "" && active.ctx.Err() == nil {
 			m.mu.Unlock()
 			return nil
 		}

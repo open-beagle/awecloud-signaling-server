@@ -113,12 +113,39 @@ func TestServiceStreamSurvivesControlPlaneOutageAndRevokesImmediately(t *testing
 	}
 	t.Logf("existing stream survived snapshot expiry after %s", time.Since(now))
 	_, allowed := cache.Permission(permission.SessionId, time.Now().UTC())
-	require.False(t, allowed)
+	require.True(t, allowed)
+	// Refresh creates another actual gRPC/TCP connection after 30 seconds.
+	original := stream
+	stream = open()
+	exchange(500)
+	require.NoError(t, original.CloseSend())
+	select {
+	case <-targetClosed:
+	case <-time.After(time.Second):
+		t.Fatal("original socket did not close")
+	}
+	exchange(501) // Closing the first socket must not cancel its sibling.
+	require.NoError(t, stream.CloseSend())
+	select {
+	case <-targetClosed:
+	case <-time.After(time.Second):
+		t.Fatal("refresh socket did not close")
+	}
+	require.Eventually(t, func() bool {
+		manager.mu.Lock()
+		defer manager.mu.Unlock()
+		active := manager.active[permission.SessionId]
+		return active != nil && active.connections == 0
+	}, time.Second, time.Millisecond)
+	stream = open() // All previous sockets closed: reuse the authorized Session.
+	exchange(502)
+	unknown := serviceSessionRequest(permission)
+	unknown.SessionId = "unknown-session"
 	denied, err := client.SVCProxy(ctx)
 	require.NoError(t, err)
-	require.NoError(t, denied.Send(serviceSessionRequest(permission)))
+	require.NoError(t, denied.Send(unknown))
 	_, err = denied.Recv()
-	require.Error(t, err, "another connection must fail even for an active Session")
+	require.Error(t, err)
 
 	// Restore the control plane without replacing the data stream or Session.
 	restoredAt := time.Now().UTC()

@@ -101,7 +101,7 @@ func TestSessionAuthorizationSeparatesSnapshotAndConnectionDeadlines(t *testing.
 	require.NoError(t, cache.Apply(snapshot, now))
 	require.NoError(t, cache.Apply(replay, now))
 	_, allowed := cache.Permission(permission.SessionID, now.Add(31*time.Second))
-	require.False(t, allowed, "expired snapshots must not admit new connections")
+	require.True(t, allowed, "cached Session permissions outlive the transport envelope")
 	s.authorizationSnapshotStates[input.TechnicalResourceID].validUntil = now
 	renewed := s.toProtoAuthorizationSnapshot(input, true)
 	require.Greater(t, renewed.Revision, snapshot.Revision)

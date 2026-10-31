@@ -715,19 +715,33 @@ func loadTenantResourceChainForTarget(tx *gorm.DB, tenantID, resourceID, targetR
 	for i := range sources {
 		candidate := tenantResourceChain{Resource: chain.Resource, Source: sources[i]}
 		if err := tx.First(&candidate.Observation, "id = ?", sources[i].WorkloadObservationID).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
 			continue
 		}
 		if err := tx.First(&candidate.Item, "id = ?", sources[i].AllocationItemID).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
 			continue
 		}
 		if err := tx.First(&candidate.Allocation, "id = ? AND tenant_id = ?", candidate.Item.AllocationID, tenantID).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
 			continue
 		}
 		if err := tx.First(&candidate.Scope, "id = ?", candidate.Item.ScopeID).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
 			continue
 		}
 		if candidate.Scope.NamespaceObservationID != nil {
-			_ = tx.First(&candidate.Namespace, "id = ?", *candidate.Scope.NamespaceObservationID).Error
+			if err := tx.First(&candidate.Namespace, "id = ?", *candidate.Scope.NamespaceObservationID).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
 		}
 		targetQuery := tx.Where("tenant_resource_source_id = ? AND superseded_at IS NULL", sources[i].ID)
 		if targetRevisionID != "" {
@@ -735,6 +749,12 @@ func loadTenantResourceChainForTarget(tx *gorm.DB, tenantID, resourceID, targetR
 		}
 		targetQuery = targetQuery.Order("revision DESC")
 		if err := targetQuery.First(&candidate.Target).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
 			if requireTrusted {
 				continue
 			}
@@ -765,6 +785,9 @@ func loadTenantResourceChainForTarget(tx *gorm.DB, tenantID, resourceID, targetR
 		}
 		if err := tx.Where("workload_observation_id = ? AND source_technical_resource_id = ?",
 			candidate.Observation.ID, candidate.Target.SourceTechnicalResourceID).First(&candidate.Evidence).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
 			continue
 		}
 		if candidate.Evidence.State != model.WorkloadObservationSourceObserved || !candidate.Evidence.Ready ||
@@ -773,6 +796,9 @@ func loadTenantResourceChainForTarget(tx *gorm.DB, tenantID, resourceID, targetR
 		}
 		var technical model.TechnicalResource
 		if err := tx.First(&technical, "id = ?", candidate.Target.AccessTechnicalResourceID).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
 			continue
 		}
 		valid, err := workloadTechnicalResourceBindingCurrent(tx, &technical)

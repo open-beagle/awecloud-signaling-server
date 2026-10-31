@@ -78,8 +78,11 @@ func TestSessionAuthorizationCacheRejectsConflictsAndExpiresLocally(t *testing.T
 	snapshot := signedSessionSnapshot(t, 2, now, sessionPermission(now, "session-a", "resource-a", "alice", 7001, 50200))
 	require.NoError(t, cache.Apply(snapshot, now))
 	_, allowed := cache.ResolveContainerSSH(50200, "alice", 7001, now.Add(31*time.Second))
+	require.True(t, allowed)
+	require.Len(t, cache.Permissions(now.Add(31*time.Second)), 1)
+	_, allowed = cache.Permission("session-a", now.Add(time.Minute))
 	require.False(t, allowed)
-	require.Empty(t, cache.Permissions(now.Add(31*time.Second)))
+	require.Empty(t, cache.Permissions(now.Add(time.Minute)))
 
 	expired := signedSessionSnapshot(t, 3, now.Add(-time.Minute), sessionPermission(now.Add(-time.Minute), "session-c", "resource-c", "carol", 7003, 50202))
 	require.ErrorIs(t, cache.Apply(expired, now), ErrSessionSnapshotExpired)
@@ -125,4 +128,38 @@ func sessionPermission(now time.Time, sessionID, resourceID, userName string, no
 			NamespaceUid: "namespace-uid", NamespaceName: "dev", WorkloadUid: "workload-a", PodName: "ide-0", PodUid: "pod-a", ContainerName: "workspace",
 		},
 	}
+}
+
+func TestCachedSessionOfflineAdmissionBoundaries(t *testing.T) {
+	now := time.Now().UTC()
+	cache := NewSessionAuthorizationCache()
+	permission := sessionPermission(now, "session-offline", "resource-a", "alice", 7001, 50200)
+	original := signedSessionSnapshot(t, 1, now, permission)
+	require.NoError(t, cache.Apply(original, now))
+	offline := now.Add(31 * time.Second)
+	require.True(t, cache.Enabled(offline))
+	require.True(t, cache.HasContainerSSHRoute(50200, offline))
+	_, ok := cache.ResolveContainerSSH(50200, "alice", 7001, offline)
+	require.True(t, ok)
+	for _, identity := range []struct {
+		user string
+		node uint64
+	}{{"bob", 7001}, {"alice", 7002}} {
+		_, ok = cache.ResolveContainerSSH(50200, identity.user, identity.node, offline)
+		require.False(t, ok)
+	}
+	_, ok = cache.Permission("unknown", offline)
+	require.False(t, ok)
+	require.ErrorIs(t, cache.Apply(original, offline), ErrSessionSnapshotExpired)
+	require.False(t, cache.HasContainerSSHRoute(50200, now.Add(time.Minute)))
+	// Even a command accompanied by a permission must immediately deny new sockets.
+	revoked := signedSessionSnapshot(t, 2, now, permission)
+	revoked.PayloadHash = ""
+	revoked.TerminationCommands = []*pb.ResourceSessionTerminationCommandV2{{SessionId: permission.SessionId, CommandRevision: 1, ReasonCode: "REVOKED"}}
+	require.NoError(t, cache.Apply(signExistingSessionSnapshot(t, revoked), now))
+	_, ok = cache.Permission(permission.SessionId, offline)
+	require.False(t, ok)
+	require.False(t, cache.HasContainerSSHRoute(50200, offline))
+	require.ErrorIs(t, cache.Apply(original, now), ErrSessionSnapshotRevisionRollback)
+	require.Empty(t, cache.Permissions(offline))
 }
