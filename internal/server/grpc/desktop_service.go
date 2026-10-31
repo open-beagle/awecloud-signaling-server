@@ -1762,10 +1762,19 @@ func (s *DesktopServiceServer) queryTunnelContainerServicesGRPC(ctx context.Cont
 	var targetAgentNode model.Node
 	if err := db.DB.WithContext(ctx).
 		Where("name = ? AND type = ?", deployToken.TargetAgentName, model.NodeTypeAgent).
-		First(&targetAgentNode).Error; err != nil || targetAgentNode.IP == "" {
-		logger.Warnf("[Tunnel] 无法解析目标 Agent 节点或 IP: target=%s err=%v", deployToken.TargetAgentName, err)
+		First(&targetAgentNode).Error; err != nil {
+		logger.Warnf("[Tunnel] 无法解析目标 Agent 节点: target=%s err=%v", deployToken.TargetAgentName, err)
 		return nil
 	}
+	// Heartbeats update NodeStatus immediately; Node.IP is persisted only every
+	// five minutes and is cleared on disconnect. Never use that delayed address
+	// for discovery or resurrect it after the live connection has disappeared.
+	nodeStatus, online := cache.GetNodeStatus(targetAgentNode.ID)
+	if !online || nodeStatus.UserID != targetAgentNode.UserID || nodeStatus.TunnelIP == "" ||
+		time.Since(nodeStatus.LastHeartbeat) >= 60*time.Second {
+		return nil
+	}
+	targetAgentNode.IP = nodeStatus.TunnelIP
 
 	savedReq, err := service.ParseTunnelPortsConfig(deployToken.PortsConfig)
 	if err != nil {

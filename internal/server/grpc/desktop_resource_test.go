@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/cache"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
@@ -506,6 +507,8 @@ func TestQueryTunnelContainerServicesGRPC(t *testing.T) {
 	}
 	require.NoError(t, database.Create(&deployToken).Error)
 
+	cache.SetNodeStatus(targetAgentNode.ID, cache.NodeStatus{NodeID: targetAgentNode.ID, UserID: agentUser.ID, TunnelIP: targetAgentNode.IP, LastHeartbeat: time.Now()})
+	t.Cleanup(func() { cache.DeleteNodeStatus(targetAgentNode.ID) })
 	server := &DesktopServiceServer{}
 	services := server.queryTunnelContainerServicesGRPC(context.Background(), &tunnelDesktopNode)
 	// 2 complete services + 1 k8s-api; incomplete service is skipped
@@ -538,4 +541,37 @@ func TestQueryTunnelContainerServicesGRPC(t *testing.T) {
 	require.Equal(t, uint32(50051), services[2].SvcProxyPort)
 	require.Equal(t, "svc-clash-uid", services[2].ServiceUid)
 	require.Equal(t, "controller", services[2].PortName)
+
+	// Disconnect clears the persisted address. A new heartbeat is authoritative
+	// before the runtime store's five-minute persistence cycle ever runs.
+	require.NoError(t, database.Model(&targetAgentNode).Update("ip", "").Error)
+	reconnected := cache.NodeStatus{NodeID: targetAgentNode.ID, UserID: agentUser.ID, TunnelIP: "100.64.0.100", LastHeartbeat: time.Now()}
+	cache.SetNodeStatus(targetAgentNode.ID, reconnected)
+	services = server.queryTunnelContainerServicesGRPC(context.Background(), &tunnelDesktopNode)
+	require.Len(t, services, 3)
+	for _, item := range services {
+		require.Equal(t, reconnected.TunnelIP, item.AgentIp)
+	}
+	var persisted model.Node
+	require.NoError(t, database.First(&persisted, targetAgentNode.ID).Error)
+	require.Empty(t, persisted.IP, "discovery must not need or perform a database flush")
+
+	// A stale persisted address must never override the latest heartbeat.
+	require.NoError(t, database.Model(&targetAgentNode).Update("ip", "100.64.0.99").Error)
+	for _, item := range server.queryTunnelContainerServicesGRPC(context.Background(), &tunnelDesktopNode) {
+		require.Equal(t, reconnected.TunnelIP, item.AgentIp)
+	}
+	for _, state := range []cache.NodeStatus{
+		{NodeID: targetAgentNode.ID, UserID: agentUser.ID, TunnelIP: reconnected.TunnelIP, LastHeartbeat: time.Now().Add(-61 * time.Second)},
+		{NodeID: targetAgentNode.ID, UserID: agentUser.ID, LastHeartbeat: time.Now()},
+		{NodeID: targetAgentNode.ID, UserID: tunnelUser.ID, TunnelIP: reconnected.TunnelIP, LastHeartbeat: time.Now()},
+	} {
+		cache.SetNodeStatus(targetAgentNode.ID, state)
+		require.Empty(t, server.queryTunnelContainerServicesGRPC(context.Background(), &tunnelDesktopNode))
+	}
+	cache.DeleteNodeStatus(targetAgentNode.ID)
+	require.Empty(t, server.queryTunnelContainerServicesGRPC(context.Background(), &tunnelDesktopNode), "disconnected cache must not fall back to a stale database IP")
+	cache.SetNodeStatus(targetAgentNode.ID, reconnected)
+	require.NoError(t, database.Model(&deployToken).Update("status", model.DeployTokenStatusRevoked).Error)
+	require.Empty(t, server.queryTunnelContainerServicesGRPC(context.Background(), &tunnelDesktopNode), "live address does not bypass revoked tunnel authorization")
 }
