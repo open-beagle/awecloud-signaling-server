@@ -24,7 +24,6 @@ var (
 	ErrResourceSessionStateTransition     = errors.New("resource session state transition is invalid")
 )
 
-const resourceSessionSnapshotTTL = 30 * time.Second
 const resourceSessionDeviceHeartbeatTTL = 2 * time.Minute
 
 type ResourceSessionView struct {

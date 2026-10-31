@@ -5,12 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/config"
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
@@ -29,6 +31,21 @@ const (
 type sessionAuthorizationHeartbeatAcks struct {
 	direct   []*pb.ResourceSessionEventAckV2
 	endpoint map[string][]*pb.ResourceSessionEventAckV2
+}
+
+// NotifySessionAuthorizationChange wakes each connected Agent after a management
+// write commits. Notifications coalesce; the receiver rebuilds the full trusted
+// snapshot, including Endpoint permissions and durable termination commands.
+// The periodic push remains a fallback for retries and background state changes.
+func (s *AgentServiceServer) NotifySessionAuthorizationChange() {
+	s.connMutex.RLock()
+	defer s.connMutex.RUnlock()
+	for _, conn := range s.connections {
+		select {
+		case conn.authorizationChanged <- struct{}{}:
+		default:
+		}
+	}
 }
 
 type authorizationSnapshotState struct {
@@ -174,6 +191,8 @@ func (s *AgentServiceServer) appendSessionAuthorizationResponse(ctx context.Cont
 				s.appendTunnelAuthorizationPermissions(ctx, conn.NodeID, snapshot)
 				resp.AuthorizationSnapshotV2 = s.toProtoAuthorizationSnapshot(snapshot, includePermissions)
 			}
+		} else if errors.Is(err, service.ErrSessionAuthorizationSourceDenied) && technical != nil {
+			resp.AuthorizationSnapshotV2 = s.toProtoAuthorizationSnapshot(&service.SessionAuthorizationSnapshot{TechnicalResourceID: technical.ID}, includePermissions)
 		}
 		if acks != nil {
 			resp.ResourceSessionEventAcksV2 = acks.direct
@@ -194,6 +213,8 @@ func (s *AgentServiceServer) appendSessionAuthorizationResponse(ctx context.Cont
 			} else {
 				wrapper.Snapshot = s.toProtoAuthorizationSnapshot(snapshot, includePermissions)
 			}
+		} else if errors.Is(err, service.ErrSessionAuthorizationSourceDenied) && technical != nil {
+			wrapper.Snapshot = s.toProtoAuthorizationSnapshot(&service.SessionAuthorizationSnapshot{TechnicalResourceID: technical.ID}, includePermissions)
 		}
 		resp.EndpointAuthorizationSnapshotsV2 = append(resp.EndpointAuthorizationSnapshotsV2, wrapper)
 	}
@@ -257,13 +278,13 @@ func (s *AgentServiceServer) appendTunnelAuthorizationPermissions(ctx context.Co
 				AuthorizationRevision: 1,
 				ValidUntil:            now.Add(30 * time.Minute),
 				Target: service.SessionAuthorizationTarget{
-					NamespaceUID: p.NamespaceUID,
+					NamespaceUID:  p.NamespaceUID,
 					NamespaceName: p.Namespace,
-					ServiceUID:   p.ServiceUID,
-					ServiceName:  p.ServiceName,
-					PortName:     p.PortName,
-					PortNumber:   p.PortNumber,
-					Protocol:     p.Protocol,
+					ServiceUID:    p.ServiceUID,
+					ServiceName:   p.ServiceName,
+					PortName:      p.PortName,
+					PortNumber:    p.PortNumber,
+					Protocol:      p.Protocol,
 				},
 			})
 		}
@@ -300,10 +321,17 @@ func (s *AgentServiceServer) sessionAuthorizationPermissionsEnabled() bool {
 
 func (s *AgentServiceServer) resolveEndpointTechnicalResource(ctx context.Context, agentID uint64, endpointName string) (*model.TechnicalResource, error) {
 	var endpoint model.Endpoint
-	if err := db.DB.WithContext(ctx).Where("user_id = ? AND name = ? AND revoked = ?", agentID, endpointName, false).First(&endpoint).Error; err != nil {
-		return nil, service.ErrSessionAuthorizationSourceDenied
+	if err := db.DB.WithContext(ctx).Where("user_id = ? AND name = ?", agentID, endpointName).First(&endpoint).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return &model.TechnicalResource{ID: fmt.Sprintf("unbound-endpoint:%d:%s", agentID, endpointName)}, service.ErrSessionAuthorizationSourceDenied
+		}
+		return nil, err
 	}
-	return s.sessionAuthorization.ResolveTechnicalResource(ctx, model.TechnicalResourceBindingLegacyEndpoint, endpoint.ID)
+	technical, err := s.sessionAuthorization.ResolveTechnicalResource(ctx, model.TechnicalResourceBindingLegacyEndpoint, endpoint.ID)
+	if err == nil && endpoint.Revoked {
+		return technical, service.ErrSessionAuthorizationSourceDenied
+	}
+	return technical, err
 }
 
 func (s *AgentServiceServer) toProtoAuthorizationSnapshot(snapshot *service.SessionAuthorizationSnapshot, enforceV2 bool) *pb.ResourceSessionAuthorizationSnapshotV2 {

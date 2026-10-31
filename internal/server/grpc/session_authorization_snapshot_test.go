@@ -65,6 +65,50 @@ func TestTerminationCommandsRequestImmediateAgentReport(t *testing.T) {
 	}
 }
 
+func TestSessionAuthorizationChangeWakesAllStreamsWithoutBlocking(t *testing.T) {
+	first, second := make(chan struct{}, 1), make(chan struct{}, 1)
+	s := &AgentServiceServer{connections: map[uint64]*AgentConnection{
+		1: {authorizationChanged: first},
+		2: {authorizationChanged: second},
+		3: {}, // A legacy/test connection without a notification channel.
+	}}
+	s.NotifySessionAuthorizationChange()
+	s.NotifySessionAuthorizationChange() // Coalesce while the stream is busy.
+	for _, ch := range []chan struct{}{first, second} {
+		select {
+		case <-ch:
+		default:
+			t.Fatal("connected stream was not woken immediately")
+		}
+		require.Empty(t, ch)
+	}
+}
+
+func TestSessionAuthorizationSeparatesSnapshotAndConnectionDeadlines(t *testing.T) {
+	now := time.Now().UTC()
+	s := &AgentServiceServer{authorizationSnapshotStates: make(map[string]*authorizationSnapshotState)}
+	permission := testSessionAuthorizationPermission(now, "session-a", "resource-a", "alice", 7001)
+	permission.ValidUntil = now.Add(time.Hour)
+	input := &service.SessionAuthorizationSnapshot{TechnicalResourceID: "technical-a", Permissions: []service.SessionAuthorizationPermission{permission}}
+	snapshot := s.toProtoAuthorizationSnapshot(input, true)
+	require.WithinDuration(t, now.Add(30*time.Second), snapshot.ValidUntil.AsTime(), time.Second)
+	require.Equal(t, permission.ValidUntil, snapshot.Permissions[0].ValidUntil.AsTime())
+	// An unchanged permission reuses the same signed envelope, without a hash
+	// conflict. Renewal changes only the envelope when its refresh is due.
+	replay := s.toProtoAuthorizationSnapshot(input, true)
+	require.Equal(t, snapshot.PayloadHash, replay.PayloadHash)
+	cache := agent.NewSessionAuthorizationCache()
+	require.NoError(t, cache.Apply(snapshot, now))
+	require.NoError(t, cache.Apply(replay, now))
+	_, allowed := cache.Permission(permission.SessionID, now.Add(31*time.Second))
+	require.False(t, allowed, "expired snapshots must not admit new connections")
+	s.authorizationSnapshotStates[input.TechnicalResourceID].validUntil = now
+	renewed := s.toProtoAuthorizationSnapshot(input, true)
+	require.Greater(t, renewed.Revision, snapshot.Revision)
+	require.NoError(t, cache.Apply(renewed, time.Now().UTC()))
+	require.Equal(t, permission.ValidUntil, renewed.Permissions[0].ValidUntil.AsTime())
+}
+
 func testSessionAuthorizationPermission(now time.Time, sessionID, resourceID, userName string, nodeID uint64) service.SessionAuthorizationPermission {
 	return service.SessionAuthorizationPermission{
 		SessionID: sessionID, TenantID: "tenant-a", ResourceID: resourceID, SourceID: "source-a", TargetRevisionID: "target-" + resourceID,

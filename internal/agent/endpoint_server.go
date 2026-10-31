@@ -56,7 +56,8 @@ type EndpointConnection struct {
 	K8SAPIPort uint16 // K8SAPI 代理端口（0 表示未分配）
 
 	// Heartbeat 流（用于直接调用 Endpoint RPC）
-	HeartbeatStream pb.EndpointService_HeartbeatServer
+	HeartbeatStream      pb.EndpointService_HeartbeatServer
+	authorizationChanged chan struct{}
 }
 
 // shellSession 等待中的 shell 会话（Agent 创建，等待 Endpoint 回调）
@@ -237,7 +238,6 @@ func (s *EndpointServer) SetSessionAuthorizationSnapshots(wrappers []*pb.Endpoin
 	nextSnapshots := make(map[string]*pb.EndpointSessionAuthorizationSnapshotV2)
 	nextCaches := make(map[string]*SessionAuthorizationCache)
 	s.authorizationMutex.Lock()
-	defer s.authorizationMutex.Unlock()
 	for _, wrapper := range wrappers {
 		if wrapper == nil || wrapper.EndpointName == "" {
 			continue
@@ -267,6 +267,19 @@ func (s *EndpointServer) SetSessionAuthorizationSnapshots(wrappers []*pb.Endpoin
 	}
 	s.authorizationSnapshots = nextSnapshots
 	s.authorizationCaches = nextCaches
+	s.authorizationMutex.Unlock()
+	// Forward trusted policy changes without waiting for the Endpoint's next
+	// heartbeat. The heartbeat loop owns the send, so this cannot race its reply.
+	s.connMutex.RLock()
+	defer s.connMutex.RUnlock()
+	for name := range nextSnapshots {
+		if conn := s.connections[name]; conn != nil {
+			select {
+			case conn.authorizationChanged <- struct{}{}:
+			default:
+			}
+		}
+	}
 }
 
 func (s *EndpointServer) SessionAuthorizationReports() []*pb.EndpointSessionAuthorizationReportV2 {
@@ -622,7 +635,8 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 		K8SServiceLabelSelector: firstReq.K8SserviceLabelSelector,
 		K8SServiceNamespaces:    firstReq.K8SserviceNamespaces,
 		// Heartbeat 流（用于直接调用 Endpoint RPC）
-		HeartbeatStream: stream,
+		HeartbeatStream:      stream,
+		authorizationChanged: make(chan struct{}, 1),
 	}
 
 	s.connMutex.Lock()
@@ -694,19 +708,43 @@ func (s *EndpointServer) Heartbeat(stream pb.EndpointService_HeartbeatServer) er
 		return err
 	}
 
-	// 持续接收心跳
+	recvRequests := make(chan *pb.EndpointHeartbeatRequest)
+	recvErrors := make(chan error, 1)
+	go func() {
+		for {
+			req, recvErr := stream.Recv()
+			if recvErr != nil {
+				recvErrors <- recvErr
+				return
+			}
+			select {
+			case recvRequests <- req:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	protocol := firstReq.SessionAuthorizationProtocol
+	// 持续接收心跳，同时立即转发控制面的授权更新。
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-s.ctx.Done():
 			return nil
-		default:
-			req, err := stream.Recv()
-			if err != nil {
+		case err := <-recvErrors:
+			return err
+		case <-conn.authorizationChanged:
+			if protocol != sessionAuthorizationProtocolV2 {
+				continue
+			}
+			resp := &pb.EndpointHeartbeatResponse{Success: true}
+			s.appendSessionAuthorizationResponse(name, resp)
+			if err := stream.Send(resp); err != nil {
 				return err
 			}
-
+		case req := <-recvRequests:
+			protocol = req.SessionAuthorizationProtocol
 			conn.LastSeen = time.Now()
 			conn.Version = req.Version
 			conn.CommitID = req.CommitId

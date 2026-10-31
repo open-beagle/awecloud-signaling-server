@@ -31,7 +31,7 @@ type tenantResourceAPIFixture struct {
 	desktop      model.Node
 }
 
-func prepareTenantResourceAPIFixture(t *testing.T) tenantResourceAPIFixture {
+func prepareTenantResourceAPIFixture(t *testing.T, notifiers ...SessionAuthorizationNotifier) tenantResourceAPIFixture {
 	t.Helper()
 	fixture := newManagementContextAPIFixture(t)
 	require.NoError(t, fixture.database.AutoMigrate(
@@ -167,6 +167,9 @@ func prepareTenantResourceAPIFixture(t *testing.T) tenantResourceAPIFixture {
 	management.Use(AuthMiddleware(fixture.config.Security.JWTSecret, false))
 	management.Use(RequireFeatureFlag(flags, config.FeatureManagementContextV2, false))
 	management.Use(UnifiedManagementIdentityMiddleware())
+	for _, notifier := range notifiers {
+		management.Use(NotifySessionAuthorizationAfterWrite(notifier))
+	}
 	tenant := management.Group("/tenants/:tenant_id")
 	tenant.Use(RequireFeatureFlag(flags, config.FeatureTenantResourceReadV2, false))
 	resourceAPI := NewTenantResourceManagementAPI(service.NewWorkloadSnapshotStore())
@@ -472,7 +475,13 @@ func TestTenantResourcePublishRollsBackBusinessOutboxAndReviewWhenAuditFails(t *
 }
 
 func TestTenantGrantSuspensionEndsSessionsAndRevokedGrantNeverResumes(t *testing.T) {
-	fixture := prepareTenantResourceAPIFixture(t)
+	var fixture tenantResourceAPIFixture
+	var verifyNotification func()
+	fixture = prepareTenantResourceAPIFixture(t, authorizationNotifyFunc(func() {
+		if verifyNotification != nil {
+			verifyNotification()
+		}
+	}))
 	publishPath := "/api/v1/management/tenants/" + fixture.tenant.ID + "/resource-candidates/" + fixture.resource.ID + "/publish"
 	require.Equal(t, http.StatusOK, tenantAPIRequest(fixture, http.MethodPost, publishPath,
 		`{"observation_revision":1,"reason":"approved"}`, map[string]string{HeaderIfMatch: `"1"`, HeaderIdempotencyKey: "grant-flow-publish"}).Code)
@@ -503,8 +512,21 @@ func TestTenantGrantSuspensionEndsSessionsAndRevokedGrantNeverResumes(t *testing
 	require.NoError(t, json.Unmarshal(createdSession.Body.Bytes(), &sessionResponse))
 
 	suspendHeaders := map[string]string{HeaderIfMatch: `"1"`, HeaderIdempotencyKey: "grant-flow-suspend"}
+	notifications := 0
+	verifyNotification = func() {
+		var committedGrant model.TenantAccessGrant
+		require.NoError(t, fixture.database.First(&committedGrant, "id = ?", grantID).Error)
+		require.Equal(t, model.TenantAccessGrantSuspended, committedGrant.Status)
+		var commandCount int64
+		require.NoError(t, fixture.database.Model(&model.ResourceSessionTermination{}).
+			Where("session_id = ?", sessionResponse.Data.Result.ID).Count(&commandCount).Error)
+		require.Equal(t, int64(1), commandCount, "termination must be committed before waking the stream")
+		notifications++
+	}
 	suspend := tenantAPIRequest(fixture, http.MethodPost, grantPath+"/"+grantID+"/suspend", `{"reason":"security review"}`, suspendHeaders)
 	require.Equal(t, http.StatusOK, suspend.Code, suspend.Body.String())
+	require.Equal(t, 1, notifications, "successful revocation must notify before the request returns")
+	verifyNotification = nil
 	replayedSuspend := tenantAPIRequest(fixture, http.MethodPost, grantPath+"/"+grantID+"/suspend", `{"reason":"security review"}`, suspendHeaders)
 	require.Equal(t, http.StatusOK, replayedSuspend.Code, replayedSuspend.Body.String())
 	require.JSONEq(t, suspend.Body.String(), replayedSuspend.Body.String())

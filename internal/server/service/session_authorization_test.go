@@ -2,15 +2,39 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	serverdb "github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
+
+func TestSessionAuthorizationDistinguishesRevokedSourceFromUnavailableDatabase(t *testing.T) {
+	fixture := newTenantManagementConstraintFixture(t)
+	database := serverdb.DB
+	var binding model.TechnicalResourceBinding
+	require.NoError(t, database.Where("technical_resource_id = ?", fixture.technical.ID).First(&binding).Error)
+	authorizer := NewSessionAuthorizationService(database)
+	resolved, err := authorizer.ResolveTechnicalResource(context.Background(), binding.SourceType, binding.SourceID)
+	require.NoError(t, err)
+	require.Equal(t, fixture.technical.ID, resolved.ID)
+	require.NoError(t, database.Model(&binding).Updates(map[string]any{"enabled": false, "row_version": gorm.Expr("row_version + 1")}).Error)
+	resolved, err = authorizer.ResolveTechnicalResource(context.Background(), binding.SourceType, binding.SourceID)
+	require.ErrorIs(t, err, ErrSessionAuthorizationSourceDenied)
+	require.Equal(t, fixture.technical.ID, resolved.ID, "revoked sources need an empty snapshot with the original identity")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = authorizer.ResolveTechnicalResource(ctx, binding.SourceType, binding.SourceID)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotErrorIs(t, err, ErrSessionAuthorizationSourceDenied)
+	_, err = authorizer.ResolveTechnicalResource(context.Background(), binding.SourceType, fmt.Sprint(99999999))
+	require.ErrorIs(t, err, ErrSessionAuthorizationSourceDenied)
+}
 
 func TestSessionAuthorizationBuildsTrustedSnapshotAndReliableTermination(t *testing.T) {
 	fixture := newTenantManagementConstraintFixture(t)
@@ -36,7 +60,7 @@ func TestSessionAuthorizationBuildsTrustedSnapshotAndReliableTermination(t *test
 	require.Equal(t, "trigger-service", permission.Target.ServiceUID)
 	require.Equal(t, int32(443), permission.Target.PortNumber)
 	require.Equal(t, "TCP", permission.Target.Protocol)
-	require.Equal(t, fixture.now.Add(31*time.Second), permission.ValidUntil)
+	require.Equal(t, session.StartedAt.Add(time.Hour), permission.ValidUntil)
 	var renewed model.ResourceSession
 	require.NoError(t, database.First(&renewed, "id = ?", session.ID).Error)
 	require.Equal(t, session.StartedAt.Add(time.Hour), renewed.ValidUntil)
@@ -167,6 +191,48 @@ func TestSessionAuthorizationRenewalKeepsOriginalMaximumSessionDeadline(t *testi
 	require.NoError(t, err)
 	require.Len(t, snapshot.Permissions, 1)
 	require.Equal(t, session.StartedAt.Add(10*time.Second), snapshot.Permissions[0].ValidUntil)
+}
+
+func TestSessionAuthorizationPermissionHonorsRealChainDeadlines(t *testing.T) {
+	for _, boundary := range []string{"grant", "membership", "allocation", "namespace"} {
+		t.Run(boundary, func(t *testing.T) {
+			fixture := newTenantManagementConstraintFixture(t)
+			database := serverdb.DB
+			require.NoError(t, database.Model(&model.Node{}).Where("id = ?", fixture.desktop.ID).Update("headscale_node_id", uint64(9905)).Error)
+			deadline := fixture.now.Add(10 * time.Minute)
+			switch boundary {
+			case "grant":
+				require.NoError(t, database.Model(&model.TenantAccessGrant{}).Where("id = ?", fixture.grant.ID).Updates(map[string]any{
+					"expires_at": deadline, "revision": gorm.Expr("revision + 1"), "row_version": gorm.Expr("row_version + 1"),
+				}).Error)
+			case "membership":
+				require.NoError(t, database.Model(&model.TenantMembership{}).Where("id = ?", fixture.membership.ID).Update("expires_at", deadline).Error)
+			case "allocation":
+				// Active allocations are immutable. Extend the other limits so the
+				// fixture's original one-hour allocation is the earliest deadline.
+				deadline = fixture.now.Add(time.Hour)
+				require.NoError(t, database.Model(&model.TenantAccessGrant{}).Where("id = ?", fixture.grant.ID).Updates(map[string]any{
+					"max_session_seconds": 7200, "revision": gorm.Expr("revision + 1"), "row_version": gorm.Expr("row_version + 1"),
+				}).Error)
+				require.NoError(t, database.Model(&model.NamespaceObservation{}).Where("namespace_uid = ?", "tenant-trigger-namespace-uid").Update("lease_expires_at", fixture.now.Add(2*time.Hour)).Error)
+			case "namespace":
+				require.NoError(t, database.Model(&model.NamespaceObservation{}).Where("namespace_uid = ?", "tenant-trigger-namespace-uid").Update("lease_expires_at", deadline).Error)
+			}
+			session := fixture.session(uuid.NewString())
+			if boundary == "grant" || boundary == "allocation" {
+				session.GrantRevision++
+			}
+			require.NoError(t, database.Create(&session).Error)
+			authorizer := NewSessionAuthorizationService(database)
+			for _, elapsed := range []time.Duration{time.Second, time.Minute} {
+				authorizer.now = func() time.Time { return fixture.now.Add(elapsed) }
+				snapshot, err := authorizer.BuildSnapshot(context.Background(), fixture.technical.ID, true)
+				require.NoError(t, err)
+				require.Len(t, snapshot.Permissions, 1)
+				require.Equal(t, deadline, snapshot.Permissions[0].ValidUntil)
+			}
+		})
+	}
 }
 
 func TestSessionAuthorizationEventsAreIdempotentAndTerminalStateWins(t *testing.T) {

@@ -497,6 +497,7 @@ func (s *Server) setupRouter() *gin.Engine {
 			managementGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret, s.config.Security.AllowLocalhostAdminDebug))
 			managementGroup.Use(api.RequireFeatureFlag(s.config.FeatureFlags, config.FeatureManagementContextV2, false))
 			managementGroup.Use(api.UnifiedManagementIdentityMiddleware())
+			managementGroup.Use(api.NotifySessionAuthorizationAfterWrite(s.agentService))
 			{
 				managementContextAPI := api.NewManagementContextAPI()
 				managementGroup.GET("/contexts", managementContextAPI.List)
@@ -640,6 +641,7 @@ func (s *Server) setupRouter() *gin.Engine {
 				adminAuthGroup.Use(api.AuthMiddleware(s.config.Security.JWTSecret, s.config.Security.AllowLocalhostAdminDebug))
 				adminAuthGroup.Use(api.ForbidUserSimulation())
 				adminAuthGroup.Use(api.ManagementAuthorizationMiddleware())
+				adminAuthGroup.Use(api.NotifySessionAuthorizationAfterWrite(s.agentService))
 				{
 					adminAuthGroup.GET("/auth/me", adminAPI.GetMe)
 					adminAuthGroup.PUT("/auth/password", adminAPI.ChangePassword)

@@ -118,15 +118,23 @@ func (s *SessionAuthorizationService) ResolveTechnicalResource(ctx context.Conte
 		return nil, ErrSessionAuthorizationInvalidInput
 	}
 	var binding model.TechnicalResourceBinding
-	if err := s.db.WithContext(ctx).Where("source_type = ? AND source_id = ? AND enabled = ?", sourceType, strings.TrimSpace(sourceID), true).First(&binding).Error; err != nil {
-		return nil, ErrSessionAuthorizationSourceDenied
+	if err := s.db.WithContext(ctx).Where("source_type = ? AND source_id = ?", sourceType, strings.TrimSpace(sourceID)).First(&binding).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return &model.TechnicalResource{ID: fmt.Sprintf("unbound:%s:%s", sourceType, sourceID)}, ErrSessionAuthorizationSourceDenied
+		}
+		return nil, err
 	}
 	var technical model.TechnicalResource
-	if err := s.db.WithContext(ctx).Where("id = ? AND lifecycle_state = ?", binding.TechnicalResourceID, model.TechnicalResourceRegistered).First(&technical).Error; err != nil {
-		return nil, ErrSessionAuthorizationSourceDenied
+	if err := s.db.WithContext(ctx).Where("id = ?", binding.TechnicalResourceID).First(&technical).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return &model.TechnicalResource{ID: binding.TechnicalResourceID}, ErrSessionAuthorizationSourceDenied
+		}
+		return nil, err
 	}
-	if technical.CredentialRevision != binding.CredentialRevision {
-		return nil, ErrSessionAuthorizationSourceDenied
+	if !binding.Enabled || technical.LifecycleState != model.TechnicalResourceRegistered || technical.CredentialRevision != binding.CredentialRevision {
+		// Retain the identity so the sender can explicitly revoke the previous
+		// view. A DB/transport error above is not an authoritative revocation.
+		return &technical, ErrSessionAuthorizationSourceDenied
 	}
 	return &technical, nil
 }
@@ -310,10 +318,9 @@ func (s *SessionAuthorizationService) revalidateSession(tx *gorm.DB, session *mo
 		session.ValidUntil = sessionValidUntil
 		session.RowVersion++
 	}
-	permissionValidUntil := now.Add(resourceSessionSnapshotTTL)
-	if sessionValidUntil.Before(permissionValidUntil) {
-		permissionValidUntil = sessionValidUntil
-	}
+	// Permission expiry is the real authorization deadline for active connections.
+	// The transport snapshot has its own short TTL for admitting new connections;
+	// losing that snapshot must not revoke an already authorized data stream.
 	var target SessionAuthorizationTarget
 	if err := json.Unmarshal([]byte(chain.Target.TargetSnapshot), &target); err != nil {
 		return nil, sessionAuthorizationInvalidCode, nil
@@ -331,7 +338,7 @@ func (s *SessionAuthorizationService) revalidateSession(tx *gorm.DB, session *mo
 		UserID: session.UserID, UserName: user.Name, DeviceID: session.DeviceID, DeviceHeadscaleNodeID: device.HeadscaleNodeID,
 		ResourceType: chain.Resource.Type, Action: session.Action, AllocationID: session.AllocationID,
 		GrantID: session.GrantID, GrantRevision: session.GrantRevision,
-		AuthorizationRevision: session.AuthorizationRevision, ValidUntil: permissionValidUntil, SSHUsers: sshUsers, Target: target,
+		AuthorizationRevision: session.AuthorizationRevision, ValidUntil: sessionValidUntil, SSHUsers: sshUsers, Target: target,
 	}, "", nil
 }
 

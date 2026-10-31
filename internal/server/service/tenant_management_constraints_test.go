@@ -327,7 +327,7 @@ func TestResourceSessionEnsureForDesktopReusesSessionAfterSnapshotExpires(t *tes
 	require.NoError(t, err)
 	require.Equal(t, fixture.now.Add(time.Hour), first.ValidUntil)
 
-	service.now = func() time.Time { return fixture.now.Add(resourceSessionSnapshotTTL + time.Second) }
+	service.now = func() time.Time { return fixture.now.Add(31 * time.Second) }
 	input.RequestID = "desktop-session-after-snapshot-expiry"
 	second, err := service.EnsureForDesktop(context.Background(), fixture.member.ID, input)
 	require.NoError(t, err)

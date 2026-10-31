@@ -65,6 +65,7 @@ type AgentConnection struct {
 	HeartbeatCount                        int // 心跳计数器，用于定期检查用户状态
 	SessionAuthorizationProtocol          string
 	EndpointSessionAuthorizationProtocols map[string]string
+	authorizationChanged                  chan struct{}
 }
 
 // AgentServiceServer Agent 服务实现
@@ -539,6 +540,7 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 		LastSeen:                              time.Now(),
 		Cancel:                                cancel,
 		EndpointSessionAuthorizationProtocols: make(map[string]string),
+		authorizationChanged:                  make(chan struct{}, 1),
 	}
 
 	s.connMutex.Lock()
@@ -674,6 +676,15 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 			}
 			if err := s.sendHeartbeatResponse(heartbeatResponseContext(ctx), stream, conn, nil); err != nil {
 				logger.Errorf("主动推送 Session 授权响应失败: %v", err)
+				return err
+			}
+		case <-conn.authorizationChanged:
+			if conn.SessionAuthorizationProtocol != sessionAuthorizationProtocolV2 && len(conn.EndpointSessionAuthorizationProtocols) == 0 {
+				continue
+			}
+			// Serialize all stream writes in this loop, including post-commit
+			// revocations; do not wait for the heartbeat or refresh ticker.
+			if err := s.sendHeartbeatResponse(heartbeatResponseContext(ctx), stream, conn, nil); err != nil {
 				return err
 			}
 		}
