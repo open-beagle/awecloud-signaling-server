@@ -134,6 +134,8 @@ func (p *NodeRuntimePersister) Flush(parentCtx context.Context) {
 			}
 			if !snapshot.LastHeartbeat.IsZero() {
 				updates["last_heartbeat"] = snapshot.LastHeartbeat
+			} else {
+				updates["last_heartbeat"] = nil
 			}
 
 			if err := tx.Model(&model.Node{}).Where("id = ?", id).Updates(updates).Error; err != nil {

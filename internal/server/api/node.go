@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,15 +17,18 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
+	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
 // NodeAPI 设备管理 API
 type NodeAPI struct {
-	config        *config.ServerConfig
-	hsClient      *headscale.Client
-	domainService *service.DomainService
-	agentService  *grpcserver.AgentServiceServer
-	runtimeStore  *cache.NodeRuntimeStore
+	config         *config.ServerConfig
+	hsClient       *headscale.Client
+	domainService  *service.DomainService
+	agentService   *grpcserver.AgentServiceServer
+	desktopService *grpcserver.DesktopServiceServer
+	aclSyncService *headscale.ACLSyncService
+	runtimeStore   *cache.NodeRuntimeStore
 }
 
 // NewNodeAPI 创建 NodeAPI
@@ -57,6 +61,16 @@ func (a *NodeAPI) SetAgentService(service *grpcserver.AgentServiceServer) {
 // SetRuntimeStore 设置 RuntimeStore
 func (a *NodeAPI) SetRuntimeStore(store *cache.NodeRuntimeStore) {
 	a.runtimeStore = store
+}
+
+// SetDesktopService 设置 DesktopService，用于推送 Desktop RDP 策略和清理在线连接
+func (a *NodeAPI) SetDesktopService(service *grpcserver.DesktopServiceServer) {
+	a.desktopService = service
+}
+
+// SetACLSyncService 设置 ACLSyncService，用于熔断或删除设备后同步清理设备级 Tag 与 ACL
+func (a *NodeAPI) SetACLSyncService(service *headscale.ACLSyncService) {
+	a.aclSyncService = service
 }
 
 // NodeUserInfo 设备关联的用户信息
@@ -610,6 +624,15 @@ func (a *NodeAPI) Delete(c *gin.Context) {
 			a.agentService.DisconnectNode(node.ID)
 		}
 		cache.DeleteNodeStatus(node.ID)
+	} else if node.Type == model.NodeTypeDesktop && db.DB.Migrator().HasTable(&model.AclDesktopRDPPermission{}) {
+		now := time.Now()
+		_ = db.DB.WithContext(ctx).Model(&model.AclDesktopRDPPermission{}).
+			Where("target_node_id = ? AND enabled = ?", node.ID, true).
+			Updates(map[string]any{
+				"enabled":       false,
+				"revoked_at":    &now,
+				"revoke_reason": "目标设备已删除",
+			}).Error
 	}
 	if a.runtimeStore != nil {
 		a.runtimeStore.DeleteNode(node.ID)
@@ -682,4 +705,191 @@ func (a *NodeAPI) RegenerateEndpointToken(c *gin.Context) {
 	recordAuditLog(ctx, c, "regenerate_endpoint_token", "node", strconv.FormatUint(id, 10), node.Name, nil)
 
 	c.JSON(http.StatusOK, NewSuccessResponse(map[string]string{"endpoint_token": token}))
+}
+
+// DesktopNodeRDPGrantSummary 平台只读展示的跨用户临时授权摘要
+type DesktopNodeRDPGrantSummary struct {
+	ID              uint64     `json:"id"`
+	TenantID        string     `json:"tenant_id"`
+	GranteeUserID   uint64     `json:"grantee_user_id"`
+	GranteeUserName string     `json:"grantee_user_name"`
+	CreatedByName   string     `json:"created_by_name,omitempty"`
+	Reason          string     `json:"reason,omitempty"`
+	Status          string     `json:"status"`
+	ExpiresAt       time.Time  `json:"expires_at"`
+	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+}
+
+// DesktopNodeRDPDiagnostics 平台工作域 Desktop 节点远程桌面只读诊断、紧急熔断状态与会话审计响应
+type DesktopNodeRDPDiagnostics struct {
+	NodeID           uint64                         `json:"node_id"`
+	RDPMode          string                         `json:"rdp_mode"`
+	RDPAllowShare    bool                           `json:"rdp_allow_share"`
+	RDPAdminDisabled bool                           `json:"rdp_admin_disabled"`
+	RDPLocalReady    bool                           `json:"rdp_local_ready"`
+	RDPLocalPort     int                            `json:"rdp_local_port"`
+	RDPTunnelExposed bool                           `json:"rdp_tunnel_exposed"`
+	ActiveGrants     []DesktopNodeRDPGrantSummary   `json:"active_grants"`
+	RecentSessions   []model.DesktopRDPSessionAudit `json:"recent_sessions"`
+}
+
+type updateDesktopRDPAdminDisableRequest struct {
+	AdminDisabled bool   `json:"admin_disabled"`
+	Reason        string `json:"reason"`
+}
+
+// GetDesktopRDPStatus 平台工作域获取 Desktop 节点远程桌面只读诊断、跨人授权摘要与会话审计
+func (a *NodeAPI) GetDesktopRDPStatus(c *gin.Context) {
+	if !requirePlatformAccess(c, false) {
+		return
+	}
+	ctx := c.Request.Context()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
+		return
+	}
+
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("设备不存在"))
+		return
+	}
+	if node.Type != model.NodeTypeDesktop {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("仅 Desktop 类型设备包含远程桌面状态"))
+		return
+	}
+
+	var rdpLocalReady bool
+	var rdpLocalPort int
+	var rdpTunnelExposed bool
+	if a.runtimeStore != nil {
+		if rn, ok := a.runtimeStore.GetNode(node.ID); ok {
+			rdpLocalReady = rn.RDPLocalReady
+			rdpLocalPort = rn.RDPLocalPort
+			rdpTunnelExposed = rn.RDPTunnelExposed
+		}
+	}
+
+	now := time.Now()
+	activeGrants := make([]DesktopNodeRDPGrantSummary, 0)
+	if db.DB.Migrator().HasTable(&model.AclDesktopRDPPermission{}) {
+		var perms []model.AclDesktopRDPPermission
+		if err := db.DB.WithContext(ctx).
+			Preload("GranteeUser").
+			Where("target_node_id = ? AND enabled = ? AND revoked_at IS NULL AND expires_at > ?", node.ID, true, now).
+			Order("expires_at ASC").
+			Find(&perms).Error; err == nil {
+			for _, perm := range perms {
+				granteeName := ""
+				if perm.GranteeUser != nil {
+					granteeName = perm.GranteeUser.Name
+				}
+				activeGrants = append(activeGrants, DesktopNodeRDPGrantSummary{
+					ID:              perm.ID,
+					TenantID:        perm.TenantID,
+					GranteeUserID:   perm.GranteeUserID,
+					GranteeUserName: granteeName,
+					CreatedByName:   perm.CreatedByName,
+					Reason:          perm.Reason,
+					Status:          "active",
+					ExpiresAt:       perm.ExpiresAt,
+					CreatedAt:       perm.CreatedAt,
+				})
+			}
+		}
+	}
+
+	recentSessions := make([]model.DesktopRDPSessionAudit, 0)
+	if db.DB.Migrator().HasTable(&model.DesktopRDPSessionAudit{}) {
+		_ = db.DB.WithContext(ctx).
+			Where("target_node_id = ?", node.ID).
+			Order("occurred_at DESC, id DESC").
+			Limit(50).
+			Find(&recentSessions).Error
+	}
+
+	c.JSON(http.StatusOK, NewSuccessResponse(DesktopNodeRDPDiagnostics{
+		NodeID:           node.ID,
+		RDPMode:          model.NormalizeDesktopRDPMode(node.RDPMode),
+		RDPAllowShare:    node.RDPAllowShare,
+		RDPAdminDisabled: node.RDPAdminDisabled,
+		RDPLocalReady:    rdpLocalReady,
+		RDPLocalPort:     rdpLocalPort,
+		RDPTunnelExposed: rdpTunnelExposed,
+		ActiveGrants:     activeGrants,
+		RecentSessions:   recentSessions,
+	}))
+}
+
+// UpdateDesktopRDPAdminDisable 平台工作域紧急熔断关闭或解除熔断 Desktop 节点远程桌面暴露。
+// 隐私红线：管理员仅拥有紧急熔断（admin_disabled=true）与解除熔断（admin_disabled=false）能力，
+// 绝不可修改或强制开启机主的 rdp_mode 或 rdp_allow_share。
+func (a *NodeAPI) UpdateDesktopRDPAdminDisable(c *gin.Context) {
+	if !requirePlatformAccess(c, true) {
+		return
+	}
+	ctx := c.Request.Context()
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("无效的 ID"))
+		return
+	}
+
+	var req updateDesktopRDPAdminDisableRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数无效"))
+		return
+	}
+
+	var node model.Node
+	if err := db.DB.WithContext(ctx).First(&node, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse("设备不存在"))
+		return
+	}
+	if node.Type != model.NodeTypeDesktop {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("仅 Desktop 类型设备支持远程桌面紧急熔断治理"))
+		return
+	}
+
+	if err := db.DB.WithContext(ctx).Model(&model.Node{}).
+		Where("id = ?", node.ID).
+		Update("rdp_admin_disabled", req.AdminDisabled).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("更新紧急熔断状态失败"))
+		return
+	}
+
+	node.RDPAdminDisabled = req.AdminDisabled
+	if a.runtimeStore != nil {
+		a.runtimeStore.UpsertNode(&node)
+	}
+
+	recordAuditLog(ctx, c, "set_desktop_rdp_admin_disable", "node", strconv.FormatUint(node.ID, 10), node.Name, map[string]any{
+		"admin_disabled": req.AdminDisabled,
+		"reason":         strings.TrimSpace(req.Reason),
+	})
+
+	if a.desktopService != nil {
+		a.desktopService.NotifyDesktopDataChange(node.ID, pb.DesktopDataType_DESKTOP_DATA_TYPE_RDP_POLICY)
+		a.desktopService.NotifyRelatedDesktopDevicesChange(ctx, node.UserID, node.ID)
+	}
+	if a.aclSyncService != nil {
+		go func() {
+			syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := a.aclSyncService.FullSync(syncCtx); err != nil {
+				logger.Warnf("更新 Desktop RDP 紧急熔断后同步 Headscale Tag/ACL 失败: %v", err)
+			}
+		}()
+	}
+
+	msg := "已解除远程桌面紧急熔断（恢复遵循机主本人设置）"
+	if req.AdminDisabled {
+		msg = "已启用远程桌面紧急熔断关闭（存量远程桌面会话已下发断开）"
+	}
+	c.JSON(http.StatusOK, NewSuccessMessageResponse(msg, map[string]any{
+		"node_id":            node.ID,
+		"rdp_admin_disabled": req.AdminDisabled,
+	}))
 }

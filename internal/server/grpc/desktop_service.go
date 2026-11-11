@@ -34,6 +34,7 @@ import (
 type DesktopConnection struct {
 	NodeID         uint64
 	UserID         uint64
+	Authenticated  bool
 	Stream         pb.DesktopService_HeartbeatServer
 	TunnelIP       string
 	Connected      bool
@@ -44,10 +45,18 @@ type DesktopConnection struct {
 
 // DesktopDataStream Desktop 数据流连接信息
 type DesktopDataStream struct {
-	NodeID uint64
-	UserID uint64
-	Stream pb.DesktopService_DataStreamServer
-	Cancel context.CancelFunc
+	NodeID        uint64
+	UserID        uint64
+	Authenticated bool
+	Stream        pb.DesktopService_DataStreamServer
+	Cancel        context.CancelFunc
+	sendMu        sync.Mutex
+}
+
+func (ds *DesktopDataStream) send(resp *pb.DesktopDataResponse) error {
+	ds.sendMu.Lock()
+	defer ds.sendMu.Unlock()
+	return ds.Stream.Send(resp)
 }
 
 // DesktopServiceServer Desktop 服务实现
@@ -65,6 +74,7 @@ type DesktopServiceServer struct {
 	runtimePersister  *cache.NodeRuntimePersister
 	snapshotRefresher *headscale.SnapshotRefresher
 	updateService     *service.UpdateService
+	aclSyncTrigger    func(ctx context.Context)
 }
 
 type headscaleDeviceIPIndex struct {
@@ -107,6 +117,10 @@ func (s *DesktopServiceServer) SetRuntimePersister(persister *cache.NodeRuntimeP
 
 func (s *DesktopServiceServer) SetSnapshotRefresher(refresher *headscale.SnapshotRefresher) {
 	s.snapshotRefresher = refresher
+}
+
+func (s *DesktopServiceServer) SetACLSyncTrigger(trigger func(ctx context.Context)) {
+	s.aclSyncTrigger = trigger
 }
 
 func buildHeadscaleDeviceIPIndex(nodes []*v1.Node) headscaleDeviceIPIndex {
@@ -236,6 +250,9 @@ func (s *DesktopServiceServer) createOrGetDesktopNode(ctx context.Context, userI
 		}
 		db.DB.WithContext(ctx).Save(&node)
 	}
+	if s.runtimeStore != nil {
+		s.runtimeStore.UpsertNode(&node)
+	}
 
 	return &node, nodeSecret, nil
 }
@@ -262,6 +279,9 @@ func (s *DesktopServiceServer) Authenticate(ctx context.Context, req *pb.Desktop
 	}
 	if err := db.DB.WithContext(ctx).Save(&node).Error; err != nil {
 		return nil, err
+	}
+	if s.runtimeStore != nil {
+		s.runtimeStore.UpsertNode(&node)
 	}
 
 	resp := &pb.DesktopAuthenticateResponse{Success: true, Message: "认证成功"}
@@ -321,52 +341,53 @@ func (s *DesktopServiceServer) Heartbeat(stream pb.DesktopService_HeartbeatServe
 	nodeID := firstReq.DesktopId
 	logger.Infof("Desktop 心跳流建立: desktopId=%d, tunnelIp=%s", nodeID, firstReq.TunnelIp)
 
-	var node model.Node
-	if err := db.DB.WithContext(ctx).First(&node, nodeID).Error; err != nil {
-		logger.Errorf("Desktop 心跳流建立失败: desktopId=%d 不存在", nodeID)
-		return status.Error(codes.NotFound, "Desktop 不存在")
-	}
-	if node.Type != model.NodeTypeDesktop {
-		logger.Errorf("Desktop 心跳流建立失败: desktopId=%d 类型错误 (type=%s)", nodeID, node.Type)
-		return status.Error(codes.InvalidArgument, "设备类型错误")
+	node, user, authenticated, authErr := s.authenticateDesktopChannel(ctx, nodeID, firstReq.Secret)
+	if authErr != nil {
+		logger.Warnf("Desktop 心跳流鉴权失败: desktopId=%d, err=%v", nodeID, authErr)
+		return authErr
 	}
 
-	logger.Infof("Desktop 心跳流验证通过: desktopId=%d, name=%s, userId=%d", nodeID, node.Name, node.UserID)
-
-	// 检查用户是否启用
-	var user model.User
-	if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err != nil {
-		logger.Errorf("Desktop 心跳流建立失败: 用户不存在, userId=%d", node.UserID)
-		return status.Error(codes.NotFound, "用户不存在")
-	}
-	if !user.Enabled {
-		logger.Warnf("Desktop 心跳流建立失败: 用户已禁用, desktopId=%d, userId=%d, userName=%s", nodeID, user.ID, user.Name)
-		return status.Error(codes.PermissionDenied, "用户已禁用")
-	}
+	logger.Infof("Desktop 心跳流验证通过: desktopId=%d, name=%s, userId=%d, authenticated=%v", nodeID, node.Name, node.UserID, authenticated)
 
 	conn := &DesktopConnection{
-		NodeID: nodeID, UserID: node.UserID, Stream: stream,
+		NodeID: nodeID, UserID: node.UserID, Authenticated: authenticated, Stream: stream,
 		TunnelIP: firstReq.TunnelIp, Connected: firstReq.TunnelConnected,
 		LastSeen: time.Now(), Cancel: cancel,
 	}
 
 	s.connMutex.Lock()
 	if oldConn, exists := s.connections[nodeID]; exists {
+		if !authenticated && oldConn.Authenticated && time.Since(oldConn.LastSeen) < 90*time.Second {
+			s.connMutex.Unlock()
+			logger.Warnf("拒绝未携带凭证的旧心跳流顶替已认证连接: desktopId=%d", nodeID)
+			return status.Error(codes.Unauthenticated, "设备连接需提供有效凭证")
+		}
 		oldConn.Cancel()
 	}
 	s.connections[nodeID] = conn
 	s.connMutex.Unlock()
 
 	defer func() {
+		isCurrent := false
 		s.connMutex.Lock()
-		delete(s.connections, nodeID)
+		if s.connections[nodeID] == conn {
+			delete(s.connections, nodeID)
+			isCurrent = true
+		}
 		s.connMutex.Unlock()
-		// 清除数据库中的心跳时间和 IP，确保离线状态正确
-		db.DB.Model(&model.Node{}).Where("id = ?", nodeID).Updates(map[string]any{"last_heartbeat": nil, "ip": ""})
-		logger.Infof("Desktop %d gRPC 连接断开，已清除心跳时间和 IP", nodeID)
+		if isCurrent {
+			if s.runtimeStore != nil {
+				s.runtimeStore.MarkDisconnected(nodeID)
+			}
+			// 清除数据库中的心跳时间和 IP，确保离线状态正确
+			db.DB.Model(&model.Node{}).Where("id = ?", nodeID).Updates(map[string]any{"last_heartbeat": nil, "ip": ""})
+			logger.Infof("Desktop %d gRPC 连接断开，已清除心跳时间和 IP", nodeID)
+			go s.NotifyRelatedDesktopDevicesChange(context.Background(), node.UserID, nodeID)
+		}
 	}()
 
-	s.handleDesktopHeartbeat(ctx, nodeID, firstReq)
+	s.handleDesktopHeartbeat(ctx, nodeID, user, authenticated, firstReq)
+	go s.NotifyRelatedDesktopDevicesChange(context.Background(), node.UserID, nodeID)
 	if err := s.sendDesktopHeartbeatResponse(ctx, stream, node.UserID); err != nil {
 		return err
 	}
@@ -383,17 +404,23 @@ func (s *DesktopServiceServer) Heartbeat(stream pb.DesktopService_HeartbeatServe
 			if err != nil {
 				return err
 			}
+			if req.DesktopId != 0 && req.DesktopId != nodeID {
+				return status.Error(codes.InvalidArgument, "心跳流设备标识不一致")
+			}
 			conn.TunnelIP = req.TunnelIp
 			conn.Connected = req.TunnelConnected
 			conn.LastSeen = time.Now()
 
 			// 定期检查用户状态（每 10 次心跳检查一次，约 5 分钟）
 			if conn.HeartbeatCount%10 == 0 {
-				var user model.User
-				if err := db.DB.WithContext(ctx).First(&user, node.UserID).Error; err == nil {
+				var latestUser model.User
+				if err := db.DB.WithContext(ctx).First(&latestUser, node.UserID).Error; err == nil {
+					user = latestUser
 					if !user.Enabled {
 						logger.Warnf("Desktop 心跳检测到用户已禁用，断开连接: desktopId=%d, userId=%d, userName=%s", nodeID, user.ID, user.Name)
-						// 清空心跳时间和 IP
+						if s.runtimeStore != nil {
+							s.runtimeStore.MarkDisconnected(nodeID)
+						}
 						db.DB.Model(&model.Node{}).Where("id = ?", nodeID).Updates(map[string]any{"last_heartbeat": nil, "ip": ""})
 						return status.Error(codes.PermissionDenied, "用户已禁用")
 					}
@@ -401,7 +428,7 @@ func (s *DesktopServiceServer) Heartbeat(stream pb.DesktopService_HeartbeatServe
 			}
 			conn.HeartbeatCount++
 
-			s.handleDesktopHeartbeat(ctx, nodeID, req)
+			s.handleDesktopHeartbeat(ctx, nodeID, user, authenticated, req)
 			if err := s.sendDesktopHeartbeatResponse(ctx, stream, node.UserID); err != nil {
 				return err
 			}
@@ -409,12 +436,39 @@ func (s *DesktopServiceServer) Heartbeat(stream pb.DesktopService_HeartbeatServe
 	}
 }
 
-func (s *DesktopServiceServer) handleDesktopHeartbeat(ctx context.Context, nodeID uint64, req *pb.DesktopHeartbeatRequest) {
+func (s *DesktopServiceServer) handleDesktopHeartbeat(ctx context.Context, nodeID uint64, user model.User, authenticated bool, req *pb.DesktopHeartbeatRequest) {
 	now := time.Now()
+	verifiedIP, headscaleNodeIDChanged := s.verifyAndBindDesktopTunnelIP(ctx, nodeID, user, req.TunnelIp, req.TunnelConnected, now)
 
 	if s.runtimeStore != nil {
-		if _, err := s.runtimeStore.UpdateHeartbeat(nodeID, req.TunnelIp, "", "", "", nil, "", "", "", "", now); err != nil {
-			logger.Warnf("Desktop 心跳 RuntimeStore 更新失败: nodeID=%d, err=%v", nodeID, err)
+		if _, err := s.runtimeStore.UpdateHeartbeat(nodeID, verifiedIP, "", "", "", nil, "", "", "", "", now); err != nil {
+			var node model.Node
+			if dbErr := db.DB.WithContext(ctx).First(&node, nodeID).Error; dbErr == nil {
+				s.runtimeStore.UpsertNode(&node)
+				_, _ = s.runtimeStore.UpdateHeartbeat(nodeID, verifiedIP, "", "", "", nil, "", "", "", "", now)
+			} else {
+				logger.Warnf("Desktop 心跳 RuntimeStore 更新失败: nodeID=%d, err=%v", nodeID, err)
+			}
+		}
+		if verifiedIP == "" && !req.TunnelConnected {
+			// 隧道未连接时同步清空内存中的陈旧 IP（保持在线心跳时间）
+			s.clearDesktopRuntimeTunnelIP(nodeID)
+		}
+		if authenticated {
+			rdpPort := int(req.RdpLocalPort)
+			if rdpPort <= 0 && req.RdpLocalReady {
+				rdpPort = 3389
+			}
+			rdpChanged, _ := s.runtimeStore.UpdateDesktopRDPStatus(nodeID, req.RdpLocalReady, rdpPort, req.RdpTunnelExposed)
+			if rdpChanged || headscaleNodeIDChanged {
+				go func() {
+					bgCtx := context.Background()
+					s.NotifyDesktopDataChange(nodeID, pb.DesktopDataType_DESKTOP_DATA_TYPE_RDP_POLICY)
+					s.NotifyRelatedDesktopDevicesChange(bgCtx, user.ID, nodeID)
+				}()
+			}
+		} else if headscaleNodeIDChanged {
+			go s.NotifyRelatedDesktopDevicesChange(context.Background(), user.ID, nodeID)
 		}
 	} else {
 		// 兜底：未初始化 runtimeStore 时落库
@@ -422,32 +476,7 @@ func (s *DesktopServiceServer) handleDesktopHeartbeat(ctx context.Context, nodeI
 		if err := db.DB.WithContext(ctx).First(&node, nodeID).Error; err == nil {
 			db.DB.WithContext(ctx).Model(&model.Node{}).
 				Where("user_id = ? AND type = ? AND name = ?", node.UserID, model.NodeTypeDesktop, node.Name).
-				Updates(map[string]any{"last_heartbeat": now, "ip": req.TunnelIp})
-		}
-	}
-
-	if s.snapshotRefresher != nil && s.runtimeStore != nil {
-		if rn, ok := s.runtimeStore.GetNode(nodeID); ok {
-			var user model.User
-			if err := db.DB.WithContext(ctx).First(&user, rn.UserID).Error; err == nil {
-				hsUserName := fmt.Sprintf("client-%s", user.Name)
-				tunnelIP := strings.TrimSpace(req.TunnelIp)
-				snapshot := s.snapshotRefresher.LoadSnapshot()
-
-				if req.TunnelConnected && tunnelIP != "" {
-					if hsView, found := snapshot.GetByIP(tunnelIP); found && hsView.User == hsUserName {
-						if s.runtimeStore.UpdateHeadscaleNodeID(nodeID, hsView.ID) && s.runtimePersister != nil {
-							s.runtimePersister.NotifyHighPriority()
-						}
-					}
-				} else if rn.HeadscaleNodeID == 0 {
-					if hsView, found := snapshot.GetByUserNameAndNodeName(hsUserName, rn.Name); found {
-						if s.runtimeStore.UpdateHeadscaleNodeID(nodeID, hsView.ID) && s.runtimePersister != nil {
-							s.runtimePersister.NotifyHighPriority()
-						}
-					}
-				}
-			}
+				Updates(map[string]any{"last_heartbeat": now, "ip": verifiedIP})
 		}
 	}
 }
@@ -779,88 +808,14 @@ func (s *DesktopServiceServer) GetHostServices(ctx context.Context, req *pb.GetH
 
 // GetMyDevices 获取我的设备列表
 func (s *DesktopServiceServer) GetMyDevices(ctx context.Context, req *pb.GetMyDevicesRequest) (*pb.GetMyDevicesResponse, error) {
-	// 验证 Desktop 是否存在
-	var currentNode model.Node
-	if err := db.DB.WithContext(ctx).First(&currentNode, req.DesktopId).Error; err != nil {
-		return nil, status.Error(codes.NotFound, "Desktop 不存在")
-	}
-	if currentNode.Type != model.NodeTypeDesktop {
-		return nil, status.Error(codes.InvalidArgument, "设备类型错误")
+	currentNode, _, authenticated, authErr := s.authenticateDesktopChannel(ctx, req.DesktopId, req.Secret)
+	if authErr != nil {
+		return nil, authErr
 	}
 
-	// 查询该用户的所有 Desktop 设备
-	var nodes []model.Node
-	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", currentNode.UserID, model.NodeTypeDesktop).Find(&nodes).Error; err != nil {
-		return nil, status.Error(codes.Internal, "查询设备失败")
-	}
-
-	// 从 Headscale 获取该用户的所有节点 IP（实时数据）
-	nodeIPIndex := headscaleDeviceIPIndex{}
-	if s.headscaleClient != nil {
-		var user model.User
-		if err := db.DB.WithContext(ctx).First(&user, currentNode.UserID).Error; err == nil {
-			hsUserName := fmt.Sprintf("client-%s", user.Name)
-			hsNodes, err := s.headscaleClient.ListNodesByUser(ctx, hsUserName)
-			if err == nil {
-				nodeIPIndex = buildHeadscaleDeviceIPIndex(hsNodes)
-			}
-		}
-	}
-
-	// 转换为响应格式
-	resp := &pb.GetMyDevicesResponse{
-		Devices: make([]*pb.DeviceInfo, 0, len(nodes)),
-	}
-	for _, node := range nodes {
-		// 解析系统信息
-		var sysInfo model.NodeSystemInfo
-		os := "未知"
-		arch := "未知"
-		hostname := node.Hostname
-		if node.SystemInfo != "" {
-			if err := json.Unmarshal([]byte(node.SystemInfo), &sysInfo); err == nil {
-				os = sysInfo.OS
-				if sysInfo.OSVersion != "" {
-					os = sysInfo.OSVersion
-				}
-				arch = sysInfo.Arch
-				if sysInfo.Hostname != "" {
-					hostname = sysInfo.Hostname
-				}
-			}
-		}
-
-		// 判断设备状态
-		deviceStatus := "offline"
-		if node.LastHeartbeat != nil && time.Since(*node.LastHeartbeat) < 60*time.Second {
-			deviceStatus = "online"
-		}
-
-		// 格式化时间
-		lastUsedAt := ""
-		if node.LastHeartbeat != nil {
-			lastUsedAt = node.LastHeartbeat.Format(time.RFC3339)
-		}
-		createdAt := node.CreatedAt.Format(time.RFC3339)
-
-		ip := resolveDeviceIP(node, nodeIPIndex)
-
-		resp.Devices = append(resp.Devices, &pb.DeviceInfo{
-			DeviceToken: fmt.Sprintf("%d:%s", node.ID, "***"), // 不返回真实 secret
-			DeviceName:  node.Name,
-			Os:          os,
-			Arch:        arch,
-			Hostname:    hostname,
-			Status:      deviceStatus,
-			LastUsedAt:  lastUsedAt,
-			CreatedAt:   createdAt,
-			IsCurrent:   node.ID == req.DesktopId,
-			Ip:          ip,
-		})
-	}
-
-	logger.Infof("Desktop %d 获取设备列表: %d 个设备", req.DesktopId, len(resp.Devices))
-	return resp, nil
+	devices := s.buildDevicesDataWithOptions(ctx, currentNode.UserID, req.DesktopId, authenticated)
+	logger.Infof("Desktop %d 获取设备列表: %d 个设备 (authenticated=%v)", req.DesktopId, len(devices), authenticated)
+	return &pb.GetMyDevicesResponse{Devices: devices}, nil
 }
 
 // OfflineDevice 设备下线
@@ -892,19 +847,18 @@ func (s *DesktopServiceServer) OfflineDevice(ctx context.Context, req *pb.Offlin
 		return &pb.OfflineDeviceResponse{Success: false, Message: "不能下线当前设备"}, nil
 	}
 
-	// 关闭该设备的连接
-	s.connMutex.Lock()
-	if conn, exists := s.connections[targetNodeID]; exists {
-		conn.Cancel()
-		delete(s.connections, targetNodeID)
+	// 关闭该设备的连接并清理内存运行态
+	s.DisconnectDesktop(targetNodeID)
+	if s.runtimeStore != nil {
+		s.runtimeStore.MarkDisconnected(targetNodeID)
 	}
-	s.connMutex.Unlock()
 
-	// 更新数据库：清除心跳时间
-	if err := db.DB.WithContext(ctx).Model(&targetNode).Update("last_heartbeat", nil).Error; err != nil {
+	// 更新数据库：清除心跳时间与 IP
+	if err := db.DB.WithContext(ctx).Model(&targetNode).Updates(map[string]any{"last_heartbeat": nil, "ip": ""}).Error; err != nil {
 		return &pb.OfflineDeviceResponse{Success: false, Message: "下线失败"}, nil
 	}
 
+	go s.NotifyRelatedDesktopDevicesChange(context.Background(), currentNode.UserID, targetNodeID)
 	logger.Infof("Desktop %d 下线设备 %d", req.DesktopId, targetNodeID)
 	return &pb.OfflineDeviceResponse{Success: true, Message: "设备已下线"}, nil
 }
@@ -938,18 +892,31 @@ func (s *DesktopServiceServer) DeleteDevice(ctx context.Context, req *pb.DeleteD
 		return &pb.DeleteDeviceResponse{Success: false, Message: "不能删除当前设备"}, nil
 	}
 
-	// 关闭该设备的连接
-	s.connMutex.Lock()
-	if conn, exists := s.connections[targetNodeID]; exists {
-		conn.Cancel()
-		delete(s.connections, targetNodeID)
+	affectedGrantees := s.collectNodeRDPGranteeUserIDs(ctx, targetNodeID)
+
+	// 关闭该设备的连接并删除内存运行态
+	s.DisconnectDesktop(targetNodeID)
+	if s.runtimeStore != nil {
+		s.runtimeStore.DeleteNode(targetNodeID)
 	}
-	s.connMutex.Unlock()
+	_ = db.DB.WithContext(ctx).Where("target_node_id = ?", targetNodeID).Delete(&model.AclDesktopRDPPermission{}).Error
 
 	// 删除数据库记录
 	if err := db.DB.WithContext(ctx).Delete(&targetNode).Error; err != nil {
 		return &pb.DeleteDeviceResponse{Success: false, Message: "删除失败"}, nil
 	}
+
+	go func() {
+		bgCtx := context.Background()
+		s.NotifyUserDesktopsDataChange(currentNode.UserID, pb.DesktopDataType_DESKTOP_DATA_TYPE_DEVICES)
+		s.NotifyUserDesktopsDataChange(currentNode.UserID, pb.DesktopDataType_DESKTOP_DATA_TYPE_RDP_POLICY)
+		for _, granteeID := range affectedGrantees {
+			s.NotifyUserDesktopsDataChange(granteeID, pb.DesktopDataType_DESKTOP_DATA_TYPE_DEVICES)
+		}
+		if len(affectedGrantees) > 0 && s.aclSyncTrigger != nil {
+			s.aclSyncTrigger(bgCtx)
+		}
+	}()
 
 	logger.Infof("Desktop %d 删除设备 %d", req.DesktopId, targetNodeID)
 	return &pb.DeleteDeviceResponse{Success: true, Message: "设备已删除"}, nil
@@ -1218,24 +1185,15 @@ func (s *DesktopServiceServer) Logout(ctx context.Context, req *pb.DesktopLogout
 		return &pb.DesktopLogoutResponse{Success: false, Message: "设备类型错误"}, nil
 	}
 
-	// 关闭该设备的心跳连接
-	s.connMutex.Lock()
-	if conn, exists := s.connections[req.DesktopId]; exists {
-		conn.Cancel()
-		delete(s.connections, req.DesktopId)
+	// 关闭该设备的心跳连接与数据流连接，并清理内存运行态
+	s.DisconnectDesktop(req.DesktopId)
+	if s.runtimeStore != nil {
+		s.runtimeStore.MarkDisconnected(req.DesktopId)
 	}
-	s.connMutex.Unlock()
 
-	// 关闭该设备的数据流连接
-	s.dataStreamMutex.Lock()
-	if ds, exists := s.dataStreams[req.DesktopId]; exists {
-		ds.Cancel()
-		delete(s.dataStreams, req.DesktopId)
-	}
-	s.dataStreamMutex.Unlock()
-
-	// 清除数据库中的心跳时间
-	db.DB.WithContext(ctx).Model(&model.Node{}).Where("id = ?", req.DesktopId).Update("last_heartbeat", nil)
+	// 清除数据库中的心跳时间与 IP
+	db.DB.WithContext(ctx).Model(&model.Node{}).Where("id = ?", req.DesktopId).Updates(map[string]any{"last_heartbeat": nil, "ip": ""})
+	go s.NotifyRelatedDesktopDevicesChange(context.Background(), node.UserID, req.DesktopId)
 
 	// 注销 Logto 上游会话（尽力而为，失败不阻塞）
 	var logoutURL string
@@ -1264,7 +1222,7 @@ func (s *DesktopServiceServer) DataStream(stream pb.DesktopService_DataStreamSer
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 
-	// 接收首条消息，获取 desktop_id
+	// 接收首条消息，获取 desktop_id 与凭证
 	firstReq, err := stream.Recv()
 	if err != nil {
 		return status.Error(codes.InvalidArgument, "无法接收初始消息")
@@ -1273,25 +1231,28 @@ func (s *DesktopServiceServer) DataStream(stream pb.DesktopService_DataStreamSer
 	nodeID := firstReq.DesktopId
 	logger.Infof("Desktop 数据流建立: desktopId=%d", nodeID)
 
-	// 验证 Desktop 是否存在
-	var node model.Node
-	if err := db.DB.WithContext(ctx).First(&node, nodeID).Error; err != nil {
-		return status.Error(codes.NotFound, "Desktop 不存在")
-	}
-	if node.Type != model.NodeTypeDesktop {
-		return status.Error(codes.InvalidArgument, "设备类型错误")
+	node, _, authenticated, authErr := s.authenticateDesktopChannel(ctx, nodeID, firstReq.Secret)
+	if authErr != nil {
+		logger.Warnf("Desktop 数据流鉴权失败: desktopId=%d, err=%v", nodeID, authErr)
+		return authErr
 	}
 
 	// 注册数据流连接
 	ds := &DesktopDataStream{
-		NodeID: nodeID,
-		UserID: node.UserID,
-		Stream: stream,
-		Cancel: cancel,
+		NodeID:        nodeID,
+		UserID:        node.UserID,
+		Authenticated: authenticated,
+		Stream:        stream,
+		Cancel:        cancel,
 	}
 
 	s.dataStreamMutex.Lock()
 	if oldDS, exists := s.dataStreams[nodeID]; exists {
+		if !authenticated && oldDS.Authenticated {
+			s.dataStreamMutex.Unlock()
+			logger.Warnf("拒绝未携带凭证的旧数据流顶替已认证数据流: desktopId=%d", nodeID)
+			return status.Error(codes.Unauthenticated, "数据流需提供有效凭证")
+		}
 		oldDS.Cancel()
 	}
 	s.dataStreams[nodeID] = ds
@@ -1299,13 +1260,15 @@ func (s *DesktopServiceServer) DataStream(stream pb.DesktopService_DataStreamSer
 
 	defer func() {
 		s.dataStreamMutex.Lock()
-		delete(s.dataStreams, nodeID)
+		if s.dataStreams[nodeID] == ds {
+			delete(s.dataStreams, nodeID)
+		}
 		s.dataStreamMutex.Unlock()
 		logger.Infof("Desktop %d 数据流断开", nodeID)
 	}()
 
 	// 发送初始数据快照（ALL）
-	if err := s.sendDataSnapshot(ctx, stream, node.UserID, nodeID, pb.DesktopDataType_DESKTOP_DATA_TYPE_ALL); err != nil {
+	if err := s.sendDataSnapshotToStream(ctx, ds, pb.DesktopDataType_DESKTOP_DATA_TYPE_ALL); err != nil {
 		logger.Errorf("Desktop %d 发送初始数据快照失败: %v", nodeID, err)
 		return err
 	}
@@ -1323,13 +1286,16 @@ func (s *DesktopServiceServer) DataStream(stream pb.DesktopService_DataStreamSer
 			if err != nil {
 				return err
 			}
+			if req.DesktopId != 0 && req.DesktopId != nodeID {
+				return status.Error(codes.InvalidArgument, "数据流设备标识不一致")
+			}
 
 			// 处理刷新请求
 			refreshType := req.RefreshType
 			if refreshType == pb.DesktopDataType_DESKTOP_DATA_TYPE_UNSPECIFIED {
 				refreshType = pb.DesktopDataType_DESKTOP_DATA_TYPE_ALL
 			}
-			if err := s.sendDataSnapshot(ctx, stream, node.UserID, nodeID, refreshType); err != nil {
+			if err := s.sendDataSnapshotToStream(ctx, ds, refreshType); err != nil {
 				logger.Errorf("Desktop %d 发送刷新数据失败: %v", nodeID, err)
 				return err
 			}
@@ -1337,38 +1303,51 @@ func (s *DesktopServiceServer) DataStream(stream pb.DesktopService_DataStreamSer
 	}
 }
 
-// sendDataSnapshot 发送数据快照
-func (s *DesktopServiceServer) sendDataSnapshot(ctx context.Context, stream pb.DesktopService_DataStreamServer, userID, nodeID uint64, dataType pb.DesktopDataType) error {
+// sendDataSnapshotToStream 线程安全地向指定 DesktopDataStream 发送快照
+func (s *DesktopServiceServer) sendDataSnapshotToStream(ctx context.Context, ds *DesktopDataStream, dataType pb.DesktopDataType) error {
+	if ds == nil {
+		return nil
+	}
 	switch dataType {
 	case pb.DesktopDataType_DESKTOP_DATA_TYPE_ALL:
-		// 发送所有数据
 		resp := &pb.DesktopDataResponse{
 			Type:               pb.DesktopDataType_DESKTOP_DATA_TYPE_ALL,
 			Services:           s.buildServicesData(ctx),
-			Hosts:              s.buildHostsData(ctx, userID),
-			Devices:            s.buildDevicesData(ctx, userID, nodeID),
-			FavoriteServiceIds: s.buildFavoritesData(ctx, userID),
+			Hosts:              s.buildHostsData(ctx, ds.UserID),
+			Devices:            s.buildDevicesDataWithOptions(ctx, ds.UserID, ds.NodeID, ds.Authenticated),
+			FavoriteServiceIds: s.buildFavoritesData(ctx, ds.UserID),
 		}
-		return stream.Send(resp)
+		if ds.Authenticated {
+			resp.RdpPolicy = s.buildInboundRDPPolicy(ctx, ds.UserID, ds.NodeID)
+		}
+		return ds.send(resp)
 	case pb.DesktopDataType_DESKTOP_DATA_TYPE_SERVICES:
-		return stream.Send(&pb.DesktopDataResponse{
+		return ds.send(&pb.DesktopDataResponse{
 			Type:     pb.DesktopDataType_DESKTOP_DATA_TYPE_SERVICES,
 			Services: s.buildServicesData(ctx),
 		})
 	case pb.DesktopDataType_DESKTOP_DATA_TYPE_HOSTS:
-		return stream.Send(&pb.DesktopDataResponse{
+		return ds.send(&pb.DesktopDataResponse{
 			Type:  pb.DesktopDataType_DESKTOP_DATA_TYPE_HOSTS,
-			Hosts: s.buildHostsData(ctx, userID),
+			Hosts: s.buildHostsData(ctx, ds.UserID),
 		})
 	case pb.DesktopDataType_DESKTOP_DATA_TYPE_DEVICES:
-		return stream.Send(&pb.DesktopDataResponse{
+		return ds.send(&pb.DesktopDataResponse{
 			Type:    pb.DesktopDataType_DESKTOP_DATA_TYPE_DEVICES,
-			Devices: s.buildDevicesData(ctx, userID, nodeID),
+			Devices: s.buildDevicesDataWithOptions(ctx, ds.UserID, ds.NodeID, ds.Authenticated),
 		})
 	case pb.DesktopDataType_DESKTOP_DATA_TYPE_FAVORITES:
-		return stream.Send(&pb.DesktopDataResponse{
+		return ds.send(&pb.DesktopDataResponse{
 			Type:               pb.DesktopDataType_DESKTOP_DATA_TYPE_FAVORITES,
-			FavoriteServiceIds: s.buildFavoritesData(ctx, userID),
+			FavoriteServiceIds: s.buildFavoritesData(ctx, ds.UserID),
+		})
+	case pb.DesktopDataType_DESKTOP_DATA_TYPE_RDP_POLICY:
+		if !ds.Authenticated {
+			return nil
+		}
+		return ds.send(&pb.DesktopDataResponse{
+			Type:      pb.DesktopDataType_DESKTOP_DATA_TYPE_RDP_POLICY,
+			RdpPolicy: s.buildInboundRDPPolicy(ctx, ds.UserID, ds.NodeID),
 		})
 	}
 	return nil
@@ -1500,65 +1479,9 @@ func (s *DesktopServiceServer) buildHostsData(ctx context.Context, userID uint64
 	return hosts
 }
 
-// buildDevicesData 构建设备列表数据（复用 GetMyDevices 的查询逻辑）
+// buildDevicesData 构建设备列表数据（默认仅本人设备；已认证会话请使用 buildDevicesDataWithOptions）
 func (s *DesktopServiceServer) buildDevicesData(ctx context.Context, userID, currentNodeID uint64) []*pb.DeviceInfo {
-	var nodes []model.Node
-	if err := db.DB.WithContext(ctx).Where("user_id = ? AND type = ?", userID, model.NodeTypeDesktop).Find(&nodes).Error; err != nil {
-		return nil
-	}
-
-	// 从 Headscale 获取 IP
-	nodeIPIndex := headscaleDeviceIPIndex{}
-	if s.headscaleClient != nil {
-		var user model.User
-		if err := db.DB.WithContext(ctx).First(&user, userID).Error; err == nil {
-			hsUserName := fmt.Sprintf("client-%s", user.Name)
-			hsNodes, err := s.headscaleClient.ListNodesByUser(ctx, hsUserName)
-			if err == nil {
-				nodeIPIndex = buildHeadscaleDeviceIPIndex(hsNodes)
-			}
-		}
-	}
-
-	var devices []*pb.DeviceInfo
-	for _, node := range nodes {
-		var sysInfo model.NodeSystemInfo
-		os := "未知"
-		arch := "未知"
-		hostname := node.Hostname
-		if node.SystemInfo != "" {
-			if err := json.Unmarshal([]byte(node.SystemInfo), &sysInfo); err == nil {
-				os = sysInfo.OS
-				if sysInfo.OSVersion != "" {
-					os = sysInfo.OSVersion
-				}
-				arch = sysInfo.Arch
-				if sysInfo.Hostname != "" {
-					hostname = sysInfo.Hostname
-				}
-			}
-		}
-
-		deviceStatus := "offline"
-		if node.LastHeartbeat != nil && time.Since(*node.LastHeartbeat) < 60*time.Second {
-			deviceStatus = "online"
-		}
-
-		lastUsedAt := ""
-		if node.LastHeartbeat != nil {
-			lastUsedAt = node.LastHeartbeat.Format(time.RFC3339)
-		}
-		createdAt := node.CreatedAt.Format(time.RFC3339)
-		ip := resolveDeviceIP(node, nodeIPIndex)
-
-		devices = append(devices, &pb.DeviceInfo{
-			DeviceToken: fmt.Sprintf("%d:%s", node.ID, "***"),
-			DeviceName:  node.Name, Os: os, Arch: arch, Hostname: hostname,
-			Status: deviceStatus, LastUsedAt: lastUsedAt, CreatedAt: createdAt,
-			IsCurrent: node.ID == currentNodeID, Ip: ip,
-		})
-	}
-	return devices
+	return s.buildDevicesDataWithOptions(ctx, userID, currentNodeID, false)
 }
 
 // buildFavoritesData 构建收藏列表数据
@@ -1589,7 +1512,7 @@ func (s *DesktopServiceServer) NotifyDesktopDataChange(nodeID uint64, dataType p
 	}
 
 	ctx := context.Background()
-	if err := s.sendDataSnapshot(ctx, ds.Stream, ds.UserID, ds.NodeID, dataType); err != nil {
+	if err := s.sendDataSnapshotToStream(ctx, ds, dataType); err != nil {
 		logger.Errorf("推送数据变更到 Desktop %d 失败: %v", nodeID, err)
 	}
 }
@@ -1605,7 +1528,7 @@ func (s *DesktopServiceServer) NotifyAllDesktopsDataChange(dataType pb.DesktopDa
 
 	ctx := context.Background()
 	for _, ds := range streams {
-		if err := s.sendDataSnapshot(ctx, ds.Stream, ds.UserID, ds.NodeID, dataType); err != nil {
+		if err := s.sendDataSnapshotToStream(ctx, ds, dataType); err != nil {
 			logger.Errorf("推送数据变更到 Desktop %d 失败: %v", ds.NodeID, err)
 		}
 	}

@@ -201,6 +201,26 @@ func (s *Server) Run() error {
 	s.desktopService.SetRuntimeStore(s.nodeRuntimeStore)
 	s.desktopService.SetRuntimePersister(s.nodeRuntimePersister)
 	s.desktopService.SetSnapshotRefresher(s.snapshotRefresher)
+	if s.aclSyncService != nil {
+		s.desktopService.SetACLSyncTrigger(func(ctx context.Context) {
+			go func() {
+				syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := s.aclSyncService.FullSync(syncCtx); err != nil {
+					logger.Warnf("Desktop RDP 配置变更触发 Headscale Tag/ACL 同步失败: %v", err)
+				}
+			}()
+		})
+		s.aclSyncService.SetRDPGrantExpiryHook(func(targetNodeID, ownerUserID, granteeUserID uint64) {
+			s.desktopService.NotifyDesktopDataChange(targetNodeID, pb.DesktopDataType_DESKTOP_DATA_TYPE_RDP_POLICY)
+			if granteeUserID != 0 {
+				s.desktopService.NotifyUserDesktopsDataChange(granteeUserID, pb.DesktopDataType_DESKTOP_DATA_TYPE_DEVICES)
+			}
+			if ownerUserID != 0 {
+				s.desktopService.NotifyUserDesktopsDataChange(ownerUserID, pb.DesktopDataType_DESKTOP_DATA_TYPE_DEVICES)
+			}
+		})
+	}
 
 	// 创建 Desktop 登录服务和认证 API
 	s.loginService = service.NewDesktopLoginService(s.config)
@@ -685,9 +705,13 @@ func (s *Server) setupRouter() *gin.Engine {
 					// 设备管理
 					nodeAPI := api.NewNodeAPI(s.config)
 					nodeAPI.SetAgentService(s.agentService)
+					nodeAPI.SetDesktopService(s.desktopService)
+					nodeAPI.SetACLSyncService(s.aclSyncService)
 					nodeAPI.SetRuntimeStore(s.nodeRuntimeStore)
 					adminAuthGroup.GET("/nodes", nodeAPI.List)
 					adminAuthGroup.GET("/nodes/:id", nodeAPI.Get)
+					adminAuthGroup.GET("/nodes/:id/rdp", nodeAPI.GetDesktopRDPStatus)
+					adminAuthGroup.PUT("/nodes/:id/rdp/admin-disable", nodeAPI.UpdateDesktopRDPAdminDisable)
 					adminAuthGroup.PUT("/nodes/:id/domain-label", nodeAPI.UpdateHostDomainLabel)
 					adminAuthGroup.GET("/nodes/:id/capabilities", nodeAPI.GetCapabilities)
 					adminAuthGroup.PUT("/nodes/:id/capabilities", nodeAPI.UpdateCapabilities)
@@ -794,6 +818,9 @@ func (s *Server) setupRouter() *gin.Engine {
 					legacyClaimAPI := api.NewLegacyResourceClaimAPI()
 					tenantContextAPI := api.NewTenantContextAPI()
 					tenantBusinessAPI := api.NewTenantBusinessAPI()
+					tenantBusinessAPI.SetDesktopService(s.desktopService)
+					tenantBusinessAPI.SetACLSyncService(s.aclSyncService)
+					tenantBusinessAPI.SetRuntimeStore(s.nodeRuntimeStore)
 					tenantSettingsAPI := api.NewTenantSettingsAPI()
 					tenantAdminMembershipAPI := api.NewTenantAdminMembershipAPI()
 					overviewAPI := api.NewOverviewAPI()
@@ -821,6 +848,9 @@ func (s *Server) setupRouter() *gin.Engine {
 					adminAuthGroup.POST("/tenants/:id/members/:user_id/disable", unifiedResourceAPI.DisableTenantMember)
 					adminAuthGroup.DELETE("/tenants/:id/members/:user_id", unifiedResourceAPI.DeleteTenantMember)
 					adminAuthGroup.GET("/tenants/:id/member-devices", tenantBusinessAPI.ListMemberDevices)
+					adminAuthGroup.GET("/tenants/:id/member-devices/:node_id/rdp-grants", tenantBusinessAPI.ListDeviceRDPGrants)
+					adminAuthGroup.POST("/tenants/:id/member-devices/:node_id/rdp-grants", tenantBusinessAPI.CreateDeviceRDPGrant)
+					adminAuthGroup.DELETE("/tenants/:id/member-devices/:node_id/rdp-grants/:grant_id", tenantBusinessAPI.RevokeDeviceRDPGrant)
 					adminAuthGroup.GET("/tenants/:id/audit-logs", tenantBusinessAPI.ListAuditLogs)
 					adminAuthGroup.GET("/resources", unifiedResourceAPI.List)
 					adminAuthGroup.GET("/resources/summary", unifiedResourceAPI.Summary)

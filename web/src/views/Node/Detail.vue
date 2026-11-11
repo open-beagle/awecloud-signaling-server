@@ -27,7 +27,10 @@
           </el-descriptions-item>
           <el-descriptions-item :label="$t('node.ip')">{{ node.ip || '-' }}</el-descriptions-item>
           <el-descriptions-item :label="$t('node.hostname')">{{ node.hostname || '-' }}</el-descriptions-item>
-		  <el-descriptions-item v-if="node.type === 'agent'" label="SSH 域名标识"><span class="mono">{{ node.host_domain_label || '待配置' }}</span><el-button link type="primary" @click="editHostDomainLabel">编辑</el-button></el-descriptions-item>
+          <el-descriptions-item v-if="node.type === 'agent'" label="SSH 域名标识">
+            <span class="mono">{{ node.host_domain_label || '待配置' }}</span>
+            <el-button link type="primary" @click="editHostDomainLabel">编辑</el-button>
+          </el-descriptions-item>
           <el-descriptions-item :label="$t('node.version')">{{ node.version || '-' }}</el-descriptions-item>
           <el-descriptions-item :label="$t('node.lastHeartbeat')">
             {{ node.last_heartbeat ? formatTime(node.last_heartbeat) : '-' }}
@@ -104,6 +107,126 @@
           </el-descriptions-item>
           <el-descriptions-item label="">&nbsp;</el-descriptions-item>
         </el-descriptions>
+      </el-card>
+
+      <!-- Desktop 远程桌面（3389）只读诊断、紧急熔断与会话审计（仅 Desktop 类型） -->
+      <el-card v-if="node.type === 'desktop'" shadow="never" class="info-card" v-loading="rdpLoading">
+        <template #header>
+          <div class="card-header">
+            <div class="rdp-header-left">
+              <span>远程桌面（RDP / 3389）诊断与隐私治理</span>
+              <el-tag v-if="rdpDiag?.rdp_admin_disabled" type="danger" size="small">
+                平台紧急熔断中
+              </el-tag>
+              <el-tag v-else-if="rdpDiag?.rdp_tunnel_exposed" type="success" size="small">
+                隧道入站已开放 (:{{ rdpDiag.rdp_local_port || 3389 }})
+              </el-tag>
+              <el-tag v-else type="info" size="small">
+                入站未暴露
+              </el-tag>
+            </div>
+            <div class="rdp-header-actions">
+              <el-button size="small" @click="fetchDesktopRDPStatus" :loading="rdpLoading">刷新</el-button>
+              <el-button
+                v-if="rdpDiag?.rdp_admin_disabled"
+                size="small"
+                type="warning"
+                :loading="rdpUpdating"
+                @click="toggleRDPAdminDisable(false)"
+              >
+                解除紧急熔断
+              </el-button>
+              <el-button
+                v-else
+                size="small"
+                type="danger"
+                :loading="rdpUpdating"
+                @click="toggleRDPAdminDisable(true)"
+              >
+                紧急熔断关闭
+              </el-button>
+            </div>
+          </div>
+        </template>
+
+        <el-alert type="info" :closable="false" show-icon class="rdp-privacy-alert">
+          <template #title>
+            个人设备隐私边界：平台管理员仅拥有只读运行态诊断、连接审计与紧急熔断关闭权，不可代机主开启远程桌面或跨人共享许可。
+          </template>
+        </el-alert>
+
+        <el-descriptions v-if="rdpDiag" :column="2" border label-class-name="desc-label" class="rdp-descriptions">
+          <el-descriptions-item label="机主模式">
+            <el-tag size="small" effect="plain" :type="rdpDiag.rdp_mode === 'disabled' ? 'info' : 'primary'">
+              {{ formatRDPMode(rdpDiag.rdp_mode) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="跨人共享许可">
+            <el-tag size="small" effect="plain" :type="rdpDiag.rdp_allow_share ? 'warning' : 'info'">
+              {{ rdpDiag.rdp_allow_share ? '机主已开启同租户临时共享许可' : '仅限机主本人设备（默认关闭）' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="本机监听探测">
+            <span>
+              {{ rdpDiag.rdp_local_ready ? `已监听 (端口 ${rdpDiag.rdp_local_port || 3389})` : '未监听或设备离线' }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="隧道暴露状态">
+            <span>
+              {{ rdpDiag.rdp_admin_disabled ? '已被平台强制熔断阻断' : rdpDiag.rdp_tunnel_exposed ? '允许授权节点访问 :3389' : '未开放' }}
+            </span>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <el-divider content-position="left">生效中的跨人临时授权 ({{ rdpDiag?.active_grants?.length || 0 }})</el-divider>
+        <el-table
+          :data="rdpDiag?.active_grants || []"
+          size="small"
+          empty-text="当前无跨用户临时远程桌面授权"
+          class="rdp-sub-table"
+        >
+          <el-table-column prop="grantee_user_name" label="被授权用户" min-width="140" />
+          <el-table-column prop="tenant_id" label="所属租户 ID" min-width="180" />
+          <el-table-column prop="created_by_name" label="签发管理员" min-width="130" />
+          <el-table-column label="到期时间" min-width="170">
+            <template #default="{ row }">{{ formatTime(row.expires_at) }}</template>
+          </el-table-column>
+          <el-table-column prop="reason" label="授权原因" min-width="160" />
+        </el-table>
+
+        <el-divider content-position="left">最近远程桌面入站会话与拦截审计</el-divider>
+        <el-table
+          :data="rdpDiag?.recent_sessions || []"
+          size="small"
+          empty-text="暂无远程桌面连接或拦截审计记录"
+        >
+          <el-table-column label="发生时间" width="175">
+            <template #default="{ row }">{{ formatTime(row.occurred_at) }}</template>
+          </el-table-column>
+          <el-table-column label="事件类型" width="115">
+            <template #default="{ row }">
+              <el-tag
+                size="small"
+                :type="row.event_type === 'started' ? 'success' : row.event_type === 'rejected' ? 'danger' : 'info'"
+              >
+                {{ row.event_type === 'started' ? '会话建立' : row.event_type === 'rejected' ? '零信任拦截' : '会话结束' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="来源身份 / 设备" min-width="200">
+            <template #default="{ row }">
+              <span>{{ row.source_user_name || '-' }}</span>
+              <span v-if="row.source_device_name" class="session-sub"> / {{ row.source_device_name }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="source_ip" label="来源隧道 IP" width="145" />
+          <el-table-column label="持续时长 / 断开原因" min-width="180">
+            <template #default="{ row }">
+              <span v-if="row.duration_ms">{{ Math.round(row.duration_ms / 1000) }}s · </span>
+              <span>{{ row.close_reason || (row.grant_id ? `临时授权 #${row.grant_id}` : '本人 Desktop 互访') }}</span>
+            </template>
+          </el-table-column>
+        </el-table>
       </el-card>
 
       <!-- 能力配置（仅 Agent 类型） -->
@@ -203,7 +326,19 @@
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getNode, getNodeCapabilities, updateNodeCapabilities, updateNodeHostDomainLabel, resetNodeCapabilities, regenerateEndpointToken, type NodeDetail, type NodeSystemInfo } from '@/api/node'
+import {
+  getNode,
+  getNodeCapabilities,
+  getNodeRDPStatus,
+  updateNodeCapabilities,
+  updateNodeHostDomainLabel,
+  updateNodeRDPAdminDisable,
+  resetNodeCapabilities,
+  regenerateEndpointToken,
+  type DesktopNodeRDPDiagnostics,
+  type NodeDetail,
+  type NodeSystemInfo,
+} from '@/api/node'
 import { formatTime } from '@/utils/time'
 import { useI18n } from 'vue-i18n'
 
@@ -211,6 +346,17 @@ const { t } = useI18n()
 const route = useRoute()
 const loading = ref(false)
 const node = ref<NodeDetail | null>(null)
+
+// Desktop RDP 只读诊断与熔断
+const rdpLoading = ref(false)
+const rdpUpdating = ref(false)
+const rdpDiag = ref<DesktopNodeRDPDiagnostics | null>(null)
+
+const formatRDPMode = (mode?: string) => {
+  if (mode === 'enabled') return '强制开启 (enabled)'
+  if (mode === 'disabled') return '已关闭 (disabled)'
+  return '自动开放 (auto)'
+}
 
 const editHostDomainLabel = async () => {
   if (!node.value || node.value.type !== 'agent') return
@@ -263,6 +409,56 @@ const systemInfo = computed<NodeSystemInfo | null>(() => {
   }
 })
 
+// 获取 Desktop RDP 状态与审计
+const fetchDesktopRDPStatus = async () => {
+  const id = Number(route.params.id)
+  if (!id) return
+  rdpLoading.value = true
+  try {
+    const res = await getNodeRDPStatus(id)
+    if (res.success && res.data) {
+      rdpDiag.value = res.data
+    }
+  } catch (error) {
+    console.error('获取 Desktop RDP 诊断信息失败:', error)
+  } finally {
+    rdpLoading.value = false
+  }
+}
+
+const toggleRDPAdminDisable = async (adminDisabled: boolean) => {
+  if (!node.value) return
+  try {
+    const promptRes = await ElMessageBox.prompt(
+      adminDisabled
+        ? '启用紧急熔断后，该 Desktop 设备的所有入站远程桌面连接将被立即强制断开，且在解除前无法接收任何远程桌面会话。请输入熔断原因：'
+        : '解除紧急熔断后，该设备将恢复遵循机主本人在 Signal Desktop 中设置的开放策略（不会强行代开）。请输入解除备注：',
+      adminDisabled ? '确认紧急熔断关闭远程桌面' : '确认解除紧急熔断',
+      {
+        inputPlaceholder: adminDisabled ? '例如：安全应急处置 / 异常访问阻断' : '例如：核查完毕恢复正常',
+        confirmButtonText: adminDisabled ? '立即熔断关闭' : '确认解除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+    rdpUpdating.value = true
+    const res = await updateNodeRDPAdminDisable(node.value.id, {
+      admin_disabled: adminDisabled,
+      reason: promptRes.value?.trim() || undefined,
+    })
+    if (res.success) {
+      ElMessage.success(res.message || '操作成功')
+      await fetchDesktopRDPStatus()
+    }
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      console.error('更新 Desktop RDP 熔断状态失败:', error)
+    }
+  } finally {
+    rdpUpdating.value = false
+  }
+}
+
 // 获取设备详情
 const fetchNode = async () => {
   const id = Number(route.params.id)
@@ -273,9 +469,10 @@ const fetchNode = async () => {
     const res = await getNode(id)
     if (res.success && res.data) {
       node.value = res.data
-      // Agent 类型设备加载能力配置
       if (res.data.type === 'agent') {
         await fetchCapabilities()
+      } else if (res.data.type === 'desktop') {
+        await fetchDesktopRDPStatus()
       }
     }
   } catch (error) {
@@ -438,6 +635,38 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.rdp-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rdp-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rdp-privacy-alert {
+  margin-bottom: 16px;
+}
+
+.rdp-descriptions {
+  margin-bottom: 16px;
+}
+
+.rdp-sub-table {
+  margin-bottom: 16px;
+}
+
+.session-sub {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 
 .user-link {
@@ -486,8 +715,8 @@ onMounted(() => {
 }
 
 .node-detail .el-descriptions__label {
-  width: 100px !important;
-  min-width: 100px !important;
-  max-width: 100px !important;
+  width: 110px !important;
+  min-width: 110px !important;
+  max-width: 110px !important;
 }
 </style>

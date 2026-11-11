@@ -88,3 +88,46 @@ func TestNodeRuntimeStoreDelete(t *testing.T) {
 		t.Fatalf("expected secondary index for node 20 to be deleted")
 	}
 }
+
+func TestNodeRuntimeStoreMarkDisconnectedPreventsStaleFlushAndClearsRDPState(t *testing.T) {
+	store := NewNodeRuntimeStore()
+	now := time.Now().UTC()
+	node := &model.Node{
+		ID:       30,
+		UserID:   3,
+		Name:     "home-desktop",
+		Type:     model.NodeTypeDesktop,
+		RDPMode:  model.DesktopRDPModeAuto,
+		Hostname: "home-win11",
+	}
+	store.UpsertNode(node)
+
+	if _, err := store.UpdateHeartbeat(30, "100.64.0.30", "home-win11", "v1.0.3", "", nil, "", "{}", "v1", "v1", now); err != nil {
+		t.Fatalf("UpdateHeartbeat failed: %v", err)
+	}
+	changed, err := store.UpdateDesktopRDPStatus(30, true, 3389, true)
+	if err != nil || !changed {
+		t.Fatalf("expected RDP status update changed=true, got changed=%v, err=%v", changed, err)
+	}
+
+	// UpsertNode 仅修改持久化策略字段时不应冲掉在线 RDP 探测态
+	node.RDPAllowShare = true
+	store.UpsertNode(node)
+	rnLive, ok := store.GetNode(30)
+	if !ok || !rnLive.RDPLocalReady || !rnLive.RDPTunnelExposed || !rnLive.RDPAllowShare {
+		t.Fatalf("expected UpsertNode to preserve live RDP state and update allow_share, got %+v", rnLive)
+	}
+
+	// MarkDisconnected 必须清空 IP、LastHeartbeat、RDP 状态与 Dirty 标记，防止后台 Persister 把脏快照刷回 DB
+	store.MarkDisconnected(30)
+	if len(store.SnapshotDirty()) != 0 {
+		t.Fatalf("expected zero dirty nodes after MarkDisconnected, got %+v", store.SnapshotDirty())
+	}
+	rnAfter, ok := store.GetNode(30)
+	if !ok {
+		t.Fatalf("expected node 30 to remain indexed after MarkDisconnected")
+	}
+	if rnAfter.IP != "" || !rnAfter.LastHeartbeat.IsZero() || rnAfter.RDPLocalReady || rnAfter.RDPTunnelExposed {
+		t.Fatalf("expected disconnected node state cleared, got %+v", rnAfter)
+	}
+}

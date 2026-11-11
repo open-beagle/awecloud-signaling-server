@@ -62,6 +62,12 @@ service DesktopService {
 
   // 列出域名（Client 模式专用）- 返回域名及其目标 IP 和端口
   rpc ListDomains(ListDomainsRequest) returns (ListDomainsResponse);
+
+  // 更新设备远程桌面（RDP）配置
+  rpc UpdateDeviceRDPConfig(UpdateDeviceRDPConfigRequest) returns (UpdateDeviceRDPConfigResponse);
+
+  // 上报远程桌面（RDP）入站会话审计事件
+  rpc ReportRDPSessionAudit(ReportRDPSessionAuditRequest) returns (ReportRDPSessionAuditResponse);
 }
 
 // ============================================
@@ -108,6 +114,10 @@ message DesktopHeartbeatRequest {
   uint64 desktop_id = 1; // Desktop ID
   string tunnel_ip = 2; // 隧道 IP
   bool tunnel_connected = 3; // 隧道连接状态
+  string secret = 4; // Desktop 专属密钥（通道鉴权）
+  bool rdp_local_ready = 5; // 本机 RDP 服务是否已监听就绪
+  int32 rdp_local_port = 6; // 本机 RDP 实际监听端口（如 3389）
+  bool rdp_tunnel_exposed = 7; // 隧道侧 3389 入站门禁当前是否开放
 }
 
 // AuthorizedService 已授权服务
@@ -137,12 +147,14 @@ enum DesktopDataType {
   DESKTOP_DATA_TYPE_HOSTS = 3; // 主机列表
   DESKTOP_DATA_TYPE_DEVICES = 4; // 设备列表
   DESKTOP_DATA_TYPE_FAVORITES = 5; // 收藏列表
+  DESKTOP_DATA_TYPE_RDP_POLICY = 6; // 本机远程桌面入站门禁策略快照
 }
 
 // DesktopDataRequest Desktop 数据流请求
 message DesktopDataRequest {
   uint64 desktop_id = 1; // Desktop ID
   DesktopDataType refresh_type = 2; // 请求刷新的数据类型（0 或 ALL 表示全部）
+  string secret = 3; // Desktop 专属密钥（通道鉴权）
 }
 
 // DesktopDataResponse Desktop 数据流响应（Server 推送）
@@ -152,6 +164,7 @@ message DesktopDataResponse {
   repeated AuthorizedHost hosts = 3; // 主机列表（当 type = HOSTS 或 ALL）
   repeated DeviceInfo devices = 4; // 设备列表（当 type = DEVICES 或 ALL）
   repeated string favorite_service_ids = 5; // 收藏的服务 ID 列表（当 type = FAVORITES 或 ALL）
+  DesktopInboundRDPPolicy rdp_policy = 6; // 本机远程桌面入站门禁策略（当 type = RDP_POLICY 或 ALL）
 }
 
 // ============================================
@@ -200,6 +213,7 @@ message GetHostServicesResponse {
 // GetMyDevicesRequest 获取我的设备列表请求
 message GetMyDevicesRequest {
   uint64 desktop_id = 1; // Desktop ID
+  string secret = 2; // Desktop 专属密钥（通道鉴权）
 }
 
 // DeviceInfo 设备信息
@@ -214,11 +228,90 @@ message DeviceInfo {
   string created_at = 8; // 创建时间
   bool is_current = 9; // 是否是当前设备
   string ip = 10; // 隧道 IP
+  uint64 node_id = 11; // 设备节点 ID
+  string rdp_mode = 12; // 远程桌面策略：auto / enabled / disabled
+  bool rdp_allow_share = 13; // 设备归属人是否允许跨账号临时授权
+  bool rdp_admin_disabled = 14; // 平台管理员是否强制熔断关闭
+  bool rdp_local_ready = 15; // 目标本机 RDP 服务是否已监听就绪
+  int32 rdp_local_port = 16; // 目标本机 RDP 监听端口
+  bool rdp_tunnel_exposed = 17; // 目标设备隧道侧 3389 是否开放
+  bool rdp_connectable = 18; // 当前调用端是否可直接发起远程桌面连接
+  string owner_username = 19; // 设备归属用户名（跨账号授权设备展示用）
+  bool is_shared = 20; // 是否为他人跨账号授权给我的设备
+  int64 grant_expires_at_unix = 21; // 跨账号授权到期时间戳（秒，0 表示本人设备）
 }
 
 // GetMyDevicesResponse 获取我的设备列表响应
 message GetMyDevicesResponse {
   repeated DeviceInfo devices = 1; // 设备列表
+}
+
+// ============================================
+// 远程桌面（RDP）门禁、配置与会话审计
+// ============================================
+
+// AllowedRDPPeer 允许访问本机远程桌面的源节点白名单条目
+message AllowedRDPPeer {
+  uint64 headscale_node_id = 1; // 允许入站的源 Desktop Headscale Node ID（精确节点级校验）
+  uint64 source_node_id = 2; // 允许入站的源 Desktop 数据库 Node ID
+  string source_user_name = 3; // 源端归属用户名
+  string source_device_name = 4; // 源端设备名称
+  uint64 grant_id = 5; // 跨账号授权记录 ID（0 表示本人自访）
+  int64 expires_at_unix = 6; // 授权到期时间戳（秒，0 表示本人自访）
+  string headscale_user_name = 7; // 源端 Headscale 用户名（如 client-zhangsan）
+}
+
+// DesktopInboundRDPPolicy 本机远程桌面入站门禁策略快照
+message DesktopInboundRDPPolicy {
+  bool effective_enabled = 1; // 综合评估后是否允许暴露隧道 3389 入站转发
+  string rdp_mode = 2; // 当前开放模式：auto / enabled / disabled
+  bool allow_share = 3; // 是否允许跨账号临时授权
+  bool admin_disabled = 4; // 是否被平台管理员强制熔断关闭
+  int32 target_port = 5; // 转发到本机的目标端口（默认 3389，或探测到的自定义端口）
+  repeated AllowedRDPPeer allowed_peers = 6; // 允许入站的精确 Desktop 节点白名单
+  int64 issued_at_unix = 7; // 快照签发时间戳（秒）
+  int64 valid_until_unix = 8; // 快照租约有效期截止时间戳（秒，超时失败关闭）
+}
+
+// UpdateDeviceRDPConfigRequest 更新本人设备远程桌面配置请求
+message UpdateDeviceRDPConfigRequest {
+  uint64 desktop_id = 1; // 当前发起请求的 Desktop ID
+  string secret = 2; // 当前发起请求的 Desktop 密钥（必填，失败关闭）
+  uint64 target_node_id = 3; // 要修改的目标本人设备 Node ID（0 表示通过 device_token 解析）
+  string device_token = 4; // 兼容设备标识 "<node_id>:***"
+  string rdp_mode = 5; // 目标模式：auto / enabled / disabled（空字符串表示不修改）
+  bool update_allow_share = 6; // 是否更新 rdp_allow_share 字段
+  bool rdp_allow_share = 7; // 是否允许跨账号临时授权
+}
+
+// UpdateDeviceRDPConfigResponse 更新本人设备远程桌面配置响应
+message UpdateDeviceRDPConfigResponse {
+  bool success = 1;
+  string message = 2;
+  DeviceInfo device = 3;
+}
+
+// ReportRDPSessionAuditRequest 上报远程桌面入站会话审计事件请求
+message ReportRDPSessionAuditRequest {
+  uint64 desktop_id = 1; // 被控端 Desktop ID
+  string secret = 2; // 被控端 Desktop 密钥（必填，失败关闭）
+  string session_uuid = 3; // 会话唯一标识（建立与断开关联）
+  string event_type = 4; // 事件类型：started / ended / rejected
+  uint64 source_headscale_node_id = 5; // 源端 Headscale Node ID
+  uint64 source_node_id = 6; // 源端数据库 Node ID
+  string source_user_name = 7; // 源端用户名
+  string source_device_name = 8; // 源端设备名
+  string source_ip = 9; // 源端隧道 IP
+  uint64 grant_id = 10; // 命中的跨账号授权 ID（0 表示本人自访或未命中）
+  string close_reason = 11; // 结束或拒绝原因
+  int64 timestamp_unix = 12; // 事件发生时间戳（秒）
+  int64 duration_ms = 13; // 会话持续时长（毫秒，ended 时填写）
+}
+
+// ReportRDPSessionAuditResponse 上报远程桌面入站会话审计事件响应
+message ReportRDPSessionAuditResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 // ============================================

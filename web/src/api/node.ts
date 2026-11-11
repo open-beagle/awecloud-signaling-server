@@ -62,6 +62,48 @@ export interface NodeDetail extends Node {
   headscale?: HeadscaleNodeInfo
 }
 
+export interface DesktopNodeRDPGrantSummary {
+  id: number
+  tenant_id: string
+  grantee_user_id: number
+  grantee_user_name: string
+  created_by_name?: string
+  reason?: string
+  status: string
+  expires_at: string
+  revoked_at?: string
+  created_at: string
+}
+
+export interface DesktopRDPSessionAuditItem {
+  id: number
+  session_uuid: string
+  target_node_id: number
+  owner_user_id: number
+  event_type: 'started' | 'ended' | 'rejected' | string
+  source_headscale_node_id?: number
+  source_node_id?: number
+  source_user_name?: string
+  source_device_name?: string
+  source_ip?: string
+  grant_id?: number
+  close_reason?: string
+  duration_ms?: number
+  occurred_at: string
+}
+
+export interface DesktopNodeRDPDiagnostics {
+  node_id: number
+  rdp_mode: string
+  rdp_allow_share: boolean
+  rdp_admin_disabled: boolean
+  rdp_local_ready: boolean
+  rdp_local_port: number
+  rdp_tunnel_exposed: boolean
+  active_grants: DesktopNodeRDPGrantSummary[]
+  recent_sessions: DesktopRDPSessionAuditItem[]
+}
+
 // 获取设备列表
 export const getNodes = (params?: { type?: NodeType; user_id?: number; search?: string; page?: number; size?: number }) => {
   return request.get<any, PagedResponse<Node[]>>('/api/v1/admin/nodes', { params })
@@ -70,6 +112,16 @@ export const getNodes = (params?: { type?: NodeType; user_id?: number; search?: 
 // 获取设备详情
 export const getNode = (id: number) => {
   return request.get<any, ApiResponse<NodeDetail>>(`/api/v1/admin/nodes/${id}`)
+}
+
+// 获取 Desktop 设备远程桌面只读诊断与会话审计
+export const getNodeRDPStatus = (id: number) => {
+  return request.get<any, ApiResponse<DesktopNodeRDPDiagnostics>>(`/api/v1/admin/nodes/${id}/rdp`)
+}
+
+// 平台管理员紧急熔断关闭或解除熔断 Desktop 远程桌面（不具备反向代开能力）
+export const updateNodeRDPAdminDisable = (id: number, data: { admin_disabled: boolean; reason?: string }) => {
+  return request.put<any, ApiResponse<{ node_id: number; rdp_admin_disabled: boolean }>>(`/api/v1/admin/nodes/${id}/rdp/admin-disable`, data)
 }
 
 // 删除设备

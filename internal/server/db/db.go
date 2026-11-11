@@ -123,6 +123,9 @@ func autoMigrate() error {
 	if err := ensureTenantAccessGrantSchema(DB); err != nil {
 		return err
 	}
+	if err := ensureDesktopRDPSchema(DB); err != nil {
+		return err
+	}
 	err := DB.AutoMigrate(
 		// 基础模型
 		&model.Admin{},
@@ -207,6 +210,10 @@ func autoMigrate() error {
 		// ACL SSH 授权模型
 		&model.AclSSHUserPermission{},
 		&model.AclSSHGroupPermission{},
+
+		// ACL Desktop 远程桌面（3389）跨账号授权与会话审计模型
+		&model.AclDesktopRDPPermission{},
+		&model.DesktopRDPSessionAudit{},
 
 		// 审计日志
 		&model.AuditLog{},
@@ -600,6 +607,30 @@ func ensureTenantAccessGrantSchema(database *gorm.DB) error {
 	if !migrator.HasColumn(&model.TenantAccessGrant{}, "allow_k8s_api") {
 		if err := database.Exec("ALTER TABLE tenant_access_grant ADD COLUMN allow_k8s_api BOOLEAN NOT NULL DEFAULT 0").Error; err != nil {
 			return fmt.Errorf("add tenant_access_grant allow_k8s_api: %w", err)
+		}
+	}
+	return nil
+}
+
+// ensureDesktopRDPSchema 确保存量 node 表以增量方式补齐 Desktop 远程桌面治理列
+func ensureDesktopRDPSchema(database *gorm.DB) error {
+	migrator := database.Migrator()
+	if !migrator.HasTable(&model.Node{}) {
+		return nil
+	}
+	if !migrator.HasColumn(&model.Node{}, "rdp_mode") {
+		if err := database.Exec("ALTER TABLE node ADD COLUMN rdp_mode VARCHAR(20) NOT NULL DEFAULT 'auto'").Error; err != nil {
+			return fmt.Errorf("add node rdp_mode: %w", err)
+		}
+	}
+	if !migrator.HasColumn(&model.Node{}, "rdp_allow_share") {
+		if err := database.Exec("ALTER TABLE node ADD COLUMN rdp_allow_share BOOLEAN NOT NULL DEFAULT 0").Error; err != nil {
+			return fmt.Errorf("add node rdp_allow_share: %w", err)
+		}
+	}
+	if !migrator.HasColumn(&model.Node{}, "rdp_admin_disabled") {
+		if err := database.Exec("ALTER TABLE node ADD COLUMN rdp_admin_disabled BOOLEAN NOT NULL DEFAULT 0").Error; err != nil {
+			return fmt.Errorf("add node rdp_admin_disabled: %w", err)
 		}
 	}
 	return nil

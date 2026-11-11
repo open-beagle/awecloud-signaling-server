@@ -51,9 +51,11 @@ type unifiedHostSSHAccess struct {
 
 // ACLSyncService ACL 同步服务
 type ACLSyncService struct {
-	client    *Client
-	refresher *SnapshotRefresher
-	mutex     sync.Mutex
+	client            *Client
+	refresher         *SnapshotRefresher
+	onRDPGrantExpired func(targetNodeID uint64, ownerUserID uint64, granteeUserID uint64)
+	setTagsOverride   func(ctx context.Context, nodeID uint64, tags []string) error
+	mutex             sync.Mutex
 }
 
 // NewACLSyncService 创建 ACL 同步服务
@@ -66,6 +68,18 @@ func NewACLSyncService(client *Client) *ACLSyncService {
 // SetRefresher 设置 SnapshotRefresher
 func (s *ACLSyncService) SetRefresher(refresher *SnapshotRefresher) {
 	s.refresher = refresher
+}
+
+// SetRDPGrantExpiryHook 设置跨用户 Desktop RDP 授权到期回调（用于即时推送 DataStream 断开会话）
+func (s *ACLSyncService) SetRDPGrantExpiryHook(fn func(targetNodeID uint64, ownerUserID uint64, granteeUserID uint64)) {
+	s.onRDPGrantExpired = fn
+}
+
+func (s *ACLSyncService) applyNodeTags(ctx context.Context, nodeID uint64, tags []string) error {
+	if s.setTagsOverride != nil {
+		return s.setTagsOverride(ctx, nodeID, tags)
+	}
+	return s.client.SetTags(ctx, nodeID, tags)
 }
 
 // SyncACL 同步 ACL 规则到 Headscale
@@ -483,6 +497,29 @@ func (s *ACLSyncService) generateACLPolicy(ctx context.Context) (*ACLPolicy, err
 		}
 	}
 
+	// 10. 跨用户 Desktop RDP 临时授权规则（仅放行设备级标签 tag:rdp-node-<node_id>:3389）
+	// RDP 授权查询失败时仅跳过 RDP 规则，不得阻断 Agent/Tunnel 等既有 ACL 下发
+	rdpGrants, err := loadValidDesktopRDPPermissions(ctx)
+	if err != nil {
+		logger.Warnf("加载 Desktop RDP 临时授权失败，本轮跳过 RDP ACL 规则: %v", err)
+		rdpGrants = nil
+	}
+	var rdpACLRules []ACLRule
+	for _, perm := range rdpGrants {
+		srcTag := fmt.Sprintf("tag:client-%s", perm.GranteeUser.Name)
+		dstTag := fmt.Sprintf("tag:rdp-node-%d", perm.TargetNodeID)
+		usedTags[srcTag] = true
+		usedTags[dstTag] = true
+		policy.TagOwners[srcTag] = []string{}
+		policy.TagOwners[dstTag] = []string{}
+		rdpACLRules = append(rdpACLRules, ACLRule{
+			Action: "accept",
+			Src:    []string{srcTag},
+			Dst:    []string{fmt.Sprintf("%s:3389", dstTag)},
+		})
+	}
+	policy.ACLs = append(policy.ACLs, appendUniqueJSON(nil, rdpACLRules)...)
+
 	// 生成 SSH 规则
 	sshRules, err := s.generateSSHRules(ctx, usedTags)
 	if err != nil {
@@ -499,6 +536,123 @@ func (s *ACLSyncService) generateACLPolicy(ctx context.Context) (*ACLPolicy, err
 	return policy, nil
 }
 
+// loadValidDesktopRDPPermissions 查询当前有效、未到期、机主允许共享且未熔断的同租户 Desktop RDP 授权
+func loadValidDesktopRDPPermissions(ctx context.Context) ([]model.AclDesktopRDPPermission, error) {
+	if db.DB == nil || !db.DB.Migrator().HasTable(&model.AclDesktopRDPPermission{}) {
+		return nil, nil
+	}
+	now := time.Now()
+	var perms []model.AclDesktopRDPPermission
+	if err := db.DB.WithContext(ctx).
+		Preload("TargetNode").
+		Preload("TargetNode.User").
+		Preload("GranteeUser").
+		Where("enabled = ? AND revoked_at IS NULL AND expires_at > ?", true, now).
+		Find(&perms).Error; err != nil {
+		return nil, fmt.Errorf("查询 Desktop RDP 临时授权失败: %w", err)
+	}
+	valid := make([]model.AclDesktopRDPPermission, 0, len(perms))
+	for _, perm := range perms {
+		if perm.TargetNode == nil || perm.TargetNode.Type != model.NodeTypeDesktop {
+			continue
+		}
+		if perm.TargetNode.User == nil || !perm.TargetNode.User.Enabled {
+			continue
+		}
+		if perm.GranteeUser == nil || !perm.GranteeUser.Enabled || perm.GranteeUser.Role != model.UserRoleClient {
+			continue
+		}
+		if !perm.TargetNode.RDPAllowShare || perm.TargetNode.RDPAdminDisabled {
+			continue
+		}
+		if model.NormalizeDesktopRDPMode(perm.TargetNode.RDPMode) == model.DesktopRDPModeDisabled {
+			continue
+		}
+		ownerUserID := perm.OwnerUserID
+		if ownerUserID == 0 {
+			ownerUserID = perm.TargetNode.UserID
+		}
+		if !hasActiveSharedTenantForRDP(ctx, perm.TenantID, ownerUserID, perm.GranteeUserID, now) {
+			continue
+		}
+		valid = append(valid, perm)
+	}
+	return valid, nil
+}
+
+func hasActiveSharedTenantForRDP(ctx context.Context, tenantID string, ownerUserID, granteeUserID uint64, now time.Time) bool {
+	if ownerUserID == 0 || granteeUserID == 0 {
+		return false
+	}
+	if !db.DB.Migrator().HasTable(&model.TenantMembership{}) {
+		return false
+	}
+	if tenantID != "" {
+		if db.DB.Migrator().HasTable(&model.Tenant{}) {
+			var tenant model.Tenant
+			if err := db.DB.WithContext(ctx).First(&tenant, "id = ? AND status = ?", tenantID, model.TenantStatusActive).Error; err != nil {
+				return false
+			}
+		}
+		var count int64
+		if err := db.DB.WithContext(ctx).Model(&model.TenantMembership{}).
+			Where("tenant_id = ? AND user_id IN ? AND enabled = ? AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)",
+				tenantID, []uint64{ownerUserID, granteeUserID}, true, now).
+			Distinct("user_id").
+			Count(&count).Error; err != nil {
+			return false
+		}
+		return count == 2
+	}
+	var count int64
+	if err := db.DB.WithContext(ctx).Table("tenant_membership AS tm1").
+		Joins("JOIN tenant_membership AS tm2 ON tm1.tenant_id = tm2.tenant_id").
+		Where("tm1.user_id = ? AND tm1.enabled = ? AND tm1.deleted_at IS NULL AND (tm1.expires_at IS NULL OR tm1.expires_at > ?)", ownerUserID, true, now).
+		Where("tm2.user_id = ? AND tm2.enabled = ? AND tm2.deleted_at IS NULL AND (tm2.expires_at IS NULL OR tm2.expires_at > ?)", granteeUserID, true, now).
+		Count(&count).Error; err != nil {
+		return false
+	}
+	return count > 0
+}
+
+// ExpireDesktopRDPPermissions 扫描并回收已过期的 Desktop RDP 临时授权，返回本次回收数量
+func (s *ACLSyncService) ExpireDesktopRDPPermissions(ctx context.Context) (int, error) {
+	if db.DB == nil || !db.DB.Migrator().HasTable(&model.AclDesktopRDPPermission{}) {
+		return 0, nil
+	}
+	now := time.Now()
+	var expired []model.AclDesktopRDPPermission
+	if err := db.DB.WithContext(ctx).
+		Where("enabled = ? AND expires_at <= ?", true, now).
+		Find(&expired).Error; err != nil {
+		return 0, fmt.Errorf("查询已过期 Desktop RDP 授权失败: %w", err)
+	}
+	if len(expired) == 0 {
+		return 0, nil
+	}
+
+	ids := make([]uint64, 0, len(expired))
+	for _, perm := range expired {
+		ids = append(ids, perm.ID)
+	}
+	if err := db.DB.WithContext(ctx).Model(&model.AclDesktopRDPPermission{}).
+		Where("id IN ? AND enabled = ?", ids, true).
+		Updates(map[string]any{
+			"enabled":       false,
+			"revoked_at":    &now,
+			"revoke_reason": "授权已到期",
+		}).Error; err != nil {
+		return 0, fmt.Errorf("更新已过期 Desktop RDP 授权状态失败: %w", err)
+	}
+
+	if s.onRDPGrantExpired != nil {
+		for _, perm := range expired {
+			s.onRDPGrantExpired(perm.TargetNodeID, perm.OwnerUserID, perm.GranteeUserID)
+		}
+	}
+	return len(expired), nil
+}
+
 // extractPort 从地址中提取端口号
 func extractPort(addr string) string {
 	if addr == "" {
@@ -512,12 +666,19 @@ func extractPort(addr string) string {
 	return addr
 }
 
-// StartPeriodicSync 启动定时全量同步
+// StartPeriodicSync 启动定时全量同步与 Desktop RDP 临时授权到期回收
 func (s *ACLSyncService) StartPeriodicSync(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
-	logger.Info("启动 ACL 定时同步任务，间隔 5 分钟")
+	expiryTicker := time.NewTicker(1 * time.Minute)
+	defer expiryTicker.Stop()
+
+	logger.Info("启动 ACL 定时同步任务，间隔 5 分钟（RDP 临时授权到期巡检 1 分钟）")
+
+	if _, err := s.ExpireDesktopRDPPermissions(ctx); err != nil {
+		logger.Warnf("初始清理过期 Desktop RDP 授权失败: %v", err)
+	}
 
 	if err := s.SyncAllNodeTags(ctx); err != nil {
 		logger.Errorf("初始 Node Tag 同步失败: %v", err)
@@ -532,8 +693,21 @@ func (s *ACLSyncService) StartPeriodicSync(ctx context.Context) {
 		case <-ctx.Done():
 			logger.Info("ACL 定时同步任务已停止")
 			return
+		case <-expiryTicker.C:
+			expiredCount, err := s.ExpireDesktopRDPPermissions(ctx)
+			if err != nil {
+				logger.Warnf("巡检清理过期 Desktop RDP 授权失败: %v", err)
+			} else if expiredCount > 0 {
+				logger.Infof("已回收 %d 条到期 Desktop RDP 临时授权，立即同步 Tag/ACL", expiredCount)
+				if err := s.FullSync(ctx); err != nil {
+					logger.Warnf("回收过期 Desktop RDP 授权后同步 ACL 失败: %v", err)
+				}
+			}
 		case <-ticker.C:
 			logger.Debug("执行定时 ACL 全量同步")
+			if _, err := s.ExpireDesktopRDPPermissions(ctx); err != nil {
+				logger.Warnf("定时清理过期 Desktop RDP 授权失败: %v", err)
+			}
 			if err := s.SyncAllNodeTags(ctx); err != nil {
 				logger.Errorf("定时 Node Tag 同步失败: %v", err)
 			}
@@ -571,13 +745,22 @@ func preferOnlineNewest(hsNodes []hsNodeInfo, filter func(*hsNodeInfo) bool) *hs
 
 // matchHeadscaleNode 为 node 表中的一条记录匹配对应的 Headscale 节点。
 //
-// 普通节点：先按 IP 精确匹配，再按 GivenName 精确匹配（在线优先、ID 最新）。
+// 普通节点：先按 HeadscaleNodeID 精确匹配，再按 IP 精确匹配，最后按 GivenName 精确匹配（在线优先、ID 最新）。
 // tunnelAccount=true：仅用于持有有效 Tunnel Token、且只有一条设备记录的服务账号。
 // Tunnel Pod 每次重建都会注册新节点，Headscale 会给 GivenName 加随机后缀，旧 IP
 // 指向已离线的旧节点，因此直接取该账号下在线优先、ID 最新的节点。
 func matchHeadscaleNode(dbNode *model.Node, hsNodes []hsNodeInfo, tunnelAccount bool) *hsNodeInfo {
 	if tunnelAccount {
 		return preferOnlineNewest(hsNodes, nil)
+	}
+	// 仅 Desktop 优先按已绑定 HeadscaleNodeID 匹配（断连后 IP 已清空）；
+	// Agent 保持原有「IP → GivenName」顺序，避免重注册后陈旧 ID 命中离线旧节点导致标签/IP 错挂。
+	if dbNode.Type == model.NodeTypeDesktop && dbNode.HeadscaleNodeID != 0 {
+		for i := range hsNodes {
+			if hsNodes[i].HeadscaleNodeID == dbNode.HeadscaleNodeID {
+				return &hsNodes[i]
+			}
+		}
 	}
 	if dbNode.IP != "" {
 		for i := range hsNodes {
@@ -673,6 +856,16 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 		nodeCountByUser[n.UserID]++
 	}
 
+	// 计算当前存在有效跨用户临时授权的 Desktop Node 集合（仅对应设备自身挂载 tag:rdp-node-<node_id>）
+	rdpSharedNodeIDs := make(map[uint64]bool)
+	if validRDPGrants, err := loadValidDesktopRDPPermissions(ctx); err != nil {
+		logger.Warnf("查询有效 Desktop RDP 授权失败，跳过设备级 RDP 标签挂载: %v", err)
+	} else {
+		for _, perm := range validRDPGrants {
+			rdpSharedNodeIDs[perm.TargetNodeID] = true
+		}
+	}
+
 	for _, dbNode := range dbNodes {
 		if dbNode.User == nil {
 			continue
@@ -741,9 +934,14 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 			}
 		}
 
+		// 若该 Desktop 设备存在有效跨用户临时授权，仅对该单设备追加设备级标签
+		if dbNode.Type == model.NodeTypeDesktop && rdpSharedNodeIDs[dbNode.ID] {
+			expectedTags = append(expectedTags, fmt.Sprintf("tag:rdp-node-%d", dbNode.ID))
+		}
+
 		// 检查是否需要更新
 		if !tagsEqual(nodeInfo.Tags, expectedTags) {
-			if err := s.client.SetTags(ctx, nodeInfo.HeadscaleNodeID, expectedTags); err != nil {
+			if err := s.applyNodeTags(ctx, nodeInfo.HeadscaleNodeID, expectedTags); err != nil {
 				logger.Warnf("设置 Node %s Tag 失败: %v", dbNode.Name, err)
 			} else {
 				logger.Infof("Node %s Tag 已同步: %v", dbNode.Name, expectedTags)
@@ -808,7 +1006,7 @@ func (s *ACLSyncService) SyncAllNodeTags(ctx context.Context) error {
 					expectedTags, nodeInfo.Tags, tagsEqual(nodeInfo.Tags, expectedTags))
 
 				if !tagsEqual(nodeInfo.Tags, expectedTags) {
-					if err := s.client.SetTags(ctx, nodeInfo.HeadscaleNodeID, expectedTags); err != nil {
+					if err := s.applyNodeTags(ctx, nodeInfo.HeadscaleNodeID, expectedTags); err != nil {
 						logger.Warnf("设置 Client Node %s (User: %s) Tag 失败: %v", nodeInfo.GivenName, userName, err)
 					} else {
 						logger.Infof("Client Node %s (User: %s) Tag 已同步: %v", nodeInfo.GivenName, userName, expectedTags)

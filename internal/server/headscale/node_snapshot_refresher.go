@@ -71,6 +71,14 @@ func (r *SnapshotRefresher) LoadSnapshot() *HeadscaleNodeSnapshot {
 	return s
 }
 
+// StoreSnapshot 注入指定只读快照（供测试或外部引导初始化使用）
+func (r *SnapshotRefresher) StoreSnapshot(snap *HeadscaleNodeSnapshot) {
+	if snap == nil {
+		snap = NewHeadscaleNodeSnapshot(0, time.Time{}, nil)
+	}
+	r.snapshot.Store(snap)
+}
+
 // NotifyRefresh 发送非阻塞刷新事件通知（设备注册/变更/删除后调用）
 func (r *SnapshotRefresher) NotifyRefresh() {
 	select {

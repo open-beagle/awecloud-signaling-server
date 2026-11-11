@@ -106,6 +106,11 @@ func (s *UserDeletionServiceServer) DisconnectUserConnections(ctx context.Contex
 		if node.Type == model.NodeTypeAgent && s.agent != nil {
 			s.agent.DisconnectNode(node.ID)
 		}
+		if s.desktop != nil && s.desktop.runtimeStore != nil {
+			s.desktop.runtimeStore.MarkDisconnected(node.ID)
+		} else if s.agent != nil && s.agent.runtimeStore != nil {
+			s.agent.runtimeStore.MarkDisconnected(node.ID)
+		}
 	}
 	if err := db.DB.WithContext(ctx).Model(&model.Node{}).Where("user_id = ?", user.ID).Updates(map[string]any{"last_heartbeat": nil, "ip": ""}).Error; err != nil {
 		return nil, err
@@ -133,6 +138,8 @@ func (s *UserDeletionServiceServer) CleanupUserResources(ctx context.Context, re
 			{&model.AclServiceUserPermission{}, "user_id = ?"},
 			{&model.AclSSHUserPermission{}, "user_id = ? OR target_user_id = ?"},
 			{&model.AclSSHGroupPermission{}, "target_user_id = ?"},
+			{&model.AclDesktopRDPPermission{}, "owner_user_id = ? OR grantee_user_id = ?"},
+			{&model.DesktopRDPSessionAudit{}, "owner_user_id = ?"},
 			{&model.AclK8SUserPermission{}, "user_id = ? OR target_user_id = ?"},
 			{&model.AclK8SGroupPermission{}, "target_user_id = ?"},
 			{&model.AclUserUserPermission{}, "granted_user_id = ? OR target_user_id = ?"},
@@ -154,7 +161,7 @@ func (s *UserDeletionServiceServer) CleanupUserResources(ctx context.Context, re
 		}
 		for _, item := range deletes {
 			args := []any{user.ID}
-			if item.query == "user_id = ? OR target_user_id = ?" || item.query == "granted_user_id = ? OR target_user_id = ?" || item.query == "user_id = ? OR created_by_user_id = ?" || item.query == "actor_user_id = ? OR effective_user_id = ?" {
+			if item.query == "user_id = ? OR target_user_id = ?" || item.query == "granted_user_id = ? OR target_user_id = ?" || item.query == "owner_user_id = ? OR grantee_user_id = ?" || item.query == "user_id = ? OR created_by_user_id = ?" || item.query == "actor_user_id = ? OR effective_user_id = ?" {
 				args = append(args, user.ID)
 			}
 			if err := tx.Where(item.query, args...).Delete(item.value).Error; err != nil {

@@ -1,5 +1,5 @@
 import request from '@/utils/request'
-import type { PagedResponse } from '@/types/models'
+import type { ApiResponse, PagedResponse } from '@/types/models'
 
 export interface TenantMemberDevice {
   node_id: number
@@ -12,6 +12,30 @@ export interface TenantMemberDevice {
   version?: string
   last_heartbeat?: string
   online: boolean
+  rdp_mode?: string
+  rdp_allow_share?: boolean
+  rdp_admin_disabled?: boolean
+  rdp_local_ready?: boolean
+  rdp_local_port?: number
+  rdp_tunnel_exposed?: boolean
+  active_grant_count?: number
+}
+
+export interface TenantDeviceRDPGrant {
+  id: number
+  tenant_id: string
+  target_node_id: number
+  owner_user_id: number
+  grantee_user_id: number
+  grantee_user_name: string
+  grantee_alias?: string
+  created_by_name?: string
+  reason?: string
+  status: 'active' | 'expired' | 'revoked' | string
+  expires_at: string
+  revoked_at?: string
+  revoke_reason?: string
+  created_at: string
 }
 
 export interface TenantAuditLog {
@@ -65,6 +89,26 @@ export const getTenantManagementMemberships = (tenantId: string, params: { searc
 export const getTenantMemberDevices = (tenantId: string, params: { search?: string; page: number; size: number }) =>
   request.get<any, PagedResponse<TenantMemberDevice[]>>(`/api/v1/admin/tenants/${tenantId}/member-devices`, {
     params,
+    headers: { 'X-Tenant-ID': tenantId },
+  })
+
+export const getTenantDeviceRDPGrants = (tenantId: string, nodeId: number) =>
+  request.get<any, ApiResponse<TenantDeviceRDPGrant[]>>(`/api/v1/admin/tenants/${tenantId}/member-devices/${nodeId}/rdp-grants`, {
+    headers: { 'X-Tenant-ID': tenantId },
+  })
+
+export const createTenantDeviceRDPGrant = (
+  tenantId: string,
+  nodeId: number,
+  data: { grantee_user_id: number; duration_minutes?: number; expires_at?: string; reason?: string }
+) =>
+  request.post<any, ApiResponse<TenantDeviceRDPGrant>>(`/api/v1/admin/tenants/${tenantId}/member-devices/${nodeId}/rdp-grants`, data, {
+    headers: { 'X-Tenant-ID': tenantId },
+  })
+
+export const revokeTenantDeviceRDPGrant = (tenantId: string, nodeId: number, grantId: number, reason?: string) =>
+  request.delete<any, ApiResponse>(`/api/v1/admin/tenants/${tenantId}/member-devices/${nodeId}/rdp-grants/${grantId}`, {
+    params: reason ? { reason } : undefined,
     headers: { 'X-Tenant-ID': tenantId },
   })
 

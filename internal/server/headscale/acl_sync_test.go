@@ -306,6 +306,9 @@ func newHeadscaleACLTestDB(t *testing.T) *gorm.DB {
 		&model.AclGroupGroupPermission{},
 		&model.AclSSHUserPermission{},
 		&model.AclSSHGroupPermission{},
+		&model.Tenant{},
+		&model.TenantMembership{},
+		&model.AclDesktopRDPPermission{},
 	))
 	db.DB = database
 	return database
@@ -329,6 +332,21 @@ func TestMatchHeadscaleNodeKeepsMultiDeviceUsersOnOwnDevice(t *testing.T) {
 	// 名称和 IP 都对不上时返回 nil（由调用方清空），不能兜底到别的设备
 	unknown := &model.Node{Name: "HOME-MENGK"}
 	require.Nil(t, matchHeadscaleNode(unknown, hsNodes, false))
+}
+
+// Agent 重注册后 DB 残留陈旧 HeadscaleNodeID：必须仍按心跳 IP 命中在线新节点，不得被旧 ID 拉回离线旧节点；
+// Desktop 则优先按已绑定 ID 匹配（断连后 IP 已清空）。
+func TestMatchHeadscaleNodeIDPriorityOnlyForDesktop(t *testing.T) {
+	hsNodes := []hsNodeInfo{
+		{HeadscaleNodeID: 301, GivenName: "agent-a", IP: "100.64.0.31", Online: false},
+		{HeadscaleNodeID: 302, GivenName: "agent-a", IP: "100.64.0.32", Online: true},
+	}
+
+	agent := &model.Node{Name: "agent-a", Type: model.NodeTypeAgent, IP: "100.64.0.32", HeadscaleNodeID: 301}
+	require.Equal(t, uint64(302), matchHeadscaleNode(agent, hsNodes, false).HeadscaleNodeID)
+
+	desktop := &model.Node{Name: "agent-a", Type: model.NodeTypeDesktop, HeadscaleNodeID: 301}
+	require.Equal(t, uint64(301), matchHeadscaleNode(desktop, hsNodes, false).HeadscaleNodeID)
 }
 
 // Tunnel 服务账号：Pod 重建后 GivenName 带随机后缀，旧 IP 指向离线旧节点，应取在线最新节点
@@ -367,4 +385,157 @@ func TestSyncAllNodeTagsSkipsWhenSnapshotNotReady(t *testing.T) {
 	require.NoError(t, database.First(&after, node.ID).Error)
 	require.Equal(t, "100.64.0.55", after.IP)
 	require.Equal(t, uint64(181), after.HeadscaleNodeID)
+}
+
+func TestDesktopRDPDeviceLevelTagsAndACLPolicyIsolation(t *testing.T) {
+	database := newHeadscaleACLTestDB(t)
+	now := time.Now()
+
+	tenant := model.Tenant{ID: "tenant-rdp", Key: "rdp-team", Name: "RDP Team", Status: model.TenantStatusActive}
+	require.NoError(t, database.Create(&tenant).Error)
+
+	alice := model.User{Name: "alice", Role: model.UserRoleClient, SecretHash: "x", Enabled: true}
+	bob := model.User{Name: "bob", Role: model.UserRoleClient, SecretHash: "x", Enabled: true}
+	require.NoError(t, database.Create(&alice).Error)
+	require.NoError(t, database.Create(&bob).Error)
+	require.NoError(t, database.Create(&model.TenantMembership{TenantID: tenant.ID, UserID: alice.ID, Role: "member", Enabled: true}).Error)
+	require.NoError(t, database.Create(&model.TenantMembership{TenantID: tenant.ID, UserID: bob.ID, Role: "member", Enabled: true}).Error)
+
+	homePC := model.Node{
+		ID:              101,
+		UserID:          alice.ID,
+		Name:            "home-pc",
+		Type:            model.NodeTypeDesktop,
+		HeadscaleNodeID: 501,
+		IP:              "100.64.0.11",
+		RDPMode:         model.DesktopRDPModeAuto,
+		RDPAllowShare:   true,
+	}
+	travelLaptop := model.Node{
+		ID:              102,
+		UserID:          alice.ID,
+		Name:            "travel-laptop",
+		Type:            model.NodeTypeDesktop,
+		HeadscaleNodeID: 502,
+		IP:              "100.64.0.12",
+		RDPMode:         model.DesktopRDPModeAuto,
+		RDPAllowShare:   false,
+	}
+	require.NoError(t, database.Create(&homePC).Error)
+	require.NoError(t, database.Create(&travelLaptop).Error)
+
+	grant := model.AclDesktopRDPPermission{
+		TenantID:      tenant.ID,
+		TargetNodeID:  homePC.ID,
+		OwnerUserID:   alice.ID,
+		GranteeUserID: bob.ID,
+		ExpiresAt:     now.Add(2 * time.Hour),
+		Enabled:       true,
+	}
+	require.NoError(t, database.Create(&grant).Error)
+
+	appliedTags := make(map[uint64][]string)
+	rawNodes := []*v1.Node{
+		{Id: 501, GivenName: "home-pc", IpAddresses: []string{"100.64.0.11"}, Online: true, User: &v1.User{Name: "client-alice"}},
+		{Id: 502, GivenName: "travel-laptop", IpAddresses: []string{"100.64.0.12"}, Online: true, User: &v1.User{Name: "client-alice"}},
+		{Id: 503, GivenName: "cloudide-alice", IpAddresses: []string{"100.64.0.13"}, Online: true, User: &v1.User{Name: "client-alice"}},
+		{Id: 601, GivenName: "bob-desktop", IpAddresses: []string{"100.64.0.21"}, Online: true, User: &v1.User{Name: "client-bob"}},
+	}
+	refresher := NewSnapshotRefresher(nil)
+	refresher.StoreSnapshot(NewHeadscaleNodeSnapshot(1, now, rawNodes))
+
+	svc := NewACLSyncService(nil)
+	svc.SetRefresher(refresher)
+	svc.setTagsOverride = func(_ context.Context, nodeID uint64, tags []string) error {
+		appliedTags[nodeID] = append([]string(nil), tags...)
+		return nil
+	}
+
+	require.NoError(t, svc.SyncAllNodeTags(context.Background()))
+	// 仅被授权的 home-pc 挂载 tag:rdp-node-101，同账号另一台 Desktop 与 CloudIDE 均不挂载
+	require.ElementsMatch(t, []string{"tag:client-alice", "tag:rdp-node-101"}, appliedTags[501])
+	require.ElementsMatch(t, []string{"tag:client-alice"}, appliedTags[502])
+	require.ElementsMatch(t, []string{"tag:client-alice"}, appliedTags[503])
+	require.ElementsMatch(t, []string{"tag:client-bob"}, appliedTags[601])
+
+	policy, err := svc.generateACLPolicy(context.Background())
+	require.NoError(t, err)
+	require.Contains(t, policy.ACLs, ACLRule{
+		Action: "accept",
+		Src:    []string{"tag:client-bob"},
+		Dst:    []string{"tag:rdp-node-101:3389"},
+	})
+	require.Contains(t, policy.TagOwners, "tag:rdp-node-101")
+	for _, rule := range policy.ACLs {
+		if len(rule.Src) == 1 && rule.Src[0] == "tag:client-bob" {
+			require.NotContains(t, rule.Dst, "tag:client-alice:*")
+			require.NotContains(t, rule.Dst, "tag:client-alice:3389")
+			require.NotContains(t, rule.Dst, "tag:rdp-node-101:*")
+		}
+	}
+
+	// 机主关闭 rdp_allow_share 后，再次同步必须自动剥离 tag:rdp-node-101 并移除 :3389 ACL 规则
+	rawNodes[0].ForcedTags = []string{"tag:client-alice", "tag:rdp-node-101"}
+	rawNodes[1].ForcedTags = []string{"tag:client-alice"}
+	rawNodes[2].ForcedTags = []string{"tag:client-alice"}
+	rawNodes[3].ForcedTags = []string{"tag:client-bob"}
+	refresher.StoreSnapshot(NewHeadscaleNodeSnapshot(2, time.Now(), rawNodes))
+	appliedTags = make(map[uint64][]string)
+
+	require.NoError(t, database.Model(&homePC).Update("rdp_allow_share", false).Error)
+	require.NoError(t, svc.SyncAllNodeTags(context.Background()))
+	require.ElementsMatch(t, []string{"tag:client-alice"}, appliedTags[501])
+
+	policyAfterRevoke, err := svc.generateACLPolicy(context.Background())
+	require.NoError(t, err)
+	require.NotContains(t, policyAfterRevoke.ACLs, ACLRule{
+		Action: "accept",
+		Src:    []string{"tag:client-bob"},
+		Dst:    []string{"tag:rdp-node-101:3389"},
+	})
+}
+
+func TestExpireDesktopRDPPermissionsMarksExpiredAndTriggersHook(t *testing.T) {
+	database := newHeadscaleACLTestDB(t)
+	now := time.Now()
+
+	expiredPerm := model.AclDesktopRDPPermission{
+		TenantID:      "t1",
+		TargetNodeID:  201,
+		OwnerUserID:   11,
+		GranteeUserID: 22,
+		ExpiresAt:     now.Add(-time.Minute),
+		Enabled:       true,
+	}
+	activePerm := model.AclDesktopRDPPermission{
+		TenantID:      "t1",
+		TargetNodeID:  202,
+		OwnerUserID:   11,
+		GranteeUserID: 33,
+		ExpiresAt:     now.Add(30 * time.Minute),
+		Enabled:       true,
+	}
+	require.NoError(t, database.Create(&expiredPerm).Error)
+	require.NoError(t, database.Create(&activePerm).Error)
+
+	var notified []uint64
+	svc := NewACLSyncService(nil)
+	svc.SetRDPGrantExpiryHook(func(targetNodeID, ownerUserID, granteeUserID uint64) {
+		notified = append(notified, targetNodeID, ownerUserID, granteeUserID)
+	})
+
+	count, err := svc.ExpireDesktopRDPPermissions(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Equal(t, []uint64{201, 11, 22}, notified)
+
+	var checkExpired model.AclDesktopRDPPermission
+	require.NoError(t, database.First(&checkExpired, expiredPerm.ID).Error)
+	require.False(t, checkExpired.Enabled)
+	require.NotNil(t, checkExpired.RevokedAt)
+	require.Equal(t, "授权已到期", checkExpired.RevokeReason)
+
+	var checkActive model.AclDesktopRDPPermission
+	require.NoError(t, database.First(&checkActive, activePerm.ID).Error)
+	require.True(t, checkActive.Enabled)
 }

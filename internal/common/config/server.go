@@ -139,10 +139,11 @@ type WebSection struct {
 }
 
 type SecuritySection struct {
-	JWTSecret                string `toml:"jwt_secret"`
-	JWTExpireHours           int    `toml:"jwt_expire_hours"`
-	UserSimulationMaxHours   int    `toml:"user_simulation_max_hours"`
-	AllowLocalhostAdminDebug bool   `toml:"allow_localhost_admin_debug"`
+	JWTSecret                               string `toml:"jwt_secret"`
+	JWTExpireHours                          int    `toml:"jwt_expire_hours"`
+	UserSimulationMaxHours                  int    `toml:"user_simulation_max_hours"`
+	AllowLocalhostAdminDebug                bool   `toml:"allow_localhost_admin_debug"`
+	AllowLegacyUnauthenticatedDesktopStream bool   `toml:"allow_legacy_unauthenticated_desktop_stream"`
 }
 
 type LogConfig struct {
@@ -230,6 +231,9 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 	}
 	if value := strings.TrimSpace(os.Getenv("SIGNAL_ALLOW_LOCALHOST_ADMIN_DEBUG")); value != "" {
 		cfg.Security.AllowLocalhostAdminDebug = parseBool(value)
+	}
+	if value := strings.TrimSpace(os.Getenv("SIGNAL_ALLOW_LEGACY_UNAUTHENTICATED_DESKTOP_STREAM")); value != "" {
+		cfg.Security.AllowLegacyUnauthenticatedDesktopStream = parseBool(value)
 	}
 	applyUpdaterEnv(&cfg.Updater)
 	applyFeatureFlagEnv(&cfg.FeatureFlags, FeatureResourceModelWrite, "SIGNAL_FEATURE_RESOURCE_MODEL_WRITE")

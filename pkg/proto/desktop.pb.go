@@ -31,6 +31,7 @@ const (
 	DesktopDataType_DESKTOP_DATA_TYPE_HOSTS       DesktopDataType = 3 // 主机列表
 	DesktopDataType_DESKTOP_DATA_TYPE_DEVICES     DesktopDataType = 4 // 设备列表
 	DesktopDataType_DESKTOP_DATA_TYPE_FAVORITES   DesktopDataType = 5 // 收藏列表
+	DesktopDataType_DESKTOP_DATA_TYPE_RDP_POLICY  DesktopDataType = 6 // 本机远程桌面入站门禁策略快照
 )
 
 // Enum value maps for DesktopDataType.
@@ -42,6 +43,7 @@ var (
 		3: "DESKTOP_DATA_TYPE_HOSTS",
 		4: "DESKTOP_DATA_TYPE_DEVICES",
 		5: "DESKTOP_DATA_TYPE_FAVORITES",
+		6: "DESKTOP_DATA_TYPE_RDP_POLICY",
 	}
 	DesktopDataType_value = map[string]int32{
 		"DESKTOP_DATA_TYPE_UNSPECIFIED": 0,
@@ -50,6 +52,7 @@ var (
 		"DESKTOP_DATA_TYPE_HOSTS":       3,
 		"DESKTOP_DATA_TYPE_DEVICES":     4,
 		"DESKTOP_DATA_TYPE_FAVORITES":   5,
+		"DESKTOP_DATA_TYPE_RDP_POLICY":  6,
 	}
 )
 
@@ -375,12 +378,16 @@ func (x *DesktopAuthenticateResponse) GetServerUrl() string {
 
 // DesktopHeartbeatRequest Desktop 心跳请求
 type DesktopHeartbeatRequest struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	DesktopId       uint64                 `protobuf:"varint,1,opt,name=desktop_id,json=desktopId,proto3" json:"desktop_id,omitempty"`                   // Desktop ID
-	TunnelIp        string                 `protobuf:"bytes,2,opt,name=tunnel_ip,json=tunnelIp,proto3" json:"tunnel_ip,omitempty"`                       // 隧道 IP
-	TunnelConnected bool                   `protobuf:"varint,3,opt,name=tunnel_connected,json=tunnelConnected,proto3" json:"tunnel_connected,omitempty"` // 隧道连接状态
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	DesktopId        uint64                 `protobuf:"varint,1,opt,name=desktop_id,json=desktopId,proto3" json:"desktop_id,omitempty"`                        // Desktop ID
+	TunnelIp         string                 `protobuf:"bytes,2,opt,name=tunnel_ip,json=tunnelIp,proto3" json:"tunnel_ip,omitempty"`                            // 隧道 IP
+	TunnelConnected  bool                   `protobuf:"varint,3,opt,name=tunnel_connected,json=tunnelConnected,proto3" json:"tunnel_connected,omitempty"`      // 隧道连接状态
+	Secret           string                 `protobuf:"bytes,4,opt,name=secret,proto3" json:"secret,omitempty"`                                                // Desktop 专属密钥（通道鉴权）
+	RdpLocalReady    bool                   `protobuf:"varint,5,opt,name=rdp_local_ready,json=rdpLocalReady,proto3" json:"rdp_local_ready,omitempty"`          // 本机 RDP 服务是否已监听就绪
+	RdpLocalPort     int32                  `protobuf:"varint,6,opt,name=rdp_local_port,json=rdpLocalPort,proto3" json:"rdp_local_port,omitempty"`             // 本机 RDP 实际监听端口（如 3389）
+	RdpTunnelExposed bool                   `protobuf:"varint,7,opt,name=rdp_tunnel_exposed,json=rdpTunnelExposed,proto3" json:"rdp_tunnel_exposed,omitempty"` // 隧道侧 3389 入站门禁当前是否开放
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *DesktopHeartbeatRequest) Reset() {
@@ -430,6 +437,34 @@ func (x *DesktopHeartbeatRequest) GetTunnelIp() string {
 func (x *DesktopHeartbeatRequest) GetTunnelConnected() bool {
 	if x != nil {
 		return x.TunnelConnected
+	}
+	return false
+}
+
+func (x *DesktopHeartbeatRequest) GetSecret() string {
+	if x != nil {
+		return x.Secret
+	}
+	return ""
+}
+
+func (x *DesktopHeartbeatRequest) GetRdpLocalReady() bool {
+	if x != nil {
+		return x.RdpLocalReady
+	}
+	return false
+}
+
+func (x *DesktopHeartbeatRequest) GetRdpLocalPort() int32 {
+	if x != nil {
+		return x.RdpLocalPort
+	}
+	return 0
+}
+
+func (x *DesktopHeartbeatRequest) GetRdpTunnelExposed() bool {
+	if x != nil {
+		return x.RdpTunnelExposed
 	}
 	return false
 }
@@ -553,6 +588,7 @@ type DesktopDataRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DesktopId     uint64                 `protobuf:"varint,1,opt,name=desktop_id,json=desktopId,proto3" json:"desktop_id,omitempty"`                                               // Desktop ID
 	RefreshType   DesktopDataType        `protobuf:"varint,2,opt,name=refresh_type,json=refreshType,proto3,enum=awecloud.signaling.DesktopDataType" json:"refresh_type,omitempty"` // 请求刷新的数据类型（0 或 ALL 表示全部）
+	Secret        string                 `protobuf:"bytes,3,opt,name=secret,proto3" json:"secret,omitempty"`                                                                       // Desktop 专属密钥（通道鉴权）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -601,14 +637,22 @@ func (x *DesktopDataRequest) GetRefreshType() DesktopDataType {
 	return DesktopDataType_DESKTOP_DATA_TYPE_UNSPECIFIED
 }
 
+func (x *DesktopDataRequest) GetSecret() string {
+	if x != nil {
+		return x.Secret
+	}
+	return ""
+}
+
 // DesktopDataResponse Desktop 数据流响应（Server 推送）
 type DesktopDataResponse struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	Type               DesktopDataType        `protobuf:"varint,1,opt,name=type,proto3,enum=awecloud.signaling.DesktopDataType" json:"type,omitempty"`                // 数据类型
-	Services           []*AuthorizedService   `protobuf:"bytes,2,rep,name=services,proto3" json:"services,omitempty"`                                                 // 服务列表（当 type = SERVICES 或 ALL）
-	Hosts              []*AuthorizedHost      `protobuf:"bytes,3,rep,name=hosts,proto3" json:"hosts,omitempty"`                                                       // 主机列表（当 type = HOSTS 或 ALL）
-	Devices            []*DeviceInfo          `protobuf:"bytes,4,rep,name=devices,proto3" json:"devices,omitempty"`                                                   // 设备列表（当 type = DEVICES 或 ALL）
-	FavoriteServiceIds []string               `protobuf:"bytes,5,rep,name=favorite_service_ids,json=favoriteServiceIds,proto3" json:"favorite_service_ids,omitempty"` // 收藏的服务 ID 列表（当 type = FAVORITES 或 ALL）
+	state              protoimpl.MessageState   `protogen:"open.v1"`
+	Type               DesktopDataType          `protobuf:"varint,1,opt,name=type,proto3,enum=awecloud.signaling.DesktopDataType" json:"type,omitempty"`                // 数据类型
+	Services           []*AuthorizedService     `protobuf:"bytes,2,rep,name=services,proto3" json:"services,omitempty"`                                                 // 服务列表（当 type = SERVICES 或 ALL）
+	Hosts              []*AuthorizedHost        `protobuf:"bytes,3,rep,name=hosts,proto3" json:"hosts,omitempty"`                                                       // 主机列表（当 type = HOSTS 或 ALL）
+	Devices            []*DeviceInfo            `protobuf:"bytes,4,rep,name=devices,proto3" json:"devices,omitempty"`                                                   // 设备列表（当 type = DEVICES 或 ALL）
+	FavoriteServiceIds []string                 `protobuf:"bytes,5,rep,name=favorite_service_ids,json=favoriteServiceIds,proto3" json:"favorite_service_ids,omitempty"` // 收藏的服务 ID 列表（当 type = FAVORITES 或 ALL）
+	RdpPolicy          *DesktopInboundRDPPolicy `protobuf:"bytes,6,opt,name=rdp_policy,json=rdpPolicy,proto3" json:"rdp_policy,omitempty"`                              // 本机远程桌面入站门禁策略（当 type = RDP_POLICY 或 ALL）
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -674,6 +718,13 @@ func (x *DesktopDataResponse) GetDevices() []*DeviceInfo {
 func (x *DesktopDataResponse) GetFavoriteServiceIds() []string {
 	if x != nil {
 		return x.FavoriteServiceIds
+	}
+	return nil
+}
+
+func (x *DesktopDataResponse) GetRdpPolicy() *DesktopInboundRDPPolicy {
+	if x != nil {
+		return x.RdpPolicy
 	}
 	return nil
 }
@@ -955,6 +1006,7 @@ func (x *GetHostServicesResponse) GetServices() []*AuthorizedService {
 type GetMyDevicesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DesktopId     uint64                 `protobuf:"varint,1,opt,name=desktop_id,json=desktopId,proto3" json:"desktop_id,omitempty"` // Desktop ID
+	Secret        string                 `protobuf:"bytes,2,opt,name=secret,proto3" json:"secret,omitempty"`                         // Desktop 专属密钥（通道鉴权）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -996,21 +1048,39 @@ func (x *GetMyDevicesRequest) GetDesktopId() uint64 {
 	return 0
 }
 
+func (x *GetMyDevicesRequest) GetSecret() string {
+	if x != nil {
+		return x.Secret
+	}
+	return ""
+}
+
 // DeviceInfo 设备信息
 type DeviceInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeviceToken   string                 `protobuf:"bytes,1,opt,name=device_token,json=deviceToken,proto3" json:"device_token,omitempty"` // 设备令牌
-	DeviceName    string                 `protobuf:"bytes,2,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`    // 设备名称
-	Os            string                 `protobuf:"bytes,3,opt,name=os,proto3" json:"os,omitempty"`                                      // 操作系统
-	Arch          string                 `protobuf:"bytes,4,opt,name=arch,proto3" json:"arch,omitempty"`                                  // 架构
-	Hostname      string                 `protobuf:"bytes,5,opt,name=hostname,proto3" json:"hostname,omitempty"`                          // 主机名
-	Status        string                 `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"`                              // 状态（online/offline）
-	LastUsedAt    string                 `protobuf:"bytes,7,opt,name=last_used_at,json=lastUsedAt,proto3" json:"last_used_at,omitempty"`  // 最后使用时间
-	CreatedAt     string                 `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`       // 创建时间
-	IsCurrent     bool                   `protobuf:"varint,9,opt,name=is_current,json=isCurrent,proto3" json:"is_current,omitempty"`      // 是否是当前设备
-	Ip            string                 `protobuf:"bytes,10,opt,name=ip,proto3" json:"ip,omitempty"`                                     // 隧道 IP
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	DeviceToken        string                 `protobuf:"bytes,1,opt,name=device_token,json=deviceToken,proto3" json:"device_token,omitempty"`                            // 设备令牌
+	DeviceName         string                 `protobuf:"bytes,2,opt,name=device_name,json=deviceName,proto3" json:"device_name,omitempty"`                               // 设备名称
+	Os                 string                 `protobuf:"bytes,3,opt,name=os,proto3" json:"os,omitempty"`                                                                 // 操作系统
+	Arch               string                 `protobuf:"bytes,4,opt,name=arch,proto3" json:"arch,omitempty"`                                                             // 架构
+	Hostname           string                 `protobuf:"bytes,5,opt,name=hostname,proto3" json:"hostname,omitempty"`                                                     // 主机名
+	Status             string                 `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"`                                                         // 状态（online/offline）
+	LastUsedAt         string                 `protobuf:"bytes,7,opt,name=last_used_at,json=lastUsedAt,proto3" json:"last_used_at,omitempty"`                             // 最后使用时间
+	CreatedAt          string                 `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`                                  // 创建时间
+	IsCurrent          bool                   `protobuf:"varint,9,opt,name=is_current,json=isCurrent,proto3" json:"is_current,omitempty"`                                 // 是否是当前设备
+	Ip                 string                 `protobuf:"bytes,10,opt,name=ip,proto3" json:"ip,omitempty"`                                                                // 隧道 IP
+	NodeId             uint64                 `protobuf:"varint,11,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`                                         // 设备节点 ID
+	RdpMode            string                 `protobuf:"bytes,12,opt,name=rdp_mode,json=rdpMode,proto3" json:"rdp_mode,omitempty"`                                       // 远程桌面策略：auto / enabled / disabled
+	RdpAllowShare      bool                   `protobuf:"varint,13,opt,name=rdp_allow_share,json=rdpAllowShare,proto3" json:"rdp_allow_share,omitempty"`                  // 设备归属人是否允许跨账号临时授权
+	RdpAdminDisabled   bool                   `protobuf:"varint,14,opt,name=rdp_admin_disabled,json=rdpAdminDisabled,proto3" json:"rdp_admin_disabled,omitempty"`         // 平台管理员是否强制熔断关闭
+	RdpLocalReady      bool                   `protobuf:"varint,15,opt,name=rdp_local_ready,json=rdpLocalReady,proto3" json:"rdp_local_ready,omitempty"`                  // 目标本机 RDP 服务是否已监听就绪
+	RdpLocalPort       int32                  `protobuf:"varint,16,opt,name=rdp_local_port,json=rdpLocalPort,proto3" json:"rdp_local_port,omitempty"`                     // 目标本机 RDP 监听端口
+	RdpTunnelExposed   bool                   `protobuf:"varint,17,opt,name=rdp_tunnel_exposed,json=rdpTunnelExposed,proto3" json:"rdp_tunnel_exposed,omitempty"`         // 目标设备隧道侧 3389 是否开放
+	RdpConnectable     bool                   `protobuf:"varint,18,opt,name=rdp_connectable,json=rdpConnectable,proto3" json:"rdp_connectable,omitempty"`                 // 当前调用端是否可直接发起远程桌面连接
+	OwnerUsername      string                 `protobuf:"bytes,19,opt,name=owner_username,json=ownerUsername,proto3" json:"owner_username,omitempty"`                     // 设备归属用户名（跨账号授权设备展示用）
+	IsShared           bool                   `protobuf:"varint,20,opt,name=is_shared,json=isShared,proto3" json:"is_shared,omitempty"`                                   // 是否为他人跨账号授权给我的设备
+	GrantExpiresAtUnix int64                  `protobuf:"varint,21,opt,name=grant_expires_at_unix,json=grantExpiresAtUnix,proto3" json:"grant_expires_at_unix,omitempty"` // 跨账号授权到期时间戳（秒，0 表示本人设备）
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *DeviceInfo) Reset() {
@@ -1113,6 +1183,83 @@ func (x *DeviceInfo) GetIp() string {
 	return ""
 }
 
+func (x *DeviceInfo) GetNodeId() uint64 {
+	if x != nil {
+		return x.NodeId
+	}
+	return 0
+}
+
+func (x *DeviceInfo) GetRdpMode() string {
+	if x != nil {
+		return x.RdpMode
+	}
+	return ""
+}
+
+func (x *DeviceInfo) GetRdpAllowShare() bool {
+	if x != nil {
+		return x.RdpAllowShare
+	}
+	return false
+}
+
+func (x *DeviceInfo) GetRdpAdminDisabled() bool {
+	if x != nil {
+		return x.RdpAdminDisabled
+	}
+	return false
+}
+
+func (x *DeviceInfo) GetRdpLocalReady() bool {
+	if x != nil {
+		return x.RdpLocalReady
+	}
+	return false
+}
+
+func (x *DeviceInfo) GetRdpLocalPort() int32 {
+	if x != nil {
+		return x.RdpLocalPort
+	}
+	return 0
+}
+
+func (x *DeviceInfo) GetRdpTunnelExposed() bool {
+	if x != nil {
+		return x.RdpTunnelExposed
+	}
+	return false
+}
+
+func (x *DeviceInfo) GetRdpConnectable() bool {
+	if x != nil {
+		return x.RdpConnectable
+	}
+	return false
+}
+
+func (x *DeviceInfo) GetOwnerUsername() string {
+	if x != nil {
+		return x.OwnerUsername
+	}
+	return ""
+}
+
+func (x *DeviceInfo) GetIsShared() bool {
+	if x != nil {
+		return x.IsShared
+	}
+	return false
+}
+
+func (x *DeviceInfo) GetGrantExpiresAtUnix() int64 {
+	if x != nil {
+		return x.GrantExpiresAtUnix
+	}
+	return 0
+}
+
 // GetMyDevicesResponse 获取我的设备列表响应
 type GetMyDevicesResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1158,6 +1305,548 @@ func (x *GetMyDevicesResponse) GetDevices() []*DeviceInfo {
 	return nil
 }
 
+// AllowedRDPPeer 允许访问本机远程桌面的源节点白名单条目
+type AllowedRDPPeer struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	HeadscaleNodeId   uint64                 `protobuf:"varint,1,opt,name=headscale_node_id,json=headscaleNodeId,proto3" json:"headscale_node_id,omitempty"`      // 允许入站的源 Desktop Headscale Node ID（精确节点级校验）
+	SourceNodeId      uint64                 `protobuf:"varint,2,opt,name=source_node_id,json=sourceNodeId,proto3" json:"source_node_id,omitempty"`               // 允许入站的源 Desktop 数据库 Node ID
+	SourceUserName    string                 `protobuf:"bytes,3,opt,name=source_user_name,json=sourceUserName,proto3" json:"source_user_name,omitempty"`          // 源端归属用户名
+	SourceDeviceName  string                 `protobuf:"bytes,4,opt,name=source_device_name,json=sourceDeviceName,proto3" json:"source_device_name,omitempty"`    // 源端设备名称
+	GrantId           uint64                 `protobuf:"varint,5,opt,name=grant_id,json=grantId,proto3" json:"grant_id,omitempty"`                                // 跨账号授权记录 ID（0 表示本人自访）
+	ExpiresAtUnix     int64                  `protobuf:"varint,6,opt,name=expires_at_unix,json=expiresAtUnix,proto3" json:"expires_at_unix,omitempty"`            // 授权到期时间戳（秒，0 表示本人自访）
+	HeadscaleUserName string                 `protobuf:"bytes,7,opt,name=headscale_user_name,json=headscaleUserName,proto3" json:"headscale_user_name,omitempty"` // 源端 Headscale 用户名（如 client-zhangsan）
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *AllowedRDPPeer) Reset() {
+	*x = AllowedRDPPeer{}
+	mi := &file_pkg_proto_desktop_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AllowedRDPPeer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AllowedRDPPeer) ProtoMessage() {}
+
+func (x *AllowedRDPPeer) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_desktop_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AllowedRDPPeer.ProtoReflect.Descriptor instead.
+func (*AllowedRDPPeer) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *AllowedRDPPeer) GetHeadscaleNodeId() uint64 {
+	if x != nil {
+		return x.HeadscaleNodeId
+	}
+	return 0
+}
+
+func (x *AllowedRDPPeer) GetSourceNodeId() uint64 {
+	if x != nil {
+		return x.SourceNodeId
+	}
+	return 0
+}
+
+func (x *AllowedRDPPeer) GetSourceUserName() string {
+	if x != nil {
+		return x.SourceUserName
+	}
+	return ""
+}
+
+func (x *AllowedRDPPeer) GetSourceDeviceName() string {
+	if x != nil {
+		return x.SourceDeviceName
+	}
+	return ""
+}
+
+func (x *AllowedRDPPeer) GetGrantId() uint64 {
+	if x != nil {
+		return x.GrantId
+	}
+	return 0
+}
+
+func (x *AllowedRDPPeer) GetExpiresAtUnix() int64 {
+	if x != nil {
+		return x.ExpiresAtUnix
+	}
+	return 0
+}
+
+func (x *AllowedRDPPeer) GetHeadscaleUserName() string {
+	if x != nil {
+		return x.HeadscaleUserName
+	}
+	return ""
+}
+
+// DesktopInboundRDPPolicy 本机远程桌面入站门禁策略快照
+type DesktopInboundRDPPolicy struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	EffectiveEnabled bool                   `protobuf:"varint,1,opt,name=effective_enabled,json=effectiveEnabled,proto3" json:"effective_enabled,omitempty"` // 综合评估后是否允许暴露隧道 3389 入站转发
+	RdpMode          string                 `protobuf:"bytes,2,opt,name=rdp_mode,json=rdpMode,proto3" json:"rdp_mode,omitempty"`                             // 当前开放模式：auto / enabled / disabled
+	AllowShare       bool                   `protobuf:"varint,3,opt,name=allow_share,json=allowShare,proto3" json:"allow_share,omitempty"`                   // 是否允许跨账号临时授权
+	AdminDisabled    bool                   `protobuf:"varint,4,opt,name=admin_disabled,json=adminDisabled,proto3" json:"admin_disabled,omitempty"`          // 是否被平台管理员强制熔断关闭
+	TargetPort       int32                  `protobuf:"varint,5,opt,name=target_port,json=targetPort,proto3" json:"target_port,omitempty"`                   // 转发到本机的目标端口（默认 3389，或探测到的自定义端口）
+	AllowedPeers     []*AllowedRDPPeer      `protobuf:"bytes,6,rep,name=allowed_peers,json=allowedPeers,proto3" json:"allowed_peers,omitempty"`              // 允许入站的精确 Desktop 节点白名单
+	IssuedAtUnix     int64                  `protobuf:"varint,7,opt,name=issued_at_unix,json=issuedAtUnix,proto3" json:"issued_at_unix,omitempty"`           // 快照签发时间戳（秒）
+	ValidUntilUnix   int64                  `protobuf:"varint,8,opt,name=valid_until_unix,json=validUntilUnix,proto3" json:"valid_until_unix,omitempty"`     // 快照租约有效期截止时间戳（秒，超时失败关闭）
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *DesktopInboundRDPPolicy) Reset() {
+	*x = DesktopInboundRDPPolicy{}
+	mi := &file_pkg_proto_desktop_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DesktopInboundRDPPolicy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DesktopInboundRDPPolicy) ProtoMessage() {}
+
+func (x *DesktopInboundRDPPolicy) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_desktop_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DesktopInboundRDPPolicy.ProtoReflect.Descriptor instead.
+func (*DesktopInboundRDPPolicy) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *DesktopInboundRDPPolicy) GetEffectiveEnabled() bool {
+	if x != nil {
+		return x.EffectiveEnabled
+	}
+	return false
+}
+
+func (x *DesktopInboundRDPPolicy) GetRdpMode() string {
+	if x != nil {
+		return x.RdpMode
+	}
+	return ""
+}
+
+func (x *DesktopInboundRDPPolicy) GetAllowShare() bool {
+	if x != nil {
+		return x.AllowShare
+	}
+	return false
+}
+
+func (x *DesktopInboundRDPPolicy) GetAdminDisabled() bool {
+	if x != nil {
+		return x.AdminDisabled
+	}
+	return false
+}
+
+func (x *DesktopInboundRDPPolicy) GetTargetPort() int32 {
+	if x != nil {
+		return x.TargetPort
+	}
+	return 0
+}
+
+func (x *DesktopInboundRDPPolicy) GetAllowedPeers() []*AllowedRDPPeer {
+	if x != nil {
+		return x.AllowedPeers
+	}
+	return nil
+}
+
+func (x *DesktopInboundRDPPolicy) GetIssuedAtUnix() int64 {
+	if x != nil {
+		return x.IssuedAtUnix
+	}
+	return 0
+}
+
+func (x *DesktopInboundRDPPolicy) GetValidUntilUnix() int64 {
+	if x != nil {
+		return x.ValidUntilUnix
+	}
+	return 0
+}
+
+// UpdateDeviceRDPConfigRequest 更新本人设备远程桌面配置请求
+type UpdateDeviceRDPConfigRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	DesktopId        uint64                 `protobuf:"varint,1,opt,name=desktop_id,json=desktopId,proto3" json:"desktop_id,omitempty"`                        // 当前发起请求的 Desktop ID
+	Secret           string                 `protobuf:"bytes,2,opt,name=secret,proto3" json:"secret,omitempty"`                                                // 当前发起请求的 Desktop 密钥（必填，失败关闭）
+	TargetNodeId     uint64                 `protobuf:"varint,3,opt,name=target_node_id,json=targetNodeId,proto3" json:"target_node_id,omitempty"`             // 要修改的目标本人设备 Node ID（0 表示通过 device_token 解析）
+	DeviceToken      string                 `protobuf:"bytes,4,opt,name=device_token,json=deviceToken,proto3" json:"device_token,omitempty"`                   // 兼容设备标识 "<node_id>:***"
+	RdpMode          string                 `protobuf:"bytes,5,opt,name=rdp_mode,json=rdpMode,proto3" json:"rdp_mode,omitempty"`                               // 目标模式：auto / enabled / disabled（空字符串表示不修改）
+	UpdateAllowShare bool                   `protobuf:"varint,6,opt,name=update_allow_share,json=updateAllowShare,proto3" json:"update_allow_share,omitempty"` // 是否更新 rdp_allow_share 字段
+	RdpAllowShare    bool                   `protobuf:"varint,7,opt,name=rdp_allow_share,json=rdpAllowShare,proto3" json:"rdp_allow_share,omitempty"`          // 是否允许跨账号临时授权
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *UpdateDeviceRDPConfigRequest) Reset() {
+	*x = UpdateDeviceRDPConfigRequest{}
+	mi := &file_pkg_proto_desktop_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateDeviceRDPConfigRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateDeviceRDPConfigRequest) ProtoMessage() {}
+
+func (x *UpdateDeviceRDPConfigRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_desktop_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateDeviceRDPConfigRequest.ProtoReflect.Descriptor instead.
+func (*UpdateDeviceRDPConfigRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *UpdateDeviceRDPConfigRequest) GetDesktopId() uint64 {
+	if x != nil {
+		return x.DesktopId
+	}
+	return 0
+}
+
+func (x *UpdateDeviceRDPConfigRequest) GetSecret() string {
+	if x != nil {
+		return x.Secret
+	}
+	return ""
+}
+
+func (x *UpdateDeviceRDPConfigRequest) GetTargetNodeId() uint64 {
+	if x != nil {
+		return x.TargetNodeId
+	}
+	return 0
+}
+
+func (x *UpdateDeviceRDPConfigRequest) GetDeviceToken() string {
+	if x != nil {
+		return x.DeviceToken
+	}
+	return ""
+}
+
+func (x *UpdateDeviceRDPConfigRequest) GetRdpMode() string {
+	if x != nil {
+		return x.RdpMode
+	}
+	return ""
+}
+
+func (x *UpdateDeviceRDPConfigRequest) GetUpdateAllowShare() bool {
+	if x != nil {
+		return x.UpdateAllowShare
+	}
+	return false
+}
+
+func (x *UpdateDeviceRDPConfigRequest) GetRdpAllowShare() bool {
+	if x != nil {
+		return x.RdpAllowShare
+	}
+	return false
+}
+
+// UpdateDeviceRDPConfigResponse 更新本人设备远程桌面配置响应
+type UpdateDeviceRDPConfigResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Device        *DeviceInfo            `protobuf:"bytes,3,opt,name=device,proto3" json:"device,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateDeviceRDPConfigResponse) Reset() {
+	*x = UpdateDeviceRDPConfigResponse{}
+	mi := &file_pkg_proto_desktop_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateDeviceRDPConfigResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateDeviceRDPConfigResponse) ProtoMessage() {}
+
+func (x *UpdateDeviceRDPConfigResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_desktop_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateDeviceRDPConfigResponse.ProtoReflect.Descriptor instead.
+func (*UpdateDeviceRDPConfigResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *UpdateDeviceRDPConfigResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *UpdateDeviceRDPConfigResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *UpdateDeviceRDPConfigResponse) GetDevice() *DeviceInfo {
+	if x != nil {
+		return x.Device
+	}
+	return nil
+}
+
+// ReportRDPSessionAuditRequest 上报远程桌面入站会话审计事件请求
+type ReportRDPSessionAuditRequest struct {
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	DesktopId             uint64                 `protobuf:"varint,1,opt,name=desktop_id,json=desktopId,proto3" json:"desktop_id,omitempty"`                                         // 被控端 Desktop ID
+	Secret                string                 `protobuf:"bytes,2,opt,name=secret,proto3" json:"secret,omitempty"`                                                                 // 被控端 Desktop 密钥（必填，失败关闭）
+	SessionUuid           string                 `protobuf:"bytes,3,opt,name=session_uuid,json=sessionUuid,proto3" json:"session_uuid,omitempty"`                                    // 会话唯一标识（建立与断开关联）
+	EventType             string                 `protobuf:"bytes,4,opt,name=event_type,json=eventType,proto3" json:"event_type,omitempty"`                                          // 事件类型：started / ended / rejected
+	SourceHeadscaleNodeId uint64                 `protobuf:"varint,5,opt,name=source_headscale_node_id,json=sourceHeadscaleNodeId,proto3" json:"source_headscale_node_id,omitempty"` // 源端 Headscale Node ID
+	SourceNodeId          uint64                 `protobuf:"varint,6,opt,name=source_node_id,json=sourceNodeId,proto3" json:"source_node_id,omitempty"`                              // 源端数据库 Node ID
+	SourceUserName        string                 `protobuf:"bytes,7,opt,name=source_user_name,json=sourceUserName,proto3" json:"source_user_name,omitempty"`                         // 源端用户名
+	SourceDeviceName      string                 `protobuf:"bytes,8,opt,name=source_device_name,json=sourceDeviceName,proto3" json:"source_device_name,omitempty"`                   // 源端设备名
+	SourceIp              string                 `protobuf:"bytes,9,opt,name=source_ip,json=sourceIp,proto3" json:"source_ip,omitempty"`                                             // 源端隧道 IP
+	GrantId               uint64                 `protobuf:"varint,10,opt,name=grant_id,json=grantId,proto3" json:"grant_id,omitempty"`                                              // 命中的跨账号授权 ID（0 表示本人自访或未命中）
+	CloseReason           string                 `protobuf:"bytes,11,opt,name=close_reason,json=closeReason,proto3" json:"close_reason,omitempty"`                                   // 结束或拒绝原因
+	TimestampUnix         int64                  `protobuf:"varint,12,opt,name=timestamp_unix,json=timestampUnix,proto3" json:"timestamp_unix,omitempty"`                            // 事件发生时间戳（秒）
+	DurationMs            int64                  `protobuf:"varint,13,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`                                     // 会话持续时长（毫秒，ended 时填写）
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *ReportRDPSessionAuditRequest) Reset() {
+	*x = ReportRDPSessionAuditRequest{}
+	mi := &file_pkg_proto_desktop_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportRDPSessionAuditRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportRDPSessionAuditRequest) ProtoMessage() {}
+
+func (x *ReportRDPSessionAuditRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_desktop_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportRDPSessionAuditRequest.ProtoReflect.Descriptor instead.
+func (*ReportRDPSessionAuditRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ReportRDPSessionAuditRequest) GetDesktopId() uint64 {
+	if x != nil {
+		return x.DesktopId
+	}
+	return 0
+}
+
+func (x *ReportRDPSessionAuditRequest) GetSecret() string {
+	if x != nil {
+		return x.Secret
+	}
+	return ""
+}
+
+func (x *ReportRDPSessionAuditRequest) GetSessionUuid() string {
+	if x != nil {
+		return x.SessionUuid
+	}
+	return ""
+}
+
+func (x *ReportRDPSessionAuditRequest) GetEventType() string {
+	if x != nil {
+		return x.EventType
+	}
+	return ""
+}
+
+func (x *ReportRDPSessionAuditRequest) GetSourceHeadscaleNodeId() uint64 {
+	if x != nil {
+		return x.SourceHeadscaleNodeId
+	}
+	return 0
+}
+
+func (x *ReportRDPSessionAuditRequest) GetSourceNodeId() uint64 {
+	if x != nil {
+		return x.SourceNodeId
+	}
+	return 0
+}
+
+func (x *ReportRDPSessionAuditRequest) GetSourceUserName() string {
+	if x != nil {
+		return x.SourceUserName
+	}
+	return ""
+}
+
+func (x *ReportRDPSessionAuditRequest) GetSourceDeviceName() string {
+	if x != nil {
+		return x.SourceDeviceName
+	}
+	return ""
+}
+
+func (x *ReportRDPSessionAuditRequest) GetSourceIp() string {
+	if x != nil {
+		return x.SourceIp
+	}
+	return ""
+}
+
+func (x *ReportRDPSessionAuditRequest) GetGrantId() uint64 {
+	if x != nil {
+		return x.GrantId
+	}
+	return 0
+}
+
+func (x *ReportRDPSessionAuditRequest) GetCloseReason() string {
+	if x != nil {
+		return x.CloseReason
+	}
+	return ""
+}
+
+func (x *ReportRDPSessionAuditRequest) GetTimestampUnix() int64 {
+	if x != nil {
+		return x.TimestampUnix
+	}
+	return 0
+}
+
+func (x *ReportRDPSessionAuditRequest) GetDurationMs() int64 {
+	if x != nil {
+		return x.DurationMs
+	}
+	return 0
+}
+
+// ReportRDPSessionAuditResponse 上报远程桌面入站会话审计事件响应
+type ReportRDPSessionAuditResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportRDPSessionAuditResponse) Reset() {
+	*x = ReportRDPSessionAuditResponse{}
+	mi := &file_pkg_proto_desktop_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportRDPSessionAuditResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportRDPSessionAuditResponse) ProtoMessage() {}
+
+func (x *ReportRDPSessionAuditResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_proto_desktop_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportRDPSessionAuditResponse.ProtoReflect.Descriptor instead.
+func (*ReportRDPSessionAuditResponse) Descriptor() ([]byte, []int) {
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *ReportRDPSessionAuditResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ReportRDPSessionAuditResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 // OfflineDeviceRequest 设备下线请求
 type OfflineDeviceRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1170,7 +1859,7 @@ type OfflineDeviceRequest struct {
 
 func (x *OfflineDeviceRequest) Reset() {
 	*x = OfflineDeviceRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[16]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1182,7 +1871,7 @@ func (x *OfflineDeviceRequest) String() string {
 func (*OfflineDeviceRequest) ProtoMessage() {}
 
 func (x *OfflineDeviceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[16]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1195,7 +1884,7 @@ func (x *OfflineDeviceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OfflineDeviceRequest.ProtoReflect.Descriptor instead.
 func (*OfflineDeviceRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{16}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *OfflineDeviceRequest) GetDesktopId() uint64 {
@@ -1230,7 +1919,7 @@ type OfflineDeviceResponse struct {
 
 func (x *OfflineDeviceResponse) Reset() {
 	*x = OfflineDeviceResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[17]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1242,7 +1931,7 @@ func (x *OfflineDeviceResponse) String() string {
 func (*OfflineDeviceResponse) ProtoMessage() {}
 
 func (x *OfflineDeviceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[17]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1255,7 +1944,7 @@ func (x *OfflineDeviceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OfflineDeviceResponse.ProtoReflect.Descriptor instead.
 func (*OfflineDeviceResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{17}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *OfflineDeviceResponse) GetSuccess() bool {
@@ -1284,7 +1973,7 @@ type DeleteDeviceRequest struct {
 
 func (x *DeleteDeviceRequest) Reset() {
 	*x = DeleteDeviceRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[18]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1296,7 +1985,7 @@ func (x *DeleteDeviceRequest) String() string {
 func (*DeleteDeviceRequest) ProtoMessage() {}
 
 func (x *DeleteDeviceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[18]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1309,7 +1998,7 @@ func (x *DeleteDeviceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteDeviceRequest.ProtoReflect.Descriptor instead.
 func (*DeleteDeviceRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{18}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *DeleteDeviceRequest) GetDesktopId() uint64 {
@@ -1344,7 +2033,7 @@ type DeleteDeviceResponse struct {
 
 func (x *DeleteDeviceResponse) Reset() {
 	*x = DeleteDeviceResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[19]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1356,7 +2045,7 @@ func (x *DeleteDeviceResponse) String() string {
 func (*DeleteDeviceResponse) ProtoMessage() {}
 
 func (x *DeleteDeviceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[19]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1369,7 +2058,7 @@ func (x *DeleteDeviceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteDeviceResponse.ProtoReflect.Descriptor instead.
 func (*DeleteDeviceResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{19}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *DeleteDeviceResponse) GetSuccess() bool {
@@ -1397,7 +2086,7 @@ type ToggleFavoriteRequest struct {
 
 func (x *ToggleFavoriteRequest) Reset() {
 	*x = ToggleFavoriteRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[20]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1409,7 +2098,7 @@ func (x *ToggleFavoriteRequest) String() string {
 func (*ToggleFavoriteRequest) ProtoMessage() {}
 
 func (x *ToggleFavoriteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[20]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1422,7 +2111,7 @@ func (x *ToggleFavoriteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToggleFavoriteRequest.ProtoReflect.Descriptor instead.
 func (*ToggleFavoriteRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{20}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ToggleFavoriteRequest) GetDesktopId() uint64 {
@@ -1451,7 +2140,7 @@ type ToggleFavoriteResponse struct {
 
 func (x *ToggleFavoriteResponse) Reset() {
 	*x = ToggleFavoriteResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[21]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1463,7 +2152,7 @@ func (x *ToggleFavoriteResponse) String() string {
 func (*ToggleFavoriteResponse) ProtoMessage() {}
 
 func (x *ToggleFavoriteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[21]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1476,7 +2165,7 @@ func (x *ToggleFavoriteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToggleFavoriteResponse.ProtoReflect.Descriptor instead.
 func (*ToggleFavoriteResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{21}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ToggleFavoriteResponse) GetSuccess() bool {
@@ -1510,7 +2199,7 @@ type GetFavoriteServicesRequest struct {
 
 func (x *GetFavoriteServicesRequest) Reset() {
 	*x = GetFavoriteServicesRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[22]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1522,7 +2211,7 @@ func (x *GetFavoriteServicesRequest) String() string {
 func (*GetFavoriteServicesRequest) ProtoMessage() {}
 
 func (x *GetFavoriteServicesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[22]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1535,7 +2224,7 @@ func (x *GetFavoriteServicesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetFavoriteServicesRequest.ProtoReflect.Descriptor instead.
 func (*GetFavoriteServicesRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{22}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *GetFavoriteServicesRequest) GetDesktopId() uint64 {
@@ -1555,7 +2244,7 @@ type GetFavoriteServicesResponse struct {
 
 func (x *GetFavoriteServicesResponse) Reset() {
 	*x = GetFavoriteServicesResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[23]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1567,7 +2256,7 @@ func (x *GetFavoriteServicesResponse) String() string {
 func (*GetFavoriteServicesResponse) ProtoMessage() {}
 
 func (x *GetFavoriteServicesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[23]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1580,7 +2269,7 @@ func (x *GetFavoriteServicesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetFavoriteServicesResponse.ProtoReflect.Descriptor instead.
 func (*GetFavoriteServicesResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{23}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *GetFavoriteServicesResponse) GetServiceIds() []string {
@@ -1602,7 +2291,7 @@ type CreateLoginSessionRequest struct {
 
 func (x *CreateLoginSessionRequest) Reset() {
 	*x = CreateLoginSessionRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[24]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1614,7 +2303,7 @@ func (x *CreateLoginSessionRequest) String() string {
 func (*CreateLoginSessionRequest) ProtoMessage() {}
 
 func (x *CreateLoginSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[24]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1627,7 +2316,7 @@ func (x *CreateLoginSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateLoginSessionRequest.ProtoReflect.Descriptor instead.
 func (*CreateLoginSessionRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{24}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *CreateLoginSessionRequest) GetUsernameHint() string {
@@ -1664,7 +2353,7 @@ type CreateLoginSessionResponse struct {
 
 func (x *CreateLoginSessionResponse) Reset() {
 	*x = CreateLoginSessionResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[25]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1676,7 +2365,7 @@ func (x *CreateLoginSessionResponse) String() string {
 func (*CreateLoginSessionResponse) ProtoMessage() {}
 
 func (x *CreateLoginSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[25]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1689,7 +2378,7 @@ func (x *CreateLoginSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateLoginSessionResponse.ProtoReflect.Descriptor instead.
 func (*CreateLoginSessionResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{25}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *CreateLoginSessionResponse) GetSuccess() bool {
@@ -1731,7 +2420,7 @@ type CheckSavedCredentialsRequest struct {
 
 func (x *CheckSavedCredentialsRequest) Reset() {
 	*x = CheckSavedCredentialsRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[26]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1743,7 +2432,7 @@ func (x *CheckSavedCredentialsRequest) String() string {
 func (*CheckSavedCredentialsRequest) ProtoMessage() {}
 
 func (x *CheckSavedCredentialsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[26]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1756,7 +2445,7 @@ func (x *CheckSavedCredentialsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckSavedCredentialsRequest.ProtoReflect.Descriptor instead.
 func (*CheckSavedCredentialsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{26}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *CheckSavedCredentialsRequest) GetServerUrl() string {
@@ -1785,7 +2474,7 @@ type CheckSavedCredentialsResponse struct {
 
 func (x *CheckSavedCredentialsResponse) Reset() {
 	*x = CheckSavedCredentialsResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[27]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1797,7 +2486,7 @@ func (x *CheckSavedCredentialsResponse) String() string {
 func (*CheckSavedCredentialsResponse) ProtoMessage() {}
 
 func (x *CheckSavedCredentialsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[27]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1810,7 +2499,7 @@ func (x *CheckSavedCredentialsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckSavedCredentialsResponse.ProtoReflect.Descriptor instead.
 func (*CheckSavedCredentialsResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{27}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *CheckSavedCredentialsResponse) GetHasCredentials() bool {
@@ -1845,7 +2534,7 @@ type WaitForLoginResultRequest struct {
 
 func (x *WaitForLoginResultRequest) Reset() {
 	*x = WaitForLoginResultRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[28]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1857,7 +2546,7 @@ func (x *WaitForLoginResultRequest) String() string {
 func (*WaitForLoginResultRequest) ProtoMessage() {}
 
 func (x *WaitForLoginResultRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[28]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1870,7 +2559,7 @@ func (x *WaitForLoginResultRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WaitForLoginResultRequest.ProtoReflect.Descriptor instead.
 func (*WaitForLoginResultRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{28}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *WaitForLoginResultRequest) GetSessionId() string {
@@ -1904,7 +2593,7 @@ type WaitForLoginResultResponse struct {
 
 func (x *WaitForLoginResultResponse) Reset() {
 	*x = WaitForLoginResultResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[29]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1916,7 +2605,7 @@ func (x *WaitForLoginResultResponse) String() string {
 func (*WaitForLoginResultResponse) ProtoMessage() {}
 
 func (x *WaitForLoginResultResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[29]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1929,7 +2618,7 @@ func (x *WaitForLoginResultResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WaitForLoginResultResponse.ProtoReflect.Descriptor instead.
 func (*WaitForLoginResultResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{29}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *WaitForLoginResultResponse) GetStatus() WaitForLoginResultStatus {
@@ -1991,7 +2680,7 @@ type DesktopLogoutRequest struct {
 
 func (x *DesktopLogoutRequest) Reset() {
 	*x = DesktopLogoutRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[30]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2003,7 +2692,7 @@ func (x *DesktopLogoutRequest) String() string {
 func (*DesktopLogoutRequest) ProtoMessage() {}
 
 func (x *DesktopLogoutRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[30]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2016,7 +2705,7 @@ func (x *DesktopLogoutRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopLogoutRequest.ProtoReflect.Descriptor instead.
 func (*DesktopLogoutRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{30}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *DesktopLogoutRequest) GetDesktopId() uint64 {
@@ -2038,7 +2727,7 @@ type DesktopLogoutResponse struct {
 
 func (x *DesktopLogoutResponse) Reset() {
 	*x = DesktopLogoutResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[31]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2050,7 +2739,7 @@ func (x *DesktopLogoutResponse) String() string {
 func (*DesktopLogoutResponse) ProtoMessage() {}
 
 func (x *DesktopLogoutResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[31]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2063,7 +2752,7 @@ func (x *DesktopLogoutResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DesktopLogoutResponse.ProtoReflect.Descriptor instead.
 func (*DesktopLogoutResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{31}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *DesktopLogoutResponse) GetSuccess() bool {
@@ -2098,7 +2787,7 @@ type ResolveDomainRequest struct {
 
 func (x *ResolveDomainRequest) Reset() {
 	*x = ResolveDomainRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[32]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2110,7 +2799,7 @@ func (x *ResolveDomainRequest) String() string {
 func (*ResolveDomainRequest) ProtoMessage() {}
 
 func (x *ResolveDomainRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[32]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2123,7 +2812,7 @@ func (x *ResolveDomainRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveDomainRequest.ProtoReflect.Descriptor instead.
 func (*ResolveDomainRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{32}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ResolveDomainRequest) GetDesktopId() uint64 {
@@ -2156,7 +2845,7 @@ type ResolveDomainResponse struct {
 
 func (x *ResolveDomainResponse) Reset() {
 	*x = ResolveDomainResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[33]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2168,7 +2857,7 @@ func (x *ResolveDomainResponse) String() string {
 func (*ResolveDomainResponse) ProtoMessage() {}
 
 func (x *ResolveDomainResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[33]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2181,7 +2870,7 @@ func (x *ResolveDomainResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveDomainResponse.ProtoReflect.Descriptor instead.
 func (*ResolveDomainResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{33}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ResolveDomainResponse) GetSuccess() bool {
@@ -2245,7 +2934,7 @@ type GetResourcesRequest struct {
 
 func (x *GetResourcesRequest) Reset() {
 	*x = GetResourcesRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[34]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2257,7 +2946,7 @@ func (x *GetResourcesRequest) String() string {
 func (*GetResourcesRequest) ProtoMessage() {}
 
 func (x *GetResourcesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[34]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2270,7 +2959,7 @@ func (x *GetResourcesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetResourcesRequest.ProtoReflect.Descriptor instead.
 func (*GetResourcesRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{34}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *GetResourcesRequest) GetDesktopId() uint64 {
@@ -2303,7 +2992,7 @@ type ListResourceTenantsRequest struct {
 
 func (x *ListResourceTenantsRequest) Reset() {
 	*x = ListResourceTenantsRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[35]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2315,7 +3004,7 @@ func (x *ListResourceTenantsRequest) String() string {
 func (*ListResourceTenantsRequest) ProtoMessage() {}
 
 func (x *ListResourceTenantsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[35]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2328,7 +3017,7 @@ func (x *ListResourceTenantsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListResourceTenantsRequest.ProtoReflect.Descriptor instead.
 func (*ListResourceTenantsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{35}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ListResourceTenantsRequest) GetDesktopId() uint64 {
@@ -2348,7 +3037,7 @@ type ResourceTenantSummary struct {
 
 func (x *ResourceTenantSummary) Reset() {
 	*x = ResourceTenantSummary{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[36]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2360,7 +3049,7 @@ func (x *ResourceTenantSummary) String() string {
 func (*ResourceTenantSummary) ProtoMessage() {}
 
 func (x *ResourceTenantSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[36]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2373,7 +3062,7 @@ func (x *ResourceTenantSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceTenantSummary.ProtoReflect.Descriptor instead.
 func (*ResourceTenantSummary) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{36}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ResourceTenantSummary) GetTenantId() string {
@@ -2399,7 +3088,7 @@ type ListResourceTenantsResponse struct {
 
 func (x *ListResourceTenantsResponse) Reset() {
 	*x = ListResourceTenantsResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[37]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2411,7 +3100,7 @@ func (x *ListResourceTenantsResponse) String() string {
 func (*ListResourceTenantsResponse) ProtoMessage() {}
 
 func (x *ListResourceTenantsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[37]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2424,7 +3113,7 @@ func (x *ListResourceTenantsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListResourceTenantsResponse.ProtoReflect.Descriptor instead.
 func (*ListResourceTenantsResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{37}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ListResourceTenantsResponse) GetTenants() []*ResourceTenantSummary {
@@ -2447,7 +3136,7 @@ type SSHResource struct {
 
 func (x *SSHResource) Reset() {
 	*x = SSHResource{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[38]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2459,7 +3148,7 @@ func (x *SSHResource) String() string {
 func (*SSHResource) ProtoMessage() {}
 
 func (x *SSHResource) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[38]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2472,7 +3161,7 @@ func (x *SSHResource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SSHResource.ProtoReflect.Descriptor instead.
 func (*SSHResource) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{38}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *SSHResource) GetAgentId() uint64 {
@@ -2517,7 +3206,7 @@ type K8SAPIResource struct {
 
 func (x *K8SAPIResource) Reset() {
 	*x = K8SAPIResource{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[39]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2529,7 +3218,7 @@ func (x *K8SAPIResource) String() string {
 func (*K8SAPIResource) ProtoMessage() {}
 
 func (x *K8SAPIResource) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[39]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2542,7 +3231,7 @@ func (x *K8SAPIResource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use K8SAPIResource.ProtoReflect.Descriptor instead.
 func (*K8SAPIResource) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{39}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *K8SAPIResource) GetAgentId() uint64 {
@@ -2593,7 +3282,7 @@ type GetResourcesResponse struct {
 
 func (x *GetResourcesResponse) Reset() {
 	*x = GetResourcesResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[40]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2605,7 +3294,7 @@ func (x *GetResourcesResponse) String() string {
 func (*GetResourcesResponse) ProtoMessage() {}
 
 func (x *GetResourcesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[40]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2618,7 +3307,7 @@ func (x *GetResourcesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetResourcesResponse.ProtoReflect.Descriptor instead.
 func (*GetResourcesResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{40}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *GetResourcesResponse) GetSsh() []*SSHResource {
@@ -2659,7 +3348,7 @@ type GetDomainListRequest struct {
 
 func (x *GetDomainListRequest) Reset() {
 	*x = GetDomainListRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[41]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2671,7 +3360,7 @@ func (x *GetDomainListRequest) String() string {
 func (*GetDomainListRequest) ProtoMessage() {}
 
 func (x *GetDomainListRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[41]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2684,7 +3373,7 @@ func (x *GetDomainListRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDomainListRequest.ProtoReflect.Descriptor instead.
 func (*GetDomainListRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{41}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *GetDomainListRequest) GetDesktopId() uint64 {
@@ -2708,7 +3397,7 @@ type DomainItem struct {
 
 func (x *DomainItem) Reset() {
 	*x = DomainItem{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[42]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2720,7 +3409,7 @@ func (x *DomainItem) String() string {
 func (*DomainItem) ProtoMessage() {}
 
 func (x *DomainItem) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[42]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2733,7 +3422,7 @@ func (x *DomainItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DomainItem.ProtoReflect.Descriptor instead.
 func (*DomainItem) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{42}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *DomainItem) GetDomain() string {
@@ -2781,7 +3470,7 @@ type GetDomainListResponse struct {
 
 func (x *GetDomainListResponse) Reset() {
 	*x = GetDomainListResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[43]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2793,7 +3482,7 @@ func (x *GetDomainListResponse) String() string {
 func (*GetDomainListResponse) ProtoMessage() {}
 
 func (x *GetDomainListResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[43]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2806,7 +3495,7 @@ func (x *GetDomainListResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDomainListResponse.ProtoReflect.Descriptor instead.
 func (*GetDomainListResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{43}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *GetDomainListResponse) GetDomains() []*DomainItem {
@@ -2825,7 +3514,7 @@ type ListDomainsRequest struct {
 
 func (x *ListDomainsRequest) Reset() {
 	*x = ListDomainsRequest{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[44]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2837,7 +3526,7 @@ func (x *ListDomainsRequest) String() string {
 func (*ListDomainsRequest) ProtoMessage() {}
 
 func (x *ListDomainsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[44]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2850,7 +3539,7 @@ func (x *ListDomainsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDomainsRequest.ProtoReflect.Descriptor instead.
 func (*ListDomainsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{44}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{50}
 }
 
 // DomainInfo 域名信息（包含目标 IP 和端口）
@@ -2869,7 +3558,7 @@ type DomainInfo struct {
 
 func (x *DomainInfo) Reset() {
 	*x = DomainInfo{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[45]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2881,7 +3570,7 @@ func (x *DomainInfo) String() string {
 func (*DomainInfo) ProtoMessage() {}
 
 func (x *DomainInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[45]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2894,7 +3583,7 @@ func (x *DomainInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DomainInfo.ProtoReflect.Descriptor instead.
 func (*DomainInfo) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{45}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *DomainInfo) GetDomain() string {
@@ -2956,7 +3645,7 @@ type ListDomainsResponse struct {
 
 func (x *ListDomainsResponse) Reset() {
 	*x = ListDomainsResponse{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[46]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2968,7 +3657,7 @@ func (x *ListDomainsResponse) String() string {
 func (*ListDomainsResponse) ProtoMessage() {}
 
 func (x *ListDomainsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[46]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2981,7 +3670,7 @@ func (x *ListDomainsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDomainsResponse.ProtoReflect.Descriptor instead.
 func (*ListDomainsResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{46}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *ListDomainsResponse) GetDomains() []*DomainInfo {
@@ -3026,7 +3715,7 @@ type ContainerSSHResource struct {
 
 func (x *ContainerSSHResource) Reset() {
 	*x = ContainerSSHResource{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[47]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3038,7 +3727,7 @@ func (x *ContainerSSHResource) String() string {
 func (*ContainerSSHResource) ProtoMessage() {}
 
 func (x *ContainerSSHResource) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[47]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3051,7 +3740,7 @@ func (x *ContainerSSHResource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerSSHResource.ProtoReflect.Descriptor instead.
 func (*ContainerSSHResource) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{47}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *ContainerSSHResource) GetResourceId() string {
@@ -3260,7 +3949,7 @@ type ContainerServiceResource struct {
 
 func (x *ContainerServiceResource) Reset() {
 	*x = ContainerServiceResource{}
-	mi := &file_pkg_proto_desktop_proto_msgTypes[48]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3272,7 +3961,7 @@ func (x *ContainerServiceResource) String() string {
 func (*ContainerServiceResource) ProtoMessage() {}
 
 func (x *ContainerServiceResource) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_proto_desktop_proto_msgTypes[48]
+	mi := &file_pkg_proto_desktop_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3285,7 +3974,7 @@ func (x *ContainerServiceResource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerServiceResource.ProtoReflect.Descriptor instead.
 func (*ContainerServiceResource) Descriptor() ([]byte, []int) {
-	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{48}
+	return file_pkg_proto_desktop_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *ContainerServiceResource) GetResourceId() string {
@@ -3468,12 +4157,16 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x19\n" +
 	"\bauth_key\x18\x03 \x01(\tR\aauthKey\x12\x1d\n" +
 	"\n" +
-	"server_url\x18\x04 \x01(\tR\tserverUrl\"\x80\x01\n" +
+	"server_url\x18\x04 \x01(\tR\tserverUrl\"\x94\x02\n" +
 	"\x17DesktopHeartbeatRequest\x12\x1d\n" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12\x1b\n" +
 	"\ttunnel_ip\x18\x02 \x01(\tR\btunnelIp\x12)\n" +
-	"\x10tunnel_connected\x18\x03 \x01(\bR\x0ftunnelConnected\"\x98\x01\n" +
+	"\x10tunnel_connected\x18\x03 \x01(\bR\x0ftunnelConnected\x12\x16\n" +
+	"\x06secret\x18\x04 \x01(\tR\x06secret\x12&\n" +
+	"\x0frdp_local_ready\x18\x05 \x01(\bR\rrdpLocalReady\x12$\n" +
+	"\x0erdp_local_port\x18\x06 \x01(\x05R\frdpLocalPort\x12,\n" +
+	"\x12rdp_tunnel_exposed\x18\a \x01(\bR\x10rdpTunnelExposed\"\x98\x01\n" +
 	"\x11AuthorizedService\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
@@ -3483,17 +4176,20 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"listenAddr\x12\x1f\n" +
 	"\vtarget_addr\x18\x05 \x01(\tR\n" +
 	"targetAddr\" \n" +
-	"\x18DesktopHeartbeatResponseJ\x04\b\x01\x10\x02\"{\n" +
+	"\x18DesktopHeartbeatResponseJ\x04\b\x01\x10\x02\"\x93\x01\n" +
 	"\x12DesktopDataRequest\x12\x1d\n" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12F\n" +
-	"\frefresh_type\x18\x02 \x01(\x0e2#.awecloud.signaling.DesktopDataTypeR\vrefreshType\"\xb7\x02\n" +
+	"\frefresh_type\x18\x02 \x01(\x0e2#.awecloud.signaling.DesktopDataTypeR\vrefreshType\x12\x16\n" +
+	"\x06secret\x18\x03 \x01(\tR\x06secret\"\x83\x03\n" +
 	"\x13DesktopDataResponse\x127\n" +
 	"\x04type\x18\x01 \x01(\x0e2#.awecloud.signaling.DesktopDataTypeR\x04type\x12A\n" +
 	"\bservices\x18\x02 \x03(\v2%.awecloud.signaling.AuthorizedServiceR\bservices\x128\n" +
 	"\x05hosts\x18\x03 \x03(\v2\".awecloud.signaling.AuthorizedHostR\x05hosts\x128\n" +
 	"\adevices\x18\x04 \x03(\v2\x1e.awecloud.signaling.DeviceInfoR\adevices\x120\n" +
-	"\x14favorite_service_ids\x18\x05 \x03(\tR\x12favoriteServiceIds\":\n" +
+	"\x14favorite_service_ids\x18\x05 \x03(\tR\x12favoriteServiceIds\x12J\n" +
+	"\n" +
+	"rdp_policy\x18\x06 \x01(\v2+.awecloud.signaling.DesktopInboundRDPPolicyR\trdpPolicy\":\n" +
 	"\x19GetAuthorizedHostsRequest\x12\x1d\n" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\"\xb5\x01\n" +
@@ -3511,10 +4207,11 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12\x17\n" +
 	"\ahost_id\x18\x02 \x01(\tR\x06hostId\"\\\n" +
 	"\x17GetHostServicesResponse\x12A\n" +
-	"\bservices\x18\x01 \x03(\v2%.awecloud.signaling.AuthorizedServiceR\bservices\"4\n" +
+	"\bservices\x18\x01 \x03(\v2%.awecloud.signaling.AuthorizedServiceR\bservices\"L\n" +
 	"\x13GetMyDevicesRequest\x12\x1d\n" +
 	"\n" +
-	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\"\x98\x02\n" +
+	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12\x16\n" +
+	"\x06secret\x18\x02 \x01(\tR\x06secret\"\xbe\x05\n" +
 	"\n" +
 	"DeviceInfo\x12!\n" +
 	"\fdevice_token\x18\x01 \x01(\tR\vdeviceToken\x12\x1f\n" +
@@ -3531,9 +4228,73 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\n" +
 	"is_current\x18\t \x01(\bR\tisCurrent\x12\x0e\n" +
 	"\x02ip\x18\n" +
-	" \x01(\tR\x02ip\"P\n" +
+	" \x01(\tR\x02ip\x12\x17\n" +
+	"\anode_id\x18\v \x01(\x04R\x06nodeId\x12\x19\n" +
+	"\brdp_mode\x18\f \x01(\tR\ardpMode\x12&\n" +
+	"\x0frdp_allow_share\x18\r \x01(\bR\rrdpAllowShare\x12,\n" +
+	"\x12rdp_admin_disabled\x18\x0e \x01(\bR\x10rdpAdminDisabled\x12&\n" +
+	"\x0frdp_local_ready\x18\x0f \x01(\bR\rrdpLocalReady\x12$\n" +
+	"\x0erdp_local_port\x18\x10 \x01(\x05R\frdpLocalPort\x12,\n" +
+	"\x12rdp_tunnel_exposed\x18\x11 \x01(\bR\x10rdpTunnelExposed\x12'\n" +
+	"\x0frdp_connectable\x18\x12 \x01(\bR\x0erdpConnectable\x12%\n" +
+	"\x0eowner_username\x18\x13 \x01(\tR\rownerUsername\x12\x1b\n" +
+	"\tis_shared\x18\x14 \x01(\bR\bisShared\x121\n" +
+	"\x15grant_expires_at_unix\x18\x15 \x01(\x03R\x12grantExpiresAtUnix\"P\n" +
 	"\x14GetMyDevicesResponse\x128\n" +
-	"\adevices\x18\x01 \x03(\v2\x1e.awecloud.signaling.DeviceInfoR\adevices\"p\n" +
+	"\adevices\x18\x01 \x03(\v2\x1e.awecloud.signaling.DeviceInfoR\adevices\"\xad\x02\n" +
+	"\x0eAllowedRDPPeer\x12*\n" +
+	"\x11headscale_node_id\x18\x01 \x01(\x04R\x0fheadscaleNodeId\x12$\n" +
+	"\x0esource_node_id\x18\x02 \x01(\x04R\fsourceNodeId\x12(\n" +
+	"\x10source_user_name\x18\x03 \x01(\tR\x0esourceUserName\x12,\n" +
+	"\x12source_device_name\x18\x04 \x01(\tR\x10sourceDeviceName\x12\x19\n" +
+	"\bgrant_id\x18\x05 \x01(\x04R\agrantId\x12&\n" +
+	"\x0fexpires_at_unix\x18\x06 \x01(\x03R\rexpiresAtUnix\x12.\n" +
+	"\x13headscale_user_name\x18\a \x01(\tR\x11headscaleUserName\"\xe3\x02\n" +
+	"\x17DesktopInboundRDPPolicy\x12+\n" +
+	"\x11effective_enabled\x18\x01 \x01(\bR\x10effectiveEnabled\x12\x19\n" +
+	"\brdp_mode\x18\x02 \x01(\tR\ardpMode\x12\x1f\n" +
+	"\vallow_share\x18\x03 \x01(\bR\n" +
+	"allowShare\x12%\n" +
+	"\x0eadmin_disabled\x18\x04 \x01(\bR\radminDisabled\x12\x1f\n" +
+	"\vtarget_port\x18\x05 \x01(\x05R\n" +
+	"targetPort\x12G\n" +
+	"\rallowed_peers\x18\x06 \x03(\v2\".awecloud.signaling.AllowedRDPPeerR\fallowedPeers\x12$\n" +
+	"\x0eissued_at_unix\x18\a \x01(\x03R\fissuedAtUnix\x12(\n" +
+	"\x10valid_until_unix\x18\b \x01(\x03R\x0evalidUntilUnix\"\x8f\x02\n" +
+	"\x1cUpdateDeviceRDPConfigRequest\x12\x1d\n" +
+	"\n" +
+	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12\x16\n" +
+	"\x06secret\x18\x02 \x01(\tR\x06secret\x12$\n" +
+	"\x0etarget_node_id\x18\x03 \x01(\x04R\ftargetNodeId\x12!\n" +
+	"\fdevice_token\x18\x04 \x01(\tR\vdeviceToken\x12\x19\n" +
+	"\brdp_mode\x18\x05 \x01(\tR\ardpMode\x12,\n" +
+	"\x12update_allow_share\x18\x06 \x01(\bR\x10updateAllowShare\x12&\n" +
+	"\x0frdp_allow_share\x18\a \x01(\bR\rrdpAllowShare\"\x8b\x01\n" +
+	"\x1dUpdateDeviceRDPConfigResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x126\n" +
+	"\x06device\x18\x03 \x01(\v2\x1e.awecloud.signaling.DeviceInfoR\x06device\"\xf1\x03\n" +
+	"\x1cReportRDPSessionAuditRequest\x12\x1d\n" +
+	"\n" +
+	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12\x16\n" +
+	"\x06secret\x18\x02 \x01(\tR\x06secret\x12!\n" +
+	"\fsession_uuid\x18\x03 \x01(\tR\vsessionUuid\x12\x1d\n" +
+	"\n" +
+	"event_type\x18\x04 \x01(\tR\teventType\x127\n" +
+	"\x18source_headscale_node_id\x18\x05 \x01(\x04R\x15sourceHeadscaleNodeId\x12$\n" +
+	"\x0esource_node_id\x18\x06 \x01(\x04R\fsourceNodeId\x12(\n" +
+	"\x10source_user_name\x18\a \x01(\tR\x0esourceUserName\x12,\n" +
+	"\x12source_device_name\x18\b \x01(\tR\x10sourceDeviceName\x12\x1b\n" +
+	"\tsource_ip\x18\t \x01(\tR\bsourceIp\x12\x19\n" +
+	"\bgrant_id\x18\n" +
+	" \x01(\x04R\agrantId\x12!\n" +
+	"\fclose_reason\x18\v \x01(\tR\vcloseReason\x12%\n" +
+	"\x0etimestamp_unix\x18\f \x01(\x03R\rtimestampUnix\x12\x1f\n" +
+	"\vduration_ms\x18\r \x01(\x03R\n" +
+	"durationMs\"S\n" +
+	"\x1dReportRDPSessionAuditResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"p\n" +
 	"\x14OfflineDeviceRequest\x12\x1d\n" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12!\n" +
@@ -3752,14 +4513,15 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\n" +
 	"local_port\x18\x15 \x01(\x05R\tlocalPort\x12\x1d\n" +
 	"\n" +
-	"agent_name\x18\x16 \x01(\tR\tagentName*\xcc\x01\n" +
+	"agent_name\x18\x16 \x01(\tR\tagentName*\xee\x01\n" +
 	"\x0fDesktopDataType\x12!\n" +
 	"\x1dDESKTOP_DATA_TYPE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15DESKTOP_DATA_TYPE_ALL\x10\x01\x12\x1e\n" +
 	"\x1aDESKTOP_DATA_TYPE_SERVICES\x10\x02\x12\x1b\n" +
 	"\x17DESKTOP_DATA_TYPE_HOSTS\x10\x03\x12\x1d\n" +
 	"\x19DESKTOP_DATA_TYPE_DEVICES\x10\x04\x12\x1f\n" +
-	"\x1bDESKTOP_DATA_TYPE_FAVORITES\x10\x05*\xc6\x02\n" +
+	"\x1bDESKTOP_DATA_TYPE_FAVORITES\x10\x05\x12 \n" +
+	"\x1cDESKTOP_DATA_TYPE_RDP_POLICY\x10\x06*\xc6\x02\n" +
 	"\x18WaitForLoginResultStatus\x12,\n" +
 	"(WAIT_FOR_LOGIN_RESULT_STATUS_UNSPECIFIED\x10\x00\x12(\n" +
 	"$WAIT_FOR_LOGIN_RESULT_STATUS_PENDING\x10\x01\x12(\n" +
@@ -3767,7 +4529,7 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"#WAIT_FOR_LOGIN_RESULT_STATUS_FAILED\x10\x03\x12(\n" +
 	"$WAIT_FOR_LOGIN_RESULT_STATUS_TIMEOUT\x10\x04\x12*\n" +
 	"&WAIT_FOR_LOGIN_RESULT_STATUS_CANCELLED\x10\x05\x12)\n" +
-	"%WAIT_FOR_LOGIN_RESULT_STATUS_DISABLED\x10\x062\x90\x10\n" +
+	"%WAIT_FOR_LOGIN_RESULT_STATUS_DISABLED\x10\x062\x8c\x12\n" +
 	"\x0eDesktopService\x12o\n" +
 	"\fAuthenticate\x12..awecloud.signaling.DesktopAuthenticateRequest\x1a/.awecloud.signaling.DesktopAuthenticateResponse\x12j\n" +
 	"\tHeartbeat\x12+.awecloud.signaling.DesktopHeartbeatRequest\x1a,.awecloud.signaling.DesktopHeartbeatResponse(\x010\x01\x12a\n" +
@@ -3788,7 +4550,9 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\fGetResources\x12'.awecloud.signaling.GetResourcesRequest\x1a(.awecloud.signaling.GetResourcesResponse\x12v\n" +
 	"\x13ListResourceTenants\x12..awecloud.signaling.ListResourceTenantsRequest\x1a/.awecloud.signaling.ListResourceTenantsResponse\x12d\n" +
 	"\rGetDomainList\x12(.awecloud.signaling.GetDomainListRequest\x1a).awecloud.signaling.GetDomainListResponse\x12^\n" +
-	"\vListDomains\x12&.awecloud.signaling.ListDomainsRequest\x1a'.awecloud.signaling.ListDomainsResponseB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
+	"\vListDomains\x12&.awecloud.signaling.ListDomainsRequest\x1a'.awecloud.signaling.ListDomainsResponse\x12|\n" +
+	"\x15UpdateDeviceRDPConfig\x120.awecloud.signaling.UpdateDeviceRDPConfigRequest\x1a1.awecloud.signaling.UpdateDeviceRDPConfigResponse\x12|\n" +
+	"\x15ReportRDPSessionAudit\x120.awecloud.signaling.ReportRDPSessionAuditRequest\x1a1.awecloud.signaling.ReportRDPSessionAuditResponseB<Z:github.com/open-beagle/awecloud-signaling-server/pkg/protob\x06proto3"
 
 var (
 	file_pkg_proto_desktop_proto_rawDescOnce sync.Once
@@ -3803,7 +4567,7 @@ func file_pkg_proto_desktop_proto_rawDescGZIP() []byte {
 }
 
 var file_pkg_proto_desktop_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_pkg_proto_desktop_proto_msgTypes = make([]protoimpl.MessageInfo, 49)
+var file_pkg_proto_desktop_proto_msgTypes = make([]protoimpl.MessageInfo, 55)
 var file_pkg_proto_desktop_proto_goTypes = []any{
 	(DesktopDataType)(0),                  // 0: awecloud.signaling.DesktopDataType
 	(WaitForLoginResultStatus)(0),         // 1: awecloud.signaling.WaitForLoginResultStatus
@@ -3823,39 +4587,45 @@ var file_pkg_proto_desktop_proto_goTypes = []any{
 	(*GetMyDevicesRequest)(nil),           // 15: awecloud.signaling.GetMyDevicesRequest
 	(*DeviceInfo)(nil),                    // 16: awecloud.signaling.DeviceInfo
 	(*GetMyDevicesResponse)(nil),          // 17: awecloud.signaling.GetMyDevicesResponse
-	(*OfflineDeviceRequest)(nil),          // 18: awecloud.signaling.OfflineDeviceRequest
-	(*OfflineDeviceResponse)(nil),         // 19: awecloud.signaling.OfflineDeviceResponse
-	(*DeleteDeviceRequest)(nil),           // 20: awecloud.signaling.DeleteDeviceRequest
-	(*DeleteDeviceResponse)(nil),          // 21: awecloud.signaling.DeleteDeviceResponse
-	(*ToggleFavoriteRequest)(nil),         // 22: awecloud.signaling.ToggleFavoriteRequest
-	(*ToggleFavoriteResponse)(nil),        // 23: awecloud.signaling.ToggleFavoriteResponse
-	(*GetFavoriteServicesRequest)(nil),    // 24: awecloud.signaling.GetFavoriteServicesRequest
-	(*GetFavoriteServicesResponse)(nil),   // 25: awecloud.signaling.GetFavoriteServicesResponse
-	(*CreateLoginSessionRequest)(nil),     // 26: awecloud.signaling.CreateLoginSessionRequest
-	(*CreateLoginSessionResponse)(nil),    // 27: awecloud.signaling.CreateLoginSessionResponse
-	(*CheckSavedCredentialsRequest)(nil),  // 28: awecloud.signaling.CheckSavedCredentialsRequest
-	(*CheckSavedCredentialsResponse)(nil), // 29: awecloud.signaling.CheckSavedCredentialsResponse
-	(*WaitForLoginResultRequest)(nil),     // 30: awecloud.signaling.WaitForLoginResultRequest
-	(*WaitForLoginResultResponse)(nil),    // 31: awecloud.signaling.WaitForLoginResultResponse
-	(*DesktopLogoutRequest)(nil),          // 32: awecloud.signaling.DesktopLogoutRequest
-	(*DesktopLogoutResponse)(nil),         // 33: awecloud.signaling.DesktopLogoutResponse
-	(*ResolveDomainRequest)(nil),          // 34: awecloud.signaling.ResolveDomainRequest
-	(*ResolveDomainResponse)(nil),         // 35: awecloud.signaling.ResolveDomainResponse
-	(*GetResourcesRequest)(nil),           // 36: awecloud.signaling.GetResourcesRequest
-	(*ListResourceTenantsRequest)(nil),    // 37: awecloud.signaling.ListResourceTenantsRequest
-	(*ResourceTenantSummary)(nil),         // 38: awecloud.signaling.ResourceTenantSummary
-	(*ListResourceTenantsResponse)(nil),   // 39: awecloud.signaling.ListResourceTenantsResponse
-	(*SSHResource)(nil),                   // 40: awecloud.signaling.SSHResource
-	(*K8SAPIResource)(nil),                // 41: awecloud.signaling.K8SAPIResource
-	(*GetResourcesResponse)(nil),          // 42: awecloud.signaling.GetResourcesResponse
-	(*GetDomainListRequest)(nil),          // 43: awecloud.signaling.GetDomainListRequest
-	(*DomainItem)(nil),                    // 44: awecloud.signaling.DomainItem
-	(*GetDomainListResponse)(nil),         // 45: awecloud.signaling.GetDomainListResponse
-	(*ListDomainsRequest)(nil),            // 46: awecloud.signaling.ListDomainsRequest
-	(*DomainInfo)(nil),                    // 47: awecloud.signaling.DomainInfo
-	(*ListDomainsResponse)(nil),           // 48: awecloud.signaling.ListDomainsResponse
-	(*ContainerSSHResource)(nil),          // 49: awecloud.signaling.ContainerSSHResource
-	(*ContainerServiceResource)(nil),      // 50: awecloud.signaling.ContainerServiceResource
+	(*AllowedRDPPeer)(nil),                // 18: awecloud.signaling.AllowedRDPPeer
+	(*DesktopInboundRDPPolicy)(nil),       // 19: awecloud.signaling.DesktopInboundRDPPolicy
+	(*UpdateDeviceRDPConfigRequest)(nil),  // 20: awecloud.signaling.UpdateDeviceRDPConfigRequest
+	(*UpdateDeviceRDPConfigResponse)(nil), // 21: awecloud.signaling.UpdateDeviceRDPConfigResponse
+	(*ReportRDPSessionAuditRequest)(nil),  // 22: awecloud.signaling.ReportRDPSessionAuditRequest
+	(*ReportRDPSessionAuditResponse)(nil), // 23: awecloud.signaling.ReportRDPSessionAuditResponse
+	(*OfflineDeviceRequest)(nil),          // 24: awecloud.signaling.OfflineDeviceRequest
+	(*OfflineDeviceResponse)(nil),         // 25: awecloud.signaling.OfflineDeviceResponse
+	(*DeleteDeviceRequest)(nil),           // 26: awecloud.signaling.DeleteDeviceRequest
+	(*DeleteDeviceResponse)(nil),          // 27: awecloud.signaling.DeleteDeviceResponse
+	(*ToggleFavoriteRequest)(nil),         // 28: awecloud.signaling.ToggleFavoriteRequest
+	(*ToggleFavoriteResponse)(nil),        // 29: awecloud.signaling.ToggleFavoriteResponse
+	(*GetFavoriteServicesRequest)(nil),    // 30: awecloud.signaling.GetFavoriteServicesRequest
+	(*GetFavoriteServicesResponse)(nil),   // 31: awecloud.signaling.GetFavoriteServicesResponse
+	(*CreateLoginSessionRequest)(nil),     // 32: awecloud.signaling.CreateLoginSessionRequest
+	(*CreateLoginSessionResponse)(nil),    // 33: awecloud.signaling.CreateLoginSessionResponse
+	(*CheckSavedCredentialsRequest)(nil),  // 34: awecloud.signaling.CheckSavedCredentialsRequest
+	(*CheckSavedCredentialsResponse)(nil), // 35: awecloud.signaling.CheckSavedCredentialsResponse
+	(*WaitForLoginResultRequest)(nil),     // 36: awecloud.signaling.WaitForLoginResultRequest
+	(*WaitForLoginResultResponse)(nil),    // 37: awecloud.signaling.WaitForLoginResultResponse
+	(*DesktopLogoutRequest)(nil),          // 38: awecloud.signaling.DesktopLogoutRequest
+	(*DesktopLogoutResponse)(nil),         // 39: awecloud.signaling.DesktopLogoutResponse
+	(*ResolveDomainRequest)(nil),          // 40: awecloud.signaling.ResolveDomainRequest
+	(*ResolveDomainResponse)(nil),         // 41: awecloud.signaling.ResolveDomainResponse
+	(*GetResourcesRequest)(nil),           // 42: awecloud.signaling.GetResourcesRequest
+	(*ListResourceTenantsRequest)(nil),    // 43: awecloud.signaling.ListResourceTenantsRequest
+	(*ResourceTenantSummary)(nil),         // 44: awecloud.signaling.ResourceTenantSummary
+	(*ListResourceTenantsResponse)(nil),   // 45: awecloud.signaling.ListResourceTenantsResponse
+	(*SSHResource)(nil),                   // 46: awecloud.signaling.SSHResource
+	(*K8SAPIResource)(nil),                // 47: awecloud.signaling.K8SAPIResource
+	(*GetResourcesResponse)(nil),          // 48: awecloud.signaling.GetResourcesResponse
+	(*GetDomainListRequest)(nil),          // 49: awecloud.signaling.GetDomainListRequest
+	(*DomainItem)(nil),                    // 50: awecloud.signaling.DomainItem
+	(*GetDomainListResponse)(nil),         // 51: awecloud.signaling.GetDomainListResponse
+	(*ListDomainsRequest)(nil),            // 52: awecloud.signaling.ListDomainsRequest
+	(*DomainInfo)(nil),                    // 53: awecloud.signaling.DomainInfo
+	(*ListDomainsResponse)(nil),           // 54: awecloud.signaling.ListDomainsResponse
+	(*ContainerSSHResource)(nil),          // 55: awecloud.signaling.ContainerSSHResource
+	(*ContainerServiceResource)(nil),      // 56: awecloud.signaling.ContainerServiceResource
 }
 var file_pkg_proto_desktop_proto_depIdxs = []int32{
 	2,  // 0: awecloud.signaling.DesktopAuthenticateRequest.system_info:type_name -> awecloud.signaling.DesktopSystemInfo
@@ -3864,60 +4634,67 @@ var file_pkg_proto_desktop_proto_depIdxs = []int32{
 	6,  // 3: awecloud.signaling.DesktopDataResponse.services:type_name -> awecloud.signaling.AuthorizedService
 	11, // 4: awecloud.signaling.DesktopDataResponse.hosts:type_name -> awecloud.signaling.AuthorizedHost
 	16, // 5: awecloud.signaling.DesktopDataResponse.devices:type_name -> awecloud.signaling.DeviceInfo
-	11, // 6: awecloud.signaling.GetAuthorizedHostsResponse.hosts:type_name -> awecloud.signaling.AuthorizedHost
-	6,  // 7: awecloud.signaling.GetHostServicesResponse.services:type_name -> awecloud.signaling.AuthorizedService
-	16, // 8: awecloud.signaling.GetMyDevicesResponse.devices:type_name -> awecloud.signaling.DeviceInfo
-	1,  // 9: awecloud.signaling.WaitForLoginResultResponse.status:type_name -> awecloud.signaling.WaitForLoginResultStatus
-	38, // 10: awecloud.signaling.ListResourceTenantsResponse.tenants:type_name -> awecloud.signaling.ResourceTenantSummary
-	40, // 11: awecloud.signaling.GetResourcesResponse.ssh:type_name -> awecloud.signaling.SSHResource
-	41, // 12: awecloud.signaling.GetResourcesResponse.k8s_api:type_name -> awecloud.signaling.K8SAPIResource
-	49, // 13: awecloud.signaling.GetResourcesResponse.container_ssh:type_name -> awecloud.signaling.ContainerSSHResource
-	50, // 14: awecloud.signaling.GetResourcesResponse.container_service:type_name -> awecloud.signaling.ContainerServiceResource
-	44, // 15: awecloud.signaling.GetDomainListResponse.domains:type_name -> awecloud.signaling.DomainItem
-	47, // 16: awecloud.signaling.ListDomainsResponse.domains:type_name -> awecloud.signaling.DomainInfo
-	3,  // 17: awecloud.signaling.DesktopService.Authenticate:input_type -> awecloud.signaling.DesktopAuthenticateRequest
-	5,  // 18: awecloud.signaling.DesktopService.Heartbeat:input_type -> awecloud.signaling.DesktopHeartbeatRequest
-	8,  // 19: awecloud.signaling.DesktopService.DataStream:input_type -> awecloud.signaling.DesktopDataRequest
-	10, // 20: awecloud.signaling.DesktopService.GetAuthorizedHosts:input_type -> awecloud.signaling.GetAuthorizedHostsRequest
-	13, // 21: awecloud.signaling.DesktopService.GetHostServices:input_type -> awecloud.signaling.GetHostServicesRequest
-	15, // 22: awecloud.signaling.DesktopService.GetMyDevices:input_type -> awecloud.signaling.GetMyDevicesRequest
-	18, // 23: awecloud.signaling.DesktopService.OfflineDevice:input_type -> awecloud.signaling.OfflineDeviceRequest
-	20, // 24: awecloud.signaling.DesktopService.DeleteDevice:input_type -> awecloud.signaling.DeleteDeviceRequest
-	22, // 25: awecloud.signaling.DesktopService.ToggleFavorite:input_type -> awecloud.signaling.ToggleFavoriteRequest
-	24, // 26: awecloud.signaling.DesktopService.GetFavoriteServices:input_type -> awecloud.signaling.GetFavoriteServicesRequest
-	28, // 27: awecloud.signaling.DesktopService.CheckSavedCredentials:input_type -> awecloud.signaling.CheckSavedCredentialsRequest
-	26, // 28: awecloud.signaling.DesktopService.CreateLoginSession:input_type -> awecloud.signaling.CreateLoginSessionRequest
-	30, // 29: awecloud.signaling.DesktopService.WaitForLoginResult:input_type -> awecloud.signaling.WaitForLoginResultRequest
-	32, // 30: awecloud.signaling.DesktopService.Logout:input_type -> awecloud.signaling.DesktopLogoutRequest
-	34, // 31: awecloud.signaling.DesktopService.ResolveDomain:input_type -> awecloud.signaling.ResolveDomainRequest
-	36, // 32: awecloud.signaling.DesktopService.GetResources:input_type -> awecloud.signaling.GetResourcesRequest
-	37, // 33: awecloud.signaling.DesktopService.ListResourceTenants:input_type -> awecloud.signaling.ListResourceTenantsRequest
-	43, // 34: awecloud.signaling.DesktopService.GetDomainList:input_type -> awecloud.signaling.GetDomainListRequest
-	46, // 35: awecloud.signaling.DesktopService.ListDomains:input_type -> awecloud.signaling.ListDomainsRequest
-	4,  // 36: awecloud.signaling.DesktopService.Authenticate:output_type -> awecloud.signaling.DesktopAuthenticateResponse
-	7,  // 37: awecloud.signaling.DesktopService.Heartbeat:output_type -> awecloud.signaling.DesktopHeartbeatResponse
-	9,  // 38: awecloud.signaling.DesktopService.DataStream:output_type -> awecloud.signaling.DesktopDataResponse
-	12, // 39: awecloud.signaling.DesktopService.GetAuthorizedHosts:output_type -> awecloud.signaling.GetAuthorizedHostsResponse
-	14, // 40: awecloud.signaling.DesktopService.GetHostServices:output_type -> awecloud.signaling.GetHostServicesResponse
-	17, // 41: awecloud.signaling.DesktopService.GetMyDevices:output_type -> awecloud.signaling.GetMyDevicesResponse
-	19, // 42: awecloud.signaling.DesktopService.OfflineDevice:output_type -> awecloud.signaling.OfflineDeviceResponse
-	21, // 43: awecloud.signaling.DesktopService.DeleteDevice:output_type -> awecloud.signaling.DeleteDeviceResponse
-	23, // 44: awecloud.signaling.DesktopService.ToggleFavorite:output_type -> awecloud.signaling.ToggleFavoriteResponse
-	25, // 45: awecloud.signaling.DesktopService.GetFavoriteServices:output_type -> awecloud.signaling.GetFavoriteServicesResponse
-	29, // 46: awecloud.signaling.DesktopService.CheckSavedCredentials:output_type -> awecloud.signaling.CheckSavedCredentialsResponse
-	27, // 47: awecloud.signaling.DesktopService.CreateLoginSession:output_type -> awecloud.signaling.CreateLoginSessionResponse
-	31, // 48: awecloud.signaling.DesktopService.WaitForLoginResult:output_type -> awecloud.signaling.WaitForLoginResultResponse
-	33, // 49: awecloud.signaling.DesktopService.Logout:output_type -> awecloud.signaling.DesktopLogoutResponse
-	35, // 50: awecloud.signaling.DesktopService.ResolveDomain:output_type -> awecloud.signaling.ResolveDomainResponse
-	42, // 51: awecloud.signaling.DesktopService.GetResources:output_type -> awecloud.signaling.GetResourcesResponse
-	39, // 52: awecloud.signaling.DesktopService.ListResourceTenants:output_type -> awecloud.signaling.ListResourceTenantsResponse
-	45, // 53: awecloud.signaling.DesktopService.GetDomainList:output_type -> awecloud.signaling.GetDomainListResponse
-	48, // 54: awecloud.signaling.DesktopService.ListDomains:output_type -> awecloud.signaling.ListDomainsResponse
-	36, // [36:55] is the sub-list for method output_type
-	17, // [17:36] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	19, // 6: awecloud.signaling.DesktopDataResponse.rdp_policy:type_name -> awecloud.signaling.DesktopInboundRDPPolicy
+	11, // 7: awecloud.signaling.GetAuthorizedHostsResponse.hosts:type_name -> awecloud.signaling.AuthorizedHost
+	6,  // 8: awecloud.signaling.GetHostServicesResponse.services:type_name -> awecloud.signaling.AuthorizedService
+	16, // 9: awecloud.signaling.GetMyDevicesResponse.devices:type_name -> awecloud.signaling.DeviceInfo
+	18, // 10: awecloud.signaling.DesktopInboundRDPPolicy.allowed_peers:type_name -> awecloud.signaling.AllowedRDPPeer
+	16, // 11: awecloud.signaling.UpdateDeviceRDPConfigResponse.device:type_name -> awecloud.signaling.DeviceInfo
+	1,  // 12: awecloud.signaling.WaitForLoginResultResponse.status:type_name -> awecloud.signaling.WaitForLoginResultStatus
+	44, // 13: awecloud.signaling.ListResourceTenantsResponse.tenants:type_name -> awecloud.signaling.ResourceTenantSummary
+	46, // 14: awecloud.signaling.GetResourcesResponse.ssh:type_name -> awecloud.signaling.SSHResource
+	47, // 15: awecloud.signaling.GetResourcesResponse.k8s_api:type_name -> awecloud.signaling.K8SAPIResource
+	55, // 16: awecloud.signaling.GetResourcesResponse.container_ssh:type_name -> awecloud.signaling.ContainerSSHResource
+	56, // 17: awecloud.signaling.GetResourcesResponse.container_service:type_name -> awecloud.signaling.ContainerServiceResource
+	50, // 18: awecloud.signaling.GetDomainListResponse.domains:type_name -> awecloud.signaling.DomainItem
+	53, // 19: awecloud.signaling.ListDomainsResponse.domains:type_name -> awecloud.signaling.DomainInfo
+	3,  // 20: awecloud.signaling.DesktopService.Authenticate:input_type -> awecloud.signaling.DesktopAuthenticateRequest
+	5,  // 21: awecloud.signaling.DesktopService.Heartbeat:input_type -> awecloud.signaling.DesktopHeartbeatRequest
+	8,  // 22: awecloud.signaling.DesktopService.DataStream:input_type -> awecloud.signaling.DesktopDataRequest
+	10, // 23: awecloud.signaling.DesktopService.GetAuthorizedHosts:input_type -> awecloud.signaling.GetAuthorizedHostsRequest
+	13, // 24: awecloud.signaling.DesktopService.GetHostServices:input_type -> awecloud.signaling.GetHostServicesRequest
+	15, // 25: awecloud.signaling.DesktopService.GetMyDevices:input_type -> awecloud.signaling.GetMyDevicesRequest
+	24, // 26: awecloud.signaling.DesktopService.OfflineDevice:input_type -> awecloud.signaling.OfflineDeviceRequest
+	26, // 27: awecloud.signaling.DesktopService.DeleteDevice:input_type -> awecloud.signaling.DeleteDeviceRequest
+	28, // 28: awecloud.signaling.DesktopService.ToggleFavorite:input_type -> awecloud.signaling.ToggleFavoriteRequest
+	30, // 29: awecloud.signaling.DesktopService.GetFavoriteServices:input_type -> awecloud.signaling.GetFavoriteServicesRequest
+	34, // 30: awecloud.signaling.DesktopService.CheckSavedCredentials:input_type -> awecloud.signaling.CheckSavedCredentialsRequest
+	32, // 31: awecloud.signaling.DesktopService.CreateLoginSession:input_type -> awecloud.signaling.CreateLoginSessionRequest
+	36, // 32: awecloud.signaling.DesktopService.WaitForLoginResult:input_type -> awecloud.signaling.WaitForLoginResultRequest
+	38, // 33: awecloud.signaling.DesktopService.Logout:input_type -> awecloud.signaling.DesktopLogoutRequest
+	40, // 34: awecloud.signaling.DesktopService.ResolveDomain:input_type -> awecloud.signaling.ResolveDomainRequest
+	42, // 35: awecloud.signaling.DesktopService.GetResources:input_type -> awecloud.signaling.GetResourcesRequest
+	43, // 36: awecloud.signaling.DesktopService.ListResourceTenants:input_type -> awecloud.signaling.ListResourceTenantsRequest
+	49, // 37: awecloud.signaling.DesktopService.GetDomainList:input_type -> awecloud.signaling.GetDomainListRequest
+	52, // 38: awecloud.signaling.DesktopService.ListDomains:input_type -> awecloud.signaling.ListDomainsRequest
+	20, // 39: awecloud.signaling.DesktopService.UpdateDeviceRDPConfig:input_type -> awecloud.signaling.UpdateDeviceRDPConfigRequest
+	22, // 40: awecloud.signaling.DesktopService.ReportRDPSessionAudit:input_type -> awecloud.signaling.ReportRDPSessionAuditRequest
+	4,  // 41: awecloud.signaling.DesktopService.Authenticate:output_type -> awecloud.signaling.DesktopAuthenticateResponse
+	7,  // 42: awecloud.signaling.DesktopService.Heartbeat:output_type -> awecloud.signaling.DesktopHeartbeatResponse
+	9,  // 43: awecloud.signaling.DesktopService.DataStream:output_type -> awecloud.signaling.DesktopDataResponse
+	12, // 44: awecloud.signaling.DesktopService.GetAuthorizedHosts:output_type -> awecloud.signaling.GetAuthorizedHostsResponse
+	14, // 45: awecloud.signaling.DesktopService.GetHostServices:output_type -> awecloud.signaling.GetHostServicesResponse
+	17, // 46: awecloud.signaling.DesktopService.GetMyDevices:output_type -> awecloud.signaling.GetMyDevicesResponse
+	25, // 47: awecloud.signaling.DesktopService.OfflineDevice:output_type -> awecloud.signaling.OfflineDeviceResponse
+	27, // 48: awecloud.signaling.DesktopService.DeleteDevice:output_type -> awecloud.signaling.DeleteDeviceResponse
+	29, // 49: awecloud.signaling.DesktopService.ToggleFavorite:output_type -> awecloud.signaling.ToggleFavoriteResponse
+	31, // 50: awecloud.signaling.DesktopService.GetFavoriteServices:output_type -> awecloud.signaling.GetFavoriteServicesResponse
+	35, // 51: awecloud.signaling.DesktopService.CheckSavedCredentials:output_type -> awecloud.signaling.CheckSavedCredentialsResponse
+	33, // 52: awecloud.signaling.DesktopService.CreateLoginSession:output_type -> awecloud.signaling.CreateLoginSessionResponse
+	37, // 53: awecloud.signaling.DesktopService.WaitForLoginResult:output_type -> awecloud.signaling.WaitForLoginResultResponse
+	39, // 54: awecloud.signaling.DesktopService.Logout:output_type -> awecloud.signaling.DesktopLogoutResponse
+	41, // 55: awecloud.signaling.DesktopService.ResolveDomain:output_type -> awecloud.signaling.ResolveDomainResponse
+	48, // 56: awecloud.signaling.DesktopService.GetResources:output_type -> awecloud.signaling.GetResourcesResponse
+	45, // 57: awecloud.signaling.DesktopService.ListResourceTenants:output_type -> awecloud.signaling.ListResourceTenantsResponse
+	51, // 58: awecloud.signaling.DesktopService.GetDomainList:output_type -> awecloud.signaling.GetDomainListResponse
+	54, // 59: awecloud.signaling.DesktopService.ListDomains:output_type -> awecloud.signaling.ListDomainsResponse
+	21, // 60: awecloud.signaling.DesktopService.UpdateDeviceRDPConfig:output_type -> awecloud.signaling.UpdateDeviceRDPConfigResponse
+	23, // 61: awecloud.signaling.DesktopService.ReportRDPSessionAudit:output_type -> awecloud.signaling.ReportRDPSessionAuditResponse
+	41, // [41:62] is the sub-list for method output_type
+	20, // [20:41] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_pkg_proto_desktop_proto_init() }
@@ -3931,7 +4708,7 @@ func file_pkg_proto_desktop_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_proto_desktop_proto_rawDesc), len(file_pkg_proto_desktop_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   49,
+			NumMessages:   55,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

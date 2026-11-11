@@ -8,7 +8,23 @@ type NodeType string
 const (
 	NodeTypeAgent   NodeType = "agent"   // Agent 设备
 	NodeTypeDesktop NodeType = "desktop" // Desktop 设备
+
+	DesktopRDPModeAuto     = "auto"
+	DesktopRDPModeEnabled  = "enabled"
+	DesktopRDPModeDisabled = "disabled"
 )
+
+// NormalizeDesktopRDPMode 归一化 Desktop 远程桌面开放模式，未知或空值一律回退为 auto
+func NormalizeDesktopRDPMode(mode string) string {
+	switch mode {
+	case DesktopRDPModeEnabled:
+		return DesktopRDPModeEnabled
+	case DesktopRDPModeDisabled:
+		return DesktopRDPModeDisabled
+	default:
+		return DesktopRDPModeAuto
+	}
+}
 
 // Node 设备模型
 // 统一 Agent 设备和 Desktop 设备
@@ -48,6 +64,11 @@ type Node struct {
 	EndpointAddress    string `gorm:"column:endpoint_address;size:255" json:"endpoint_address,omitempty"` // Endpoint 所在网络可达的 Agent 地址
 	EndpointListenPort *int   `gorm:"column:endpoint_listen_port" json:"endpoint_listen_port,omitempty"`  // Endpoint 内网 gRPC 监听端口（默认 50052）
 	EndpointToken      string `gorm:"column:endpoint_token;size:255" json:"-"`                            // Endpoint 注册令牌（不序列化到 JSON）
+
+	// Desktop 远程桌面（3389）开放策略与隐私治理配置
+	RDPMode          string `gorm:"column:rdp_mode;size:20;not null;default:'auto'" json:"rdp_mode"`            // 本人开放模式：auto / enabled / disabled
+	RDPAllowShare    bool   `gorm:"column:rdp_allow_share;not null;default:false" json:"rdp_allow_share"`       // 设备归属人是否允许跨账号临时授权
+	RDPAdminDisabled bool   `gorm:"column:rdp_admin_disabled;not null;default:false" json:"rdp_admin_disabled"` // 平台管理员是否强制熔断关闭
 
 	// 关联
 	User *User `gorm:"foreignKey:UserID" json:"user,omitempty"`

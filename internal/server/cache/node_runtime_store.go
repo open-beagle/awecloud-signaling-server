@@ -51,6 +51,14 @@ type RuntimeNode struct {
 	SVCListenPortBase  *int   `json:"svc_listen_port_base,omitempty"`
 	EndpointEnabled    *bool  `json:"endpoint_enabled,omitempty"`
 	EndpointListenPort *int   `json:"endpoint_listen_port,omitempty"`
+
+	// Desktop 远程桌面（3389）持久化策略镜像与纯内存实时探测态
+	RDPMode          string `json:"rdp_mode,omitempty"`
+	RDPAllowShare    bool   `json:"rdp_allow_share,omitempty"`
+	RDPAdminDisabled bool   `json:"rdp_admin_disabled,omitempty"`
+	RDPLocalReady    bool   `json:"rdp_local_ready,omitempty"`
+	RDPLocalPort     int    `json:"rdp_local_port,omitempty"`
+	RDPTunnelExposed bool   `json:"rdp_tunnel_exposed,omitempty"`
 }
 
 // RuntimeNodeDirtySnapshot 脏节点快照，包含落库所需字段与 snapshot 时的 Revision
@@ -148,6 +156,9 @@ func (s *NodeRuntimeStore) modelToRuntimeNode(node *model.Node) *RuntimeNode {
 		SVCListenPortBase:    node.SVCListenPortBase,
 		EndpointEnabled:      node.EndpointEnabled,
 		EndpointListenPort:   node.EndpointListenPort,
+		RDPMode:              model.NormalizeDesktopRDPMode(node.RDPMode),
+		RDPAllowShare:        node.RDPAllowShare,
+		RDPAdminDisabled:     node.RDPAdminDisabled,
 	}
 }
 
@@ -272,6 +283,58 @@ func (s *NodeRuntimeStore) UpdateHeadscaleNodeID(nodeID uint64, headscaleNodeID 
 	return true
 }
 
+// UpdateDesktopRDPStatus 更新 Desktop 远程桌面纯内存运行态（不触发数据库 Dirty 刷盘），返回状态是否发生变化
+func (s *NodeRuntimeStore) UpdateDesktopRDPStatus(nodeID uint64, localReady bool, localPort int, tunnelExposed bool) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rn, ok := s.nodes[nodeID]
+	if !ok || rn == nil {
+		return false, ErrNodeNotFound
+	}
+	changed := rn.RDPLocalReady != localReady || rn.RDPLocalPort != localPort || rn.RDPTunnelExposed != tunnelExposed
+	if !changed {
+		return false, nil
+	}
+	rn.RDPLocalReady = localReady
+	rn.RDPLocalPort = localPort
+	rn.RDPTunnelExposed = tunnelExposed
+	rn.Revision++
+	return true, nil
+}
+
+// MarkDisconnected 在节点断连或主动下线时清理内存运行态，避免后台 Persister 将残留 IP 或心跳时间刷回数据库
+func (s *NodeRuntimeStore) MarkDisconnected(nodeID uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rn, ok := s.nodes[nodeID]
+	if !ok || rn == nil {
+		return
+	}
+	rn.IP = ""
+	rn.LastHeartbeat = time.Time{}
+	rn.RDPLocalReady = false
+	rn.RDPLocalPort = 0
+	rn.RDPTunnelExposed = false
+	rn.Revision++
+	rn.Dirty = false
+}
+
+// ClearTunnelIP 在节点在线但隧道未连通或 IP 校验不通过时清空内存中的隧道 IP
+func (s *NodeRuntimeStore) ClearTunnelIP(nodeID uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rn, ok := s.nodes[nodeID]
+	if !ok || rn == nil || rn.IP == "" {
+		return
+	}
+	rn.IP = ""
+	rn.Revision++
+	rn.Dirty = true
+}
+
 // UpsertNode 节点创建/修改管理接口调用：事务成功后同步更新内存 Store
 func (s *NodeRuntimeStore) UpsertNode(node *model.Node) {
 	if node == nil || node.ID == 0 {
@@ -288,6 +351,12 @@ func (s *NodeRuntimeStore) UpsertNode(node *model.Node) {
 		if rn.LastHeartbeat.IsZero() {
 			rn.LastHeartbeat = existing.LastHeartbeat
 		}
+		if rn.IP == "" && !existing.LastHeartbeat.IsZero() {
+			rn.IP = existing.IP
+		}
+		rn.RDPLocalReady = existing.RDPLocalReady
+		rn.RDPLocalPort = existing.RDPLocalPort
+		rn.RDPTunnelExposed = existing.RDPTunnelExposed
 	}
 
 	s.nodes[rn.ID] = rn
