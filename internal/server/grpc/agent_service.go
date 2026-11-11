@@ -555,50 +555,19 @@ func (s *AgentServiceServer) Heartbeat(stream pb.AgentService_HeartbeatServer) e
 	logger.Infof("Agent 连接注册: agent_id=%d, node_id=%d, hostname=%s", agentID, nodeID, firstReq.Hostname)
 
 	defer func() {
-		s.containerSessionAckMutex.Lock()
-		delete(s.containerSessionAcks, nodeID)
-		s.containerSessionAckMutex.Unlock()
 		s.connMutex.Lock()
-		delete(s.connections, nodeID)
+		isCurrent := s.connections[nodeID] == conn
+		if isCurrent {
+			delete(s.connections, nodeID)
+		}
 		s.connMutex.Unlock()
 
-		// 清理 Node 内存缓存
-		cache.DeleteNodeStatus(nodeID)
-		logger.Infof("Node 断连，清理内存缓存: node_id=%d", nodeID)
-
-		// 断连时只清理当前 Node 的数据，不影响同 Agent 下其他 Node
-		if err := db.DB.Model(&model.Node{}).
-			Where("id = ?", nodeID).
-			Updates(map[string]any{"ip": "", "last_heartbeat": nil}).Error; err != nil {
-			logger.Errorf("Node 断连时清空 IP 失败: node_id=%d, err=%v", nodeID, err)
+		if !isCurrent {
+			logger.Infof("Node 旧连接退出，跳过状态清理: agent_id=%d, node_id=%d", agentID, nodeID)
+			return
 		}
 
-		// 检查同 Agent 下是否还有其他在线 Node
-		hasOtherOnline := false
-		s.connMutex.RLock()
-		for _, c := range s.connections {
-			if c.AgentID == agentID && c.NodeID != nodeID {
-				hasOtherOnline = true
-				break
-			}
-		}
-		s.connMutex.RUnlock()
-
-		// 只有当该 Agent 下没有其他在线 Node 时，才清理 Endpoint 缓存
-		// 因为 Endpoint 是 Agent 级别的（user_id），不是 Node 级别的
-		if !hasOtherOnline {
-			// 查询该 Agent 的所有 Endpoint，清理缓存
-			var endpoints []model.Endpoint
-			if err := db.DB.Where("user_id = ?", agentID).Find(&endpoints).Error; err == nil {
-				for _, ep := range endpoints {
-					cache.DeleteEndpointStatus(ep.Name)
-					logger.Infof("Endpoint 断连，清理内存缓存: endpoint_name=%s", ep.Name)
-				}
-			}
-			db.DB.Model(&model.Endpoint{}).Where("user_id = ? AND status = ?", agentID, "online").Update("status", "offline")
-		}
-
-		logger.Infof("Node 断连: agent_id=%d, node_id=%d, 同 Agent 其他在线=%v", agentID, nodeID, hasOtherOnline)
+		s.cleanupDisconnectedNode(agentID, nodeID)
 	}()
 
 	firstAcks := s.processSessionAuthorizationHeartbeat(context.Background(), conn, firstReq)
@@ -1781,29 +1750,92 @@ func (s *AgentServiceServer) IsAgentOnline(agentID uint64) bool {
 
 // DisconnectAgent 断开指定 Agent 的所有连接
 func (s *AgentServiceServer) DisconnectAgent(agentID uint64) {
+	var disconnectedNodes []uint64
 	s.connMutex.Lock()
-	defer s.connMutex.Unlock()
-
 	// 遍历所有连接，断开属于该 Agent 的所有 Node 连接
 	for nodeID, conn := range s.connections {
 		if conn.AgentID == agentID {
-			conn.Cancel()
+			if conn.Cancel != nil {
+				conn.Cancel()
+			}
 			delete(s.connections, nodeID)
+			disconnectedNodes = append(disconnectedNodes, nodeID)
 			logger.Infof("已断开 Agent 连接: agentId=%d, nodeId=%d", agentID, nodeID)
 		}
+	}
+	s.connMutex.Unlock()
+
+	for _, nodeID := range disconnectedNodes {
+		s.cleanupDisconnectedNode(agentID, nodeID)
 	}
 }
 
 // DisconnectNode 断开指定 Node 的 Agent 连接
 func (s *AgentServiceServer) DisconnectNode(nodeID uint64) {
 	s.connMutex.Lock()
-	defer s.connMutex.Unlock()
-
-	if conn, exists := s.connections[nodeID]; exists {
-		conn.Cancel()
+	conn, exists := s.connections[nodeID]
+	if exists {
+		if conn.Cancel != nil {
+			conn.Cancel()
+		}
 		delete(s.connections, nodeID)
 		logger.Infof("已断开 Agent Node 连接: agentId=%d, nodeId=%d", conn.AgentID, nodeID)
 	}
+	s.connMutex.Unlock()
+
+	if exists {
+		s.cleanupDisconnectedNode(conn.AgentID, nodeID)
+	}
+}
+
+func (s *AgentServiceServer) cleanupDisconnectedNode(agentID, nodeID uint64) {
+	s.containerSessionAckMutex.Lock()
+	delete(s.containerSessionAcks, nodeID)
+	s.containerSessionAckMutex.Unlock()
+
+	// 清理 Node 内存缓存
+	cache.DeleteNodeStatus(nodeID)
+	// 仅当前连接退出或主动断开时清理运行态；重连场景下旧流晚退出不得抹掉新连接的 IP 与心跳
+	if s.runtimeStore != nil {
+		s.runtimeStore.MarkDisconnected(nodeID)
+	}
+	logger.Infof("Node 断连，清理内存缓存: node_id=%d", nodeID)
+
+	if db.DB != nil {
+		// 断连时只清理当前 Node 的数据，不影响同 Agent 下其他 Node
+		if err := db.DB.Model(&model.Node{}).
+			Where("id = ?", nodeID).
+			Updates(map[string]any{"ip": "", "last_heartbeat": nil}).Error; err != nil {
+			logger.Errorf("Node 断连时清空 IP 失败: node_id=%d, err=%v", nodeID, err)
+		}
+	}
+
+	// 检查同 Agent 下是否还有其他在线 Node
+	hasOtherOnline := false
+	s.connMutex.RLock()
+	for _, c := range s.connections {
+		if c.AgentID == agentID && c.NodeID != nodeID {
+			hasOtherOnline = true
+			break
+		}
+	}
+	s.connMutex.RUnlock()
+
+	// 只有当该 Agent 下没有其他在线 Node 时，才清理 Endpoint 缓存
+	// 因为 Endpoint 是 Agent 级别的（user_id），不是 Node 级别的
+	if !hasOtherOnline && db.DB != nil {
+		// 查询该 Agent 的所有 Endpoint，清理缓存
+		var endpoints []model.Endpoint
+		if err := db.DB.Where("user_id = ?", agentID).Find(&endpoints).Error; err == nil {
+			for _, ep := range endpoints {
+				cache.DeleteEndpointStatus(ep.Name)
+				logger.Infof("Endpoint 断连，清理内存缓存: endpoint_name=%s", ep.Name)
+			}
+		}
+		db.DB.Model(&model.Endpoint{}).Where("user_id = ? AND status = ?", agentID, "online").Update("status", "offline")
+	}
+
+	logger.Infof("Node 断连: agent_id=%d, node_id=%d, 同 Agent 其他在线=%v", agentID, nodeID, hasOtherOnline)
 }
 
 // GetAgentConnection 获取 Agent 连接（返回该 AgentID 下第一个在线连接）
