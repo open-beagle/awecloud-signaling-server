@@ -105,6 +105,11 @@ func EnableTracing() error {
 
 // autoMigrate 自动迁移数据库表
 func autoMigrate() error {
+	// SQLite 在执行表重建（ALTER TABLE ...__temp RENAME TO ...）时会校验全库所有现存触发器；
+	// 先摘除受管触发器，待表结构迁移完成后在末尾统一重建，避免跨表引用触发器阻断升级。
+	if err := dropManagedConstraintTriggers(DB); err != nil {
+		return err
+	}
 	if err := ensureTenantGovernanceSchema(DB); err != nil {
 		return err
 	}
@@ -612,25 +617,41 @@ func ensureTenantAccessGrantSchema(database *gorm.DB) error {
 	return nil
 }
 
-// ensureDesktopRDPSchema 确保存量 node 表以增量方式补齐 Desktop 远程桌面治理列
+// dropManagedConstraintTriggers 在表结构迁移前临时卸下由代码声明式维护的 S2/S3/S4 触发器，
+// 防止 GORM 在 SQLite 上重建被触发器引用的基础表（如 node、user、endpoint）时报 no such table。
+func dropManagedConstraintTriggers(database *gorm.DB) error {
+	return database.Transaction(func(tx *gorm.DB) error {
+		for _, trigger := range providerSupplyTriggers {
+			if err := tx.Exec("DROP TRIGGER IF EXISTS " + trigger.name).Error; err != nil {
+				return fmt.Errorf("drop Provider supply trigger %s before migrate: %w", trigger.name, err)
+			}
+		}
+		for _, trigger := range platformAllocationTriggers {
+			if err := tx.Exec("DROP TRIGGER IF EXISTS " + trigger.name).Error; err != nil {
+				return fmt.Errorf("drop Platform allocation trigger %s before migrate: %w", trigger.name, err)
+			}
+		}
+		for _, trigger := range tenantResourceTriggers {
+			if err := tx.Exec("DROP TRIGGER IF EXISTS " + trigger.name).Error; err != nil {
+				return fmt.Errorf("drop Tenant resource trigger %s before migrate: %w", trigger.name, err)
+			}
+		}
+		return nil
+	})
+}
+
+// ensureDesktopRDPSchema 确保存量 node 表以与 GORM SQLite 方言一致的类型补齐 Desktop 远程桌面治理列
 func ensureDesktopRDPSchema(database *gorm.DB) error {
 	migrator := database.Migrator()
 	if !migrator.HasTable(&model.Node{}) {
 		return nil
 	}
-	if !migrator.HasColumn(&model.Node{}, "rdp_mode") {
-		if err := database.Exec("ALTER TABLE node ADD COLUMN rdp_mode VARCHAR(20) NOT NULL DEFAULT 'auto'").Error; err != nil {
-			return fmt.Errorf("add node rdp_mode: %w", err)
+	for _, field := range []string{"RDPMode", "RDPAllowShare", "RDPAdminDisabled"} {
+		if migrator.HasColumn(&model.Node{}, field) {
+			continue
 		}
-	}
-	if !migrator.HasColumn(&model.Node{}, "rdp_allow_share") {
-		if err := database.Exec("ALTER TABLE node ADD COLUMN rdp_allow_share BOOLEAN NOT NULL DEFAULT 0").Error; err != nil {
-			return fmt.Errorf("add node rdp_allow_share: %w", err)
-		}
-	}
-	if !migrator.HasColumn(&model.Node{}, "rdp_admin_disabled") {
-		if err := database.Exec("ALTER TABLE node ADD COLUMN rdp_admin_disabled BOOLEAN NOT NULL DEFAULT 0").Error; err != nil {
-			return fmt.Errorf("add node rdp_admin_disabled: %w", err)
+		if err := migrator.AddColumn(&model.Node{}, field); err != nil {
+			return fmt.Errorf("add node %s: %w", field, err)
 		}
 	}
 	return nil

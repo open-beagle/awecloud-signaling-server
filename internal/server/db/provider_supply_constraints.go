@@ -207,6 +207,9 @@ const resourceScopeTriggerBody = `
 func ensureProviderSupplyConstraints(database *gorm.DB) error {
 	return database.Transaction(func(tx *gorm.DB) error {
 		for _, trigger := range providerSupplyTriggers {
+			if err := tx.Exec("DROP TRIGGER IF EXISTS " + trigger.name).Error; err != nil {
+				return fmt.Errorf("drop Provider supply constraint trigger %s: %w", trigger.name, err)
+			}
 			statement := fmt.Sprintf(
 				"CREATE TRIGGER IF NOT EXISTS %s BEFORE %s ON %s FOR EACH ROW BEGIN %s END",
 				trigger.name,
