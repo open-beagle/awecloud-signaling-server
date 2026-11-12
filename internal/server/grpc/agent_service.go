@@ -1079,14 +1079,8 @@ func (s *AgentServiceServer) sendHeartbeatResponse(ctx context.Context, stream p
 	configVersion := s.configVersion
 	s.versionMutex.RUnlock()
 
-	// 读取域名后缀配置
-	domainSuffix := model.DefaultDomainSuffix
-	var sysConfig model.SystemConfig
-	if err := db.DB.WithContext(ctx).Where("key = ?", model.ConfigDomainSuffix).First(&sysConfig).Error; err == nil {
-		if sysConfig.Value != "" {
-			domainSuffix = sysConfig.Value
-		}
-	}
+	// 读取生效域名后缀（优先管理员显式自定义，其次根据控制面域名动态推导，默认 .beagle）
+	domainSuffix := service.EffectiveDomainSuffix(ctx, db.DB)
 
 	resp := &pb.AgentHeartbeatResponse{
 		ConfigVersion:          configVersion,

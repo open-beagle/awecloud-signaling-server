@@ -22,6 +22,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
@@ -459,4 +460,84 @@ func TestBuildInboundRDPPolicyExcludesCloudIDEAndHonorsShareConsent(t *testing.T
 	var auditCount int64
 	require.NoError(t, database.Model(&model.DesktopRDPSessionAudit{}).Where("session_uuid = ?", "sess-001").Count(&auditCount).Error)
 	require.Equal(t, int64(1), auditCount)
+}
+
+func TestUpdateDeviceRDPConfigPersonalDomainLabels(t *testing.T) {
+	database := setupDesktopRDPTestDB(t)
+	_ = database.AutoMigrate(&model.SystemConfig{})
+
+	service.SetConfiguredPublicURLs("https://signal.acme.io")
+	t.Cleanup(func() { service.SetConfiguredPublicURLs() })
+
+	secretHash, err := bcrypt.GenerateFromPassword([]byte("dev-secret"), bcrypt.MinCost)
+	require.NoError(t, err)
+
+	owner := model.User{Name: "mengskzhaoyun", Role: model.UserRoleClient, SecretHash: "x", Enabled: true}
+	require.NoError(t, database.Create(&owner).Error)
+
+	homeNode := model.Node{
+		UserID:     owner.ID,
+		Name:       "HOME-MENGK",
+		Type:       model.NodeTypeDesktop,
+		SecretHash: string(secretHash),
+	}
+	workNode := model.Node{
+		UserID:     owner.ID,
+		Name:       "BG-WORKSTATION",
+		Type:       model.NodeTypeDesktop,
+		SecretHash: string(secretHash),
+	}
+	require.NoError(t, database.Create(&homeNode).Error)
+	require.NoError(t, database.Create(&workNode).Error)
+
+	srv := NewDesktopServiceServer(&config.ServerConfig{})
+
+	// 初始查询：自动补齐 host_domain_label 并返回动态品牌后缀 .acme
+	listResp, err := srv.GetMyDevices(context.Background(), &pb.GetMyDevicesRequest{
+		DesktopId: workNode.ID,
+		Secret:    "dev-secret",
+	})
+	require.NoError(t, err)
+	require.Equal(t, ".acme", listResp.DomainSuffix)
+	require.Equal(t, "mengskzhaoyun", listResp.UserDomainLabel)
+	require.Len(t, listResp.Devices, 2)
+	require.Equal(t, "home-mengk.mengskzhaoyun.acme", listResp.Devices[0].DeviceDomain)
+
+	// 修改个人域名中段为 mengk，并将两台机器分别改为 home / work
+	updHome, err := srv.UpdateDeviceRDPConfig(context.Background(), &pb.UpdateDeviceRDPConfigRequest{
+		DesktopId:             workNode.ID,
+		Secret:                "dev-secret",
+		TargetNodeId:          homeNode.ID,
+		UpdateUserDomainLabel: true,
+		UserDomainLabel:       "mengk",
+		UpdateHostDomainLabel: true,
+		HostDomainLabel:       "home",
+	})
+	require.NoError(t, err)
+	require.True(t, updHome.Success)
+	require.Equal(t, ".acme", updHome.DomainSuffix)
+	require.Equal(t, "mengk", updHome.UserDomainLabel)
+	require.Equal(t, "home.mengk.acme", updHome.Device.DeviceDomain)
+
+	updWork, err := srv.UpdateDeviceRDPConfig(context.Background(), &pb.UpdateDeviceRDPConfigRequest{
+		DesktopId:             workNode.ID,
+		Secret:                "dev-secret",
+		TargetNodeId:          workNode.ID,
+		UpdateHostDomainLabel: true,
+		HostDomainLabel:       "work",
+	})
+	require.NoError(t, err)
+	require.True(t, updWork.Success)
+	require.Equal(t, "work.mengk.acme", updWork.Device.DeviceDomain)
+
+	// 同名主机前缀冲突拒绝
+	conflictResp, err := srv.UpdateDeviceRDPConfig(context.Background(), &pb.UpdateDeviceRDPConfigRequest{
+		DesktopId:             workNode.ID,
+		Secret:                "dev-secret",
+		TargetNodeId:          workNode.ID,
+		UpdateHostDomainLabel: true,
+		HostDomainLabel:       "home",
+	})
+	require.NoError(t, err)
+	require.False(t, conflictResp.Success)
 }

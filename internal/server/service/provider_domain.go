@@ -172,15 +172,5 @@ func ChangeProviderDomainLabel(ctx context.Context, tx *gorm.DB, providerID, old
 }
 
 func domainSuffix(ctx context.Context, database *gorm.DB) string {
-	suffix := model.DefaultDomainSuffix
-	if database != nil {
-		var config model.SystemConfig
-		if err := database.WithContext(ctx).Where("key = ?", model.ConfigDomainSuffix).First(&config).Error; err == nil && strings.TrimSpace(config.Value) != "" {
-			suffix = strings.TrimSpace(config.Value)
-		}
-	}
-	if !strings.HasPrefix(suffix, ".") {
-		suffix = "." + suffix
-	}
-	return strings.ToLower(suffix)
+	return EffectiveDomainSuffix(ctx, database)
 }

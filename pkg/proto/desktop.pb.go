@@ -309,13 +309,15 @@ func (x *DesktopAuthenticateRequest) GetSystemInfo() *DesktopSystemInfo {
 
 // DesktopAuthenticateResponse Desktop 认证响应
 type DesktopAuthenticateResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`                     // 是否成功
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`                      // 响应消息
-	AuthKey       string                 `protobuf:"bytes,3,opt,name=auth_key,json=authKey,proto3" json:"auth_key,omitempty"`       // Tailscale PreAuthKey（如需重新连接）
-	ServerUrl     string                 `protobuf:"bytes,4,opt,name=server_url,json=serverUrl,proto3" json:"server_url,omitempty"` // Headscale 服务器地址
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Success         bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`                                         // 是否成功
+	Message         string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`                                          // 响应消息
+	AuthKey         string                 `protobuf:"bytes,3,opt,name=auth_key,json=authKey,proto3" json:"auth_key,omitempty"`                           // Tailscale PreAuthKey（如需重新连接）
+	ServerUrl       string                 `protobuf:"bytes,4,opt,name=server_url,json=serverUrl,proto3" json:"server_url,omitempty"`                     // Headscale 服务器地址
+	DomainSuffix    string                 `protobuf:"bytes,5,opt,name=domain_suffix,json=domainSuffix,proto3" json:"domain_suffix,omitempty"`            // 当前生效的根品牌域名后缀（如 .beagle）
+	UserDomainLabel string                 `protobuf:"bytes,6,opt,name=user_domain_label,json=userDomainLabel,proto3" json:"user_domain_label,omitempty"` // 当前账号生效的个人域名中段标识
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *DesktopAuthenticateResponse) Reset() {
@@ -372,6 +374,20 @@ func (x *DesktopAuthenticateResponse) GetAuthKey() string {
 func (x *DesktopAuthenticateResponse) GetServerUrl() string {
 	if x != nil {
 		return x.ServerUrl
+	}
+	return ""
+}
+
+func (x *DesktopAuthenticateResponse) GetDomainSuffix() string {
+	if x != nil {
+		return x.DomainSuffix
+	}
+	return ""
+}
+
+func (x *DesktopAuthenticateResponse) GetUserDomainLabel() string {
+	if x != nil {
+		return x.UserDomainLabel
 	}
 	return ""
 }
@@ -653,6 +669,8 @@ type DesktopDataResponse struct {
 	Devices            []*DeviceInfo            `protobuf:"bytes,4,rep,name=devices,proto3" json:"devices,omitempty"`                                                   // 设备列表（当 type = DEVICES 或 ALL）
 	FavoriteServiceIds []string                 `protobuf:"bytes,5,rep,name=favorite_service_ids,json=favoriteServiceIds,proto3" json:"favorite_service_ids,omitempty"` // 收藏的服务 ID 列表（当 type = FAVORITES 或 ALL）
 	RdpPolicy          *DesktopInboundRDPPolicy `protobuf:"bytes,6,opt,name=rdp_policy,json=rdpPolicy,proto3" json:"rdp_policy,omitempty"`                              // 本机远程桌面入站门禁策略（当 type = RDP_POLICY 或 ALL）
+	DomainSuffix       string                   `protobuf:"bytes,7,opt,name=domain_suffix,json=domainSuffix,proto3" json:"domain_suffix,omitempty"`                     // 当前生效的根品牌域名后缀
+	UserDomainLabel    string                   `protobuf:"bytes,8,opt,name=user_domain_label,json=userDomainLabel,proto3" json:"user_domain_label,omitempty"`          // 当前账号生效的个人域名中段标识
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -727,6 +745,20 @@ func (x *DesktopDataResponse) GetRdpPolicy() *DesktopInboundRDPPolicy {
 		return x.RdpPolicy
 	}
 	return nil
+}
+
+func (x *DesktopDataResponse) GetDomainSuffix() string {
+	if x != nil {
+		return x.DomainSuffix
+	}
+	return ""
+}
+
+func (x *DesktopDataResponse) GetUserDomainLabel() string {
+	if x != nil {
+		return x.UserDomainLabel
+	}
+	return ""
 }
 
 // GetAuthorizedHostsRequest 获取已授权主机列表请求
@@ -1079,6 +1111,9 @@ type DeviceInfo struct {
 	OwnerUsername      string                 `protobuf:"bytes,19,opt,name=owner_username,json=ownerUsername,proto3" json:"owner_username,omitempty"`                     // 设备归属用户名（跨账号授权设备展示用）
 	IsShared           bool                   `protobuf:"varint,20,opt,name=is_shared,json=isShared,proto3" json:"is_shared,omitempty"`                                   // 是否为他人跨账号授权给我的设备
 	GrantExpiresAtUnix int64                  `protobuf:"varint,21,opt,name=grant_expires_at_unix,json=grantExpiresAtUnix,proto3" json:"grant_expires_at_unix,omitempty"` // 跨账号授权到期时间戳（秒，0 表示本人设备）
+	HostDomainLabel    string                 `protobuf:"bytes,22,opt,name=host_domain_label,json=hostDomainLabel,proto3" json:"host_domain_label,omitempty"`             // 设备主机域名前缀标识（如 home / work）
+	DeviceDomain       string                 `protobuf:"bytes,23,opt,name=device_domain,json=deviceDomain,proto3" json:"device_domain,omitempty"`                        // 完整三段式设备域名（如 home.mengk.beagle）
+	OwnerDomainLabel   string                 `protobuf:"bytes,24,opt,name=owner_domain_label,json=ownerDomainLabel,proto3" json:"owner_domain_label,omitempty"`          // 设备归属人的个人域名中段标识
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -1260,12 +1295,35 @@ func (x *DeviceInfo) GetGrantExpiresAtUnix() int64 {
 	return 0
 }
 
+func (x *DeviceInfo) GetHostDomainLabel() string {
+	if x != nil {
+		return x.HostDomainLabel
+	}
+	return ""
+}
+
+func (x *DeviceInfo) GetDeviceDomain() string {
+	if x != nil {
+		return x.DeviceDomain
+	}
+	return ""
+}
+
+func (x *DeviceInfo) GetOwnerDomainLabel() string {
+	if x != nil {
+		return x.OwnerDomainLabel
+	}
+	return ""
+}
+
 // GetMyDevicesResponse 获取我的设备列表响应
 type GetMyDevicesResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Devices       []*DeviceInfo          `protobuf:"bytes,1,rep,name=devices,proto3" json:"devices,omitempty"` // 设备列表
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Devices         []*DeviceInfo          `protobuf:"bytes,1,rep,name=devices,proto3" json:"devices,omitempty"`                                          // 设备列表
+	DomainSuffix    string                 `protobuf:"bytes,2,opt,name=domain_suffix,json=domainSuffix,proto3" json:"domain_suffix,omitempty"`            // 当前生效的根品牌域名后缀
+	UserDomainLabel string                 `protobuf:"bytes,3,opt,name=user_domain_label,json=userDomainLabel,proto3" json:"user_domain_label,omitempty"` // 当前账号生效的个人域名中段标识
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *GetMyDevicesResponse) Reset() {
@@ -1303,6 +1361,20 @@ func (x *GetMyDevicesResponse) GetDevices() []*DeviceInfo {
 		return x.Devices
 	}
 	return nil
+}
+
+func (x *GetMyDevicesResponse) GetDomainSuffix() string {
+	if x != nil {
+		return x.DomainSuffix
+	}
+	return ""
+}
+
+func (x *GetMyDevicesResponse) GetUserDomainLabel() string {
+	if x != nil {
+		return x.UserDomainLabel
+	}
+	return ""
 }
 
 // AllowedRDPPeer 允许访问本机远程桌面的源节点白名单条目
@@ -1499,18 +1571,22 @@ func (x *DesktopInboundRDPPolicy) GetValidUntilUnix() int64 {
 	return 0
 }
 
-// UpdateDeviceRDPConfigRequest 更新本人设备远程桌面配置请求
+// UpdateDeviceRDPConfigRequest 更新本人设备远程桌面与个人域名配置请求
 type UpdateDeviceRDPConfigRequest struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	DesktopId        uint64                 `protobuf:"varint,1,opt,name=desktop_id,json=desktopId,proto3" json:"desktop_id,omitempty"`                        // 当前发起请求的 Desktop ID
-	Secret           string                 `protobuf:"bytes,2,opt,name=secret,proto3" json:"secret,omitempty"`                                                // 当前发起请求的 Desktop 密钥（必填，失败关闭）
-	TargetNodeId     uint64                 `protobuf:"varint,3,opt,name=target_node_id,json=targetNodeId,proto3" json:"target_node_id,omitempty"`             // 要修改的目标本人设备 Node ID（0 表示通过 device_token 解析）
-	DeviceToken      string                 `protobuf:"bytes,4,opt,name=device_token,json=deviceToken,proto3" json:"device_token,omitempty"`                   // 兼容设备标识 "<node_id>:***"
-	RdpMode          string                 `protobuf:"bytes,5,opt,name=rdp_mode,json=rdpMode,proto3" json:"rdp_mode,omitempty"`                               // 目标模式：auto / enabled / disabled（空字符串表示不修改）
-	UpdateAllowShare bool                   `protobuf:"varint,6,opt,name=update_allow_share,json=updateAllowShare,proto3" json:"update_allow_share,omitempty"` // 是否更新 rdp_allow_share 字段
-	RdpAllowShare    bool                   `protobuf:"varint,7,opt,name=rdp_allow_share,json=rdpAllowShare,proto3" json:"rdp_allow_share,omitempty"`          // 是否允许跨账号临时授权
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	DesktopId             uint64                 `protobuf:"varint,1,opt,name=desktop_id,json=desktopId,proto3" json:"desktop_id,omitempty"`                                          // 当前发起请求的 Desktop ID
+	Secret                string                 `protobuf:"bytes,2,opt,name=secret,proto3" json:"secret,omitempty"`                                                                  // 当前发起请求的 Desktop 密钥（必填，失败关闭）
+	TargetNodeId          uint64                 `protobuf:"varint,3,opt,name=target_node_id,json=targetNodeId,proto3" json:"target_node_id,omitempty"`                               // 要修改的目标本人设备 Node ID（0 表示通过 device_token 解析）
+	DeviceToken           string                 `protobuf:"bytes,4,opt,name=device_token,json=deviceToken,proto3" json:"device_token,omitempty"`                                     // 兼容设备标识 "<node_id>:***"
+	RdpMode               string                 `protobuf:"bytes,5,opt,name=rdp_mode,json=rdpMode,proto3" json:"rdp_mode,omitempty"`                                                 // 目标模式：auto / enabled / disabled（空字符串表示不修改）
+	UpdateAllowShare      bool                   `protobuf:"varint,6,opt,name=update_allow_share,json=updateAllowShare,proto3" json:"update_allow_share,omitempty"`                   // 是否更新 rdp_allow_share 字段
+	RdpAllowShare         bool                   `protobuf:"varint,7,opt,name=rdp_allow_share,json=rdpAllowShare,proto3" json:"rdp_allow_share,omitempty"`                            // 是否允许跨账号临时授权
+	UpdateHostDomainLabel bool                   `protobuf:"varint,8,opt,name=update_host_domain_label,json=updateHostDomainLabel,proto3" json:"update_host_domain_label,omitempty"`  // 是否更新目标设备的主机域名前缀标识
+	HostDomainLabel       string                 `protobuf:"bytes,9,opt,name=host_domain_label,json=hostDomainLabel,proto3" json:"host_domain_label,omitempty"`                       // 目标设备自定义主机域名前缀标识（如 home / work）
+	UpdateUserDomainLabel bool                   `protobuf:"varint,10,opt,name=update_user_domain_label,json=updateUserDomainLabel,proto3" json:"update_user_domain_label,omitempty"` // 是否更新当前账号的个人域名中段标识
+	UserDomainLabel       string                 `protobuf:"bytes,11,opt,name=user_domain_label,json=userDomainLabel,proto3" json:"user_domain_label,omitempty"`                      // 当前账号自定义个人域名中段标识（空字符串恢复默认）
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *UpdateDeviceRDPConfigRequest) Reset() {
@@ -1592,14 +1668,44 @@ func (x *UpdateDeviceRDPConfigRequest) GetRdpAllowShare() bool {
 	return false
 }
 
-// UpdateDeviceRDPConfigResponse 更新本人设备远程桌面配置响应
+func (x *UpdateDeviceRDPConfigRequest) GetUpdateHostDomainLabel() bool {
+	if x != nil {
+		return x.UpdateHostDomainLabel
+	}
+	return false
+}
+
+func (x *UpdateDeviceRDPConfigRequest) GetHostDomainLabel() string {
+	if x != nil {
+		return x.HostDomainLabel
+	}
+	return ""
+}
+
+func (x *UpdateDeviceRDPConfigRequest) GetUpdateUserDomainLabel() bool {
+	if x != nil {
+		return x.UpdateUserDomainLabel
+	}
+	return false
+}
+
+func (x *UpdateDeviceRDPConfigRequest) GetUserDomainLabel() string {
+	if x != nil {
+		return x.UserDomainLabel
+	}
+	return ""
+}
+
+// UpdateDeviceRDPConfigResponse 更新本人设备远程桌面与个人域名配置响应
 type UpdateDeviceRDPConfigResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Device        *DeviceInfo            `protobuf:"bytes,3,opt,name=device,proto3" json:"device,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Success         bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message         string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Device          *DeviceInfo            `protobuf:"bytes,3,opt,name=device,proto3" json:"device,omitempty"`
+	DomainSuffix    string                 `protobuf:"bytes,4,opt,name=domain_suffix,json=domainSuffix,proto3" json:"domain_suffix,omitempty"`
+	UserDomainLabel string                 `protobuf:"bytes,5,opt,name=user_domain_label,json=userDomainLabel,proto3" json:"user_domain_label,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *UpdateDeviceRDPConfigResponse) Reset() {
@@ -1651,6 +1757,20 @@ func (x *UpdateDeviceRDPConfigResponse) GetDevice() *DeviceInfo {
 		return x.Device
 	}
 	return nil
+}
+
+func (x *UpdateDeviceRDPConfigResponse) GetDomainSuffix() string {
+	if x != nil {
+		return x.DomainSuffix
+	}
+	return ""
+}
+
+func (x *UpdateDeviceRDPConfigResponse) GetUserDomainLabel() string {
+	if x != nil {
+		return x.UserDomainLabel
+	}
+	return ""
 }
 
 // ReportRDPSessionAuditRequest 上报远程桌面入站会话审计事件请求
@@ -2582,13 +2702,15 @@ type WaitForLoginResultResponse struct {
 	Status  WaitForLoginResultStatus `protobuf:"varint,1,opt,name=status,proto3,enum=awecloud.signaling.WaitForLoginResultStatus" json:"status,omitempty"` // 状态
 	Message string                   `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`                                                 // 消息
 	// 登录成功时返回
-	DesktopId     uint64 `protobuf:"varint,3,opt,name=desktop_id,json=desktopId,proto3" json:"desktop_id,omitempty"`      // Desktop ID
-	DeviceToken   string `protobuf:"bytes,4,opt,name=device_token,json=deviceToken,proto3" json:"device_token,omitempty"` // 设备令牌
-	AuthKey       string `protobuf:"bytes,5,opt,name=auth_key,json=authKey,proto3" json:"auth_key,omitempty"`             // Tailscale PreAuthKey
-	ServerUrl     string `protobuf:"bytes,6,opt,name=server_url,json=serverUrl,proto3" json:"server_url,omitempty"`       // Headscale 服务器地址
-	Username      string `protobuf:"bytes,7,opt,name=username,proto3" json:"username,omitempty"`                          // 用户名
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	DesktopId       uint64 `protobuf:"varint,3,opt,name=desktop_id,json=desktopId,proto3" json:"desktop_id,omitempty"`                    // Desktop ID
+	DeviceToken     string `protobuf:"bytes,4,opt,name=device_token,json=deviceToken,proto3" json:"device_token,omitempty"`               // 设备令牌
+	AuthKey         string `protobuf:"bytes,5,opt,name=auth_key,json=authKey,proto3" json:"auth_key,omitempty"`                           // Tailscale PreAuthKey
+	ServerUrl       string `protobuf:"bytes,6,opt,name=server_url,json=serverUrl,proto3" json:"server_url,omitempty"`                     // Headscale 服务器地址
+	Username        string `protobuf:"bytes,7,opt,name=username,proto3" json:"username,omitempty"`                                        // 用户名
+	DomainSuffix    string `protobuf:"bytes,8,opt,name=domain_suffix,json=domainSuffix,proto3" json:"domain_suffix,omitempty"`            // 当前生效的根品牌域名后缀
+	UserDomainLabel string `protobuf:"bytes,9,opt,name=user_domain_label,json=userDomainLabel,proto3" json:"user_domain_label,omitempty"` // 当前账号生效的个人域名中段标识
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *WaitForLoginResultResponse) Reset() {
@@ -2666,6 +2788,20 @@ func (x *WaitForLoginResultResponse) GetServerUrl() string {
 func (x *WaitForLoginResultResponse) GetUsername() string {
 	if x != nil {
 		return x.Username
+	}
+	return ""
+}
+
+func (x *WaitForLoginResultResponse) GetDomainSuffix() string {
+	if x != nil {
+		return x.DomainSuffix
+	}
+	return ""
+}
+
+func (x *WaitForLoginResultResponse) GetUserDomainLabel() string {
+	if x != nil {
+		return x.UserDomainLabel
 	}
 	return ""
 }
@@ -4151,13 +4287,15 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\x06secret\x18\x02 \x01(\tR\x06secret\x12-\n" +
 	"\x12device_fingerprint\x18\x03 \x01(\tR\x11deviceFingerprint\x12F\n" +
 	"\vsystem_info\x18\x04 \x01(\v2%.awecloud.signaling.DesktopSystemInfoR\n" +
-	"systemInfo\"\x8b\x01\n" +
+	"systemInfo\"\xdc\x01\n" +
 	"\x1bDesktopAuthenticateResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x19\n" +
 	"\bauth_key\x18\x03 \x01(\tR\aauthKey\x12\x1d\n" +
 	"\n" +
-	"server_url\x18\x04 \x01(\tR\tserverUrl\"\x94\x02\n" +
+	"server_url\x18\x04 \x01(\tR\tserverUrl\x12#\n" +
+	"\rdomain_suffix\x18\x05 \x01(\tR\fdomainSuffix\x12*\n" +
+	"\x11user_domain_label\x18\x06 \x01(\tR\x0fuserDomainLabel\"\x94\x02\n" +
 	"\x17DesktopHeartbeatRequest\x12\x1d\n" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12\x1b\n" +
@@ -4181,7 +4319,7 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12F\n" +
 	"\frefresh_type\x18\x02 \x01(\x0e2#.awecloud.signaling.DesktopDataTypeR\vrefreshType\x12\x16\n" +
-	"\x06secret\x18\x03 \x01(\tR\x06secret\"\x83\x03\n" +
+	"\x06secret\x18\x03 \x01(\tR\x06secret\"\xd4\x03\n" +
 	"\x13DesktopDataResponse\x127\n" +
 	"\x04type\x18\x01 \x01(\x0e2#.awecloud.signaling.DesktopDataTypeR\x04type\x12A\n" +
 	"\bservices\x18\x02 \x03(\v2%.awecloud.signaling.AuthorizedServiceR\bservices\x128\n" +
@@ -4189,7 +4327,9 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\adevices\x18\x04 \x03(\v2\x1e.awecloud.signaling.DeviceInfoR\adevices\x120\n" +
 	"\x14favorite_service_ids\x18\x05 \x03(\tR\x12favoriteServiceIds\x12J\n" +
 	"\n" +
-	"rdp_policy\x18\x06 \x01(\v2+.awecloud.signaling.DesktopInboundRDPPolicyR\trdpPolicy\":\n" +
+	"rdp_policy\x18\x06 \x01(\v2+.awecloud.signaling.DesktopInboundRDPPolicyR\trdpPolicy\x12#\n" +
+	"\rdomain_suffix\x18\a \x01(\tR\fdomainSuffix\x12*\n" +
+	"\x11user_domain_label\x18\b \x01(\tR\x0fuserDomainLabel\":\n" +
 	"\x19GetAuthorizedHostsRequest\x12\x1d\n" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\"\xb5\x01\n" +
@@ -4211,7 +4351,7 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\x13GetMyDevicesRequest\x12\x1d\n" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12\x16\n" +
-	"\x06secret\x18\x02 \x01(\tR\x06secret\"\xbe\x05\n" +
+	"\x06secret\x18\x02 \x01(\tR\x06secret\"\xbd\x06\n" +
 	"\n" +
 	"DeviceInfo\x12!\n" +
 	"\fdevice_token\x18\x01 \x01(\tR\vdeviceToken\x12\x1f\n" +
@@ -4239,9 +4379,14 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\x0frdp_connectable\x18\x12 \x01(\bR\x0erdpConnectable\x12%\n" +
 	"\x0eowner_username\x18\x13 \x01(\tR\rownerUsername\x12\x1b\n" +
 	"\tis_shared\x18\x14 \x01(\bR\bisShared\x121\n" +
-	"\x15grant_expires_at_unix\x18\x15 \x01(\x03R\x12grantExpiresAtUnix\"P\n" +
+	"\x15grant_expires_at_unix\x18\x15 \x01(\x03R\x12grantExpiresAtUnix\x12*\n" +
+	"\x11host_domain_label\x18\x16 \x01(\tR\x0fhostDomainLabel\x12#\n" +
+	"\rdevice_domain\x18\x17 \x01(\tR\fdeviceDomain\x12,\n" +
+	"\x12owner_domain_label\x18\x18 \x01(\tR\x10ownerDomainLabel\"\xa1\x01\n" +
 	"\x14GetMyDevicesResponse\x128\n" +
-	"\adevices\x18\x01 \x03(\v2\x1e.awecloud.signaling.DeviceInfoR\adevices\"\xad\x02\n" +
+	"\adevices\x18\x01 \x03(\v2\x1e.awecloud.signaling.DeviceInfoR\adevices\x12#\n" +
+	"\rdomain_suffix\x18\x02 \x01(\tR\fdomainSuffix\x12*\n" +
+	"\x11user_domain_label\x18\x03 \x01(\tR\x0fuserDomainLabel\"\xad\x02\n" +
 	"\x0eAllowedRDPPeer\x12*\n" +
 	"\x11headscale_node_id\x18\x01 \x01(\x04R\x0fheadscaleNodeId\x12$\n" +
 	"\x0esource_node_id\x18\x02 \x01(\x04R\fsourceNodeId\x12(\n" +
@@ -4260,7 +4405,7 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"targetPort\x12G\n" +
 	"\rallowed_peers\x18\x06 \x03(\v2\".awecloud.signaling.AllowedRDPPeerR\fallowedPeers\x12$\n" +
 	"\x0eissued_at_unix\x18\a \x01(\x03R\fissuedAtUnix\x12(\n" +
-	"\x10valid_until_unix\x18\b \x01(\x03R\x0evalidUntilUnix\"\x8f\x02\n" +
+	"\x10valid_until_unix\x18\b \x01(\x03R\x0evalidUntilUnix\"\xd9\x03\n" +
 	"\x1cUpdateDeviceRDPConfigRequest\x12\x1d\n" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12\x16\n" +
@@ -4269,11 +4414,18 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\fdevice_token\x18\x04 \x01(\tR\vdeviceToken\x12\x19\n" +
 	"\brdp_mode\x18\x05 \x01(\tR\ardpMode\x12,\n" +
 	"\x12update_allow_share\x18\x06 \x01(\bR\x10updateAllowShare\x12&\n" +
-	"\x0frdp_allow_share\x18\a \x01(\bR\rrdpAllowShare\"\x8b\x01\n" +
+	"\x0frdp_allow_share\x18\a \x01(\bR\rrdpAllowShare\x127\n" +
+	"\x18update_host_domain_label\x18\b \x01(\bR\x15updateHostDomainLabel\x12*\n" +
+	"\x11host_domain_label\x18\t \x01(\tR\x0fhostDomainLabel\x127\n" +
+	"\x18update_user_domain_label\x18\n" +
+	" \x01(\bR\x15updateUserDomainLabel\x12*\n" +
+	"\x11user_domain_label\x18\v \x01(\tR\x0fuserDomainLabel\"\xdc\x01\n" +
 	"\x1dUpdateDeviceRDPConfigResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x126\n" +
-	"\x06device\x18\x03 \x01(\v2\x1e.awecloud.signaling.DeviceInfoR\x06device\"\xf1\x03\n" +
+	"\x06device\x18\x03 \x01(\v2\x1e.awecloud.signaling.DeviceInfoR\x06device\x12#\n" +
+	"\rdomain_suffix\x18\x04 \x01(\tR\fdomainSuffix\x12*\n" +
+	"\x11user_domain_label\x18\x05 \x01(\tR\x0fuserDomainLabel\"\xf1\x03\n" +
 	"\x1cReportRDPSessionAuditRequest\x12\x1d\n" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\x12\x16\n" +
@@ -4350,7 +4502,7 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\x19WaitForLoginResultRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12-\n" +
-	"\x12device_fingerprint\x18\x02 \x01(\tR\x11deviceFingerprint\"\x94\x02\n" +
+	"\x12device_fingerprint\x18\x02 \x01(\tR\x11deviceFingerprint\"\xe5\x02\n" +
 	"\x1aWaitForLoginResultResponse\x12D\n" +
 	"\x06status\x18\x01 \x01(\x0e2,.awecloud.signaling.WaitForLoginResultStatusR\x06status\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1d\n" +
@@ -4360,7 +4512,9 @@ const file_pkg_proto_desktop_proto_rawDesc = "" +
 	"\bauth_key\x18\x05 \x01(\tR\aauthKey\x12\x1d\n" +
 	"\n" +
 	"server_url\x18\x06 \x01(\tR\tserverUrl\x12\x1a\n" +
-	"\busername\x18\a \x01(\tR\busername\"5\n" +
+	"\busername\x18\a \x01(\tR\busername\x12#\n" +
+	"\rdomain_suffix\x18\b \x01(\tR\fdomainSuffix\x12*\n" +
+	"\x11user_domain_label\x18\t \x01(\tR\x0fuserDomainLabel\"5\n" +
 	"\x14DesktopLogoutRequest\x12\x1d\n" +
 	"\n" +
 	"desktop_id\x18\x01 \x01(\x04R\tdesktopId\"j\n" +

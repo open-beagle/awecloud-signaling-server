@@ -137,8 +137,21 @@ func (a *NodeAPI) List(c *gin.Context) {
 	now := time.Now()
 	result := make([]NodeListItem, len(nodes))
 	for i, node := range nodes {
+		lastHb := node.LastHeartbeat
+		liveIP := node.IP
+		if a.runtimeStore != nil {
+			if rn, ok := a.runtimeStore.GetNode(node.ID); ok {
+				if !rn.LastHeartbeat.IsZero() && (lastHb == nil || rn.LastHeartbeat.After(*lastHb)) {
+					hb := rn.LastHeartbeat
+					lastHb = &hb
+				}
+				if rn.IP != "" {
+					liveIP = rn.IP
+				}
+			}
+		}
 		status := "offline"
-		if node.LastHeartbeat != nil && now.Sub(*node.LastHeartbeat) < 60*time.Second {
+		if lastHb != nil && now.Sub(*lastHb) < 90*time.Second {
 			status = "online"
 		}
 
@@ -158,12 +171,12 @@ func (a *NodeAPI) List(c *gin.Context) {
 			Type:            string(node.Type),
 			UserID:          node.UserID,
 			User:            userInfo,
-			IP:              node.IP,
+			IP:              liveIP,
 			Version:         node.Version,
 			Hostname:        node.Hostname,
 			HostDomainLabel: node.HostDomainLabel,
 			Status:          status,
-			LastHeartbeat:   node.LastHeartbeat,
+			LastHeartbeat:   lastHb,
 			CreatedAt:       node.CreatedAt,
 		}
 	}
@@ -221,8 +234,21 @@ func (a *NodeAPI) Get(c *gin.Context) {
 	}
 
 	now := time.Now()
+	lastHb := node.LastHeartbeat
+	liveIP := node.IP
+	if a.runtimeStore != nil {
+		if rn, ok := a.runtimeStore.GetNode(node.ID); ok {
+			if !rn.LastHeartbeat.IsZero() && (lastHb == nil || rn.LastHeartbeat.After(*lastHb)) {
+				hb := rn.LastHeartbeat
+				lastHb = &hb
+			}
+			if rn.IP != "" {
+				liveIP = rn.IP
+			}
+		}
+	}
 	status := "offline"
-	if node.LastHeartbeat != nil && now.Sub(*node.LastHeartbeat) < 60*time.Second {
+	if lastHb != nil && now.Sub(*lastHb) < 90*time.Second {
 		status = "online"
 	}
 
@@ -243,13 +269,13 @@ func (a *NodeAPI) Get(c *gin.Context) {
 		UserID:          node.UserID,
 		User:            userInfo,
 		HeadscaleNodeID: node.HeadscaleNodeID,
-		IP:              node.IP,
+		IP:              liveIP,
 		Version:         node.Version,
 		Hostname:        node.Hostname,
 		HostDomainLabel: node.HostDomainLabel,
 		SystemInfo:      node.SystemInfo,
 		Status:          status,
-		LastHeartbeat:   node.LastHeartbeat,
+		LastHeartbeat:   lastHb,
 		CreatedAt:       node.CreatedAt,
 		UpdatedAt:       node.UpdatedAt,
 	}

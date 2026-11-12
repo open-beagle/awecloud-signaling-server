@@ -12,6 +12,20 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
 )
 
+type preRDPUserSchema struct {
+	ID         uint64 `gorm:"primaryKey;autoIncrement"`
+	Name       string `gorm:"uniqueIndex;size:100;not null"`
+	Role       string `gorm:"size:20;not null;index"`
+	SecretHash string `gorm:"size:255;not null"`
+	Enabled    bool   `gorm:"default:true"`
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+func (preRDPUserSchema) TableName() string {
+	return "user"
+}
+
 type preRDPNodeSchema struct {
 	ID              uint64         `gorm:"primaryKey;autoIncrement"`
 	UserID          uint64         `gorm:"not null;index;uniqueIndex:uk_node_user_type_name,priority:1"`
@@ -54,7 +68,7 @@ func TestAutoMigrateUpgradesLegacyNodeTableWithS2Triggers(t *testing.T) {
 			// 模拟存量库已具备 S2/S3/S4 表与触发器，而 node 表处于升级前（或旧类型列待重建）状态
 			require.NoError(t, database.AutoMigrate(
 				&model.Tenant{},
-				&model.User{},
+				&preRDPUserSchema{},
 				&preRDPNodeSchema{},
 				&model.Endpoint{},
 				&model.ResourceProvider{},
@@ -82,7 +96,7 @@ func TestAutoMigrateUpgradesLegacyNodeTableWithS2Triggers(t *testing.T) {
 				&model.ResourceSessionEvent{},
 				&model.ResourceSessionTermination{},
 			))
-			require.NoError(t, database.Create(&model.User{
+			require.NoError(t, database.Create(&preRDPUserSchema{
 				ID:         1,
 				Name:       "edge-agent",
 				Role:       "agent",
@@ -108,6 +122,10 @@ func TestAutoMigrateUpgradesLegacyNodeTableWithS2Triggers(t *testing.T) {
 			DB = database
 			require.NoError(t, autoMigrate())
 			require.NoError(t, autoMigrate())
+
+			var upgradedUser model.User
+			require.NoError(t, database.First(&upgradedUser, 1).Error)
+			require.Equal(t, "", upgradedUser.DomainLabel)
 
 			var upgraded model.Node
 			require.NoError(t, database.First(&upgraded, 10).Error)

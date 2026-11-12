@@ -24,6 +24,7 @@ type User struct {
 	ID                  uint64     `gorm:"primaryKey;autoIncrement" json:"id"`        // 自增主键
 	HeadscaleUID        uint64     `gorm:"index" json:"headscale_uid,omitempty"`      // Headscale User ID
 	Name                string     `gorm:"uniqueIndex;size:100;not null" json:"name"` // 唯一名称
+	DomainLabel         string     `gorm:"column:domain_label;size:63;not null;default:'';index" json:"domain_label"` // 个人域名中段标识（为空时回退规范化用户名）
 	Alias               string     `gorm:"size:100" json:"alias"`                     // 别名（显示名称）
 	Role                UserRole   `gorm:"size:20;not null;index" json:"role"`        // 角色：agent / client
 	SecretHash          string     `gorm:"size:255;not null" json:"-"`                // 密钥哈希（不序列化）

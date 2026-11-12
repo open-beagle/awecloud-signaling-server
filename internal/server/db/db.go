@@ -640,9 +640,14 @@ func dropManagedConstraintTriggers(database *gorm.DB) error {
 	})
 }
 
-// ensureDesktopRDPSchema 确保存量 node 表以与 GORM SQLite 方言一致的类型补齐 Desktop 远程桌面治理列
+// ensureDesktopRDPSchema 确保存量 node / user 表以与 GORM SQLite 方言一致的类型补齐 Desktop 远程桌面治理与个人域名列
 func ensureDesktopRDPSchema(database *gorm.DB) error {
 	migrator := database.Migrator()
+	if migrator.HasTable(&model.User{}) && !migrator.HasColumn(&model.User{}, "DomainLabel") {
+		if err := migrator.AddColumn(&model.User{}, "DomainLabel"); err != nil {
+			return fmt.Errorf("add user DomainLabel: %w", err)
+		}
+	}
 	if !migrator.HasTable(&model.Node{}) {
 		return nil
 	}

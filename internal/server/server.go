@@ -79,6 +79,13 @@ func (s *Server) GetACLSyncService() *headscale.ACLSyncService {
 }
 
 func NewServer(cfg *config.ServerConfig) (*Server, error) {
+	service.SetConfiguredPublicURLs(
+		cfg.Server.PublicURL,
+		cfg.Tailscale.HeadscalePublicURL,
+		cfg.Logto.CallbackURL,
+		cfg.Logto.Endpoint,
+	)
+
 	if err := db.InitDB(cfg.Database); err != nil {
 		return nil, fmt.Errorf("初始化数据库失败: %w", err)
 	}

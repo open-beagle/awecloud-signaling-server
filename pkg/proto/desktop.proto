@@ -103,6 +103,8 @@ message DesktopAuthenticateResponse {
   string message = 2; // 响应消息
   string auth_key = 3; // Tailscale PreAuthKey（如需重新连接）
   string server_url = 4; // Headscale 服务器地址
+  string domain_suffix = 5; // 当前生效的根品牌域名后缀（如 .beagle）
+  string user_domain_label = 6; // 当前账号生效的个人域名中段标识
 }
 
 // ============================================
@@ -165,6 +167,8 @@ message DesktopDataResponse {
   repeated DeviceInfo devices = 4; // 设备列表（当 type = DEVICES 或 ALL）
   repeated string favorite_service_ids = 5; // 收藏的服务 ID 列表（当 type = FAVORITES 或 ALL）
   DesktopInboundRDPPolicy rdp_policy = 6; // 本机远程桌面入站门禁策略（当 type = RDP_POLICY 或 ALL）
+  string domain_suffix = 7; // 当前生效的根品牌域名后缀
+  string user_domain_label = 8; // 当前账号生效的个人域名中段标识
 }
 
 // ============================================
@@ -239,11 +243,16 @@ message DeviceInfo {
   string owner_username = 19; // 设备归属用户名（跨账号授权设备展示用）
   bool is_shared = 20; // 是否为他人跨账号授权给我的设备
   int64 grant_expires_at_unix = 21; // 跨账号授权到期时间戳（秒，0 表示本人设备）
+  string host_domain_label = 22; // 设备主机域名前缀标识（如 home / work）
+  string device_domain = 23; // 完整三段式设备域名（如 home.mengk.beagle）
+  string owner_domain_label = 24; // 设备归属人的个人域名中段标识
 }
 
 // GetMyDevicesResponse 获取我的设备列表响应
 message GetMyDevicesResponse {
   repeated DeviceInfo devices = 1; // 设备列表
+  string domain_suffix = 2; // 当前生效的根品牌域名后缀
+  string user_domain_label = 3; // 当前账号生效的个人域名中段标识
 }
 
 // ============================================
@@ -273,7 +282,7 @@ message DesktopInboundRDPPolicy {
   int64 valid_until_unix = 8; // 快照租约有效期截止时间戳（秒，超时失败关闭）
 }
 
-// UpdateDeviceRDPConfigRequest 更新本人设备远程桌面配置请求
+// UpdateDeviceRDPConfigRequest 更新本人设备远程桌面与个人域名配置请求
 message UpdateDeviceRDPConfigRequest {
   uint64 desktop_id = 1; // 当前发起请求的 Desktop ID
   string secret = 2; // 当前发起请求的 Desktop 密钥（必填，失败关闭）
@@ -282,13 +291,19 @@ message UpdateDeviceRDPConfigRequest {
   string rdp_mode = 5; // 目标模式：auto / enabled / disabled（空字符串表示不修改）
   bool update_allow_share = 6; // 是否更新 rdp_allow_share 字段
   bool rdp_allow_share = 7; // 是否允许跨账号临时授权
+  bool update_host_domain_label = 8; // 是否更新目标设备的主机域名前缀标识
+  string host_domain_label = 9; // 目标设备自定义主机域名前缀标识（如 home / work）
+  bool update_user_domain_label = 10; // 是否更新当前账号的个人域名中段标识
+  string user_domain_label = 11; // 当前账号自定义个人域名中段标识（空字符串恢复默认）
 }
 
-// UpdateDeviceRDPConfigResponse 更新本人设备远程桌面配置响应
+// UpdateDeviceRDPConfigResponse 更新本人设备远程桌面与个人域名配置响应
 message UpdateDeviceRDPConfigResponse {
   bool success = 1;
   string message = 2;
   DeviceInfo device = 3;
+  string domain_suffix = 4;
+  string user_domain_label = 5;
 }
 
 // ReportRDPSessionAuditRequest 上报远程桌面入站会话审计事件请求
@@ -438,6 +453,8 @@ message WaitForLoginResultResponse {
   string auth_key = 5; // Tailscale PreAuthKey
   string server_url = 6; // Headscale 服务器地址
   string username = 7; // 用户名
+  string domain_suffix = 8; // 当前生效的根品牌域名后缀
+  string user_domain_label = 9; // 当前账号生效的个人域名中段标识
 }
 
 // ============================================

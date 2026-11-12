@@ -15,6 +15,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/headscale"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 	pb "github.com/open-beagle/awecloud-signaling-server/pkg/proto"
 )
 
@@ -249,7 +250,7 @@ func (s *DesktopServiceServer) nodeLiveSnapshot(node model.Node) (online bool, l
 	return
 }
 
-func (s *DesktopServiceServer) buildSingleDeviceInfo(node model.Node, ownerName string, currentNodeID uint64, ipIndex headscaleDeviceIPIndex, isShared bool, grantExpiresUnix int64) *pb.DeviceInfo {
+func (s *DesktopServiceServer) buildSingleDeviceInfo(ctx context.Context, node model.Node, owner model.User, currentNodeID uint64, ipIndex headscaleDeviceIPIndex, isShared bool, grantExpiresUnix int64) *pb.DeviceInfo {
 	var sysInfo model.NodeSystemInfo
 	osName := "未知"
 	arch := "未知"
@@ -270,6 +271,10 @@ func (s *DesktopServiceServer) buildSingleDeviceInfo(node model.Node, ownerName 
 			}
 		}
 	}
+
+	hostLabel := service.EnsureDesktopNodeHostDomainLabel(ctx, db.DB, &node)
+	ownerDomainLabel := service.EffectiveUserDomainLabel(owner)
+	deviceDomain := service.BuildPersonalDeviceDomain(ctx, db.DB, node, owner)
 
 	online, lastHb, runtimeIP, rdpLocalReady, rdpLocalPort, rdpTunnelExposed := s.nodeLiveSnapshot(node)
 	deviceStatus := "offline"
@@ -325,9 +330,12 @@ func (s *DesktopServiceServer) buildSingleDeviceInfo(node model.Node, ownerName 
 		RdpLocalPort:       int32(rdpLocalPort),
 		RdpTunnelExposed:   rdpTunnelExposed,
 		RdpConnectable:     connectable,
-		OwnerUsername:      ownerName,
+		OwnerUsername:      owner.Name,
 		IsShared:           isShared,
 		GrantExpiresAtUnix: grantExpiresUnix,
+		HostDomainLabel:    hostLabel,
+		DeviceDomain:       deviceDomain,
+		OwnerDomainLabel:   ownerDomainLabel,
 	}
 }
 
@@ -346,7 +354,7 @@ func (s *DesktopServiceServer) buildDevicesDataWithOptions(ctx context.Context, 
 	ownIPIndex := s.loadUserHeadscaleIPIndex(ctx, owner.Name)
 	devices := make([]*pb.DeviceInfo, 0, len(ownNodes))
 	for _, n := range ownNodes {
-		info := s.buildSingleDeviceInfo(n, owner.Name, currentNodeID, ownIPIndex, false, 0)
+		info := s.buildSingleDeviceInfo(ctx, n, owner, currentNodeID, ownIPIndex, false, 0)
 		if !includeShared {
 			// 未认证灰度路径隐藏全部远程桌面元数据，防止敏感信息泄露
 			info.RdpMode = ""
@@ -406,7 +414,7 @@ func (s *DesktopServiceServer) buildDevicesDataWithOptions(ctx context.Context, 
 		}
 
 		seenNodes[targetNode.ID] = true
-		info := s.buildSingleDeviceInfo(targetNode, targetOwner.Name, currentNodeID, idx, true, grant.ExpiresAt.Unix())
+		info := s.buildSingleDeviceInfo(ctx, targetNode, targetOwner, currentNodeID, idx, true, grant.ExpiresAt.Unix())
 		// 共享视图不向被授权人暴露主人的开关控制状态细节
 		info.RdpAllowShare = false
 		devices = append(devices, info)
@@ -590,6 +598,38 @@ func (s *DesktopServiceServer) UpdateDeviceRDPConfig(ctx context.Context, req *p
 	}
 
 	updates := make(map[string]any)
+	domainUpdated := false
+	if req.UpdateUserDomainLabel {
+		if _, err := service.UpdateUserDomainLabel(ctx, db.DB, owner.ID, req.UserDomainLabel); err != nil {
+			msg := "更新个人域名标识失败"
+			switch err {
+			case service.ErrUserDomainLabelInvalid:
+				msg = "个人域名标识格式无效（仅支持小写字母、数字与连字符，不能使用系统保留词）"
+			case service.ErrUserDomainLabelExists:
+				msg = "该个人域名标识已被其他账号或站点占用，请更换"
+			}
+			return &pb.UpdateDeviceRDPConfigResponse{Success: false, Message: msg}, nil
+		}
+		_ = db.DB.WithContext(ctx).First(&owner, owner.ID).Error
+		domainUpdated = true
+	}
+
+	if req.UpdateHostDomainLabel {
+		updatedHostLabel, err := service.UpdateDesktopNodeHostDomainLabel(ctx, db.DB, owner.ID, targetNode.ID, req.HostDomainLabel)
+		if err != nil {
+			msg := "更新主机域名前缀失败"
+			switch err {
+			case service.ErrHostDomainLabelInvalid:
+				msg = "主机域名前缀格式无效（仅支持小写字母、数字与连字符，如 home、work）"
+			case service.ErrHostDomainLabelExists:
+				msg = "您名下已有另一台设备使用该主机域名前缀，请更换"
+			}
+			return &pb.UpdateDeviceRDPConfigResponse{Success: false, Message: msg}, nil
+		}
+		targetNode.HostDomainLabel = updatedHostLabel
+		domainUpdated = true
+	}
+
 	if rawMode := strings.TrimSpace(req.RdpMode); rawMode != "" {
 		switch rawMode {
 		case model.DesktopRDPModeAuto, model.DesktopRDPModeEnabled, model.DesktopRDPModeDisabled:
@@ -619,25 +659,41 @@ func (s *DesktopServiceServer) UpdateDeviceRDPConfig(ctx context.Context, req *p
 		}
 	}
 
-	if len(updates) == 0 {
+	if len(updates) == 0 && !domainUpdated {
 		return &pb.UpdateDeviceRDPConfigResponse{Success: false, Message: "未提供需要更新的配置项"}, nil
 	}
 
-	if err := db.DB.WithContext(ctx).Model(&model.Node{}).Where("id = ?", targetNode.ID).Updates(updates).Error; err != nil {
-		return &pb.UpdateDeviceRDPConfigResponse{Success: false, Message: "保存配置失败"}, nil
+	if len(updates) > 0 {
+		if err := db.DB.WithContext(ctx).Model(&model.Node{}).Where("id = ?", targetNode.ID).Updates(updates).Error; err != nil {
+			return &pb.UpdateDeviceRDPConfigResponse{Success: false, Message: "保存配置失败"}, nil
+		}
 	}
 	if s.runtimeStore != nil {
 		s.runtimeStore.UpsertNode(&targetNode)
 	}
 
+	if req.UpdateUserDomainLabel {
+		var ownerActiveGrantees []uint64
+		_ = db.DB.WithContext(ctx).Model(&model.AclDesktopRDPPermission{}).
+			Where("owner_user_id = ? AND enabled = ?", owner.ID, true).
+			Distinct("grantee_user_id").
+			Pluck("grantee_user_id", &ownerActiveGrantees).Error
+		affectedGrantees = append(affectedGrantees, ownerActiveGrantees...)
+	}
+
 	ipIndex := s.loadUserHeadscaleIPIndex(ctx, owner.Name)
-	deviceInfo := s.buildSingleDeviceInfo(targetNode, owner.Name, currentNode.ID, ipIndex, false, 0)
+	deviceInfo := s.buildSingleDeviceInfo(ctx, targetNode, owner, currentNode.ID, ipIndex, false, 0)
 
 	go func() {
 		bgCtx := context.Background()
 		s.NotifyDesktopDataChange(targetNode.ID, pb.DesktopDataType_DESKTOP_DATA_TYPE_RDP_POLICY)
 		s.NotifyRelatedDesktopDevicesChange(bgCtx, owner.ID, targetNode.ID)
+		seenGrantee := make(map[uint64]bool)
 		for _, granteeID := range affectedGrantees {
+			if granteeID == 0 || granteeID == owner.ID || seenGrantee[granteeID] {
+				continue
+			}
+			seenGrantee[granteeID] = true
 			s.NotifyUserDesktopsDataChange(granteeID, pb.DesktopDataType_DESKTOP_DATA_TYPE_DEVICES)
 		}
 		if revokedAnyShare && s.aclSyncTrigger != nil {
@@ -645,11 +701,14 @@ func (s *DesktopServiceServer) UpdateDeviceRDPConfig(ctx context.Context, req *p
 		}
 	}()
 
-	logger.Infof("Desktop %d 更新设备 %d RDP 配置成功: mode=%s, allow_share=%v", currentNode.ID, targetNode.ID, targetNode.RDPMode, targetNode.RDPAllowShare)
+	logger.Infof("Desktop %d 更新设备 %d 配置成功: mode=%s, allow_share=%v, host_label=%s, user_label=%s",
+		currentNode.ID, targetNode.ID, targetNode.RDPMode, targetNode.RDPAllowShare, targetNode.HostDomainLabel, owner.DomainLabel)
 	return &pb.UpdateDeviceRDPConfigResponse{
-		Success: true,
-		Message: "远程桌面设置已更新",
-		Device:  deviceInfo,
+		Success:         true,
+		Message:         "设置已更新",
+		Device:          deviceInfo,
+		DomainSuffix:    service.EffectiveDomainSuffix(ctx, db.DB),
+		UserDomainLabel: service.EffectiveUserDomainLabel(owner),
 	}, nil
 }
 

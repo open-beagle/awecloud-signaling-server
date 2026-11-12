@@ -9,6 +9,7 @@ import (
 	"github.com/open-beagle/awecloud-signaling-server/internal/common/logger"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/db"
 	"github.com/open-beagle/awecloud-signaling-server/internal/server/model"
+	"github.com/open-beagle/awecloud-signaling-server/internal/server/service"
 )
 
 // SystemConfigResponse 系统配置响应
@@ -28,7 +29,7 @@ func GetSystemConfig(c *gin.Context) {
 	config := SystemConfigResponse{
 		StunPort:           3478,
 		AuthKeyExpiryHours: 24,
-		DomainSuffix:       model.DefaultDomainSuffix,
+		DomainSuffix:       service.EffectiveDomainSuffix(ctx, db.DB),
 	}
 
 	// 从数据库读取配置
@@ -53,10 +54,9 @@ func GetSystemConfig(c *gin.Context) {
 			if v, err := strconv.Atoi(cfg.Value); err == nil {
 				config.AuthKeyExpiryHours = v
 			}
-		case model.ConfigDomainSuffix:
-			config.DomainSuffix = cfg.Value
 		}
 	}
+	config.DomainSuffix = service.EffectiveDomainSuffix(ctx, db.DB)
 
 	c.JSON(http.StatusOK, NewSuccessResponse(config))
 }

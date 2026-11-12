@@ -121,13 +121,5 @@ func containerBusinessDomain(ctx context.Context, database *gorm.DB, accessTechn
 }
 
 func resourceDomainSuffix(database *gorm.DB) string {
-	suffix := model.DefaultDomainSuffix
-	var config model.SystemConfig
-	if database != nil && database.Where("key = ?", model.ConfigDomainSuffix).First(&config).Error == nil && strings.TrimSpace(config.Value) != "" {
-		suffix = config.Value
-	}
-	if !strings.HasPrefix(suffix, ".") {
-		suffix = "." + suffix
-	}
-	return suffix
+	return EffectiveDomainSuffix(context.Background(), database)
 }

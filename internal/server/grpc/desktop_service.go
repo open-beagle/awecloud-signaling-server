@@ -233,6 +233,7 @@ func (s *DesktopServiceServer) createOrGetDesktopNode(ctx context.Context, userI
 		if err := db.DB.WithContext(ctx).Create(&node).Error; err != nil {
 			return nil, "", err
 		}
+		service.EnsureDesktopNodeHostDomainLabel(ctx, db.DB, &node)
 	} else {
 		node.SecretHash = string(secretHash)
 		now := time.Now()
@@ -249,6 +250,7 @@ func (s *DesktopServiceServer) createOrGetDesktopNode(ctx context.Context, userI
 			node.Hostname = systemInfo.Hostname
 		}
 		db.DB.WithContext(ctx).Save(&node)
+		service.EnsureDesktopNodeHostDomainLabel(ctx, db.DB, &node)
 	}
 	if s.runtimeStore != nil {
 		s.runtimeStore.UpsertNode(&node)
@@ -280,11 +282,17 @@ func (s *DesktopServiceServer) Authenticate(ctx context.Context, req *pb.Desktop
 	if err := db.DB.WithContext(ctx).Save(&node).Error; err != nil {
 		return nil, err
 	}
+	service.EnsureDesktopNodeHostDomainLabel(ctx, db.DB, &node)
 	if s.runtimeStore != nil {
 		s.runtimeStore.UpsertNode(&node)
 	}
 
-	resp := &pb.DesktopAuthenticateResponse{Success: true, Message: "认证成功"}
+	resp := &pb.DesktopAuthenticateResponse{
+		Success:         true,
+		Message:         "认证成功",
+		DomainSuffix:    service.EffectiveDomainSuffix(ctx, db.DB),
+		UserDomainLabel: service.EffectiveUserDomainLabel(user),
+	}
 	if s.headscaleClient != nil && s.config != nil {
 		if authKey, serverURL, err := s.getOrCreateAuthKey(ctx, user.ID, user.Name); err == nil {
 			resp.AuthKey = authKey
@@ -809,14 +817,18 @@ func (s *DesktopServiceServer) GetHostServices(ctx context.Context, req *pb.GetH
 
 // GetMyDevices 获取我的设备列表
 func (s *DesktopServiceServer) GetMyDevices(ctx context.Context, req *pb.GetMyDevicesRequest) (*pb.GetMyDevicesResponse, error) {
-	currentNode, _, authenticated, authErr := s.authenticateDesktopChannel(ctx, req.DesktopId, req.Secret)
+	currentNode, user, authenticated, authErr := s.authenticateDesktopChannel(ctx, req.DesktopId, req.Secret)
 	if authErr != nil {
 		return nil, authErr
 	}
 
 	devices := s.buildDevicesDataWithOptions(ctx, currentNode.UserID, req.DesktopId, authenticated)
 	logger.Infof("Desktop %d 获取设备列表: %d 个设备 (authenticated=%v)", req.DesktopId, len(devices), authenticated)
-	return &pb.GetMyDevicesResponse{Devices: devices}, nil
+	return &pb.GetMyDevicesResponse{
+		Devices:         devices,
+		DomainSuffix:    service.EffectiveDomainSuffix(ctx, db.DB),
+		UserDomainLabel: service.EffectiveUserDomainLabel(user),
+	}, nil
 }
 
 // OfflineDevice 设备下线
@@ -1156,19 +1168,27 @@ func (s *DesktopServiceServer) WaitForLoginResult(stream pb.DesktopService_WaitF
 			}
 		}
 
+		var loggedUser model.User
+		_ = db.DB.WithContext(ctx).First(&loggedUser, result.UserID).Error
+		if loggedUser.ID == 0 {
+			loggedUser = model.User{ID: result.UserID, Name: result.UserName}
+		}
+
 		logger.Infof("推送登录成功结果: sessionId=%s, desktopId=%d", sessionID, node.ID)
 
 		// 清理会话（在返回结果后）
 		defer s.loginService.UnregisterLoginSession(sessionID)
 
 		return stream.Send(&pb.WaitForLoginResultResponse{
-			Status:      pb.WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_SUCCESS,
-			Message:     "登录成功",
-			DesktopId:   node.ID,
-			DeviceToken: nodeSecret,
-			AuthKey:     authKey,
-			ServerUrl:   serverURL,
-			Username:    result.UserName,
+			Status:          pb.WaitForLoginResultStatus_WAIT_FOR_LOGIN_RESULT_STATUS_SUCCESS,
+			Message:         "登录成功",
+			DesktopId:       node.ID,
+			DeviceToken:     nodeSecret,
+			AuthKey:         authKey,
+			ServerUrl:       serverURL,
+			Username:        result.UserName,
+			DomainSuffix:    service.EffectiveDomainSuffix(ctx, db.DB),
+			UserDomainLabel: service.EffectiveUserDomainLabel(loggedUser),
 		})
 	}
 }
@@ -1311,12 +1331,16 @@ func (s *DesktopServiceServer) sendDataSnapshotToStream(ctx context.Context, ds 
 	}
 	switch dataType {
 	case pb.DesktopDataType_DESKTOP_DATA_TYPE_ALL:
+		var streamUser model.User
+		_ = db.DB.WithContext(ctx).First(&streamUser, ds.UserID).Error
 		resp := &pb.DesktopDataResponse{
 			Type:               pb.DesktopDataType_DESKTOP_DATA_TYPE_ALL,
 			Services:           s.buildServicesData(ctx),
 			Hosts:              s.buildHostsData(ctx, ds.UserID),
 			Devices:            s.buildDevicesDataWithOptions(ctx, ds.UserID, ds.NodeID, ds.Authenticated),
 			FavoriteServiceIds: s.buildFavoritesData(ctx, ds.UserID),
+			DomainSuffix:       service.EffectiveDomainSuffix(ctx, db.DB),
+			UserDomainLabel:    service.EffectiveUserDomainLabel(streamUser),
 		}
 		if ds.Authenticated {
 			resp.RdpPolicy = s.buildInboundRDPPolicy(ctx, ds.UserID, ds.NodeID)
@@ -1333,9 +1357,13 @@ func (s *DesktopServiceServer) sendDataSnapshotToStream(ctx context.Context, ds 
 			Hosts: s.buildHostsData(ctx, ds.UserID),
 		})
 	case pb.DesktopDataType_DESKTOP_DATA_TYPE_DEVICES:
+		var streamUser model.User
+		_ = db.DB.WithContext(ctx).First(&streamUser, ds.UserID).Error
 		return ds.send(&pb.DesktopDataResponse{
-			Type:    pb.DesktopDataType_DESKTOP_DATA_TYPE_DEVICES,
-			Devices: s.buildDevicesDataWithOptions(ctx, ds.UserID, ds.NodeID, ds.Authenticated),
+			Type:            pb.DesktopDataType_DESKTOP_DATA_TYPE_DEVICES,
+			Devices:         s.buildDevicesDataWithOptions(ctx, ds.UserID, ds.NodeID, ds.Authenticated),
+			DomainSuffix:    service.EffectiveDomainSuffix(ctx, db.DB),
+			UserDomainLabel: service.EffectiveUserDomainLabel(streamUser),
 		})
 	case pb.DesktopDataType_DESKTOP_DATA_TYPE_FAVORITES:
 		return ds.send(&pb.DesktopDataResponse{
@@ -2287,15 +2315,7 @@ func desktopAccessAgentNode(ctx context.Context, technicalResourceID string) (mo
 }
 
 func desktopResourceDomainSuffix(ctx context.Context) string {
-	domainSuffix := model.DefaultDomainSuffix
-	var domainConfig model.SystemConfig
-	if err := db.DB.WithContext(ctx).Where("key = ?", model.ConfigDomainSuffix).First(&domainConfig).Error; err == nil && domainConfig.Value != "" {
-		domainSuffix = domainConfig.Value
-	}
-	if !strings.HasPrefix(domainSuffix, ".") {
-		domainSuffix = "." + domainSuffix
-	}
-	return domainSuffix
+	return service.EffectiveDomainSuffix(ctx, db.DB)
 }
 
 func grpcGroupGrantMatchesTenant(ctx context.Context, grant model.AccessGrant) bool {
