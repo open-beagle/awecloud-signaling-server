@@ -90,15 +90,20 @@ func (c *LogtoClient) CreateLogtoClient(storage *MemorySessionStorage) *client.L
 	return logtoClient
 }
 
-// GetSignInURL 获取登录 URL
-// 使用 prompt=login 强制 Logto 每次都显示登录页面，避免 cookie 残留导致自动登录
+// GetSignInURL 获取登录 URL（默认复用系统浏览器已有 Logto SSO 会话）
 func (c *LogtoClient) GetSignInURL(storage *MemorySessionStorage, loginHint string) (string, error) {
+	return c.GetSignInURLWithPrompt(storage, loginHint, "")
+}
+
+// GetSignInURLWithPrompt 获取登录 URL；仅当 prompt 非空（如切换账号传 "login"）时强制重新验证
+func (c *LogtoClient) GetSignInURLWithPrompt(storage *MemorySessionStorage, loginHint, prompt string) (string, error) {
 	logtoClient := c.CreateLogtoClient(storage)
 
-	// 使用配置的回调 URL，prompt=login 强制重新登录
 	options := &client.SignInOptions{
 		RedirectUri: c.config.CallbackURL,
-		Prompt:      "login",
+	}
+	if prompt != "" {
+		options.Prompt = prompt
 	}
 
 	if loginHint != "" {
@@ -111,7 +116,7 @@ func (c *LogtoClient) GetSignInURL(storage *MemorySessionStorage, loginHint stri
 		return "", err
 	}
 
-	logger.Infof("生成 Logto 登录 URL: %s", signInURL)
+	logger.Infof("生成 Logto 登录 URL: prompt=%s", prompt)
 	return signInURL, nil
 }
 

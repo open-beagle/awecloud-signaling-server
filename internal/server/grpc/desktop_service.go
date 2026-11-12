@@ -499,7 +499,8 @@ func (s *DesktopServiceServer) sendDesktopHeartbeatResponse(ctx context.Context,
 }
 
 func (s *DesktopServiceServer) getOrCreateAuthKey(ctx context.Context, userID uint64, userName string) (string, string, error) {
-	hsUserName := fmt.Sprintf("client-%s", userName)
+	normalizedUser := strings.ToLower(strings.TrimSpace(userName))
+	hsUserName := fmt.Sprintf("client-%s", normalizedUser)
 	user, err := s.headscaleClient.GetUserByName(ctx, hsUserName)
 	if err != nil {
 		return "", "", fmt.Errorf("查询 Headscale User 失败: %w", err)
@@ -514,7 +515,7 @@ func (s *DesktopServiceServer) getOrCreateAuthKey(ctx context.Context, userID ui
 	// 注意：不再删除旧节点，保持节点稳定性
 	// Desktop 使用持久化状态，重连时应复用现有节点
 
-	tags := []string{fmt.Sprintf("tag:client-%s", userName)}
+	tags := []string{fmt.Sprintf("tag:client-%s", normalizedUser)}
 	var groupMembers []model.GroupMember
 	if err := db.DB.WithContext(ctx).Preload("Group").Where("user_id = ?", userID).Find(&groupMembers).Error; err == nil {
 		for _, gm := range groupMembers {
