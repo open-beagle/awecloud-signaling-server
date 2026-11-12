@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +45,7 @@ type TunnelResourceStatus struct {
 // 3. 不分配 VIP，不改写 DNS，支持非 root 运行。
 type TunnelProxyManager struct {
 	targetAgent string // 绑定的目标 Agent 名称
+	listenHost  string // 本地监听绑定地址（生产默认 0.0.0.0，单测可指定 127.0.0.1 避免防火墙弹窗）
 	tsManager   *TailscaleManager
 	dialer      TunnelDialer
 
@@ -66,6 +68,7 @@ func NewTunnelProxyManager(targetAgent string, tsManager *TailscaleManager, pare
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &TunnelProxyManager{
 		targetAgent: targetAgent,
+		listenHost:  "0.0.0.0",
 		tsManager:   tsManager,
 		listeners:   make(map[int]net.Listener),
 		resources:   make(map[int]*pb.ContainerServiceResource),
@@ -73,6 +76,17 @@ func NewTunnelProxyManager(targetAgent string, tsManager *TailscaleManager, pare
 		ctx:         ctx,
 		cancel:      cancel,
 	}
+}
+
+// SetListenHost 设置本地代理监听绑定地址（默认 0.0.0.0；单元测试可设为 127.0.0.1 以避免触发 Windows 防火墙弹窗）
+func (m *TunnelProxyManager) SetListenHost(host string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	trimmed := strings.TrimSpace(host)
+	if trimmed == "" {
+		trimmed = "0.0.0.0"
+	}
+	m.listenHost = trimmed
 }
 
 // SetDialer 设置自定义拨号器（用于单元测试或特殊网络路由）
@@ -137,7 +151,11 @@ func (m *TunnelProxyManager) SyncTunnelProxies(resources []*pb.ContainerServiceR
 		}
 
 		if _, exists := m.listeners[port]; !exists {
-			listenAddr := fmt.Sprintf("0.0.0.0:%d", port)
+			host := m.listenHost
+			if host == "" {
+				host = "0.0.0.0"
+			}
+			listenAddr := net.JoinHostPort(host, strconv.Itoa(port))
 			listener, err := net.Listen("tcp", listenAddr)
 			if err != nil {
 				logger.Errorf("[Tunnel] 监听本地端口失败 %s: %v", listenAddr, err)

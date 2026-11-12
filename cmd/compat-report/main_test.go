@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -175,10 +176,17 @@ func TestSchemaWarningsAndFailClosedColumns(t *testing.T) {
 func TestValidateOutputPathRejectsInputAndSymlink(t *testing.T) {
 	path := createFullFixture(t)
 	require.Error(t, validateOutputPath(path, path))
-	symlink := filepath.Join(t.TempDir(), "database-link")
-	require.NoError(t, os.Symlink(path, symlink))
-	require.Error(t, validateOutputPath(path, symlink))
 	require.NoError(t, validateOutputPath(path, filepath.Join(t.TempDir(), "report.json")))
+
+	symlink := filepath.Join(t.TempDir(), "database-link")
+	if err := os.Symlink(path, symlink); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Logf("当前 Windows 非特权会话未开启符号链接权限，跳过 symlink 分支断言: %v", err)
+			return
+		}
+		require.NoError(t, err)
+	}
+	require.Error(t, validateOutputPath(path, symlink))
 }
 
 func TestM0DScenariosProduceConservedReadOnlyReports(t *testing.T) {

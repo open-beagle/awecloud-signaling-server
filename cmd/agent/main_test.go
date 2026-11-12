@@ -202,9 +202,18 @@ func TestInstallSignalScriptUsesChinesePromptAndAvoidsDuplicateLogRedirect(t *te
 	}
 }
 
-func TestInstallSignalUpgradeDownloadFailureDoesNotStopClient(t *testing.T) {
+func requireLinuxBash(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX/Linux bash 安装器回归用例仅在非 Windows 环境运行")
+	}
 	bashPath, err := exec.LookPath("bash")
 	require.NoError(t, err)
+	return bashPath
+}
+
+func TestInstallSignalUpgradeDownloadFailureDoesNotStopClient(t *testing.T) {
+	bashPath := requireLinuxBash(t)
 
 	tempDir := t.TempDir()
 	homeDir := filepath.Join(tempDir, "home")
@@ -273,8 +282,7 @@ main "$@"
 }
 
 func TestInstallSignalUpgradeRollsBackFailedStart(t *testing.T) {
-	bashPath, err := exec.LookPath("bash")
-	require.NoError(t, err)
+	bashPath := requireLinuxBash(t)
 	scriptPath := filepath.Join("..", "..", "scripts", "install_signal.sh")
 	content, err := os.ReadFile(scriptPath)
 	require.NoError(t, err)
@@ -323,8 +331,7 @@ upgrade_client
 }
 
 func TestInstallSignalUpgradeAcceptsRegistrationConfigRewrite(t *testing.T) {
-	bashPath, err := exec.LookPath("bash")
-	require.NoError(t, err)
+	bashPath := requireLinuxBash(t)
 	scriptPath := filepath.Join("..", "..", "scripts", "install_signal.sh")
 	content, err := os.ReadFile(scriptPath)
 	require.NoError(t, err)
@@ -375,8 +382,7 @@ upgrade_client
 }
 
 func TestInstallSignalStartRequiresClientReadiness(t *testing.T) {
-	bashPath, err := exec.LookPath("bash")
-	require.NoError(t, err)
+	bashPath := requireLinuxBash(t)
 	scriptPath := filepath.Join("..", "..", "scripts", "install_signal.sh")
 	content, err := os.ReadFile(scriptPath)
 	require.NoError(t, err)
@@ -425,8 +431,7 @@ start_client
 }
 
 func TestInstallSignalFindClientPIDUsesReadableCommandLine(t *testing.T) {
-	bashPath, err := exec.LookPath("bash")
-	require.NoError(t, err)
+	bashPath := requireLinuxBash(t)
 	scriptPath := filepath.Join("..", "..", "scripts", "install_signal.sh")
 	content, err := os.ReadFile(scriptPath)
 	require.NoError(t, err)
@@ -462,8 +467,7 @@ readlink() {
 }
 
 func TestInstallSignalStartUsesDataDirForRelativeTunnelState(t *testing.T) {
-	bashPath, err := exec.LookPath("bash")
-	require.NoError(t, err)
+	bashPath := requireLinuxBash(t)
 	scriptPath := filepath.Join("..", "..", "scripts", "install_signal.sh")
 	content, err := os.ReadFile(scriptPath)
 	require.NoError(t, err)
@@ -584,8 +588,7 @@ func TestInstallAgentUpgradePreservesExistingCredentialConfig(t *testing.T) {
 }
 
 func TestInstallAgentUpgradeStagesBeforeStopAndRollsBackFailedRestart(t *testing.T) {
-	bashPath, err := exec.LookPath("bash")
-	require.NoError(t, err)
+	bashPath := requireLinuxBash(t)
 	scriptPath := filepath.Join("..", "..", "scripts", "install_agent.sh")
 	content, err := os.ReadFile(scriptPath)
 	require.NoError(t, err)

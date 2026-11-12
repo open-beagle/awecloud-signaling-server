@@ -26,12 +26,24 @@ func getFreePort(t *testing.T) int {
 	return l.Addr().(*net.TCPAddr).Port
 }
 
+// newTestTunnelProxyManager 创建绑定 127.0.0.1 回环地址的测试管理器，避免在 Windows 上绑定 0.0.0.0 触发防火墙弹窗
+func newTestTunnelProxyManager(targetAgent string, tsManager *TailscaleManager, parentCtx context.Context) *TunnelProxyManager {
+	mgr := NewTunnelProxyManager(targetAgent, tsManager, parentCtx)
+	mgr.SetListenHost("127.0.0.1")
+	return mgr
+}
+
 // TestTunnel_ZeroPortSilent 验证获授权资源 local_port <= 0 时本地保持静默，不开放任何端口
 func TestTunnel_ZeroPortSilent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	// 验证生产默认监听地址仍为 0.0.0.0，而单测辅助构造器使用 127.0.0.1
+	prodMgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	require.Equal(t, "0.0.0.0", prodMgr.listenHost)
+	prodMgr.Stop()
+
+	mgr := newTestTunnelProxyManager("edge-gpu-5090", nil, ctx)
 	defer mgr.Stop()
 
 	// 下发两个资源，local_port 均为 0 或负数
@@ -59,7 +71,7 @@ func TestTunnel_ExplicitPortListen(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	mgr := newTestTunnelProxyManager("edge-gpu-5090", nil, ctx)
 	defer mgr.Stop()
 
 	port := getFreePort(t)
@@ -76,6 +88,8 @@ func TestTunnel_ExplicitPortListen(t *testing.T) {
 	active := mgr.GetActivePorts()
 	require.Len(t, active, 1)
 	require.Equal(t, port, active[0])
+	require.NotNil(t, mgr.GetListener(port))
+	require.True(t, mgr.GetListener(port).Addr().(*net.TCPAddr).IP.IsLoopback(), "单测监听必须绑定 127.0.0.1 回环地址")
 
 	// 验证本地端口可成功连接
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 2*time.Second)
@@ -88,7 +102,7 @@ func TestTunnel_1to1AgentFilter(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	mgr := newTestTunnelProxyManager("edge-gpu-5090", nil, ctx)
 	defer mgr.Stop()
 
 	port1 := getFreePort(t)
@@ -120,7 +134,7 @@ func TestTunnel_DynamicPortRevocation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	mgr := newTestTunnelProxyManager("edge-gpu-5090", nil, ctx)
 	defer mgr.Stop()
 
 	port := getFreePort(t)
@@ -159,7 +173,7 @@ func TestTunnel_ContainerServiceRejectsDirectDial(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	mgr := newTestTunnelProxyManager("edge-gpu-5090", nil, ctx)
 	defer mgr.Stop()
 
 	localPort := getFreePort(t)
@@ -203,7 +217,7 @@ func TestTunnel_K8sAPIProxy6443(t *testing.T) {
 	}))
 	defer mockK8sAPI.Close()
 
-	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	mgr := newTestTunnelProxyManager("edge-gpu-5090", nil, ctx)
 	defer mgr.Stop()
 
 	// Mock Dialer 路由到模拟的 mockK8sAPI
@@ -310,7 +324,7 @@ func TestTunnel_ContainerServiceWithPort6443UsesSVCProxy(t *testing.T) {
 	go func() { _ = grpcServer.Serve(grpcListener) }()
 	defer grpcServer.Stop()
 
-	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	mgr := newTestTunnelProxyManager("edge-gpu-5090", nil, ctx)
 	defer mgr.Stop()
 
 	var dialedAddrs []string
@@ -387,7 +401,7 @@ func TestTunnel_NoFallbackAfterAgentReject(t *testing.T) {
 	go func() { _ = grpcServer.Serve(grpcListener) }()
 	defer grpcServer.Stop()
 
-	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	mgr := newTestTunnelProxyManager("edge-gpu-5090", nil, ctx)
 	defer mgr.Stop()
 
 	var dialedAddrs []string
@@ -462,7 +476,7 @@ func TestTunnel_FirstAckTimeoutCountsAsReject(t *testing.T) {
 	go func() { _ = grpcServer.Serve(grpcListener) }()
 	defer grpcServer.Stop()
 
-	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	mgr := newTestTunnelProxyManager("edge-gpu-5090", nil, ctx)
 	defer mgr.Stop()
 	mgr.SetDialer(func(dialCtx context.Context, network, addr string) (net.Conn, error) {
 		var d net.Dialer
@@ -500,7 +514,7 @@ func TestTunnel_StatuszEndpoint(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	mgr := newTestTunnelProxyManager("edge-gpu-5090", nil, ctx)
 	defer mgr.Stop()
 
 	statusPort := getFreePort(t)
@@ -563,7 +577,7 @@ func TestTunnel_DirectDialViolationGuard(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mgr := NewTunnelProxyManager("edge-gpu-5090", nil, ctx)
+	mgr := newTestTunnelProxyManager("edge-gpu-5090", nil, ctx)
 	defer mgr.Stop()
 
 	statusPort := getFreePort(t)

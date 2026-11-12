@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -144,6 +146,7 @@ type EndpointServerConfig struct {
 type EndpointServer struct {
 	pb.UnimplementedEndpointServiceServer
 
+	listenHost string
 	listenPort int
 	token      string // Server 下发的 endpoint_token，用于验证 Endpoint
 
@@ -207,6 +210,7 @@ type EndpointServer struct {
 func NewEndpointServer(listenPort int, token string, parentCtx context.Context) *EndpointServer {
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &EndpointServer{
+		listenHost:                "0.0.0.0",
 		listenPort:                listenPort,
 		token:                     token,
 		connections:               make(map[string]*EndpointConnection),
@@ -228,6 +232,15 @@ func NewEndpointServer(listenPort int, token string, parentCtx context.Context) 
 		ctx:                       ctx,
 		cancel:                    cancel,
 	}
+}
+
+// SetListenHost 设置监听绑定地址（默认 0.0.0.0；单元测试可指定 127.0.0.1 避免触发防火墙弹窗）
+func (s *EndpointServer) SetListenHost(host string) {
+	trimmed := strings.TrimSpace(host)
+	if trimmed == "" {
+		trimmed = "0.0.0.0"
+	}
+	s.listenHost = trimmed
 }
 
 func (s *EndpointServer) SetSessionAuthorizationSnapshots(wrappers []*pb.EndpointSessionAuthorizationSnapshotV2) {
@@ -490,7 +503,11 @@ func (s *EndpointServer) getServerConfig(name string) *EndpointServerConfig {
 
 // Start 启动 gRPC Server
 func (s *EndpointServer) Start() error {
-	addr := fmt.Sprintf("0.0.0.0:%d", s.listenPort)
+	host := s.listenHost
+	if host == "" {
+		host = "0.0.0.0"
+	}
+	addr := net.JoinHostPort(host, strconv.Itoa(s.listenPort))
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("监听端口 %d 失败: %w", s.listenPort, err)
